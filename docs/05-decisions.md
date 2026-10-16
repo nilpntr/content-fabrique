@@ -468,7 +468,7 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 
 ## D-24 Public IDs are TypeIDs over UUIDv7
 
-**Context.** The database uses UUIDv7 keys ([architecture §4](03-architecture.md#4-data-model)). The API, the timeline spec and the agents' tool calls also need IDs. A bare UUID doesn't say what it points at, so an agent can pass an asset ID where a moment ID belongs, and logs are harder to read. The architecture's examples already write `ast_01J…`.
+**Context.** The database uses UUIDv7 keys ([architecture §4](03-architecture.md#4-data-model)). The API, the timeline spec and the agents' tool calls also need IDs. A bare UUID doesn't say what it points at, so an agent can pass an asset ID where a moment ID belongs, and logs are harder to read. The architecture's examples already write `ast_01j…`.
 
 **Decision.**
 - **Outside the database, every ID is a [TypeID](https://github.com/jetify-com/typeid):** a lowercase type prefix, an underscore, and the UUIDv7 in 26-character Crockford base32, for example `ast_01jabcd…`.

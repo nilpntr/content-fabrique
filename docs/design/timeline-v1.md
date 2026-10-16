@@ -7,7 +7,7 @@
 | What | Where | Notes |
 |---|---|---|
 | JSON Schema (the source of truth) | `packages/schemas/timeline/v1.schema.json` | Draft 2020-12, `$id` `https://contentfabrique.app/schemas/timeline/v1.json` |
-| Fixtures | `packages/schemas/timeline/fixtures/{valid,invalid}/*.json` | Each invalid fixture names the issue code it must raise, in `"$comment"` |
+| Fixtures | `packages/schemas/timeline/fixtures/{valid,invalid}/*.json` | Each invalid fixture names the issue code it must raise, in `"$comment"`; `render.txt` lists the valid ones that are also render fixtures |
 | Go types, validation, ops, diff | `apps/server/internal/timeline` | The schema is copied in by `task gen` and embedded with `go:embed`. CI fails if the copy differs |
 | Beat utilities | `apps/server/internal/timeline/beats` | P3-09 |
 | Compiler, profiles, ASS, time map, contact sheet | `apps/server/internal/render` | P3-03 to P3-06 |
@@ -143,7 +143,7 @@ Both profiles write `yuv420p` and add `-map_metadata -1` and `-fflags +bitexact`
 
 **Fixtures (P3-01):** 30 valid and 30 invalid specs, covering every issue code at least once.
 
-**Golden plans (P3-03):** for each of the 20 fixture specs, the compiled argument list and ASS text are snapshot-tested as text files under `testdata/golden/`. `go test ./internal/render -update` rewrites the snapshots, and a reviewer reads the diff.
+**Golden plans (P3-03):** 20 of the valid fixtures are also render fixtures (listed in `fixtures/render.txt`, covering every transition, reframe mode, look, speed range and audio kind). For each of them, the compiled argument list and ASS text are snapshot-tested as text files under `testdata/golden/`. `go test ./internal/render -update` rewrites the snapshots, and a reviewer reads the diff.
 
 **Golden renders (P3-03):**
 - **Media:** the test media is generated when the tests run (`testsrc2`, `sine` and a coloured countdown with a burned-in frame number), so no binary fixtures are committed. It's cached in `testdata/.cache`.
