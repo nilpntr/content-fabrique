@@ -256,7 +256,7 @@ func TestServeGracefulShutdown(t *testing.T) {
 			slowBody <- "error: " + err.Error()
 			return
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		b, _ := io.ReadAll(resp.Body)
 		slowBody <- string(b)
 	}()
