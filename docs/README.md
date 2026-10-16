@@ -12,7 +12,7 @@
   - Postgres from day one, not D1, because a Go service outside Workers can only reach D1 through Cloudflare's rate-limited REST API.
   - R2 in the EU jurisdiction.
   - Clerk for auth; billing through a merchant of record (handles EU VAT), not Clerk Billing.
-  - Every model call goes through Cloudflare AI Gateway in BYOK mode, so plan and AWS credits still apply. OpenRouter is only an optional provider for non-Claude models.
+  - Customer-facing model calls go through Cloudflare AI Gateway in BYOK mode (our Anthropic key, or the creator's). Testing runs direct on Claude in Amazon Bedrock, paid with the holding's AWS Activate credits and never with customer traffic. OpenRouter is only an optional provider for non-Claude models.
   - Claude Opus 5.5 edits, via a Go-native agent loop. Cheaper models (Haiku 5.5) run as sub-agents directed by an Opus 5.5 lead for research and other bulk reading. Everything else is tuned by a benchmark harness.
   - A pluggable sandbox layer: gVisor-hardened containers for our media jobs, Cloudflare Sandbox for free-form agent code.
   - Cloudflare K2 is deliberately **not** needed in v1.
@@ -21,12 +21,12 @@
   - **Trend data:** TikTok's Research API is non-commercial only, and Creative Center's song chart is unreliable. Use curation, web research, creator links and licensed music analytics instead.
   - **Edit quality:** eval suites gate every prompt or model change.
   - **Cost:** model tokens dominate. With Opus 5.5 editing, an exported video costs ≈ $1.25 all-in, about half of it output tokens. So the benchmark tunes effort and escalate-on-failure first, and cheaper models second.
-  - **Who pays for tokens:** two plan families per workspace. *Managed* credits (we call Claude, priced for ≥ 60 % margin) or *BYOK* (the creator's Anthropic API key, lower platform fee). Claude Pro/Max logins can't be used in third-party products.
+  - **Who pays for tokens:** two plan families per workspace. *Managed* credits (we call Claude, priced for ≥ 60 % margin) or *BYOK* (the creator's Anthropic API key, lower platform fee). Claude Pro/Max logins can't be used in third-party products. Credits (AWS Activate, Anthropic plan) pay for testing only.
 - **Decisions waiting on you:**
   - the billing mode for the private beta (I recommend managed credits with a hard cap per creator, BYOK opt-in);
-  - which legal entity (your holding or a new company) operates Content Fabrique and applies to AWS Activate, whether to run beta editor traffic on Bedrock if it approves you, and a website or profile for the application;
+  - which company operates Content Fabrique (the TikTok developer app, data processing agreements and merchant of record), and a website or profile that matches the holding's AWS Activate application. The credits themselves are settled: the holding applies and keeps them for testing;
   - plan prices and the margin target;
-  - the benchmark budget (≈ $350 per development sweep, ≈ $1,000 for the cutover), and which Console organization receives your plan's monthly API credits if you're on Max or Team;
+  - the benchmark budget (≈ $350 per development sweep, ≈ $1,000 for the cutover; Activate credits would cover most of it), and which Console organization receives your plan's monthly API credits if you're on Max or Team;
   - the legal questions in P0-12, including Anthropic's terms for customer keys;
   - your budget, target regions and beta creators ([implementation plan, open questions](04-implementation-plan.md#open-questions-for-the-founder)).
 - **First action:** `apps/web` was committed as a broken git link, so the UI isn't in the repo yet. See [implementation plan §0](04-implementation-plan.md#0-current-state-2026-10-16).
@@ -37,9 +37,9 @@
 |---|---|---|
 | 01 | [Product plan](01-product-plan.md) | Problem, users and personas, principles, journeys, MVP scope, agents, music strategy, pricing and business model (managed + BYOK), metrics, risks, seed concept library, roadmap |
 | 02 | [Research report](02-research.md) | TikTok APIs and trend data, music licensing, video understanding, editing and rendering stack, competitors, agent runtime and sandboxes, Cloudflare/Clerk/Go platform, costs. Sourced and confidence-marked |
-| 03 | [Architecture](03-architecture.md) | Components, data model, media pipeline, timeline spec and renderer, agents and evals, model routing and sub-agents, benchmark harness, sandbox interface, API, realtime, auth/billing, managed vs BYOK model access, deployment, cost model, security |
+| 03 | [Architecture](03-architecture.md) | Components, data model, media pipeline, timeline spec and renderer, agents and evals, model routing and sub-agents, benchmark harness, sandbox interface, API, realtime, auth/billing, managed vs BYOK model access and the Bedrock test lane, deployment, cost model, security |
 | 04 | [Implementation plan](04-implementation-plan.md) | Phases P0–P7 with PR-sized tasks and acceptance criteria, cross-cutting practices, definition of done, open questions |
-| 05 | [Decision log](05-decisions.md) | Lightweight ADRs (D-01 … D-19) with context, alternatives and when to revisit |
+| 05 | [Decision log](05-decisions.md) | Lightweight ADRs (D-01 … D-20) with context, alternatives and when to revisit |
 
 Suggested reading order: TL;DR → 01 → 03 → 04, with 02 and 05 as reference.
 

@@ -12,6 +12,7 @@
 - **EU-first**: the founder and early users are EU-based, so data stays in EU regions where the vendor allows ([D-15](05-decisions.md#d-15-eu-data-residency)).
 - **Who pays for tokens is per workspace**: either managed credits (we call Claude with our key) or the creator's own Anthropic key ([D-18](05-decisions.md#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key)).
 - **Model choice is data, not code**: routing profiles tuned by benchmark ([D-17](05-decisions.md#d-17-model-routing-is-data-tuned-by-benchmark)).
+- **Credits fund testing, customers fund production**: customer traffic goes through the AI Gateway on the customer's or our own funding, while development, CI and benchmarks run direct on Claude in Amazon Bedrock with the holding's AWS credits ([D-20](05-decisions.md#d-20-two-model-lanes-credits-fund-testing-customers-fund-production)).
 
 ## 2. System overview
 
@@ -38,7 +39,8 @@ flowchart LR
   end
 
   PG[("Postgres<br/>app data · jobs · events")]
-  LLM["Anthropic API · Amazon Bedrock<br/>our keys (managed) or the<br/>creator's key (BYOK)"]
+  LLM["Anthropic API<br/>our key (managed) or the<br/>creator's key (BYOK)"]
+  BR["Claude in Amazon Bedrock<br/>test lane · AWS Activate credits<br/>no customer data"]
   TRD["Trend data providers"]
   TT["TikTok APIs<br/>Login Kit · Content Posting"]
 
@@ -53,8 +55,10 @@ flowchart LR
   WRK -->|claim jobs| PG
   WRK <--> R2
   WRK --> AGT
-  AGT --> GW
+  AGT -->|production lane| GW
   GW --> LLM
+  AGT -.->|"test lane: dev, CI, benchmarks"| BR
+  GW ~~~ BR
   AGT --> TRD
   AGT --> SBX
   SBX <-->|presigned URLs| R2
@@ -78,8 +82,8 @@ flowchart LR
 | R2 | Cloudflare | All media and large artefacts |
 | Clerk | SaaS | Users, sessions, organizations (workspaces) |
 | Billing | Merchant of record: Stripe MoR or Paddle ([D-13](05-decisions.md#d-13-billing)) | Checkout, subscriptions, EU VAT and sales tax; webhooks → plans and entitlements in Postgres |
-| AI Gateway | Cloudflare ([D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)) | One front door for all model calls: our provider keys or the creator's, analytics, spend limits as a backstop, payload logging off |
-| Model APIs | SaaS | Claude for agents and tagging, called with our key (managed) or the creator's key (BYOK, [D-18](05-decisions.md#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key)); a video-native model only where it wins ([D-10](05-decisions.md#d-10-video-understanding)) |
+| AI Gateway | Cloudflare ([D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)) | Front door for customer-facing model calls (the production lane): our Anthropic key or the creator's, analytics, spend limits as a backstop, payload logging off |
+| Model APIs | SaaS | Claude for agents and tagging. Production: our key (managed) or the creator's key (BYOK, [D-18](05-decisions.md#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key)) through the gateway. Testing: Claude in Amazon Bedrock, paid with AWS credits ([D-20](05-decisions.md#d-20-two-model-lanes-credits-fund-testing-customers-fund-production)). A video-native model only where it wins ([D-10](05-decisions.md#d-10-video-understanding)) |
 
 ### Repository layout
 
@@ -92,7 +96,7 @@ apps/
       worker/              # River workers (ingest, analysis, render, agents, trends)
       cfctl/               # admin CLI: migrate, seed taxonomy, replay agent runs, run evals and benchmarks
     config/
-      routing/             # versioned model-routing profiles (YAML)
+      routing/             # versioned model-routing profiles (YAML) and models.yaml (logical model → provider ID)
     internal/
       config/ telemetry/   # env config, slog + OpenTelemetry
       httpapi/             # handlers, middleware (auth, tenancy, rate limit), OpenAPI glue
@@ -106,7 +110,7 @@ apps/
       render/              # timeline → ffmpeg compiler, profiles, text & captions
       agents/
         runtime/           # loop, tool registry, budgets, events, cancellation, delegate (sub-agents)
-        llm/               # provider interfaces; Anthropic impl; router + routing profiles; client factory (managed / BYOK); video-model impl
+        llm/               # provider interfaces; Anthropic impl (gateway) and Bedrock impl (test lane); lane guard; router + routing profiles; client factory (managed / BYOK); video-model impl
         editor/ research/ ideation/
       trends/              # provider adapters, normalisation, snapshots
       sandbox/             # Provider interface + implementations
@@ -172,7 +176,7 @@ erDiagram
 | `renders` | `timeline_id`, `profile` (preview, final), `status`, `r2_key`, `time_map` (output ms → timeline item), `cpu_ms`, `error` |
 | `agent_runs` | `agent` (research, ideation, editor, worker), `parent_run_id` (sub-agent runs), `status` (queued, running, waiting_input, succeeded, failed, cancelled), `input`, `output`, `routing_profile`, `model`, `effort`, `escalated` (bool), token counts, `cost_micros`, `budget_micros`, `billed_to` |
 | `agent_events` | `run_id`, `seq`, `type` (status, progress, tool_call, tool_result, message, artifact, error), `payload`. Streamed to the UI. |
-| `usage_ledger` | `kind` (llm, render_seconds, analysis_minutes, storage_gb_days, sandbox_seconds), `quantity`, `billed_to` (platform, workspace_key), token counts (input, cache_write, cache_read, output), `list_cost_micros`, `price_table_version`, `ref` |
+| `usage_ledger` | `kind` (llm, render_seconds, analysis_minutes, storage_gb_days, sandbox_seconds), `quantity`, `billed_to` (platform, workspace_key, test), `provider` (anthropic, bedrock), token counts (input, cache_write, cache_read, output), `list_cost_micros`, `price_table_version`, `ref` |
 | `provider_credentials` | `workspace_id`, `provider` (anthropic), `label`, `key_ciphertext`, `key_version`, `key_last4`, `status` (active, invalid, revoked), `validated_at`, `last_used_at`, `created_by` (BYOK keys; [§11a](#11a-model-access-managed-credits-or-byok)) |
 | `credit_ledger` | `workspace_id`, `kind` (grant, spend, expire, refund, top_up), `credits`, `action` (first_edit, revision, ideation…), `usage_ref`, `created_at`. Append-only. |
 | `integrations` | `provider` (tiktok), `external_account_id`, `scopes`, encrypted tokens, `expires_at` |
@@ -313,7 +317,7 @@ Agents (and the UI) change timelines through **high-level ops**, never by rewrit
 ### 7.1 Runtime ([D-07](05-decisions.md#d-07-agent-runtime-go-native-loop-on-the-claude-messages-api))
 
 A Go-native agent loop on the Claude Messages API (`anthropic-sdk-go`, using its beta tool runner or a hand-written loop):
-- **Tool registry** with typed JSON-Schema tools (`strict: true`). Tool calls and results are persisted as `agent_events` and streamed to the UI ("Looking for your best back pose…").
+- **Tool registry** with typed JSON-Schema tools (`strict: true` where the provider supports it; Claude in Amazon Bedrock doesn't, so the loop validates every tool input itself and returns errors to the model either way). Tool calls and results are persisted as `agent_events` and streamed to the UI ("Looking for your best back pose…").
 - **Budgets per run**: token and $ caps (`budget_micros`), a wall-clock timeout and a maximum number of tool calls. They are checked before every model request, and costs go to the `usage_ledger`.
 - **Pause and resume**: an `ask_user` tool moves the run to `waiting_input`. The user's reply resumes it. Runs are River jobs, so they survive restarts. The loop is append-only, so a replay rebuilds state from `agent_events`.
 - **Prompt caching**: a stable system prompt and tool list come first (cached), and per-run context comes after.
@@ -325,7 +329,7 @@ A Go-native agent loop on the Claude Messages API (`anthropic-sdk-go`, using its
 - **Sub-agents:** a `delegate` tool starts a worker with its own model, tool subset, prompt and budget, and returns a compact structured report (§7.5).
 - **Escalation:** a run at the cheaper effort is re-run at the higher effort only when the deterministic hard-constraint checks fail.
 - **Per-workspace client:** the loop never holds a key. It asks `llm.ClientFactory` for a client for the workspace's billing mode (§11a).
-- **Provider interface** (`agents/llm`), so a second model vendor can be added without touching agent code.
+- **Provider interface** (`agents/llm`) with two Claude providers, `anthropic` (production lane, through the gateway) and `bedrock` (test lane), and a capability matrix (`strict` schemas, batch, web tools, Models API). A second model vendor can be added without touching agent code.
 
 ### 7.2 Editor agent
 
@@ -373,7 +377,7 @@ Agent quality is the product, so every prompt, model or tool change runs the eva
 
 ### 7.5 Model routing, sub-agents and benchmarking
 
-**Routing profiles** (`apps/server/config/routing/*.yaml`) are versioned data. Code asks for a *stage*, never for a model ID. The starting profile follows [D-07](05-decisions.md#d-07-agent-runtime-go-native-loop-on-the-claude-messages-api):
+**Routing profiles** (`apps/server/config/routing/*.yaml`) are versioned data. Code asks for a *stage*, never for a model ID, and profiles name logical models: `config/routing/models.yaml` maps each to its provider's ID (`claude-opus-5-5` on the Anthropic API, `anthropic.claude-opus-5-5` on Bedrock). The starting profile follows [D-07](05-decisions.md#d-07-agent-runtime-go-native-loop-on-the-claude-messages-api):
 
 ```yaml
 profile: v1-start
@@ -423,7 +427,7 @@ flowchart LR
 - **Failure:** a failed or over-budget worker returns an error report. It never crashes the lead.
 - **Trust:** reports are untrusted data. The lead checks central claims against the cited source before it writes `trends` or `concepts`.
 - **Caching:** a worker starts a fresh prefix and shares no cache with its parent, because caches are model-scoped. Each worker role has its own stable prompt and tool list, so its prefix caches across runs.
-- **Research tools:** workers use the Messages API's server-side `web_search` and `web_fetch` tools (search at about $10 per 1,000). Web fetch only retrieves URLs already in the conversation, so URLs come from search results or the lead's brief.
+- **Research tools:** workers use the Messages API's server-side `web_search` and `web_fetch` tools (search at about $10 per 1,000). Web fetch only retrieves URLs already in the conversation, so URLs come from search results or the lead's brief. Both tools exist only on the first-party API (Bedrock has neither), so research runs and their tests use the first-party lane, about $1–5 per region-day.
 
 **Benchmark harness** (`cfctl bench`, protocol and budget in [D-17](05-decisions.md#d-17-model-routing-is-data-tuned-by-benchmark)):
 
@@ -431,6 +435,7 @@ flowchart LR
 |---|---|
 | Inputs | Eval sets #1 (analysis), #2 (editor scenarios), #3 (research) and an ideation set, as **recorded fixtures**: pre-analysed clip libraries, so analysis cost isn't paid again |
 | Runner | One isolated workspace per cell (scenario × profile × trial). The real renderer runs; the sandbox and TikTok posting are stubbed. Every call's usage is recorded |
+| Lanes | Sweeps run on the **test lane** (Bedrock, AWS credits), with per-provider rate limits in the runner. The winning profile and its runner-up then get a **parity run** on the production path before the cutover ([D-20](05-decisions.md#d-20-two-model-lanes-credits-fund-testing-customers-fund-production)). Judge calls run synchronously on Bedrock, which has no Batch API |
 | Scoring | Deterministic hard-constraint checks first, then the judge rubric (calibrated against ~30 human ratings), then a human "would you post it?" sample |
 | Statistics | Mean and p90 cost per *completed* task, pass rate with confidence intervals, quality-versus-cost Pareto frontier |
 | Output | A dated report in `docs/benchmarks/` with the table and chart; raw JSONL in R2 |
@@ -530,8 +535,20 @@ Every model call goes through `llm.ClientFactory(workspace)` ([D-18](05-decision
 | Prompt cache | The static prefix is shared across tenants, because caches are per workspace | Per key |
 | Rate limits | Ours (we ask for a higher tier) | The creator's tier; new keys start low |
 
-**Gateway ([D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)).** Both billing modes call models through Cloudflare AI Gateway in BYOK mode.
-- **Client:** the SDK's base URL points at the gateway's Anthropic endpoint (or the Bedrock endpoint for a Bedrock lane), and the provider key travels with the request. Native Anthropic features pass through unchanged.
+**Lanes ([D-20](05-decisions.md#d-20-two-model-lanes-credits-fund-testing-customers-fund-production)).** Credits fund testing, customers fund production.
+
+| Lane | Used by | Path | Paid with | Data |
+|---|---|---|---|---|
+| Production | Customer runs (managed and BYOK) and the shared research scans | Go client → AI Gateway → Anthropic API | Managed: our key. BYOK: the creator's key | Real creator data |
+| Test | Local development, CI model tests, evals, benchmark sweeps | Go client → Claude in Amazon Bedrock (no gateway) | AWS Activate credits | Synthetic data and consented eval footage |
+| First-party checks | The gateway conformance test, the parity run, Batches and Models API paths, `strict` schemas, web search and fetch | Go client → Anthropic API | Anthropic plan credits or prepaid credits (development organization) | Synthetic data and consented eval footage |
+
+- **Guard:** `llm.ClientFactory` takes the lane from the environment, not from the workspace. The `production` environment has no AWS credentials and refuses the test lane, and the other environments hold only synthetic and consented eval data. Test-lane calls write ledger rows with `billed_to = test` and `provider = bedrock`.
+- **Bedrock client:** the Anthropic Go SDK's `bedrock.NewMantleClient`, which speaks the Messages API at `bedrock-mantle.{region}.api.aws/anthropic/v1/messages` with SSE streaming. It uses the global endpoint (no premium; a single-region endpoint costs 10 % more) and the standard AWS credential chain: SSO or an assumed role locally, GitHub OIDC in CI.
+- **Capability matrix:** `strict` schemas and structured outputs, the Batch API, web search and fetch, and the Models API exist only on the first-party API. Prompt caching (5 minutes and 1 hour), effort, adaptive thinking, tool use and token counting exist on both. The loop validates tool inputs itself, so a run without `strict` still works.
+
+**Gateway ([D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)).** In production, both billing modes call models through Cloudflare AI Gateway in BYOK mode.
+- **Client:** the SDK's base URL points at the gateway's Anthropic endpoint, and the provider key travels with the request. Native Anthropic features pass through unchanged.
 - **Per-request headers:** `cf-aig-metadata` tags (`workspace_id`, `run_id`, `stage`, `profile`; the limit is five entries) and `cf-aig-collect-log-payload: false`. The gateway then keeps metadata (tokens, model, cost, duration) but not prompts or frames.
 - **Guards:** the gateway requires provider credentials, so a request can never fall back to Cloudflare-managed billing. Retries live in our client only. A config flag sends traffic straight to the provider if the gateway is down.
 
@@ -544,6 +561,7 @@ Every model call goes through `llm.ClientFactory(workspace)` ([D-18](05-decision
 
 **Rate-limit-aware client.**
 - A per-key concurrency limiter (a low default for new keys), exponential backoff that honours `retry-after`, and queueing instead of failing.
+- The same limiter is configured per provider. A new first-party organization starts on a low tier, while Bedrock's default is 2 million input tokens per minute and AWS enforces its own requests-per-minute limit.
 - Prompt caching on every run: cache reads don't count toward input-token limits.
 - Plain-language UI: "Your Anthropic key is on a low rate-limit tier, so runs will queue. Check your tier in the Anthropic Console." (Thresholds change; don't hard-code them.)
 
@@ -555,7 +573,7 @@ Every model call goes through `llm.ClientFactory(workspace)` ([D-18](05-decision
 
 ## 12. Deployment, environments, observability
 
-- **Environments**: `local` (docker compose: Postgres, MinIO or a dev R2 bucket, worker, api; web via Vite), `staging`, `production`. Separate Clerk instances, R2 buckets and DB branches per environment.
+- **Environments**: `local` (docker compose: Postgres, MinIO or a dev R2 bucket, worker, api; web via Vite), `staging`, `production`. Separate Clerk instances, R2 buckets and DB branches per environment. Model lanes follow the environment ([D-20](05-decisions.md#d-20-two-model-lanes-credits-fund-testing-customers-fund-production)): `production` uses the production lane, while `local`, `ci`, `bench` and `staging` use the test lane, with the first-party development key for first-party checks. The test lane's AWS accounts live in the holding's AWS Organization, each with a Budgets alert.
 - **Hosting** ([D-09](05-decisions.md#d-09-hosting)):
   - Web on Cloudflare Workers.
   - Go `api` and `worker` on EU servers (e.g. Hetzner) as containers, reachable only through **Cloudflare Tunnel**.
@@ -572,6 +590,8 @@ Every model call goes through `llm.ClientFactory(workspace)` ([D-18](05-decision
 ## 13. Cost model
 
 These are **modelled estimates** for budgeting. List prices are from October 2026 ([research §5.8](02-research.md#58-cost-model-inputs-oct-2026-list-prices)). The token volumes are assumptions that the benchmark ([D-17](05-decisions.md#d-17-model-routing-is-data-tuned-by-benchmark)) and the `usage_ledger` will replace.
+
+**Credits are outside this model.** AWS Activate credits and Anthropic plan credits fund testing only ([D-20](05-decisions.md#d-20-two-model-lanes-credits-fund-testing-customers-fund-production)). The COGS and margins below use list prices, with no credit discount.
 
 **Price mechanics that matter** ([prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching), [batch](https://platform.claude.com/docs/en/build-with-claude/batch-processing)):
 - Cache writes cost **1.25×** the input price (5-minute TTL).
@@ -652,7 +672,7 @@ A creator who posts 15 videos a month pays about €40 on BYOK (€25 plus ≈ $
 ## 14. Security and privacy
 
 - **Data**: the EU region for the database and R2 where available ([D-15](05-decisions.md#d-15-eu-data-residency)); encryption at rest (provider default) and in transit; short-lived presigned URLs; no public buckets.
-- **Secrets**: only in the API and worker; never in sandboxes or prompts; rotated through the platform secret store. Creator-supplied Anthropic keys follow the custody rules in [§11a](#11a-model-access-managed-credits-or-byok). They transit the AI Gateway in request headers, and the conformance test confirms the gateway never stores them.
+- **Secrets**: only in the API and worker; never in sandboxes or prompts; rotated through the platform secret store. The test lane's AWS access exists only in `local`, `ci` and `bench` (SSO or GitHub OIDC, no long-lived keys), never in production ([D-20](05-decisions.md#d-20-two-model-lanes-credits-fund-testing-customers-fund-production)). Creator-supplied Anthropic keys follow the custody rules in [§11a](#11a-model-access-managed-credits-or-byok). They transit the AI Gateway in request headers, and the conformance test confirms the gateway never stores them.
 - **Prompt injection**: user text, transcripts, OCR'd on-screen text and web/trend content are untrusted. Delimit them in prompts, keep tool permissions fixed, and treat a model's request to do something outside its tools as a no-op.
 - **Abuse**: per-workspace rate limits and quotas; upload type and size checks; malware-safe media parsing inside sandboxes; a takedown process.
-- **GDPR**: data processing agreements with every processor (Cloudflare, Clerk, the database host, model providers); a records-of-processing list; retention (delete originals N days after export, configurable); account deletion cascades to R2; **no training on customer content**.
+- **GDPR**: data processing agreements with every processor (Cloudflare, Clerk, the database host, model providers: Anthropic, plus AWS if consented eval footage goes through the test lane); a records-of-processing list; retention (delete originals N days after export, configurable); account deletion cascades to R2; **no training on customer content**.
