@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/nilpntr/content-fabrique/internal/doctor"
@@ -28,7 +29,8 @@ statuses (ok, missing, invalid, skipped), never values. Exits 1 on any missing o
   --env       the environment to check (required)
   --phase     the project phase; later-phase variables become required, and the sandbox gateway is checked from P4 (default P0)
   --env-file  the env file; default .env for local and bench, .env.staging and .env.production for those, none for ci
-              (process environment only). Values in the file win; the process environment fills the names it lacks.
+              (process environment only). A non-empty value in the file wins; the process environment fills every
+              name the file lacks or leaves empty.
   --json      machine-readable output
 `
 
@@ -50,7 +52,7 @@ func cmdDoctor(args []string, stdout, stderr io.Writer, lookup lookupEnv) int {
 		_, _ = fmt.Fprintf(stderr, "cfctl doctor: unexpected argument %q\n", flags.Arg(0))
 		return 2
 	}
-	if !contains(doctor.Environments, *envName) {
+	if !slices.Contains(doctor.Environments, *envName) {
 		_, _ = fmt.Fprintf(stderr, "cfctl doctor: --env must be one of %s\n", strings.Join(doctor.Environments, ", "))
 		return 2
 	}
@@ -93,7 +95,7 @@ func cmdDoctor(args []string, stdout, stderr io.Writer, lookup lookupEnv) int {
 	}
 
 	vars := doctor.MergeEnv(example, file, lookup)
-	redactor := doctor.NewRedactor(vars)
+	redactor := doctor.NewRedactor(example, vars)
 	out := redactor.Writer(stdout)
 
 	rep := doctor.Run(context.Background(), doctor.Options{
@@ -103,13 +105,15 @@ func cmdDoctor(args []string, stdout, stderr io.Writer, lookup lookupEnv) int {
 		Vars:      vars,
 		RoutingFS: os.DirFS(filepath.Join(root, "apps", "server", "config", "routing")),
 	})
+	// Redact the results before encoding: JSON escapes & < > and quotes, which would hide a value from the writer.
+	redacted := redactor.Report(rep)
 	if *asJSON {
-		if err := doctor.WriteJSON(out, rep, shown); err != nil {
+		if err := doctor.WriteJSON(out, redacted, redactor.Redact(shown)); err != nil {
 			_, _ = fmt.Fprintln(stderr, "cfctl doctor: cannot write the report")
 			return 2
 		}
 	} else {
-		doctor.WriteText(out, rep, shown)
+		doctor.WriteText(out, redacted, redactor.Redact(shown))
 	}
 	if rep.Failed() {
 		return 1
@@ -150,15 +154,6 @@ func displayPath(root, path string) string {
 		}
 	}
 	return path
-}
-
-func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }
 
 // ---- cfctl env -------------------------------------------------------------------------------------------------

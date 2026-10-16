@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+
+	"github.com/nilpntr/content-fabrique/internal/envfile"
 )
 
 // minRedact is the shortest loaded value the Redactor blanks. Shorter values ("cf", "1", "eu") would blank
@@ -21,10 +23,18 @@ type Redactor struct {
 	values []string // longest first
 }
 
-// NewRedactor collects the values to blank from vars. A value that is one of its variable's documented enum
-// values (CF_ENV=staging) is not secret and is kept, so the report can name the profile and environment. The
-// password and user of a URL value are blanked on their own too.
-func NewRedactor(vars map[string]string) *Redactor {
+// NewRedactor collects the values to blank from vars. Two kinds are kept, because they are public by definition
+// and blanking them would mangle the report: a value that is one of its variable's documented enum values
+// (CF_ENV=staging, so the report can name the profile), and any value of a variable tagged [public] in example.
+// The password of a URL value is blanked on its own as well as inside the whole value. The user name is not: local
+// defaults such as "postgres" would blank the labels.
+func NewRedactor(example []envfile.Var, vars map[string]string) *Redactor {
+	public := map[string]bool{}
+	for _, v := range example {
+		if slices.Contains(v.Tags, envfile.TagPublic) {
+			public[v.Name] = true
+		}
+	}
 	set := map[string]bool{}
 	add := func(v string) {
 		if len(v) >= minRedact {
@@ -32,12 +42,14 @@ func NewRedactor(vars map[string]string) *Redactor {
 		}
 	}
 	for name, val := range vars {
+		if public[name] {
+			continue
+		}
 		if allowed, ok := enums[name]; ok && slices.Contains(allowed, val) {
 			continue
 		}
 		add(val)
 		if u, err := url.Parse(val); err == nil && u.User != nil {
-			add(u.User.Username())
 			if pw, ok := u.User.Password(); ok {
 				add(pw)
 			}
@@ -62,6 +74,18 @@ func (r *Redactor) Redact(s string) string {
 		s = strings.ReplaceAll(s, v, redacted)
 	}
 	return s
+}
+
+// Report returns a copy of rep with every result's name and reason redacted. Do this before encoding to JSON: the
+// encoder escapes characters such as & < > and quotes, which would stop a value from matching afterwards.
+func (r *Redactor) Report(rep Report) Report {
+	out := rep
+	out.Results = make([]Result, len(rep.Results))
+	for i, x := range rep.Results {
+		x.Name, x.Reason = r.Redact(x.Name), r.Redact(x.Reason)
+		out.Results[i] = x
+	}
+	return out
 }
 
 // Writer wraps w so everything written is redacted. Each Write must carry whole values, which holds for the
@@ -104,6 +128,7 @@ func WriteText(w io.Writer, rep Report, envFile string) {
 // WriteJSON prints the report for machines.
 func WriteJSON(w io.Writer, rep Report, envFile string) error {
 	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")
 	return enc.Encode(struct {
 		Report

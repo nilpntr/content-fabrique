@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nilpntr/content-fabrique/internal/agents/llm/routing"
 	"github.com/nilpntr/content-fabrique/internal/envfile"
 )
 
@@ -145,6 +146,13 @@ type run struct {
 	timeout   time.Duration
 	ep        Endpoints
 	varStatus map[string]Status
+
+	// The routing profile and model catalogue, each read once per run.
+	routingOnce, catalogOnce sync.Once
+	models                   []string
+	modelsErr                error
+	catalog                  routing.Catalog
+	catalogErr               error
 }
 
 func newRun(opts Options) *run {
@@ -187,19 +195,24 @@ func newRun(opts Options) *run {
 // passed to it, so every name used here is checked against .env.example in CI.
 func (r *run) getenv(name string) string { return r.vars[name] }
 
-// MergeEnv builds the environment doctor checks. Values in the env file are authoritative: the process environment
-// only fills names the file does not contain. Only names listed in .env.example are taken from the process.
+// MergeEnv builds the environment doctor checks. A non-empty value in the env file is authoritative; the process
+// environment fills every name the file lacks or leaves empty (an empty line in .env.example's copy is a blank to
+// fill, not a choice). Only names listed in .env.example are taken from the process.
 func MergeEnv(example []envfile.Var, file map[string]string, process func(string) (string, bool)) map[string]string {
 	out := map[string]string{}
 	for _, v := range example {
-		if val, ok := file[v.Name]; ok {
+		if val := file[v.Name]; val != "" {
 			out[v.Name] = val
 			continue
 		}
 		if process != nil {
-			if val, ok := process(v.Name); ok {
+			if val, ok := process(v.Name); ok && val != "" {
 				out[v.Name] = val
+				continue
 			}
+		}
+		if val, ok := file[v.Name]; ok {
+			out[v.Name] = val
 		}
 	}
 	return out

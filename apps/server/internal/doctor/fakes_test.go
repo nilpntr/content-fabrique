@@ -73,6 +73,7 @@ type fakeS3 struct {
 	mu      sync.Mutex
 	objects map[string][]byte
 	puts    int
+	deletes int
 	left    func() int
 }
 
@@ -101,6 +102,7 @@ func newFakeS3(t *testing.T, bucket string) *fakeS3 {
 			_, _ = w.Write(data)
 		case http.MethodDelete:
 			delete(f.objects, r.URL.Path)
+			f.deletes++
 			w.WriteHeader(http.StatusNoContent)
 		}
 	}))
@@ -260,7 +262,7 @@ func newAPIFakes(t *testing.T, anthropicKey, aigToken string) *apiFakes {
 			_, _ = w.Write([]byte(`{"success":true,"result":{"buckets":[]}}`))
 		case strings.HasSuffix(r.URL.Path, "/ai-gateway/gateways"):
 			_, _ = w.Write([]byte(`{"success":true,"result":[]}`))
-		case strings.HasSuffix(r.URL.Path, "/ai/v1/chat/completions"):
+		case strings.HasSuffix(r.URL.Path, "/ai/v1/messages"):
 			var body struct {
 				Model string `json:"model"`
 			}

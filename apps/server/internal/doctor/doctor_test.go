@@ -11,6 +11,10 @@ import (
 
 func runDoctor(t *testing.T, env string, phase int, vars map[string]string, ep Endpoints) Report {
 	t.Helper()
+	// CF_ENV must match --env. goodVars carries the .env.example default (local), so follow the environment under test.
+	if vars["CF_ENV"] == "local" && env != "bench" {
+		vars["CF_ENV"] = env
+	}
 	return Run(context.Background(), Options{
 		Env: env, Phase: phase, Example: loadExample(t), Vars: vars, RoutingFS: routingFS,
 		Endpoints: ep, Timeout: 5 * time.Second,
@@ -87,8 +91,8 @@ func TestObjectStorageCleansUp(t *testing.T) {
 	vars["R2_ENDPOINT"] = s3.URL
 	rep := runDoctor(t, "ci", 0, vars, Endpoints{})
 	wantStatus(t, rep, "object-storage", OK)
-	if s3.puts != 1 || s3.left() != 0 {
-		t.Errorf("puts = %d, objects left = %d", s3.puts, s3.left())
+	if s3.puts != 1 || s3.deletes != 1 || s3.left() != 0 {
+		t.Errorf("puts = %d, deletes = %d, objects left = %d; want one put, one delete, none left", s3.puts, s3.deletes, s3.left())
 	}
 
 	// Wrong credentials are rejected by the fake the same way R2 would.
@@ -350,19 +354,26 @@ func TestFormatChecks(t *testing.T) {
 
 func TestMergeEnvFileWins(t *testing.T) {
 	example := loadExample(t)
-	process := map[string]string{"CF_ENV": "ci", "LLM_MODE": "replay", "NOT_LISTED": "x"}
-	got := MergeEnv(example, map[string]string{"CF_ENV": "local", "ROUTING_PROFILE": ""}, func(k string) (string, bool) {
+	process := map[string]string{"CF_ENV": "ci", "LLM_MODE": "replay", "ROUTING_PROFILE": "dev-mid", "NOT_LISTED": "x", "APP_BASE_URL": ""}
+	file := map[string]string{"CF_ENV": "local", "ROUTING_PROFILE": "", "APP_BASE_URL": "", "API_BASE_URL": ""}
+	got := MergeEnv(example, file, func(k string) (string, bool) {
 		v, ok := process[k]
 		return v, ok
 	})
 	if got["CF_ENV"] != "local" {
-		t.Error("the file must win over the process environment")
+		t.Error("a non-empty value in the file must win over the process environment")
 	}
 	if got["LLM_MODE"] != "replay" {
 		t.Error("the process environment fills names the file lacks")
 	}
-	if v, ok := got["ROUTING_PROFILE"]; !ok || v != "" {
-		t.Error("a name present but empty in the file stays empty")
+	if got["ROUTING_PROFILE"] != "dev-mid" {
+		t.Error("the process environment fills a name that is empty in the file")
+	}
+	if v, ok := got["APP_BASE_URL"]; !ok || v != "" {
+		t.Error("empty in both stays empty")
+	}
+	if v, ok := got["API_BASE_URL"]; !ok || v != "" {
+		t.Error("empty in the file and absent from the process stays empty")
 	}
 	if _, ok := got["NOT_LISTED"]; ok {
 		t.Error("names outside .env.example are ignored")

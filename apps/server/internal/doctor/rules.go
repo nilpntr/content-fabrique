@@ -19,17 +19,34 @@ var allowedEmpty = map[string]bool{
 	"R2_JURISDICTION":    true,
 }
 
-// ciNotUsed are [YOU-now] variables that CI does not hold: CI runs in replay mode and makes no live Anthropic or
-// Clerk calls (decision D-22). In `--env ci` they are not required and report skipped, and if someone sets them
-// anyway they are checked like any other environment. This is an exception in code, not a change to the tags in
-// .env.example. Every other environment follows the tags.
-var ciNotUsed = map[string]bool{
-	"ANTHROPIC_API_KEY":          true,
-	"CLERK_SECRET_KEY":           true,
-	"VITE_CLERK_PUBLISHABLE_KEY": true,
+const (
+	ciNotUsedReason     = "not used in ci (replay mode, D-22)"
+	dockerOnlyReason    = "only for the local Docker Postgres"
+	gatewayRequiredNote = "needed because ANTHROPIC_BASE_URL is set (the gateway is authenticated, D-19)"
+)
+
+// notUsedIn is the explicit per-environment exception list to the tag rules. A variable listed for an environment
+// is not required there and reports skipped with the reason; if someone sets it anyway it is checked like any
+// other. This is code, not a change to the tags in .env.example. Every other variable follows the tags.
+//
+//   - ci holds no Anthropic or Clerk secrets: CI runs in replay mode and makes no live calls (decision D-22).
+//   - staging and production use PlanetScale, so the POSTGRES_* variables, which only configure the local Docker
+//     Postgres container, do not apply.
+var notUsedIn = map[string]map[string]string{
+	"ci": {
+		"ANTHROPIC_API_KEY":          ciNotUsedReason,
+		"CLERK_SECRET_KEY":           ciNotUsedReason,
+		"VITE_CLERK_PUBLISHABLE_KEY": ciNotUsedReason,
+	},
+	"staging":    dockerOnly,
+	"production": dockerOnly,
 }
 
-const ciNotUsedReason = "not used in ci (replay mode, D-22)"
+var dockerOnly = map[string]string{
+	"POSTGRES_USER":     dockerOnlyReason,
+	"POSTGRES_PASSWORD": dockerOnlyReason,
+	"POSTGRES_DB":       dockerOnlyReason,
+}
 
 // enums are the variables with a fixed set of documented values. A value inside the set is not secret, so the
 // Redactor leaves it alone and the report can say "profile dev-cheap".
@@ -49,6 +66,16 @@ var (
 	hex32RE = regexp.MustCompile(`^[0-9a-f]{32}$`)
 	slugRE  = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 )
+
+// matches checks the value against a pattern; what describes it in the reason.
+func matches(re *regexp.Regexp, what string) validator {
+	return func(_ *run, val string) string {
+		if !re.MatchString(val) {
+			return "bad format (expected " + what + ")"
+		}
+		return ""
+	}
+}
 
 func urlOf(schemes ...string) validator {
 	return func(_ *run, val string) string {
@@ -107,7 +134,18 @@ var validators = map[string]validator{
 	},
 	"CLERK_WEBHOOK_SECRET": prefixed("whsec_"),
 
-	"CF_ENV":             oneOf("CF_ENV"),
+	// CF_ENV must name the environment being checked: a mismatch means the wrong file was loaded. bench is the
+	// exception: it runs on a developer machine with the local .env, so CF_ENV=local is accepted there too.
+	"CF_ENV": func(r *run, val string) string {
+		if why := oneOf("CF_ENV")(r, val); why != "" {
+			return why
+		}
+		benchOnLocal := r.opts.Env == "bench" && val == "local"
+		if val != r.opts.Env && !benchOnLocal {
+			return "does not match --env (wrong env file?)"
+		}
+		return ""
+	},
 	"ROUTING_PROFILE":    oneOf("ROUTING_PROFILE"),
 	"LLM_MODE":           oneOf("LLM_MODE"),
 	"BILLING_PROVIDER":   oneOf("BILLING_PROVIDER"),
@@ -154,24 +192,9 @@ var validators = map[string]validator{
 	"SANDBOX_GATEWAY_TOKEN": minLen(16),
 	"RIVER_UI_PASSWORD":     minLen(16),
 
-	"CLOUDFLARE_ACCOUNT_ID": func(_ *run, val string) string {
-		if !hex32RE.MatchString(val) {
-			return "bad format (expected 32 hex characters)"
-		}
-		return ""
-	},
-	"CLOUDFLARE_ZONE_ID": func(_ *run, val string) string {
-		if !hex32RE.MatchString(val) {
-			return "bad format (expected 32 hex characters)"
-		}
-		return ""
-	},
-	"CF_AIG_GATEWAY_ID": func(_ *run, val string) string {
-		if !slugRE.MatchString(val) {
-			return "bad format (expected a gateway slug)"
-		}
-		return ""
-	},
+	"CLOUDFLARE_ACCOUNT_ID": matches(hex32RE, "32 hex characters"),
+	"CLOUDFLARE_ZONE_ID":    matches(hex32RE, "32 hex characters"),
+	"CF_AIG_GATEWAY_ID":     matches(slugRE, "a gateway slug"),
 	"OTEL_EXPORTER_OTLP_HEADERS": func(_ *run, val string) string {
 		for _, kv := range strings.Split(val, ",") {
 			if k, _, ok := strings.Cut(kv, "="); !ok || strings.TrimSpace(k) == "" {
@@ -189,25 +212,40 @@ var validators = map[string]validator{
 
 // required reports whether the variable must be set for this environment and phase, from its tags.
 func (r *run) required(v envfile.Var) bool {
-	if r.opts.Env == "ci" && ciNotUsed[v.Name] {
+	if _, exempt := notUsedIn[r.opts.Env][v.Name]; exempt {
 		return false
 	}
+	// The gateway is authenticated (D-19), so an ANTHROPIC_BASE_URL needs its token in every environment.
+	if v.Name == "CF_AIG_TOKEN" && r.gatewayInUse() {
+		return true
+	}
+	has := func(t envfile.Tag) bool { return slices.Contains(v.Tags, t) }
 	// Billing: only the chosen provider's set is required.
-	if v.Has(envfile.TagP7) {
+	if has(envfile.TagP7) {
 		if r.opts.Phase < 7 {
 			return false
 		}
 		return r.billingMine(v.Name)
 	}
 	switch {
-	case v.Has(envfile.TagNow), v.Has(envfile.TagAuto):
+	case has(envfile.TagNow), has(envfile.TagAuto):
 		return true
-	case v.Has(envfile.TagStaging):
+	case has(envfile.TagStaging):
 		return r.opts.Env == "staging" || r.opts.Env == "production"
-	case v.Has(envfile.TagP6):
+	case has(envfile.TagP6):
 		return r.opts.Phase >= 6
 	}
 	return false // [optional]
+}
+
+// gatewayInUse reports whether the AI Gateway is called: ANTHROPIC_BASE_URL is set, and the environment uses
+// Anthropic at all (ci without a key is in replay mode and calls nothing).
+func (r *run) gatewayInUse() bool {
+	if r.getenv("ANTHROPIC_BASE_URL") == "" {
+		return false
+	}
+	replayOnly := r.opts.Env == "ci" && r.getenv("ANTHROPIC_API_KEY") == ""
+	return !replayOnly
 }
 
 // billingMine reports whether a [YOU-P7] variable belongs to the chosen BILLING_PROVIDER (or to neither).
@@ -224,19 +262,21 @@ func (r *run) billingMine(name string) bool {
 
 // notRequiredReason says why an empty, not-required variable is skipped.
 func (r *run) notRequiredReason(v envfile.Var) string {
+	if why, exempt := notUsedIn[r.opts.Env][v.Name]; exempt {
+		return why
+	}
+	has := func(t envfile.Tag) bool { return slices.Contains(v.Tags, t) }
 	switch {
-	case r.opts.Env == "ci" && ciNotUsed[v.Name]:
-		return ciNotUsedReason
-	case v.Has(envfile.TagOptional):
+	case has(envfile.TagOptional):
 		return "optional, not set"
-	case v.Has(envfile.TagP7):
+	case has(envfile.TagP7):
 		if r.opts.Phase < 7 {
 			return "not needed before P7"
 		}
 		return "other billing provider"
-	case v.Has(envfile.TagP6):
+	case has(envfile.TagP6):
 		return "not needed before P6"
-	case v.Has(envfile.TagStaging):
+	case has(envfile.TagStaging):
 		return "not needed for " + r.opts.Env
 	}
 	return "not required"
@@ -255,6 +295,9 @@ func (r *run) checkVariables() []Result {
 			res.Status, res.Reason = OK, "empty is valid"
 		case val == "" && r.required(v):
 			res.Status, res.Reason = Missing, "not set"
+			if v.Name == "CF_AIG_TOKEN" && r.gatewayInUse() {
+				res.Reason = "not set, " + gatewayRequiredNote
+			}
 		case val == "":
 			res.Status, res.Reason = Skipped, r.notRequiredReason(v)
 		default:

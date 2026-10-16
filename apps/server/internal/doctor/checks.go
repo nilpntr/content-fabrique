@@ -181,8 +181,12 @@ func (r *run) storage() job {
 		}); err != nil {
 			return failed(name, "put: "+classify(err))
 		}
-		// Always try to remove the object, even if the get failed.
+		// The object is deleted exactly once: on the happy path below, or here if the get fails first.
+		deleted := false
 		defer func() {
+			if deleted {
+				return
+			}
 			cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			_, _ = client.DeleteObject(cctx, &s3.DeleteObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)})
@@ -199,6 +203,7 @@ func (r *run) storage() job {
 		if len(data) != 1 {
 			return failed(name, "get: unexpected size")
 		}
+		deleted = true
 		if _, err := client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)}); err != nil {
 			return failed(name, "delete: "+classify(err))
 		}
@@ -254,16 +259,33 @@ func (r *run) cloudflare() job {
 
 // ---- Models: Anthropic, the AI Gateway and Cloudflare's REST path ----------------------------------------------
 
-// profileModels returns the distinct native model IDs of the active ROUTING_PROFILE.
+// profileModels returns the distinct native model IDs of the active ROUTING_PROFILE. The profile is read once per run.
 func (r *run) profileModels() ([]string, error) {
-	if r.opts.RoutingFS == nil {
-		return nil, fmt.Errorf("no routing config")
-	}
-	p, err := routing.LoadProfile(r.opts.RoutingFS, r.getenv("ROUTING_PROFILE"))
-	if err != nil {
-		return nil, err
-	}
-	return p.Models(), nil
+	r.routingOnce.Do(func() {
+		if r.opts.RoutingFS == nil {
+			r.modelsErr = fmt.Errorf("no routing config")
+			return
+		}
+		p, err := routing.LoadProfile(r.opts.RoutingFS, r.getenv("ROUTING_PROFILE"))
+		if err != nil {
+			r.modelsErr = err
+			return
+		}
+		r.models = p.Models()
+	})
+	return r.models, r.modelsErr
+}
+
+// modelCatalog returns models.yaml, read once per run.
+func (r *run) modelCatalog() (routing.Catalog, error) {
+	r.catalogOnce.Do(func() {
+		if r.opts.RoutingFS == nil {
+			r.catalogErr = fmt.Errorf("no routing config")
+			return
+		}
+		r.catalog, r.catalogErr = routing.LoadCatalog(r.opts.RoutingFS)
+	})
+	return r.catalog, r.catalogErr
 }
 
 // countTokens asks the Messages API how many tokens a tiny prompt takes for the model. It is free and generates
@@ -345,8 +367,8 @@ func (r *run) gatewayJobs() []job {
 }
 
 // cfRESTJobs sends a one-token request per model by its Cloudflare name (anthropic/claude-opus-5.5), when
-// CF_AI_API_TOKEN is set. The endpoint is Workers AI's OpenAI-compatible route; whether Cloudflare serves Claude 5.5
-// there is unverified, which is what this check is for.
+// CF_AI_API_TOKEN is set. The route is the REST API's Anthropic-compatible /ai/v1/messages (D-19, docs/06 §3.9).
+// Whether Cloudflare serves Claude 5.5 there is unverified, which is what this check is for.
 func (r *run) cfRESTJobs() []job {
 	const name = "cloudflare-rest"
 	if res, ok := r.gate(name, "CF_AI_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "ROUTING_PROFILE"); !ok {
@@ -355,13 +377,13 @@ func (r *run) cfRESTJobs() []job {
 	models, err := r.profileModels()
 	var catalog routing.Catalog
 	if err == nil {
-		catalog, err = routing.LoadCatalog(r.opts.RoutingFS)
+		catalog, err = r.modelCatalog()
 	}
 	if err != nil {
 		return []job{static(failed(name, "routing config unreadable"))}
 	}
 	token := r.getenv("CF_AI_API_TOKEN")
-	endpoint := strings.TrimRight(r.ep.Cloudflare, "/") + "/accounts/" + url.PathEscape(r.getenv("CLOUDFLARE_ACCOUNT_ID")) + "/ai/v1/chat/completions"
+	endpoint := strings.TrimRight(r.ep.Cloudflare, "/") + "/accounts/" + url.PathEscape(r.getenv("CLOUDFLARE_ACCOUNT_ID")) + "/ai/v1/messages"
 	var jobs []job
 	for _, m := range models {
 		entry, known := catalog[m]
@@ -378,6 +400,7 @@ func (r *run) cfRESTJobs() []job {
 			})
 			hdr := bearer(token)
 			hdr["Content-Type"] = "application/json"
+			hdr["anthropic-version"] = "2023-06-01"
 			if _, err := r.doBody(ctx, http.MethodPost, endpoint, hdr, body); err != nil {
 				return failed(label, classify(err))
 			}
@@ -426,7 +449,8 @@ func (r *run) sandbox() job {
 // observability sends one test span to the OTLP endpoint and expects a 2xx.
 func (r *run) observability() job {
 	const name = "observability"
-	if res, ok := r.gate(name, "OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_HEADERS"); !ok {
+	// Headers are optional: a local collector without authentication is valid.
+	if res, ok := r.gate(name, "OTEL_EXPORTER_OTLP_ENDPOINT"); !ok {
 		return static(res)
 	}
 	endpoint := strings.TrimRight(r.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"), "/") + "/v1/traces"

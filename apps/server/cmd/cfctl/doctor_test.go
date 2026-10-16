@@ -91,23 +91,26 @@ func TestDoctorCLIUsageErrors(t *testing.T) {
 	}
 }
 
-// The env file wins over the process environment, and a default file that does not exist is only a note.
+// A non-empty value in the file wins over the process environment; the process fills names the file lacks or leaves
+// empty. (No Anthropic or Clerk key is involved, so the run makes no network call.)
 func TestDoctorCLIEnvFile(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "test.env")
-	if err := os.WriteFile(file, []byte("ANTHROPIC_API_KEY=\nCF_ENV=local\n"), 0o600); err != nil {
+	if err := os.WriteFile(file, []byte("CF_ENV=local\r\nLLM_MODE=\r\nROUTING_PROFILE=dev-mid\r\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	process := fakeProcessEnv(map[string]string{"ANTHROPIC_API_KEY": "sk-ant-from-process", "LLM_MODE": "live"})
+	process := fakeProcessEnv(map[string]string{"CF_ENV": "ci", "LLM_MODE": "live", "ROUTING_PROFILE": "dev-cheap", "APP_BASE_URL": "http://localhost:3000"})
 	var out, errb bytes.Buffer
-	cmdDoctor([]string{"--env", "ci", "--env-file", file}, &out, &errb, process)
+	cmdDoctor([]string{"--env", "local", "--env-file", file}, &out, &errb, process)
 	text := out.String()
-	// The file has an empty ANTHROPIC_API_KEY, so the process value must not fill it; ci then skips it.
-	if !strings.Contains(text, "skipped  ANTHROPIC_API_KEY") {
-		t.Errorf("an empty value in the file should win:\n%s", text)
+	// CF_ENV=local from the file matches --env local; had the process value (ci) won, it would be a mismatch.
+	if !strings.Contains(text, "ok       CF_ENV") {
+		t.Errorf("the file's value should win:\n%s", text)
 	}
-	// LLM_MODE is absent from the file, so the process value fills it.
-	if !strings.Contains(text, "ok       LLM_MODE") {
-		t.Errorf("the process environment should fill names the file lacks:\n%s", text)
+	// LLM_MODE is empty in the file, so the process value fills it, and APP_BASE_URL is absent from the file.
+	for _, name := range []string{"LLM_MODE", "APP_BASE_URL"} {
+		if !strings.Contains(text, "ok       "+name) {
+			t.Errorf("the process environment should fill %s:\n%s", name, text)
+		}
 	}
 }
 

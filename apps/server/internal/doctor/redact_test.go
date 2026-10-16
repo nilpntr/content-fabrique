@@ -55,10 +55,11 @@ func sentinelVars(t *testing.T, api *apiFakes, dead string) map[string]string {
 		"TIKTOK_REDIRECT_URI":         withUser(api.Clerk.URL, "TIKTOK_REDIRECT_URI"),
 		"SENTRY_DSN":                  withUser(api.Clerk.URL, "SENTRY_DSN"),
 		"VITE_SENTRY_DSN":             withUser(api.Clerk.URL, "VITE_SENTRY_DSN"),
-		"DATABASE_URL":                withUser("postgres://"+dead, "DATABASE_URL"),
-		"DATABASE_DIRECT_URL":         withUser("postgres://"+dead, "DATABASE_DIRECT_URL"),
-		"DATABASE_MIGRATE_URL":        withUser("postgres://"+dead, "DATABASE_MIGRATE_URL"),
-		"R2_ENDPOINT":                 withUser("http://"+dead, "R2_ENDPOINT"),
+		// A DSN with & (and a sentinel in a parameter) is the case JSON escaping would hide from the redactor.
+		"DATABASE_URL":         withUser("postgres://"+dead, "DATABASE_URL") + "?sslmode=disable&application_name=SENTINEL_app",
+		"DATABASE_DIRECT_URL":  withUser("postgres://"+dead, "DATABASE_DIRECT_URL") + "?sslmode=disable&application_name=SENTINEL_app",
+		"DATABASE_MIGRATE_URL": withUser("postgres://"+dead, "DATABASE_MIGRATE_URL"),
+		"R2_ENDPOINT":          withUser("http://"+dead, "R2_ENDPOINT"),
 	}
 	for k, v := range set {
 		vars[k] = v
@@ -144,18 +145,20 @@ func TestRedactorBlanksLeakedValues(t *testing.T) {
 		"SHORT":             "abc",
 		"CF_ENV":            "staging",
 		"ROUTING_PROFILE":   "dev-cheap",
-		"LLM_MODE":          "not-a-mode", // invalid enum value: not exempt
+		"LLM_MODE":          "not-a-mode",             // invalid enum value: not exempt
+		"APP_BASE_URL":      "http://public-url.test", // [public]: kept
 	}
-	red := NewRedactor(vars)
+	red := NewRedactor(loadExample(t), vars)
 	in := "key sk-ant-leaky-value dsn postgres://appuser:hunter2hunter2@db.internal:5432/cf pw hunter2hunter2 user appuser " +
-		"short abc env staging profile dev-cheap mode not-a-mode"
+		"short abc env staging profile dev-cheap mode not-a-mode app http://public-url.test"
 	got := red.Redact(in)
-	for _, leaked := range []string{"sk-ant-leaky-value", "hunter2hunter2", "appuser", "not-a-mode"} {
+	for _, leaked := range []string{"sk-ant-leaky-value", "hunter2hunter2", "not-a-mode", "db.internal"} {
 		if strings.Contains(got, leaked) {
 			t.Errorf("%q survived: %s", leaked, got)
 		}
 	}
-	for _, kept := range []string{"abc", "staging", "dev-cheap"} {
+	// A URL's user name is not blanked on its own, and neither are short values, enum values or [public] ones.
+	for _, kept := range []string{"user appuser", "abc", "staging", "dev-cheap", "http://public-url.test"} {
 		if !strings.Contains(got, kept) {
 			t.Errorf("%q should be kept: %s", kept, got)
 		}
