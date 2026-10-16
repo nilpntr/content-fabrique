@@ -24,7 +24,8 @@
 | D-17 | Model routing is data, tuned by benchmark: effort first, then escalation, then delegation, then cheaper models | Accepted (protocol); results come from P4-10 |
 | D-18 | Who pays for tokens: managed credits or bring-your-own Anthropic key, per workspace | Proposed (founder confirms the beta default) |
 | D-19 | Model gateway: Cloudflare AI Gateway in BYOK mode in front of customer-facing model calls; OpenRouter only as an optional non-Claude provider | Accepted (the founder chose it for customer traffic); gated by the conformance test in P4-00 |
-| D-20 | Two model lanes: AWS Activate credits fund testing on Amazon Bedrock, direct; customer traffic goes through the gateway on its own funding | Accepted (founder decision); depends on the Activate application (P0-14) |
+| D-20 | Two model lanes: AWS Activate credits fund testing on Amazon Bedrock, direct; customer traffic goes through the gateway on its own funding | Superseded by D-21 (the founder dropped the AWS credits) |
+| D-21 | Testing calls the first-party Claude API directly and is self-funded; customer traffic goes through the gateway; no AWS credits, no Bedrock lane | Accepted (founder decision) |
 
 ---
 
@@ -263,7 +264,7 @@ Our own model of an Opus 5.5 editor run ([architecture §13](03-architecture.md#
    Keep a change only if quality holds within noise and cost per completed task falls. Otherwise revert and record why.
 4. **Metrics:** hard-constraint pass rate; LLM-judge rubric score, calibrated against human ratings on ~30 samples; a human "would you post it?" rating on a sample; cost per completed task (mean and p90, because the tail decides the bill); latency; turns; failure rate. The output is a quality-versus-cost Pareto chart.
 5. **Rigour:** development sweeps use 20–30 scenarios with at least 3 trials each. The production cutover uses about 50 scenarios with at least 5 trials, the bar Anthropic publishes. A difference of a scenario or two is noise.
-6. **Budget** (estimates at Oct 2026 prices, approved once): ≈ $350 per editor development sweep (30 scenarios × 6 profiles × 3 trials), ≈ $1,000 for the cutover measurement, and ≈ $150 for the research and ideation benchmarks. Judge calls run through the Batch API at 50 % off. A scaled-down development sweep (15 scenarios × 6 profiles × 2 trials) is ≈ $125, which fits one month of Max 20x API credits ($200); the full sweeps need more than a month of plan credits, and credits don't roll over. Sweeps run on the test lane, so the holding's AWS Activate credits pay for them where they cover it ([D-20](#d-20-two-model-lanes-credits-fund-testing-customers-fund-production)). Bedrock has no Batch API, so judge calls cost the full price there. If that matters, run the judge pass later as a batch on the first-party API.
+6. **Budget** (estimates at Oct 2026 prices, approved once): ≈ $350 per editor development sweep (30 scenarios × 6 profiles × 3 trials), ≈ $1,000 for the cutover measurement, and ≈ $150 for the research and ideation benchmarks. Judge calls run through the Batch API at 50 % off. A scaled-down development sweep (15 scenarios × 6 profiles × 2 trials) is ≈ $125, which fits one month of Max 20x API credits ($200); the full sweeps need more than a month of plan credits, and credits don't roll over. The founder funds these runs ([D-21](#d-21-testing-on-the-first-party-api-self-funded)).
 7. **Re-run** on every new model release and every major prompt change. Rankings can flip between models and workloads.
 
 **Alternatives.** Choosing by price list or intuition (rejected: it doesn't predict cost per completed task). A router model that picks a model per request (rejected for v1: another failure mode, and it loses cache locality).
@@ -276,7 +277,7 @@ Our own model of an Opus 5.5 editor run ([architecture §13](03-architecture.md#
 
 **Context.** The founder's direction: make people use their own keys, or a subscription where we still take a profit. What the research found:
 - **Cost.** With Opus 5.5 on every edit, LLM spend is about $1.15 per exported video, about $1.25 all-in ([architecture §13](03-architecture.md#13-cost-model)). That can't be sold at "unlimited clipping" prices.
-- **"Your own key" means an Anthropic Console API key.** Anthropic's [legal and compliance page](https://code.claude.com/docs/en/legal-and-compliance) points developers building on Claude to API keys, and says third-party developers may not offer Claude.ai login or route requests through Free, Pro or Max credentials on users' behalf. Subscription logins were also blocked in third-party clients from January 2026 ([The Register](https://www.theregister.com/software/2026/02/20/anthropic-clarifies-ban-on-third-party-tool-access-to-claude/5014546), [WinBuzzer](https://winbuzzer.com/2026/02/19/anthropic-bans-claude-subscription-oauth-in-third-party-apps-xcxwbn/)). **We found no exception for development or testing.** What exists instead is better: **Max and Team plans include monthly API credits** (Max 5x $100, Max 20x $200, Team pooled up to $500) that pay for API use with a normal key, "to build and run your own applications and agents" ([Anthropic docs](https://platform.claude.com/docs/en/about-claude/api-credits-for-subscribers)). If the founder's plan is eligible, those credits fund the first-party checks of development and benchmarking (P0-13), while most testing runs on Bedrock with AWS credits ([D-20](#d-20-two-model-lanes-credits-fund-testing-customers-fund-production)). Anthropic's pages leave a grey area for its own tools (Claude Code, the Agent SDK, `claude -p`) under a plan login, and we don't build on it.
+- **"Your own key" means an Anthropic Console API key.** Anthropic's [legal and compliance page](https://code.claude.com/docs/en/legal-and-compliance) points developers building on Claude to API keys, and says third-party developers may not offer Claude.ai login or route requests through Free, Pro or Max credentials on users' behalf. Subscription logins were also blocked in third-party clients from January 2026 ([The Register](https://www.theregister.com/software/2026/02/20/anthropic-clarifies-ban-on-third-party-tool-access-to-claude/5014546), [WinBuzzer](https://winbuzzer.com/2026/02/19/anthropic-bans-claude-subscription-oauth-in-third-party-apps-xcxwbn/)). **We found no exception for development or testing.** What exists instead is better: **Max and Team plans include monthly API credits** (Max 5x $100, Max 20x $200, Team pooled up to $500) that pay for API use with a normal key, "to build and run your own applications and agents" ([Anthropic docs](https://platform.claude.com/docs/en/about-claude/api-credits-for-subscribers)). If the founder's plan is eligible, those credits fund our development and benchmark runs (P0-13). Anthropic's pages leave a grey area for its own tools (Claude Code, the Agent SDK, `claude -p`) under a plan login, and we don't build on it.
 - **New keys start on low rate limits.** A third-party report says tiers were consolidated into Start, Build and Scale in June 2026, with Start at about 50 requests per minute and promotion after roughly $40 of spend ([Knightli](https://knightli.com/en/2026/06/29/claude-api-rate-limits-rpm-itpm-otpm-429/); unverified, check the [rate-limits doc](https://platform.claude.com/docs/en/api/rate-limits)). Cache reads don't count toward input-token limits on most models, so prompt caching also helps here.
 - **Spend limits exist per workspace** in the Anthropic Console ([Anthropic](https://claude.com/blog/workspaces)), so a BYOK creator can cap their own exposure with a dedicated workspace and key.
 - **Prompt caches are isolated per workspace** ([prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)). In managed mode all tenants share one production workspace, so the static prompt prefix (system prompt and tool definitions) is cached across customers. Each BYOK key has its own cache.
@@ -308,11 +309,11 @@ Our own model of an Opus 5.5 editor run ([architecture §13](03-architecture.md#
 **Context.** The founder would rather reach models through a gateway (OpenRouter or Cloudflare) than call providers directly. What the research found ([research §4.6](02-research.md#46-model-gateways-cloudflare-ai-gateway-and-openrouter)):
 - **Cloudflare AI Gateway's Anthropic endpoint passes native requests through.** For Bedrock it passes requests, responses and server-sent events through without translation. Core features are free, and Unified Billing adds 5 % on credit purchases.
 - **OpenRouter offers a Messages-compatible endpoint but maps Anthropic's fields onto its own `reasoning` parameter.** Its Claude 5.5 migration guide says Opus 5.5 thinking budgets aren't forwarded and mismatched thinking blocks may be dropped, and its native integration is only guaranteed with the first-party Anthropic provider. Its credits cost 5.5 % on purchase.
-- **Funding survives a gateway only in BYOK mode.** Anthropic's plan credits and AWS Activate credits are applied by the provider that bills us, so the request must carry our own provider key. Gateway credits (Cloudflare Unified Billing, OpenRouter credits) don't carry them. The founder then chose to spend AWS credits on testing only, and to send that traffic direct to Bedrock ([D-20](#d-20-two-model-lanes-credits-fund-testing-customers-fund-production)), so the gateway carries customer traffic.
+- **Funding survives a gateway only in BYOK mode.** Anthropic's plan credits and AWS Activate credits are applied by the provider that bills us, so the request must carry our own provider key. Gateway credits (Cloudflare Unified Billing, OpenRouter credits) don't carry them. The founder chose to send testing direct to the Anthropic API and keep the gateway for customer traffic ([D-21](#d-21-testing-on-the-first-party-api-self-funded)).
 - **Workers AI hosts open models, not Claude.** Claude reaches Cloudflare through AI Gateway.
 
 **Decision.**
-1. **One Cloudflare AI Gateway per environment** is the front door for customer-facing model calls (the production lane of [D-20](#d-20-two-model-lanes-credits-fund-testing-customers-fund-production)), **in BYOK mode**: our Anthropic key for managed workspaces, or the workspace's own key for BYOK workspaces. Testing doesn't use it: development, CI and benchmark traffic goes direct to Claude in Amazon Bedrock. We don't use Unified Billing on the main paths, and each gateway is set to require provider credentials so a request can't fall back to Cloudflare-managed billing by accident.
+1. **One Cloudflare AI Gateway per environment** is the front door for customer-facing model calls, **in BYOK mode**: our Anthropic key for managed workspaces, or the workspace's own key for BYOK workspaces. Testing doesn't use it: development, CI and benchmark traffic calls the Anthropic API directly ([D-21](#d-21-testing-on-the-first-party-api-self-funded)). We don't use Unified Billing on the main paths, and each gateway is set to require provider credentials so a request can't fall back to Cloudflare-managed billing by accident.
 2. **The Go client keeps the native Anthropic API.** It uses the Anthropic SDK with the gateway's Anthropic endpoint as the base URL, so adaptive thinking, effort, strict tools, caching and preserved thinking pass through.
 3. **A conformance test gates it** (P4-00). The same requests go direct and through the gateway, and we compare:
    - behaviour and the `usage` fields (cache writes and reads);
@@ -327,13 +328,15 @@ Our own model of an Opus 5.5 editor run ([architecture §13](03-architecture.md#
 6. **Retries live in our client only,** so a failure is never retried twice.
 7. **OpenRouter is not in the Claude editor path.** It may sit behind the `llm` interface as an optional provider for non-Claude models (benchmark breadth, cheap tagging experiments, the video-model spike), preferably in BYOK mode.
 
-**Alternatives.** Direct provider calls (the fallback with the fewest hops, and the test lane's path in [D-20](#d-20-two-model-lanes-credits-fund-testing-customers-fund-production)). OpenRouter as the main gateway (normalisation risk for Opus 5.5, a new processor, and no free credits unless BYOK). Cloudflare Unified Billing (+5 % and no plan or Activate credits).
+**Alternatives.** Direct provider calls (the fallback with the fewest hops, and the path testing uses in [D-21](#d-21-testing-on-the-first-party-api-self-funded)). OpenRouter as the main gateway (normalisation risk for Opus 5.5, a new processor, and no free credits unless BYOK). Cloudflare Unified Billing (+5 % and no plan or Activate credits).
 
 **Consequences.** One more hop and one more dependency, mitigated by the bypass flag. In return we get free analytics, one place to attribute cost, and BYOK customer keys that pass through headers we never log.
 
 **Revisit** if the conformance test fails, if the extra latency proves to be a problem, or if OpenRouter's Anthropic compatibility passes our own conformance test.
 
 ## D-20 Two model lanes: credits fund testing, customers fund production
+
+**Status: superseded by [D-21](#d-21-testing-on-the-first-party-api-self-funded).** The founder dropped the AWS credits before applying. This entry stays as the record of what was considered.
 
 **Context.** After the AWS Activate discussion ([research §4.5](02-research.md#45-funding-claude-usage-anthropic-credits-aws-activate-and-google)) the founder decided three things:
 - The credits stay in the holding, which will also run other AI apps, and pay for **active testing**.
@@ -375,6 +378,27 @@ That is also the cleanest reading of the Activate terms, which say credits are f
 Research variants can't run on Bedrock (no web tools), so their ≈ $150 comes from plan credits or cash. Consent for eval footage must name AWS as a processor.
 
 **Revisit** when AWS answers whether a holding that runs several AI startups qualifies, when the credits run out or expire, when Bedrock gains structured outputs or the Batch API, or if a parity run shows the lanes disagree.
+
+## D-21 Testing on the first-party API, self-funded
+
+**Context.** [D-20](#d-20-two-model-lanes-credits-fund-testing-customers-fund-production) planned to spend the holding's AWS Activate credits on testing through Amazon Bedrock. The founder dropped that before applying:
+- The credits are small ($1,000, up to $5,000 for select startups), they expire, and they can't be used for customer traffic.
+- Claude in Amazon Bedrock lacks features the product relies on: structured outputs (so `strict` tool schemas), the Batch API, the Models API, and web search and fetch ([research §4.5](02-research.md#45-funding-claude-usage-anthropic-credits-aws-activate-and-google)). Results measured there would only be a proxy for production and would need a parity run.
+
+**Decision.**
+1. **Testing calls the Anthropic API directly.** Development, CI and benchmark traffic skips the gateway and uses a development key in a dedicated Console workspace with a monthly spend limit (P0-13). That is the same path as the gateway's bypass flag, so it needs no new code.
+2. **Customer traffic is unchanged** ([D-19](#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)): it goes through the Cloudflare AI Gateway in BYOK mode, on our production key (managed) or the creator's key (BYOK).
+3. **One API and the same models on both paths,** so benchmark results transfer to production without a parity run. The gateway hop is covered by the conformance test (P4-00), and staging runs through its own gateway.
+4. **Keys follow the environment.** Production holds the production key and customers' keys. `local`, `ci` and `bench` hold only the development key. Test calls write ledger rows with `billed_to = test`, so test spend never mixes into customer margin.
+5. **The founder funds testing,** with Anthropic plan credits first if the plan includes them (Max or Team, P0-13) and prepaid credits otherwise.
+
+**Alternatives.**
+- Apply for AWS Activate anyway ([D-20](#d-20-two-model-lanes-credits-fund-testing-customers-fund-production)). Rejected for the reasons above.
+- Other startup credits. Google's reportedly don't cover Claude on Vertex, and Anthropic's own startup perks are paused ([research §4.5](02-research.md#45-funding-claude-usage-anthropic-credits-aws-activate-and-google)).
+
+**Consequences.** One provider, no capability matrix, no AWS accounts and no parity run. The benchmark program is now a cash cost. At the [D-17](#d-17-model-routing-is-data-tuned-by-benchmark) estimates it comes to about $1,650 if every sweep is scaled down (four at ≈ $125, the cutover at ≈ $1,000, research and ideation at ≈ $150), and up to about $2,550 if every sweep is a full one (≈ $350 each). The levers are the ones in D-17: `dev-cheap` for everyday loops (≈ $0.02 per run), scaled-down sweeps first, the Batch API for judge calls (50 % off) and prompt caching.
+
+**Revisit** if testing spend becomes material and the company has a website that fits the Activate application (applying later is still possible: the Founders grant is one-time per company, and not applying doesn't use it up), if Bedrock gains the missing features, or if EU creators need EU-only processing. Bedrock's EU endpoints are the option for that, at list price ([D-15](#d-15-eu-data-residency)).
 
 ## Template for new decisions
 
