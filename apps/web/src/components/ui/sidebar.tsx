@@ -24,7 +24,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { MOD_KEY } from "@/hooks/use-hotkey"
+import { useModKey } from "@/hooks/use-hotkey"
 import { Glider, handOff } from "@/lib/glide"
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
@@ -272,6 +272,7 @@ function SidebarTrigger({
 }: React.ComponentProps<typeof Button>) {
   const { toggleSidebar, state, isMobile, openMobile } = useSidebar()
   const open = isMobile ? openMobile : state === "expanded"
+  const modKey = useModKey()
 
   return (
     <Tooltip>
@@ -297,7 +298,7 @@ function SidebarTrigger({
       </TooltipTrigger>
       <TooltipContent side="bottom" align="start" hidden={isMobile}>
         {open ? "Collapse sidebar" : "Expand sidebar"}
-        <Kbd>{MOD_KEY}</Kbd>
+        <Kbd>{modKey}</Kbd>
         <Kbd className="-ml-1">B</Kbd>
       </TooltipContent>
     </Tooltip>
