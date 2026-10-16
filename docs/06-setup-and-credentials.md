@@ -16,7 +16,7 @@
 
 | Step | What | Time | Needed by |
 |---|---|---|---|
-| 1 | Anthropic Console: a `dev` workspace with a $50 limit and one key ([§3.1](#31-anthropic)). If you're on Max or Team, link the Console organization to your plan first (P0-13) | 10 min | start |
+| 1 | Anthropic Console: a `dev` workspace with a $50 limit and one key, in the Console organization that is linked to your Max plan, so its $200 a month of API credit pays for it ([§3.1](#31-anthropic)) | 10 min | start |
 | 2 | Clerk: an application, Organizations on, the development instance's keys ([§3.2](#32-clerk)) | 10 min | start |
 | 3 | Fill in `.env` (three values) and install the tools ([§5](#5-tools-to-install)) | 20 min | start |
 | 4 | Domain: `contentfabrique.app` is bought. Put it on Cloudflare (if the registrar isn't Cloudflare, add the domain there and change the nameservers at the registrar to the two Cloudflare shows), then copy the Zone ID. Clerk production, TikTok review and all DNS hang off it ([§3.3](#33-cloudflare-needed-from-p0-09)) | 15 min | P0-09 |
@@ -40,6 +40,7 @@ Create four workspaces in the Console, one key each. Each has a monthly spend li
 | `production` | the production app, managed credits | $500 (the private beta is capped at about $375 a month) | `.env.production` |
 
 - Only `dev` is needed to start. Create the others when staging and CI exist.
+- **Plan credit.** Your Max plan gives $200 a month of API credit, which pays for any key in the Console organization linked to it, so create `dev` there. The credit doesn't roll over, and every workspace in that organization draws from one balance, so keep production in a separate organization ([D-21](05-decisions.md#d-21-testing-on-the-first-party-api-self-funded)).
 - Creators' own keys (BYOK) are never in `.env`. They sit encrypted in Postgres under `SECRETS_MASTER_KEY` ([architecture §11a](03-architecture.md#11a-model-access-managed-credits-or-byok)).
 - `ROUTING_PROFILE` starts at `dev-cheap` and `LLM_MODE` at `live` ([D-22](05-decisions.md#d-22-cheap-first-testing-ladder)).
 - **Model names.** The native Anthropic API, called directly or through the gateway's `/anthropic` endpoint, takes `claude-opus-5-5`. Cloudflare's REST endpoints use `provider/model` names, so the same model is `anthropic/claude-opus-5.5` there. That dotted spelling is the founder's: Cloudflare's docs show `anthropic/claude-sonnet-5` and `anthropic/claude-sonnet-4` but no 5.5 model ◐, so it is △ until `cfctl doctor` resolves it. The routing profiles use the native ID and `apps/server/config/routing/models.yaml` maps each one to its Cloudflare name ([architecture §7.5](03-architecture.md#75-model-routing-sub-agents-and-benchmarking)). The REST path also needs its own token, `CF_AI_API_TOKEN` ([§3.9](#39-scopes-and-permissions-per-token)), and credits loaded in Cloudflare. Claude stays on the native path by default ([D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)).
