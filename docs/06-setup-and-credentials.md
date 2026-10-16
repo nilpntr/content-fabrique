@@ -41,7 +41,7 @@ Create four workspaces in the Console, one key each. Each has a monthly spend li
 - Only `dev` is needed to start. Create the others when staging and CI exist.
 - Creators' own keys (BYOK) are never in `.env`. They sit encrypted in Postgres under `SECRETS_MASTER_KEY` ([architecture §11a](03-architecture.md#11a-model-access-managed-credits-or-byok)).
 - `ROUTING_PROFILE` starts at `dev-cheap` and `LLM_MODE` at `live` ([D-22](05-decisions.md#d-22-cheap-first-testing-ladder)).
-- `ANTHROPIC_BASE_URL` stays empty except in staging and production, where it is the gateway URL ([§3.3](#33-cloudflare-needed-from-p0-09)).
+- `ANTHROPIC_BASE_URL` stays empty until the gateways exist (P0-09). After that every environment sets its gateway's URL, `cf-dev` for local, CI and benchmarks ([§3.3](#33-cloudflare-needed-from-p0-09)). Empty again means a direct call, the bypass for debugging.
 
 ### 3.2 Clerk
 
@@ -62,7 +62,7 @@ The agent creates the resources below with `cfctl bootstrap cloudflare` (P0-15) 
 | R2 buckets, **EU jurisdiction** | `cf-media-staging`, `cf-media-production` | The jurisdiction is fixed at creation. An EU bucket is reachable only through `https://<ACCOUNT_ID>.eu.r2.cloudflarestorage.com`, so the S3 client must use it ◐. CORS: allow `PUT`, `GET` and `HEAD` from the app origins and expose `ETag`. Lifecycle: abort incomplete multipart uploads after 1 day. |
 | Worker: web app | `cf-web-{env}` | TanStack Start deploys as a Worker through `@cloudflare/vite-plugin` and a `wrangler.jsonc` with `main: @tanstack/react-start/server-entry` and `nodejs_compat` ◐. |
 | Worker: sandbox gateway | `cf-sandbox-gateway-{env}` | A Durable Object that starts a container. `wrangler dev` runs it in Docker ◐. |
-| AI Gateways | `cf-staging`, `cf-production` | Settings from [D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional): **Authenticated Gateway on**, **Require provider credentials on**, caching off, payload logging off, **no stored provider keys** (see the note below). Only the gateway id `default` is created automatically, so these are created explicitly ◐. |
+| AI Gateways | `cf-dev`, `cf-staging`, `cf-production` | Settings from [D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional): **Authenticated Gateway on**, **Require provider credentials on**, caching off, payload logging off, **no stored provider keys** (see the note below). Only the gateway id `default` is created automatically, so these are created explicitly ◐. |
 | Tunnels | `cf-api-staging`, `cf-api-production` | The Go API on the EU servers is reachable only through its tunnel. The token goes to the server as `CLOUDFLARE_TUNNEL_TOKEN`. |
 | DNS records | `app`, `api`, `staging-app`, `staging-api` | Proxied, on your domain. |
 
@@ -74,7 +74,7 @@ Tokens. The first is yours to create, and the agent can mint the other two from 
 |---|---|---|---|
 | **Bootstrap and deploy** | `CLOUDFLARE_API_TOKEN` | Account: Workers Scripts Edit, Workers KV Storage Edit, Workers R2 Storage Edit, AI Gateway Read and Edit, Cloudflare Tunnel Edit, Account Settings Read. Zone (your domain only): DNS Edit, Zone Read, Workers Routes Edit. Optional: API Tokens Edit, so the agent can mint the two below. Set an expiry. △ The token builder may word the names slightly differently, so pick the Edit permission of the same product. The two AI Gateway names are ◐. | `.env` and `.env.staging` on your machine, and the CI deploy secret. Never on a server |
 | **R2 S3 credentials**, one per bucket | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | R2 → Manage API tokens → Create Account API token → **Object Read & Write**, scoped to that bucket ◐. The secret is shown once. The agent can mint them instead: the access key id is the token's `id` and the secret is the SHA-256 of the token's `value` ◐. | the server's env file |
-| **AI Gateway token**, one per gateway | `CF_AIG_TOKEN` | Gateway → Settings → **Create authentication token** (Run permission), then switch Authenticated Gateway on ◐. It is sent as the `cf-aig-authorization` header ◐. | staging and production only |
+| **AI Gateway token**, one per gateway | `CF_AIG_TOKEN` | Gateway → Settings → **Create authentication token** (Run permission), then switch Authenticated Gateway on ◐. It is sent as the `cf-aig-authorization` header ◐. | every environment that uses a gateway |
 
 > **Security note.** AI Gateway tokens are account-scoped: any token with the Run permission can send requests through every gateway in the account, including ones with stored provider keys ◐. So provider keys are never stored in the gateway. Our own secret store holds them and each request carries the key ([D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)). Treat `CF_AIG_TOKEN` as sensitive in every environment. If that ever matters, move production to its own Cloudflare account.
 
@@ -120,7 +120,7 @@ Tokens. The first is yours to create, and the agent can mint the other two from 
 | Variables | local | ci | bench | staging | production |
 |---|---|---|---|---|---|
 | Anthropic key | `dev` | `ci` | `dev` | `staging` | `production` |
-| `ANTHROPIC_BASE_URL`, `CF_AIG_*` | empty | empty | empty | staging gateway | production gateway |
+| `ANTHROPIC_BASE_URL`, `CF_AIG_*` | `cf-dev` (empty until P0-09) | `cf-dev` (empty until P0-09) | `cf-dev` (empty until P0-09) | `cf-staging` | `cf-production` |
 | Postgres | Docker | service container | Docker | PlanetScale | PlanetScale |
 | Object storage | MinIO | MinIO | MinIO | `cf-media-staging` | `cf-media-production` |
 | Clerk | development | development | none | development | production |
@@ -156,13 +156,13 @@ It prints nothing when the three start values are present.
 | Object storage | put, get and delete a one-byte object with the credentials against `R2_ENDPOINT`, which proves the EU endpoint and signing |
 | Cloudflare token | the token-verify call, then list the EU R2 buckets and the AI Gateways △ |
 | Anthropic | a token-count request on the configured model, with no generation cost |
-| AI Gateway (staging, production) | the same request through `ANTHROPIC_BASE_URL` with `cf-aig-authorization` |
+| AI Gateway (when `ANTHROPIC_BASE_URL` is set) | the same request through it with `cf-aig-authorization` |
 | Clerk | one Backend API call with `CLERK_SECRET_KEY`, listing a single user |
 | Sandbox gateway | `GET /healthz` on the Worker, with the token |
 | Observability | send one test event and expect a 2xx |
 | TikTok, billing | format checks only until their phase |
 
-**`cfctl bootstrap cloudflare --env <staging|production>`** (P0-15) is idempotent. It creates the EU R2 bucket with CORS and the lifecycle rule, the AI Gateway with the D-19 settings, the tunnel and the DNS records. It then prints which values to add to `.env.<env>`. It never prints the token, and running it twice changes nothing.
+**`cfctl bootstrap cloudflare --env <dev|staging|production>`** (P0-15) is idempotent. For `staging` and `production` it creates the EU R2 bucket with CORS and the lifecycle rule, the AI Gateway with the D-19 settings, the tunnel and the DNS records. For `dev` it creates only the `cf-dev` gateway. It then prints which values to add to `.env.<env>`. It never prints the token, and running it twice changes nothing.
 
 ## 7. Prompt for the implementing agent
 

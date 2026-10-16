@@ -12,7 +12,7 @@
   - Postgres from day one, not D1, because a Go service outside Workers can only reach D1 through Cloudflare's rate-limited REST API.
   - R2 in the EU jurisdiction.
   - Clerk for auth; billing through a merchant of record (handles EU VAT), not Clerk Billing.
-  - Customer-facing model calls go through Cloudflare AI Gateway in BYOK mode (our Anthropic key, or the creator's). Testing calls the Anthropic API directly with a development key, funded by you (no AWS credits). OpenRouter is only an optional provider for non-Claude models.
+  - Every model call goes through Cloudflare AI Gateway in BYOK mode: our Anthropic key or the creator's for customers, and a development key, funded by you (no AWS credits), for testing. Other providers' models use the same gateway for benchmarks. A direct call is only a bypass for debugging.
   - Claude Opus 5.5 edits, via a Go-native agent loop. Cheaper models (Haiku 5.5) run as sub-agents directed by an Opus 5.5 lead for research and other bulk reading. Everything else is tuned by a benchmark harness.
   - A pluggable sandbox layer: gVisor-hardened containers for our media jobs, Cloudflare Sandbox for free-form agent code.
   - Cloudflare K2 is deliberately **not** needed in v1.
