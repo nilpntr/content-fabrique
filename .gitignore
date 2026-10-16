@@ -1,0 +1,25 @@
+.DS_Store
+.env
+.env.local
+
+apps/web/node_modules
+apps/web/.output
+apps/web/.nitro
+apps/web/.tanstack
+apps/web/dist
+apps/web/.env
+apps/web/.env.local
+
+server/bin
+server/tmp
+server/data/
+server/coverage.out
+*.exe
+
+/node_modules
+packages/*/node_modules
+
+# Go test binaries (go test -c)
+*.test
+
+.claude/worktrees/
