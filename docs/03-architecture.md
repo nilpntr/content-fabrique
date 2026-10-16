@@ -126,7 +126,7 @@ docs/
 
 ## 4. Data model
 
-Postgres, every tenant-owned row carries `workspace_id`. IDs are UUIDv7, which is time-sortable. Simplified:
+Postgres, every tenant-owned row carries `workspace_id`. IDs are UUIDv7, which is time-sortable; the API and the timeline spec show them as TypeIDs such as `ast_01j…` ([D-24](05-decisions.md#d-24-public-ids-are-typeids-over-uuidv7)). Simplified:
 
 ```mermaid
 erDiagram
@@ -241,6 +241,8 @@ All CPU/ML steps run in the `media-tools` image inside the sandbox layer (§8), 
 
 ### Spec (v1, abridged)
 
+The full rules for v1, the edit ops and the compiler are in the [timeline design note](design/timeline-v1.md).
+
 ```json
 {
   "schema": "contentfabrique.timeline/v1",
@@ -250,7 +252,7 @@ All CPU/ML steps run in the `media-tools` image inside the sandbox layer (§8), 
       "id": "main", "type": "video",
       "items": [
         {
-          "id": "c1", "asset_id": "ast_01J…", "moment_id": "mom_01J…",
+          "id": "c1", "asset_id": "ast_01j…", "moment_id": "mom_01j…",
           "source": { "in_ms": 3200, "out_ms": 5400 },
           "at_ms": 0, "speed": 1.0,
           "reframe": { "mode": "cover", "focus": { "x": 0.52, "y": 0.40 }, "zoom": 1.08 },
@@ -272,13 +274,13 @@ All CPU/ML steps run in the `media-tools` image inside the sandbox layer (§8), 
     {
       "id": "sound", "type": "audio",
       "items": [
-        { "id": "s1", "kind": "trend_sound", "trend_id": "trd_01J…", "at_ms": 0,
+        { "id": "s1", "kind": "trend_sound", "trend_id": "trd_01j…", "at_ms": 0,
           "source_offset_ms": 12000, "export": "cue_only", "gain_db": -3 }
       ]
     }
   ],
   "markers": [ { "at_ms": 2200, "kind": "beat", "strength": 1.0 } ],
-  "meta": { "idea_id": "ide_01J…", "concept_id": "con_01J…" }
+  "meta": { "idea_id": "ide_01j…", "concept_id": "con_01j…" }
 }
 ```
 
