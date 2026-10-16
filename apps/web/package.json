@@ -1,5 +1,5 @@
 {
-  "name": "skeleton-dashboard-ui",
+  "name": "@cf/web",
   "private": true,
   "version": "0.1.0",
   "type": "module",

@@ -1,7 +1,62 @@
-# https://taskfile.dev. P0-02 extends this file with `task dev` and friends; P0-14 added the env tasks.
+# https://taskfile.dev. `task` with no arguments lists everything. P0-14 added the env tasks, P0-02 the monorepo ones.
 version: '3'
 
 tasks:
+  default:
+    cmds:
+      - task --list
+    silent: true
+
+  # ── Local development ───────────────────────────────────────────────────────
+
+  dev:
+    desc: "Start everything locally: Postgres + MinIO (Docker), then web (:3000), api (:8080) and worker (:8081). Ctrl-C stops the three processes"
+    cmds:
+      - task: env:init
+      - task: up
+      # Loads .env, builds the api and worker, runs the three processes and stops them together (see the script).
+      - ./scripts/dev.sh
+
+  up:
+    desc: Start Postgres and MinIO with Docker Compose, wait until they are healthy, and create the bucket
+    cmds:
+      - docker compose up -d --wait postgres minio
+      # A one-shot service, so it is run on its own: `up --wait` treats an exited container as a failure.
+      - docker compose run --rm minio-init
+
+  down:
+    desc: Stop Postgres and MinIO (the data stays in the Docker volumes)
+    cmds:
+      - docker compose down
+
+  reset:
+    desc: Stop Postgres and MinIO and DELETE their data (the Docker volumes)
+    prompt: This deletes the local database and bucket. Continue?
+    cmds:
+      - docker compose down --volumes
+
+  # ── Build and test ──────────────────────────────────────────────────────────
+
+  install:
+    desc: Install the JS dependencies of the whole workspace (one bun.lock at the root)
+    cmds:
+      - bun install --frozen-lockfile
+
+  build:
+    desc: Build the web app and every Go package
+    cmds:
+      - bun run --filter @cf/web build
+      - cd apps/server && go build ./...
+
+  test:
+    desc: Run the web tests and the Go tests
+    cmds:
+      - bun run --filter @cf/web typecheck
+      - bun run --filter @cf/web test
+      - cd apps/server && go test ./...
+
+  # ── Environment ─────────────────────────────────────────────────────────────
+
   env:init:
     desc: Create .env from .env.example if missing and generate the empty [AUTO] secrets (never prints values)
     dir: apps/server

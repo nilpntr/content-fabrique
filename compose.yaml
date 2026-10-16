@@ -1,0 +1,77 @@
+# Local services for development: `task up` (or `task dev`, which also starts web, api and worker).
+# Compose reads the .env at the repository root. The names are the ones in .env.example, so there is one place to change a value.
+# Run `task env:init` first if .env does not exist yet.
+name: content-fabrique
+
+services:
+  # System of record and, from P0-06, the River job queue. The same image the CI doctor job uses (.github/workflows/env.yml).
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is not set, run task env:init}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set, run task env:init}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is not set, run task env:init}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+
+  # Stands in for R2. MinIO no longer publishes public images, so this is Chainguard's build, pinned by the same digest as
+  # .github/workflows/env.yml (what `latest` pointed to on 2026-10-16). Change both together. The root user and password
+  # are R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY, which is also what the Go code signs requests with.
+  minio:
+    image: cgr.dev/chainguard/minio@sha256:2136d593beacf4461187035eca949fe49abd589d5079735025c711ca58fee0c8
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${R2_ACCESS_KEY_ID:?R2_ACCESS_KEY_ID is not set, run task env:init}
+      MINIO_ROOT_PASSWORD: ${R2_SECRET_ACCESS_KEY:?R2_SECRET_ACCESS_KEY is not set, run task env:init}
+    ports:
+      - "127.0.0.1:9000:9000" # S3 API: R2_ENDPOINT
+      - "127.0.0.1:9001:9001" # web console, log in with the same R2_* credentials
+    volumes:
+      - minio-data:/data
+    # The image has no curl or wget, so the probe is a bash /dev/tcp request to MinIO's readiness endpoint.
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - 'exec 3<>/dev/tcp/127.0.0.1/9000 && printf "GET /minio/health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3 && read -r status <&3 && [[ $$status == *" 200 "* ]]'
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 2s
+
+  # One-shot: creates the bucket named by R2_BUCKET and exits. Safe to run again, an existing bucket is left alone.
+  minio-init:
+    image: amazon/aws-cli:2.34.0@sha256:97cc5f847898f54432492c128408c62e0df2153d9ad36573be8e5a03826123b0
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      AWS_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:?R2_ACCESS_KEY_ID is not set, run task env:init}
+      AWS_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:?R2_SECRET_ACCESS_KEY is not set, run task env:init}
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ENDPOINT_URL: http://minio:9000
+      BUCKET: ${R2_BUCKET:?R2_BUCKET is not set, run task env:init}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        if aws s3api head-bucket --bucket "$$BUCKET" 2>/dev/null; then
+          echo "bucket $$BUCKET already exists"
+        else
+          aws s3api create-bucket --bucket "$$BUCKET"
+          echo "bucket $$BUCKET created"
+        fi
+
+volumes:
+  postgres-data:
+  minio-data:

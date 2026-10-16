@@ -10,7 +10,8 @@ export default mergeConfig(
   { plugins: [cloudflare({ viteEnvironment: { name: "ssr" } }), tanstackStart()] },
   mergeConfig(baseConfig, {
     plugins: [tailwindcss()],
-    server: { port: 5173 },
+    // Matches APP_BASE_URL in .env.example. strictPort fails loudly instead of moving to another port.
+    server: { port: 3000, strictPort: true },
     build: { sourcemap: true },
     environments: {
       client: {
