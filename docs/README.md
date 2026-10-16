@@ -24,7 +24,7 @@
 - **Decisions waiting on you:**
   - the billing mode for the private beta (I recommend managed credits with a hard cap per creator, BYOK opt-in);
   - plan prices and the margin target;
-  - the benchmark budget (≈ $350 per development sweep, ≈ $1,000 for the cutover);
+  - the benchmark budget (≈ $350 per development sweep, ≈ $1,000 for the cutover), and which Console organization receives your plan's monthly API credits if you're on Max or Team;
   - the legal questions in P0-12, including Anthropic's terms for customer keys;
   - your budget, target regions and beta creators ([implementation plan, open questions](04-implementation-plan.md#open-questions-for-the-founder)).
 - **First action:** `apps/web` was committed as a broken git link, so the UI isn't in the repo yet. See [implementation plan §0](04-implementation-plan.md#0-current-state-2026-10-16).
