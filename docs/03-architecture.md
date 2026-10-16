@@ -391,6 +391,8 @@ tagging:  { model: claude-haiku-5-5, batch: true }    # Batch API for backfills:
 judge:    { model: claude-opus-5-5, effort: high, batch: true }
 ```
 
+Development uses a second profile, `dev-cheap`, with Haiku 5.5 for every stage (about $0.02 per editor run), so loops, tools and validators can be built for pennies. Switch to `v1-start` only when judging quality.
+
 **Where sub-agents are used.** They are for *bulk* work that fits a "look into N things, then summarise" shape. The editor is one dependent chain in one context window, so it stays a single Opus 5.5 loop ([D-07](05-decisions.md#d-07-agent-runtime-go-native-loop-on-the-claude-messages-api)).
 
 ```mermaid

@@ -56,6 +56,7 @@ The bars count working days and are indicative for **one to two engineers workin
 | P0-10 | Backend hosting baseline per [D-09](05-decisions.md#d-09-hosting): EU server(s), `api` and `worker` images, Docker Compose deploy pipeline, secrets, **Cloudflare Tunnel** (no public inbound ports) | `api.staging…/healthz` is reachable only through Cloudflare |
 | P0-11 | Observability backend + error tracking; log correlation by `trace_id`, `workspace_id`, `run_id` | One request traceable end to end |
 | P0-12 | **Legal kickoff** (in parallel with engineering): music and beat-grid approach, TikTok developer terms for draft uploads, trend-data sources, GDPR/DSA hosting duties, ToS and privacy policy drafts ([research §6](02-research.md#6-limits-of-this-research-and-open-questions)) | Written answers before P5/P6 start |
+| P0-13 | **Dev and CI credentials:** a dedicated Anthropic Console workspace for development with a monthly spend limit (suggest $50), keys only in `.env` (gitignored) or via `ant auth login`, and a separate capped key for CI; a `dev-cheap` routing profile (Haiku 5.5 for every stage) so loops cost pennies; subscription logins are not used for our runtime or benchmarks ([D-18](05-decisions.md#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key)) | A fresh checkout runs the agent loop against the dev key; a full editor run on `dev-cheap` costs about $0.02–0.05; no key appears in git history or CI logs |
 
 ## P1 — Upload, library, player and annotations (≈ 2.5–3 weeks)
 
@@ -169,6 +170,7 @@ The bars count working days and are indicative for **one to two engineers workin
   - Render golden tests; web component tests.
   - Playwright end-to-end for upload → edit → export on staging.
   - Agent evals (P2-08, P4-07) on every prompt or model change.
+- **Development credentials.** Our runtime and benchmarks always use API keys: a capped Console workspace for development and a separate capped key for CI. A Claude subscription covers building the app with Claude Code, and prototyping the editor's tools and prompts inside Claude Code through an MCP server. It doesn't cover our own Go agent loop ([D-18](05-decisions.md#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key)).
 - **Feature flags** for risky features (sandbox escape hatch, TikTok drafts, new models).
 - **Cost visibility** from day one: every model call and render writes to `usage_ledger`; daily cost report per workspace.
 - **Docs.** Keep `docs/` current: update [decisions](05-decisions.md) when a choice changes, and add runbooks as services ship.
