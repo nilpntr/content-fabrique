@@ -1,6 +1,14 @@
 # Content Fabrique
 AI tooling for creators. 
 
+## Plan & research
+The full project plan lives in [`docs/`](docs/README.md):
+- [Product plan](docs/01-product-plan.md): vision, users, journeys, MVP scope, pricing, metrics
+- [Research](docs/02-research.md): TikTok data and music licensing, video AI, editing stack, sandboxes, platform (with sources)
+- [Architecture](docs/03-architecture.md): system design, data model, timeline spec, agents, sandbox, API
+- [Implementation plan](docs/04-implementation-plan.md): phased, PR-sized tasks with acceptance criteria
+- [Decision log](docs/05-decisions.md): key technical decisions and why
+
 ## FYI
 I already implemented a base ui design which you can fill to become an actual useable dashboard(the apps/web folder)
 
