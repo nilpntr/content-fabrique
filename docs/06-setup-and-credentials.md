@@ -169,20 +169,20 @@ Grant exactly this and nothing more. The same instruction sits above each token 
 
 ## 5. Tools to install
 
-Go 1.24 or newer (the Anthropic Go SDK needs it ◐), Node 22 LTS with pnpm, Docker with compose, `wrangler` 4.141 or newer (the Sandbox base image needs it locally ◐), `cloudflared`, `sqlc`, `goose` or Atlas, `oapi-codegen`, `task` and `openssl`. ffmpeg 8 lives in the `media-tools` image. gVisor (`runsc`) is needed only on the Linux servers ([D-08](05-decisions.md#d-08-sandbox-pluggable-interface-default-provider)).
+Go 1.24 or newer (the Anthropic Go SDK needs it ◐), Node 22 LTS with pnpm, Docker with compose, `wrangler` 4.141 or newer (the Sandbox base image needs it locally ◐), `cloudflared`, `sqlc`, `goose` or Atlas, `oapi-codegen`, `task` and `openssl`. ffmpeg 8 lives in the `media-tools` image. gVisor (`runsc`) is needed only on the Linux servers ([D-08](05-decisions.md#d-08-sandbox-pluggable-interface-default-provider)). To see what is missing, run `for t in go node pnpm docker task sqlc goose oapi-codegen openssl gh git; do command -v $t >/dev/null || echo "missing: $t"; done` (ignore `goose` if you chose Atlas).
 
 ## 6. Checking it
 
 **Quick check**, before `cfctl` exists. Fill in `.env`, then run:
 
 ```bash
-set -a; . ./.env; set +a
-for v in $(grep -E '^[A-Z][A-Z0-9_]*=.*\[YOU-now\]' .env.example | cut -d= -f1); do
+bash -c 'set -a; . ./.env; set +a
+for v in $(grep -E "^[A-Z][A-Z0-9_]*=.*\[YOU-now\]" .env.example | cut -d= -f1); do
   [ -n "${!v}" ] || echo "missing: $v"
-done
+done'
 ```
 
-It prints nothing when the three start values are present.
+It prints nothing when the three start values are present. It starts bash itself, because zsh (the macOS default) can't run the `${!v}` part.
 
 **`cfctl doctor --env <local|ci|bench|staging|production> [--phase P4]`** (P0-14):
 
