@@ -24,7 +24,7 @@
   - **Who pays for tokens:** two plan families per workspace. *Managed* credits (we call Claude, priced for ≥ 60 % margin) or *BYOK* (the creator's Anthropic API key, lower platform fee). Claude Pro/Max logins can't be used in third-party products.
 - **Decisions waiting on you:**
   - the billing mode for the private beta (I recommend managed credits with a hard cap per creator, BYOK opt-in);
-  - whether to run beta editor traffic on Bedrock if AWS Activate approves you, and a website or profile for the application;
+  - which legal entity (your holding or a new company) operates Content Fabrique and applies to AWS Activate, whether to run beta editor traffic on Bedrock if it approves you, and a website or profile for the application;
   - plan prices and the margin target;
   - the benchmark budget (≈ $350 per development sweep, ≈ $1,000 for the cutover), and which Console organization receives your plan's monthly API credits if you're on Max or Team;
   - the legal questions in P0-12, including Anthropic's terms for customer keys;
@@ -39,7 +39,7 @@
 | 02 | [Research report](02-research.md) | TikTok APIs and trend data, music licensing, video understanding, editing and rendering stack, competitors, agent runtime and sandboxes, Cloudflare/Clerk/Go platform, costs. Sourced and confidence-marked |
 | 03 | [Architecture](03-architecture.md) | Components, data model, media pipeline, timeline spec and renderer, agents and evals, model routing and sub-agents, benchmark harness, sandbox interface, API, realtime, auth/billing, managed vs BYOK model access, deployment, cost model, security |
 | 04 | [Implementation plan](04-implementation-plan.md) | Phases P0–P7 with PR-sized tasks and acceptance criteria, cross-cutting practices, definition of done, open questions |
-| 05 | [Decision log](05-decisions.md) | Lightweight ADRs (D-01 … D-18) with context, alternatives and when to revisit |
+| 05 | [Decision log](05-decisions.md) | Lightweight ADRs (D-01 … D-19) with context, alternatives and when to revisit |
 
 Suggested reading order: TL;DR → 01 → 03 → 04, with 02 and 05 as reference.
 
