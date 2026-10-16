@@ -148,7 +148,7 @@ The bars count working days and are indicative for **one to two engineers workin
 |---|---|---|
 | P6-01 | Export package: final MP4 + caption text + hashtags + **sound cue** (sound name/link, start offset), download page | One-click download; the cue matches the timeline |
 | P6-02 | Licensed-music option (if chosen in [D-03](05-decisions.md#d-03-music-cue-only-by-default)): catalogue search, licence record per export | Licence id stored with every export that bakes in music |
-| P6-03 | TikTok developer app, Login Kit OAuth, encrypted token storage, refresh | A creator can connect and disconnect TikTok |
+| P6-03 | TikTok developer app (the founder creates it as an organization-owned app and submits it for review by the start of P4, [setup guide §3.8](06-setup-and-credentials.md#38-later-phases)), Login Kit OAuth, encrypted token storage, refresh | A creator can connect and disconnect TikTok |
 | P6-04 | Content Posting API: **upload as draft to the creator's inbox**; status polling; error handling; start the app review/audit early | The draft appears in the creator's TikTok inbox |
 
 ## P7 — SaaS hardening and private beta (≈ 2.5–3 weeks)
