@@ -16,7 +16,7 @@
 
 | Step | What | Time | Needed by |
 |---|---|---|---|
-| 1 | Anthropic Console: a `dev` workspace with a $50 limit and one key ([§3.1](#31-anthropic)). If you're on Max or Team, link the Console organization to your plan first (P0-13) | 10 min | start |
+| 1 | Anthropic Console: a `dev` workspace with a $50 limit and one key, in the Console organization that is linked to your Max plan, so its $200 a month of API credit pays for it ([§3.1](#31-anthropic)) | 10 min | start |
 | 2 | Clerk: an application, Organizations on, the development instance's keys ([§3.2](#32-clerk)) | 10 min | start |
 | 3 | Fill in `.env` (three values) and install the tools ([§5](#5-tools-to-install)) | 20 min | start |
 | 4 | Domain: `contentfabrique.app` is bought. Put it on Cloudflare (if the registrar isn't Cloudflare, add the domain there and change the nameservers at the registrar to the two Cloudflare shows), then copy the Zone ID. Clerk production, TikTok review and all DNS hang off it ([§3.3](#33-cloudflare-needed-from-p0-09)) | 15 min | P0-09 |
@@ -24,7 +24,7 @@
 | 6 | Staging database and server ([§3.4](#34-postgres), [§3.5](#35-servers-ci-and-github)) | 1 h | P0-05, P0-10 |
 | 7 | GitHub: Actions environments and secrets, Renovate ([§3.5](#35-servers-ci-and-github)) | 10 min | P0-03 |
 | 8 | Observability: Axiom and Sentry ([§3.6](#36-observability)) | 15 min | P0-11 |
-| 9 | Later: TikTok developer app (start early), merchant of record, optional providers ([§3.8](#38-later-phases)) | — | P5 to P7 |
+| 9 | Later: TikTok developer app, merchant of record, optional providers ([§3.8](#38-later-phases)) | — | the TikTok app by the start of P4, the rest P5 to P7 |
 
 ## 3. Services
 
@@ -40,6 +40,7 @@ Create four workspaces in the Console, one key each. Each has a monthly spend li
 | `production` | the production app, managed credits | $500 (the private beta is capped at about $375 a month) | `.env.production` |
 
 - Only `dev` is needed to start. Create the others when staging and CI exist.
+- **Plan credit.** Your Max plan gives $200 a month of API credit, which pays for any key in the Console organization linked to it, so create `dev` there. The credit doesn't roll over, and every workspace in that organization draws from one balance, so keep production in a separate organization ([D-21](05-decisions.md#d-21-testing-on-the-first-party-api-self-funded)).
 - Creators' own keys (BYOK) are never in `.env`. They sit encrypted in Postgres under `SECRETS_MASTER_KEY` ([architecture §11a](03-architecture.md#11a-model-access-managed-credits-or-byok)).
 - `ROUTING_PROFILE` starts at `dev-cheap` and `LLM_MODE` at `live` ([D-22](05-decisions.md#d-22-cheap-first-testing-ladder)).
 - **Model names.** The native Anthropic API, called directly or through the gateway's `/anthropic` endpoint, takes `claude-opus-5-5`. Cloudflare's REST endpoints use `provider/model` names, so the same model is `anthropic/claude-opus-5.5` there. That dotted spelling is the founder's: Cloudflare's docs show `anthropic/claude-sonnet-5` and `anthropic/claude-sonnet-4` but no 5.5 model ◐, so it is △ until `cfctl doctor` resolves it. The routing profiles use the native ID and `apps/server/config/routing/models.yaml` maps each one to its Cloudflare name ([architecture §7.5](03-architecture.md#75-model-routing-sub-agents-and-benchmarking)). The REST path also needs its own token, `CF_AI_API_TOKEN` ([§3.9](#39-scopes-and-permissions-per-token)), and credits loaded in Cloudflare. Claude stays on the native path by default ([D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)).
@@ -114,7 +115,7 @@ Tokens. Apart from the tunnel token, which `cfctl bootstrap` makes, you create e
 
 ### 3.8 Later phases
 
-- **TikTok (P6).** Register an app at TikTok for Developers with **Login Kit** and the **Content Posting API**. Request `user.info.basic` and `video.upload`, add a redirect URI per environment, and add sandbox test users. △ `video.publish` (direct posting) needs TikTok's audit and unaudited apps can only post privately, so v1 uses inbox drafts ([D-03](05-decisions.md#d-03-music-cue-only-by-default)). Start early: review takes time, and registration asks for a website, privacy policy and terms URLs (△ check when you register), so the company site has to exist first. Those URLs are pages on `contentfabrique.app`, and the redirect URIs are `https://contentfabrique.app/integrations/tiktok/callback` for production and `https://staging.contentfabrique.app/integrations/tiktok/callback` for staging. Variables: `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET` and `TIKTOK_REDIRECT_URI`.
+- **TikTok (P6).** Register an app at TikTok for Developers with **Login Kit** and the **Content Posting API**. Choose **Organization** as the app owner and create one named Content Fabrique: TikTok's docs recommend an organization for real integrations and advise against an individual account, and an organization's name can't be changed later ◐ ([creating an app](https://developers.tiktok.com/docs/en/getting-started-create-an-app), [organizations](https://developers.tiktok.com/docs/en/working-with-organizations)). An app registered as Individual can be transferred to an organization, but the transfer can't be undone ◐. In the Create app dialog, pick app type **Other**, which lists Login with TikTok, Share Kit and the Content Posting API (Mini game is pre-selected, and the type can't be changed later), and name the app Content Fabrique, because TikTok shows the name to users. This app logs creators in and sends finished edits to their TikTok inbox. The Research agent doesn't use it: it reads the web, and TikTok's own Research API is non-commercial only ([D-11](05-decisions.md#d-11-trend-data-sources)). Request `user.info.basic` and `video.upload`, add a redirect URI per environment, and add sandbox test users. △ `video.publish` (direct posting) needs TikTok's audit and unaudited apps can only post privately, so v1 uses inbox drafts ([D-03](05-decisions.md#d-03-music-cue-only-by-default)). The founder is creating the app later, so the deadline is the start of P4: review takes time (third-party guides say 2 to 6 weeks △), and registration asks for a website, privacy policy and terms URLs (△ check when you register), so the company site has to exist first. Those URLs are pages on `contentfabrique.app`, and the redirect URIs are `https://contentfabrique.app/integrations/tiktok/callback` for production and `https://staging.contentfabrique.app/integrations/tiktok/callback` for staging. Variables: `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET` and `TIKTOK_REDIRECT_URI`.
 - **Billing (P7).** The merchant of record is still open in [D-13](05-decisions.md#d-13-billing): Paddle or Stripe's merchant-of-record product. Create a sandbox account for the one you pick and leave the other's variables empty.
 - **Trend data (P5, optional).** Chartmetric, about $350 a month, only once the beta shows creators use the feature ([D-11](05-decisions.md#d-11-trend-data-sources)). Variable: `CHARTMETRIC_REFRESH_TOKEN`.
 - **Video-model spike (P2, optional).** `GEMINI_API_KEY` and `TWELVELABS_API_KEY`, only if you run the spike ([D-10](05-decisions.md#d-10-video-understanding)).
@@ -204,13 +205,30 @@ It prints nothing when the three start values are present.
 
 ## 7. Prompt for the implementing agent
 
+Start the session on Opus 5.5 as the director and paste this. The coding subagents run on your Claude plan, not on `ANTHROPIC_API_KEY`: the plan's API credit doesn't cover Claude Code ◐ ([research §4.5](02-research.md#45-funding-claude-usage-anthropic-credits-aws-activate-and-google)), so higher effort levels spend your plan's usage limit. Once the repo has a `CLAUDE.md`, move the rules there so every session and subagent loads them.
+
 ```text
-You're implementing Content Fabrique. Read docs/README.md, then docs/04-implementation-plan.md and docs/06-setup-and-credentials.md. Decisions are in docs/05-decisions.md.
-- Work on a branch per phase, one PR-sized task at a time, and meet each task's acceptance criteria.
-- `.env` is filled in. Build `task env:init` and `cfctl doctor` first (P0-14) and keep running doctor.
+You're the engineering director for Content Fabrique. You plan, brief, review and integrate. Subagents write the code.
+
+Read docs/README.md, docs/04-implementation-plan.md, docs/06-setup-and-credentials.md and docs/05-decisions.md first, then run the quick check in guide section 6 and tell me if a start value is missing. The decisions are settled: if the code would contradict one, stop and ask me, then update the decision log.
+
+How to run it
+- Follow the plan's order, one phase at a time (P3 can run beside P1 and P2). Start with P0-01, then P0-04 and P0-14, so `cfctl doctor` exists early. For P0-01, move apps/web/.git aside instead of deleting it.
+- One task, one subagent, one branch from the latest main, one PR. If a task needs an unmerged one, stack on its branch and say so in the PR. When a phase starts, create a GitHub issue per task (ID in the title, acceptance criteria in the body, label `founder` where I must act). Each PR closes its issue.
+- Brief each subagent with the task ID, its acceptance criteria word for word, the files and packages it may touch, the docs and decisions that apply, what is out of scope, and the commands that prove it works. Ask for a report under 200 words: what changed, what it ran and the results, deviations, questions. Keep your own context clean: subagents read the code and the logs.
+- Subagents run on Sonnet 5.5 at high effort, each in its own git worktree. Rerun a task that fails review twice at max effort. Run tasks in parallel only when they touch different packages, never two on go.mod, lockfiles, generated code or the OpenAPI spec, and at most three at a time.
+- Don't trust a report. Check the diff against the acceptance criteria, run the checks yourself, and run /code-review before each PR. For auth and tenancy, key custody (P4-00), the sandbox and billing, also run /security-review and have an Opus 5.5 reviewer read the diff cold.
+- For the hard parts (the timeline schema and renderer, the agent runtime, key custody, the eval and benchmark design), write a short design note first and brief the subagent from it.
+- End every session at a task boundary: PR open, issue updated, no half-finished branch. If I hit a usage limit, a fresh session resumes from the issues and PRs.
+
+Rules
 - Never print, log or commit a secret, and never put one in a VITE_ variable.
-- Follow the cheap-first ladder (D-22): ROUTING_PROFILE=dev-cheap and LLM_MODE=replay wherever possible. Don't start a paid sweep without asking me.
-- If a value is missing or a service is unreachable, say which one and keep going with work that doesn't depend on it. Don't mock a service to get past it.
+- Follow the cheap-first ladder (D-22): ROUTING_PROFILE=dev-cheap and LLM_MODE=replay wherever possible. Never start a paid sweep or raise a workspace limit without asking me.
+- A task is done only when its acceptance criteria pass and CI is green. Don't weaken a criterion. If one can't be met, tell me.
+- If a value is missing or a service is unreachable, say which one and carry on with work that doesn't depend on it. Don't mock a service to get past it.
+- Open PRs, don't merge them, and never force-push.
+- Ask me before anything that costs money or touches Cloudflare, servers, DNS or production, and before the open questions in docs/04.
+- When a PR changes a decision, a schema or a variable, update the docs and .env.example in the same PR.
 ```
 
 ## 8. Every variable by tag
