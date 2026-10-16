@@ -7,12 +7,9 @@
 ## 0. Current state (2026-10-16)
 
 - `README.md` with the product idea; `apps/server/go.mod` (`module github.com/nilpntr/content-fabrique`, Go 1.27.2).
-- ⚠️ **`apps/web` is not in the repository.** It was committed as a *gitlink* (mode 160000, pointing at commit `e298d18…`) without a `.gitmodules` entry. The base UI never reached GitHub. Most likely `apps/web` had its own `.git` folder (created by the TanStack scaffolder) when the root repo was committed. **Fix (task P0-01):**
-  ```bash
-  rm -rf apps/web/.git            # or move it aside if its history matters
-  git rm --cached apps/web
-  git add apps/web && git commit -m "chore(web): add web app sources" && git push
-  ```
+- `apps/web` was committed as a *gitlink* (mode 160000) without a `.gitmodules` entry, so the base UI never reached GitHub. P0-01 replaced it with the real sources. There was no `apps/web/.git` left to move aside.
+- The base UI is a **Vite + React SPA** (TanStack Router, Tailwind 4, shadcn on Base UI), not TanStack Start. The founder chose to port it to Start (P0-01b), so [D-09](05-decisions.md#d-09-hosting), P0-07 and P0-09 stand as written.
+- **bun** is the JavaScript package manager (founder's choice, 2026-10-16).
 
 ## Phase overview
 
@@ -46,7 +43,8 @@ The bars count working days and are indicative for **one to two engineers workin
 |---|---|---|
 | P0-00 | **Fill in `.env`** (a founder action, before the agent starts): `cp .env.example .env`, then provide the three `[YOU-now]` values: an Anthropic `dev` workspace key and the Clerk development-instance keys ([setup guide §3](06-setup-and-credentials.md#3-services)). The other accounts are created when their step comes ([order of operations](06-setup-and-credentials.md#2-order-of-operations)) | `.env` has no empty `[YOU-now]` line (the quick check in the guide prints nothing); `git status` shows `.env` ignored |
 | P0-01 | Fix the `apps/web` gitlink; commit the real UI sources | `git ls-tree HEAD apps/web` shows a tree (not a commit); the app builds in CI |
-| P0-02 | Monorepo hygiene: root `Taskfile`/`Makefile`, `.editorconfig`, pnpm workspace for `apps/web` + `packages/*`, Go workspace layout from [architecture §3](03-architecture.md#repository-layout) | `task dev` starts web + api + worker + Postgres locally |
+| P0-01b | **Port `apps/web` to TanStack Start**: `@tanstack/react-start` with `@cloudflare/vite-plugin` and a `wrangler.jsonc` (`main: @tanstack/react-start/server-entry`, `nodejs_compat`, [setup guide §3.3](06-setup-and-credentials.md#33-cloudflare-needed-from-p0-09)), file-based routes for the existing pages, the UI unchanged; no deploy (P0-09) | Every existing page renders as before and the existing tests pass; `bun run build` succeeds in CI; `wrangler dev` serves the app locally |
+| P0-02 | Monorepo hygiene: root `Taskfile`/`Makefile`, `.editorconfig`, bun workspace for `apps/web` + `packages/*`, Go workspace layout from [architecture §3](03-architecture.md#repository-layout) | `task dev` starts web + api + worker + Postgres locally |
 | P0-03 | CI (GitHub Actions): Go (`go vet`, `golangci-lint`, `go test -race`), web (typecheck, lint, test, build), Renovate config | Required checks on `main`; under 10 min |
 | P0-04 | Go service skeleton: config, `slog`, OpenTelemetry, `/healthz` + `/readyz`, graceful shutdown, `cmd/api`, `cmd/worker`, `cmd/cfctl` | Binaries build; health endpoints work; traces visible locally |
 | P0-05 | Postgres: `pgx` pool, `sqlc`, migrations (`goose` or Atlas), initial schema (workspaces, users, members, profiles) per [D-01](05-decisions.md#d-01-database-postgres-from-day-one-skip-d1-for-the-go-backend). Migrations run as `cfctl migrate` with `DATABASE_MIGRATE_URL`, a role that owns the schema, and each migration grants the app role DML only ([setup guide §3.4](06-setup-and-credentials.md#34-postgres)) | `cfctl migrate up` works against local and staging; on staging the app role can read and write rows but gets a permission error on `CREATE TABLE` |
