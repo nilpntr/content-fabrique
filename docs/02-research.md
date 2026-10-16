@@ -50,6 +50,7 @@
    - So effort level and turn count matter more than cheaper models. Cheap sub-agents pay off for bulk reading such as research, not for the single-context editor chain.
    - "Bring your own key" must mean an Anthropic API key: subscription logins are barred in third-party products. New keys start on low rate limits.
    - Managed credits with caps keep margin predictable. → §4.4, [D-17](05-decisions.md#d-17-model-routing-is-data-tuned-by-benchmark), [D-18](05-decisions.md#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key)
+   - **Credits can fund usage.** Anthropic's Max and Team plan credits pay for the first-party API, and AWS Activate credits pay for Claude on Bedrock. Google's startup credits reportedly don't cover Claude on Vertex. → [§4.5](#45-funding-claude-usage-anthropic-credits-aws-activate-and-google)
 
 ---
 
@@ -242,6 +243,25 @@ Model notes for the agent loop:
 - **New keys start on low rate limits.** A third-party report says tiers were consolidated into Start, Build and Scale in June 2026, with Start at about 50 requests per minute and promotion at roughly $40 of spend. △ [Knightli](https://knightli.com/en/2026/06/29/claude-api-rate-limits-rpm-itpm-otpm-429/). Cache reads don't count toward input-token limits on most models.
 - **Workspaces have monthly spend limits,** so a creator can cap their own exposure with a dedicated workspace and key. ◐ [Anthropic](https://claude.com/blog/workspaces), a 2024 announcement.
 
+### 4.5 Funding Claude usage: Anthropic credits, AWS Activate and Google
+
+| Source | Pays for Claude? | Amount | Who qualifies | Catches |
+|---|---|---|---|---|
+| **Anthropic: Max and Team plan API credits** | ✅ first-party API ◐ | $100 (Max 5x), $200 (Max 20x), up to $500 (Team) per month | Max 5x/20x and Team, not Pro | Linked to one Console organization; no rollover |
+| Anthropic: Claude for Startups | ✅ first-party API △ | $1,000, expires after 6 months, plus a free Team year | Founded ≤ 5 years ago or funded ≤ 2 years ago; bootstrapped included | **Paused since 9 Oct 2026** |
+| **AWS Activate** | ✅ **Claude on Amazon Bedrock** ◐ | Founders $1,000 (select startups up to $5,000); Portfolio up to $200,000 | Pre-Series B, company website, founded ≤ 10 years ago, paid-tier AWS account. Portfolio also needs an Org ID from a VC, accelerator or angel | Only new charges; Activate terms say credits "cannot be passed on to any end customers"; Bedrock feature gaps (below) |
+| Google for Startups Cloud | ❌ **not for Claude on Vertex AI** per Google's current pages; ✅ Gemini and Google Cloud services | Start $2,000; Scale up to $200,000; AI startups up to $350,000 △ | Start: pre-funded and young; Scale and AI tiers need institutional funding △ | Google says third-party models are billed directly and credits can't be applied to third-party offerings, even on Marketplace. Older 2025 blog posts said otherwise |
+| Claude Platform on AWS | ❔ unconfirmed | Billed through AWS Marketplace in Claude Consumption Units ($0.01 each); no prepaid credits | | No evidence that Activate credits apply |
+
+Sources ◐ ([AWS Activate terms](https://aws.amazon.com/activate/terms/), [AWS Activate credits](https://aws.amazon.com/startups/credits/), [Google AI startup program](https://cloud.google.com/startup/ai), [Google startup FAQ](https://cloud.google.com/startup/faq), [Claude Platform on AWS billing](https://docs.aws.amazon.com/claude-platform/latest/userguide/billing.html)), all read through search summaries. Tier amounts for Google come from third-party guides △. Check each program's current terms before budgeting around it.
+
+**Bedrock and Vertex are not the first-party API.** Anthropic's platform-availability table lists these gaps:
+- **Works on both:** the Messages API, streaming, tool use, strict tools and structured outputs, adaptive thinking and effort, prompt caching (5-minute and 1-hour), and token counting.
+- **Missing on Bedrock and Vertex:** the Message Batches API (our 50 % discount for backfills and judge calls), the Models API (our BYOK key validation), Managed Agents, fast mode, task budgets and server-side fallbacks.
+- **Web tools:** server-side web search is missing on Bedrock and basic-only on Vertex, and web fetch is missing on both. Our research agent depends on them.
+
+**Implication.** The editor and ideation agents port to Bedrock, and the Go SDK has Bedrock and Vertex clients, so a provider behind `agents/llm` is a small change. The research agent, batch work and BYOK validation stay on the first-party API. The credits don't cross over: Anthropic's work only on the first-party API, and AWS's only on Bedrock. A sensible split is Anthropic plan credits for development, benchmarks and research, and AWS Activate credits (if eligible) for managed-mode editor traffic in the beta. Re-run the final benchmark on the platform we ship on.
+
 ---
 
 ## 5. Platform: Cloudflare, Clerk, Go, costs
@@ -328,6 +348,7 @@ Sources ◐: [limits](https://developers.cloudflare.com/r2/platform/limits/), [u
 - As a result, **no claim in this report carries ✔**. The workflow can be resumed from its cached results to run verification.
 
 **Not covered or unverified:**
+- Cloud startup-credit terms were read through search summaries, not the programs' own pages (fetching those domains is blocked). The AWS "end customers" clause and Google's partner-model position need a direct read or a question to each program.
 - BYOK facts rest on secondary sources: the subscription-login ban (The Register, WinBuzzer), rate-limit tier thresholds (Knightli) and workspace spend limits (a 2024 announcement). Anthropic's legal pages and rate-limit docs weren't read directly.
 - Whether Anthropic's terms allow customer-supplied API keys in a third-party product. This is standard practice but unconfirmed.
 - Competitor pricing (OpusClip, Submagic, Captions, CapCut).
