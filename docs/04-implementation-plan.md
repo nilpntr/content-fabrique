@@ -20,22 +20,23 @@
 gantt
   dateFormat  YYYY-MM-DD
   axisFormat  %b %d
+  excludes    weekends
   section Foundations
   P0 Foundations                  :p0, 2026-10-19, 10d
   section Media
-  P1 Upload, library, annotations :p1, after p0, 18d
-  P2 Analysis & clip index        :p2, after p1, 18d
+  P1 Upload, library, annotations :p1, after p0, 14d
+  P2 Analysis & clip index        :p2, after p1, 14d
   section Editing
-  P3 Timeline spec & renderer     :p3, after p0, 25d
-  P4 Editor agent v1              :p4, after p2, 20d
+  P3 Timeline spec & renderer     :p3, after p0, 18d
+  P4 Editor agent, routing, bench :p4, after p2, 20d
   section Trends
-  P5 Research agent, trends, ideas:p5, after p4, 15d
+  P5 Research agent, trends, ideas:p5, after p4, 14d
   section Launch
-  P6 Export & TikTok              :p6, after p4, 10d
-  P7 SaaS hardening & beta        :p7, after p5, 18d
+  P6 Export & TikTok              :p6, after p4, 8d
+  P7 SaaS hardening & beta        :p7, after p5, 14d
 ```
 
-The dates are indicative for **one to two engineers working with Claude Code**. P3 runs in parallel with P1–P2 because the renderer only needs fixtures, not the analysis pipeline. **Critical path: P0 → P1 → P2 → P4 → P5 → P7, about 16–18 weeks.**
+The bars count working days and are indicative for **one to two engineers working with Claude Code**. P3 runs in parallel with P1–P2 because the renderer only needs fixtures, not the analysis pipeline. **Critical path: P0 → P1 → P2 → P4 → P5 → P7, about 17–18 weeks.** P4 grew from three to four weeks to fit the model-access layer, routing and sub-agents, and the benchmark harness.
 
 ## P0 — Foundations (≈ 2 weeks)
 
@@ -81,7 +82,7 @@ The dates are indicative for **one to two engineers working with Claude Code**. 
 | P2-01 | **Fitness taxonomy** v1 (exercises, muscle groups, equipment, poses, framings, settings) as versioned YAML in `packages/schemas` + loader | Covers the 150 most common gym exercises and standard bodybuilding poses |
 | P2-02 | Shot/segment detection in `media-tools` (tool per [D-10](05-decisions.md#d-10-video-understanding)); `shots` table | On the eval set, boundary F1 ≥ 0.85 |
 | P2-03 | Keyframe sampling + quality signals (sharpness, exposure, stability) | Per-shot best frame selected; blurry frames rejected |
-| P2-04 | Vision tagging job: batch keyframes → **Claude Haiku 5.5** (escalate ambiguous shots to Sonnet 5.5) with a strict JSON schema based on the taxonomy; retries; cost metered ([D-10](05-decisions.md#d-10-video-understanding)) | Tagging accuracy (exercise/pose) ≥ 80 % on the eval set; cost ≤ $0.005 per footage-minute |
+| P2-04 | Vision tagging job: keyframes → **Claude Haiku 5.5** (escalate ambiguous shots to Sonnet 5.5) with a strict JSON schema based on the taxonomy; retries; cost metered ([D-10](05-decisions.md#d-10-video-understanding)). Interactive uploads run synchronously; backfills and re-tagging use the Message Batches API (50 % off) | Tagging accuracy (exercise/pose) ≥ 80 % on the eval set; cost ≤ $0.005 per footage-minute |
 | P2-05 | Transcription job with word timestamps (speech clips only; detect speech first) | Word timing error < 100 ms median on test clips |
 | P2-06 | Moment builder: merge shots + tags + transcript + quality into `moments`; full-text search; optional embeddings | `GET /v1/moments?q=back` returns relevant moments ranked by quality |
 | P2-07 | Library search UI + moment chips on the clip timeline; user annotations shown as user moments | Search "posing" highlights the matching ranges |
@@ -105,22 +106,25 @@ The dates are indicative for **one to two engineers working with Claude Code**. 
 | P3-08 | Manual tweak ops in the UI (reorder, trim, swap source, edit text) → new versions | A user can fix a cut without the agent |
 | P3-09 | Beat utilities: beat-grid type, cut-to-beat snapping, a tempo-aware duration helper | Snap error ≤ 1 frame |
 
-## P4 — Editor agent v1 (≈ 3 weeks)
+## P4 — Editor agent v1 (≈ 4 weeks)
 
-**Goal:** from an idea or a brief plus clips, the agent makes a good first edit and revises it from comments.
+**Goal:** from an idea or a brief plus clips, the agent makes a good first edit on Claude Opus 5.5 and revises it from comments. Model access works for managed and BYOK workspaces, and a benchmark picks the routing profile for the beta.
 
 | ID | Task | Acceptance criteria |
 |---|---|---|
-| P4-01 | Agent runtime: loop on the Claude Messages API (`anthropic-sdk-go`), typed tool registry (`strict` schemas), persisted events, budgets ($, tokens, tool calls, wall clock), cancel, `ask_user` pause and resume, prompt caching ([D-07](05-decisions.md#d-07-agent-runtime-go-native-loop-on-the-claude-messages-api)) | Kill the worker mid-run and resume without a duplicate side effect; budget overrun stops cleanly |
+| P4-00 | **Model access layer (do first):** `llm.ClientFactory(workspace)` for managed and BYOK; key vault with envelope encryption; key validation through the Models API; a rate-limit-aware client (per-key concurrency limit, backoff on `retry-after`, queueing); usage metering with a versioned price table; BYOK settings UI ([architecture §11a](03-architecture.md#11a-model-access-managed-credits-or-byok), [D-18](05-decisions.md#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key)) | A BYOK key is validated and stored encrypted, and never appears in logs, prompts or API responses (asserted by tests); a throttled key queues runs instead of failing; every call writes a ledger row with `billed_to` |
+| P4-01 | Agent runtime: loop on the Claude Messages API (`anthropic-sdk-go`), typed tool registry (`strict` schemas), persisted events, budgets ($, tokens, tool calls, wall clock), cancel, `ask_user` pause and resume, prompt caching, effort set explicitly; the client comes from P4-00 ([D-07](05-decisions.md#d-07-agent-runtime-go-native-loop-on-the-claude-messages-api)) | Kill the worker mid-run and resume without a duplicate side effect; budget overrun stops cleanly |
 | P4-02 | Editor tools ([architecture §7.2](03-architecture.md#72-editor-agent)): `get_brief`, `search_moments`, `view_moment`, `get_sound`, `get_timeline`, `edit_timeline`, `render_preview` (+ contact sheet), `finish` | Each tool has unit tests and a JSON-schema contract test |
 | P4-03 | Editor system prompt: TikTok fitness editing principles (hook in the first 1–2 s, pacing, beat sync, text legibility and safe zones, duration targets, honouring exclude/include annotations), with versioning | Prompt lives in the repo with a changelog; cache hit rate visible |
 | P4-04 | Brief → constraints: parse a free-text brief into structured constraints (ordering, titles, specific clips, sound) shown to the user before editing | The README example ("best back pose → 'How to grow a back 101' → exercise clip + viral song") becomes 3 explicit constraints |
 | P4-05 | Revision flow: comments on a preview → targeted editor run → new version + change summary | Typical comment → new preview in under 2 min |
 | P4-06 | Run UI: live activity feed (tool steps in plain language), cost and time, stop button, answer `ask_user` | A user always sees what the agent is doing |
-| P4-07 | **Eval set #2**: 20–30 scenarios (clip library + brief/idea + expected properties); automatic checks (constraints satisfied, duration, beat alignment, safe zones) + LLM-judge rubric + human rating; `cfctl eval editor` | Baseline recorded; the release gate needs ≥ 80 % pass on hard constraints and no regression on the judge score |
+| P4-07 | **Eval set #2**: 20–30 scenarios (clip library + brief/idea + expected properties), grown to about 50 before the cutover measurement in P4-10; automatic checks (constraints satisfied, duration, beat alignment, safe zones) + LLM-judge rubric + human rating; `cfctl eval editor` | Baseline recorded; the release gate needs ≥ 80 % pass on hard constraints and no regression on the judge score |
 | P4-08 | Escape hatch behind a flag: `sandbox_exec` on **Cloudflare Sandbox** via the `sandbox-gateway` Worker (internet off, R2 prefix mounted, no credentials inside) ([D-08](05-decisions.md#d-08-sandbox-pluggable-interface-default-provider)), producing derived assets usable in timelines | A custom effect (e.g. a speed-ramp montage) works end to end and is billed |
+| P4-09 | **Routing and sub-agents:** `config/routing/*.yaml` profiles and `llm.Router`; the `delegate` tool (own model, read-only tools, budget, parallel workers, `parent_run_id` cost roll-up); escalate-on-failure; effort set per stage ([architecture §7.5](03-architecture.md#75-model-routing-sub-agents-and-benchmarking)) | Switching a stage's model is a config change; a worker failure never crashes its parent; sub-agent cost counts against the parent's budget |
+| P4-10 | **Benchmark harness and first sweep:** `cfctl bench`, recorded fixtures, judge calibration against ~30 human ratings, a Pareto report in `docs/benchmarks/`. Run the [D-17](05-decisions.md#d-17-model-routing-is-data-tuned-by-benchmark) protocol: effort sweep, then escalate-on-failure, then the Haiku inspector variant, then step-down for revisions. Budget ≈ $350 per development sweep and ≈ $1,000 for the cutover | A dated report names the routing profile for the beta, with quality, cost per completed task (mean and p90) and the trade-offs; D-07 is updated |
 
-## P5 — Research agent, trend board and ideas (≈ 2–3 weeks)
+## P5 — Research agent, trend board and ideas (≈ 3 weeks)
 
 **Goal:** a fresh, evidence-backed fitness trend board, and ideas that combine trends with the creator's own clips.
 
@@ -128,10 +132,11 @@ The dates are indicative for **one to two engineers working with Claude Code**. 
 |---|---|---|
 | P5-01 | `trends.Provider` interface + MVP sources per [D-11](05-decisions.md#d-11-trend-data-sources): an admin curation UI (formats and hashtags from manual Creative Center review), web-search research runs, creator TikTok links via oEmbed; licensed music analytics (Chartmetric) adapter once funded; normalisation into `trends`/`trend_snapshots`; rate limits and caching | A daily snapshot for one region is stored; provider outages are tolerated |
 | P5-02 | Sound metadata: tempo, beat grid, popular-snippet window. Method per the P0-12 legal answer: provider metadata, analysis of audio we may process, or tap-tempo fallback in the UI | `get_sound()` returns a usable beat grid for ≥ 80 % of the sounds on the board |
-| P5-03 | Research agent (periodic, per audience region): classify fitness relevance, extract **concepts** (format templates with slots) with evidence links | The board shows at least 20 relevant formats and sounds, refreshed at least weekly (daily once licensed music data is on), each with "why it works" |
+| P5-03 | Research agent (periodic, per audience region) as an **Opus 5.5 lead with Haiku 5.5 worker sub-agents** (P4-09), using the server-side web search and fetch tools: workers search, read and extract; the lead plans, verifies and synthesises; classify fitness relevance and extract **concepts** (format templates with slots) with evidence links. Runs on our key in both billing modes | The board shows at least 20 relevant formats and sounds, refreshed at least weekly (daily once licensed music data is on), each with "why it works" and an evidence link that resolves |
 | P5-04 | Trend board UI: sounds and formats, growth sparkline, filters, save to inspiration | — |
 | P5-05 | Ideation run → idea cards with slot→moment mapping (only real moments); accept, tweak or reject → project | Ideas reference existing clips 100 % of the time |
 | P5-06 | Curated concept library seed (10–20 proven fitness formats) as a fallback when trend data is thin | Ideas still work with zero provider data |
+| P5-07 | **Research and ideation benchmark** (eval set #3: a human-curated weekly gold list of fitness trends plus evidence-link checks). Compare Opus alone, Opus lead + Haiku workers, Sonnet lead + Haiku workers, Sonnet alone, and the Managed Agents research roster ([D-07](05-decisions.md#d-07-agent-runtime-go-native-loop-on-the-claude-messages-api)); ideation on Sonnet 5.5 vs Opus 5.5. Budget ≈ $150 | A dated report picks the research and ideation profiles; cost per weekly scan is recorded |
 
 ## P6 — Export and TikTok (≈ 1.5–2 weeks)
 
@@ -146,7 +151,7 @@ The dates are indicative for **one to two engineers working with Claude Code**. 
 
 | ID | Task | Acceptance criteria |
 |---|---|---|
-| P7-01 | Plans, quotas and credit ledger enforcement; billing through a **merchant of record** (Stripe MoR or Paddle) per [D-13](05-decisions.md#d-13-billing); upgrade/downgrade flows | Quota exceeded → clear UI; webhooks idempotent; EU VAT handled by the MoR |
+| P7-01 | Plans, quotas and the **credit ledger**: a per-action price list calibrated from measured COGS (target ≤ 40 % of credit value), a monthly allowance and top-ups; billing through a **merchant of record** (Stripe MoR or Paddle) per [D-13](05-decisions.md#d-13-billing) for both plan families, managed credits and the BYOK platform fee ([D-18](05-decisions.md#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key)); upgrade and downgrade flows | Quota exceeded → clear UI; webhooks idempotent; EU VAT handled by the MoR; switching billing mode keeps history |
 | P7-02 | Onboarding flow (profile, first upload, first idea) + empty states + sample project | A new user exports a first video in < 15 min of their own time |
 | P7-03 | Rate limiting, abuse controls, upload validation, takedown process | — |
 | P7-04 | Security review: tenancy isolation tests, sandbox escape tests, prompt-injection tests over comments, transcripts and trend text | Findings fixed or accepted with an owner |
@@ -154,6 +159,7 @@ The dates are indicative for **one to two engineers working with Claude Code**. 
 | P7-06 | Load test: 50 concurrent renders + 20 concurrent agent runs; autoscaling or queue limits tuned | p95 preview latency within target under load |
 | P7-07 | Dashboards and alerts: queue age, failure rates, cost per run, cost per export | On-call runbook in `docs/` |
 | P7-08 | Beta programme: recruit 10–20 fitness creators, in-app feedback, weekly review of failed or low-rated edits → eval set | Weekly metrics from the [product plan §11](01-product-plan.md#11-success-metrics) |
+| P7-09 | **Cost guardrails:** per-run, per-day and per-workspace caps in both billing modes; a p99-cost anomaly alert; an Anthropic spend limit on our production workspace; a BYOK onboarding guide (create a dedicated Anthropic workspace key with a spend limit) | A runaway run stops at its budget; an alert fires within minutes of a cost spike |
 
 ## Cross-cutting practices
 
@@ -170,7 +176,7 @@ The dates are indicative for **one to two engineers working with Claude Code**. 
 ## Definition of done for the private beta
 
 1. A new creator can sign up, upload clips, get ideas, receive an agent-made edit, revise it with comments and export it (download or TikTok draft), without help.
-2. p50 *upload complete → first preview* < 5 min. Median COGS per exported video is measured from `usage_ledger`, and the founder has chosen the model routing for v1 from the P4 eval results ([architecture §13](03-architecture.md#13-cost-model)).
+2. p50 *upload complete → first preview* < 5 min. The routing profile for the beta comes from the P4-10 benchmark report, and realised COGS per exported video is measured from `usage_ledger`: managed COGS at or below about 40 % of credit value ([architecture §13](03-architecture.md#13-cost-model)).
 3. Eval gates are green; there are no known cross-tenant or sandbox-escape issues.
 4. Billing/quotas are on; the GDPR basics are in place; dashboards and alerts are live.
 
@@ -182,5 +188,8 @@ The dates are indicative for **one to two engineers working with Claude Code**. 
 4. **Legal entity** for the TikTok developer app and the data processing agreements.
 5. **Beta creators**: who are the first 10–20, and can we use (some of) their footage for evals with consent?
 6. Is **AI voice-over / generated b-roll** ever in scope? It is a non-goal for v1 and affects later architecture.
-7. **Model routing vs price per video** (decide after P4 evals). Claude Opus 5.5 on every edit costs ≈ $1.10 per exported video; routing steps to Sonnet 5.5 or Haiku 5.5 where evals show parity brings it to ≈ $0.15–0.65 ([architecture §13](03-architecture.md#13-cost-model)). Which quality bar and plan prices do we want?
+7. **Model routing: decided.** Opus 5.5 edits; cheaper sub-agents directed by an Opus 5.5 lead do the research reading; the rest is tuned by benchmark ([D-07](05-decisions.md#d-07-agent-runtime-go-native-loop-on-the-claude-messages-api), [D-17](05-decisions.md#d-17-model-routing-is-data-tuned-by-benchmark)). **Still open:** approve the benchmark budget, about $350 per editor development sweep, $1,000 for the cutover measurement and $150 for research and ideation.
 8. **Escape-hatch provider**: Cloudflare Sandbox (default in [D-08](05-decisions.md#d-08-sandbox-pluggable-interface-default-provider)) or Claude Managed Agents, if you want Anthropic to run free-form editing sessions end to end?
+9. **Billing mode for the private beta.** I recommend managed credits with a hard cap per creator (at most ≈ $375 a month for 20 creators at 15 videos each), with BYOK open to anyone who prefers it. BYOK-only gives zero LLM cost risk but will probably cost activation among non-technical creators ([D-18](05-decisions.md#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key)). Which do you want?
+10. **Pricing and margin.** Are the plan prices in [product plan §10](01-product-plan.md#10-pricing-and-business-model) (Studio €25, Creator €59, Pro €129) in the right range for your audience, and is a managed gross margin of at least 60 % the target?
+11. **Anthropic terms.** Please confirm, or let the P0-12 legal kickoff confirm, that customer-supplied API keys are fine for our use. Claude Pro and Max logins can't be used in third-party products.

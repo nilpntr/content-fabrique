@@ -11,7 +11,7 @@
 | D-04 | Job orchestration with River (Postgres-backed) | Accepted |
 | D-05 | Realtime via SSE from Go; Cloudflare K2 deferred | Accepted |
 | D-06 | Playback via MP4 proxies, sprites and waveforms on R2; no Cloudflare Stream in v1 | Accepted |
-| D-07 | Go-native agent loop on the Claude Messages API; Managed Agents as an optional runtime | Accepted |
+| D-07 | Go-native agent loop on the Claude Messages API; Opus 5.5 edits; cheaper sub-agents for research and bulk work | Accepted (editor on Opus 5.5); sub-agent split tuned by D-17 |
 | D-08 | Sandbox: hardened containers for our media jobs; Cloudflare Sandbox for agent code; all behind one interface | Proposed (validate in P1-03 / P4-08) |
 | D-09 | Hosting: web on Workers; Go API + workers on EU servers behind Cloudflare Tunnel; burst to Cloudflare Containers | Proposed (validate in P0-10) |
 | D-10 | Video understanding: deterministic signals + small-model frame tagging; video-native model optional | Proposed (validate with eval set #1, P2) |
@@ -21,6 +21,8 @@
 | D-14 | OpenAPI 3.1 contract-first API with generated clients | Accepted |
 | D-15 | EU data residency where the vendor allows | Accepted |
 | D-16 | Only permissively licensed ML components in the product | Accepted |
+| D-17 | Model routing is data, tuned by benchmark: effort first, then escalation, then delegation, then cheaper models | Accepted (protocol); results come from P4-10 |
+| D-18 | Who pays for tokens: managed credits or bring-your-own Anthropic key, per workspace | Proposed (founder confirms the beta default) |
 
 ---
 
@@ -100,16 +102,19 @@ A SaaS that bakes a trending song into an exported MP4 makes copies it has no li
 
 **Decision.**
 - Agents run in our Go `worker` as a hand-owned loop on the Messages API, with persisted events, budgets and pause/resume ([architecture §7](03-architecture.md#7-agents)).
-- **Models** (prices per MTok, Oct 2026):
-  - Claude Opus 5.5 (`claude-opus-5-5`, $4 / $20) is the **default and quality reference** for editor runs.
-  - Claude Haiku 5.5 (`claude-haiku-5-5`, $0.10 / $0.50) handles bulk frame tagging, validated on eval set #1; escalate to a bigger model if it falls short.
-  - **Routing editor steps to Claude Sonnet 5.5** (`claude-sonnet-5-5`, $2 / $10) **or Haiku 5.5 is a founder decision after the P4 evals.** It is the main unit-economics lever: ≈ $1.10 vs ≈ $0.65 vs ≈ $0.15 per exported video ([architecture §13](03-architecture.md#13-cost-model)).
-  - Routing sits behind an `llm` interface, so a video-native model can be added (D-10).
+- **Models** (prices per MTok, Oct 2026). The founder decided the starting design; the benchmark in [D-17](#d-17-model-routing-is-data-tuned-by-benchmark) tunes the rest:
+  - **Claude Opus 5.5** (`claude-opus-5-5`, $4 / $20) runs the **editor** end to end. *Decided.* Effort starts at `medium` (Opus 5.5's default, set explicitly) and is tuned by the benchmark.
+  - **Research and other bulk reading use cheaper sub-agents directed by an expensive model.** *Decided as the starting design.* An Opus 5.5 lead plans, delegates and synthesises. **Claude Haiku 5.5** (`claude-haiku-5-5`, $0.10 / $0.50) workers search, read and extract. Claude Sonnet 5.5 (`claude-sonnet-5-5`, $2 / $10) workers are used where a task needs more judgement.
+  - **Everything else starts on the cheapest model that passes its eval:** Haiku 5.5 for frame tagging, Sonnet 5.5 for ideation, Opus 5.5 for revisions (stepped down only if the benchmark shows parity).
+  - Routing lives in versioned config behind an `llm` interface, so a video-native model can be added later ([D-10](#d-10-video-understanding)).
+- **The editor stays a single model; there is no orchestrator around it.** It is one dependent chain that fits in one context window. Anthropic's measured runs found that for that shape the coordinator model alone at lower effort beat orchestrated setups, while orchestration paid off only where there was bulk to hand off ([cost guidance](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence)). The benchmark tests exactly one editor delegation variant: a Haiku "inspector" that shortlists candidate clips while Opus verifies the top picks itself.
+- **Sub-agents** are nested loops in our Go runtime: a `delegate` tool starts a worker with its own model, tool subset, prompt and budget, and returns a compact structured report. Workers run in parallel. A worker starts a fresh prompt prefix, so it shares no cache with its parent; caches are model-scoped.
 - **Claude Managed Agents** is the optional runtime for *free-form* sandbox sessions (the escape hatch), not the core path:
   - Anthropic runs the loop, and tools execute either in Anthropic's cloud container or on our own hosts through a Go environment worker that only makes outbound calls.
   - Sessions support hard dollar budgets. Session runtime is billed at $0.08/hour plus tokens.
+  - Its documented "research lead + web researcher" roster (an Opus 5.5 coordinator with Haiku 5.5 workers, run as a scheduled deployment) is a ready-made alternative for the research agent. It is benchmarked against our Go-native sub-agents in P5-07.
 
-**Revisit** after P4 evals: if free-form sessions outperform the structured editor, promote Managed Agents to a first-class runtime.
+**Revisit** after the P4-10 benchmark: if free-form sessions outperform the structured editor, promote Managed Agents to a first-class runtime.
 
 ## D-08 Sandbox: pluggable interface, default provider
 
@@ -201,6 +206,7 @@ Daytona is not considered: its open-source repo was reported unmaintained or arc
 - **Clerk for identity only.**
 - **Billing through a merchant of record** that collects and remits VAT and sales tax: Stripe's merchant-of-record product (Managed Payments) if it is available for our entity and product category, otherwise **Paddle** (≈ 5 % + $0.50 per transaction).
 - Plans and entitlements are synced to Postgres via webhooks, and our `usage_ledger` enforces quotas and credits whatever the provider.
+- There are **two plan families** ([D-18](#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key)): managed plans with a monthly credit allowance, and a lower-priced BYOK plan where the creator's own Anthropic key pays for tokens.
 
 **Alternatives.** Stripe Billing + Stripe Tax: lower fees (0.5 % for tax), but we register and file VAT ourselves. Clerk Billing: reconsider once it supports tax, EUR and strong customer authentication.
 
@@ -233,6 +239,67 @@ Daytona is not considered: its open-source repo was reported unmaintained or arc
 - **Shot detection**: PySceneDetect / ffmpeg `scdet`.
 
 `media-tools` keeps a licence inventory, and CI fails on new copyleft or non-commercial dependencies.
+
+## D-17 Model routing is data, tuned by benchmark
+
+**Context.** The founder's direction: Opus 5.5 for editing, cheaper sub-agents directed by an expensive model for research, and benchmarking to find out the rest. Anthropic's cost guidance ([cost guidance](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence)) sets the order to work in and warns that per-token prices don't predict cost per *completed* task:
+- The lever order is caching, then input hygiene, then batch, then effort, with model choice last. Change one lever at a time and keep or revert on measured evidence.
+- Sweep effort before dropping a model tier.
+- An orchestrator pays only when there is bulk to hand off.
+
+Our own model of an Opus 5.5 editor run ([architecture §13](03-architecture.md#13-cost-model)) says about half the spend is output tokens (thinking and tool calls), about 40 % is cache writes and under 10 % is cache reads. So effort and turn count matter far more than moving image viewing to a cheaper model, which saves only about 5 %.
+
+**Decision.**
+1. **Routing profiles are versioned config** (`config/routing/*.yaml`): per stage a model, effort, escalation rule, sub-agents and a batch flag. Code refers to a stage name, never to a model ID.
+2. **`cfctl bench` runs scenario × profile × trial** against recorded fixtures (pre-analysed clip libraries; the real renderer; sandbox and posting stubbed) and writes a dated report to `docs/benchmarks/`.
+3. **Protocol: one lever at a time, in this order.**
+   1. Effort sweep on Opus 5.5 (`low`, `medium`, `high`), each level in separate sessions with otherwise identical requests.
+   2. **Escalate on failure:** run at the cheaper effort and re-run at the higher effort only when the deterministic hard-constraint checks fail. We have a cheap failure signal, and in Anthropic's coding runs this held the pass rate for about half the cost.
+   3. **Delegation variants:** the editor "inspector" (Haiku 5.5 shortlists, Opus 5.5 verifies the top picks), and the research lead with Haiku 5.5 workers, also against Managed Agents (P5-07).
+   4. **Cheaper-model step-down** for revisions and ideation (Sonnet 5.5, then Haiku 5.5), one notch at a time.
+
+   Keep a change only if quality holds within noise and cost per completed task falls. Otherwise revert and record why.
+4. **Metrics:** hard-constraint pass rate; LLM-judge rubric score, calibrated against human ratings on ~30 samples; a human "would you post it?" rating on a sample; cost per completed task (mean and p90, because the tail decides the bill); latency; turns; failure rate. The output is a quality-versus-cost Pareto chart.
+5. **Rigour:** development sweeps use 20–30 scenarios with at least 3 trials each. The production cutover uses about 50 scenarios with at least 5 trials, the bar Anthropic publishes. A difference of a scenario or two is noise.
+6. **Budget** (estimates at Oct 2026 prices, approved once): ≈ $350 per editor development sweep (30 scenarios × 6 profiles × 3 trials), ≈ $1,000 for the cutover measurement, and ≈ $150 for the research and ideation benchmarks. Judge calls run through the Batch API at 50 % off.
+7. **Re-run** on every new model release and every major prompt change. Rankings can flip between models and workloads.
+
+**Alternatives.** Choosing by price list or intuition (rejected: it doesn't predict cost per completed task). A router model that picks a model per request (rejected for v1: another failure mode, and it loses cache locality).
+
+**Consequences.** The harness, a consented eval dataset and an approved budget become P4 deliverables ([implementation plan](04-implementation-plan.md)). Until the first sweep finishes, the starting profile in [D-07](#d-07-agent-runtime-go-native-loop-on-the-claude-messages-api) applies.
+
+**Revisit** on every model release.
+
+## D-18 Who pays for tokens: managed credits or bring-your-own key
+
+**Context.** The founder's direction: make people use their own keys, or a subscription where we still take a profit. What the research found:
+- **Cost.** With Opus 5.5 on every edit, LLM spend is about $1.15 per exported video, about $1.25 all-in ([architecture §13](03-architecture.md#13-cost-model)). That can't be sold at "unlimited clipping" prices.
+- **"Your own key" means an Anthropic Console API key.** Claude.ai Free, Pro and Max subscription logins can't be used inside third-party products: Anthropic's consumer terms bar it, and it was enforced from January 2026 ([The Register](https://www.theregister.com/software/2026/02/20/anthropic-clarifies-ban-on-third-party-tool-access-to-claude/5014546), [WinBuzzer](https://winbuzzer.com/2026/02/19/anthropic-bans-claude-subscription-oauth-in-third-party-apps-xcxwbn/)). Both are secondary sources, so confirm on Anthropic's legal pages (P0-12).
+- **New keys start on low rate limits.** A third-party report says tiers were consolidated into Start, Build and Scale in June 2026, with Start at about 50 requests per minute and promotion after roughly $40 of spend ([Knightli](https://knightli.com/en/2026/06/29/claude-api-rate-limits-rpm-itpm-otpm-429/); unverified, check the [rate-limits doc](https://platform.claude.com/docs/en/api/rate-limits)). Cache reads don't count toward input-token limits on most models, so prompt caching also helps here.
+- **Spend limits exist per workspace** in the Anthropic Console ([Anthropic](https://claude.com/blog/workspaces)), so a BYOK creator can cap their own exposure with a dedicated workspace and key.
+- **Prompt caches are isolated per workspace** ([prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)). In managed mode all tenants share one production workspace, so the static prompt prefix (system prompt and tool definitions) is cached across customers. Each BYOK key has its own cache.
+
+**Decision.** Two ways to pay, chosen per workspace (`workspaces.billing_mode`):
+- **Managed (credits).** We call Claude with our key.
+  - The subscription includes a monthly credit allowance.
+  - Credits are priced **per action**, not per token, and calibrated so that realised COGS stays at or below about 40 % of credit value.
+  - There are hard caps per run, per day and per month, plus top-up packs.
+- **BYOK.** The creator pastes an Anthropic Console API key (we recommend a dedicated workspace key with a spend limit).
+  - A lower platform fee covers compute, storage, transcription and support.
+  - Anthropic bills tokens to the creator, and we show an estimated cost per run from our own metering.
+  - Plan quotas still cap renders, storage and exports.
+- **One code path.** `llm.ClientFactory(workspace)` returns a client for the right key, and every call writes a ledger row with `billed_to` ([architecture §11a](03-architecture.md#11a-model-access-managed-credits-or-byok)).
+- **Defaults.** Managed is the default for mainstream creators and for the capped private beta. BYOK is offered from the beta for power users and agencies. Whether BYOK becomes *mandatory* on any plan is the founder's call.
+- **Always on our key:** work that serves the whole platform (the shared trend board, research scans) is a platform cost.
+- **Not supported:** reusing a creator's Claude Pro or Max login.
+
+**Why not BYOK-only.** The target creator would need an Anthropic account, a payment method, a key, and an understanding of rate-limit tiers, and a fresh key will hit 429s when agents run in parallel. That friction is likely to cut activation. BYOK-only is a sound choice for a developer-savvy or agency segment, and it removes our LLM cost risk entirely.
+
+**Why not managed-only.** At Opus-class costs the margin is thin or negative for heavy users unless prices are high, and power users want control over spend.
+
+**Consequences.** We take on key custody and security work, a rate-limit-aware client, a cost UI, two plan families, and legal checks (Anthropic's terms for customer keys; GDPR roles, because with BYOK the creator's Anthropic account is also a processor of their footage).
+
+**Revisit** after the beta: conversion by billing mode, BYOK support burden, and realised COGS.
 
 ## Template for new decisions
 

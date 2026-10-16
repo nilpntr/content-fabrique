@@ -100,7 +100,8 @@ flowchart LR
 | Manual timeline tweaks in UI | Reorder, trim, swap, edit text | Fuller editor | |
 | Export + sound cue sheet | ✅ | | |
 | TikTok draft upload (inbox) | ✅ if TikTok's app review passes in time | ✅ | Direct post (needs audit) |
-| Billing, plans, quotas | Manual (invite-only) | ✅ | Usage-based add-ons |
+| Billing, plans, quotas | Managed credits with a hard cap per creator (invite-only) | ✅ managed and BYOK plans | Usage-based add-ons |
+| Bring-your-own Anthropic key (BYOK) | ✅ opt-in for power users | ✅ | More providers |
 | Instagram Reels / YouTube Shorts | | | ✅ |
 | Brand kit, saved templates | | ✅ | Template marketplace |
 
@@ -131,18 +132,27 @@ flowchart LR
 - **Licensed-music option.** Music from a stock library whose licence covers our use can be baked in. This suits business accounts, which are limited to commercially cleared music.
 - **Creator-supplied audio.** Creators may upload audio they own or have licensed (voice-over, their own music). Our terms make them responsible for their rights.
 
-## 10. Pricing hypothesis
+## 10. Pricing and business model
 
-The numbers below are **hypotheses to validate in beta**, anchored on the unit costs in [architecture §13](03-architecture.md#13-cost-model). Competitor prices still need benchmarking ([research §6](02-research.md#6-limits-of-this-research-and-open-questions)).
+**Two ways to pay for the AI** ([D-18](05-decisions.md#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key)):
+- **Managed:** we call Claude with our key. The subscription includes a monthly credit allowance, priced per action and calibrated so realised COGS stays at or below about 40 % of credit value.
+- **BYOK (bring your own key):** the creator supplies an Anthropic Console API key (a dedicated workspace key with a spend limit is recommended). A lower platform fee covers compute, storage and support, and Anthropic bills the tokens to the creator. We show an estimated cost per run. **A creator's Claude.ai Pro or Max login can't be used**, because Anthropic bars subscription logins in third-party products.
 
-| Plan | Price (hypothesis) | Includes |
-|---|---|---|
-| Trial | Free | 3 exported videos, 2 GB storage. Previews are watermarked, exports never are: TikTok forbids API-posting apps from adding promotional watermarks ([research §1](02-research.md#1-tiktok-trend-data-and-music-licensing)) |
-| Creator | ~€29 / month | 20 exported videos, 50 GB, trend board, ideas |
-| Pro | ~€79 / month | 60 videos, 200 GB, brand kit, priority renders, TikTok drafts |
-| Team / Agency | Custom | Several creators, seats, approvals |
+**Why Opus 5.5 for editing sets the price floor.** It puts COGS at about **$1.25 per exported video** all-in, of which about $1.15 is the LLM ([architecture §13](03-architecture.md#13-cost-model)). That can't be sold as "unlimited".
 
-**Unit-economics guardrail:** cost of goods per exported video (LLM + compute + storage) must stay **at or below ~25 % of the plan's per-video price at full usage**. For Creator, €29/20 ≈ €1.45 per video, so COGS ≤ ~€0.36. For Pro, €79/60 ≈ €1.32, so COGS ≤ ~€0.33. That matches the architecture target of **< $0.30 per video at v1**. With Claude Opus 5.5 on every edit, COGS is ≈ $1.00–1.20 per video, so reaching the guardrail needs cheaper models on the steps where evals show parity, or higher prices. That is **a founder decision after the P4 evals** ([architecture §13](03-architecture.md#13-cost-model)). The private beta runs at a lower margin on purpose. The plan is credits-based internally, so expensive actions (sandbox runs, many revisions) draw down credits transparently.
+**Plan hypotheses.** Validate them in the beta. The margin assumptions are in [architecture §13](03-architecture.md#13-cost-model), and competitor prices still need benchmarking ([research §6](02-research.md#6-limits-of-this-research-and-open-questions)).
+
+| Plan | Price | AI billed by | Includes | Gross margin at full use |
+|---|---|---|---|---|
+| Trial | Free | Us | 2 exported videos, 2 GB storage. Previews are watermarked, exports never are: TikTok forbids API-posting apps from adding promotional watermarks ([research §1](02-research.md#1-tiktok-trend-data-and-music-licensing)) | Cost of ≈ $2.50 per trial |
+| **Studio (BYOK)** | ~€25 / month | The creator's Anthropic key | 60 exports, 100 GB, trend board, ideas | ≈ 73 % |
+| **Creator (managed)** | ~€59 / month | Us, from credits | 15 videos, 50 GB, trend board, ideas | ≈ 64 % |
+| **Pro (managed)** | ~€129 / month | Us, from credits | 40 videos, 200 GB, brand kit, priority renders, TikTok drafts | ≈ 56 % |
+| Team / Agency | Custom | BYOK or pooled credits | Several creators, seats, approvals | |
+
+A "video" is one first edit plus two revisions and unlimited previews, metered internally in credits. Extra videos come from top-up packs priced at about 3× COGS. A creator posting 15 videos a month pays about €40 on BYOK (€25 plus ≈ €15 to Anthropic) against €59 managed. The difference is the price of convenience.
+
+**Recommendation (your call).** Make managed the default for mainstream creators and for the private beta, with a hard cap per creator: 20 creators at 15 videos each is at most ≈ $375 a month. Offer BYOK to power users and agencies from the beta. Making BYOK *mandatory* removes our LLM cost risk entirely, but the target creator then needs an Anthropic account, billing and an API key, and a fresh key starts on low rate limits. That friction will probably cost activation. It is a sound choice if you target developer-savvy creators or agencies.
 
 ## 11. Success metrics
 
@@ -153,7 +163,8 @@ The numbers below are **hypotheses to validate in beta**, anchored on the unit c
 | Speed | Upload done → first preview | p50 < 5 min |
 | Quality | First drafts accepted with ≤ 2 revisions | ≥ 60 % |
 | Retention | Creators active in week 4 | ≥ 35 % |
-| Economics | COGS per exported video | Measured in beta (≈ $1.00–1.20 expected with Opus 5.5 throughout); < $0.30 by v1 |
+| Economics | Realised COGS per exported video, and managed COGS as a share of credit value | ≈ $1.25 expected with Opus 5.5; managed COGS ≤ 40 % of credit value |
+| Mix | Share of workspaces on BYOK vs managed, and activation by billing mode | Tracked from the first beta cohort |
 | Outcome (later) | Views/engagement vs the creator's baseline | ↑ |
 
 ## 12. Non-goals for v1
@@ -171,7 +182,10 @@ The numbers below are **hypotheses to validate in beta**, anchored on the unit c
 | Music licensing | Legal exposure, muted videos | §9: cue-only by default, licensed library option, clear ToS |
 | Trend-data access: no official commercial API; Research API is non-commercial; Creative Center's song chart unavailable in Sept–Oct 2026 | Research agent is starved | Curated concept library + web-search research + creator-supplied links + licensed music analytics; unofficial providers only after legal review, behind one interface; shared across tenants ([D-11](05-decisions.md#d-11-trend-data-sources)) |
 | Edit quality below creator bar | Churn | Structured timeline, strong clip analysis, evals from day one, fast revision loop, proven concept templates |
-| Cost per video too high | Margin | Cheap deterministic signals first, small models for bulk tagging, prompt caching, proxies for previews, shared research |
+| Cost per video: Opus-class editing is ≈ $1.25 all-in | Thin margins for heavy managed users | Credits with hard caps; a per-action price list calibrated to ≥ 60 % gross margin; benchmark levers (effort, escalate-on-failure, cheaper models for revisions); cheap deterministic signals first; prompt caching; BYOK plan for heavy users ([D-17](05-decisions.md#d-17-model-routing-is-data-tuned-by-benchmark)) |
+| BYOK friction and rate limits: creators must set up Anthropic billing, and new keys start on low tiers | Lower activation; 429s when agents run in parallel | Managed is the default; BYOK offered to power users first; rate-limit-aware client that queues; key validation and an onboarding guide |
+| BYOK key custody: creators' API keys are secrets | A breach means financial harm to creators | Envelope encryption, keys never in logs, prompts or sandboxes, audit log, creators set their own Anthropic spend limits ([architecture §11a](03-architecture.md#11a-model-access-managed-credits-or-byok)) |
+| Anthropic terms: subscription logins are barred in third-party products; customer-key terms not yet confirmed | A planned feature is blocked | API keys only; confirm the terms in the P0-12 legal kickoff |
 | TikTok API/policy changes | Publishing breaks | Export-first design; publishing is an add-on |
 | Privacy (EU users, bodies and faces in footage) | Trust, GDPR | EU storage/DB regions, DPAs, retention limits, no training on user content, deletion on request |
 | Users uploading content they don't own | Takedowns | ToS, notice-and-takedown process, no public hosting of user media |
@@ -205,7 +219,7 @@ Detailed phases are in the [implementation plan](04-implementation-plan.md).
 |---|---|---|
 | M0 Foundations | Sign in; see the dashboard shell | weeks 0–2 |
 | M1 Library | Upload, browse, annotate clips | weeks 2–5 |
-| M2 Understanding | Search their footage by meaning | weeks 4–8 |
-| M3 First edits | Get an agent-made edit from a brief and revise it | weeks 6–11 |
-| M4 Trends & ideas | Browse trends; get ideas that use their clips | weeks 10–13 |
-| M5 Private beta | Export, TikTok drafts, plans and limits; 10–20 creators onboarded | weeks 13–17 |
+| M2 Understanding | Search their footage by meaning | weeks 5–8 |
+| M3 First edits | Get an agent-made edit from a brief and revise it (the renderer is built in parallel, weeks 2–6) | weeks 8–12 |
+| M4 Trends & ideas | Browse trends; get ideas that use their clips | weeks 12–15 |
+| M5 Private beta | Export, TikTok drafts, plans, credits and limits; 10–20 creators onboarded | weeks 15–18 |

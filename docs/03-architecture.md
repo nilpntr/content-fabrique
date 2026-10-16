@@ -10,6 +10,8 @@
 - **Media heavy**: multi-GB uploads, CPU-bound analysis and rendering, smooth scrubbing in the browser.
 - **Planned stack**: TanStack Start (`apps/web`), Go (`apps/server`), Cloudflare (R2, Workers), Clerk, a pluggable agent sandbox. Cloudflare K2 only if a real need appears ([D-05](05-decisions.md#d-05-realtime-updates-sse-from-go-k2-deferred)).
 - **EU-first**: the founder and early users are EU-based, so data stays in EU regions where the vendor allows ([D-15](05-decisions.md#d-15-eu-data-residency)).
+- **Who pays for tokens is per workspace**: either managed credits (we call Claude with our key) or the creator's own Anthropic key ([D-18](05-decisions.md#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key)).
+- **Model choice is data, not code**: routing profiles tuned by benchmark ([D-17](05-decisions.md#d-17-model-routing-is-data-tuned-by-benchmark)).
 
 ## 2. System overview
 
@@ -35,7 +37,7 @@ flowchart LR
   end
 
   PG[("Postgres<br/>app data · jobs · events")]
-  LLM["Model APIs<br/>Claude · video model"]
+  LLM["Anthropic API<br/>our key (managed) or the<br/>creator's key (BYOK)"]
   TRD["Trend data providers"]
   TT["TikTok APIs<br/>Login Kit · Content Posting"]
 
@@ -74,7 +76,7 @@ flowchart LR
 | R2 | Cloudflare | All media and large artefacts |
 | Clerk | SaaS | Users, sessions, organizations (workspaces) |
 | Billing | Merchant of record: Stripe MoR or Paddle ([D-13](05-decisions.md#d-13-billing)) | Checkout, subscriptions, EU VAT and sales tax; webhooks → plans and entitlements in Postgres |
-| Model APIs | SaaS | Claude for agents and tagging; a video-native model where it wins ([D-10](05-decisions.md#d-10-video-understanding)) |
+| Model APIs | SaaS | Claude for agents and tagging, called with our key (managed) or the creator's key (BYOK, [D-18](05-decisions.md#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key)); a video-native model only where it wins ([D-10](05-decisions.md#d-10-video-understanding)) |
 
 ### Repository layout
 
@@ -85,7 +87,9 @@ apps/
     cmd/
       api/                 # HTTP API + SSE
       worker/              # River workers (ingest, analysis, render, agents, trends)
-      cfctl/               # admin CLI: migrate, seed taxonomy, replay agent runs, run evals
+      cfctl/               # admin CLI: migrate, seed taxonomy, replay agent runs, run evals and benchmarks
+    config/
+      routing/             # versioned model-routing profiles (YAML)
     internal/
       config/ telemetry/   # env config, slog + OpenTelemetry
       httpapi/             # handlers, middleware (auth, tenancy, rate limit), OpenAPI glue
@@ -98,13 +102,15 @@ apps/
       timeline/            # spec types, JSON Schema, validation, edit ops, diff
       render/              # timeline → ffmpeg compiler, profiles, text & captions
       agents/
-        runtime/           # loop, tool registry, budgets, events, cancellation
-        llm/               # provider interfaces; Anthropic impl; video-model impl
+        runtime/           # loop, tool registry, budgets, events, cancellation, delegate (sub-agents)
+        llm/               # provider interfaces; Anthropic impl; router + routing profiles; client factory (managed / BYOK); video-model impl
         editor/ research/ ideation/
       trends/              # provider adapters, normalisation, snapshots
       sandbox/             # Provider interface + implementations
       events/              # event log + SSE broker (LISTEN/NOTIFY)
-      billing/             # plans, quotas, usage ledger
+      billing/             # plans, quotas, usage + credit ledgers, price table
+      secrets/             # envelope encryption and custody for BYOK keys
+      bench/               # benchmark harness behind `cfctl bench`
       tiktok/              # Login Kit OAuth, Content Posting API client
 packages/
   schemas/                 # timeline JSON Schema + OpenAPI spec (single source of truth)
@@ -137,12 +143,15 @@ erDiagram
   workspaces ||--o{ agent_runs : runs
   agent_runs ||--o{ agent_events : emits
   workspaces ||--o{ usage_ledger : accrues
+  workspaces ||--o{ provider_credentials : stores
+  workspaces ||--o{ credit_ledger : holds
+  agent_runs ||--o{ agent_runs : delegates_to
   renders ||--o{ exports : exported_as
 ```
 
 | Table | Key columns (abridged) |
 |---|---|
-| `workspaces` | `id`, `clerk_org_id`, `name`, `plan`, `region` |
+| `workspaces` | `id`, `clerk_org_id`, `name`, `plan`, `region`, `billing_mode` (managed, byok) |
 | `users`, `workspace_members` | `clerk_user_id`, `email`; `role` (owner, editor, viewer) |
 | `creator_profiles` | `niche` (jsonb: sub-niches), `audience_regions`, `tone`, `language`, `brand` (fonts, colours, logo asset), `defaults` (caption style, fps) |
 | `assets` | `kind` (video, audio, image), `status` (uploading → uploaded → processing → ready / failed), `r2_key`, `size_bytes`, `sha256`, `duration_ms`, `width`, `height`, `fps`, `rotation`, `codecs`, `has_audio` |
@@ -158,9 +167,11 @@ erDiagram
 | `projects` | `idea_id`, `title`, `brief`, `status` (draft, editing, review, approved, exported), `current_timeline_id` |
 | `timelines` | `project_id`, `version`, `spec` (jsonb), `schema_version`, `parent_id`, `author` (user or run), `change_summary`. Immutable once written. |
 | `renders` | `timeline_id`, `profile` (preview, final), `status`, `r2_key`, `time_map` (output ms → timeline item), `cpu_ms`, `error` |
-| `agent_runs` | `agent` (research, ideation, editor), `status` (queued, running, waiting_input, succeeded, failed, cancelled), `input`, `output`, `model`, token counts, `cost_micros`, `budget_micros` |
+| `agent_runs` | `agent` (research, ideation, editor, worker), `parent_run_id` (sub-agent runs), `status` (queued, running, waiting_input, succeeded, failed, cancelled), `input`, `output`, `routing_profile`, `model`, `effort`, `escalated` (bool), token counts, `cost_micros`, `budget_micros`, `billed_to` |
 | `agent_events` | `run_id`, `seq`, `type` (status, progress, tool_call, tool_result, message, artifact, error), `payload`. Streamed to the UI. |
-| `usage_ledger` | `kind` (agent_cost, render_seconds, analysis_minutes, storage_gb_days, sandbox_seconds), `quantity`, `cost_micros`, `ref` |
+| `usage_ledger` | `kind` (llm, render_seconds, analysis_minutes, storage_gb_days, sandbox_seconds), `quantity`, `billed_to` (platform, workspace_key), token counts (input, cache_write, cache_read, output), `list_cost_micros`, `price_table_version`, `ref` |
+| `provider_credentials` | `workspace_id`, `provider` (anthropic), `label`, `key_ciphertext`, `key_version`, `key_last4`, `status` (active, invalid, revoked), `validated_at`, `last_used_at`, `created_by` (BYOK keys; [§11a](#11a-model-access-managed-credits-or-byok)) |
+| `credit_ledger` | `workspace_id`, `kind` (grant, spend, expire, refund, top_up), `credits`, `action` (first_edit, revision, ideation…), `usage_ref`, `created_at`. Append-only. |
 | `integrations` | `provider` (tiktok), `external_account_id`, `scopes`, encrypted tokens, `expires_at` |
 | `exports` | `render_id`, `destination` (download, tiktok_draft), `status`, `external_id` |
 
@@ -303,11 +314,14 @@ A Go-native agent loop on the Claude Messages API (`anthropic-sdk-go`, using its
 - **Budgets per run**: token and $ caps (`budget_micros`), a wall-clock timeout and a maximum number of tool calls. They are checked before every model request, and costs go to the `usage_ledger`.
 - **Pause and resume**: an `ask_user` tool moves the run to `waiting_input`. The user's reply resumes it. Runs are River jobs, so they survive restarts. The loop is append-only, so a replay rebuilds state from `agent_events`.
 - **Prompt caching**: a stable system prompt and tool list come first (cached), and per-run context comes after.
-- **Model routing** (see [research §4](02-research.md#4-agent-runtime-and-sandboxes) and the cost model in §13):
-  - Claude Opus 5.5 is the default and quality reference for editor runs.
-  - Claude Haiku 5.5 handles bulk frame tagging.
-  - A video-native model is used only where it wins.
-  - Moving editor steps to Sonnet 5.5 or Haiku 5.5 is a **founder decision after the P4 evals**: it is the main unit-economics lever.
+- **Model routing** ([D-07](05-decisions.md#d-07-agent-runtime-go-native-loop-on-the-claude-messages-api), [D-17](05-decisions.md#d-17-model-routing-is-data-tuned-by-benchmark), §7.5):
+  - The editor runs on Claude Opus 5.5 (decided).
+  - Research uses an Opus 5.5 lead with Haiku 5.5 worker sub-agents.
+  - Tagging uses Haiku 5.5, and ideation Sonnet 5.5.
+  - Profiles are versioned config, tuned by benchmark.
+- **Sub-agents:** a `delegate` tool starts a worker with its own model, tool subset, prompt and budget, and returns a compact structured report (§7.5).
+- **Escalation:** a run at the cheaper effort is re-run at the higher effort only when the deterministic hard-constraint checks fail.
+- **Per-workspace client:** the loop never holds a key. It asks `llm.ClientFactory` for a client for the workspace's billing mode (§11a).
 - **Provider interface** (`agents/llm`), so a second model vendor can be added without touching agent code.
 
 ### 7.2 Editor agent
@@ -348,10 +362,74 @@ Agent quality is the product, so every prompt, model or tool change runs the eva
 | **Analysis** (eval set #1) | Exercise, pose and framing tags; best-moment picks; shot boundaries | Labelled clips → precision/recall per label; cost per footage-minute |
 | **Hard constraints** (eval set #2) | The brief's ordering, title and required clips are honoured; `exclude` annotations respected; duration limits; text inside safe zones; cuts within ±1 frame of beats when beat-synced | Deterministic checks on the timeline JSON (no model needed) |
 | **Edit quality** | Hook strength in the first 2 s, pacing, clip quality, coherence with the concept, text legibility | LLM-judge rubric (1–5 per dimension) on the contact sheet + timeline, calibrated against human ratings |
+| **Research** (eval set #3) | Relevance and novelty of extracted trends and concepts against a human-curated weekly gold list; every evidence link resolves and supports its claim | Gold list + link checker + LLM judge for claim support |
 | **Human review** | Would the creator post it? | Weekly blind rating of sampled beta edits; failures added to the eval sets |
 | **Efficiency** | $ per run, wall clock, tool calls, revisions needed | From `agent_runs` / `usage_ledger` |
 
 **Gate:** ≥ 80 % hard-constraint pass rate, no regression in judge scores beyond noise, and cost per run within budget.
+
+### 7.5 Model routing, sub-agents and benchmarking
+
+**Routing profiles** (`apps/server/config/routing/*.yaml`) are versioned data. Code asks for a *stage*, never for a model ID. The starting profile follows [D-07](05-decisions.md#d-07-agent-runtime-go-native-loop-on-the-claude-messages-api):
+
+```yaml
+profile: v1-start
+editor:
+  model: claude-opus-5-5
+  effort: medium                 # Opus 5.5's default, set explicitly; tuned by D-17
+  escalate: { when: hard_constraints_failed, effort: high, max_attempts: 1 }
+  subagents:
+    inspector: { enabled: false, model: claude-haiku-5-5 }   # benchmark variant only
+revision:
+  model: claude-opus-5-5
+  effort: medium
+research:
+  lead:    { model: claude-opus-5-5, effort: medium }
+  workers: { model: claude-haiku-5-5, max_parallel: 6, budget_micros: 150000 }
+ideation: { model: claude-sonnet-5-5, effort: medium }
+tagging:  { model: claude-haiku-5-5, batch: true }    # Batch API for backfills: 50 % off
+judge:    { model: claude-opus-5-5, effort: high, batch: true }
+```
+
+**Where sub-agents are used.** They are for *bulk* work that fits a "look into N things, then summarise" shape. The editor is one dependent chain in one context window, so it stays a single Opus 5.5 loop ([D-07](05-decisions.md#d-07-agent-runtime-go-native-loop-on-the-claude-messages-api)).
+
+```mermaid
+flowchart LR
+  subgraph EDIT["Editor run: one Opus 5.5 loop, no orchestrator"]
+    E["Editor · Opus 5.5<br/>effort medium, high on failure"]
+    T["Tools: search_moments · view_moment ·<br/>edit_timeline · render_preview"]
+    I["Inspector · Haiku 5.5<br/>(benchmark variant only)"]
+    E --> T
+    E -.->|"delegate: shortlist 40 clips"| I
+    I -.->|"top 5 + reasons"| E
+  end
+  subgraph RES["Research run: our key, shared by all tenants"]
+    L["Lead · Opus 5.5<br/>plans, verifies, synthesises"]
+    W["Workers · Haiku 5.5, 4–8 in parallel<br/>search · read · extract"]
+    L -->|"delegate(question)"| W
+    W -->|"findings + source URLs"| L
+  end
+```
+
+**The `delegate` tool.**
+- **Call:** `delegate(role, task, inputs)` returns a schema-validated report (`summary`, `findings[]`, `sources[]`) plus the worker's cost.
+- **Worker:** it runs its own loop with its own model, prompt, **read-only tool subset** and `budget_micros`. Workers run in parallel up to `max_parallel`.
+- **Accounting:** each worker is an `agent_runs` row with `parent_run_id`, and its cost rolls up into the parent's budget and the ledger.
+- **Failure:** a failed or over-budget worker returns an error report. It never crashes the lead.
+- **Trust:** reports are untrusted data. The lead checks central claims against the cited source before it writes `trends` or `concepts`.
+- **Caching:** a worker starts a fresh prefix and shares no cache with its parent, because caches are model-scoped. Each worker role has its own stable prompt and tool list, so its prefix caches across runs.
+- **Research tools:** workers use the Messages API's server-side `web_search` and `web_fetch` tools (search at about $10 per 1,000). Web fetch only retrieves URLs already in the conversation, so URLs come from search results or the lead's brief.
+
+**Benchmark harness** (`cfctl bench`, protocol and budget in [D-17](05-decisions.md#d-17-model-routing-is-data-tuned-by-benchmark)):
+
+| Part | Design |
+|---|---|
+| Inputs | Eval sets #1 (analysis), #2 (editor scenarios), #3 (research) and an ideation set, as **recorded fixtures**: pre-analysed clip libraries, so analysis cost isn't paid again |
+| Runner | One isolated workspace per cell (scenario × profile × trial). The real renderer runs; the sandbox and TikTok posting are stubbed. Every call's usage is recorded |
+| Scoring | Deterministic hard-constraint checks first, then the judge rubric (calibrated against ~30 human ratings), then a human "would you post it?" sample |
+| Statistics | Mean and p90 cost per *completed* task, pass rate with confidence intervals, quality-versus-cost Pareto frontier |
+| Output | A dated report in `docs/benchmarks/` with the table and chart; raw JSONL in R2 |
+| Safety | Replays never mutate production state; cost is capped per sweep by a budget approved up front |
 
 ## 8. Sandbox layer ([D-08](05-decisions.md#d-08-sandbox-pluggable-interface-default-provider))
 
@@ -433,6 +511,38 @@ Conventions: cursor pagination; `Idempotency-Key` on POSTs that create work; `pr
   - Plans map to quotas (exports per month, storage, concurrent jobs, agent budget).
   - Every billable action writes to `usage_ledger`, and quotas are checked before work is enqueued. Agent runs carry hard `$` budgets.
 
+## 11a. Model access: managed credits or BYOK
+
+Every model call goes through `llm.ClientFactory(workspace)` ([D-18](05-decisions.md#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key)):
+
+| | Managed | BYOK |
+|---|---|---|
+| Key | Platform key from the secret store, in one production Anthropic workspace that has a spend limit as the last backstop | The creator's key from `provider_credentials` |
+| Anthropic bills | Us | The creator |
+| The creator pays us | A subscription with a credit allowance | A lower platform fee |
+| Budgets | Per-run, per-day and per-month credit caps | Per-run $ cap, optional monthly soft cap, plus the creator's own Anthropic workspace spend limit |
+| Ledger `billed_to` | `platform` | `workspace_key` |
+| Prompt cache | The static prefix is shared across tenants, because caches are per workspace | Per key |
+| Rate limits | Ours (we ask for a higher tier) | The creator's tier; new keys start low |
+
+**Key custody (BYOK).**
+- **At rest:** `provider_credentials` holds the key envelope-encrypted (AES-256-GCM, a per-record data key, a versioned master key from the platform secret store; a managed KMS later). The API only ever returns the label, last four characters and status.
+- **In use:** the key is decrypted only inside the `worker` or `api` process at call time. It is never logged, never written to R2, never put in prompts or tool results, and never sent to a sandbox or the browser. Outbound calls with it go only to `api.anthropic.com`.
+- **Access and audit:** only workspace owners can add, replace or remove keys. Every use is audit-logged (workspace, run, model, tokens, never the key).
+- **Validation:** on save we call the Models API for the models our profile needs (`claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`) and refuse a key that can't see them. A later 401 or 403 marks the key `invalid`, pauses that workspace's queued runs and notifies the owner.
+- **Rotation and deletion:** add the new key, test it, switch, delete the old one. Deleting a key purges its ciphertext.
+
+**Rate-limit-aware client.**
+- A per-key concurrency limiter (a low default for new keys), exponential backoff that honours `retry-after`, and queueing instead of failing.
+- Prompt caching on every run: cache reads don't count toward input-token limits.
+- Plain-language UI: "Your Anthropic key is on a low rate-limit tier, so runs will queue. Check your tier in the Anthropic Console." (Thresholds change; don't hard-code them.)
+
+**Metering (both modes).**
+- Every call writes a `usage_ledger` row: input, cache-write, cache-read and output tokens, `list_cost_micros` from a **versioned price table**, and `billed_to`.
+- The same table drives credits in managed mode and the "estimated cost" display in BYOK mode.
+- **Credits:** a per-action price list calibrated against realised COGS, written to the append-only `credit_ledger`. The plan allowance resets monthly, and top-up packs are priced at about 3× COGS.
+- **Guardrails in both modes:** `budget_micros` per run (enforced by the agent runtime before each model request), a per-workspace daily cap, and an alert when a run exceeds the p99 cost.
+
 ## 12. Deployment, environments, observability
 
 - **Environments**: `local` (docker compose: Postgres, MinIO or a dev R2 bucket, worker, api; web via Vite), `staging`, `production`. Separate Clerk instances, R2 buckets and DB branches per environment.
@@ -451,44 +561,88 @@ Conventions: cursor pagination; `Idempotency-Key` on POSTs that create work; `pr
 
 ## 13. Cost model
 
-These are unit-cost **estimates** for budgeting. List prices are from October 2026 ([research §5.8](02-research.md#58-cost-model-inputs-oct-2026-list-prices)); the volumes are assumptions to replace with real `usage_ledger` data during the beta.
+These are **modelled estimates** for budgeting. List prices are from October 2026 ([research §5.8](02-research.md#58-cost-model-inputs-oct-2026-list-prices)). The token volumes are assumptions that the benchmark ([D-17](05-decisions.md#d-17-model-routing-is-data-tuned-by-benchmark)) and the `usage_ledger` will replace.
+
+**Price mechanics that matter** ([prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching), [batch](https://platform.claude.com/docs/en/build-with-claude/batch-processing)):
+- Cache writes cost **1.25×** the input price (5-minute TTL).
+- Cache reads cost **0.05×** on Opus 5.5 ($0.20 per MTok) and about 0.1× elsewhere.
+- Batch processing takes **50 % off every token**, including cache reads and writes.
+- A cache hit needs an identical prefix within the TTL, and caches are isolated per workspace.
+
+### Where an Opus 5.5 editor run spends its money
+
+Worked example for a first edit: ~10 turns; the context grows from ~9k to ~49k tokens as tool results accumulate; ~1.5k output tokens per turn (thinking plus tool calls).
+
+| Component | Tokens | Rate | Cost | Share |
+|---|---|---|---|---|
+| Cache writes (each token written once) | 49k | $5.00 / MTok | $0.245 | 40 % |
+| Cache reads (each turn re-reads the prefix) | 261k | $0.20 / MTok | $0.052 | 9 % |
+| Uncached input | ~2k | $4.00 / MTok | $0.010 | 2 % |
+| Output (thinking + tool calls) | 15k | $20.00 / MTok | $0.300 | 49 % |
+| **First edit, Opus 5.5** | | | **≈ $0.61** | |
+
+The same run costs ≈ $0.33 on Sonnet 5.5 and ≈ $0.02 on Haiku 5.5. A revision (~16k starting context, 4 turns, ~5k output) costs ≈ $0.23 on Opus 5.5. Plausible ranges are $0.45–0.95 for a first edit and $0.15–0.35 for a revision.
+
+**What this says about levers.** About half the cost is output, and about 40 % is cache writes. So effort level, turn count and prefix stability move the bill far more than offloading image viewing to a cheaper model, which would save only ~5 %. That is why the benchmark starts with an effort sweep and escalate-on-failure, not with sub-agents.
+
+### Other units
 
 | Item | Assumption | Estimate |
 |---|---|---|
-| **Editor agent, first edit** | ~12 turns. Prompt caching on (≈ 50k cache-write + ≈ 350k cache-read tokens). ≈ 20k output tokens including thinking. | **≈ $0.40 on Sonnet 5.5** ($2/$10, cache reads $0.20) · ≈ $0.70 on Opus 5.5 ($4/$20) · ≈ $0.03 on Haiku 5.5 if evals show it is good enough |
-| Editor agent, revision | ~5 turns, targeted ops | ≈ $0.10–0.20 (Sonnet 5.5) |
-| Ideation | 1 structured run with a moment-search tool | ≈ $0.03–0.06 |
-| Clip tagging | 30 keyframes per footage-minute × ~700 tokens, Haiku 5.5 | ≈ $0.003 per footage-minute |
-| Rendering | Preview from proxies + final 1080×1920, ~60 s of 4 vCPU | ≈ $0.005 on Cloudflare Containers; less on our own servers |
-| Storage | ~5 GB originals + proxies per active creator per month, R2 Standard, no egress fees | ≈ $0.08 per creator-month |
-| Research agent | Shared across tenants: ~50 web searches ($10 per 1k) + ~1M tokens per region per day | ≈ $1–5 per region-day, not per user |
-| Agent escape hatch | Cloudflare Sandbox, 2 vCPU for 5 min (+ memory) | ≈ $0.02 per run, billed as credits |
+| Ideation | 1 structured run on Sonnet 5.5 with a moment-search tool | ≈ $0.05 |
+| Clip tagging | 30 keyframes per footage-minute × ~700 tokens, Haiku 5.5 | ≈ $0.003 per footage-minute; half that through the Batch API for backfills |
+| Research agent | Shared across tenants. Opus 5.5 lead, 4–8 Haiku 5.5 workers, ~50 web searches ($10 per 1,000) per region per day | ≈ $1–5 per region-day, never per creator. Our key in both billing modes |
+| Rendering | Preview from proxies + final, ~60 s of 4 vCPU | ≈ $0.005 on Cloudflare Containers; less on our own servers |
+| Agent escape hatch | Cloudflare Sandbox, 2 vCPU for 5 min | ≈ $0.02 per run |
+| Storage | ~5 GB originals + proxies per creator-month on R2 Standard, no egress fees | ≈ $0.08 per creator-month |
+| Transcription, shared research, other platform costs | Vendor price not verified | ≈ $0.10 per exported video, all-in |
 
-**Roll-up per exported video** (1 first edit + 2 revisions + ideation + 10 footage-minutes of tagging + renders + storage share):
+### Per exported video
 
-| Model mix for editor runs | ≈ COGS per exported video |
-|---|---|
-| **Opus 5.5 throughout (default, quality reference)** | **$1.00–1.20** |
-| Opus 5.5 first edit + Sonnet 5.5 revisions | $0.85–0.95 |
-| Sonnet 5.5 throughout | $0.60–0.70 |
-| Sonnet 5.5 first edit + Haiku 5.5 revisions and routine steps | $0.45–0.55 |
-| Haiku 5.5 throughout | $0.10–0.15 |
+One first edit, two revisions, ideation, 10 footage-minutes of tagging, plus the platform costs above:
 
-**Model tokens dominate COGS**; compute and storage are noise.
+| Routing | LLM only | All-in |
+|---|---|---|
+| **Decided start: Opus 5.5 for edits and revisions** | ≈ $1.15 | **≈ $1.25** (range ≈ $0.9–1.9) |
+| Opus 5.5 first edit, Sonnet 5.5 revisions | ≈ $0.95 | ≈ $1.05 |
+| Sonnet 5.5 for edits and revisions | ≈ $0.65 | ≈ $0.75 |
+| Sonnet 5.5 first edit, Haiku 5.5 revisions | ≈ $0.45 | ≈ $0.55 |
+| Haiku 5.5 throughout | ≈ $0.10 | ≈ $0.20 |
 
-**Unit economics need a founder decision.** With Opus 5.5 on every edit (≈ $1.10 per video), the Creator plan (€29 for 20 videos ≈ €1.45 per video) is far above the ~25 % COGS guardrail in the [product plan §10](01-product-plan.md#10-pricing-hypothesis). The options are:
-1. Route editor steps to Sonnet 5.5 or Haiku 5.5 **where the P4 evals show they match Opus 5.5** on the quality gates (§7.4).
-2. Price per video higher.
-3. A mix of both.
+### Who pays, and what margin that leaves
 
-The beta measures real cost per exported video, then the founder picks the routing. The v1 target is **< $0.30 per exported video**.
+| | Managed | BYOK |
+|---|---|---|
+| LLM, ≈ $1.15 per video | Us | The creator, on their Anthropic bill |
+| Platform, ≈ $0.10 per video | Us | Us, covered by the platform fee |
 
-**Cost levers, in order:** prompt caching; fewer and denser turns (contact sheets instead of many `view_moment` calls); effort tuning per route; model routing per the decision above; the shared research cost.
+Illustrative plan economics. These are **hypotheses**: €1 ≈ $1.15, 21 % VAT, a merchant-of-record fee of 5 % + $0.50 (an unverified third-party figure), and COGS from the table above at full plan usage.
+
+| Plan | Price | Includes | Net revenue | COGS at full use | Gross margin |
+|---|---|---|---|---|---|
+| Studio (BYOK) | €25 / month | 60 exports | ≈ $22 | 60 × $0.10 = $6 | ≈ 73 % |
+| Creator (managed) | €59 / month | 15 videos | ≈ $52 | 15 × $1.25 = $19 | ≈ 64 % |
+| Pro (managed) | €129 / month | 40 videos | ≈ $115 | 40 × $1.25 = $50 | ≈ 56 % |
+
+A creator who posts 15 videos a month pays about €40 on BYOK (€25 plus ≈ $17 to Anthropic) against €59 managed. The ≈ €19 difference is the price of convenience. Credit caps keep heavy managed users from turning the margin negative.
+
+**Targets.**
+- Managed plans: realised COGS at or below about **40 % of credit value**. The earlier "< $0.30 per video" target is dropped, because the founder chose Opus 5.5 for editing.
+- Private beta: managed credits with a hard cap per creator, so exposure is bounded (20 creators × 15 videos × $1.25 ≈ $375 a month).
+
+**Levers, in the order the benchmark pulls them** ([D-17](05-decisions.md#d-17-model-routing-is-data-tuned-by-benchmark)):
+1. Prompt-prefix stability and caching.
+2. Effort level.
+3. Escalate on failure: cheap pass first, re-run at higher effort only if the validators fail.
+4. Fewer, denser turns: contact sheets instead of many `view_moment` calls.
+5. Batch API for non-interactive work (tagging backfills, judge calls, research evals): 50 % off.
+6. Sub-agents for bulk reading (research, and the editor's optional inspector).
+7. Cheaper models for revisions and ideation, one notch at a time.
 
 ## 14. Security and privacy
 
 - **Data**: the EU region for the database and R2 where available ([D-15](05-decisions.md#d-15-eu-data-residency)); encryption at rest (provider default) and in transit; short-lived presigned URLs; no public buckets.
-- **Secrets**: only in the API and worker; never in sandboxes or prompts; rotated through the platform secret store.
+- **Secrets**: only in the API and worker; never in sandboxes or prompts; rotated through the platform secret store. Creator-supplied Anthropic keys follow the custody rules in [§11a](#11a-model-access-managed-credits-or-byok).
 - **Prompt injection**: user text, transcripts, OCR'd on-screen text and web/trend content are untrusted. Delimit them in prompts, keep tool permissions fixed, and treat a model's request to do something outside its tools as a no-op.
 - **Abuse**: per-workspace rate limits and quotas; upload type and size checks; malware-safe media parsing inside sandboxes; a takedown process.
 - **GDPR**: data processing agreements with every processor (Cloudflare, Clerk, the database host, model providers); a records-of-processing list; retention (delete originals N days after export, configurable); account deletion cascades to R2; **no training on customer content**.

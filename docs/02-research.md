@@ -45,6 +45,11 @@
    - **Don't use Cloudflare Stream**: it would bill for every minute twice next to R2 originals.
    - **Don't use Clerk Billing for an EU business yet**: no VAT and not a merchant of record. Keep Clerk for auth and bill through a merchant of record.
    - **K2 is not needed in v1.** → §5, [D-01](05-decisions.md#d-01-database-postgres-from-day-one-skip-d1-for-the-go-backend), [D-05](05-decisions.md#d-05-realtime-updates-sse-from-go-k2-deferred), [D-06](05-decisions.md#d-06-video-delivery-mp4-proxies-on-r2-no-cloudflare-stream-in-v1), [D-13](05-decisions.md#d-13-billing)
+9. **Model costs, sub-agents and who pays.**
+   - With Opus 5.5 editing, an exported video costs about $1.25 all-in. About half of an editor run is output tokens and about 40 % is cache writes.
+   - So effort level and turn count matter more than cheaper models. Cheap sub-agents pay off for bulk reading such as research, not for the single-context editor chain.
+   - "Bring your own key" must mean an Anthropic API key: subscription logins are barred in third-party products. New keys start on low rate limits.
+   - Managed credits with caps keep margin predictable. → §4.4, [D-17](05-decisions.md#d-17-model-routing-is-data-tuned-by-benchmark), [D-18](05-decisions.md#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key)
 
 ---
 
@@ -211,6 +216,27 @@ Model notes for the agent loop:
   2. *Free-form agent code* (the escape hatch) runs in a per-job hosted sandbox.
 - At MVP volume (well under 1,000 sandbox-hours a month), **managed sandboxes beat self-hosted microVMs on total cost**. Revisit past the crossover. → [D-08](05-decisions.md#d-08-sandbox-pluggable-interface-default-provider)
 
+### 4.4 Multi-model patterns, cost levers and bring-your-own-key
+
+**What Anthropic's cost guidance says** ◐ ([cost guidance](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence), read through the bundled API reference):
+- **Lever order:** prompt caching, then input hygiene, then batch, then effort, with model choice last. Change one lever at a time and keep or revert on the eval.
+- **Sweep effort before dropping a model tier.** The frontier model at lower effort sometimes costs less per solved task than a smaller model. Per-token prices don't predict the ranking.
+- **An orchestrator pays only when there is bulk to hand off:** many independent pieces, ideally too many for one context. When the work is one dependent chain that fits in one context, the coordinator model alone at lower effort came out ahead in every measured case.
+- **Subagents for self-contained bulky steps** can run on a cheaper model, but a subagent starts a fresh prefix and shares no cache with its parent. Skip them when the deciding model needs the intermediate context to judge well.
+- **Re-run failures at higher effort:** run everything at a low setting and re-run only failures at a higher one. In Anthropic's coding runs this held the pass rate for a little over half the cost. It needs a usable failure signal, and we have one in the deterministic validators.
+- **Batch processing** takes 50 % off every token, including cache reads and writes, for work nobody is waiting on. It is single-shot, with no tool loop.
+- **Price the tail.** Compare models on the hardest tenth of the workload, because that is where the bill is decided.
+- **Evidence bar:** about 50 cases and at least 5 trials per configuration for a production cutover; smaller sets with repeated trials for per-lever decisions.
+
+**Prompt-caching facts that shape the design** ◐ ([prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)): cache writes cost 1.25× (5-minute TTL), and reads cost 0.05× on Opus 5.5. Caches are **isolated per workspace** and never shared across organizations, and caches are model-scoped. So managed mode shares one cached prefix across all tenants, while each BYOK key has its own. Cache reads also don't count toward input-token rate limits on most models.
+
+**Claude Managed Agents already documents our research pattern** ◐ ([multiagent](https://platform.claude.com/docs/en/managed-agents/overview)): an Opus 5.5 "research lead" coordinator with a Haiku 5.5 "web researcher" worker, with scheduled deployments for recurring runs. Its worker tokens are billed at the worker model's rates. It is a candidate to benchmark against our Go-native sub-agents ([P5-07](04-implementation-plan.md)).
+
+**Bring your own key: what constrains it.**
+- **Subscription logins can't be used.** Anthropic's consumer terms bar Claude Free, Pro and Max OAuth tokens in other products, enforced from January 2026 and made explicit in a February 2026 docs update. Developers building products are directed to API keys. △ [The Register](https://www.theregister.com/software/2026/02/20/anthropic-clarifies-ban-on-third-party-tool-access-to-claude/5014546), [WinBuzzer](https://winbuzzer.com/2026/02/19/anthropic-bans-claude-subscription-oauth-in-third-party-apps-xcxwbn/). One guide says later plans were paused, so check Anthropic's own pages.
+- **New keys start on low rate limits.** A third-party report says tiers were consolidated into Start, Build and Scale in June 2026, with Start at about 50 requests per minute and promotion at roughly $40 of spend. △ [Knightli](https://knightli.com/en/2026/06/29/claude-api-rate-limits-rpm-itpm-otpm-429/). Cache reads don't count toward input-token limits on most models.
+- **Workspaces have monthly spend limits,** so a creator can cap their own exposure with a dedicated workspace and key. ◐ [Anthropic](https://claude.com/blog/workspaces), a 2024 announcement.
+
 ---
 
 ## 5. Platform: Cloudflare, Clerk, Go, costs
@@ -276,6 +302,8 @@ Sources ◐: [limits](https://developers.cloudflare.com/r2/platform/limits/), [u
 | Item | Unit price |
 |---|---|
 | Claude Opus 5.5 / Sonnet 5.5 / Haiku 5.5 | $4 / $20 · $2 / $10 · $0.10 / $0.50 per MTok (in / out) |
+| Prompt caching | Writes 1.25× (5-minute TTL); reads 0.05× on Opus 5.5 ($0.20 per MTok), about 0.1× elsewhere |
+| Message Batches | 50 % off every token, including cache reads and writes |
 | Web search (model tool) | $10 per 1,000 searches |
 | Managed Agents session runtime | $0.08 per hour |
 | R2 Standard storage | $0.015 per GB-month, egress free |
@@ -295,6 +323,8 @@ Sources ◐: [limits](https://developers.cloudflare.com/r2/platform/limits/), [u
 - As a result, **no claim in this report carries ✔**. The workflow can be resumed from its cached results to run verification.
 
 **Not covered or unverified:**
+- BYOK facts rest on secondary sources: the subscription-login ban (The Register, WinBuzzer), rate-limit tier thresholds (Knightli) and workspace spend limits (a 2024 announcement). Anthropic's legal pages and rate-limit docs weren't read directly.
+- Whether Anthropic's terms allow customer-supplied API keys in a third-party product. This is standard practice but unconfirmed.
 - Competitor pricing (OpusClip, Submagic, Captions, CapCut).
 - Twelve Labs pricing and quality.
 - Current Gemini prices.
