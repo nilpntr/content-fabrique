@@ -1,19 +1,24 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createRouter } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { QueryClient } from "@tanstack/react-query";
+import { createRouter, type RouterHistory } from "@tanstack/react-router";
+import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query";
 import { routeTree } from "./routeTree.gen";
 
-/** Start calls this once per server request and once in the browser, so nothing is shared between visitors. */
-export function getRouter() {
-  const queryClient = new QueryClient();
-  return createRouter({
+/**
+ * Start calls this once per server request and once in the browser, so nothing is shared between visitors.
+ * Tests pass a memory history.
+ */
+export function getRouter(history?: RouterHistory) {
+  // Data fetched on the server is sent to the browser; a staleTime keeps it from being refetched at once.
+  const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000 } } });
+  const router = createRouter({
     routeTree,
+    history,
     defaultPreload: "intent",
     scrollRestoration: true,
-    Wrap: ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    ),
   });
+  // Also wraps the router in a QueryClientProvider.
+  setupRouterSsrQueryIntegration({ router, queryClient });
+  return router;
 }
 
 declare module "@tanstack/react-router" {
