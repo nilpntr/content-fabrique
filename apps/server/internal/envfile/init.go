@@ -72,6 +72,12 @@ func Init(examplePath, envPath string, random io.Reader) (InitResult, error) {
 		lines = lines[:len(lines)-1]
 	}
 
+	// New lines use the file's own line ending.
+	eol := "\n"
+	if strings.Contains(string(content), "\r\n") {
+		eol = "\r\n"
+	}
+
 	changed := res.Created
 	for _, s := range Secrets {
 		// The last assignment of a name is the effective one.
@@ -101,9 +107,9 @@ func Init(examplePath, envPath string, random io.Reader) (InitResult, error) {
 			lines[idx] = line[:eq+1] + value + after
 		} else {
 			if n := len(lines); n > 0 && !strings.HasSuffix(lines[n-1], "\n") {
-				lines[n-1] += "\n"
+				lines[n-1] += eol
 			}
-			lines = append(lines, s.Name+"="+value+"\n")
+			lines = append(lines, s.Name+"="+value+eol)
 		}
 		res.Generated = append(res.Generated, s.Name)
 		changed = true

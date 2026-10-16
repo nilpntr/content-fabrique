@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -35,16 +36,17 @@ func TestParseExample(t *testing.T) {
 	for _, v := range vars {
 		byName[v.Name] = v
 	}
-	if v := byName["VITE_CLERK_PUBLISHABLE_KEY"]; !v.Has(TagNow) || !v.Has(TagPublic) || v.Has(TagAuto) || v.Comment != "pk_test_..." {
+	if v := byName["VITE_CLERK_PUBLISHABLE_KEY"]; !slices.Contains(v.Tags, TagNow) || !slices.Contains(v.Tags, TagPublic) ||
+		slices.Contains(v.Tags, TagAuto) || v.Comment != "pk_test_..." {
 		t.Errorf("VITE_CLERK_PUBLISHABLE_KEY = %+v", v)
 	}
-	if v := byName["DATABASE_URL"]; v.Default != "postgres://cf:cf@localhost:5432/cf?sslmode=disable" || !v.Has(TagAuto) {
+	if v := byName["DATABASE_URL"]; v.Default != "postgres://cf:cf@localhost:5432/cf?sslmode=disable" || !slices.Contains(v.Tags, TagAuto) {
 		t.Errorf("DATABASE_URL = %+v", v)
 	}
-	if v := byName["ANTHROPIC_API_KEY"]; v.Default != "" || !v.Has(TagNow) {
+	if v := byName["ANTHROPIC_API_KEY"]; v.Default != "" || !slices.Contains(v.Tags, TagNow) {
 		t.Errorf("ANTHROPIC_API_KEY = %+v", v)
 	}
-	if !byName["CLOUDFLARE_ACCOUNT_ID"].Has(TagStaging) {
+	if !slices.Contains(byName["CLOUDFLARE_ACCOUNT_ID"].Tags, TagStaging) {
 		t.Error("CLOUDFLARE_ACCOUNT_ID should be YOU-staging")
 	}
 }

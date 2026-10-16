@@ -46,16 +46,6 @@ type Var struct {
 	Comment string
 }
 
-// Has reports whether the variable carries the tag.
-func (v Var) Has(t Tag) bool {
-	for _, x := range v.Tags {
-		if x == t {
-			return true
-		}
-	}
-	return false
-}
-
 var (
 	nameRE = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 	tagRE  = regexp.MustCompile(`\[([A-Za-z0-9-]+)\]`)
@@ -70,8 +60,11 @@ type assignment struct {
 	valueStart, valueEnd int
 }
 
-// splitAssignment parses a NAME=value line. ok is false for blank lines, comment lines and anything else.
+// splitAssignment parses a NAME=value line. ok is false for blank lines, comment lines and anything else. The line
+// may end in "\n" or "\r\n": the ending is not part of the value, and the offsets in the result are valid for the
+// original line, so the caller can keep the ending when it rewrites the line.
 func splitAssignment(line string) (a assignment, ok bool) {
+	line = strings.TrimRight(line, "\r\n")
 	trimmed := strings.TrimLeft(line, " \t")
 	trimmed = strings.TrimPrefix(trimmed, "export ")
 	trimmed = strings.TrimLeft(trimmed, " \t")
