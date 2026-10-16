@@ -1,0 +1,12 @@
+# Model catalogue: each native Anthropic model ID (what the routing profiles use, and what the direct API and the
+# gateway's /anthropic endpoint take) mapped to its Cloudflare REST name (provider/model).
+#
+# The dotted Cloudflare spelling is the founder's. Cloudflare's docs show no 5.5 model, so treat it as unverified
+# until `cfctl doctor` resolves it with CF_AI_API_TOKEN set (docs/06-setup-and-credentials.md §3.1).
+models:
+  claude-opus-5-5:
+    cloudflare: anthropic/claude-opus-5.5
+  claude-sonnet-5-5:
+    cloudflare: anthropic/claude-sonnet-5.5
+  claude-haiku-5-5:
+    cloudflare: anthropic/claude-haiku-5.5

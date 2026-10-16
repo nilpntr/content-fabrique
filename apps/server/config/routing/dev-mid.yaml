@@ -1,0 +1,18 @@
+# Rung 2 of the cheap-first ladder (decision D-22): Sonnet 5.5 for every stage, about $0.33 per editor run.
+# Same shape as v1-start. Use it once dev-cheap is clean, to tell model limits apart from prompt and tool flaws.
+profile: dev-mid
+editor:
+  model: claude-sonnet-5-5
+  effort: medium
+  escalate: { when: hard_constraints_failed, effort: high, max_attempts: 1 }
+  subagents:
+    inspector: { enabled: false, model: claude-sonnet-5-5 }
+revision:
+  model: claude-sonnet-5-5
+  effort: medium
+research:
+  lead:    { model: claude-sonnet-5-5, effort: medium }
+  workers: { model: claude-sonnet-5-5, max_parallel: 6, budget_micros: 150000 }
+ideation: { model: claude-sonnet-5-5, effort: medium }
+tagging:  { model: claude-sonnet-5-5, batch: true }
+judge:    { model: claude-sonnet-5-5, effort: high, batch: true }

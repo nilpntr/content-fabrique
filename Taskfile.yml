@@ -1,0 +1,21 @@
+# https://taskfile.dev. P0-02 extends this file with `task dev` and friends; P0-14 added the env tasks.
+version: '3'
+
+tasks:
+  env:init:
+    desc: Create .env from .env.example if missing and generate the empty [AUTO] secrets (never prints values)
+    dir: apps/server
+    cmds:
+      - go run ./cmd/cfctl env init
+
+  env:lint:
+    desc: Fail if code reads an environment variable that .env.example does not list
+    dir: apps/server
+    cmds:
+      - go run ./cmd/cfctl env lint
+
+  doctor:
+    desc: "Check the environment and every service. Default: --env local. Example: task doctor -- --env staging --phase P4"
+    dir: apps/server
+    cmds:
+      - go run ./cmd/cfctl doctor {{if .CLI_ARGS}}{{.CLI_ARGS}}{{else}}--env local{{end}}
