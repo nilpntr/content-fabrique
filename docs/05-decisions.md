@@ -26,6 +26,7 @@
 | D-19 | Model gateway: Cloudflare AI Gateway in BYOK mode in front of customer-facing model calls; OpenRouter only as an optional non-Claude provider | Accepted (the founder chose it for customer traffic); gated by the conformance test in P4-00 |
 | D-20 | Two model lanes: AWS Activate credits fund testing on Amazon Bedrock, direct; customer traffic goes through the gateway on its own funding | Superseded by D-21 (the founder dropped the AWS credits) |
 | D-21 | Testing calls the first-party Claude API directly and is self-funded; customer traffic goes through the gateway; no AWS credits, no Bedrock lane | Accepted (founder decision) |
+| D-22 | Cheap-first testing ladder: free replay, then Haiku, then Sonnet, then Opus, with an exit checklist per rung | Accepted (founder direction) |
 
 ---
 
@@ -269,7 +270,7 @@ Our own model of an Opus 5.5 editor run ([architecture §13](03-architecture.md#
 
 **Alternatives.** Choosing by price list or intuition (rejected: it doesn't predict cost per completed task). A router model that picks a model per request (rejected for v1: another failure mode, and it loses cache locality).
 
-**Consequences.** The harness, a consented eval dataset and an approved budget become P4 deliverables ([implementation plan](04-implementation-plan.md)). Until the first sweep finishes, the starting profile in [D-07](#d-07-agent-runtime-go-native-loop-on-the-claude-messages-api) applies.
+**Consequences.** The harness, a consented eval dataset and an approved budget become P4 deliverables ([implementation plan](04-implementation-plan.md)). Until the first sweep finishes, the starting profile in [D-07](#d-07-agent-runtime-go-native-loop-on-the-claude-messages-api) applies. Before any sweep, development climbs the cheap-first ladder of [D-22](#d-22-cheap-first-testing-ladder).
 
 **Revisit** on every model release.
 
@@ -396,9 +397,50 @@ Research variants can't run on Bedrock (no web tools), so their ≈ $150 comes f
 - Apply for AWS Activate anyway ([D-20](#d-20-two-model-lanes-credits-fund-testing-customers-fund-production)). Rejected for the reasons above.
 - Other startup credits. Google's reportedly don't cover Claude on Vertex, and Anthropic's own startup perks are paused ([research §4.5](02-research.md#45-funding-claude-usage-anthropic-credits-aws-activate-and-google)).
 
-**Consequences.** One provider, no capability matrix, no AWS accounts and no parity run. The benchmark program is now a cash cost. At the [D-17](#d-17-model-routing-is-data-tuned-by-benchmark) estimates it comes to about $1,650 if every sweep is scaled down (four at ≈ $125, the cutover at ≈ $1,000, research and ideation at ≈ $150), and up to about $2,550 if every sweep is a full one (≈ $350 each). The levers are the ones in D-17: `dev-cheap` for everyday loops (≈ $0.02 per run), scaled-down sweeps first, the Batch API for judge calls (50 % off) and prompt caching.
+**Consequences.** One provider, no capability matrix, no AWS accounts and no parity run. The benchmark program is now a cash cost. At the [D-17](#d-17-model-routing-is-data-tuned-by-benchmark) estimates it comes to about $1,650 if every sweep is scaled down (four at ≈ $125, the cutover at ≈ $1,000, research and ideation at ≈ $150), and up to about $2,550 if every sweep is a full one (≈ $350 each). The levers are the ones in D-17: `dev-cheap` for everyday loops (≈ $0.02 per run), scaled-down sweeps first, the Batch API for judge calls (50 % off), prompt caching, and the cheap-first ladder of [D-22](#d-22-cheap-first-testing-ladder), which keeps the early work off the expensive models.
 
 **Revisit** if testing spend becomes material and the company has a website that fits the Activate application (applying later is still possible: the Founders grant is one-time per company, and not applying doesn't use it up), if Bedrock gains the missing features, or if EU creators need EU-only processing. Bedrock's EU endpoints are the option for that, at list price ([D-15](#d-15-eu-data-residency)).
+
+## D-22 Cheap-first testing ladder
+
+**Context.** The founder's direction: the first testing runs on cheap models, and only once the flaws are out do we move to expensive ones, because a paid sweep spent on a fixable bug is wasted money. [D-17](#d-17-model-routing-is-data-tuned-by-benchmark) already says to change one lever at a time, and the architecture already has a `dev-cheap` profile. This decision makes the climb explicit: a free rung below the cheapest, a checklist to leave each rung, and a record-and-replay mode so tests stop paying for the same call twice.
+
+Cost of one editor first edit, from [architecture §13](03-architecture.md#13-cost-model): Haiku 5.5 about $0.02, Sonnet 5.5 about $0.33, Opus 5.5 about $0.61.
+
+**Decision.** Five rungs. Leave a rung only when its checklist is green, and record the result in the PR or the benchmark report.
+
+| Rung | Profile | What runs | Cost | Purpose |
+|---|---|---|---|---|
+| 0. Free | none, `LLM_MODE=replay` | unit tests, golden renders, validators, and agent-loop tests that replay recorded model calls | $0 | Everything deterministic. A flaw found on a higher rung becomes a recorded transcript here first |
+| 1. Cheap | `dev-cheap`: Haiku 5.5 for every stage | the loop, tools, validators, budgets, caching, UI flows and the eval harness, on 10 to 20 scenarios | about $0.02 a run, capped by the $50 `dev` workspace limit | Remove the plumbing flaws |
+| 2. Mid | `dev-mid`: Sonnet 5.5 for every stage | the same scenarios, about 10 with 2 trials each | about $7 to $10 a pass | Tell model limits apart from prompt and tool flaws |
+| 3. Opus | `v1-start` | a smoke test of 5 scenarios, then one scaled-down sweep (15 scenarios × 6 profiles × 2 trials) | about $3, then about $125 | Prove the Opus path and see the shape of the results |
+| 4. Sweeps | `v1-start` variants | the full development sweeps and the cutover from D-17 | about $350 each, and about $1,000 | The numbers that decide the routing profile |
+
+**Exit checklists.**
+- **Rung 1 to 2.** All of these hold over at least 3 trials of every scenario:
+  1. No unhandled errors. Every run ends as succeeded, failed or cancelled, including cancel and resume, and a killed worker resumes without a duplicate side effect.
+  2. A rejected tool call never kills a run, and the validator's message lets the model recover.
+  3. Budgets stop runs cleanly, and the ledger's total matches the Anthropic Console's usage for the `dev` workspace within about 5 %.
+  4. Cache reads appear from the second turn on a stable prefix. The minimum cacheable length differs by model, so check each model once.
+  5. The renderer handles every output (the golden tests pass), and the eval harness catches a set of deliberately broken outputs.
+  6. Cost per run matches the estimate, about $0.02 to $0.05 on `dev-cheap`.
+- **Rung 2 to 3.** Every failure that remains on Sonnet is fixed or explained as a model limit, and the hard-constraint pass rate is at least 80 %, the release-gate number in P4-07.
+- **Rung 3 to 4.** The scenario set, validators and judge rubric are frozen (no changes mid-sweep), the judge is calibrated against the human ratings, and the scaled-down sweep gave stable results.
+
+**Rules.**
+1. **Never re-run a paid sweep to debug code.** Debug on rung 0 or 1.
+2. **Record and replay.** `LLM_MODE=record` stores each request and response under `apps/server/testdata/cassettes/`, keyed by a hash of the canonical request (model, system prompt, messages, tools and parameters). Keys are scrubbed and only synthetic data is recorded. `replay` serves them and fails the test on a miss, so no test silently makes a live call.
+3. **Every failure gets a regression test on rung 0** before the next rung starts.
+4. **A paid sweep needs the founder's go-ahead each time.** The `dev` workspace limit is raised for it and lowered again afterwards.
+
+**Alternatives.**
+- Start on Opus to see the real quality. Rejected: about 30 times the cost of Haiku while the plumbing is still broken.
+- Use only Haiku until the cutover. Rejected: Haiku failures can hide prompt flaws, and judging quality needs a stronger model.
+
+**Consequences.** Rungs 0 to 2 cost about $45 to $130 in total (a few hundred Haiku runs and a few Sonnet passes). Rung 3's scaled-down sweep is the first of the scaled-down sweeps already counted in the [D-21](#d-21-testing-on-the-first-party-api-self-funded) budget, plus about $3 for the smoke test. Rung 4 is the rest of that budget, spent only when the flaws are gone. The cost is one more profile (`dev-mid`) and a record and replay mode in the model client.
+
+**Revisit** if a rung's checklist keeps passing but the next rung finds the same class of flaw, because then the checklist is missing a check.
 
 ## Template for new decisions
 

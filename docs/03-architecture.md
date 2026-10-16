@@ -121,6 +121,7 @@ packages/
   schemas/                 # timeline JSON Schema + OpenAPI spec (single source of truth)
   media-tools/             # Dockerfile + Python CLI for the media/sandbox image
 infra/                     # IaC: Cloudflare (R2, DNS, Workers), backend hosts
+.env.example               # every variable the stack reads; sources in docs/06
 docs/
 ```
 
@@ -396,7 +397,7 @@ tagging:  { model: claude-haiku-5-5, batch: true }    # Batch API for backfills:
 judge:    { model: claude-opus-5-5, effort: high, batch: true }
 ```
 
-Development uses a second profile, `dev-cheap`, with Haiku 5.5 for every stage (about $0.02 per editor run), so loops, tools and validators can be built for pennies. Switch to `v1-start` only when judging quality.
+Development climbs a **cheap-first ladder** ([D-22](05-decisions.md#d-22-cheap-first-testing-ladder)). It starts on `dev-cheap`, Haiku 5.5 for every stage (about $0.02 per editor run), until the loop, tools and validators are solid. Then comes `dev-mid` (Sonnet 5.5 for every stage, about $0.33), and only then `v1-start` (Opus 5.5) for a smoke test and the sweeps. Agent-loop tests run with `LLM_MODE=replay`, which serves recorded model calls and costs nothing.
 
 **Where sub-agents are used.** They are for *bulk* work that fits a "look into N things, then summarise" shape. The editor is one dependent chain in one context window, so it stays a single Opus 5.5 loop ([D-07](05-decisions.md#d-07-agent-runtime-go-native-loop-on-the-claude-messages-api)).
 
@@ -560,7 +561,7 @@ Every model call goes through `llm.ClientFactory(workspace)` ([D-18](05-decision
 
 ## 12. Deployment, environments, observability
 
-- **Environments**: `local` (docker compose: Postgres, MinIO or a dev R2 bucket, worker, api; web via Vite), `staging`, `production`. Separate Clerk instances, R2 buckets and DB branches per environment. Model access follows the environment ([D-21](05-decisions.md#d-21-testing-on-the-first-party-api-self-funded)): `production` and `staging` go through their own AI Gateway, while `local`, `ci` and `bench` call the Anthropic API directly with the development key.
+- **Environments**: `local` (docker compose: Postgres, MinIO or a dev R2 bucket, worker, api; web via Vite), `staging`, `production`. Separate Clerk instances, R2 buckets and DB branches per environment. Model access follows the environment ([D-21](05-decisions.md#d-21-testing-on-the-first-party-api-self-funded)): `production` and `staging` go through their own AI Gateway, while `local`, `ci` and `bench` call the Anthropic API directly with the development key. Environment variables: `.env.example` lists every name. Local values live in `.env`, and staging and production values in `.env.staging` and `.env.production` on the founder's machine and in the CI secret store ([setup guide](06-setup-and-credentials.md)).
 - **Hosting** ([D-09](05-decisions.md#d-09-hosting)):
   - Web on Cloudflare Workers.
   - Go `api` and `worker` on EU servers (e.g. Hetzner) as containers, reachable only through **Cloudflare Tunnel**.
