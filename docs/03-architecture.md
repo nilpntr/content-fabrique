@@ -126,7 +126,7 @@ docs/
 
 ## 4. Data model
 
-Postgres, every tenant-owned row carries `workspace_id`. IDs are UUIDv7, which is time-sortable. Simplified:
+Postgres, every tenant-owned row carries `workspace_id`. IDs are UUIDv7, which is time-sortable; the API and the timeline spec show them as TypeIDs such as `ast_01j…` ([D-24](05-decisions.md#d-24-public-ids-are-typeids-over-uuidv7)). Simplified:
 
 ```mermaid
 erDiagram
@@ -240,6 +240,8 @@ All CPU/ML steps run in the `media-tools` image inside the sandbox layer (§8), 
 - **Portability**: the same spec can later drive an in-browser live preview or another renderer.
 
 ### Spec (v1, abridged)
+
+The full rules for v1, the edit ops and the compiler are in the [timeline design note](design/timeline-v1.md).
 
 ```json
 {
