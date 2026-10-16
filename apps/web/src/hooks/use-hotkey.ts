@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 
 function typing(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -23,5 +23,13 @@ export function useHotkey(key: string, handler: (event: KeyboardEvent) => void, 
   }, [key, mod]);
 }
 
-export const MOD_KEY =
-  typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? "⌘" : "Ctrl";
+const noSubscription = () => () => {};
+
+function platformModKey(): "⌘" | "Ctrl" {
+  return /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? "⌘" : "Ctrl";
+}
+
+/** "⌘" on Apple platforms, "Ctrl" elsewhere. The server renders "Ctrl", so hydration matches and Apple browsers switch after. */
+export function useModKey(): "⌘" | "Ctrl" {
+  return useSyncExternalStore(noSubscription, platformModKey, () => "Ctrl");
+}

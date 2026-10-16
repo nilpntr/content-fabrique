@@ -1,18 +1,22 @@
-import { act, cleanup, render, screen, within } from "@testing-library/react";
-import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
+import { act, screen, within } from "@testing-library/react";
+import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
+import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test } from "vitest";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { routeTree } from "./router";
+import { getRouter } from "./router";
 
-afterEach(cleanup);
+let root: Root | undefined;
 
+afterEach(() => {
+  act(() => root?.unmount());
+  root = undefined;
+});
+
+// The root route is the whole document (<html> and up) and supplies the providers, so render it into
+// `document` the way Start hydrates it.
 function renderAt(path: string) {
-  const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: [path] }) });
-  render(
-    <TooltipProvider>
-      <RouterProvider router={router} />
-    </TooltipProvider>,
-  );
+  const router = getRouter(createMemoryHistory({ initialEntries: [path] }));
+  root = createRoot(document);
+  act(() => root?.render(<RouterProvider router={router} />));
   return router;
 }
 

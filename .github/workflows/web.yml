@@ -27,3 +27,5 @@ jobs:
       - run: bun run typecheck
       - run: bun run test
       - run: bun run build
+      # Start regenerates the route tree on build; a diff means the committed one is stale.
+      - run: git diff --exit-code -- src/routeTree.gen.ts

@@ -1,25 +1,28 @@
 import { QueryClient } from "@tanstack/react-query";
-import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
-import { AppShell } from "@/components/app-shell";
-import { NotFound } from "@/pages/not-found";
-import { OverviewPage } from "@/pages/overview";
-import { ReportsPage } from "@/pages/reports";
-import { SettingsPage } from "@/pages/settings";
+import { createRouter, type RouterHistory } from "@tanstack/react-router";
+import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query";
+import { routeTree } from "./routeTree.gen";
 
-export const queryClient = new QueryClient();
-
-const rootRoute = createRootRoute({ component: AppShell, notFoundComponent: NotFound });
-
-const overviewRoute = createRoute({ getParentRoute: () => rootRoute, path: "/", component: OverviewPage });
-const reportsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/reports", component: ReportsPage });
-const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsPage });
-
-export const routeTree = rootRoute.addChildren([overviewRoute, reportsRoute, settingsRoute]);
-
-export const router = createRouter({ routeTree, defaultPreload: "intent", scrollRestoration: true });
+/**
+ * Start calls this once per server request and once in the browser, so nothing is shared between visitors.
+ * Tests pass a memory history.
+ */
+export function getRouter(history?: RouterHistory) {
+  // Data fetched on the server is sent to the browser; a staleTime keeps it from being refetched at once.
+  const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000 } } });
+  const router = createRouter({
+    routeTree,
+    history,
+    defaultPreload: "intent",
+    scrollRestoration: true,
+  });
+  // Also wraps the router in a QueryClientProvider.
+  setupRouterSsrQueryIntegration({ router, queryClient });
+  return router;
+}
 
 declare module "@tanstack/react-router" {
   interface Register {
-    router: typeof router;
+    router: ReturnType<typeof getRouter>;
   }
 }
