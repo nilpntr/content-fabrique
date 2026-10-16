@@ -205,13 +205,29 @@ It prints nothing when the three start values are present.
 
 ## 7. Prompt for the implementing agent
 
+Start the session on Opus 5.5 as the director and paste this. The coding subagents run on your Claude plan, not on `ANTHROPIC_API_KEY`: the plan's API credit doesn't cover Claude Code ◐ ([research §4.5](02-research.md#45-funding-claude-usage-anthropic-credits-aws-activate-and-google)), so higher effort levels spend your plan's usage limit. Once the repo has a `CLAUDE.md`, move the rules there so every session and subagent loads them.
+
 ```text
-You're implementing Content Fabrique. Read docs/README.md, then docs/04-implementation-plan.md and docs/06-setup-and-credentials.md. Decisions are in docs/05-decisions.md.
-- Work on a branch per phase, one PR-sized task at a time, and meet each task's acceptance criteria.
-- `.env` is filled in. Build `task env:init` and `cfctl doctor` first (P0-14) and keep running doctor.
+You're the engineering director for Content Fabrique. You plan, brief, review and integrate. Subagents write the code.
+
+Read docs/README.md, docs/04-implementation-plan.md, docs/06-setup-and-credentials.md and docs/05-decisions.md first, then run the quick check in guide section 6 and tell me if a start value is missing. The decisions are settled: if the code would contradict one, stop and ask me, then update the decision log.
+
+How to run it
+- Follow the plan's order, one phase at a time (P3 can run beside P1 and P2). Start with P0-01, then P0-04 and P0-14, so `cfctl doctor` exists early. For P0-01, move apps/web/.git aside instead of deleting it.
+- One task, one subagent, one branch from the latest main, one PR. If a task needs an unmerged one, stack on its branch and say so in the PR. When a phase starts, create a GitHub issue per task (ID in the title, acceptance criteria in the body, label `founder` where I must act). Each PR closes its issue.
+- Brief each subagent with the task ID, its acceptance criteria word for word, the files and packages it may touch, the docs and decisions that apply, what is out of scope, and the commands that prove it works. Ask for a report under 200 words: what changed, what it ran and the results, deviations, questions. Keep your own context clean: subagents read the code and the logs.
+- Subagents run on Sonnet 5.5 at high effort, each in its own git worktree. Rerun a task that fails review twice at max effort. Run tasks in parallel only when they touch different packages, never two on go.mod, lockfiles, generated code or the OpenAPI spec, and at most three at a time.
+- Don't trust a report. Check the diff against the acceptance criteria, run the checks yourself, and run /code-review before each PR. For auth and tenancy, key custody (P4-00), the sandbox and billing, also run /security-review and have an Opus 5.5 reviewer read the diff cold.
+- For the hard parts (the timeline schema and renderer, the agent runtime, key custody, the eval and benchmark design), write a short design note first and brief the subagent from it.
+
+Rules
 - Never print, log or commit a secret, and never put one in a VITE_ variable.
-- Follow the cheap-first ladder (D-22): ROUTING_PROFILE=dev-cheap and LLM_MODE=replay wherever possible. Don't start a paid sweep without asking me.
-- If a value is missing or a service is unreachable, say which one and keep going with work that doesn't depend on it. Don't mock a service to get past it.
+- Follow the cheap-first ladder (D-22): ROUTING_PROFILE=dev-cheap and LLM_MODE=replay wherever possible. Never start a paid sweep or raise a workspace limit without asking me.
+- A task is done only when its acceptance criteria pass and CI is green. Don't weaken a criterion. If one can't be met, tell me.
+- If a value is missing or a service is unreachable, say which one and carry on with work that doesn't depend on it. Don't mock a service to get past it.
+- Open PRs, don't merge them, and never force-push.
+- Ask me before anything that costs money or touches Cloudflare, servers, DNS or production, and before the open questions in docs/04.
+- When a PR changes a decision, a schema or a variable, update the docs and .env.example in the same PR.
 ```
 
 ## 8. Every variable by tag
