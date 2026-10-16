@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -9,8 +10,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -75,12 +81,134 @@ func TestReadyzShuttingDown(t *testing.T) {
 	}
 }
 
-func TestHandlerRecoversPanics(t *testing.T) {
+func TestHandlerRecoversAndLogsPanics(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /boom", func(http.ResponseWriter, *http.Request) { panic("boom") })
-	rec := get(t, Handler(mux, discardLogger()), "/boom")
+	rec := get(t, Handler(mux, logger), "/boom")
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("code = %d", rec.Code)
+	}
+	if out := buf.String(); !strings.Contains(out, "panic in handler") || !strings.Contains(out, "msg=\"http request\"") || !strings.Contains(out, "status=500") {
+		t.Fatalf("panicked request not access-logged with 500:\n%s", out)
+	}
+}
+
+func TestProbesAreNotTraced(t *testing.T) {
+	exp := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp))
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() { otel.SetTracerProvider(prev) })
+
+	h := Handler(NewMux(NewHealth(discardLogger())), discardLogger())
+	get(t, h, "/healthz")
+	get(t, h, "/readyz")
+	if n := len(exp.GetSpans()); n != 0 {
+		t.Fatalf("probes produced %d spans", n)
+	}
+	get(t, h, "/nope")
+	spans := exp.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("unknown path produced %d spans, want 1", len(spans))
+	}
+}
+
+func TestReadyzRunsChecksConcurrently(t *testing.T) {
+	slow := func(context.Context) error { time.Sleep(300 * time.Millisecond); return nil }
+	h := NewHealth(discardLogger(), Check{Name: "a", Fn: slow}, Check{Name: "b", Fn: slow}, Check{Name: "c", Fn: slow})
+	start := time.Now()
+	rec := get(t, NewMux(h), "/readyz")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code = %d", rec.Code)
+	}
+	if d := time.Since(start); d > 700*time.Millisecond {
+		t.Fatalf("checks ran sequentially: %s", d)
+	}
+}
+
+func TestReadyzBoundedByTimeoutForStuckCheck(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	h := NewHealth(discardLogger(), Check{Name: "stuck", Fn: func(context.Context) error { <-release; return nil }})
+	start := time.Now()
+	rec := get(t, NewMux(h), "/readyz")
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code = %d", rec.Code)
+	}
+	if d := time.Since(start); d > CheckTimeout+time.Second {
+		t.Fatalf("took %s", d)
+	}
+}
+
+func TestDuplicateCheckPanics(t *testing.T) {
+	ok := func(context.Context) error { return nil }
+	assertPanics(t, func() { NewHealth(discardLogger(), Check{Name: "x", Fn: ok}, Check{Name: "x", Fn: ok}) })
+	h := NewHealth(discardLogger(), Check{Name: "x", Fn: ok})
+	assertPanics(t, func() { h.AddCheck(Check{Name: "x", Fn: ok}) })
+}
+
+func assertPanics(t *testing.T, f func()) {
+	t.Helper()
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic")
+		}
+	}()
+	f()
+}
+
+func TestServeForcedShutdownReturnsWrappedError(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	health := NewHealth(logger)
+	mux := NewMux(health)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once atomic.Bool
+	mux.HandleFunc("GET /stuck", func(http.ResponseWriter, *http.Request) {
+		if once.CompareAndSwap(false, true) {
+			close(started)
+		}
+		<-release
+	})
+	srv := NewServer(addr, mux)
+	ctx, cancel := context.WithCancel(context.Background())
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- Serve(ctx, srv, health, ServeOptions{DrainDelay: -1, ShutdownTimeout: 200 * time.Millisecond}, logger)
+	}()
+	waitFor(t, func() bool {
+		resp, err := http.Get("http://" + addr + "/healthz")
+		if err != nil {
+			return false
+		}
+		_ = resp.Body.Close()
+		return true
+	})
+	go func() {
+		if resp, err := http.Get("http://" + addr + "/stuck"); err == nil {
+			_ = resp.Body.Close()
+		}
+	}()
+	<-started
+	cancel()
+
+	err = <-serveErr
+	close(release)
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "forced shutdown") {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(buf.String(), "forced shutdown after timeout") {
+		t.Fatalf("log missing forced shutdown line:\n%s", buf.String())
 	}
 }
 

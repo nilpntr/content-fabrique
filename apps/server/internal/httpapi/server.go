@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -11,11 +12,13 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-// Defaults for Serve. Container runtimes send SIGTERM and wait about ten seconds before SIGKILL, so the
-// drain delay plus the shutdown timeout must stay under that.
+// Shutdown budget. Container runtimes send SIGTERM and SIGKILL about ten seconds later, so the worst case
+// must stay under that: DefaultDrainDelay (readyz is 503, still serving) + DefaultShutdownTimeout (in-flight
+// requests finish) + TelemetryFlushTimeout (pending spans exported) = 1s + 6s + 2s = 9s.
 const (
 	DefaultDrainDelay      = 1 * time.Second
-	DefaultShutdownTimeout = 8 * time.Second
+	DefaultShutdownTimeout = 6 * time.Second
+	TelemetryFlushTimeout  = 2 * time.Second
 )
 
 // NewMux returns a mux with the health endpoints registered. Later tasks add API routes to it.
@@ -25,10 +28,12 @@ func NewMux(h *Health) *http.ServeMux {
 	return mux
 }
 
-// Handler wraps next with HTTP server tracing (otelhttp), panic recovery and access logging.
-// Tracing is outermost so the log lines carry trace_id and span_id.
+// Handler wraps next with HTTP server tracing (otelhttp), access logging and panic recovery, outermost first.
+// Tracing wraps the access log so log lines carry trace_id and span_id, and the access log wraps recovery so a
+// panicked request is logged with status 500. Probe requests (/healthz, /readyz) are not traced.
 func Handler(next http.Handler, logger *slog.Logger) http.Handler {
-	return otelhttp.NewHandler(recoverer(accessLog(next, logger), logger), "http.server")
+	return otelhttp.NewHandler(accessLog(recoverer(next, logger), logger), "http.server",
+		otelhttp.WithFilter(func(r *http.Request) bool { return !isProbe(r) }))
 }
 
 // NewServer returns an http.Server with conservative timeouts.
@@ -87,13 +92,21 @@ func Serve(ctx context.Context, srv *http.Server, health *Health, opts ServeOpti
 	defer cancel()
 	if err := srv.Shutdown(shutCtx); err != nil {
 		_ = srv.Close()
-		return err
+		if errors.Is(err, context.DeadlineExceeded) {
+			logger.Error("forced shutdown after timeout", "timeout", opts.ShutdownTimeout.String())
+			return fmt.Errorf("forced shutdown after %s: in-flight requests did not finish: %w", opts.ShutdownTimeout, err)
+		}
+		return fmt.Errorf("server shutdown: %w", err)
 	}
 	if err := <-errCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	logger.Info("shutdown complete")
 	return nil
+}
+
+func isProbe(r *http.Request) bool {
+	return r.URL.Path == "/healthz" || r.URL.Path == "/readyz"
 }
 
 func recoverer(next http.Handler, logger *slog.Logger) http.Handler {
@@ -131,7 +144,7 @@ func accessLog(next http.Handler, logger *slog.Logger) http.Handler {
 		next.ServeHTTP(rec, r)
 
 		level := slog.LevelInfo
-		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+		if isProbe(r) {
 			level = slog.LevelDebug
 		}
 		logger.Log(r.Context(), level, "http request",

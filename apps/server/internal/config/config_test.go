@@ -66,3 +66,11 @@ func TestLoadErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadRejectsOTLPScheme(t *testing.T) {
+	for _, ep := range []string{"ftp://collector:4318", "grpc://collector:4317", "collector:4318"} {
+		if _, err := Load(env(map[string]string{"OTEL_EXPORTER_OTLP_ENDPOINT": ep})); err == nil {
+			t.Errorf("%q: expected error", ep)
+		}
+	}
+}

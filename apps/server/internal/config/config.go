@@ -67,7 +67,7 @@ func Load(getenv Getenv) (Config, error) {
 	c.APIListenAddr = addr
 
 	if c.OTLPEndpoint != "" {
-		if u, err := url.Parse(c.OTLPEndpoint); err != nil || u.Scheme == "" || u.Host == "" {
+		if u, err := url.Parse(c.OTLPEndpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			errs = append(errs, errors.New("OTEL_EXPORTER_OTLP_ENDPOINT: must be an absolute http(s) URL"))
 		}
 	}
