@@ -154,6 +154,6 @@ Both profiles write `yuv420p` and add `-map_metadata -1` and `-fflags +bitexact`
 
 ## 8. Order and boundaries
 
-P3-01 schema and validation → P3-09 beat utilities → P3-02 ops (including `snap_cuts_to_beats`, which uses P3-09) → P3-03 compiler → P3-04 text and P3-05 audio → P3-06 render jobs (needs River from P0-06 and storage from P1-01) → P3-07 and P3-08 web (need the API from P0-08).
+P3-01 schema and validation → P3-09 beat utilities → P3-02 ops (including `snap_cuts_to_beats`, which uses P3-09) → P3-03 compiler → P3-04 text and P3-05 audio → P3-06 render jobs (needs River from P0-06 and storage from P1-01) → P3-07 and P3-08 web (need the API from P0-08). P3-07 includes the range-selection timeline under the player and the comment history side panel ([plan, P3-07](../04-implementation-plan.md#p3--timeline-spec-and-renderer--34-weeks-parallel-with-p1p2)).
 
 Out of scope for v1: overlay video tracks, keyframed motion, LUT files, the in-browser live preview and HyperFrames titles. The schema leaves room for them: new track types and new enum values are additive changes inside `v1`. Anything that changes the meaning of an existing field needs `v2`.
