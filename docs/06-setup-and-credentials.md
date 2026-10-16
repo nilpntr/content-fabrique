@@ -169,7 +169,7 @@ Grant exactly this and nothing more. The same instruction sits above each token 
 
 ## 5. Tools to install
 
-Go 1.24 or newer (the Anthropic Go SDK needs it ◐), Node 22 LTS with pnpm, Docker with compose, `wrangler` 4.141 or newer (the Sandbox base image needs it locally ◐), `cloudflared`, `sqlc`, `goose` or Atlas, `oapi-codegen`, `task` and `openssl`. ffmpeg 8 lives in the `media-tools` image. gVisor (`runsc`) is needed only on the Linux servers ([D-08](05-decisions.md#d-08-sandbox-pluggable-interface-default-provider)).
+Go 1.24 or newer (the Anthropic Go SDK needs it ◐), Node 22 LTS and bun 1.4 or newer (the JS package manager), Docker with compose, `wrangler` 4.141 or newer (the Sandbox base image needs it locally ◐), `cloudflared`, `sqlc`, `goose` or Atlas, `oapi-codegen`, `task` and `openssl`. ffmpeg 8 lives in the `media-tools` image. gVisor (`runsc`) is needed only on the Linux servers ([D-08](05-decisions.md#d-08-sandbox-pluggable-interface-default-provider)).
 
 ## 6. Checking it
 

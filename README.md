@@ -31,7 +31,7 @@ https://www.framejam.ai/
 Create a simple dashboard where people can upload their content, let ai create the ideas, get a simple timeline interface where people can highlight a certain period in the video with remarks/comments
 
 ## Tech Stack
-- Tanstack Start(apps/web)
+- Tanstack Start(apps/web, use bun as package manager)
 - Backend in golang(apps/server)
 - Cloudflare
 - R2
