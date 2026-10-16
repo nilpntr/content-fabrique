@@ -45,9 +45,9 @@ Create four workspaces in the Console, one key each. Each has a monthly spend li
 
 ### 3.2 Clerk
 
-1. Create an application and turn on **Organizations**, because they are our workspaces.
+1. Create an application and turn on **Organizations**, Clerk's B2B side. Every workspace is a Clerk organization, and a solo creator gets a personal one at onboarding ([D-12](05-decisions.md)). Set **Membership required** (the label may read differently; it is the setting that turns personal accounts off) so every signed-in user has an active workspace △. Keep the default roles, Admin for the creator and Member for a teammate. Add custom roles only when the Team and Agency plan needs them, because they may need a paid Clerk plan.
 2. Use the **development instance** for local work and staging. Copy the publishable key (`pk_test_…`) into `VITE_CLERK_PUBLISHABLE_KEY` and the secret key (`sk_test_…`) into `CLERK_SECRET_KEY`. The TanStack Start SDK reads exactly these two names ◐ (`@clerk/tanstack-react-start`).
-3. `CLERK_ISSUER`, the Frontend API URL, is derived from the publishable key by `task env:init`, or you copy it from the dashboard under API keys △. `CLERK_JWKS_URL` defaults to `<issuer>/.well-known/jwks.json` △. The Go middleware verifies session JWTs against them.
+3. **The secret for the Go backend is `CLERK_SECRET_KEY`, so there is nothing extra to create.** The Clerk Go SDK middleware uses it to fetch the instance's public signing keys and verify each request's session token, and the same key lets the backend call Clerk's Backend API. Keep it server-side only: never in the browser, so never with a `VITE_` prefix.
 4. **Webhook, on staging.** Add an endpoint `https://<staging api host>/v1/webhooks/clerk` for the `user.*`, `organization.*` and `organizationMembership.*` events, and copy its signing secret (`whsec_…`) into `CLERK_WEBHOOK_SECRET`. Locally the handler is tested with signed fixtures, so no tunnel is needed.
 5. **Production instance, later.** It needs the production domain and DNS records, and gives `pk_live_…` and `sk_live_…` keys.
 
@@ -157,7 +157,7 @@ It prints nothing when the three start values are present.
 | Cloudflare token | the token-verify call, then list the EU R2 buckets and the AI Gateways △ |
 | Anthropic | a token-count request on the configured model, with no generation cost |
 | AI Gateway (staging, production) | the same request through `ANTHROPIC_BASE_URL` with `cf-aig-authorization` |
-| Clerk | fetch the JWKS, and make one Backend API call with `CLERK_SECRET_KEY` |
+| Clerk | one Backend API call with `CLERK_SECRET_KEY`, listing a single user |
 | Sandbox gateway | `GET /healthz` on the Worker, with the token |
 | Observability | send one test event and expect a 2xx |
 | TikTok, billing | format checks only until their phase |
@@ -180,7 +180,7 @@ You're implementing Content Fabrique. Read docs/README.md, then docs/04-implemen
 The same tags as in [`.env.example`](../.env.example), which holds the defaults and a comment per line.
 
 - **You provide before the agent starts, `[YOU-now]` (3):** `ANTHROPIC_API_KEY`, `VITE_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`.
-- **Local defaults or generated, `[AUTO]` (24):** `CF_ENV`, `APP_BASE_URL`, `API_BASE_URL`, `VITE_API_BASE_URL`, `ROUTING_PROFILE`, `LLM_MODE`, `ANTHROPIC_BASE_URL`, `DATABASE_URL`, `DATABASE_DIRECT_URL`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_JURISDICTION`, `CLERK_ISSUER`, `CLERK_JWKS_URL`, `SECRETS_MASTER_KEY`, `SECRETS_MASTER_KEY_VERSION`, `SANDBOX_GATEWAY_URL`, `SANDBOX_GATEWAY_TOKEN`, `RIVER_UI_PASSWORD`.
+- **Local defaults or generated, `[AUTO]` (22):** `CF_ENV`, `APP_BASE_URL`, `API_BASE_URL`, `VITE_API_BASE_URL`, `ROUTING_PROFILE`, `LLM_MODE`, `ANTHROPIC_BASE_URL`, `DATABASE_URL`, `DATABASE_DIRECT_URL`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_JURISDICTION`, `SECRETS_MASTER_KEY`, `SECRETS_MASTER_KEY_VERSION`, `SANDBOX_GATEWAY_URL`, `SANDBOX_GATEWAY_TOKEN`, `RIVER_UI_PASSWORD`.
 - **You provide when staging is set up, `[YOU-staging]` (14):** `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_TUNNEL_TOKEN`, `CF_AIG_GATEWAY_ID`, `CF_AIG_TOKEN`, `CLERK_WEBHOOK_SECRET`, `DEPLOY_HOST`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_PRIVATE_KEY`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`, `SENTRY_DSN`, `VITE_SENTRY_DSN`.
 - **TikTok, `[YOU-P6]` (3):** `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, `TIKTOK_REDIRECT_URI`.
 - **Billing, `[YOU-P7]` (8):** `BILLING_PROVIDER`, `PADDLE_API_KEY`, `PADDLE_WEBHOOK_SECRET`, `PADDLE_CLIENT_TOKEN`, `PADDLE_ENVIRONMENT`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PUBLISHABLE_KEY`. Fill in one provider's set.

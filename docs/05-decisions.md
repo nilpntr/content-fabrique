@@ -197,6 +197,8 @@ Daytona is not considered: its open-source repo was reported unmaintained or arc
 - Every workspace is a Clerk organization (a solo creator gets a personal org created at onboarding), so teams and agencies need no migration later.
 - The Go API verifies Clerk session JWTs with the Go SDK v2 middleware (`clerkhttp.RequireHeaderAuthorization`, claims via `clerk.SessionClaimsFromContext`) and resolves `workspace_id` from the active org.
 - Clerk webhooks (Svix-signed) sync users, orgs and memberships into Postgres idempotently.
+- **Clerk settings.** Organizations on, and membership required, so every signed-in user has an active workspace and `workspace_id` always resolves. Keep the default Admin and Member roles in v1, and add custom roles only when the Team and Agency plan needs them.
+- **Secrets.** The Go service uses `CLERK_SECRET_KEY` with the SDK middleware, which fetches the instance's public signing keys, so there is no separate API secret. The webhook signing secret is the only other one.
 
 **Revisit** if Clerk pricing at scale, or EU data-residency requirements, become a problem.
 
