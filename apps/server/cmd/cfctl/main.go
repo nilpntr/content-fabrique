@@ -15,6 +15,8 @@ Usage:
   cfctl <command>
 
 Commands:
+  doctor     check the environment's variables and services (cfctl doctor --help)
+  env        init: create .env and generate secrets. lint: check variable reads against .env.example
   version    print the build version
   help       show this help
 `
@@ -33,6 +35,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "version", "-version", "--version":
 		_, _ = fmt.Fprintf(stdout, "cfctl %s\n", version.Get())
 		return 0
+	case "doctor":
+		return cmdDoctor(args[1:], stdout, stderr, os.LookupEnv)
+	case "env":
+		return cmdEnv(args[1:], stdout, stderr)
 	case "help", "-h", "-help", "--help":
 		_, _ = fmt.Fprint(stdout, usage)
 		return 0

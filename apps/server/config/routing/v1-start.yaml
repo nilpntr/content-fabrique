@@ -1,0 +1,17 @@
+# The starting profile (docs/03-architecture.md §7.5, decision D-07). Opus 5.5 where judgement matters.
+profile: v1-start
+editor:
+  model: claude-opus-5-5
+  effort: medium                 # Opus 5.5's default, set explicitly; tuned by D-17
+  escalate: { when: hard_constraints_failed, effort: high, max_attempts: 1 }
+  subagents:
+    inspector: { enabled: false, model: claude-haiku-5-5 }   # benchmark variant only
+revision:
+  model: claude-opus-5-5
+  effort: medium
+research:
+  lead:    { model: claude-opus-5-5, effort: medium }
+  workers: { model: claude-haiku-5-5, max_parallel: 6, budget_micros: 150000 }
+ideation: { model: claude-sonnet-5-5, effort: medium }
+tagging:  { model: claude-haiku-5-5, batch: true }    # Batch API for backfills: 50 % off
+judge:    { model: claude-opus-5-5, effort: high, batch: true }

@@ -35,11 +35,11 @@ Create four workspaces in the Console, one key each. Each has a monthly spend li
 | Workspace | Used by | Limit per month | Key goes to |
 |---|---|---|---|
 | `dev` | local development and benchmarks | $50, raised for a paid sweep ([D-22](05-decisions.md#d-22-cheap-first-testing-ladder)) | `ANTHROPIC_API_KEY` in `.env` |
-| `ci` | GitHub Actions model tests | $25 | the CI secret `ANTHROPIC_API_KEY` |
+| `ci` | live model calls in GitHub Actions, only if a test ever needs them (CI runs in replay mode, [D-22](05-decisions.md#d-22-cheap-first-testing-ladder)) | $25 | the CI secret `ANTHROPIC_API_KEY`, created only then |
 | `staging` | the staging app | $100 | `.env.staging` |
 | `production` | the production app, managed credits | $500 (the private beta is capped at about $375 a month) | `.env.production` |
 
-- Only `dev` is needed to start. Create the others when staging and CI exist.
+- Only `dev` is needed to start. Create `staging` and `production` when those environments exist, and `ci` only if a test ever needs live calls in CI.
 - **Plan credit.** Your Max plan gives $200 a month of API credit, which pays for any key in the Console organization linked to it, so create `dev` there. The credit doesn't roll over, and every workspace in that organization draws from one balance, so keep production in a separate organization ([D-21](05-decisions.md#d-21-testing-on-the-first-party-api-self-funded)).
 - Creators' own keys (BYOK) are never in `.env`. They sit encrypted in Postgres under `SECRETS_MASTER_KEY` ([architecture §11a](03-architecture.md#11a-model-access-managed-credits-or-byok)).
 - `ROUTING_PROFILE` starts at `dev-cheap` and `LLM_MODE` at `live` ([D-22](05-decisions.md#d-22-cheap-first-testing-ladder)).
@@ -94,7 +94,7 @@ Tokens. Apart from the tunnel token, which `cfctl bootstrap` makes, you create e
 ### 3.5 Servers, CI and GitHub
 
 - **EU servers** ([D-09](05-decisions.md#d-09-hosting)). You order one for staging and one for production and create an SSH user with Docker access. The agent installs Docker and `cloudflared` over SSH. The research priced a Hetzner AX102 at about $115 a month for production. Staging is a smaller box and wasn't priced. Values: `DEPLOY_HOST`, `DEPLOY_SSH_USER` and `DEPLOY_SSH_PRIVATE_KEY`, an ed25519 key pair made only for deploys ([§3.9](#39-scopes-and-permissions-per-token)).
-- **GitHub** → Settings → Environments: create `staging` and `production`, with a required reviewer on `production`. Secrets per environment: the `ci` Anthropic key (as `ANTHROPIC_API_KEY`), `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` and the `DEPLOY_*` values. Images go to GitHub Container Registry with the built-in `GITHUB_TOKEN`, so they need no extra secret.
+- **GitHub** → Settings → Environments: create `staging` and `production`, with a required reviewer on `production`. Secrets per environment: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` and the `DEPLOY_*` values. Images go to GitHub Container Registry with the built-in `GITHUB_TOKEN`, so they need no extra secret.
 - **Renovate:** install the Renovate GitHub App on the repository (P0-03).
 
 ### 3.6 Observability
@@ -156,20 +156,20 @@ Grant exactly this and nothing more. The same instruction sits above each token 
 
 | Variables | local | ci | bench | staging | production |
 |---|---|---|---|---|---|
-| Anthropic key | `dev` | `ci` | `dev` | `staging` | `production` |
-| `ANTHROPIC_BASE_URL`, `CF_AIG_*` | `cf-dev` (empty until P0-09) | `cf-dev` (empty until P0-09) | `cf-dev` (empty until P0-09) | `cf-staging` | `cf-production` |
+| Anthropic key | `dev` | none (replay) | `dev` | `staging` | `production` |
+| `ANTHROPIC_BASE_URL`, `CF_AIG_*` | `cf-dev` (empty until P0-09) | none (replay) | `cf-dev` (empty until P0-09) | `cf-staging` | `cf-production` |
 | Postgres | Docker | service container | Docker | PlanetScale | PlanetScale |
 | `DATABASE_MIGRATE_URL` | same database | same database | same database | migrate role, release step only | migrate role, release step only |
 | `APP_BASE_URL`, `API_BASE_URL` | `localhost:3000`, `localhost:8080` | `localhost` | `localhost` | `staging.contentfabrique.app`, `api-staging.contentfabrique.app` | `contentfabrique.app`, `api.contentfabrique.app` |
 | Object storage | MinIO | MinIO | MinIO | `cf-media-staging` | `cf-media-production` |
-| Clerk | development | development | none | development | production |
+| Clerk | development | none (replay) | none | development | production |
 | Cloudflare bootstrap token | yes | deploy only | no | no | no |
 | Observability | empty | empty | empty | Axiom and Sentry | Axiom and Sentry |
 | TikTok and billing | sandbox as needed | none | none | sandbox | live |
 
 ## 5. Tools to install
 
-Go 1.24 or newer (the Anthropic Go SDK needs it ◐), Node 22 LTS and bun 1.4 or newer (the JS package manager), Docker with compose, `wrangler` 4.141 or newer (the Sandbox base image needs it locally ◐), `cloudflared`, `sqlc`, `goose` or Atlas, `oapi-codegen`, `task` and `openssl`. ffmpeg 8 lives in the `media-tools` image. gVisor (`runsc`) is needed only on the Linux servers ([D-08](05-decisions.md#d-08-sandbox-pluggable-interface-default-provider)).
+Go 1.24 or newer (the Anthropic Go SDK needs it ◐), Node 22 LTS and bun 1.4 or newer (the JS package manager), Docker with compose, `wrangler` 4.141 or newer (the Sandbox base image needs it locally ◐), `cloudflared`, `sqlc`, `goose` or Atlas, `oapi-codegen`, `task` and `openssl` (only for making the generated secrets by hand: `task env:init` doesn't use it). ffmpeg 8 lives in the `media-tools` image. gVisor (`runsc`) is needed only on the Linux servers ([D-08](05-decisions.md#d-08-sandbox-pluggable-interface-default-provider)).
 
 ## 6. Checking it
 
@@ -187,14 +187,21 @@ It prints nothing when the three start values are present.
 **`cfctl doctor --env <local|ci|bench|staging|production> [--phase P4]`** (P0-14):
 
 - The required variables follow the tags: `[YOU-now]` and `[AUTO]` always, `[YOU-staging]` for `staging` and `production`, and the later tags once `--phase` reaches them.
-- It makes one cheap authenticated call per service and never prints a value, only the variable name and ok, missing, invalid or skipped. The exit code is 1 on any missing or invalid.
+- It makes one cheap authenticated call per service and never prints a value, only the variable name and ok, missing, invalid or skipped, each with a short reason such as `unreachable` or `auth rejected (HTTP 401)`. The exit code is 1 on any missing or invalid.
+- **The env file.** By default `.env` for `local` and `bench`, `.env.staging` and `.env.production` for those, and none for `ci` (the process environment only). `--env-file PATH` overrides it. A non-empty value in the file wins; the process environment fills every name the file lacks or leaves empty. `--json` prints the report as JSON.
+- **`CF_ENV` must equal `--env`**, because a mismatch means the wrong file was loaded. The one exception is `bench`, which runs with the local `.env` and so accepts `CF_ENV=local` too.
+- **`POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB`** configure the local Docker Postgres only. They are required for `local`, `ci` and `bench`, and skipped for `staging` and `production`.
+- **The AI Gateway is authenticated** ([D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)), so when `ANTHROPIC_BASE_URL` is set, `CF_AIG_TOKEN` is required in every environment. `OTEL_EXPORTER_OTLP_HEADERS` is not needed for the observability check: a local collector without authentication is valid.
+- **`ci` holds no Anthropic or Clerk secrets** (CI runs in replay mode, [D-22](05-decisions.md#d-22-cheap-first-testing-ladder)). For `--env ci`, `ANTHROPIC_API_KEY`, `VITE_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` are not required, and the Anthropic, AI Gateway and Clerk checks report `skipped`. If they are set anyway, they are checked like any other environment.
+- **Run it** with `task doctor` (`--env local`) or `task doctor -- --env staging --phase P4`. `task env:init` creates `.env` and fills the three generated secrets without printing them, and a second run changes nothing.
+- **`cfctl env lint`** (`task env:lint`, and the `env` workflow in CI) fails when the Go or web code reads a variable that `.env.example` doesn't list. Names the platform sets (Vite's `MODE`, `DEV`, `PROD`, `SSR`, `BASE_URL`, plus `NODE_ENV` and `CI`) are on a short allowlist in `internal/envlint`.
 
 | Service | Call |
 |---|---|
 | Postgres | `SELECT 1` on both URLs, and a `LISTEN` on the direct one |
 | Object storage | put, get and delete a one-byte object with the credentials against `R2_ENDPOINT`, which proves the EU endpoint and signing |
 | Cloudflare token | the token-verify call, then list the EU R2 buckets and the AI Gateways △ |
-| Anthropic and model names | a token-count request for each model in the active profile by its native ID (`claude-opus-5-5`), with no generation cost. When `CF_AI_API_TOKEN` is set, a one-token request for the same models by their Cloudflare names (`anthropic/claude-opus-5.5`) △ |
+| Anthropic and model names | a token-count request for each model in the active profile by its native ID (`claude-opus-5-5`), with no generation cost. When `CF_AI_API_TOKEN` is set, a one-token request for the same models by their Cloudflare names (`anthropic/claude-opus-5.5`) on the REST API's Anthropic-compatible `/ai/v1/messages` △ |
 | AI Gateway (when `ANTHROPIC_BASE_URL` is set) | the same request through it with `cf-aig-authorization` |
 | Clerk | one Backend API call with `CLERK_SECRET_KEY`, listing a single user |
 | Sandbox gateway | `GET /healthz` on the Worker, with the token |

@@ -1,0 +1,18 @@
+# Rung 1 of the cheap-first ladder (decision D-22): Haiku 5.5 for every stage, about $0.02 per editor run.
+# Same shape as v1-start. Use it until the loop, tools and validators are solid.
+profile: dev-cheap
+editor:
+  model: claude-haiku-5-5
+  effort: medium
+  escalate: { when: hard_constraints_failed, effort: high, max_attempts: 1 }
+  subagents:
+    inspector: { enabled: false, model: claude-haiku-5-5 }
+revision:
+  model: claude-haiku-5-5
+  effort: medium
+research:
+  lead:    { model: claude-haiku-5-5, effort: medium }
+  workers: { model: claude-haiku-5-5, max_parallel: 6, budget_micros: 150000 }
+ideation: { model: claude-haiku-5-5, effort: medium }
+tagging:  { model: claude-haiku-5-5, batch: true }
+judge:    { model: claude-haiku-5-5, effort: high, batch: true }
