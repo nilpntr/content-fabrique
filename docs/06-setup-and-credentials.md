@@ -188,7 +188,10 @@ It prints nothing when the three start values are present.
 
 - The required variables follow the tags: `[YOU-now]` and `[AUTO]` always, `[YOU-staging]` for `staging` and `production`, and the later tags once `--phase` reaches them.
 - It makes one cheap authenticated call per service and never prints a value, only the variable name and ok, missing, invalid or skipped, each with a short reason such as `unreachable` or `auth rejected (HTTP 401)`. The exit code is 1 on any missing or invalid.
-- **The env file.** By default `.env` for `local` and `bench`, `.env.staging` and `.env.production` for those, and none for `ci` (the process environment only). `--env-file PATH` overrides it. Values in the file win; the process environment only fills names the file lacks, and a name that is present but empty in the file stays empty. `--json` prints the report as JSON.
+- **The env file.** By default `.env` for `local` and `bench`, `.env.staging` and `.env.production` for those, and none for `ci` (the process environment only). `--env-file PATH` overrides it. A non-empty value in the file wins; the process environment fills every name the file lacks or leaves empty. `--json` prints the report as JSON.
+- **`CF_ENV` must equal `--env`**, because a mismatch means the wrong file was loaded. The one exception is `bench`, which runs with the local `.env` and so accepts `CF_ENV=local` too.
+- **`POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB`** configure the local Docker Postgres only. They are required for `local`, `ci` and `bench`, and skipped for `staging` and `production`.
+- **The AI Gateway is authenticated** ([D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)), so when `ANTHROPIC_BASE_URL` is set, `CF_AIG_TOKEN` is required in every environment. `OTEL_EXPORTER_OTLP_HEADERS` is not needed for the observability check: a local collector without authentication is valid.
 - **`ci` holds no Anthropic or Clerk secrets** (CI runs in replay mode, [D-22](05-decisions.md#d-22-cheap-first-testing-ladder)). For `--env ci`, `ANTHROPIC_API_KEY`, `VITE_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` are not required, and the Anthropic, AI Gateway and Clerk checks report `skipped`. If they are set anyway, they are checked like any other environment.
 - **Run it** with `task doctor` (`--env local`) or `task doctor -- --env staging --phase P4`. `task env:init` creates `.env` and fills the three generated secrets without printing them, and a second run changes nothing.
 - **`cfctl env lint`** (`task env:lint`, and the `env` workflow in CI) fails when the Go or web code reads a variable that `.env.example` doesn't list. Names the platform sets (Vite's `MODE`, `DEV`, `PROD`, `SSR`, `BASE_URL`, plus `NODE_ENV` and `CI`) are on a short allowlist in `internal/envlint`.
@@ -198,7 +201,7 @@ It prints nothing when the three start values are present.
 | Postgres | `SELECT 1` on both URLs, and a `LISTEN` on the direct one |
 | Object storage | put, get and delete a one-byte object with the credentials against `R2_ENDPOINT`, which proves the EU endpoint and signing |
 | Cloudflare token | the token-verify call, then list the EU R2 buckets and the AI Gateways △ |
-| Anthropic and model names | a token-count request for each model in the active profile by its native ID (`claude-opus-5-5`), with no generation cost. When `CF_AI_API_TOKEN` is set, a one-token request for the same models by their Cloudflare names (`anthropic/claude-opus-5.5`) △ |
+| Anthropic and model names | a token-count request for each model in the active profile by its native ID (`claude-opus-5-5`), with no generation cost. When `CF_AI_API_TOKEN` is set, a one-token request for the same models by their Cloudflare names (`anthropic/claude-opus-5.5`) on the REST API's Anthropic-compatible `/ai/v1/messages` △ |
 | AI Gateway (when `ANTHROPIC_BASE_URL` is set) | the same request through it with `cf-aig-authorization` |
 | Clerk | one Backend API call with `CLERK_SECRET_KEY`, listing a single user |
 | Sandbox gateway | `GET /healthz` on the Worker, with the token |
