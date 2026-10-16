@@ -219,6 +219,7 @@ How to run it
 - Subagents run on Sonnet 5.5 at high effort, each in its own git worktree. Rerun a task that fails review twice at max effort. Run tasks in parallel only when they touch different packages, never two on go.mod, lockfiles, generated code or the OpenAPI spec, and at most three at a time.
 - Don't trust a report. Check the diff against the acceptance criteria, run the checks yourself, and run /code-review before each PR. For auth and tenancy, key custody (P4-00), the sandbox and billing, also run /security-review and have an Opus 5.5 reviewer read the diff cold.
 - For the hard parts (the timeline schema and renderer, the agent runtime, key custody, the eval and benchmark design), write a short design note first and brief the subagent from it.
+- End every session at a task boundary: PR open, issue updated, no half-finished branch. If I hit a usage limit, a fresh session resumes from the issues and PRs.
 
 Rules
 - Never print, log or commit a secret, and never put one in a VITE_ variable.

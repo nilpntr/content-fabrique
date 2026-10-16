@@ -30,7 +30,7 @@
   - the benchmark budget you'd fund yourself (≈ $350 per development sweep, ≈ $1,000 for the cutover, about $1,650 to $2,550 in total, partly covered by your Max plan's $200 a month of API credit, which doesn't roll over), and whether the Console organization holding that credit is development-only;
   - the legal questions in P0-12, including Anthropic's terms for customer keys;
   - your budget, target regions and beta creators ([implementation plan, open questions](04-implementation-plan.md#open-questions-for-the-founder)).
-- **First action:** `apps/web` was committed as a broken git link, so the UI isn't in the repo yet. See [implementation plan §0](04-implementation-plan.md#0-current-state-2026-10-16). Then copy `.env.example` to `.env` and fill the three `[YOU-now]` values ([setup guide](06-setup-and-credentials.md)).
+- **First action:** `apps/web` was committed as a broken git link, so the UI isn't in the repo yet. See [implementation plan §0](04-implementation-plan.md#0-current-state-2026-10-16). Then copy `.env.example` to `.env` and fill the three `[YOU-now]` values ([setup guide](06-setup-and-credentials.md)). Then start the director session with the prompt in [setup guide §7](06-setup-and-credentials.md#7-prompt-for-the-implementing-agent).
 
 ## Documents
 
