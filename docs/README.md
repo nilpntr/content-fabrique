@@ -12,6 +12,7 @@
   - Postgres from day one, not D1, because a Go service outside Workers can only reach D1 through Cloudflare's rate-limited REST API.
   - R2 in the EU jurisdiction.
   - Clerk for auth; billing through a merchant of record (handles EU VAT), not Clerk Billing.
+  - Every model call goes through Cloudflare AI Gateway in BYOK mode, so plan and AWS credits still apply. OpenRouter is only an optional provider for non-Claude models.
   - Claude Opus 5.5 edits, via a Go-native agent loop. Cheaper models (Haiku 5.5) run as sub-agents directed by an Opus 5.5 lead for research and other bulk reading. Everything else is tuned by a benchmark harness.
   - A pluggable sandbox layer: gVisor-hardened containers for our media jobs, Cloudflare Sandbox for free-form agent code.
   - Cloudflare K2 is deliberately **not** needed in v1.
@@ -23,6 +24,7 @@
   - **Who pays for tokens:** two plan families per workspace. *Managed* credits (we call Claude, priced for ≥ 60 % margin) or *BYOK* (the creator's Anthropic API key, lower platform fee). Claude Pro/Max logins can't be used in third-party products.
 - **Decisions waiting on you:**
   - the billing mode for the private beta (I recommend managed credits with a hard cap per creator, BYOK opt-in);
+  - whether to run beta editor traffic on Bedrock if AWS Activate approves you, and a website or profile for the application;
   - plan prices and the margin target;
   - the benchmark budget (≈ $350 per development sweep, ≈ $1,000 for the cutover), and which Console organization receives your plan's monthly API credits if you're on Max or Team;
   - the legal questions in P0-12, including Anthropic's terms for customer keys;

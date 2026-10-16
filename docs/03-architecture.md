@@ -24,6 +24,7 @@ flowchart LR
   subgraph CF[Cloudflare]
     WEB["Workers<br/>SSR + static assets"]
     R2[("R2<br/>originals · proxies · analysis · renders")]
+    GW["AI Gateway<br/>BYOK keys · metadata tags"]
   end
 
   CLERK["Clerk<br/>auth · orgs"]
@@ -37,7 +38,7 @@ flowchart LR
   end
 
   PG[("Postgres<br/>app data · jobs · events")]
-  LLM["Anthropic API<br/>our key (managed) or the<br/>creator's key (BYOK)"]
+  LLM["Anthropic API · Amazon Bedrock<br/>our keys (managed) or the<br/>creator's key (BYOK)"]
   TRD["Trend data providers"]
   TT["TikTok APIs<br/>Login Kit · Content Posting"]
 
@@ -52,7 +53,8 @@ flowchart LR
   WRK -->|claim jobs| PG
   WRK <--> R2
   WRK --> AGT
-  AGT --> LLM
+  AGT --> GW
+  GW --> LLM
   AGT --> TRD
   AGT --> SBX
   SBX <-->|presigned URLs| R2
@@ -76,6 +78,7 @@ flowchart LR
 | R2 | Cloudflare | All media and large artefacts |
 | Clerk | SaaS | Users, sessions, organizations (workspaces) |
 | Billing | Merchant of record: Stripe MoR or Paddle ([D-13](05-decisions.md#d-13-billing)) | Checkout, subscriptions, EU VAT and sales tax; webhooks → plans and entitlements in Postgres |
+| AI Gateway | Cloudflare ([D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)) | One front door for all model calls: our provider keys or the creator's, analytics, spend limits as a backstop, payload logging off |
 | Model APIs | SaaS | Claude for agents and tagging, called with our key (managed) or the creator's key (BYOK, [D-18](05-decisions.md#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key)); a video-native model only where it wins ([D-10](05-decisions.md#d-10-video-understanding)) |
 
 ### Repository layout
@@ -527,6 +530,11 @@ Every model call goes through `llm.ClientFactory(workspace)` ([D-18](05-decision
 | Prompt cache | The static prefix is shared across tenants, because caches are per workspace | Per key |
 | Rate limits | Ours (we ask for a higher tier) | The creator's tier; new keys start low |
 
+**Gateway ([D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)).** Both billing modes call models through Cloudflare AI Gateway in BYOK mode.
+- **Client:** the SDK's base URL points at the gateway's Anthropic endpoint (or the Bedrock endpoint for a Bedrock lane), and the provider key travels with the request. Native Anthropic features pass through unchanged.
+- **Per-request headers:** `cf-aig-metadata` tags (`workspace_id`, `run_id`, `stage`, `profile`; the limit is five entries) and `cf-aig-collect-log-payload: false`. The gateway then keeps metadata (tokens, model, cost, duration) but not prompts or frames.
+- **Guards:** the gateway requires provider credentials, so a request can never fall back to Cloudflare-managed billing. Retries live in our client only. A config flag sends traffic straight to the provider if the gateway is down.
+
 **Key custody (BYOK).**
 - **At rest:** `provider_credentials` holds the key envelope-encrypted (AES-256-GCM, a per-record data key, a versioned master key from the platform secret store; a managed KMS later). The API only ever returns the label, last four characters and status.
 - **In use:** the key is decrypted only inside the `worker` or `api` process at call time. It is never logged, never written to R2, never put in prompts or tool results, and never sent to a sandbox or the browser. Outbound calls with it go only to `api.anthropic.com`.
@@ -558,7 +566,7 @@ Every model call goes through `llm.ClientFactory(workspace)` ([D-18](05-decision
   - build the images (`api`, `worker`, `media-tools`) and deploy;
   - Renovate for dependencies;
   - migrations run as a release step.
-- **Observability**: structured logs (`slog`) + OpenTelemetry traces and metrics. One trace spans API → job → agent turns → sandbox exec. Export goes to a managed backend (e.g. Axiom or Grafana Cloud), with error tracking in the web app. Dashboards: queue depth and latency per job type, render time per output minute, agent cost per run, failures by tool.
+- **Observability**: structured logs (`slog`) + OpenTelemetry traces and metrics. One trace spans API → job → agent turns → sandbox exec. Export goes to a managed backend (e.g. Axiom or Grafana Cloud), with error tracking in the web app. Dashboards: queue depth and latency per job type, render time per output minute, agent cost per run, failures by tool. AI Gateway analytics give a second view of model cost and latency per stage; our ledger stays the source of truth, because gateway cost is a best-effort estimate.
 - **Agent observability**: every run has a replayable event log, plus an admin view to inspect prompts, tool calls, cost and the resulting timeline.
 
 ## 13. Cost model
@@ -644,7 +652,7 @@ A creator who posts 15 videos a month pays about €40 on BYOK (€25 plus ≈ $
 ## 14. Security and privacy
 
 - **Data**: the EU region for the database and R2 where available ([D-15](05-decisions.md#d-15-eu-data-residency)); encryption at rest (provider default) and in transit; short-lived presigned URLs; no public buckets.
-- **Secrets**: only in the API and worker; never in sandboxes or prompts; rotated through the platform secret store. Creator-supplied Anthropic keys follow the custody rules in [§11a](#11a-model-access-managed-credits-or-byok).
+- **Secrets**: only in the API and worker; never in sandboxes or prompts; rotated through the platform secret store. Creator-supplied Anthropic keys follow the custody rules in [§11a](#11a-model-access-managed-credits-or-byok). They transit the AI Gateway in request headers, and the conformance test confirms the gateway never stores them.
 - **Prompt injection**: user text, transcripts, OCR'd on-screen text and web/trend content are untrusted. Delimit them in prompts, keep tool permissions fixed, and treat a model's request to do something outside its tools as a no-op.
 - **Abuse**: per-workspace rate limits and quotas; upload type and size checks; malware-safe media parsing inside sandboxes; a takedown process.
 - **GDPR**: data processing agreements with every processor (Cloudflare, Clerk, the database host, model providers); a records-of-processing list; retention (delete originals N days after export, configurable); account deletion cascades to R2; **no training on customer content**.

@@ -51,6 +51,7 @@
    - "Bring your own key" must mean an Anthropic API key: subscription logins are barred in third-party products. New keys start on low rate limits.
    - Managed credits with caps keep margin predictable. → §4.4, [D-17](05-decisions.md#d-17-model-routing-is-data-tuned-by-benchmark), [D-18](05-decisions.md#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key)
    - **Credits can fund usage.** Anthropic's Max and Team plan credits pay for the first-party API, and AWS Activate credits pay for Claude on Bedrock. Google's startup credits reportedly don't cover Claude on Vertex. → [§4.5](#45-funding-claude-usage-anthropic-credits-aws-activate-and-google)
+   - **A gateway keeps the credits only in BYOK mode.** Cloudflare AI Gateway passes Anthropic's native API through, while OpenRouter translates it and has documented Opus 5.5 caveats. → [§4.6](#46-model-gateways-cloudflare-ai-gateway-and-openrouter), [D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)
 
 ---
 
@@ -262,6 +263,23 @@ Sources ◐ ([AWS Activate terms](https://aws.amazon.com/activate/terms/), [AWS 
 
 **Implication.** The editor and ideation agents port to Bedrock, and the Go SDK has Bedrock and Vertex clients, so a provider behind `agents/llm` is a small change. The research agent, batch work and BYOK validation stay on the first-party API. The credits don't cross over: Anthropic's work only on the first-party API, and AWS's only on Bedrock. A sensible split is Anthropic plan credits for development, benchmarks and research, and AWS Activate credits (if eligible) for managed-mode editor traffic in the beta. Re-run the final benchmark on the platform we ship on.
 
+### 4.6 Model gateways: Cloudflare AI Gateway and OpenRouter
+
+| | Cloudflare AI Gateway | OpenRouter |
+|---|---|---|
+| What it is | A proxy in front of providers: analytics, rate limits, spend limits, retries, optional caching. Part of the Cloudflare account we already use | A marketplace and router: one API and key for many models, provider fallbacks, presets |
+| Claude API fidelity | The Anthropic endpoint passes native requests through. For Bedrock, requests, responses and server-sent events pass through without translation ◐. A unified `/ai/v1/messages` endpoint also takes Anthropic-format requests for other third-party models | A Messages-compatible endpoint, but `output_config.effort` and thinking are mapped onto a unified `reasoning` parameter. Opus 5.5 thinking budgets aren't forwarded, and mismatched thinking blocks may be dropped. Guaranteed only for the first-party Anthropic provider ◐ |
+| Billing options | Our own provider keys (BYOK), or Unified Billing credits (+5 % on credit purchases, inference at provider prices) | OpenRouter credits (+5.5 % on purchases; one page lists 8 % on Business), or BYOK (free up to a monthly allowance, about $25,000 of list-price inference on pay-as-you-go per one page, then 5 %) |
+| Do plan and Activate credits still apply? | ✅ in BYOK mode, because the provider bills us. ❌ with Unified Billing | ✅ in BYOK mode for supported providers (Anthropic; Bedrock unverified). ❌ with OpenRouter credits |
+| Limits | 25 MB cacheable request size, 5 metadata entries per request, 100,000 logs on the free plan or 10 million per gateway on paid ◐ | Free plan limited to 50 requests a day; the rest unverified |
+| Data | The same vendor as R2 and Workers. Payload logging can be turned off per request. Zero-data-retention settings don't control gateway logs ◐ | A new processor. Zero-data-retention routing is offered, but how it applies to Claude on Bedrock or Vertex is unclear |
+| Models | Claude through the gateway. Workers AI hosts open models, not Claude | Hundreds of models |
+| Extras | Spend limits (June 2026), up to 20 rules per gateway. Cost tracking is a best-effort estimate | Presets, routing and fallbacks |
+
+Sources ◐, all read through search summaries: Cloudflare ([Anthropic provider](https://developers.cloudflare.com/ai-gateway/usage/providers/anthropic/), [Bedrock](https://developers.cloudflare.com/ai-gateway/usage/providers/bedrock/), [REST API](https://developers.cloudflare.com/ai-gateway/usage/rest-api/), [Unified Billing](https://developers.cloudflare.com/ai-gateway/features/unified-billing/), [limits](https://developers.cloudflare.com/ai-gateway/reference/limits/), [pricing](https://developers.cloudflare.com/ai-gateway/reference/pricing/), [spend limits](https://developers.cloudflare.com/ai-gateway/features/spend-limits/)) and OpenRouter ([pricing](https://openrouter.ai/pricing), [Claude 5.5 migration](https://openrouter.ai/docs/cookbook/evaluate-and-optimize/model-migrations/claude-5-5), [reasoning tokens](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens), [native Claude Code integration](https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration)).
+
+**What none of the sources documents** is how each gateway treats `cache_control`, thinking-block replay, request timeouts for long Opus turns, and whether provider-key headers end up in logs. Other gateways are known to reformat requests in ways that invalidate provider caches and to normalise token counts. So we test before depending on a gateway ([D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)).
+
 ---
 
 ## 5. Platform: Cloudflare, Clerk, Go, costs
@@ -348,6 +366,7 @@ Sources ◐: [limits](https://developers.cloudflare.com/r2/platform/limits/), [u
 - As a result, **no claim in this report carries ✔**. The workflow can be resumed from its cached results to run verification.
 
 **Not covered or unverified:**
+- Gateway behaviour for `cache_control`, thinking-block replay, long-request timeouts and key-header logging is undocumented in what we read, and the Cloudflare and OpenRouter pages were read through search summaries.
 - Cloud startup-credit terms were read through search summaries, not the programs' own pages (fetching those domains is blocked). The AWS "end customers" clause and Google's partner-model position need a direct read or a question to each program.
 - BYOK facts rest on secondary sources: the subscription-login ban (The Register, WinBuzzer), rate-limit tier thresholds (Knightli) and workspace spend limits (a 2024 announcement). Anthropic's legal pages and rate-limit docs weren't read directly.
 - Whether Anthropic's terms allow customer-supplied API keys in a third-party product. This is standard practice but unconfirmed.
