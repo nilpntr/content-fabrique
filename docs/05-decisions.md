@@ -23,10 +23,11 @@
 | D-16 | Only permissively licensed ML components in the product | Accepted |
 | D-17 | Model routing is data, tuned by benchmark: effort first, then escalation, then delegation, then cheaper models | Accepted (protocol); results come from P4-10 |
 | D-18 | Who pays for tokens: managed credits or bring-your-own Anthropic key, per workspace | Proposed (founder confirms the beta default) |
-| D-19 | Model gateway: Cloudflare AI Gateway in BYOK mode in front of customer-facing model calls; OpenRouter only as an optional non-Claude provider | Accepted (the founder chose it for customer traffic); gated by the conformance test in P4-00 |
+| D-19 | Model gateway: Cloudflare AI Gateway in BYOK mode in front of every model call; other providers through the same gateway, OpenRouter not needed | Accepted (the founder chose it for customer traffic); gated by the conformance test in P4-00 |
 | D-20 | Two model lanes: AWS Activate credits fund testing on Amazon Bedrock, direct; customer traffic goes through the gateway on its own funding | Superseded by D-21 (the founder dropped the AWS credits) |
-| D-21 | Testing calls the first-party Claude API directly and is self-funded; customer traffic goes through the gateway; no AWS credits, no Bedrock lane | Accepted (founder decision) |
+| D-21 | Testing uses the first-party Claude API through its own dev gateway and is self-funded; no AWS credits, no Bedrock lane | Accepted (founder decision) |
 | D-22 | Cheap-first testing ladder: free replay, then Haiku, then Sonnet, then Opus, with an exit checklist per rung | Accepted (founder direction) |
+| D-23 | Product domain `contentfabrique.app`: the apex serves the landing page and the app, `api.` the API, `staging.` and `api-staging.` for staging | Accepted (the founder bought the domain) |
 
 ---
 
@@ -197,6 +198,8 @@ Daytona is not considered: its open-source repo was reported unmaintained or arc
 - Every workspace is a Clerk organization (a solo creator gets a personal org created at onboarding), so teams and agencies need no migration later.
 - The Go API verifies Clerk session JWTs with the Go SDK v2 middleware (`clerkhttp.RequireHeaderAuthorization`, claims via `clerk.SessionClaimsFromContext`) and resolves `workspace_id` from the active org.
 - Clerk webhooks (Svix-signed) sync users, orgs and memberships into Postgres idempotently.
+- **Clerk settings.** Organizations on, and membership required, so every signed-in user has an active workspace and `workspace_id` always resolves. Keep the default Admin and Member roles in v1, and add custom roles only when the Team and Agency plan needs them.
+- **Secrets.** The Go service uses `CLERK_SECRET_KEY` with the SDK middleware, which fetches the instance's public signing keys, so there is no separate API secret. The webhook signing secret is the only other one.
 
 **Revisit** if Clerk pricing at scale, or EU data-residency requirements, become a problem.
 
@@ -292,7 +295,7 @@ Our own model of an Opus 5.5 editor run ([architecture §13](03-architecture.md#
   - A lower platform fee covers compute, storage, transcription and support.
   - Anthropic bills tokens to the creator, and we show an estimated cost per run from our own metering.
   - Plan quotas still cap renders, storage and exports.
-- **One code path.** `llm.ClientFactory(workspace)` returns a client for the right key, customer-facing calls go through the AI Gateway ([D-19](#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)), and every call writes a ledger row with `billed_to` ([architecture §11a](03-architecture.md#11a-model-access-managed-credits-or-byok)).
+- **One code path.** `llm.ClientFactory(workspace)` returns a client for the right key, every call goes through the AI Gateway ([D-19](#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)), and every call writes a ledger row with `billed_to` ([architecture §11a](03-architecture.md#11a-model-access-managed-credits-or-byok)).
 - **Defaults.** Managed is the default for mainstream creators and for the capped private beta. BYOK is offered from the beta for power users and agencies. Whether BYOK becomes *mandatory* on any plan is the founder's call.
 - **Always on our key:** work that serves the whole platform (the shared trend board, research scans) is a platform cost.
 - **Not supported:** reusing a creator's Claude Pro or Max login, and using a subscription login for our own runtime or benchmarks.
@@ -310,11 +313,11 @@ Our own model of an Opus 5.5 editor run ([architecture §13](03-architecture.md#
 **Context.** The founder would rather reach models through a gateway (OpenRouter or Cloudflare) than call providers directly. What the research found ([research §4.6](02-research.md#46-model-gateways-cloudflare-ai-gateway-and-openrouter)):
 - **Cloudflare AI Gateway's Anthropic endpoint passes native requests through.** For Bedrock it passes requests, responses and server-sent events through without translation. Core features are free, and Unified Billing adds 5 % on credit purchases.
 - **OpenRouter offers a Messages-compatible endpoint but maps Anthropic's fields onto its own `reasoning` parameter.** Its Claude 5.5 migration guide says Opus 5.5 thinking budgets aren't forwarded and mismatched thinking blocks may be dropped, and its native integration is only guaranteed with the first-party Anthropic provider. Its credits cost 5.5 % on purchase.
-- **Funding survives a gateway only in BYOK mode.** Anthropic's plan credits and AWS Activate credits are applied by the provider that bills us, so the request must carry our own provider key. Gateway credits (Cloudflare Unified Billing, OpenRouter credits) don't carry them. The founder chose to send testing direct to the Anthropic API and keep the gateway for customer traffic ([D-21](#d-21-testing-on-the-first-party-api-self-funded)).
+- **Funding survives a gateway only in BYOK mode.** Anthropic's plan credits and AWS Activate credits are applied by the provider that bills us, so the request must carry our own provider key. Gateway credits (Cloudflare Unified Billing, OpenRouter credits) don't carry them. Testing goes through a development gateway too ([D-21](#d-21-testing-on-the-first-party-api-self-funded)).
 - **Workers AI hosts open models, not Claude.** Claude reaches Cloudflare through AI Gateway.
 
 **Decision.**
-1. **One Cloudflare AI Gateway per environment** is the front door for customer-facing model calls, **in BYOK mode**: our Anthropic key for managed workspaces, or the workspace's own key for BYOK workspaces. Testing doesn't use it: development, CI and benchmark traffic calls the Anthropic API directly ([D-21](#d-21-testing-on-the-first-party-api-self-funded)). We don't use Unified Billing on the main paths, and each gateway is set to require provider credentials so a request can't fall back to Cloudflare-managed billing by accident.
+1. **One Cloudflare AI Gateway per environment** is the front door for every model call, **in BYOK mode**: our Anthropic key for managed workspaces, the workspace's own key for BYOK workspaces, and a development key through `cf-dev` for development, CI and benchmarks ([D-21](#d-21-testing-on-the-first-party-api-self-funded)). An empty `ANTHROPIC_BASE_URL` bypasses it. We don't use Unified Billing on the main paths, and each gateway is set to require provider credentials so a request can't fall back to Cloudflare-managed billing by accident.
 2. **The Go client keeps the native Anthropic API.** It uses the Anthropic SDK with the gateway's Anthropic endpoint as the base URL, so adaptive thinking, effort, strict tools, caching and preserved thinking pass through.
 3. **A conformance test gates it** (P4-00). The same requests go direct and through the gateway, and we compare:
    - behaviour and the `usage` fields (cache writes and reads);
@@ -327,13 +330,14 @@ Our own model of an Opus 5.5 editor run ([architecture §13](03-architecture.md#
 4. **Privacy.** Payload logging is off by default (`cf-aig-collect-log-payload: false`), so the gateway keeps metadata (tokens, model, cost, duration) and not prompts or frames. Zero-data-retention settings don't control gateway logs, so logging is turned off separately, and we confirm the gateway never stores provider-key headers. Cloudflare is already a processor for R2 and Workers, so this adds no new vendor to the DPA list.
 5. **Attribution.** Every request carries `cf-aig-metadata` tags (`workspace_id`, `run_id`, `stage`, `profile`; at most five entries). Gateway spend limits are a coarse backstop only. Our `usage_ledger` budgets stay the source of truth, because gateway cost tracking is a best-effort estimate.
 6. **Retries live in our client only,** so a failure is never retried twice.
-7. **OpenRouter is not in the Claude editor path.** It may sit behind the `llm` interface as an optional provider for non-Claude models (benchmark breadth, cheap tagging experiments, the video-model spike), preferably in BYOK mode.
+7. **Other providers go through the same gateway** for benchmark breadth, cheap tagging experiments and the video-model spike. Use each provider's native endpoint, or the REST API's Anthropic-compatible `/ai/v1/messages`, which takes `provider/model` names such as `google/gemini-3-flash` or, for Opus 5.5, `anthropic/claude-opus-5.5`. It authenticates with a Cloudflare API token that has Account → Workers AI → Read (`CF_AI_API_TOKEN`, optional) and bills through Unified Billing, with 5 % on credit purchases ([research §4.6](02-research.md#46-model-gateways-cloudflare-ai-gateway-and-openrouter)). Claude itself always uses the native `/anthropic` endpoint with our own key, so effort, adaptive thinking, strict tools and caching pass through unchanged. That endpoint takes Anthropic's native ID, `claude-opus-5-5`, and `config/routing/models.yaml` holds both names so a profile never depends on the path ([architecture §7.5](03-architecture.md#75-model-routing-sub-agents-and-benchmarking)). Translating endpoints are fine for non-Claude models, where there are no Claude features to lose.
+8. **OpenRouter is not needed.** The gateway reaches the same providers. It stays an optional extra only if it offers a model the gateway can't reach.
 
-**Alternatives.** Direct provider calls (the fallback with the fewest hops, and the path testing uses in [D-21](#d-21-testing-on-the-first-party-api-self-funded)). OpenRouter as the main gateway (normalisation risk for Opus 5.5, a new processor, and no free credits unless BYOK). Cloudflare Unified Billing (+5 % and no plan or Activate credits).
+**Alternatives.** Direct provider calls (the bypass, with the fewest hops). OpenRouter as the main gateway (normalisation risk for Opus 5.5, a new processor, and no free credits unless BYOK). Cloudflare Unified Billing (+5 % and no plan or Activate credits).
 
 **Consequences.** One more hop and one more dependency, mitigated by the bypass flag. In return we get free analytics, one place to attribute cost, and BYOK customer keys that pass through headers we never log.
 
-**Revisit** if the conformance test fails, if the extra latency proves to be a problem, or if OpenRouter's Anthropic compatibility passes our own conformance test.
+**Revisit** if the conformance test fails, if the extra latency proves to be a problem, if OpenRouter's Anthropic compatibility passes our own conformance test, or if Cloudflare's REST `/ai/v1/messages` passes it too, which would let testing and non-Claude comparisons run on Cloudflare credits.
 
 ## D-20 Two model lanes: credits fund testing, customers fund production
 
@@ -387,14 +391,15 @@ Research variants can't run on Bedrock (no web tools), so their ≈ $150 comes f
 - Claude in Amazon Bedrock lacks features the product relies on: structured outputs (so `strict` tool schemas), the Batch API, the Models API, and web search and fetch ([research §4.5](02-research.md#45-funding-claude-usage-anthropic-credits-aws-activate-and-google)). Results measured there would only be a proxy for production and would need a parity run.
 
 **Decision.**
-1. **Testing calls the Anthropic API directly.** Development, CI and benchmark traffic skips the gateway and uses a development key in a dedicated Console workspace with a monthly spend limit (P0-13). That is the same path as the gateway's bypass flag, so it needs no new code.
-2. **Customer traffic is unchanged** ([D-19](#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)): it goes through the Cloudflare AI Gateway in BYOK mode, on our production key (managed) or the creator's key (BYOK).
-3. **One API and the same models on both paths,** so benchmark results transfer to production without a parity run. The gateway hop is covered by the conformance test (P4-00), and staging runs through its own gateway.
+1. **Testing goes through the gateway too.** Development, CI and benchmarks use a `cf-dev` gateway with a development key in a dedicated Console workspace that has a monthly spend limit (P0-13). Tests then exercise the production path: the headers, caching, thinking blocks and timeouts. An empty `ANTHROPIC_BASE_URL` calls the API directly. That is the bypass for debugging, and how work starts before the gateway exists (P0-09).
+2. **Customer traffic is unchanged** ([D-19](#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)): the production gateway in BYOK mode, on our production key (managed) or the creator's key (BYOK).
+3. **The same API, models and path in every environment,** so benchmark results transfer to production without a parity run, and the gateway is exercised all the time, not only by the conformance test (P4-00).
 4. **Keys follow the environment.** Production holds the production key and customers' keys. `local`, `ci` and `bench` hold only the development key. Test calls write ledger rows with `billed_to = test`, so test spend never mixes into customer margin.
 5. **The founder funds testing,** with Anthropic plan credits first if the plan includes them (Max or Team, P0-13) and prepaid credits otherwise.
 
 **Alternatives.**
 - Apply for AWS Activate anyway ([D-20](#d-20-two-model-lanes-credits-fund-testing-customers-fund-production)). Rejected for the reasons above.
+- Test directly against the Anthropic API, as this decision first said, which was a leftover from the Bedrock plan. Rejected: fewer hops isn't worth testing a different path from production. Direct stays as the bypass.
 - Other startup credits. Google's reportedly don't cover Claude on Vertex, and Anthropic's own startup perks are paused ([research §4.5](02-research.md#45-funding-claude-usage-anthropic-credits-aws-activate-and-google)).
 
 **Consequences.** One provider, no capability matrix, no AWS accounts and no parity run. The benchmark program is now a cash cost. At the [D-17](#d-17-model-routing-is-data-tuned-by-benchmark) estimates it comes to about $1,650 if every sweep is scaled down (four at ≈ $125, the cutover at ≈ $1,000, research and ideation at ≈ $150), and up to about $2,550 if every sweep is a full one (≈ $350 each). The levers are the ones in D-17: `dev-cheap` for everyday loops (≈ $0.02 per run), scaled-down sweeps first, the Batch API for judge calls (50 % off), prompt caching, and the cheap-first ladder of [D-22](#d-22-cheap-first-testing-ladder), which keeps the early work off the expensive models.
@@ -441,6 +446,23 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 **Consequences.** Rungs 0 to 2 cost about $45 to $130 in total (a few hundred Haiku runs and a few Sonnet passes). Rung 3's scaled-down sweep is the first of the scaled-down sweeps already counted in the [D-21](#d-21-testing-on-the-first-party-api-self-funded) budget, plus about $3 for the smoke test. Rung 4 is the rest of that budget, spent only when the flaws are gone. The cost is one more profile (`dev-mid`) and a record and replay mode in the model client.
 
 **Revisit** if a rung's checklist keeps passing but the next rung finds the same class of flaw, because then the checklist is missing a check.
+
+## D-23 Product domain and hostnames: contentfabrique.app
+
+**Context.** The founder bought `contentfabrique.app`. Every environment but localhost needs hostnames: the web app, the landing page with the privacy policy and terms that TikTok review asks for, the Go API behind its tunnel, webhooks (Clerk now, the merchant of record later) and OAuth redirect URIs, plus a staging copy of all of it.
+
+**Decision.**
+1. **Production.** `contentfabrique.app` is one TanStack Start Worker that serves the landing page, the privacy policy, the terms and the signed-in app. `www` is routed to the same Worker, which redirects it to the apex. `api.contentfabrique.app` is the Go API behind its Cloudflare Tunnel.
+2. **Staging.** `staging.contentfabrique.app` for the web app and `api-staging.contentfabrique.app` for the API.
+3. **Names stay one level deep.** Cloudflare's free universal certificate covers the apex and one level of subdomain △, so staging's API is `api-staging`, not `api.staging`.
+4. **Callbacks follow the hostnames.** Clerk webhooks go to `https://api[-staging].contentfabrique.app/v1/webhooks/clerk`, and TikTok redirects to `https://[staging.]contentfabrique.app/integrations/tiktok/callback`.
+5. **Clerk.** The development instance serves localhost and staging. The production instance is tied to `contentfabrique.app`.
+
+**Alternatives.** Landing page on the apex and the app on `app.contentfabrique.app`: the usual split, at the price of a second Worker and a navigation between two sites. Deeper staging names (`api.staging.…`): they need a paid certificate.
+
+**Consequences.** `.app` is on the browsers' HSTS preload list △, so every hostname is HTTPS-only from the first request. That is fine behind Cloudflare, but a plain-HTTP check fails, and local work stays on `localhost`. The web app and the API are different origins, and the session token travels in an `Authorization: Bearer` header ([architecture §9](03-architecture.md#9-api)), so no cookie crosses between them. The API therefore needs a CORS allowlist, built from `APP_BASE_URL`.
+
+**Revisit** if the landing page needs its own release cadence (then move the app to `app.`), or if the product is renamed.
 
 ## Template for new decisions
 

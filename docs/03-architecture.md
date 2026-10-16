@@ -12,7 +12,7 @@
 - **EU-first**: the founder and early users are EU-based, so data stays in EU regions where the vendor allows ([D-15](05-decisions.md#d-15-eu-data-residency)).
 - **Who pays for tokens is per workspace**: either managed credits (we call Claude with our key) or the creator's own Anthropic key ([D-18](05-decisions.md#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key)).
 - **Model choice is data, not code**: routing profiles tuned by benchmark ([D-17](05-decisions.md#d-17-model-routing-is-data-tuned-by-benchmark)).
-- **Testing is direct and self-funded, customers go through the gateway**: development, CI and benchmarks call the Anthropic API directly with a development key, while customer traffic goes through the AI Gateway on our key (managed) or the creator's key (BYOK) ([D-21](05-decisions.md#d-21-testing-on-the-first-party-api-self-funded)).
+- **Every model call goes through the AI Gateway, and testing is self-funded**: development, CI and benchmarks use a `cf-dev` gateway with a development key, and customer traffic uses the production gateway on our key (managed) or the creator's key (BYOK) ([D-21](05-decisions.md#d-21-testing-on-the-first-party-api-self-funded)).
 
 ## 2. System overview
 
@@ -54,9 +54,8 @@ flowchart LR
   WRK -->|claim jobs| PG
   WRK <--> R2
   WRK --> AGT
-  AGT -->|customer traffic| GW
+  AGT -->|all model calls| GW
   GW --> LLM
-  AGT -.->|"tests: dev, CI, benchmarks"| LLM
   AGT --> TRD
   AGT --> SBX
   SBX <-->|presigned URLs| R2
@@ -80,8 +79,8 @@ flowchart LR
 | R2 | Cloudflare | All media and large artefacts |
 | Clerk | SaaS | Users, sessions, organizations (workspaces) |
 | Billing | Merchant of record: Stripe MoR or Paddle ([D-13](05-decisions.md#d-13-billing)) | Checkout, subscriptions, EU VAT and sales tax; webhooks → plans and entitlements in Postgres |
-| AI Gateway | Cloudflare ([D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)) | Front door for customer-facing model calls: our Anthropic key or the creator's, analytics, spend limits as a backstop, payload logging off |
-| Model APIs | SaaS | Claude for agents and tagging, called with our key (managed) or the creator's key (BYOK, [D-18](05-decisions.md#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key)) through the gateway. Tests call the same API directly with a development key ([D-21](05-decisions.md#d-21-testing-on-the-first-party-api-self-funded)). A video-native model only where it wins ([D-10](05-decisions.md#d-10-video-understanding)) |
+| AI Gateway | Cloudflare ([D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)) | Front door for every model call: our Anthropic key, the creator's or the development key, analytics, spend limits as a backstop, payload logging off |
+| Model APIs | SaaS | Claude for agents and tagging, called with our key (managed) or the creator's key (BYOK, [D-18](05-decisions.md#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key)) through the gateway. Tests use the same API through the dev gateway with a development key ([D-21](05-decisions.md#d-21-testing-on-the-first-party-api-self-funded)). A video-native model only where it wins ([D-10](05-decisions.md#d-10-video-understanding)) |
 
 ### Repository layout
 
@@ -94,7 +93,7 @@ apps/
       worker/              # River workers (ingest, analysis, render, agents, trends)
       cfctl/               # admin CLI: migrate, seed taxonomy, replay agent runs, run evals and benchmarks
     config/
-      routing/             # versioned model-routing profiles (YAML)
+      routing/             # versioned model-routing profiles (YAML) and models.yaml, the model-name map
     internal/
       config/ telemetry/   # env config, slog + OpenTelemetry
       httpapi/             # handlers, middleware (auth, tenancy, rate limit), OpenAPI glue
@@ -399,6 +398,8 @@ judge:    { model: claude-opus-5-5, effort: high, batch: true }
 
 Development climbs a **cheap-first ladder** ([D-22](05-decisions.md#d-22-cheap-first-testing-ladder)). It starts on `dev-cheap`, Haiku 5.5 for every stage (about $0.02 per editor run), until the loop, tools and validators are solid. Then comes `dev-mid` (Sonnet 5.5 for every stage, about $0.33), and only then `v1-start` (Opus 5.5) for a smoke test and the sweeps. Agent-loop tests run with `LLM_MODE=replay`, which serves recorded model calls and costs nothing.
 
+**Model names.** The profiles above use Anthropic's native IDs, such as `claude-opus-5-5`. The direct API and the gateway's `/anthropic` endpoint both take that form. Cloudflare's REST endpoints use `provider/model` names, so the same model is `anthropic/claude-opus-5.5` there (the founder's spelling, which Cloudflare's docs don't show for 5.5 △). `config/routing/models.yaml` maps each native ID to its Cloudflare name, so a profile never changes when the path does. `cfctl doctor` resolves every model in the active profile by its native ID and, when `CF_AI_API_TOKEN` is set, by its Cloudflare name.
+
 **Where sub-agents are used.** They are for *bulk* work that fits a "look into N things, then summarise" shape. The editor is one dependent chain in one context window, so it stays a single Opus 5.5 loop ([D-07](05-decisions.md#d-07-agent-runtime-go-native-loop-on-the-claude-messages-api)).
 
 ```mermaid
@@ -434,7 +435,7 @@ flowchart LR
 |---|---|
 | Inputs | Eval sets #1 (analysis), #2 (editor scenarios), #3 (research) and an ideation set, as **recorded fixtures**: pre-analysed clip libraries, so analysis cost isn't paid again |
 | Runner | One isolated workspace per cell (scenario × profile × trial). The real renderer runs; the sandbox and TikTok posting are stubbed. Every call's usage is recorded |
-| Path | Runs call the Anthropic API directly with the development key, the same API and models production uses behind the gateway. The gateway hop is covered by the conformance test ([D-21](05-decisions.md#d-21-testing-on-the-first-party-api-self-funded)) |
+| Path | Runs go through the `cf-dev` gateway with the development key: the same path, API and models production uses ([D-21](05-decisions.md#d-21-testing-on-the-first-party-api-self-funded)) |
 | Scoring | Deterministic hard-constraint checks first, then the judge rubric (calibrated against ~30 human ratings), then a human "would you post it?" sample |
 | Statistics | Mean and p90 cost per *completed* task, pass rate with confidence intervals, quality-versus-cost Pareto frontier |
 | Output | A dated report in `docs/benchmarks/` with the table and chart; raw JSONL in R2 |
@@ -534,9 +535,9 @@ Every model call goes through `llm.ClientFactory(workspace)` ([D-18](05-decision
 | Prompt cache | The static prefix is shared across tenants, because caches are per workspace | Per key |
 | Rate limits | Ours (we ask for a higher tier) | The creator's tier; new keys start low |
 
-**Testing ([D-21](05-decisions.md#d-21-testing-on-the-first-party-api-self-funded)).** Development, CI and benchmarks call the Anthropic API directly, with no gateway, using a development key in a dedicated Console workspace that has a monthly spend limit. Keys follow the environment: `production` holds the production key and customers' keys, while `local`, `ci` and `bench` hold only the development key, and `staging` goes through its own gateway. Test calls write ledger rows with `billed_to = test`, so test spend never mixes into customer margin.
+**Testing ([D-21](05-decisions.md#d-21-testing-on-the-first-party-api-self-funded)).** Development, CI and benchmarks go through the `cf-dev` gateway like everything else, using a development key in a dedicated Console workspace that has a monthly spend limit. An empty `ANTHROPIC_BASE_URL` bypasses the gateway, for debugging and before it exists. Keys follow the environment: `production` holds the production key and customers' keys, `staging` its own key, and `local`, `ci` and `bench` only the development key. Test calls write ledger rows with `billed_to = test`, so test spend never mixes into customer margin.
 
-**Gateway ([D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)).** In production, both billing modes call models through Cloudflare AI Gateway in BYOK mode.
+**Gateway ([D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)).** Every model call goes through a Cloudflare AI Gateway in BYOK mode: in production both billing modes, and the development key elsewhere.
 - **Client:** the SDK's base URL points at the gateway's Anthropic endpoint, and the provider key travels with the request. Native Anthropic features pass through unchanged.
 - **Per-request headers:** `cf-aig-metadata` tags (`workspace_id`, `run_id`, `stage`, `profile`; the limit is five entries) and `cf-aig-collect-log-payload: false`. The gateway then keeps metadata (tokens, model, cost, duration) but not prompts or frames.
 - **Guards:** the gateway requires provider credentials, so a request can never fall back to Cloudflare-managed billing. Retries live in our client only. A config flag sends traffic straight to the provider if the gateway is down.
@@ -561,7 +562,7 @@ Every model call goes through `llm.ClientFactory(workspace)` ([D-18](05-decision
 
 ## 12. Deployment, environments, observability
 
-- **Environments**: `local` (docker compose: Postgres, MinIO or a dev R2 bucket, worker, api; web via Vite), `staging`, `production`. Separate Clerk instances, R2 buckets and DB branches per environment. Model access follows the environment ([D-21](05-decisions.md#d-21-testing-on-the-first-party-api-self-funded)): `production` and `staging` go through their own AI Gateway, while `local`, `ci` and `bench` call the Anthropic API directly with the development key. Environment variables: `.env.example` lists every name. Local values live in `.env`, and staging and production values in `.env.staging` and `.env.production` on the founder's machine and in the CI secret store ([setup guide](06-setup-and-credentials.md)).
+- **Environments**: `local` (docker compose: Postgres, MinIO or a dev R2 bucket, worker, api; web via Vite), `staging`, `production`. Separate Clerk instances, R2 buckets and DB branches per environment. Model access follows the environment ([D-21](05-decisions.md#d-21-testing-on-the-first-party-api-self-funded)): `production` and `staging` go through their own AI Gateway, and `local`, `ci` and `bench` through the `cf-dev` one with the development key. Hostnames on `contentfabrique.app`: `contentfabrique.app` and `api.` for production, `staging.` and `api-staging.` for staging ([D-23](05-decisions.md#d-23-product-domain-and-hostnames-contentfabriqueapp)). Environment variables: `.env.example` lists every name. Local values live in `.env`, and staging and production values in `.env.staging` and `.env.production` on the founder's machine and in the CI secret store ([setup guide](06-setup-and-credentials.md)).
 - **Hosting** ([D-09](05-decisions.md#d-09-hosting)):
   - Web on Cloudflare Workers.
   - Go `api` and `worker` on EU servers (e.g. Hetzner) as containers, reachable only through **Cloudflare Tunnel**.
@@ -571,7 +572,7 @@ Every model call goes through `llm.ClientFactory(workspace)` ([D-18](05-decision
   - lint + test for Go and web, render golden tests, and OpenAPI drift check;
   - build the images (`api`, `worker`, `media-tools`) and deploy;
   - Renovate for dependencies;
-  - migrations run as a release step.
+  - migrations run as a release step, as the schema-owning migrate role (`DATABASE_MIGRATE_URL`). The app roles on staging and production can read and write rows but not change the schema.
 - **Observability**: structured logs (`slog`) + OpenTelemetry traces and metrics. One trace spans API → job → agent turns → sandbox exec. Export goes to a managed backend (e.g. Axiom or Grafana Cloud), with error tracking in the web app. Dashboards: queue depth and latency per job type, render time per output minute, agent cost per run, failures by tool. AI Gateway analytics give a second view of model cost and latency per stage; our ledger stays the source of truth, because gateway cost is a best-effort estimate.
 - **Agent observability**: every run has a replayable event log, plus an admin view to inspect prompts, tool calls, cost and the resulting timeline.
 
