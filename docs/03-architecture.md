@@ -93,7 +93,7 @@ apps/
       worker/              # River workers (ingest, analysis, render, agents, trends)
       cfctl/               # admin CLI: migrate, seed taxonomy, replay agent runs, run evals and benchmarks
     config/
-      routing/             # versioned model-routing profiles (YAML)
+      routing/             # versioned model-routing profiles (YAML) and models.yaml, the model-name map
     internal/
       config/ telemetry/   # env config, slog + OpenTelemetry
       httpapi/             # handlers, middleware (auth, tenancy, rate limit), OpenAPI glue
@@ -398,6 +398,8 @@ judge:    { model: claude-opus-5-5, effort: high, batch: true }
 
 Development climbs a **cheap-first ladder** ([D-22](05-decisions.md#d-22-cheap-first-testing-ladder)). It starts on `dev-cheap`, Haiku 5.5 for every stage (about $0.02 per editor run), until the loop, tools and validators are solid. Then comes `dev-mid` (Sonnet 5.5 for every stage, about $0.33), and only then `v1-start` (Opus 5.5) for a smoke test and the sweeps. Agent-loop tests run with `LLM_MODE=replay`, which serves recorded model calls and costs nothing.
 
+**Model names.** The profiles above use Anthropic's native IDs, such as `claude-opus-5-5`. The direct API and the gateway's `/anthropic` endpoint both take that form. Cloudflare's REST endpoints use `provider/model` names, so the same model is `anthropic/claude-opus-5.5` there (the founder's spelling, which Cloudflare's docs don't show for 5.5 △). `config/routing/models.yaml` maps each native ID to its Cloudflare name, so a profile never changes when the path does. `cfctl doctor` resolves every model in the active profile by its native ID and, when `CF_AI_API_TOKEN` is set, by its Cloudflare name.
+
 **Where sub-agents are used.** They are for *bulk* work that fits a "look into N things, then summarise" shape. The editor is one dependent chain in one context window, so it stays a single Opus 5.5 loop ([D-07](05-decisions.md#d-07-agent-runtime-go-native-loop-on-the-claude-messages-api)).
 
 ```mermaid
@@ -560,7 +562,7 @@ Every model call goes through `llm.ClientFactory(workspace)` ([D-18](05-decision
 
 ## 12. Deployment, environments, observability
 
-- **Environments**: `local` (docker compose: Postgres, MinIO or a dev R2 bucket, worker, api; web via Vite), `staging`, `production`. Separate Clerk instances, R2 buckets and DB branches per environment. Model access follows the environment ([D-21](05-decisions.md#d-21-testing-on-the-first-party-api-self-funded)): `production` and `staging` go through their own AI Gateway, and `local`, `ci` and `bench` through the `cf-dev` one with the development key. Environment variables: `.env.example` lists every name. Local values live in `.env`, and staging and production values in `.env.staging` and `.env.production` on the founder's machine and in the CI secret store ([setup guide](06-setup-and-credentials.md)).
+- **Environments**: `local` (docker compose: Postgres, MinIO or a dev R2 bucket, worker, api; web via Vite), `staging`, `production`. Separate Clerk instances, R2 buckets and DB branches per environment. Model access follows the environment ([D-21](05-decisions.md#d-21-testing-on-the-first-party-api-self-funded)): `production` and `staging` go through their own AI Gateway, and `local`, `ci` and `bench` through the `cf-dev` one with the development key. Hostnames on `contentfabrique.app`: `contentfabrique.app` and `api.` for production, `staging.` and `api-staging.` for staging ([D-23](05-decisions.md#d-23-product-domain-and-hostnames-contentfabriqueapp)). Environment variables: `.env.example` lists every name. Local values live in `.env`, and staging and production values in `.env.staging` and `.env.production` on the founder's machine and in the CI secret store ([setup guide](06-setup-and-credentials.md)).
 - **Hosting** ([D-09](05-decisions.md#d-09-hosting)):
   - Web on Cloudflare Workers.
   - Go `api` and `worker` on EU servers (e.g. Hetzner) as containers, reachable only through **Cloudflare Tunnel**.
@@ -570,7 +572,7 @@ Every model call goes through `llm.ClientFactory(workspace)` ([D-18](05-decision
   - lint + test for Go and web, render golden tests, and OpenAPI drift check;
   - build the images (`api`, `worker`, `media-tools`) and deploy;
   - Renovate for dependencies;
-  - migrations run as a release step.
+  - migrations run as a release step, as the schema-owning migrate role (`DATABASE_MIGRATE_URL`). The app roles on staging and production can read and write rows but not change the schema.
 - **Observability**: structured logs (`slog`) + OpenTelemetry traces and metrics. One trace spans API → job → agent turns → sandbox exec. Export goes to a managed backend (e.g. Axiom or Grafana Cloud), with error tracking in the web app. Dashboards: queue depth and latency per job type, render time per output minute, agent cost per run, failures by tool. AI Gateway analytics give a second view of model cost and latency per stage; our ledger stays the source of truth, because gateway cost is a best-effort estimate.
 - **Agent observability**: every run has a replayable event log, plus an admin view to inspect prompts, tool calls, cost and the resulting timeline.
 

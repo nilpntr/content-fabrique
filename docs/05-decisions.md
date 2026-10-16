@@ -27,6 +27,7 @@
 | D-20 | Two model lanes: AWS Activate credits fund testing on Amazon Bedrock, direct; customer traffic goes through the gateway on its own funding | Superseded by D-21 (the founder dropped the AWS credits) |
 | D-21 | Testing uses the first-party Claude API through its own dev gateway and is self-funded; no AWS credits, no Bedrock lane | Accepted (founder decision) |
 | D-22 | Cheap-first testing ladder: free replay, then Haiku, then Sonnet, then Opus, with an exit checklist per rung | Accepted (founder direction) |
+| D-23 | Product domain `contentfabrique.app`: the apex serves the landing page and the app, `api.` the API, `staging.` and `api-staging.` for staging | Accepted (the founder bought the domain) |
 
 ---
 
@@ -329,14 +330,14 @@ Our own model of an Opus 5.5 editor run ([architecture §13](03-architecture.md#
 4. **Privacy.** Payload logging is off by default (`cf-aig-collect-log-payload: false`), so the gateway keeps metadata (tokens, model, cost, duration) and not prompts or frames. Zero-data-retention settings don't control gateway logs, so logging is turned off separately, and we confirm the gateway never stores provider-key headers. Cloudflare is already a processor for R2 and Workers, so this adds no new vendor to the DPA list.
 5. **Attribution.** Every request carries `cf-aig-metadata` tags (`workspace_id`, `run_id`, `stage`, `profile`; at most five entries). Gateway spend limits are a coarse backstop only. Our `usage_ledger` budgets stay the source of truth, because gateway cost tracking is a best-effort estimate.
 6. **Retries live in our client only,** so a failure is never retried twice.
-7. **Other providers go through the same gateway** for benchmark breadth, cheap tagging experiments and the video-model spike. Use each provider's native endpoint, or the REST API's Anthropic-compatible `/ai/v1/messages`, which takes `provider/model` names such as `google/gemini-3-flash` and bills through Unified Billing, with 5 % on credit purchases ([research §4.6](02-research.md#46-model-gateways-cloudflare-ai-gateway-and-openrouter)). Claude itself always uses the native `/anthropic` endpoint with our own key, so effort, adaptive thinking, strict tools and caching pass through unchanged. Translating endpoints are fine for non-Claude models, where there are no Claude features to lose.
+7. **Other providers go through the same gateway** for benchmark breadth, cheap tagging experiments and the video-model spike. Use each provider's native endpoint, or the REST API's Anthropic-compatible `/ai/v1/messages`, which takes `provider/model` names such as `google/gemini-3-flash` or, for Opus 5.5, `anthropic/claude-opus-5.5`. It authenticates with a Cloudflare API token that has Account → Workers AI → Read (`CF_AI_API_TOKEN`, optional) and bills through Unified Billing, with 5 % on credit purchases ([research §4.6](02-research.md#46-model-gateways-cloudflare-ai-gateway-and-openrouter)). Claude itself always uses the native `/anthropic` endpoint with our own key, so effort, adaptive thinking, strict tools and caching pass through unchanged. That endpoint takes Anthropic's native ID, `claude-opus-5-5`, and `config/routing/models.yaml` holds both names so a profile never depends on the path ([architecture §7.5](03-architecture.md#75-model-routing-sub-agents-and-benchmarking)). Translating endpoints are fine for non-Claude models, where there are no Claude features to lose.
 8. **OpenRouter is not needed.** The gateway reaches the same providers. It stays an optional extra only if it offers a model the gateway can't reach.
 
 **Alternatives.** Direct provider calls (the bypass, with the fewest hops). OpenRouter as the main gateway (normalisation risk for Opus 5.5, a new processor, and no free credits unless BYOK). Cloudflare Unified Billing (+5 % and no plan or Activate credits).
 
 **Consequences.** One more hop and one more dependency, mitigated by the bypass flag. In return we get free analytics, one place to attribute cost, and BYOK customer keys that pass through headers we never log.
 
-**Revisit** if the conformance test fails, if the extra latency proves to be a problem, or if OpenRouter's Anthropic compatibility passes our own conformance test.
+**Revisit** if the conformance test fails, if the extra latency proves to be a problem, if OpenRouter's Anthropic compatibility passes our own conformance test, or if Cloudflare's REST `/ai/v1/messages` passes it too, which would let testing and non-Claude comparisons run on Cloudflare credits.
 
 ## D-20 Two model lanes: credits fund testing, customers fund production
 
@@ -445,6 +446,23 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 **Consequences.** Rungs 0 to 2 cost about $45 to $130 in total (a few hundred Haiku runs and a few Sonnet passes). Rung 3's scaled-down sweep is the first of the scaled-down sweeps already counted in the [D-21](#d-21-testing-on-the-first-party-api-self-funded) budget, plus about $3 for the smoke test. Rung 4 is the rest of that budget, spent only when the flaws are gone. The cost is one more profile (`dev-mid`) and a record and replay mode in the model client.
 
 **Revisit** if a rung's checklist keeps passing but the next rung finds the same class of flaw, because then the checklist is missing a check.
+
+## D-23 Product domain and hostnames: contentfabrique.app
+
+**Context.** The founder bought `contentfabrique.app`. Every environment but localhost needs hostnames: the web app, the landing page with the privacy policy and terms that TikTok review asks for, the Go API behind its tunnel, webhooks (Clerk now, the merchant of record later) and OAuth redirect URIs, plus a staging copy of all of it.
+
+**Decision.**
+1. **Production.** `contentfabrique.app` is one TanStack Start Worker that serves the landing page, the privacy policy, the terms and the signed-in app. `www` is routed to the same Worker, which redirects it to the apex. `api.contentfabrique.app` is the Go API behind its Cloudflare Tunnel.
+2. **Staging.** `staging.contentfabrique.app` for the web app and `api-staging.contentfabrique.app` for the API.
+3. **Names stay one level deep.** Cloudflare's free universal certificate covers the apex and one level of subdomain △, so staging's API is `api-staging`, not `api.staging`.
+4. **Callbacks follow the hostnames.** Clerk webhooks go to `https://api[-staging].contentfabrique.app/v1/webhooks/clerk`, and TikTok redirects to `https://[staging.]contentfabrique.app/integrations/tiktok/callback`.
+5. **Clerk.** The development instance serves localhost and staging. The production instance is tied to `contentfabrique.app`.
+
+**Alternatives.** Landing page on the apex and the app on `app.contentfabrique.app`: the usual split, at the price of a second Worker and a navigation between two sites. Deeper staging names (`api.staging.…`): they need a paid certificate.
+
+**Consequences.** `.app` is on the browsers' HSTS preload list △, so every hostname is HTTPS-only from the first request. That is fine behind Cloudflare, but a plain-HTTP check fails, and local work stays on `localhost`. The web app and the API are different origins, and the session token travels in an `Authorization: Bearer` header ([architecture §9](03-architecture.md#9-api)), so no cookie crosses between them. The API therefore needs a CORS allowlist, built from `APP_BASE_URL`.
+
+**Revisit** if the landing page needs its own release cadence (then move the app to `app.`), or if the product is renamed.
 
 ## Template for new decisions
 

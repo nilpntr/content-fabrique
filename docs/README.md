@@ -25,7 +25,7 @@
 - **Decisions waiting on you:**
   - the billing mode for the private beta (I recommend managed credits with a hard cap per creator, BYOK opt-in);
   - which company operates Content Fabrique (the TikTok developer app, data processing agreements and merchant of record);
-  - the product domain, and a one-page company site with a privacy policy and terms, which Clerk production, TikTok review and DNS all need;
+  - the company site: a one-page site on `contentfabrique.app` (the domain is bought) with a privacy policy and terms. TikTok review needs it, and Clerk production and the DNS records need the domain;
   - plan prices and the margin target;
   - the benchmark budget you'd fund yourself (≈ $350 per development sweep, ≈ $1,000 for the cutover, about $1,650 to $2,550 in total), and which Console organization receives your plan's monthly API credits if you're on Max or Team;
   - the legal questions in P0-12, including Anthropic's terms for customer keys;
@@ -40,8 +40,8 @@
 | 02 | [Research report](02-research.md) | TikTok APIs and trend data, music licensing, video understanding, editing and rendering stack, competitors, agent runtime and sandboxes, Cloudflare/Clerk/Go platform, costs. Sourced and confidence-marked |
 | 03 | [Architecture](03-architecture.md) | Components, data model, media pipeline, timeline spec and renderer, agents and evals, model routing and sub-agents, benchmark harness, sandbox interface, API, realtime, auth/billing, managed vs BYOK model access, deployment, cost model, security |
 | 04 | [Implementation plan](04-implementation-plan.md) | Phases P0–P7 with PR-sized tasks and acceptance criteria, cross-cutting practices, definition of done, open questions |
-| 05 | [Decision log](05-decisions.md) | Lightweight ADRs (D-01 … D-22) with context, alternatives and when to revisit |
-| 06 | [Setup and credentials](06-setup-and-credentials.md) | Every account, key and `.env` variable, who creates it and when; `cfctl doctor` and bootstrap tooling; a prompt for the implementing agent |
+| 05 | [Decision log](05-decisions.md) | Lightweight ADRs (D-01 … D-23) with context, alternatives and when to revisit |
+| 06 | [Setup and credentials](06-setup-and-credentials.md) | Every account, key and `.env` variable, who creates it and when; the scopes to grant each token; the hostnames on `contentfabrique.app`; `cfctl doctor` and bootstrap tooling; a prompt for the implementing agent |
 
 Suggested reading order: TL;DR → 01 → 03 → 04, with 02 and 05 as reference, and 06 before you start building.
 
