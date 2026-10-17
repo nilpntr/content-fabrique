@@ -386,6 +386,12 @@
       "title": "Alignment",
       "description": "How the lines of a text of more than one line sit against each other in its box: left, center or right. Default center."
     },
+    "textAvoidSubject": {
+      "type": "boolean",
+      "default": true,
+      "title": "Avoid the subject",
+      "description": "Whether the renderer keeps this text off the head of the person in the footage: when it would cover the head it is moved above or below it inside the safe zone, or shrunk within the allowed scale. true by default; set false to place the text exactly where its anchor or position puts it."
+    },
     "textAnimation": {
       "enum": [
         "none",
@@ -861,6 +867,9 @@
         },
         "align": {
           "$ref": "#/$defs/textAlign"
+        },
+        "avoid_subject": {
+          "$ref": "#/$defs/textAvoidSubject"
         }
       },
       "oneOf": [
@@ -936,6 +945,9 @@
         },
         "align": {
           "$ref": "#/$defs/textAlign"
+        },
+        "avoid_subject": {
+          "$ref": "#/$defs/textAvoidSubject"
         }
       },
       "anyOf": [
@@ -1025,6 +1037,14 @@
           ],
           "properties": {
             "align": {}
+          }
+        },
+        {
+          "required": [
+            "avoid_subject"
+          ],
+          "properties": {
+            "avoid_subject": {}
           }
         }
       ],

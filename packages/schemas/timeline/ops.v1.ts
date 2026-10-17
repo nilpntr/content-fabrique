@@ -912,6 +912,10 @@ export type Shadow = "none" | "soft" | "strong";
  */
 export type Alignment = "left" | "center" | "right";
 /**
+ * Whether the renderer keeps this text off the head of the person in the footage: when it would cover the head it is moved above or below it inside the safe zone, or shrunk within the allowed scale. true by default; set false to place the text exactly where its anchor or position puts it.
+ */
+export type AvoidTheSubject = boolean;
+/**
  * Change fields of a text item; the fields you leave out stay as they are, except that changing the style resets fill, scale, shadow and align to the new style's own: restate the ones you want to keep. Setting anchor removes the position and the other way round. Give at least one field.
  */
 export type UpdateText = UpdateText1 & UpdateText2;
@@ -948,6 +952,9 @@ export type UpdateText1 =
     }
   | {
       align: unknown;
+    }
+  | {
+      avoid_subject: unknown;
     };
 /**
  * "update_text".
@@ -1449,6 +1456,7 @@ export interface AddText2 {
   scale?: SizeScale;
   shadow?: Shadow;
   align?: Alignment;
+  avoid_subject?: AvoidTheSubject;
 }
 /**
  * A free place for the text's centre as fractions of the frame. The text must stay inside the format's safe zone (checked by the Go layer). Set this or anchor, not both.
@@ -1471,6 +1479,7 @@ export interface UpdateText2 {
   scale?: SizeScale;
   shadow?: Shadow;
   align?: Alignment;
+  avoid_subject?: AvoidTheSubject;
 }
 /**
  * Remove a text item.

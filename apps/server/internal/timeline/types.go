@@ -463,6 +463,8 @@ type TextItem struct {
 	Scale  *float64 `json:"scale,omitempty"`
 	Shadow string   `json:"shadow,omitempty"`
 	Align  string   `json:"align,omitempty"`
+	// AvoidSubject false keeps the renderer from moving the text off the subject's head (true, the default, moves it; see avoid.go).
+	AvoidSubject *bool `json:"avoid_subject,omitempty"`
 }
 
 // StyleOverrides are the item's per-item style changes.

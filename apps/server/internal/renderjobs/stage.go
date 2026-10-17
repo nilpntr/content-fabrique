@@ -14,6 +14,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/render"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
+	"github.com/nilpntr/content-fabrique/internal/subject"
 )
 
 // stager is the render.AssetResolver of a render job. The sandbox has no network, so the footage is downloaded into the job
@@ -35,6 +36,9 @@ type stager struct {
 	total  int64
 	// captions says whether the timeline has an enabled captions track: only then does a clip need the transcript of its asset.
 	captions bool
+	// subjects are the subject boxes of the project's footage, read once (subjectsRead says it was tried).
+	subjects     subject.Index
+	subjectsRead bool
 
 	fatal *fileError
 	infra error
@@ -113,6 +117,23 @@ func (s *stager) stage(assetID string, variant render.Variant) (render.ResolvedA
 		return render.ResolvedAsset{}, perr
 	}
 	ra := render.ResolvedAsset{Location: dest, HasAudio: in.HasAudio != nil && *in.HasAudio}
+	// Where the person is, so a title is kept off the head: one read for all the project's footage, the first time. A failed read is not a
+	// failed render: the titles stay where they are placed.
+	if !s.subjectsRead {
+		s.subjectsRead = true
+		all := make([]ids.AssetID, 0, len(s.inputs))
+		for aid := range s.inputs {
+			all = append(all, aid)
+		}
+		ix, err := subject.Load(s.ctx, s.r.p.cfg.Store, ws, all)
+		if err != nil {
+			s.r.log.WarnContext(s.ctx, "render: the subject boxes could not be read; titles are placed without them", "error", err)
+		}
+		s.subjects = ix
+	}
+	if t, ok := s.subjects[assetID]; ok {
+		ra.Subject = &t
+	}
 	if s.captions {
 		words, err := s.transcript(id)
 		if err != nil {

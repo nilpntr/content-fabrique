@@ -141,6 +141,8 @@ type AddText struct {
 	Scale      *float64        `json:"scale,omitempty"`
 	Shadow     string          `json:"shadow,omitempty"`
 	Align      string          `json:"align,omitempty"`
+	// AvoidSubject false keeps the renderer from moving the text off the subject's head.
+	AvoidSubject *bool `json:"avoid_subject,omitempty"`
 }
 
 // UpdateText changes the fields of a text item that are set.
@@ -157,6 +159,8 @@ type UpdateText struct {
 	Scale      *float64        `json:"scale,omitempty"`
 	Shadow     string          `json:"shadow,omitempty"`
 	Align      string          `json:"align,omitempty"`
+	// AvoidSubject sets whether the renderer keeps the text off the subject's head.
+	AvoidSubject *bool `json:"avoid_subject,omitempty"`
 }
 
 // RemoveText removes a text item.
