@@ -7,6 +7,9 @@
 # not root. The root filesystem is meant to run read-only: /work (the job's output mount) and /tmp (a tmpfs) are the only
 # places a job writes.
 #
+# The label org.contentfabrique.fonts=1 (last line) says the image holds the fonts: `task dev` rebuilds an image without it, and the
+# worker warns about one. Anything that removes the fonts must drop the label.
+#
 # Reproducibility: the base image is pinned by digest, Debian packages come from a dated snapshot.debian.org archive, and
 # the ffmpeg source is checked against a pinned SHA-256. To bump: change the three ARGs below together and rebuild.
 #
@@ -98,4 +101,5 @@ WORKDIR /work
 LABEL org.opencontainers.image.title="media-tools" \
       org.opencontainers.image.description="ffmpeg 8 and ffprobe for Content Fabrique sandboxes" \
       org.opencontainers.image.licenses="GPL-2.0-or-later" \
-      org.opencontainers.image.source="https://github.com/nilpntr/content-fabrique"
+      org.opencontainers.image.source="https://github.com/nilpntr/content-fabrique" \
+      org.contentfabrique.fonts="1"

@@ -388,7 +388,7 @@ func TestGetTimelineBeforeAndAfterTheFirstEdit(t *testing.T) {
 
 func TestEditTimelineCreatesVersions(t *testing.T) {
 	e := newEnv(t)
-	a := e.asset(e.wsA, clip{durMs: 20000})
+	a := e.asset(e.wsA, clip{durMs: 20000, title: "Posing"})
 	b := e.asset(e.wsA, clip{durMs: 20000})
 	prj := e.project(e.wsA, "9:16", "", a, b)
 
@@ -399,7 +399,7 @@ func TestEditTimelineCreatesVersions(t *testing.T) {
 	text := textOf(res)
 	for _, want := range []string{
 		"Applied. The timeline is now version 1: 15000 ms (15.0 s) long, 2 clips, 1 texts, 0 sounds (it was version 0).",
-		"Changes:", "New items: op 0 made clip c1; op 1 made clip c2; op 2 made text t1;",
+		"Changes:", "- added clip c1 (Posing, 0.0-8.0 s)", "- added clip c2 (clip "+b.String()[:12]+", 2.0-9.0 s)", "New items: op 0 made clip c1; op 1 made clip c2; op 2 made text t1;",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("result lacks %q:\n%s", want, text)
