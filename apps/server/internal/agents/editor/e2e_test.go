@@ -50,7 +50,7 @@ var (
 
 const projectBrief = "A 20 second back-day short. Open on the heaviest set. Keep it punchy."
 
-// fakeAnthropic plays the Messages API for the editor: list_footage, view_clip, edit_timeline, get_timeline, render_preview, finish.
+// fakeAnthropic plays the Messages API for the editor: find_moments, view_clip, edit_timeline, get_timeline, render_preview, finish.
 type fakeAnthropic struct {
 	mu       sync.Mutex
 	messages int
@@ -94,7 +94,7 @@ func (f *fakeAnthropic) turn(n int) string {
 	asset := func(a ids.AssetID) string { return `"` + a.String() + `"` }
 	switch n {
 	case 1:
-		return message(use("toolu_ed_1", "list_footage", `{}`), 410, 9200, 0, 61)
+		return message(use("toolu_ed_1", "find_moments", `{"asset_id":`+asset(clipA)+`,"kind":"rep","min_score":0.7}`), 410, 9200, 0, 61)
 	case 2:
 		return message(use("toolu_ed_2", "view_clip", `{"asset_id":`+asset(clipA)+`}`), 380, 900, 9200, 74)
 	case 3:
@@ -144,6 +144,18 @@ func newE2E(t *testing.T, vars map[string]string, api *fakeAnthropic) *e2e {
 	// Things the editor must never reach: a clip of another workspace, and one of another project of this workspace.
 	e.asset(e.wsB, clip{title: "private clip of workspace B"})
 	e.asset(e.wsA, clip{title: "private clip of another project"})
+	// The analysis of the heaviest set: two clean reps from 2 s to 8 s, rest before and after.
+	res := store.AnalysisResult{Version: 1, StepMs: 100, DurationMs: 12000, Series: store.PackedSeries{}, Shots: []store.NewShot{{Idx: 0, StartMs: 0, EndMs: 12000, Signals: []byte(`{}`)}},
+		Summary: []byte(`{"version":1,"duration_ms":12000,"shots":1,"sets":1,"reps":2,"clean_reps":2,"period_ms":3000,"dead_ms":4000,"mean_y":0.3,"exposure_level":"ok","exposure_gain":1.2,"best_rep":{"kind":"rep","start_ms":5000,"end_ms":8000,"score":0.88}}`),
+		Moments: []store.NewMoment{
+			{Kind: store.MomentRep, StartMs: 2000, EndMs: 5000, Score: 0.81, Attrs: []byte(`{}`), Description: "rep 1 of 2, clean, full range"},
+			{Kind: store.MomentRep, StartMs: 5000, EndMs: 8000, Score: 0.88, Attrs: []byte(`{}`), Description: "rep 2 of 2, clean, full range"},
+			{Kind: store.MomentDead, StartMs: 0, EndMs: 2000, Attrs: []byte(`{}`), Description: "dead time, 2.0 s: still between sets"},
+			{Kind: store.MomentDead, StartMs: 8000, EndMs: 12000, Attrs: []byte(`{}`), Description: "dead time, 4.0 s: still between sets"},
+		}}
+	if err := e.st.SaveAnalysis(context.Background(), e.wsA.ID, clipA, res); err != nil {
+		t.Fatal(err)
+	}
 	x := &e2e{env: e, api: api}
 	x.prj = e.project(e.wsA, "9:16", projectBrief, clipA, clipB, clipC)
 	// The preview renderer answers with a contact sheet the image resolver can read.
@@ -297,7 +309,7 @@ func TestEditorRecordedRequests(t *testing.T) {
 		}
 	}
 	first := api.requests[0]
-	if tools, _ := first["tools"].([]any); len(tools) != 8 {
+	if tools, _ := first["tools"].([]any); len(tools) != 9 {
 		t.Errorf("%d tools sent", len(tools))
 	} else {
 		var names []string
@@ -306,10 +318,10 @@ func TestEditorRecordedRequests(t *testing.T) {
 			name, _ := m["name"].(string)
 			names = append(names, name)
 		}
-		if strings.Join(names, ",") != "get_brief,list_footage,view_clip,get_timeline,get_comments,edit_timeline,render_preview,finish" {
+		if strings.Join(names, ",") != "get_brief,list_footage,view_clip,find_moments,get_timeline,get_comments,edit_timeline,render_preview,finish" {
 			t.Errorf("tools: %v", names)
 		}
-		editTool, _ := tools[5].(map[string]any)
+		editTool, _ := tools[6].(map[string]any)
 		viewTool, _ := tools[2].(map[string]any)
 		if editTool["strict"] == true || viewTool["strict"] != true {
 			t.Errorf("strict flags: edit_timeline %v, view_clip %v", editTool["strict"], viewTool["strict"])
@@ -323,9 +335,15 @@ func TestEditorRecordedRequests(t *testing.T) {
 	// The opening and the run context come first, with the creator's words as data.
 	msgs, _ := first["messages"].([]any)
 	opening, _ := json.Marshal(msgs[0])
-	for _, want := range []string{"Lead with the heaviest set.", `kind=\"instructions\"`, `kind=\"brief\"`, projectBrief, "Footage: 3 clips", clipA.String()} {
+	for _, want := range []string{"Lead with the heaviest set.", `kind=\"instructions\"`, `kind=\"brief\"`, projectBrief, "Footage: 3 clips", clipA.String(), "analysis: 1 set, 2 reps"} {
 		if !strings.Contains(string(opening), want) {
 			t.Errorf("the first message lacks %q", want)
+		}
+	}
+	// The answer of find_moments is in the next request: ranked reps with exact times, and the dead time to skip.
+	for _, want := range []string{"rep 2 of 2, clean, full range", "5000 to 8000 ms", "Dead time to skip"} {
+		if !strings.Contains(api.bodies[1], want) {
+			t.Errorf("the second request lacks the find_moments answer %q", want)
 		}
 	}
 	// After view_clip the pictures are in the next request, as base64 images next to their labels.

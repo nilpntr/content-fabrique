@@ -49,6 +49,10 @@ type Store interface {
 	ListProjectFootage(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID) ([]store.ProjectFootageRow, error)
 	// GetTimelineVersionByAuthor returns the latest version an author made (for the agent, its run's TypeID).
 	GetTimelineVersionByAuthor(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, authorKind, authorID string) (store.TimelineVersion, error)
+	// ListMoments and ListAssetAnalysisSummaries read the clip analysis (P2-02, P2-09) for find_moments and the run context.
+	ListMoments(ctx context.Context, ws ids.WorkspaceID, f store.MomentFilter) ([]store.Moment, error)
+	ListAssetAnalysisSummaries(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.AnalysisSummaryRow, error)
+	ListDeadSpans(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID, perAsset int) ([]store.DeadSpan, error)
 }
 
 // Deps are what the editor's tools need.
@@ -87,6 +91,7 @@ const (
 	ToolGetBrief      = "get_brief"
 	ToolListFootage   = "list_footage"
 	ToolViewClip      = "view_clip"
+	ToolFindMoments   = "find_moments"
 	ToolGetTimeline   = "get_timeline"
 	ToolEditTimeline  = "edit_timeline"
 	ToolRenderPreview = "render_preview"
@@ -110,6 +115,7 @@ func Tools(d Deps) ([]runtime.Tool, error) {
 		{ToolGetBrief, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getBrief) }},
 		{ToolListFootage, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.listFootage) }},
 		{ToolViewClip, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.viewClip) }},
+		{ToolFindMoments, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.findMoments) }},
 		{ToolGetTimeline, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getTimeline) }},
 		{ToolGetComments, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getComments) }},
 		{ToolEditTimeline, true, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.editTimeline) }},
@@ -246,7 +252,11 @@ func (d Deps) listFootage(ctx context.Context, rc runtime.RunContext, _ noArgs) 
 	if err != nil {
 		return runtime.Result{}, fmt.Errorf("list footage: %w", err)
 	}
-	return runtime.Text(footageText(rows, footageOpts{Full: true})), nil
+	sums, err := d.analysisSummaries(ctx, ws, rows)
+	if err != nil {
+		return runtime.Result{}, err
+	}
+	return runtime.Text(footageText(rows, footageOpts{Full: true, Analysis: sums})), nil
 }
 
 // ---- view_clip --------------------------------------------------------------------------------------------------

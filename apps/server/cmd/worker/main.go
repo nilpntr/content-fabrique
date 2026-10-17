@@ -49,6 +49,7 @@ func run(args []string) error {
 				ingester jobs.AssetIngester // nil without storage: asset_ingest jobs then wait (snoozed)
 				renderer jobs.Renderer      // nil without storage: render jobs then wait (snoozed)
 				transcr  jobs.Transcriber   // nil without storage: transcribe jobs then wait (snoozed)
+				analyzer jobs.Analyzer      // nil without storage: analyze jobs then wait (snoozed)
 			)
 			if cfg.ObjectStorageConfigured() {
 				client, err := storage.New(cfg.Storage())
@@ -62,6 +63,9 @@ func run(args []string) error {
 					return nil, err
 				}
 				ingester = pipeline
+				if analyzer, err = newAnalysis(cfg, st, client, logger); err != nil {
+					return nil, err
+				}
 				rp, err := newRenderPipeline(cfg, st, client, logger)
 				if err != nil {
 					return nil, err
@@ -105,6 +109,7 @@ func run(args []string) error {
 				Ingest:     ingester,
 				Render:     renderer,
 				Transcribe: transcr,
+				Analysis:   analyzer,
 				Register:   runtime.Register(runner),
 				QuickLook:  quickLooker,
 				Logger:     logger,

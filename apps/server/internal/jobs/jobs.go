@@ -83,6 +83,7 @@ func DefaultConfig() Config {
 		{Name: QueueAgents, MaxWorkers: DefaultAgentConcurrency},
 		{Name: QueueQuickLook, MaxWorkers: DefaultQuickLookConcurrency},
 		{Name: QueueTranscribe, MaxWorkers: DefaultTranscribeConcurrency},
+		{Name: QueueAnalysis, MaxWorkers: DefaultAnalysisConcurrency},
 	}}
 }
 
