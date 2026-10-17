@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -74,8 +75,19 @@ type RunContext struct {
 	// Input is the run's input (agent_runs.input).
 	Input  json.RawMessage
 	Logger *slog.Logger
+	// Left is what the run has left of its budgets, as of this call: a tool can tell the model that it is running out.
+	Left BudgetLeft
 
 	artifact func(ctx context.Context, payload json.RawMessage) error
+}
+
+// BudgetLeft is what a run has left. ToolCalls is the number of tool calls it may still start and Wall the wall-clock time; both
+// are zero or less when the limit is reached. Known is false for a RunContext that was not made by the loop (a test of a tool).
+type BudgetLeft struct {
+	Known     bool
+	ToolCalls int
+	Wall      time.Duration
+	Micros    int64
 }
 
 // WithArtifacts returns a RunContext whose Artifact calls go to sink instead of the run's events. It is for tests of tools,

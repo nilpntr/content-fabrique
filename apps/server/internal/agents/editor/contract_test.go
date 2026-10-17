@@ -42,7 +42,7 @@ func TestRegisteredToolsAreTheContract(t *testing.T) {
 	if len(got) != len(defs) {
 		t.Fatalf("the agent registers %d tools, the contract lists %d", len(got), len(defs))
 	}
-	wantNames := []string{"get_brief", "list_footage", "view_clip", "find_moments", "get_timeline", "get_comments", "edit_timeline", "render_preview", "finish"}
+	wantNames := []string{"get_brief", "list_footage", "view_clip", "find_moments", "plan_edit", "get_timeline", "get_comments", "edit_timeline", "match_exposure", "render_preview", "check_edit", "finish"}
 	for i, d := range defs {
 		g := got[i]
 		if g.Name != d.Name || g.Description != d.Description || g.Strict != d.Strict {
@@ -56,7 +56,7 @@ func TestRegisteredToolsAreTheContract(t *testing.T) {
 		}
 	}
 	// The tools of the design note, section 5, and nothing mutating beyond what it says.
-	mutating := map[string]bool{ToolEditTimeline: true, ToolRenderPreview: true}
+	mutating := map[string]bool{ToolEditTimeline: true, ToolMatchExposure: true, ToolRenderPreview: true}
 	for name, tool := range e.tools {
 		if tool.Mutates() != mutating[name] {
 			t.Errorf("%s: Mutates() = %v", name, tool.Mutates())
@@ -362,7 +362,7 @@ func TestNewAgentChecksItsTools(t *testing.T) {
 	}
 	sorted := slices.Clone(names)
 	sort.Strings(sorted)
-	if len(names) != 9 {
+	if len(names) != 12 {
 		t.Fatalf("tools: %v", names)
 	}
 	if _, err := runtime.NewAgents(a); err != nil {

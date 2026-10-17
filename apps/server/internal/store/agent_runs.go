@@ -296,6 +296,12 @@ func (s *Store) AgentEvents(ctx context.Context, ws ids.WorkspaceID, run uuid.UU
 	return out, nil
 }
 
+// AgentArtifactEvents returns the artifact events of a run whose payload has the kind, oldest first.
+func (s *Store) AgentArtifactEvents(ctx context.Context, ws ids.WorkspaceID, run uuid.UUID, kind string) ([]AgentEvent, error) {
+	rows, err := s.q.ListAgentArtifactEvents(ctx, db.ListAgentArtifactEventsParams{WorkspaceID: ws, RunID: run, Kind: kind})
+	return rows, mapErr(err)
+}
+
 // AgentRunLedgerCostMicros is what the usage ledger holds for the run, at list price.
 func (s *Store) AgentRunLedgerCostMicros(ctx context.Context, ws ids.WorkspaceID, run uuid.UUID) (int64, error) {
 	n, err := s.q.SumAgentRunLedgerCost(ctx, db.SumAgentRunLedgerCostParams{WorkspaceID: ws, RunID: pgUUID(run)})

@@ -95,6 +95,12 @@ WHERE workspace_id = @workspace_id AND run_id = @run_id AND seq > @after_seq
 ORDER BY seq
 LIMIT @row_limit;
 
+-- The artifact events of a run with one kind (the payload's "kind"), oldest first: the editor reads back its plan and its checks.
+-- name: ListAgentArtifactEvents :many
+SELECT * FROM agent_events
+WHERE workspace_id = @workspace_id AND run_id = @run_id AND type = 'artifact' AND payload ->> 'kind' = @kind::text
+ORDER BY seq;
+
 -- name: GetLastAgentEvent :one
 SELECT * FROM agent_events
 WHERE workspace_id = @workspace_id AND run_id = @run_id

@@ -1,17 +1,18 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "8b58794b960c8393f1c78bdc25f9eb54d91aa8efb0d113f26e512f795c92a988",
-  "recorded_at": "2026-10-17T16:02:25Z",
+  "key": "45f1fb869c52e8ac9cc4fe42171863b7225f2f737a478d7bc11253328aa38dcf",
+  "recorded_at": "2026-10-17T17:11:29Z",
   "request": {
     "model": "claude-haiku-5-5",
-    "max_tokens": 16000,
+    "max_tokens": 24000,
     "effort": "medium",
     "system_blocks": 1,
     "messages": [
       {
         "role": "user",
         "blocks": [
+          "text",
           "text",
           "text",
           "text",
@@ -45,6 +46,54 @@
         "blocks": [
           "tool_result"
         ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
+        ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
+        ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
+        ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
+        ]
       }
     ],
     "tools": [
@@ -52,10 +101,13 @@
       "list_footage",
       "view_clip",
       "find_moments",
+      "plan_edit",
       "get_timeline",
       "get_comments",
       "edit_timeline",
+      "match_exposure",
       "render_preview",
+      "check_edit",
       "finish"
     ],
     "images": [
@@ -88,6 +140,11 @@
         "sha256": "c1a2c1dd9e9b679be49eb3856f237cf0984ba86e667f45e56d1a9934a461dcba",
         "media_type": "image/jpeg",
         "bytes": 4825
+      },
+      {
+        "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
+        "media_type": "image/jpeg",
+        "bytes": 9284
       }
     ]
   },
@@ -98,57 +155,37 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_3",
+        "id": "toolu_ed_7",
         "name": "edit_timeline",
         "input": {
-          "base_version": 0,
+          "base_version": 1,
           "ops": [
             {
-              "op": "add_clip",
-              "asset_id": "ast_01jc000000e00800000000000a",
-              "source": {
-                "in_ms": 2000,
-                "out_ms": 8000
+              "op": "trim_item",
+              "id": "c4",
+              "out_ms": 4500
+            },
+            {
+              "op": "snap_cuts_to_beats",
+              "grid": {
+                "bpm": 124,
+                "first_beat_ms": 0
               },
-              "why": "The heaviest set of the lat pulldown, so it opens the video."
-            },
-            {
-              "op": "add_clip",
-              "asset_id": "ast_01jc000000e00800000000000b",
-              "source": {
-                "in_ms": 1000,
-                "out_ms": 6000
+              "options": {
+                "write_markers": true,
+                "max_shift_ms": 60
               }
-            },
-            {
-              "op": "add_clip",
-              "asset_id": "ast_01jc000000e00800000000000c",
-              "source": {
-                "in_ms": 3000,
-                "out_ms": 9000
-              },
-              "reframe": {
-                "mode": "blur_fill"
-              }
-            },
-            {
-              "op": "add_text",
-              "text": "HEAVY LAT DAY",
-              "style": "title_bold",
-              "at_ms": 0,
-              "duration_ms": 2000,
-              "anchor": "upper_third"
             }
           ]
         }
       }
     ],
     "usage": {
-      "input_tokens": 450,
-      "cache_write_tokens": 2100,
+      "input_tokens": 440,
+      "cache_write_tokens": 800,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 10100,
-      "output_tokens": 301
+      "cache_read_tokens": 14200,
+      "output_tokens": 120
     }
   },
   "count_tokens": 9000

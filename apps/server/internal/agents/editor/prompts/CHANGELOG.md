@@ -1,8 +1,15 @@
 # Editor system prompt: changelog
 
-The editor agent's system prompt is `editor.v1.5.md`, embedded in the Go binary. The text the model receives is the runtime's
-preamble (`runtime.SystemPreamble`, the untrusted-data rule) followed by this file. The prompt version (`PromptVersion` in
-`prompt.go`) is stored in every run's input, so a run can always be tied to the text it was given.
+The editor agent's system prompt is `editor.v2.0.md`, embedded in the Go binary, and the genre playbooks are the files in
+`playbooks/`, embedded too. The text the model receives is the runtime's preamble (`runtime.SystemPreamble`, the untrusted-data
+rule) followed by this file. The prompt version (`PromptVersion` in `prompt.go`) is stored in every run's input, so a run can
+always be tied to the text it was given; a playbook has its own version (`workout.v1`, in `playbooks.go`) that the run's plan
+records.
+
+Both the prompt and the playbooks are Go templates over the features of the build (`features.go`): the sections about an effect,
+a look or a sound effect sit behind `{{if .Has "..."}}` and are cut out unless the embedded op schema has that op or preset. So the
+prompt never offers an op that does not exist, and when part B of P3-10 (looks and sound effects) merges, its sections turn on with
+no change to the text.
 
 Rules for changing it:
 
@@ -14,6 +21,54 @@ Rules for changing it:
 - The cache hit rate of a run is visible: `cfctl agent show <run>` prints the cache write and read tokens of every model call and
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
+
+## editor.v2.0 (2026-10-17)
+
+Editor v2 (steps 3 and 4 of `docs/design/edit-style-v1.md`, and the measurement slice of step 5). The first live Opus edit of real
+gym footage after clip analysis had every cut on a rep boundary and no dead time on screen, but the edit was flat: shots of 4.5 to
+5 s (one slow rep each), only hard cuts, no beat grid, a static title and no check of its own work. The file is now
+`editor.v2.0.md`; it changes behaviour a lot, so it is a major version.
+
+- **Understand, then plan.** New step 3: before the first edit the editor calls `plan_edit` (new tool): content type, story, hook,
+  arc, ending, playbook, target length, tempo and a shot list in beats. The answer carries the playbook of the chosen genre, the
+  length of a beat and what the shot list adds up to. The first `edit_timeline` of a run is refused without a plan. The plan is an
+  artifact event (`creative_plan`) for the run feed.
+- **Playbooks** (new, `playbooks/*.v1.md`): talking, unboxing_product, workout, vlog, tutorial and general, from edit-style-v1
+  sections 2 and 3. Only the chosen one enters the conversation, as the result of `plan_edit`, so the system prompt and the tools
+  (the cached prefix) are the same for every run and project. The run context may carry a one-line guess of the content type.
+- **Rhythm.** New section "Pacing and rhythm": a default beat grid of 120 to 128 BPM (the beat length in ms is in the prompt), shot
+  lengths in beats (hype shots of 1 to 2 beats, a full rep only where it is worth it), a long rep trimmed to its strongest half or
+  sped up (`set_speed`, a speed ramp), cuts that speed up toward the end, never more than two equal-length shots in a row, and the
+  half-way turning point of a rep as a legal cut.
+- **Effects with restraint** (new section, each part behind its feature): `set_motion` (punch_in on a beat hit, push_in, shake),
+  `set_speed_ramp` (fast into slow at the peak, on a few shots at most), `set_transition` (whip_left, whip_right, zoom_through,
+  flash) with examples, about one effect per 3 or 4 cuts. Looks (`auto`, `gym_moody`: one grade for all clips, never `exposure_ev` or
+  `match`) and sound effects (`add_sfx`: a whoosh on a whip, an impact on the drop, a riser into a big moment, one per effect) were
+  written ahead of part B of P3-10 behind their features and turned on when it merged.
+- **The order of the ops** (new): everything that changes a shot's length (speed, transitions, ramps) first, then
+  `snap_cuts_to_beats` once with `write_markers` and `max_shift_ms` 80, then what does not change timing (motion, text, audio, looks). `snap_cuts_to_beats`
+  cannot move a cut next to a ramped clip, so a ramped shot is tuned to whole beats before the snap.
+- **Self-review.** Step 5 now ends with `check_edit` (new tool: objective checks computed from the timeline and the analysis), and
+  step 6 is one revision pass at most. `finish` is refused until the newest version has a preview and a `check_edit`.
+- **Exposure** paragraph rewritten: the analysis line now gives the p90 luma and says "low-key" for footage that is dark overall;
+  low-key is fine and never to be brightened. Only the jump at a cut matters, and `check_edit` measures it. The "no automatic
+  exposure correction" line is gone with the gain wording.
+- The result of `edit_timeline` and `get_timeline` now list where every clip plays (start, end, speed, motion, transition), which
+  the beat arithmetic needs.
+- **Review round 1** (after the first live Opus run of v2.0, which put `gym_moody` on low-key footage and crushed it): the
+  looks paragraph and the workout playbook now choose the grade from the clips' exposure notes (no look or `auto` on low-key
+  footage, `gym_moody` only for clips with no note or a bright one) and say to take a look off when `check_edit`'s new `crushed`
+  check fails; `check_edit` refuses a version that was not previewed, because its brightness checks measure the rendered picture;
+  new tool `match_exposure` (bounded exposure hints computed from the analysis, only darkening the brighter clips) for a clip much
+  brighter than its neighbours; `render_preview` and `check_edit` report what is left of the tool calls and time, and the editor
+  is told that a limit that comes after a preview ends the run with the version as it stands. `gym_moody` itself was retuned (no
+  toe, a gentle S, a soft vignette).
+- **Review round 2** (a live Opus run was cut off in its `plan_edit` turn: thinking plus the plan used all 16000 output tokens): the
+  plan is "a short working note, not an essay", the prompt and the tool description say to think briefly before calling it and to use
+  6 to 12 shots, and its bounds are tighter (140 characters for the story, hook and ending, 240 for the arc, 80 for a shot's text, at
+  most 16 shots). The routing entries give the editor 24000 output tokens and the loop recovers from a cut-off turn.
+- **Playbook for talking video** has a TODO: the transcripts (P2-05) exist, but the editor has no tool to read them yet.
+- Cassettes re-recorded (the prompt, the tool list and the run context changed).
 
 ## editor.v1.5 (2026-10-17)
 

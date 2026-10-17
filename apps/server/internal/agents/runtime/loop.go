@@ -417,6 +417,12 @@ func (l *loop) work(ctx context.Context) (Outcome, error) {
 		if limit := l.overBudget(); limit != "" {
 			return l.stopBudget(ctx, limit)
 		}
+		if t := l.cv.last(); t != nil && t.needsCutOffRecovery() {
+			if out, done, err := l.recoverCutOff(ctx, t); done || err != nil {
+				return out, err
+			}
+			continue
+		}
 		if t := l.cv.last(); t != nil && !t.complete() {
 			if out, done, err := l.callTool(ctx, t, t.pending()[0]); done || err != nil {
 				return out, err
@@ -470,6 +476,10 @@ func (l *loop) toolContext(toolUseID string, resumed bool) RunContext {
 		WorkspaceID: l.ws, RunID: l.run.ID, ProjectID: l.run.ProjectID.UUID, Agent: l.run.Agent,
 		ToolUseID: toolUseID, Resumed: resumed, Input: l.run.Input,
 		Logger: l.log.With("tool_use_id", toolUseID),
+		Left: BudgetLeft{
+			Known: true, ToolCalls: int(l.run.BudgetToolCalls) - l.toolCalls,
+			Wall: time.Until(l.wallDeadline()), Micros: l.budget.remaining(),
+		},
 	}
 	if toolUseID != "" {
 		rc.IdempotencyKey = l.run.ID.String() + ":" + toolUseID
@@ -612,8 +622,9 @@ func (l *loop) modelStep(ctx context.Context) (Outcome, bool, error) {
 
 	switch reason := resp.StopReason; {
 	case reason == "max_tokens":
-		out, ferr := l.fail(ctx, FailMaxTokens, "the model's answer was cut off at max_tokens", nil)
-		return out, true, ferr
+		// The answer was cut off at the output limit. The loop recovers from the first MaxCutOffRecoveries of them (recoverCutOff), from
+		// the main loop, so that a resumed run does the same from the stored events.
+		return "", false, nil
 	case reason == "refusal":
 		out, ferr := l.fail(ctx, FailRefusal, "the model declined to continue", nil)
 		return out, true, ferr
@@ -651,6 +662,49 @@ func (l *loop) endTurn(ctx context.Context, reason, text string) (Outcome, bool,
 	}
 	out, ferr := l.succeed(ctx, output)
 	return out, true, ferr
+}
+
+// MaxCutOffRecoveries is how many times a run may recover from an answer that was cut off at max_tokens before the next one fails it.
+const MaxCutOffRecoveries = 2
+
+// CutOffMessage is what the model is told after an answer that was cut off at the output limit.
+const CutOffMessage = "Your answer was cut off at the output limit before this call was complete. Send it again, shorter: think less and keep text fields brief."
+
+// recoverCutOff deals with the newest turn when it stopped at max_tokens. Its tool calls are incomplete, so none is run: each gets an
+// is_error result that says what happened, and a turn with no tool call gets a message from the user in its place, so the conversation
+// never ends on an assistant message and no tool_use is left unanswered. The state is the stored events, so a worker that died after
+// the cut-off answer was stored, or after some of the results, finds the rest still to do and does not do the first part twice. The
+// call that was cut off is paid and on the ledger as usual; the budget is untouched. After MaxCutOffRecoveries the next one fails the
+// run with max_tokens.
+func (l *loop) recoverCutOff(ctx context.Context, t *turn) (Outcome, bool, error) {
+	if l.cv.cutOffs > MaxCutOffRecoveries {
+		out, ferr := l.fail(ctx, FailMaxTokens, fmt.Sprintf("the model's answer was cut off at max_tokens %d times", l.cv.cutOffs), nil)
+		return out, true, ferr
+	}
+	msg := []wireBlock{{Type: "text", Text: CutOffMessage}}
+	if len(t.uses) == 0 {
+		e, err := l.append(ctx, store.EventStatus, mustJSON(statusPayload{State: stateCutOff, Blocks: msg}), store.EventDelta{})
+		if err != nil {
+			return "", true, err
+		}
+		if err := l.cv.apply(e); err != nil {
+			out, ferr := l.fail(ctx, FailCorruptLog, err.Error(), nil)
+			return out, true, ferr
+		}
+		return "", false, nil
+	}
+	for _, use := range t.pending() {
+		e, err := l.append(ctx, store.EventToolResult, mustJSON(toolResultPayload{ToolUseID: use.ID, Name: use.Name, IsError: true, Content: msg}), store.EventDelta{})
+		if err != nil {
+			return "", true, err
+		}
+		if err := l.cv.apply(e); err != nil {
+			out, ferr := l.fail(ctx, FailCorruptLog, err.Error(), nil)
+			return out, true, ferr
+		}
+		l.hook("cut_off_result")
+	}
+	return "", false, nil
 }
 
 // nudge stores the agent's message after a turn that ended without a tool call; the next model call sends it. done is false:
@@ -990,6 +1044,22 @@ func (l *loop) stopBudget(ctx context.Context, limit string) (Outcome, error) {
 }
 
 func (l *loop) stopBudgetWithUsage(ctx context.Context, limit string, usage llm.Usage, cost int64) (Outcome, error) {
+	// An agent whose work is in a usable state may end the run gracefully instead of failing it for the limit.
+	if l.agent.OnLimit != nil {
+		if output, ok := l.agent.OnLimit(ctx, l.toolContext("", false), limit); ok && len(output) > 0 {
+			if err := l.recordGraceful(ctx, limit, usage, cost); err != nil {
+				return "", err
+			}
+			_, err := l.end(ctx, store.RunEnd{
+				Status: store.AgentSucceeded, Output: output,
+				Event: mustJSON(statusPayload{State: stateSucceeded, Limit: limit}), ActiveMs: l.takeActive(),
+			})
+			if err != nil {
+				return "", err
+			}
+			return OutcomeFinished, nil
+		}
+	}
 	msg := fmt.Sprintf("The run reached its %s limit and was stopped.", strings.ReplaceAll(limit, "_", " "))
 	if err := l.recordSpend(ctx, FailBudget, msg, usage, cost); err != nil {
 		return "", err
@@ -1028,6 +1098,16 @@ func (l *loop) failWithUsage(ctx context.Context, reason, message string, usage 
 		return "", err
 	}
 	return OutcomeFinished, nil
+}
+
+// recordGraceful writes the status event that says a run is ending at a limit by the agent's choice, with whatever the call that hit
+// the limit cost added to the run's totals.
+func (l *loop) recordGraceful(ctx context.Context, limit string, usage llm.Usage, cost int64) error {
+	_, err := l.append(ctx, store.EventStatus, mustJSON(statusPayload{State: "limit_reached", Limit: limit}), store.EventDelta{
+		InputTokens: usage.InputTokens, CacheWriteTokens: usage.CacheWriteTokens, CacheReadTokens: usage.CacheReadTokens,
+		OutputTokens: usage.OutputTokens, CostMicros: cost,
+	})
+	return err
 }
 
 // recordSpend writes the error event that explains a failure, with whatever the failed call cost added to the run's totals.

@@ -39,6 +39,19 @@ SELECT asset_id, version, duration_ms, summary FROM asset_signals
 WHERE workspace_id = @workspace_id AND asset_id = ANY(@asset_ids::uuid[])
 ORDER BY asset_id;
 
+-- The mean and the 90th percentile luma of each sample of the assets' analyses, for the percentile exposure (the exposure note of the
+-- editor's footage list and the brightness check of check_edit). Two of the six series, not the whole row.
+-- name: ListAssetExposureSeries :many
+SELECT asset_id, step_ms, luma, high FROM asset_signals
+WHERE workspace_id = @workspace_id AND asset_id = ANY(@asset_ids::uuid[])
+ORDER BY asset_id;
+
+-- The reps, holds and dead moments of several assets in one read (every source), for the editor's check_edit.
+-- name: ListAssetSpans :many
+SELECT asset_id, kind, start_ms, end_ms FROM moments
+WHERE workspace_id = @workspace_id AND asset_id = ANY(@asset_ids::uuid[]) AND kind IN ('rep', 'hold', 'dead')
+ORDER BY asset_id, start_ms;
+
 -- Which analysis an asset has, without the series: the skip check of the job reads this.
 -- name: GetAssetSignalsMeta :one
 SELECT asset_id, version, source_ingested_at, duration_ms FROM asset_signals WHERE workspace_id = @workspace_id AND asset_id = @asset_id;

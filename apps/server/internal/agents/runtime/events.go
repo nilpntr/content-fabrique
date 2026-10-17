@@ -127,6 +127,7 @@ const (
 	stateCostFixed    = "cost_reconciled"
 	stateModelCall    = "model_call"
 	stateNudge        = "nudge"
+	stateCutOff       = "cut_off"
 )
 
 // statusPayload is a status event.
@@ -236,6 +237,19 @@ func (t *turn) endedWithText() bool {
 	return len(t.uses) == 0 && len(t.nudge) == 0 && (t.stopReason == "end_turn" || t.stopReason == "stop_sequence")
 }
 
+// needsCutOffRecovery says the assistant's answer stopped at max_tokens and has not been dealt with yet: it has tool calls without a
+// result, or it has none and nothing has followed it. The loop must not run those calls (they are cut off) nor send the model a
+// conversation that ends on this message.
+func (t *turn) needsCutOffRecovery() bool {
+	if t.stopReason != "max_tokens" {
+		return false
+	}
+	if len(t.uses) == 0 {
+		return len(t.nudge) == 0
+	}
+	return !t.complete()
+}
+
 // complete says every tool call has its result.
 func (t *turn) complete() bool { return len(t.pending()) == 0 }
 
@@ -256,6 +270,9 @@ type convo struct {
 	turns      []*turn
 	// started says the run has a status event of state running already: this start is a resume.
 	started bool
+	// cutOffs counts the model answers that stopped at max_tokens: the loop recovers from the first few (see recoverCutOff) and fails the
+	// run for the next one. It is rebuilt from the assistant events, so a resumed run counts the same.
+	cutOffs int
 	// nudges counts the nudge events: how often the agent asked the model to go on after a turn that ended without a tool call.
 	nudges int
 	// inflight is the worst-case cost reserved for a model call that was sent and has no answer on record: the worker died
@@ -293,6 +310,11 @@ func (c *convo) apply(e store.AgentEvent) error {
 				cur.nudge = fromWire(p.Blocks)
 				c.nudges++
 			}
+		case stateCutOff:
+			// The message after a cut-off turn that had no tool call. It is not the agent's nudge and does not count as one.
+			if cur := c.last(); cur != nil {
+				cur.nudge = fromWire(p.Blocks)
+			}
 		case stateModelCall:
 			c.inflight = p.ReservedMicros
 		case stateCostFixed:
@@ -323,6 +345,9 @@ func (c *convo) apply(e store.AgentEvent) error {
 			}
 		}
 		c.turns = append(c.turns, t)
+		if p.StopReason == "max_tokens" {
+			c.cutOffs++
+		}
 	case store.EventToolCall:
 		var p toolCallPayload
 		if err := json.Unmarshal(e.Payload, &p); err != nil {

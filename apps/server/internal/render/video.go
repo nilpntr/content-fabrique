@@ -22,9 +22,13 @@ var looks = map[string]string{
 	// look.match says). It never measures the picture: the compiler has no pass that could, and a mean-brightness measure would
 	// wash out low-key footage anyway. The exposure hint comes from the analysis, from percentiles, and is bounded.
 	"auto": "format=gbrp,curves=all='0/0 0.25/0.235 0.75/0.765 1/1',format=yuv420p",
-	// gym_moody: deep blacks (the toe pulled down), warm skin (red up, blue down in the mids), a little less saturation and
-	// more contrast, and a slight vignette with the filter's random dither off.
-	"gym_moody": "format=gbrp,curves=r='0/0 0.12/0.07 0.5/0.53 1/1':g='0/0 0.12/0.07 0.5/0.49 1/1':b='0/0 0.12/0.08 0.5/0.45 1/0.97',format=yuv420p,eq=saturation=0.92:contrast=1.08,vignette=angle=0.8:dither=0",
+	// gym_moody: warm skin (red up, blue down in the mids), a little less saturation, a gentle S in the upper half for contrast, and
+	// a soft vignette with the filter's random dither off. Everything under about 0.15 is left where it is: the look is for gym
+	// footage, which is shot low-key (a lit lifter in a dark room, p90 luma 0.10 to 0.33), and the first version of this preset, a
+	// toe pulled from 0.12 to 0.07 plus eq contrast 1.08, took the rendered mean of such a shot from 17 to 5 of 255: the grade
+	// crushed the footage it was made for. The preset darkens nothing that is already dark; its mood is the warm mids, the
+	// contrast above the shadows and the corners.
+	"gym_moody": "format=gbrp,curves=r='0/0 0.15/0.15 0.5/0.53 0.8/0.84 1/1':g='0/0 0.15/0.15 0.5/0.49 0.8/0.82 1/1':b='0/0 0.15/0.16 0.5/0.45 0.8/0.76 1/0.97',format=yuv420p,eq=saturation=0.92,vignette=angle=0.28:dither=0",
 }
 
 // The exposure nudge (look.match, and the preset auto): the hint is bounded by the spec to -1 to 1 stops, the applied correction

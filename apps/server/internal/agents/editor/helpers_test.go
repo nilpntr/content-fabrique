@@ -220,7 +220,9 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	e.frames = &fakeFrames{objs: e.objs}
-	e.deps = Deps{Projects: e.svc, Store: st, Frames: e.frames, Preview: e.preview}.withState()
+	// The plan gate and the check gate are switched off here, so the tests of the other tools stay about those tools; the gates have
+	// their own tests (plan_test.go, checktool_test.go) and the end-to-end run has them on.
+	e.deps = Deps{Projects: e.svc, Store: st, Frames: e.frames, Preview: e.preview, noPlanGate: true, noCheckGate: true}.withState()
 	e.rebuild()
 	return e
 }
