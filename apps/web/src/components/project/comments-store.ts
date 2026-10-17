@@ -7,15 +7,16 @@ import type { ReviewAnnotation } from "@/components/editor/types";
  */
 export interface CommentsStore {
   list(projectId: string): ReviewAnnotation[];
-  add(projectId: string, comment: ReviewAnnotation): void;
+  /** Replaces the project's comments with these: every change on the screen (add, edit, resolve, delete) is written this way. */
+  replace(projectId: string, comments: readonly ReviewAnnotation[]): void;
 }
 
 export function createMemoryCommentsStore(): CommentsStore {
   const byProject = new Map<string, ReviewAnnotation[]>();
   return {
     list: (projectId) => [...(byProject.get(projectId) ?? [])],
-    add: (projectId, comment) => {
-      byProject.set(projectId, [...(byProject.get(projectId) ?? []), comment]);
+    replace: (projectId, comments) => {
+      byProject.set(projectId, [...comments]);
     },
   };
 }

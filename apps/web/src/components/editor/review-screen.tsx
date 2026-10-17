@@ -29,6 +29,8 @@ export interface ReviewScreenProps {
   /** The version to open on. Falls back to the latest version when it is not given or does not exist. */
   initialVersion?: number;
   onCommentCreate?: (comment: ReviewAnnotation) => void;
+  /** Called with the whole list after every change to it (a comment added, and later edited, resolved or deleted). */
+  onCommentsChange?: (comments: ReviewAnnotation[]) => void;
   /** Whether the "Local video" button is offered (it plays a file from the computer instead of the placeholder). Default true. */
   localVideo?: boolean;
   /** What the frame says when there is no video to play. Default "Placeholder preview". */
@@ -90,6 +92,7 @@ function ReviewWorkspace({
   src,
   initialVersion,
   onCommentCreate,
+  onCommentsChange,
   onSeek,
   className,
   localVideo = true,
@@ -107,6 +110,7 @@ function ReviewWorkspace({
   const version = versions.find((candidate) => candidate.version === versionNumber) ?? (versions.find((candidate) => candidate.version === latest) as ReviewVersion);
 
   const [comments, setComments] = React.useState(initialComments);
+  const commentsRef = React.useRef(comments);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [hoveredId, setHoveredId] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState<CommentDraft | null>(null);
@@ -245,12 +249,15 @@ function ReviewWorkspace({
         author: { kind: "creator", name: "You" },
         created_at: new Date().toISOString(),
       };
-      setComments((current) => [...current, comment]);
+      const next = [...commentsRef.current, comment];
+      commentsRef.current = next;
+      setComments(next);
+      onCommentsChange?.(next);
       setSelectedId(comment.id);
       clearDraft();
       onCommentCreate?.(comment);
     },
-    [draft, version.version, clearDraft, onCommentCreate],
+    [draft, version.version, clearDraft, onCommentCreate, onCommentsChange],
   );
 
   const changeDraft = React.useCallback(

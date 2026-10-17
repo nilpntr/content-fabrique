@@ -13,6 +13,7 @@ import type { ApiAsset } from "@/lib/api/client";
 import { useAssets } from "@/lib/api/hooks";
 import { useCreateProject, useStartEdit } from "@/lib/api/project-hooks";
 import { ASSETS_QUERY_KEY } from "@/lib/query-client";
+import { useRefreshThrottle } from "@/lib/refresh-throttle";
 
 /** A clip the editor can use: a video that has finished processing. */
 export const isUsableClip = (asset: ApiAsset): boolean => asset.kind === "video" && asset.status === "ready";
@@ -29,35 +30,29 @@ export function toPickerAsset(asset: ApiAsset): Asset {
   };
 }
 
-const MEDIA_REFRESH_MIN_MS = 10_000;
-
 /**
  * Where a project starts: the ready videos of the library to pick from, the format and the instructions. Creating makes the
  * project, starts the editor on it with the instructions, and opens the project page, which follows the run.
  */
 export function NewProjectPage({ onOpenProject }: { onOpenProject: (projectId: string, runId?: string) => void }) {
   const assets = useAssets();
-  const { hasNextPage, isFetchingNextPage, fetchNextPage } = assets;
+  const { hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage } = assets;
   const createProject = useCreateProject();
   const startEdit = useStartEdit();
   const queryClient = useQueryClient();
 
-  // The picker needs the whole library to search it, so the remaining pages are fetched as they come.
+  // The picker needs the whole library to search it, so the remaining pages are fetched as they come. After a failure it stops,
+  // and a button asks again: a loop of retries against a failing API helps nobody.
   React.useEffect(() => {
-    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+    if (hasNextPage && !isFetchingNextPage && !isFetchNextPageError) void fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage]);
 
   const clips = React.useMemo(() => (assets.data ?? []).filter(isUsableClip).map(toPickerAsset), [assets.data]);
-  const loading = assets.isPending && assets.fetchStatus !== "idle";
+  // Pending includes "not asked yet" (the session is still loading): that is loading, not an empty library.
+  const loading = assets.isPending;
 
   // A poster that does not load has an expired URL (they last 30 minutes): fetch the list again, at most every few seconds.
-  const lastRefresh = React.useRef(0);
-  const refresh = React.useCallback(() => {
-    const now = Date.now();
-    if (now - lastRefresh.current < MEDIA_REFRESH_MIN_MS) return;
-    lastRefresh.current = now;
-    void queryClient.invalidateQueries({ queryKey: [ASSETS_QUERY_KEY] });
-  }, [queryClient]);
+  const { refresh } = useRefreshThrottle(() => void queryClient.invalidateQueries({ queryKey: [ASSETS_QUERY_KEY] }));
 
   async function onCreate(input: NewProjectInput) {
     const project = await createProject.mutateAsync({
@@ -124,5 +119,17 @@ export function NewProjectPage({ onOpenProject }: { onOpenProject: (projectId: s
     );
   }
 
-  return <NewProjectFlow assets={clips} onCreate={onCreate} onMediaError={refresh} budgetUsd={DEFAULT_BUDGET_USD} describeError={describeError} />;
+  return (
+    <div className="space-y-4">
+      {isFetchNextPageError ? (
+        <div role="alert" className="flex flex-wrap items-center gap-3 rounded-xl bg-del-wash px-3 py-2 text-[13.5px]">
+          <p className="text-destructive">Some of your clips could not be loaded.</p>
+          <Button variant="secondary" size="sm" disabled={isFetchingNextPage} onClick={() => void fetchNextPage()}>
+            {isFetchingNextPage ? "Loading…" : "Load the rest"}
+          </Button>
+        </div>
+      ) : null}
+      <NewProjectFlow assets={clips} onCreate={onCreate} onMediaError={refresh} budgetUsd={DEFAULT_BUDGET_USD} describeError={describeError} />
+    </div>
+  );
 }

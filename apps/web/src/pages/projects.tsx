@@ -14,7 +14,8 @@ import { useProjects } from "@/lib/api/project-hooks";
 export function ProjectsPage() {
   const projects = useProjects();
   const items = projects.data ?? [];
-  const loading = projects.isPending && projects.fetchStatus !== "idle";
+  // Pending includes "not asked yet" (the session is still loading): that is loading, not an empty list.
+  const loading = projects.isPending;
 
   return (
     <div className="space-y-6">

@@ -89,6 +89,21 @@ export interface VersionInputs {
   previewUrl?: string;
 }
 
+/** A listed version whose spec has not been fetched: it can be chosen, and shows as loading until the spec arrives. */
+export function loadingReviewVersion(summary: TimelineVersionSummary, projectFormat: OutputFormat, duration_ms = 1000): ReviewVersion {
+  return {
+    version: summary.version,
+    created_at: summary.created_at,
+    author_kind: summary.author_kind,
+    summary: versionSummaryLine(summary),
+    output: { format: projectFormat, fps: 30 },
+    duration_ms,
+    items: [],
+    time_map: [],
+    loading: true,
+  };
+}
+
 /** A version for the review screen, or null while its spec is not there yet. Without a render, the time map is the one the renderer would write. */
 export function toReviewVersion(input: VersionInputs, projectFormat: OutputFormat): ReviewVersion | null {
   if (!input.version) return null;

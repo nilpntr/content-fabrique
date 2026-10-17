@@ -277,9 +277,67 @@ test("a project opened without ?run= follows the run this browser started, else 
   first.unmount();
 
   rememberRun(P, runId(4));
-  page();
+  const second = page();
   await reviewUp();
   await waitFor(() => expect(fake.callsTo("GET /v1/runs/{id}").at(-1)?.path).toBe(`/v1/runs/${runId(4)}`));
+  second.unmount();
+
+  // A remembered run that is older than the newest version's run gives way to it.
+  rememberRun(P, runId(4), "2020-01-01T00:00:00Z");
+  page();
+  await reviewUp();
+  await waitFor(() => expect(fake.callsTo("GET /v1/runs/{id}").at(-1)?.path).toBe(`/v1/runs/${runId(1)}`));
+});
+
+test("specs are fetched lazily: the latest and the one on screen, and the screen stays up while another version loads", async () => {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const fake = api({
+    ...noRenders,
+    "GET /v1/projects/{id}/timelines/{version}": async (call: { path: string }) => {
+      const version = Number(call.path.split("/").at(-1));
+      if (version === 1) await gate;
+      return SPECS[version - 1] as object;
+    },
+  });
+  page();
+  await reviewUp();
+  const fetched = () => fake.callsTo("GET /v1/projects/{id}/timelines/{version}").map((call) => call.path.split("/").at(-1));
+  expect(fetched()).toEqual(["3"]);
+
+  fireEvent.click(within(screen.getByRole("region", { name: "Versions" })).getByRole("button", { name: /^v1/ }));
+  // v1 is on screen but its spec is still on the way: the screen stays, with a small loading line, and v2 is never fetched.
+  expect(await screen.findByText("Loading v1…")).toBeTruthy();
+  expect(screen.getByRole("group", { name: "Version" })).toBeTruthy();
+  expect(screen.queryByText("Loading v3…")).toBeNull();
+  expect(fetched()).toEqual(["3", "1"]);
+  release();
+  await waitFor(() => expect(screen.queryByText("Loading v1…")).toBeNull());
+  expect(screen.getByText(/Video previews aren't available yet/)).toBeTruthy();
+  expect(fetched()).toEqual(["3", "1"]);
+});
+
+test("asking for a preview is tracked per version: another version is not shown as starting", async () => {
+  let finish: () => void = () => {};
+  const slow = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  api({
+    "GET /v1/projects/{id}/renders": { items: [], next_cursor: null },
+    "POST /v1/projects/{id}/renders": async () => {
+      await slow;
+      return json(202, render({ id: renderId(2), timeline_version: 3, status: "queued" }));
+    },
+  });
+  page();
+  fireEvent.click(await screen.findByRole("button", { name: "Render preview" }));
+  expect(await screen.findByRole("button", { name: "Starting…" })).toBeTruthy();
+  fireEvent.click(within(screen.getByRole("region", { name: "Versions" })).getByRole("button", { name: /^v2/ }));
+  expect(await screen.findByText("There is no video preview of v2 yet.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Render preview" }).hasAttribute("disabled")).toBe(false);
+  finish();
 });
 
 test("before the first cut: a run that is going says it is on its way; with none, the editor can be started", async () => {

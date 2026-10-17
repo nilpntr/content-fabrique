@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, expect, test, vi } from "vitest";
+import { clerkMock } from "@/test-clerk";
 import { apiError, installApi, json, renderApp } from "@/test-api";
 import { apiAsset, assetId, project, projectId, run, runId } from "@/test-fixtures";
 import { NewProjectPage, toPickerAsset } from "./new-project";
@@ -182,6 +183,31 @@ test("every page of the library is fetched, so the picker can search all of it",
   expect(await screen.findByRole("checkbox", { name: /On page two/ })).toBeTruthy();
   expect(screen.getByRole("checkbox", { name: /On page one/ })).toBeTruthy();
   expect(api.callsTo("GET /v1/assets")).toHaveLength(2);
+});
+
+test("a page of the library that fails stops the paging and offers to load the rest", async () => {
+  const api = installApi({
+    "GET /v1/assets": (call) => (call.query.get("cursor") ? apiError(403, "no_active_workspace") : { items: [apiAsset(1, { title: "On page one" })], next_cursor: "page2" }),
+  });
+  renderApp(<NewProjectPage onOpenProject={vi.fn()} />);
+  expect((await screen.findByRole("alert")).textContent).toContain("Some of your clips could not be loaded");
+  fireEvent.click(await screen.findByRole("button", { name: /^Next/ }));
+  expect(screen.getByRole("checkbox", { name: /On page one/ })).toBeTruthy();
+  const calls = api.callsTo("GET /v1/assets").length;
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  expect(api.callsTo("GET /v1/assets")).toHaveLength(calls);
+
+  api.on("GET /v1/assets", (call) => (call.query.get("cursor") ? { items: [apiAsset(2, { title: "On page two" })], next_cursor: null } : { items: [apiAsset(1, { title: "On page one" })], next_cursor: "page2" }));
+  fireEvent.click(screen.getByRole("button", { name: "Load the rest" }));
+  expect(await screen.findByRole("checkbox", { name: /On page two/ })).toBeTruthy();
+});
+
+test("while the session is not ready the page is loading, not an empty library", async () => {
+  clerkMock.session = { ...clerkMock.session, orgId: null };
+  installApi({ "GET /v1/assets": { items: [], next_cursor: null } });
+  renderApp(<NewProjectPage onOpenProject={vi.fn()} />);
+  expect(await screen.findByText("Loading your clips")).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Upload some clips first" })).toBeNull();
 });
 
 test("toPickerAsset names a clip by its title, or its file when it has none, and carries the previews", () => {

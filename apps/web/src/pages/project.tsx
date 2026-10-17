@@ -3,7 +3,7 @@ import { ArrowLeft } from "lucide-react";
 import { FormatBadge, StatusBadge } from "@/components/project/badges";
 import { type CommentsStore, sessionCommentsStore } from "@/components/project/comments-store";
 import { EditAgain } from "@/components/project/edit-again";
-import { recallRun } from "@/components/project/last-run";
+import { chooseRun, isRunId, useRememberedRun } from "@/components/project/last-run";
 import { ProjectReview } from "@/components/project/project-review";
 import { relativeTime } from "@/components/project/relative-time";
 import { RunPanel } from "@/components/project/run-panel";
@@ -11,9 +11,6 @@ import { isRunActive, useProject, useRun, useTimelineVersions } from "@/lib/api/
 import { ApiError, type Project } from "@/lib/api/client";
 import { Skeleton } from "@/components/ui/skeleton";
 import { buttonVariants } from "@/components/ui/button";
-
-/** A TypeID of a run starts with `run_`; `author_id` of a version made by the editor is one. */
-const isRunAuthor = (id: string) => id.startsWith("run_");
 
 /**
  * A project: the editor run (live while it works), the review of the cut and its versions, and the way to edit again.
@@ -34,8 +31,10 @@ export function ProjectPage({
   const project = useProject(projectId);
   const versions = useTimelineVersions(projectId);
 
-  const latestAgentRun = versions.data?.find((version) => version.author_kind === "agent" && isRunAuthor(version.author_id))?.author_id;
-  const runId = urlRunId ?? recallRun(projectId) ?? latestAgentRun;
+  // Newest first: the first version made by a run. See last-run.ts for the order and for why this is a stand-in.
+  const newestByRun = versions.data?.find((version) => version.author_kind === "agent" && isRunId(version.author_id));
+  const remembered = useRememberedRun(projectId);
+  const runId = chooseRun(urlRunId, remembered, newestByRun ? { runId: newestByRun.author_id, createdAt: newestByRun.created_at } : undefined);
   // The run is read here as well as in its panel (same query, so one request) to know whether the editor is busy.
   const run = useRun(runId);
   const runActive = isRunActive(run.data?.status);

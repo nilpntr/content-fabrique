@@ -6,6 +6,7 @@ import { type ApiAsset, fetchSpriteVtt } from "@/lib/api/client";
 import { useDeleteAsset } from "@/lib/api/hooks";
 import { useApiClient } from "@/lib/api/provider";
 import { ASSETS_QUERY_KEY } from "@/lib/query-client";
+import { URL_REFRESH_MIN_MS, useRefreshThrottle } from "@/lib/refresh-throttle";
 import type { UploadItem } from "@/lib/upload/manager";
 import { useUploadCommands, useUploadSelector } from "@/lib/upload/provider";
 import { LibraryGrid } from "./library-grid";
@@ -101,8 +102,6 @@ const sameUploads = (a: readonly LocalUpload[], b: readonly LocalUpload[]) =>
 const selectLocalUploads = (snapshot: { items: readonly UploadItem[] }): LocalUpload[] =>
   snapshot.items.flatMap((item) => (item.assetId ? [{ id: item.id, assetId: item.assetId, status: item.status, percent: Math.round(item.progress * 100) }] : []));
 
-/** How soon the list may be fetched again because a picture or video would not load. */
-const MEDIA_REFRESH_MIN_MS = 10_000;
 /** The URLs are renewed this long before they expire. */
 const EXPIRY_MARGIN_MS = 60_000;
 
@@ -122,25 +121,19 @@ export function RealLibrary({ assets, loading, hasMore, loadingMore, onLoadMore 
 
   // A picture or video that does not load has an expired URL (they last 30 minutes), so the list, which carries fresh
   // ones, is fetched again; at most every few seconds, however many cards fail together.
-  const lastRefresh = React.useRef(0);
-  const refresh = React.useCallback(() => {
-    const now = Date.now();
-    if (now - lastRefresh.current < MEDIA_REFRESH_MIN_MS) return;
-    lastRefresh.current = now;
-    void queryClient.invalidateQueries({ queryKey: [ASSETS_QUERY_KEY] });
-  }, [queryClient]);
+  const { refresh, reset: resetRefresh } = useRefreshThrottle(() => void queryClient.invalidateQueries({ queryKey: [ASSETS_QUERY_KEY] }));
 
   // And before they expire, so that a page left open for an hour keeps its previews.
   React.useEffect(() => {
     const expiries = assets.flatMap((asset) => (asset.derivative_urls_expire_at ? [Date.parse(asset.derivative_urls_expire_at)] : [])).filter(Number.isFinite);
     if (expiries.length === 0) return;
-    const wait = Math.min(2 ** 31 - 1, Math.max(MEDIA_REFRESH_MIN_MS, Math.min(...expiries) - Date.now() - EXPIRY_MARGIN_MS));
+    const wait = Math.min(2 ** 31 - 1, Math.max(URL_REFRESH_MIN_MS, Math.min(...expiries) - Date.now() - EXPIRY_MARGIN_MS));
     const timer = setTimeout(() => {
-      lastRefresh.current = 0;
+      resetRefresh();
       refresh();
     }, wait);
     return () => clearTimeout(timer);
-  }, [assets, refresh]);
+  }, [assets, refresh, resetRefresh]);
 
   return (
     <div className="space-y-4">

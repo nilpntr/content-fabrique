@@ -27,6 +27,9 @@ import {
 } from "@/lib/api/client";
 import { retryUnlessClientError } from "@/lib/api/hooks";
 import { useApiClient } from "@/lib/api/provider";
+import { parseTimeMap } from "@/components/project/review-data";
+import type { TimeMapEntry } from "@/components/editor/types";
+import { URL_REFRESH_MIN_MS, useRefreshThrottle } from "@/lib/refresh-throttle";
 import { PROJECT_QUERY_KEY, PROJECTS_QUERY_KEY, RENDER_QUERY_KEY, RENDERS_QUERY_KEY, RUN_QUERY_KEY, TIMELINES_QUERY_KEY } from "@/lib/query-client";
 
 /**
@@ -99,7 +102,8 @@ export function useTimelineSpecs(projectId: string, versions: readonly TimelineV
 /** Everything a project's page shows is fetched again: after an edit run starts or ends, or when the project changes. */
 export function invalidateProject(queryClient: QueryClient) {
   void queryClient.invalidateQueries({ queryKey: [PROJECT_QUERY_KEY] });
-  void queryClient.invalidateQueries({ queryKey: [TIMELINES_QUERY_KEY] });
+  // Only the lists of versions (`[TIMELINES_QUERY_KEY, user, org, projectId]`): a version's own spec, one key longer, never changes.
+  void queryClient.invalidateQueries({ queryKey: [TIMELINES_QUERY_KEY], predicate: (query) => query.queryKey.length === 4 });
   void queryClient.invalidateQueries({ queryKey: [PROJECTS_QUERY_KEY] });
 }
 
@@ -242,7 +246,6 @@ export type PreviewRenderState =
   | { kind: "failed"; render: Render };
 
 const URL_REFRESH_MARGIN_MS = 60_000;
-const URL_REFRESH_MIN_MS = 10_000;
 
 /** Which of a version's renders to show: a ready one, else one in progress, else the latest failure. The list is newest first. */
 export function pickRender(renders: readonly Render[]): Render | undefined {
@@ -285,24 +288,27 @@ export function usePreviewRender(projectId: string, version: number | undefined)
     },
   });
 
-  const lastRefresh = useRef(0);
   const chosenId = chosen?.id;
-  const refreshUrls = useCallback(() => {
-    const now = Date.now();
-    if (now - lastRefresh.current < URL_REFRESH_MIN_MS) return;
-    lastRefresh.current = now;
-    void queryClient.invalidateQueries({ queryKey: [RENDER_QUERY_KEY, userId, orgId, chosenId] });
-  }, [queryClient, chosenId, userId, orgId]);
+  const { refresh: refreshUrls } = useRefreshThrottle(() => void queryClient.invalidateQueries({ queryKey: [RENDER_QUERY_KEY, userId, orgId, chosenId] }));
 
+  // The variable is the version asked for, so that the state below is the one of the version on screen, not of another that was asked for a moment ago.
   const request = useMutation({
-    mutationFn: () => createRender(getClient(), projectId, version as number, "preview"),
+    mutationFn: (requested: number) => createRender(getClient(), projectId, requested, "preview"),
     onSuccess: (render) => {
+      // The render says which version it is of; that may no longer be the one on screen.
+      const key = [RENDERS_QUERY_KEY, userId, orgId, projectId, render.timeline_version];
       queryClient.setQueryData([RENDER_QUERY_KEY, userId, orgId, render.id], render);
       // The list names it at once; the fetch that follows confirms.
-      queryClient.setQueryData<Render[]>(listKey, (old) => [render, ...(old ?? []).filter((candidate) => candidate.id !== render.id)]);
-      void queryClient.invalidateQueries({ queryKey: listKey });
+      queryClient.setQueryData<Render[]>(key, (old) => [render, ...(old ?? []).filter((candidate) => candidate.id !== render.id)]);
+      void queryClient.invalidateQueries({ queryKey: key });
     },
   });
+  const asked = request.variables === version;
+  const requesting = request.isPending && asked;
+  const requestError = request.isError && asked ? request.error : undefined;
+  const requestRender = useCallback(() => {
+    if (version !== undefined) request.mutate(version);
+  }, [request, version]);
 
   // A render that finished: the list is fetched again so that it names the same render next time.
   const detailStatus = detail.data?.status;
@@ -327,6 +333,29 @@ export function usePreviewRender(projectId: string, version: number | undefined)
     else state = { kind: "working", render };
   }
 
-  return { state, request, refreshUrls, timeMapUrl: state.kind === "ready" ? state.render.files?.time_map.url : undefined };
+  return { state, requestRender, requesting, requestError, refreshUrls, timeMapUrl: state.kind === "ready" ? state.render.files?.time_map.url : undefined };
+}
+
+/**
+ * The render's time map: a JSON file behind a presigned URL. Undefined while it loads and when it cannot be read (the caller
+ * then uses the time map made from the spec, which is the same by construction). The URL is part of the key, so a failure is
+ * tried again with the fresh URL that a refresh brings, and is not remembered.
+ */
+export function useRenderTimeMap(renderId: string | undefined, url: string | undefined): TimeMapEntry[] | undefined {
+  const { userId, orgId, ready } = useScope();
+  const query = useQuery({
+    queryKey: [RENDER_QUERY_KEY, userId, orgId, renderId, "time-map", url],
+    queryFn: async (): Promise<TimeMapEntry[]> => {
+      const response = await fetch(url as string, { credentials: "omit" });
+      if (!response.ok) throw new Error(`The time map answered ${response.status}.`);
+      const entries = parseTimeMap(await response.json());
+      if (!entries) throw new Error("The time map is not a list.");
+      return entries;
+    },
+    enabled: ready && Boolean(renderId && url),
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: 1,
+  });
+  return query.data;
 }
 
