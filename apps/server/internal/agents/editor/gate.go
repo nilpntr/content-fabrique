@@ -16,68 +16,105 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/timeline/ops"
 )
 
-// The preview gate. A run that edited the timeline must have looked at the result before it ends: when previews are wired, finish
-// is refused until render_preview has succeeded for the newest version the run made, and a turn that ends in plain text counts as
+// The preview gate. A run that edited the timeline must have looked at the result before it ends: when previews are wired, finish is
+// refused until render_preview has succeeded for the newest version the run made, and a turn that ends in plain text counts as
 // finishing only if that is true (otherwise the model is asked once to preview and call finish).
 //
 // The record of which versions a run previewed lives in the process: a resumed run in another worker starts with none, and is
 // asked to preview again, which the renderer allows (it is idempotent in (project, version)).
 
-// maxPreviewFailures is how many times render_preview may fail for a run before the gate opens: a renderer that is down must not
-// trap the model in a loop it cannot leave.
+// maxPreviewFailures is how many times in a row render_preview may fail for a version before finish no longer needs a preview of
+// it: a renderer that is down must not trap the model in a loop it cannot leave. It applies to that version only; the next version
+// the run makes needs a preview again, and a success clears the count.
 const maxPreviewFailures = 2
 
+// maxTrackedRuns bounds the record: past it, the run that was used least recently is forgotten. (Runs are also forgotten when they
+// end, see Agent.OnEnd; the bound is for a worker that never hears of a run ending, such as one that lost it.)
+const maxTrackedRuns = 1024
+
 type previewState struct {
-	version  int // the newest version previewed, 0 for none
-	failures int
+	version  int    // the newest version previewed, 0 for none
+	failures int    // previews that failed in a row since the last success
+	failedAt int    // the version the latest failure was for
+	used     uint64 // when the run was last used, for the bound
 }
 
 type previewLog struct {
 	mu   sync.Mutex
 	runs map[uuid.UUID]*previewState
+	tick uint64
 }
 
 func newPreviewLog() *previewLog { return &previewLog{runs: map[uuid.UUID]*previewState{}} }
 
-// maxTrackedRuns bounds the log: it forgets everything when it grows past this many runs (a few bytes each).
-const maxTrackedRuns = 4096
-
+// state returns the run's record, making it (and making room for it) if there is none. The caller holds mu.
 func (l *previewLog) state(run uuid.UUID) *previewState {
+	l.tick++
 	s := l.runs[run]
 	if s == nil {
 		if len(l.runs) >= maxTrackedRuns {
-			clear(l.runs)
+			var oldest uuid.UUID
+			least := ^uint64(0)
+			for id, st := range l.runs {
+				if st.used < least {
+					oldest, least = id, st.used
+				}
+			}
+			delete(l.runs, oldest)
 		}
 		s = &previewState{}
 		l.runs[run] = s
 	}
+	s.used = l.tick
 	return s
 }
 
+// previewed records a successful preview of version, which also ends a streak of failures.
 func (l *previewLog) previewed(run uuid.UUID, version int) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if s := l.state(run); version > s.version {
-		s.version = version
-	}
+	s := l.state(run)
+	s.version = max(s.version, version)
+	s.failures, s.failedAt = 0, 0
 }
 
-func (l *previewLog) failed(run uuid.UUID, times int) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.state(run).failures += times
-}
-
-// ok says the run has previewed version (or a later one), or has been let off because previews keep failing.
-func (l *previewLog) ok(run uuid.UUID, version int) bool {
+// failed records n failed previews of version.
+func (l *previewLog) failed(run uuid.UUID, version, n int) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	s := l.state(run)
-	return s.version >= version || s.failures >= maxPreviewFailures
+	s.failures += n
+	s.failedAt = version
 }
 
-// withState returns the Deps with the gate's record set. It is idempotent, and the agent and its tools must share one record, so
-// NewAgent calls it before building the tools.
+// ok says the run has previewed version (or a later one), or has been let off for it because previews of it kept failing.
+func (l *previewLog) ok(run uuid.UUID, version int) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	s := l.runs[run]
+	if s == nil {
+		return false
+	}
+	l.tick++
+	s.used = l.tick
+	return s.version >= version || (s.failures >= maxPreviewFailures && s.failedAt >= version)
+}
+
+// forget drops the run's record: the run has ended.
+func (l *previewLog) forget(run uuid.UUID) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.runs, run)
+}
+
+func (l *previewLog) tracked() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.runs)
+}
+
+// withState returns the Deps with the record of previews set (kept if there is one). NewAgent is its one production caller: the
+// agent and its tools share the record of that one agent instance, and Deps.check refuses a Deps without it.
 func (d Deps) withState() Deps {
 	if d.previews == nil {
 		d.previews = newPreviewLog()
@@ -96,7 +133,7 @@ func (d Deps) previewsOn() bool {
 
 // previewGate returns the refusal for finish when the run's newest version has not been previewed, or "" when it may finish.
 func (d Deps) previewGate(run uuid.UUID, version int) string {
-	if !d.previewsOn() || d.previews == nil || d.previews.ok(run, version) {
+	if !d.previewsOn() || d.previews.ok(run, version) {
 		return ""
 	}
 	return fmt.Sprintf("you cannot finish yet: you have not looked at version %d. Call render_preview and look at the contact sheet (black frames, a cropped-off subject, text over a face or outside the safe area, a weak hook). If something is wrong, fix it with edit_timeline and preview again. Then call finish.", version)
@@ -104,41 +141,43 @@ func (d Deps) previewGate(run uuid.UUID, version int) string {
 
 const (
 	nudgeNoPreview = "You ended your turn without calling finish, and you have not looked at your latest version, version %d, yet. Call render_preview now and look at the contact sheet. Fix what is wrong, then call finish with your message for the creator."
+	nudgeNoFinish  = "You ended your turn without calling finish. Call finish now with your message for the creator."
 	nudgeNoEdit    = "You ended your turn without calling finish. If you edited the timeline, call finish with your message for the creator (after render_preview, which shows the result). If the timeline already does what the creator asked and nothing needs to change, call finish with no_edit_needed set to true."
 )
 
-// endTurn decides what a turn that ends in text, with no tool call, means. With previews wired it is an implicit finish if the
-// run's newest version was previewed; otherwise the model is asked once to preview and finish, and the second time the text ends
-// the run as it always did.
+// endTurn decides what a turn that ends in text, with no tool call, means. The prompt says a run ends with finish, so the model is
+// asked once to call it (and, with previews wired, to look at its latest version first). A turn that follows the nudge, or one
+// that already previewed the newest version, is accepted as the finish, with the output finish would have written.
 func (d Deps) endTurn(ctx context.Context, rc runtime.RunContext, text string, nudges int) (runtime.EndTurn, error) {
-	if !d.previewsOn() || d.previews == nil {
-		return runtime.EndTurn{}, nil
-	}
 	pid, ws, err := project(rc)
 	if err != nil {
 		return runtime.EndTurn{}, nil //nolint:nilerr // a run without a project ends as before
 	}
 	made, err := d.Store.GetTimelineVersionByAuthor(ctx, ws, pid, string(ops.AuthorAgent), ids.Encode(ids.PrefixRun, rc.RunID))
 	switch {
-	case err == nil:
-		v := int(made.Version)
-		if d.previews.ok(rc.RunID, v) {
-			return runtime.EndTurn{Output: implicitFinish(text, v)}, nil
-		}
-		if nudges == 0 {
-			return runtime.EndTurn{Nudge: fmt.Sprintf(nudgeNoPreview, v)}, nil
-		}
 	case errors.Is(err, store.ErrNotFound):
 		if nudges == 0 {
 			return runtime.EndTurn{Nudge: nudgeNoEdit}, nil
 		}
-	default:
+		return runtime.EndTurn{}, nil
+	case err != nil:
 		return runtime.EndTurn{}, fmt.Errorf("look for the run's versions: %w", err)
 	}
-	return runtime.EndTurn{}, nil
+	v := int(made.Version)
+	switch {
+	case d.previewsOn() && d.previews.ok(rc.RunID, v):
+		// Looked at: the text is the message.
+	case nudges > 0:
+		// Asked, and it did not: end the run rather than fail it.
+	case d.previewsOn():
+		return runtime.EndTurn{Nudge: fmt.Sprintf(nudgeNoPreview, v)}, nil
+	default:
+		return runtime.EndTurn{Nudge: nudgeNoFinish}, nil
+	}
+	return runtime.EndTurn{Output: implicitFinish(text, v)}, nil
 }
 
-// implicitFinish is the run's output for a turn that ended in text after a previewed edit: the same shape finish writes.
+// implicitFinish is the run's output for a turn that ended in text after an edit: the same shape finish writes.
 func implicitFinish(text string, version int) json.RawMessage {
 	summary := cutRunes(strings.TrimSpace(strings.ReplaceAll(text, "\x00", "")), maxSummaryChars)
 	if summary == "" {

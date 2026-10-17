@@ -42,6 +42,7 @@ func NewAgent(d Deps) (runtime.Agent, error) {
 		Opening: opening,
 		Context: d.runContext,
 		EndTurn: d.endTurn,
+		OnEnd:   d.previews.forget,
 		Budgets: DefaultBudgets,
 	}, nil
 }

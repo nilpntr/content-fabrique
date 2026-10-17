@@ -25,8 +25,8 @@ tasks:
     cmds:
       - ./scripts/media-image.sh build
 
-  # Runs on every `task dev`: rebuilds media-tools:dev when it is missing, older than the newest commit that touched
-  # packages/media-tools, or built before the fonts were added. Without Docker it only warns. MEDIA_IMAGE_SKIP_BUILD=1 only warns.
+  # Runs on every `task dev`: rebuilds media-tools:dev when it is missing, was built from other sources than packages/media-tools
+  # as it is now (a tree-hash label, see scripts/media-image.sh), or was built before the fonts were added. Without Docker it only warns. MEDIA_IMAGE_SKIP_BUILD=1 only warns.
   media:image:
     internal: true
     silent: true

@@ -34,7 +34,7 @@ func TestVersionChain(t *testing.T) {
 		t.Fatalf("v2: %+v", v2)
 	}
 	wantSummary := []string{
-		"added clip c4 (posing, 0.0-2.0 s)",
+		"added clip c4 (posing, asset " + vid60[len(vid60)-6:] + ", 0.0-2.0 s)",
 		"trimmed c3 by 400 ms at the end",
 		"moved t1 to 2.0 s",
 	}

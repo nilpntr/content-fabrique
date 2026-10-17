@@ -13,7 +13,7 @@ import (
 //
 //	trimmed c3 by 400 ms at the end
 //	moved t1 to 2.0 s
-//	added clip c7 (posing, 5.5-8.2 s)
+//	added clip c7 (posing, asset 899gs, 5.5-8.2 s)
 //
 // parent is the spec the patch applies to. A JSON Patch carries neither the ids of the items it touches (its paths
 // are array indexes) nor the old values, so Summarize replays the patch on a copy of the parent and reads both from it
@@ -29,7 +29,8 @@ func Summarize(parent timeline.Spec, patch Patch) ([]string, error) {
 type Titles func(assetID string) string
 
 // SummarizeWith is Summarize with a title lookup: a clip is named by its asset's title ("posing") instead of the asset id.
-// An asset without a title is named by the end of its id ("asset 899gs"), never the whole id.
+// The end of the asset's id always follows ("posing, asset 899gs"), so two assets with the same title stay apart; an asset
+// without a title is named by that alone. The full ids stay in the stored diff and in the spec get_timeline returns.
 func SummarizeWith(parent timeline.Spec, patch Patch, titles Titles) ([]string, error) {
 	doc, err := json.Marshal(parent)
 	if err != nil {
@@ -359,22 +360,42 @@ func (s *summarizer) move(op Operation, path []string) error {
 	return nil
 }
 
-// assetName is how a summary names an asset: its title when the lookup knows one (one line, at most 40 characters), else the
-// last characters of its id.
-func (s *summarizer) assetName(id string) string {
-	if s.titles != nil {
-		if t := strings.Join(strings.Fields(s.titles(id)), " "); t != "" {
-			if r := []rune(t); len(r) > 40 {
-				t = string(r[:37]) + "..."
-			}
-			return t
-		}
-	}
+// assetShort is the end of an asset id, "asset 899gs": enough to tell two assets of the same title apart.
+func assetShort(id string) string {
 	const keep = 6
 	if r := []rune(id); len(r) > keep {
 		return "asset " + string(r[len(r)-keep:])
 	}
 	return id
+}
+
+// assetTitle is the asset's title when the lookup knows one: one line, at most 40 characters.
+func (s *summarizer) assetTitle(id string) string {
+	if s.titles == nil {
+		return ""
+	}
+	t := strings.Join(strings.Fields(s.titles(id)), " ")
+	if r := []rune(t); len(r) > 40 {
+		t = string(r[:37]) + "..."
+	}
+	return t
+}
+
+// assetList names an asset inside a list: "posing, asset 899gs", or "asset 899gs" when it has no title. The id's end is always
+// there, so two assets with the same title (or a renamed one) stay apart.
+func (s *summarizer) assetList(id string) string {
+	if t := s.assetTitle(id); t != "" {
+		return t + ", " + assetShort(id)
+	}
+	return assetShort(id)
+}
+
+// assetName names an asset in a sentence: "posing (asset 899gs)", or "asset 899gs".
+func (s *summarizer) assetName(id string) string {
+	if t := s.assetTitle(id); t != "" {
+		return t + " (" + assetShort(id) + ")"
+	}
+	return assetShort(id)
 }
 
 // sourceSuffix is ", 5.5-8.2 s" for the part of the asset a clip plays, or "" when the clip has no source range.
@@ -401,7 +422,7 @@ func (s *summarizer) addedItem(typ string, v any) {
 	id := str(m["id"])
 	switch typ {
 	case "video":
-		s.say("added clip %s (%s%s)", id, s.assetName(str(m["asset_id"])), sourceSuffix(m["source"]))
+		s.say("added clip %s (%s%s)", id, s.assetList(str(m["asset_id"])), sourceSuffix(m["source"]))
 	case "text":
 		s.say("added text %s %s at %s", id, quoted(str(m["text"])), secs(intOf(m["at_ms"])))
 	case "audio":

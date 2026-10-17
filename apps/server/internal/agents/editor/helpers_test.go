@@ -220,7 +220,7 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	e.frames = &fakeFrames{objs: e.objs}
-	e.deps = Deps{Projects: e.svc, Store: st, Frames: e.frames, Preview: e.preview}
+	e.deps = Deps{Projects: e.svc, Store: st, Frames: e.frames, Preview: e.preview}.withState()
 	e.rebuild()
 	return e
 }

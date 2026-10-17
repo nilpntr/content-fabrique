@@ -219,6 +219,23 @@ func (t *turn) pending() []llm.Block {
 	return out
 }
 
+// text is the text of the assistant message.
+func (t *turn) text() string {
+	var s string
+	for _, b := range t.assistant.Content {
+		if b.Type == llm.BlockText {
+			s += b.Text
+		}
+	}
+	return s
+}
+
+// endedWithText says the assistant ended the turn without a tool call and nothing has followed it yet (no nudge): the run is to
+// end, or to be nudged, and must not go to the model as it is.
+func (t *turn) endedWithText() bool {
+	return len(t.uses) == 0 && len(t.nudge) == 0 && (t.stopReason == "end_turn" || t.stopReason == "stop_sequence")
+}
+
 // complete says every tool call has its result.
 func (t *turn) complete() bool { return len(t.pending()) == 0 }
 
@@ -363,7 +380,7 @@ func (c *convo) messages(opening []llm.Block) []llm.Message {
 	first = append(first, opening...)
 	msgs := []llm.Message{{Role: llm.RoleUser, Content: first}}
 	for _, t := range c.turns {
-		msgs = append(msgs, t.assistant)
+		msgs = append(msgs, withContent(t.assistant))
 		if len(t.uses) == 0 && len(t.nudge) > 0 {
 			msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: t.nudge})
 			continue
@@ -379,4 +396,15 @@ func (c *convo) messages(opening []llm.Block) []llm.Message {
 		msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: results})
 	}
 	return msgs
+}
+
+// emptyReply stands in for an assistant message that has no content (the model answered with nothing, or only empty text): the
+// API refuses a message without content, and the nudge after it makes it part of the next request.
+const emptyReply = "(no reply)"
+
+func withContent(m llm.Message) llm.Message {
+	if len(m.Content) == 0 {
+		m.Content = []llm.Block{llm.TextBlock(emptyReply)}
+	}
+	return m
 }

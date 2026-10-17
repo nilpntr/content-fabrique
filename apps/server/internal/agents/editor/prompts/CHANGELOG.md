@@ -25,6 +25,10 @@ it ended its turn in plain text instead of calling finish. The file is now `edit
   fails twice), the model checks with get_timeline and finishes.
 - Step 6 and "Finishing" say that a run ends with a finish call; a plain-text reply without it is nudged once (a status event
   `nudge`, sent to the model as a user message), and counts as the finish only when the newest version was previewed.
+- With no renderer wired the same promise holds: a plain-text reply is nudged once to call finish, then accepted as the finish.
+  An accepted reply writes the output finish writes (the message, the version the run made).
+- Previews that fail (the renderer, the sheet, the version) count per version: two in a row let the model finish that version
+  without one, a success clears the count, and the next version needs a preview again.
 - Code, not prompt: `Deps.previewGate` (finish) and `Deps.endTurn` (the runtime's `Agent.EndTurn` hook) in `gate.go`.
 
 ## editor.v1.2 (2026-10-17)

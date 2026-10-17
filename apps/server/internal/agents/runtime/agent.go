@@ -9,6 +9,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 )
 
@@ -101,6 +103,9 @@ type Agent struct {
 	// model instead of ending the run (a nudge), or with the output the run ends with. Nil ends the run with the text as its
 	// summary. See EndTurn.
 	EndTurn func(ctx context.Context, rc RunContext, text string, nudges int) (EndTurn, error)
+	// OnEnd, when set, is called after a run of this agent has ended in any way (finished, failed, stopped, cancelled), with the
+	// run's id, so the agent can drop what it kept for the run in memory. It runs in the worker that ended the run.
+	OnEnd func(run uuid.UUID)
 	// Thinking, when set, is sent with every request. Nil leaves the model's default. Effort always comes from the routing
 	// entry.
 	Thinking *llm.Thinking

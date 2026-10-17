@@ -2,6 +2,7 @@ package diff
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/nilpntr/content-fabrique/internal/timeline"
@@ -177,13 +178,15 @@ func TestSummarizeNamesAssetsByTitle(t *testing.T) {
 	lookup := func(id string) string { return titles[id] }
 	cases := []struct{ name, patch, want string }{
 		{"added clip", `[{"op":"add","path":"/tracks/0/items/3","value":{"id":"c7","asset_id":"ast_01j3er3kwcgrasdgd4aznmxxe0","source":{"in_ms":5500,"out_ms":8200},"at_ms":10000}}]`,
-			"added clip c7 (posing, 5.5-8.2 s)"},
+			"added clip c7 (posing, asset nmxxe0, 5.5-8.2 s)"},
 		{"long title is one short line", `[{"op":"add","path":"/tracks/0/items/3","value":{"id":"c7","asset_id":"ast_01jfbemsc6way7dnfebdf8tf3g","source":{"in_ms":0,"out_ms":1250},"at_ms":10000}}]`,
-			"added clip c7 (a very long title that goes on and on..., 0.0-1.25 s)"},
+			"added clip c7 (a very long title that goes on and on..., asset f8tf3g, 0.0-1.25 s)"},
 		{"no title falls back to the id suffix", `[{"op":"add","path":"/tracks/0/items/3","value":{"id":"c7","asset_id":"ast_01j0h9rew727hk2pt0v5b31h44","source":{"in_ms":0,"out_ms":2000},"at_ms":10000}}]`,
 			"added clip c7 (asset b31h44, 0.0-2.0 s)"},
 		{"replaced asset", `[{"op":"replace","path":"/tracks/0/items/1/asset_id","value":"ast_01j3er3kwcgrasdgd4aznmxxe0"}]`,
-			"replaced the asset of c2 with posing"},
+			"replaced the asset of c2 with posing (asset nmxxe0)"},
+		{"two assets with one title stay apart", `[{"op":"add","path":"/tracks/0/items/3","value":{"id":"c7","asset_id":"ast_01jfbemsc6way7dnfebdf8tf3g","source":{"in_ms":0,"out_ms":1000},"at_ms":10000}},{"op":"add","path":"/tracks/0/items/4","value":{"id":"c8","asset_id":"ast_01j3er3kwcgrasdgd4aznmxxe0","source":{"in_ms":0,"out_ms":1000},"at_ms":11000}}]`,
+			"added clip c7 (a very long title that goes on and on..., asset f8tf3g, 0.0-1.0 s)\nadded clip c8 (posing, asset nmxxe0, 0.0-1.0 s)"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -191,8 +194,8 @@ func TestSummarizeNamesAssetsByTitle(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(lines) != 1 || lines[0] != c.want {
-				t.Errorf("got %q, want %q", lines, c.want)
+			if got := strings.Join(lines, "\n"); got != c.want {
+				t.Errorf("got %q, want %q", got, c.want)
 			}
 		})
 	}
