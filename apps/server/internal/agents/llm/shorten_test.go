@@ -39,12 +39,6 @@ func (rg *rig) countAt(n int) {
 	}
 }
 
-// prices is the price table the rig's factory was built with.
-func (rg *rig) prices(t *testing.T) *PriceTable {
-	t.Helper()
-	return rg.factory.opts.Prices
-}
-
 // replyWithin answers like the real API: the answer never has more output tokens than max_tokens allowed.
 func replyWithin(call recordedCall, input, output int64) fakeReply {
 	var body struct {
@@ -231,11 +225,12 @@ func TestThinkingBudgetFollowsAShortenedCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := rg.api.messageCalls()[0].json(t)
-	max := int(body["max_tokens"].(float64))
+	sentMax, _ := body["max_tokens"].(float64)
+	sent := int(sentMax)
 	think, _ := body["thinking"].(map[string]any)
 	budget, _ := think["budget_tokens"].(float64)
-	if max >= 24_000 || int(budget) < 1024 || int(budget) >= max {
-		t.Fatalf("max_tokens %d, thinking budget %v: the thinking must stay inside the answer", max, think)
+	if sent >= 24_000 || int(budget) < 1024 || int(budget) >= sent {
+		t.Fatalf("max_tokens %d, thinking budget %v: the thinking must stay inside the answer", sent, think)
 	}
 	if th.BudgetTokens != 16_000 {
 		t.Errorf("the caller's thinking setting was changed to %d", th.BudgetTokens)
