@@ -3,6 +3,10 @@ package assets
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/api"
@@ -97,4 +101,67 @@ func (s *Service) views(ctx context.Context, ws ids.WorkspaceID, rows []store.As
 // file converts one File to its API form.
 func (f File) file() *api.DerivativeFile {
 	return &api.DerivativeFile{Url: f.URL, ContentType: f.ContentType, SizeBytes: f.SizeBytes, Width: f.Width, Height: f.Height, DurationMs: f.DurationMs}
+}
+
+// maxVTTBytes bounds the track read from object storage: the largest legitimate one is 100 cues of about 70 bytes.
+const maxVTTBytes = 1 << 20
+
+// cueRE matches the cue payload lines the ingest writes: the sheet's relative name and a media fragment.
+var cueRE = regexp.MustCompile(`^sprite\.jpg(#xywh=\d+,\d+,\d+,\d+)$`)
+
+var errNoSprite = &Error{Status: 404, Code: api.ErrorCodeNotFound, Message: "this asset has no sprite track"}
+
+// SpriteVTT returns the thumbnails track of a ready asset with each cue's URL replaced by a fresh presigned URL of the
+// sprite sheet, so the track works on its own. The stored track names the sheet relatively; the sheet's URL is signed and
+// expires, so it cannot be stored in the file.
+func (s *Service) SpriteVTT(ctx context.Context, who Actor, id ids.AssetID) (string, *Error) {
+	a, err := s.store.GetAsset(ctx, who.Workspace, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return "", errNotFound
+	}
+	if err != nil {
+		return "", s.internal(ctx, "get asset", err)
+	}
+	if a.Status != store.AssetReady {
+		return "", errNoSprite
+	}
+	derivs, err := s.store.ListAssetDerivatives(ctx, who.Workspace, []ids.AssetID{a.ID})
+	if err != nil {
+		return "", s.internal(ctx, "list derivatives", err)
+	}
+	var vtt, sprite *store.Derivative
+	for i := range derivs {
+		switch derivs[i].Kind {
+		case store.DerivativeSpriteVTT:
+			vtt = &derivs[i]
+		case store.DerivativeSprite:
+			sprite = &derivs[i]
+		}
+	}
+	if vtt == nil || sprite == nil {
+		return "", errNoSprite
+	}
+	url, err := s.objects.PresignGet(ctx, sprite.R2Key, DerivativeURLExpiry)
+	if err != nil {
+		return "", s.internal(ctx, "presign the sprite sheet", err)
+	}
+	obj, err := s.objects.Get(ctx, vtt.R2Key)
+	if err != nil {
+		return "", s.storageErr(ctx, "get the sprite track", err)
+	}
+	defer func() { _ = obj.Body.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(obj.Body, maxVTTBytes+1))
+	if err != nil {
+		return "", s.storageErr(ctx, "read the sprite track", err)
+	}
+	if len(raw) > maxVTTBytes {
+		return "", s.internal(ctx, "sprite track", errors.New("the stored track is too large"))
+	}
+	lines := strings.Split(string(raw), "\n")
+	for i, line := range lines {
+		if m := cueRE.FindStringSubmatch(line); m != nil {
+			lines[i] = url + m[1]
+		}
+	}
+	return strings.Join(lines, "\n"), nil
 }

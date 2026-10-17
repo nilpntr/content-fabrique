@@ -2,7 +2,6 @@ package ingest
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 
@@ -47,11 +46,11 @@ func (s *scopedObjects) put(ctx context.Context, name string, body io.ReadSeeker
 	return key, nil
 }
 
-// deleteAll removes every object of the asset. The caller has checked that the asset is deleted or failed.
-func (s *scopedObjects) deleteAll(ctx context.Context) (int, error) {
-	n, err := s.objs.DeletePrefix(ctx, storage.AssetPrefix(s.ws, s.asset))
+// delete removes a derivative this process wrote. The name must be a plain derivative name, as for put.
+func (s *scopedObjects) delete(ctx context.Context, name string) error {
+	key, err := storage.DerivativeKey(s.ws, s.asset, name)
 	if err != nil {
-		return n, errors.Join(errors.New("delete asset objects"), err)
+		return err
 	}
-	return n, nil
+	return s.objs.Delete(ctx, key)
 }

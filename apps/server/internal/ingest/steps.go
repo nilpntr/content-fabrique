@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/media"
 	"github.com/nilpntr/content-fabrique/internal/storage"
@@ -33,10 +34,11 @@ const (
 // errNoOutput is a tool that exited cleanly and wrote nothing.
 var errNoOutput = errors.New("the tool produced no output")
 
-// exec runs one media tool in the sandbox with the given host files mounted read-only as /in/0, /in/1 ... and returns the
-// fresh output directory (mounted at /work). A tool that ran and failed is a *media.ToolError; anything else is the
-// sandbox's or the context's failure.
-func (r *run) exec(ctx context.Context, args []string, inputs ...string) (string, error) {
+// exec runs one media tool in the sandbox, for at most timeout, with the given host files mounted read-only as /in/0, /in/1
+// ... and returns the fresh output directory (mounted at /work). A tool that ran and failed is a *media.ToolError; a tool
+// that was killed (the out-of-memory killer, a stopping container) or timed out, a sandbox that could not run it and a
+// cancelled context are other errors, which the job retries: they say nothing about the file.
+func (r *run) exec(ctx context.Context, timeout time.Duration, args []string, inputs ...string) (string, error) {
 	out, err := os.MkdirTemp(r.dir, "out-")
 	if err != nil {
 		return "", err
@@ -45,23 +47,22 @@ func (r *run) exec(ctx context.Context, args []string, inputs ...string) (string
 	for i, p := range inputs {
 		ins[i] = media.Input{Host: p, Container: media.InputPath(i)}
 	}
-	res, err := r.runner.Run(ctx, media.Invocation{Args: args, Inputs: ins, OutputDir: out})
+	res, err := r.runner.Run(ctx, media.Invocation{Args: args, Inputs: ins, OutputDir: out, Timeout: timeout})
 	if err != nil {
 		return out, fmt.Errorf("%s: %w", args[0], err)
 	}
-	if res.ExitCode != 0 {
-		return out, &media.ToolError{Tool: args[0], ExitCode: res.ExitCode, Stderr: snippet(res.Stderr)}
+	switch {
+	case killedExit(res.ExitCode):
+		return out, fmt.Errorf("%s: %w (exit code %d): %s", args[0], errKilled, res.ExitCode, media.StderrSnippet(res.Stderr))
+	case res.ExitCode != 0:
+		return out, &media.ToolError{Tool: args[0], ExitCode: res.ExitCode, Stderr: media.StderrSnippet(res.Stderr)}
 	}
 	return out, nil
 }
 
-func snippet(b []byte) string {
-	const limit = 1024
-	if len(b) > limit {
-		b = b[:limit]
-	}
-	return string(b)
-}
+// heavy and light are the tool timeouts for this clip; see HeavyTimeout and LightTimeout.
+func (r *run) heavy() time.Duration { return HeavyTimeout(time.Duration(r.durMs) * time.Millisecond) }
+func (r *run) light() time.Duration { return LightTimeout(time.Duration(r.durMs) * time.Millisecond) }
 
 // toolFailed reports whether err is a tool that ran and failed (the file's fault, usually).
 func toolFailed(err error) bool {
@@ -120,7 +121,7 @@ func (r *run) video(ctx context.Context, original string, meta media.Metadata) (
 	if err != nil {
 		return ingested{}, err
 	}
-	out, err := r.exec(ctx, args, original)
+	out, err := r.exec(ctx, ProbeTimeout, args, original)
 	_ = os.RemoveAll(out)
 	if toolFailed(err) {
 		return ingested{}, fileErr(store.FailureUndecodableVideo, err)
@@ -132,14 +133,14 @@ func (r *run) video(ctx context.Context, original string, meta media.Metadata) (
 	if err := r.progress(ctx, pctProxy, store.StageProxy); err != nil {
 		return ingested{}, err
 	}
-	proxyPath, proxy, err := r.makeProxy(ctx, original, &meta)
+	proxyPath, proxySize, proxy, err := r.makeProxy(ctx, original, &meta)
 	if err != nil {
 		return ingested{}, err
 	}
 	pw, ph := proxy.Width, proxy.Height
 	fps := proxy.FPS.Value
 	dur := proxy.DurationMs
-	r.keep(store.DerivativeProxy720, fileProxy, "video/mp4", proxyPath, r.sizeOf(proxyPath), map[string]any{
+	r.keep(store.DerivativeProxy720, fileProxy, "video/mp4", proxyPath, proxySize, map[string]any{
 		"width": pw, "height": ph, "duration_ms": dur, "fps": fps, "codec": "h264", "has_audio": proxy.HasAudio,
 	})
 
@@ -175,40 +176,48 @@ func (r *run) video(ctx context.Context, original string, meta media.Metadata) (
 
 // makeProxy runs the transcode. A file whose audio track will not encode is retried without audio, so a damaged audio track
 // does not cost the user the picture; meta.SelectedAudio is then cleared.
-func (r *run) makeProxy(ctx context.Context, original string, meta *media.Metadata) (string, media.Metadata, error) {
+func (r *run) makeProxy(ctx context.Context, original string, meta *media.Metadata) (path string, size int64, proxy media.Metadata, err error) {
 	for {
 		args, err := media.ProxyArgs(media.InputPath(0), media.OutputPath(fileProxy), *meta)
 		if err != nil {
-			return "", media.Metadata{}, fileErr(store.FailureProcessing, err)
+			return "", 0, media.Metadata{}, fileErr(store.FailureProcessing, err)
 		}
-		out, err := r.exec(ctx, args, original)
+		out, err := r.exec(ctx, r.heavy(), args, original)
 		if err == nil {
-			path, _, aerr := r.adopt(out, fileProxy, maxVideoFile)
-			if aerr != nil {
-				return "", media.Metadata{}, fileErr(store.FailureUndecodableVideo, aerr)
-			}
-			proxy, perr := media.Probe(ctx, r.runner, path)
-			if perr != nil {
-				if toolFailed(perr) || errors.Is(perr, media.ErrUnparsable) {
-					return "", media.Metadata{}, fileErr(store.FailureCorruptMedia, perr)
-				}
-				return "", media.Metadata{}, fmt.Errorf("probe proxy: %w", perr)
-			}
-			if err := checkProxy(proxy, *meta); err != nil {
-				return "", media.Metadata{}, fileErr(store.FailureCorruptMedia, err)
-			}
-			return path, proxy, nil
+			return r.checkedProxy(ctx, out, *meta)
 		}
 		_ = os.RemoveAll(out)
 		if !toolFailed(err) {
-			return "", media.Metadata{}, err
+			return "", 0, media.Metadata{}, err // killed, timed out or the sandbox failed: retried, and never retried without audio
 		}
 		if meta.SelectedAudio == nil {
-			return "", media.Metadata{}, fileErr(store.FailureUndecodableVideo, err)
+			return "", 0, media.Metadata{}, fileErr(store.FailureUndecodableVideo, err)
 		}
 		r.log.WarnContext(ctx, "the proxy would not encode with the audio track; trying without it", "error", err)
 		meta.SelectedAudio = nil
 	}
+}
+
+// checkedProxy adopts the transcode's output and verifies it.
+func (r *run) checkedProxy(ctx context.Context, out string, src media.Metadata) (string, int64, media.Metadata, error) {
+	path, size, err := r.adopt(out, fileProxy, maxVideoFile)
+	if err != nil {
+		return "", 0, media.Metadata{}, fileErr(store.FailureUndecodableVideo, err)
+	}
+	proxy, err := media.Probe(ctx, r.runner, path)
+	var te *media.ToolError
+	switch {
+	case errors.As(err, &te) && killedExit(te.ExitCode):
+		return "", 0, media.Metadata{}, fmt.Errorf("probe proxy: %w (exit code %d)", errKilled, te.ExitCode)
+	case errors.As(err, &te), errors.Is(err, media.ErrUnparsable):
+		return "", 0, media.Metadata{}, fileErr(store.FailureCorruptMedia, err)
+	case err != nil:
+		return "", 0, media.Metadata{}, fmt.Errorf("probe proxy: %w", err)
+	}
+	if err := checkProxy(proxy, src); err != nil {
+		return "", 0, media.Metadata{}, fileErr(store.FailureCorruptMedia, err)
+	}
+	return path, size, proxy, nil
 }
 
 // checkProxy verifies what the sandbox made: an upright H.264 video of the size we asked for with nothing left to rotate,
@@ -246,7 +255,7 @@ func (r *run) makePoster(ctx context.Context, proxy string, durMs int64, w, h in
 
 // posterAt makes the poster from the frame at atMs.
 func (r *run) posterAt(ctx context.Context, proxy string, atMs int64) (string, int64, error) {
-	out, err := r.exec(ctx, media.PosterArgs(media.InputPath(0), media.OutputPath(filePoster), atMs), proxy)
+	out, err := r.exec(ctx, r.light(), media.PosterArgs(media.InputPath(0), media.OutputPath(filePoster), atMs), proxy)
 	if err != nil {
 		_ = os.RemoveAll(out)
 		return "", 0, err
@@ -263,7 +272,7 @@ func (r *run) makeSprite(ctx context.Context, proxy string, durMs int64, w, h in
 	if err != nil {
 		return err
 	}
-	out, err := r.exec(ctx, args, proxy)
+	out, err := r.exec(ctx, r.light(), args, proxy)
 	if err != nil {
 		_ = os.RemoveAll(out)
 		if toolFailed(err) {
@@ -289,7 +298,7 @@ func (r *run) makeHover(ctx context.Context, proxy string, durMs int64, w, h int
 	if err != nil {
 		return err
 	}
-	out, err := r.exec(ctx, args, proxy)
+	out, err := r.exec(ctx, r.light(), args, proxy)
 	if err != nil {
 		_ = os.RemoveAll(out)
 		if toolFailed(err) {
@@ -335,7 +344,7 @@ func (r *run) extractAudio(ctx context.Context, original string, meta media.Meta
 	if err != nil {
 		return err
 	}
-	out, err := r.exec(ctx, args, original)
+	out, err := r.exec(ctx, r.light(), args, original)
 	if err != nil {
 		_ = os.RemoveAll(out)
 		return err
@@ -369,14 +378,6 @@ func selectedCodec(m media.Metadata) string {
 	return ""
 }
 
-func (r *run) sizeOf(path string) int64 {
-	fi, err := os.Stat(path)
-	if err != nil {
-		return 0
-	}
-	return fi.Size()
-}
-
 // ---- Audio and image assets -----------------------------------------------------------------------------------------
 
 func (r *run) audio(ctx context.Context, original string, meta media.Metadata) (ingested, error) {
@@ -402,7 +403,7 @@ func (r *run) image(ctx context.Context, original string, meta media.Metadata) (
 	if err != nil {
 		return ingested{}, fileErr(store.FailureUnsupportedFormat, err)
 	}
-	out, err := r.exec(ctx, args, original)
+	out, err := r.exec(ctx, r.light(), args, original)
 	if err != nil {
 		_ = os.RemoveAll(out)
 		if toolFailed(err) {
@@ -437,6 +438,7 @@ func (r *run) upload(ctx context.Context) ([]store.NewDerivative, error) {
 		if err != nil {
 			return nil, fmt.Errorf("upload %s: %w", d.name, err)
 		}
+		r.uploaded = append(r.uploaded, d.name)
 		meta, err := json.Marshal(d.meta)
 		if err != nil {
 			return nil, err

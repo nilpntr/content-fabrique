@@ -12,6 +12,7 @@ import (
 
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/ingest"
+	"github.com/nilpntr/content-fabrique/internal/sandbox"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
@@ -62,9 +63,14 @@ type AssetIngester interface {
 	Fail(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, reason string) error
 }
 
-// IngestTimeout is how long one attempt of an ingest may run. River's default is a minute; a long clip takes much longer.
-// The sandbox limits each tool run on top of this.
-const IngestTimeout = 2 * time.Hour
+// IngestTimeout is how long one attempt of an ingest may run: River's per-job timeout for this worker (its default is a
+// minute). Package ingest derives it from the longest clip it accepts and checks that the tool timeouts fit.
+const IngestTimeout = ingest.JobTimeout
+
+// JobRescueAfter is how long River lets a job run before it assumes the worker died and hands the job to another one
+// (Config.RescueStuckJobsAfter). It is longer than IngestTimeout by a margin, so a running ingest is never rescued: its
+// own timeout ends it first. (River's default of an hour is shorter than an ingest may run.)
+const JobRescueAfter = IngestTimeout + 30*time.Minute
 
 // noIngestSnooze is how long an ingest waits when the worker has no media pipeline (no object storage or no sandbox set up).
 const noIngestSnooze = 5 * time.Minute
@@ -96,16 +102,30 @@ func (w *AssetIngestWorker) Work(ctx context.Context, job *river.Job[AssetIngest
 		return river.JobCancel(err)
 	case err != nil:
 		w.deps.logger().WarnContext(ctx, "asset ingest attempt failed", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "attempt", job.Attempt, "error", err)
-		if job.Attempt >= job.MaxAttempts && ctx.Err() == nil {
-			fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		if job.Attempt >= job.MaxAttempts {
+			// The last attempt, whatever ended it (even a cancelled or timed-out context: River will not run the job again),
+			// fails the asset, with a fresh context for the write.
+			fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 			defer cancel()
-			if ferr := w.deps.Ingest.Fail(fctx, ws, id, store.FailureProcessing); ferr != nil {
+			if ferr := w.deps.Ingest.Fail(fctx, ws, id, giveUpReason(ctx, err)); ferr != nil {
 				w.deps.logger().ErrorContext(ctx, "could not mark an asset whose ingest gave up as failed", "asset_id", id.String(), "error", ferr)
 			}
 		}
 		return err
 	}
 	return river.RecordOutput(ctx, res)
+}
+
+// giveUpReason is the failure reason of an asset whose last ingest attempt failed with err: a timeout (the job's or a
+// tool's), an interruption (the worker was stopped), or processing_failed for anything else.
+func giveUpReason(ctx context.Context, err error) string {
+	switch {
+	case errors.Is(ctx.Err(), context.DeadlineExceeded), errors.Is(err, context.DeadlineExceeded), errors.Is(err, sandbox.ErrTimeout):
+		return store.FailureTimeout
+	case errors.Is(ctx.Err(), context.Canceled), errors.Is(err, context.Canceled):
+		return store.FailureInterrupted
+	}
+	return store.FailureProcessing
 }
 
 // AssetObjectDeleteArgs is enqueued, in the transaction that deletes an asset (or fails its upload while an object may

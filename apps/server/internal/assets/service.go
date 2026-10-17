@@ -70,6 +70,7 @@ type Objects interface {
 	Head(ctx context.Context, key string) (storage.ObjectInfo, error)
 	DeletePrefix(ctx context.Context, prefix string) (int, error)
 	PresignGet(ctx context.Context, key string, expires time.Duration) (string, error)
+	Get(ctx context.Context, key string) (storage.Object, error)
 }
 
 // Enqueuer inserts a job in the transaction behind tx. *jobs.Enqueuer is the real one.

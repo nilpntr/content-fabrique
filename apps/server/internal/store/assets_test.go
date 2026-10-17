@@ -523,9 +523,15 @@ func assetsSuite(t *testing.T, st *store.Store, suffix string) {
 		}
 
 		// Failing: only from uploaded or processing, with the reason kept.
+		if rows, _ := st.ListAssetDerivatives(ctx, wa.ID, []ids.AssetID{a.ID}); len(rows) != 2 {
+			t.Fatalf("derivatives before the failure: %v", rows)
+		}
 		failed, err := st.FailAssetIngest(ctx, wa.ID, a.ID, store.FailureCorruptMedia)
 		if err != nil || failed.Status != store.AssetFailed || failed.FailureReason == nil || *failed.FailureReason != store.FailureCorruptMedia || failed.DeletedAt != nil {
 			t.Fatalf("fail = %+v %v", failed, err)
+		}
+		if rows, _ := st.ListAssetDerivatives(ctx, wa.ID, []ids.AssetID{a.ID}); len(rows) != 0 {
+			t.Fatalf("a failed asset keeps no derivatives, found %v", rows)
 		}
 		if _, err := st.FailAssetIngest(ctx, wa.ID, a.ID, store.FailureProcessing); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("failing a failed asset = %v", err)

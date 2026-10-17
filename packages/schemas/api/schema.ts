@@ -159,6 +159,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/assets/{id}/sprite.vtt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The asset's TypeID. */
+                id: components["parameters"]["AssetIdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The hover-scrub thumbnails track, with working URLs
+         * @description The WebVTT thumbnails track of a `ready` video, with every cue pointing at the sprite sheet through a fresh presigned
+         *     URL (`https://...?X-Amz-...#xywh=x,y,w,h`), so a player can use it as is. The file stored in object storage
+         *     (`derivatives.sprite_vtt`) names the sheet relatively and cannot work on its own, because the sheet's URL is signed and
+         *     expires; this endpoint is how to get a track that works. It needs the same authentication as the rest of the API, so
+         *     fetch it with the bearer token and hand the text to the player (for example as a Blob URL for a `<track>`). The cue URLs
+         *     stop working at the same time as `derivative_urls_expire_at`. `404 not_found` when the asset has no sprite track (not
+         *     ready yet, an audio file, an image).
+         */
+        get: operations["getAssetSpriteVtt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/assets/{id}/parts": {
         parameters: {
             query?: never;
@@ -345,8 +374,10 @@ export interface components {
              * @description Why the asset is `failed`, as a code that is safe to show. The upload failed: `upload_expired`, `size_mismatch`,
              *     `upload_aborted`. The ingest could not process the file: `unsupported_format` (not a container we accept),
              *     `corrupt_media` (damaged or cut off), `no_video_stream`, `no_audio_stream`, `undecodable_video`,
-             *     `invalid_duration`, `too_long` (over 4 hours), `unsupported_resolution`, `kind_mismatch`; or `processing_failed`
-             *     (our fault: it failed on every retry). Null otherwise.
+             *     `invalid_duration`, `too_long` (over 30 minutes), `unsupported_resolution`, `kind_mismatch`; or, our fault, the
+             *     ingest failed on every retry: `processing_failed`, `processing_timeout` (it ran out of time) or
+             *     `processing_interrupted` (the worker was stopped on the last attempt). A failed asset has no derivatives.
+             *     Null otherwise.
              */
             failure_reason: string | null;
             /** @description How far the ingest is while `status` is `processing`; 100 when `ready`, 0 before it starts. */
@@ -416,7 +447,7 @@ export interface components {
             hover_preview?: components["schemas"]["DerivativeFile"];
             /** @description `sprite.jpg`: a grid of 160 px wide tiles, one per `interval_sec` seconds (at most 100), for hover scrubbing. `sprite_vtt` says where each tile is. */
             sprite?: components["schemas"]["DerivativeFile"];
-            /** @description `sprite.vtt`: a WebVTT thumbnails track. Each cue is `sprite.jpg#xywh=x,y,w,h`; resolve `sprite.jpg` to the `sprite` URL. */
+            /** @description `sprite.vtt` as stored: a WebVTT thumbnails track whose cues name the sheet relatively (`sprite.jpg#xywh=x,y,w,h`). Do not give this URL to a player; `GET /v1/assets/{id}/sprite.vtt` returns the same track with every cue pointing at the sprite URL. */
             sprite_vtt?: components["schemas"]["DerivativeFile"];
             /** @description `waveform.json`: `{version, sample_rate, duration_ms, samples_per_peak, peaks}`, up to 1000 peaks from 0 to 1. */
             waveform?: components["schemas"]["DerivativeFile"];
@@ -886,6 +917,36 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["UploadConflict"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getAssetSpriteVtt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The asset's TypeID. */
+                id: components["parameters"]["AssetIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The track, `text/vtt`. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/vtt": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["Unavailable"];
         };

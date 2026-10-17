@@ -12,8 +12,10 @@ import (
 // Limits on what the ingest accepts. They protect the worker (a decode of an absurd resolution, or of days of footage, is
 // not something to start) and are far above what a phone or a camera makes.
 const (
-	// DefaultMaxDuration is the longest clip or recording accepted.
-	DefaultMaxDuration = 4 * time.Hour
+	// DefaultMaxDuration is the longest clip or recording accepted. It is tied to the timeouts below: the transcode of a clip
+	// this long, at the slowest speed the timeouts allow for, is what JobTimeout has to cover (see WorstCase). Raise it only
+	// together with JobTimeout.
+	DefaultMaxDuration = 30 * time.Minute
 	// MinSide and MaxSide bound the picture's width and height (display size), in pixels. 8192 allows 8K video.
 	MinSide = 16
 	MaxSide = 8192
@@ -22,6 +24,48 @@ const (
 	// MaxFPS is the highest frame rate accepted (slow-motion phone video is 240).
 	MaxFPS = 480
 )
+
+// The time the ingest allows itself. A sandboxed tool is killed at its timeout; the job as a whole is cut off at JobTimeout
+// (River's per-job timeout, jobs.AssetIngestWorker.Timeout), and River only hands a running job to another worker after
+// JobTimeout plus a margin (jobs.JobRescueAfter), so a run never overlaps its own retry.
+const (
+	// ProbeTimeout is the limit of the quick tools: ffprobe and the decode check.
+	ProbeTimeout = 5 * time.Minute
+	// JobTimeout is how long one attempt of an ingest may run, downloading and uploading included. WorstCase of the longest
+	// accepted clip has to fit in it, which New checks.
+	JobTimeout = 4 * time.Hour
+	// transferAllowance is the time reserved for moving the original down and the derivatives up.
+	transferAllowance = 30 * time.Minute
+)
+
+// HeavyTimeout is the limit of the transcode of a clip of the given length: three times real time plus two minutes, at most
+// two hours. A 4K HEVC clip tone mapped to SDR on two vCPUs runs at about a third of real time or better, so this is a
+// generous margin, not a target.
+func HeavyTimeout(d time.Duration) time.Duration {
+	return min(max(3*d+2*time.Minute, 2*time.Minute), 2*time.Hour)
+}
+
+// LightTimeout is the limit of the tools that work on the 720 px proxy or on the audio: poster, sprite sheet, hover preview
+// and audio extraction. A third of the clip's length, but at least five minutes and at most an hour.
+func LightTimeout(d time.Duration) time.Duration {
+	return min(max(d/3, ProbeTimeout), time.Hour)
+}
+
+// WorstCase is the longest an ingest of a clip of the given length can take if every tool runs to its timeout: the transfers,
+// the probe and decode check, the transcode and the probe of the proxy, then poster, sprite, hover preview and audio.
+func WorstCase(d time.Duration) time.Duration {
+	return 2*transferAllowance + 3*ProbeTimeout + HeavyTimeout(d) + 4*LightTimeout(d)
+}
+
+// errKilled marks a tool that was killed by a signal (the out-of-memory killer's 137, a 143 from a stopping container): the
+// machine's doing, not the file's. It is retried, never reported as a bad file.
+var errKilled = errors.New("the tool was killed")
+
+// killedExit reports whether an exit code is the shell's 128 plus a signal number (SIGHUP to SIGTERM). ffmpeg's own error
+// exits are 1, or a negative AVERROR code seen modulo 256, which in practice is above this range (an invalid-data error is
+// 183, an end-of-file one 187); the one risk is a crash of ffmpeg on a malicious file (SIGSEGV is 139), which is then retried
+// and, on the last attempt, fails the asset as processing_failed.
+func killedExit(code int) bool { return code >= 129 && code <= 143 }
 
 // fileError is a failure caused by the file, not by us or the infrastructure: retrying cannot help, the asset is marked
 // failed with Reason (a store.Failure code, safe to show a user) and the job ends.

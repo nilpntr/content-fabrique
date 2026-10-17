@@ -69,6 +69,21 @@ func (q *Queries) ClaimAssetForIngest(ctx context.Context, arg ClaimAssetForInge
 	return i, err
 }
 
+const deleteAssetDerivatives = `-- name: DeleteAssetDerivatives :exec
+DELETE FROM asset_derivatives WHERE workspace_id = $1 AND asset_id = $2
+`
+
+type DeleteAssetDerivativesParams struct {
+	WorkspaceID ids.WorkspaceID
+	AssetID     ids.AssetID
+}
+
+// A failed asset has no derivatives: the rows go with the failure (the ingest removes the objects).
+func (q *Queries) DeleteAssetDerivatives(ctx context.Context, arg DeleteAssetDerivativesParams) error {
+	_, err := q.db.Exec(ctx, deleteAssetDerivatives, arg.WorkspaceID, arg.AssetID)
+	return err
+}
+
 const deleteStaleAssetDerivatives = `-- name: DeleteStaleAssetDerivatives :exec
 DELETE FROM asset_derivatives
 WHERE workspace_id = $1 AND asset_id = $2 AND NOT (kind = ANY($3::text[]))

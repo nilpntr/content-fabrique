@@ -54,7 +54,7 @@ func probeWith(ctx context.Context, r Runner, path string, args func(input strin
 		return Metadata{}, fmt.Errorf("media: probe %q: %w", filepath.Base(path), err)
 	}
 	if res.ExitCode != 0 {
-		return Metadata{}, &ToolError{Tool: "ffprobe", ExitCode: res.ExitCode, Stderr: stderrSnippet(res.Stderr)}
+		return Metadata{}, &ToolError{Tool: "ffprobe", ExitCode: res.ExitCode, Stderr: StderrSnippet(res.Stderr)}
 	}
 	if res.StdoutTruncated {
 		return Metadata{}, errors.New("media: ffprobe output exceeded the capture limit")

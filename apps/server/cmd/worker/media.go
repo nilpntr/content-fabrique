@@ -17,9 +17,10 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
-// ingestLimits bound every sandboxed tool run of the ingest: a 4K transcode of a long clip is the heaviest thing it does.
+// ingestLimits bound every sandboxed tool run of the ingest. The timeout here is the default (ffprobe and the other quick
+// tools); the pipeline sets a longer one for each run that depends on the clip's length (ingest.HeavyTimeout, LightTimeout).
 func ingestLimits() sandbox.Limits {
-	return sandbox.Limits{CPU: 2, MemoryMB: 3072, Timeout: 30 * time.Minute, PIDs: 512}
+	return sandbox.Limits{CPU: 2, MemoryMB: 3072, Timeout: ingest.ProbeTimeout, PIDs: 512}
 }
 
 // newSandboxProvider builds the provider MEDIA_SANDBOX_PROVIDER names, rooted at the job directory. The local provider

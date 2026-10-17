@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/api"
@@ -259,6 +260,36 @@ func (h *Handler) GetAsset(ctx context.Context, req api.GetAssetRequestObject) (
 		return nil, undocumented("getAsset", e)
 	}
 	return api.GetAsset200JSONResponse(viewOf(v)), nil
+}
+
+// GetAssetSpriteVtt is GET /v1/assets/{id}/sprite.vtt.
+func (h *Handler) GetAssetSpriteVtt(ctx context.Context, req api.GetAssetSpriteVttRequestObject) (api.GetAssetSpriteVttResponseObject, error) {
+	who, e := h.begin(ctx, false)
+	var vtt string
+	if e == nil {
+		var id ids.AssetID
+		if id, e = parseID(req.Id); e == nil {
+			vtt, e = h.svc.SpriteVTT(ctx, who, id)
+		}
+	}
+	if e != nil {
+		switch e.Status {
+		case 400:
+			return api.GetAssetSpriteVtt400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body(e))}, nil
+		case 401:
+			return api.GetAssetSpriteVtt401JSONResponse{UnauthenticatedJSONResponse: api.UnauthenticatedJSONResponse(body(e))}, nil
+		case 403:
+			return api.GetAssetSpriteVtt403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(body(e))}, nil
+		case 404:
+			return api.GetAssetSpriteVtt404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(body(e))}, nil
+		case 500:
+			return api.GetAssetSpriteVtt500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(body(e))}, nil
+		case 503:
+			return api.GetAssetSpriteVtt503JSONResponse{UnavailableJSONResponse: api.UnavailableJSONResponse(body(e))}, nil
+		}
+		return nil, undocumented("getAssetSpriteVtt", e)
+	}
+	return api.GetAssetSpriteVtt200TextvttResponse{Body: strings.NewReader(vtt), ContentLength: int64(len(vtt))}, nil
 }
 
 // DeleteAsset is DELETE /v1/assets/{id}.

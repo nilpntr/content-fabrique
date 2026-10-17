@@ -40,10 +40,11 @@ func (e *assetsEnv) ingested(who string, a api.Asset) map[string][]byte {
 		e.t.Fatal(err)
 	}
 	files := map[string][]byte{
-		store.DerivativeProxy720:     bytes.Repeat([]byte("PROXY"), 2000),
-		store.DerivativePoster:       []byte("JPEGPOSTER"),
-		store.DerivativeSprite:       []byte("JPEGSPRITE"),
-		store.DerivativeSpriteVTT:    []byte("WEBVTT\n"),
+		store.DerivativeProxy720: bytes.Repeat([]byte("PROXY"), 2000),
+		store.DerivativePoster:   []byte("JPEGPOSTER"),
+		store.DerivativeSprite:   []byte("JPEGSPRITE"),
+		store.DerivativeSpriteVTT: []byte("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nsprite.jpg#xywh=0,0,160,284\n\n" +
+			"00:00:01.000 --> 00:00:02.000\nsprite.jpg#xywh=160,0,160,284\n"),
 		store.DerivativeWaveform:     []byte(`{"version":1}`),
 		store.DerivativeHoverPreview: []byte("HOVERMP4"),
 		store.DerivativeAudio16k:     []byte("RIFFWAVE"),
@@ -230,4 +231,50 @@ func TestAssetProgressAndFailureShowInTheAPI(t *testing.T) {
 	if got.Status != api.AssetStatusFailed || got.FailureReason == nil || *got.FailureReason != "corrupt_media" || got.IngestStage != nil || got.Derivatives != nil {
 		t.Fatalf("failed: %+v", got)
 	}
+}
+
+// The stored sprite.vtt names the sheet relatively and cannot work alone; the endpoint serves it with every cue pointing at a
+// working presigned URL of the sheet.
+func TestSpriteVTTEndpointRewritesCueURLs(t *testing.T) {
+	e := newAssetsEnv(t)
+	ready := e.uploadedAsset("ada", "clip.mp4")
+	files := e.ingested("ada", ready)
+	waiting := e.uploadedAsset("ada", "waiting.mp4")
+
+	rec := e.do(http.MethodGet, "/v1/assets/"+ready.Id+"/sprite.vtt", "ada", nil)
+	if rec.Code != http.StatusOK || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/vtt") || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("%d %v %s", rec.Code, rec.Header(), rec.Body)
+	}
+	lines := strings.Split(rec.Body.String(), "\n")
+	var cues []string
+	for _, l := range lines {
+		if strings.Contains(l, "#xywh=") {
+			cues = append(cues, l)
+		}
+	}
+	if len(cues) != 2 || !strings.HasPrefix(rec.Body.String(), "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nhttp") ||
+		!strings.Contains(rec.Body.String(), "00:00:01.000 --> 00:00:02.000\n") {
+		t.Fatalf("track:\n%s", rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "\nsprite.jpg") {
+		t.Fatalf("a cue still names the sheet relatively:\n%s", rec.Body)
+	}
+	if !strings.HasSuffix(cues[0], "#xywh=0,0,160,284") || !strings.HasSuffix(cues[1], "#xywh=160,0,160,284") {
+		t.Fatalf("cues %v", cues)
+	}
+	// The URL in a cue (without its media fragment) is the sprite sheet.
+	for _, c := range cues {
+		url, _, _ := strings.Cut(c, "#")
+		status, body := httpGet(t, url)
+		if status != http.StatusOK || !bytes.Equal(body, files[store.DerivativeSprite]) {
+			t.Errorf("cue URL %s: status %d, %d bytes", url, status, len(body))
+		}
+	}
+
+	// Same for a viewer; not for another workspace, an asset that is not ready, a bad id or no token.
+	e.call(http.MethodGet, "/v1/assets/"+ready.Id+"/sprite.vtt", "viewer", nil, http.StatusOK, nil)
+	e.fail(http.MethodGet, "/v1/assets/"+ready.Id+"/sprite.vtt", "bob", nil, http.StatusNotFound, api.ErrorCodeNotFound)
+	e.fail(http.MethodGet, "/v1/assets/"+waiting.Id+"/sprite.vtt", "ada", nil, http.StatusNotFound, api.ErrorCodeNotFound)
+	e.fail(http.MethodGet, "/v1/assets/ast_nope/sprite.vtt", "ada", nil, http.StatusBadRequest, api.ErrorCodeInvalidRequest)
+	e.fail(http.MethodGet, "/v1/assets/"+ready.Id+"/sprite.vtt", "", nil, http.StatusUnauthorized, api.ErrorCodeUnauthenticated)
 }

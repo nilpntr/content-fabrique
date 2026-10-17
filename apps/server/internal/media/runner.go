@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/sandbox"
 )
@@ -27,6 +28,9 @@ type Invocation struct {
 	Inputs []Input
 	// OutputDir is a host directory mounted writable at sandbox.WorkDir; empty means the tool gets no writable mount.
 	OutputDir string
+	// Timeout overrides the runner's wall-clock limit for this one run; zero keeps the runner's. A long clip needs more
+	// time than a probe does, so the caller scales it.
+	Timeout time.Duration
 }
 
 // Runner executes media tools. In production it is a SandboxRunner.
@@ -63,11 +67,15 @@ func (r *SandboxRunner) Run(ctx context.Context, inv Invocation) (sandbox.Result
 	if inv.OutputDir != "" {
 		mounts = append(mounts, sandbox.Mount{Host: inv.OutputDir, Container: sandbox.WorkDir, Writable: true})
 	}
+	limits := r.Limits
+	if inv.Timeout > 0 {
+		limits.Timeout = inv.Timeout
+	}
 	return r.Provider.Run(ctx, sandbox.Job{
 		Image:          r.Image,
 		Args:           inv.Args,
 		Mounts:         mounts,
-		Limits:         r.Limits,
+		Limits:         limits,
 		Labels:         r.Labels,
 		MaxOutputBytes: r.MaxOutputBytes,
 	})
@@ -84,8 +92,8 @@ func (e *ToolError) Error() string {
 	return fmt.Sprintf("media: %s exited with code %d: %s", e.Tool, e.ExitCode, e.Stderr)
 }
 
-// stderrSnippet is the part of stderr worth putting in an error message.
-func stderrSnippet(b []byte) string {
+// StderrSnippet is the start of a tool's stderr (at most 1 KiB), the part worth putting in an error message.
+func StderrSnippet(b []byte) string {
 	const limit = 1024
 	if len(b) > limit {
 		b = b[:limit]

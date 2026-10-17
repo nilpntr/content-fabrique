@@ -51,3 +51,7 @@ WHERE workspace_id = @workspace_id AND asset_id = @asset_id AND NOT (kind = ANY(
 SELECT * FROM asset_derivatives
 WHERE workspace_id = @workspace_id AND asset_id = ANY(@asset_ids::uuid[])
 ORDER BY asset_id, kind;
+
+-- A failed asset has no derivatives: the rows go with the failure (the ingest removes the objects).
+-- name: DeleteAssetDerivatives :exec
+DELETE FROM asset_derivatives WHERE workspace_id = @workspace_id AND asset_id = @asset_id;

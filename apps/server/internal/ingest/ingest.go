@@ -29,6 +29,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/ids"
@@ -45,7 +46,8 @@ var ErrAssetGone = errors.New("ingest: the asset is deleted, failed or not in th
 type Objects interface {
 	Get(ctx context.Context, key string) (storage.Object, error)
 	Put(ctx context.Context, key string, body io.ReadSeeker, size int64, contentType string) error
-	DeletePrefix(ctx context.Context, prefix string) (int, error)
+	// Delete removes one object; one that is not there is not an error.
+	Delete(ctx context.Context, key string) error
 }
 
 // Store is what the pipeline needs from the database. *store.Store is the real one.
@@ -54,6 +56,7 @@ type Store interface {
 	SetIngestProgress(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, progress int, stage string) error
 	FinishAssetIngest(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, r store.IngestResult) (store.Asset, error)
 	FailAssetIngest(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, reason string) (store.Asset, error)
+	ListAssetDerivatives(ctx context.Context, ws ids.WorkspaceID, assetIDs []ids.AssetID) ([]store.Derivative, error)
 	GetAssetForObjectDeletion(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (store.Asset, error)
 }
 
@@ -66,7 +69,8 @@ type Config struct {
 	// TempDir holds one directory per running job. It must be inside the sandbox provider's allowed roots and its path must
 	// have no symlinks in it (resolve it with filepath.EvalSymlinks first).
 	TempDir string
-	// MaxDuration is the longest accepted clip; zero means DefaultMaxDuration.
+	// MaxDuration is the longest accepted clip; zero means DefaultMaxDuration. New refuses a value whose worst case
+	// (WorstCase) does not fit in JobTimeout, so the tool timeouts, the job timeout and the accepted length agree.
 	MaxDuration time.Duration
 	Logger      *slog.Logger
 }
@@ -87,13 +91,43 @@ func New(cfg Config) (*Pipeline, error) {
 	if cfg.MaxDuration <= 0 {
 		cfg.MaxDuration = DefaultMaxDuration
 	}
+	if worst := WorstCase(cfg.MaxDuration); worst > JobTimeout {
+		return nil, fmt.Errorf("ingest: a %v clip needs up to %v, more than the job timeout of %v; accept shorter clips", cfg.MaxDuration, worst, JobTimeout)
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
 	if err := os.MkdirAll(cfg.TempDir, 0o750); err != nil {
 		return nil, fmt.Errorf("ingest: temp dir: %w", err)
 	}
-	return &Pipeline{cfg: cfg}, nil
+	p := &Pipeline{cfg: cfg}
+	p.sweepStale(time.Now())
+	return p, nil
+}
+
+// sweepStale removes the job directories (ingest-*) of runs that died without cleaning up (a crashed or killed worker).
+// A directory counts as stale when nothing in it changed for longer than JobTimeout, which is longer than any run lives, so
+// a directory of a run on another worker that shares the temp dir is never touched.
+func (p *Pipeline) sweepStale(now time.Time) {
+	entries, err := os.ReadDir(p.cfg.TempDir)
+	if err != nil {
+		p.cfg.Logger.Warn("could not list the ingest temp dir", "dir", p.cfg.TempDir, "error", err)
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), "ingest-") {
+			continue
+		}
+		fi, err := e.Info()
+		if err != nil || now.Sub(fi.ModTime()) <= JobTimeout {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(p.cfg.TempDir, e.Name())); err != nil {
+			p.cfg.Logger.Warn("could not remove a stale ingest directory", "dir", e.Name(), "error", err)
+			continue
+		}
+		p.cfg.Logger.Info("removed a stale ingest directory", "dir", e.Name())
+	}
 }
 
 // Result is the outcome of a run that ended normally.
@@ -106,14 +140,44 @@ type Result struct {
 	Derivatives []string `json:"derivatives,omitempty"`
 }
 
-// Fail marks an asset failed, for a job that has given up on its last attempt. A deleted or already finished asset is not
-// an error.
+// Fail marks an asset failed, for a file that cannot be processed or a job that has given up on its last attempt. A failed
+// asset has no derivatives, whatever it had before (a re-run that fails does not leave the old ones behind): the rows go in
+// the same transaction and the objects are removed afterwards (the original stays). A deleted or already finished asset is
+// not an error.
 func (p *Pipeline) Fail(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, reason string) error {
-	_, err := p.cfg.Store.FailAssetIngest(ctx, ws, id, reason)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil
+	old, err := p.cfg.Store.ListAssetDerivatives(ctx, ws, []ids.AssetID{id})
+	if err != nil {
+		return fmt.Errorf("list derivatives: %w", err)
 	}
-	return err
+	if _, err := p.cfg.Store.FailAssetIngest(ctx, ws, id, reason); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	keys := make([]string, len(old))
+	for i, d := range old {
+		keys[i] = d.R2Key
+	}
+	p.deleteDerivatives(ctx, ws, id, keys)
+	return nil
+}
+
+// deleteDerivatives removes derivative objects of the asset, best effort: a key that is not a derivative key of this asset
+// is skipped (the original is never removed here), and a failure is logged; the asset's deletion job removes the whole
+// prefix in the end.
+func (p *Pipeline) deleteDerivatives(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, keys []string) {
+	prefix := storage.AssetPrefix(ws, id)
+	for _, key := range keys {
+		name, ok := strings.CutPrefix(key, prefix)
+		if !ok || !storage.ValidDerivativeName(name) {
+			p.cfg.Logger.Warn("not removing an object that is not a derivative of the asset", "asset_id", id.String())
+			continue
+		}
+		if err := p.cfg.Objects.Delete(ctx, key); err != nil {
+			p.cfg.Logger.Warn("could not remove a derivative object", "asset_id", id.String(), "name", name, "error", err)
+		}
+	}
 }
 
 // Run ingests the asset of the workspace. See the package comment for what its results and errors mean.
@@ -151,7 +215,11 @@ func (p *Pipeline) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) 
 	switch {
 	case errors.As(err, &fe):
 		log.WarnContext(ctx, "asset ingest failed: the file cannot be processed", "reason", fe.reason, "error", fe.err)
+		r.removeUploaded(ctx) // the failure also removes the rows of an earlier run; whatever this run wrote goes too
 		return Result{Status: store.AssetFailed, Reason: fe.reason}, p.markFailed(ctx, ws, id, fe.reason)
+	case errors.Is(err, ErrAssetGone):
+		r.removeUploaded(ctx) // deleted while the job worked: nobody will use what it wrote
+		return Result{}, err
 	case err != nil:
 		return Result{}, err
 	}
@@ -170,7 +238,7 @@ func (p *Pipeline) giveUp(ctx context.Context, ws ids.WorkspaceID, id ids.AssetI
 
 // markFailed records the failure even if ctx is cancelled meanwhile. A row that is not processing any more is fine.
 func (p *Pipeline) markFailed(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, reason string) error {
-	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	if err := p.Fail(cctx, ws, id, reason); err != nil {
 		return fmt.Errorf("mark asset failed: %w", err)
@@ -190,6 +258,10 @@ type run struct {
 	log    *slog.Logger
 
 	derived []*derivative
+	// durMs is the probed duration, which scales the tool timeouts (0 until the probe has run).
+	durMs int64
+	// uploaded are the derivative names this run has written to object storage so far.
+	uploaded []string
 }
 
 // derivative is a file the run made and will upload.
@@ -246,6 +318,7 @@ func (r *run) execute(ctx context.Context) (Result, error) {
 	if reason, verr := Validate(r.asset.Kind, meta, r.p.cfg.MaxDuration); reason != "" {
 		return Result{}, fileErr(reason, verr)
 	}
+	r.durMs = meta.DurationMs
 
 	var out ingested
 	switch r.asset.Kind {
@@ -273,13 +346,18 @@ func (r *run) execute(ctx context.Context) (Result, error) {
 	}
 	out.result.Probe = probe
 	out.result.Derivatives = rows
+	// What an earlier run made, to remove the kinds this one no longer makes (a clip that lost its audio track).
+	before, err := r.p.cfg.Store.ListAssetDerivatives(ctx, r.ws, []ids.AssetID{r.id})
+	if err != nil {
+		return Result{}, fmt.Errorf("list derivatives: %w", err)
+	}
 	if _, err := r.p.cfg.Store.FinishAssetIngest(ctx, r.ws, r.id, out.result); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			r.cleanupGone(ctx)
 			return Result{}, ErrAssetGone
 		}
 		return Result{}, fmt.Errorf("finish asset: %w", err)
 	}
+	r.removeStale(ctx, before, rows)
 	kinds := make([]string, len(r.derived))
 	for i, d := range r.derived {
 		kinds[i] = d.kind
@@ -292,16 +370,36 @@ type ingested struct {
 	result store.IngestResult
 }
 
-// cleanupGone removes the objects this run wrote for an asset that was deleted while it worked: the deletion job may have
-// run already, before the derivatives existed. Only an asset that is deleted or failed in this workspace is touched.
-func (r *run) cleanupGone(ctx context.Context) {
-	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-	defer cancel()
-	if _, err := r.p.cfg.Store.GetAssetForObjectDeletion(cctx, r.ws, r.id); err != nil {
+// removeUploaded deletes the derivatives this run wrote, for a run that ended without making the asset ready (it was deleted
+// while the job worked, or the file turned out bad late). It removes only what this run uploaded, by name: the original is
+// the deletion job's business. It uses a fresh context, as the run's may be the thing that ended.
+func (r *run) removeUploaded(ctx context.Context) {
+	if len(r.uploaded) == 0 {
 		return
 	}
-	if _, err := r.objs.deleteAll(cctx); err != nil {
-		r.log.WarnContext(ctx, "could not remove the objects of an asset deleted during ingest", "error", err)
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	for _, name := range r.uploaded {
+		if err := r.objs.delete(cctx, name); err != nil {
+			r.log.WarnContext(ctx, "could not remove a derivative of an ingest that did not finish", "name", name, "error", err)
+		}
+	}
+}
+
+// removeStale deletes the objects of derivative kinds that an earlier run made and this one did not.
+func (r *run) removeStale(ctx context.Context, before []store.Derivative, now []store.NewDerivative) {
+	made := make(map[string]bool, len(now))
+	for _, d := range now {
+		made[d.Kind] = true
+	}
+	var keys []string
+	for _, d := range before {
+		if !made[d.Kind] {
+			keys = append(keys, d.R2Key)
+		}
+	}
+	if len(keys) > 0 {
+		r.p.deleteDerivatives(ctx, r.ws, r.id, keys)
 	}
 }
 
@@ -344,6 +442,8 @@ func (r *run) probe(ctx context.Context, path string) (media.Metadata, error) {
 	m, err := probe(ctx, r.runner, path)
 	var te *media.ToolError
 	switch {
+	case errors.As(err, &te) && killedExit(te.ExitCode):
+		return m, fmt.Errorf("probe: %w (exit code %d)", errKilled, te.ExitCode)
 	case errors.As(err, &te):
 		return m, fileErr(classifyToolError(te, store.FailureUnsupportedFormat), err)
 	case errors.Is(err, media.ErrUnparsable):

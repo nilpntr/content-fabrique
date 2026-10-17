@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -281,11 +282,14 @@ func TestAssetIngestJobSkipsADeletedAsset(t *testing.T) {
 	}
 }
 
-// failingIngester always fails with an infrastructure error.
-type failingIngester struct{ failed chan string }
+// failingIngester fails every run with err and reports the reason of each Fail it gets.
+type failingIngester struct {
+	err    error
+	failed chan string
+}
 
-func (failingIngester) Run(context.Context, ids.WorkspaceID, ids.AssetID) (ingest.Result, error) {
-	return ingest.Result{}, errors.New("the sandbox is down")
+func (f failingIngester) Run(context.Context, ids.WorkspaceID, ids.AssetID) (ingest.Result, error) {
+	return ingest.Result{}, f.err
 }
 
 func (f failingIngester) Fail(_ context.Context, _ ids.WorkspaceID, id ids.AssetID, reason string) error {
@@ -294,21 +298,56 @@ func (f failingIngester) Fail(_ context.Context, _ ids.WorkspaceID, id ids.Asset
 }
 
 // The last attempt of a job that keeps failing for infrastructure reasons marks the asset failed, so it does not stay
-// `processing` for ever.
+// `processing` for ever, with a reason that says what ended it: a timeout, an interruption, or just a failure.
 func TestAssetIngestJobGivesUpOnTheLastAttempt(t *testing.T) {
-	e := newAssetsEnv(t)
-	w := e.newWorkspace(t, "org_ingest_giveup")
-	a := e.newUploadedAsset(t, w, store.AssetKindVideo, "x.mp4", []byte("x"))
-	ing := failingIngester{failed: make(chan string, 4)}
-	e.startWorker(t, jobs.WorkerOptions{Objects: e.objs, Ingest: ing})
-	e.enqueueIngest(t, a, &river.InsertOpts{MaxAttempts: 1})
-	select {
-	case got := <-ing.failed:
-		if got != a.ID.String()+":"+store.FailureProcessing {
-			t.Fatalf("got %s", got)
-		}
-	case <-time.After(20 * time.Second):
-		t.Fatal("the asset was not marked failed")
+	for _, c := range []struct {
+		name   string
+		err    error
+		reason string
+	}{
+		{"an error", errors.New("the sandbox is down"), store.FailureProcessing},
+		{"the job timed out", fmt.Errorf("probe: %w", context.DeadlineExceeded), store.FailureTimeout},
+		{"a tool timed out", fmt.Errorf("ffmpeg: %w", sandbox.ErrTimeout), store.FailureTimeout},
+		{"the worker was stopped", fmt.Errorf("download: %w", context.Canceled), store.FailureInterrupted},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newAssetsEnv(t)
+			w := e.newWorkspace(t, "org_ingest_giveup")
+			a := e.newUploadedAsset(t, w, store.AssetKindVideo, "x.mp4", []byte("x"))
+			ing := failingIngester{err: c.err, failed: make(chan string, 4)}
+			e.startWorker(t, jobs.WorkerOptions{Objects: e.objs, Ingest: ing})
+			e.enqueueIngest(t, a, &river.InsertOpts{MaxAttempts: 1})
+			select {
+			case got := <-ing.failed:
+				if got != a.ID.String()+":"+c.reason {
+					t.Fatalf("got %s, want reason %s", got, c.reason)
+				}
+			case <-time.After(20 * time.Second):
+				t.Fatal("the asset was not marked failed")
+			}
+		})
+	}
+}
+
+// River must not hand a running ingest to a second worker: the job's own timeout ends it first, and the rescue comes later.
+func TestIngestIsNeverRescuedWhileItRuns(t *testing.T) {
+	if jobs.JobRescueAfter <= jobs.IngestTimeout {
+		t.Fatalf("River rescues a job after %v, an ingest may run %v", jobs.JobRescueAfter, jobs.IngestTimeout)
+	}
+	if jobs.IngestTimeout != ingest.JobTimeout || ingest.WorstCase(ingest.DefaultMaxDuration) > jobs.IngestTimeout {
+		t.Fatalf("the job timeout %v does not cover the longest accepted clip (%v)", jobs.IngestTimeout, ingest.WorstCase(ingest.DefaultMaxDuration))
+	}
+	rc, err := jobs.WorkerClientConfig(jobs.DefaultConfig(), jobs.Deps{Store: &store.Store{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rc.RescueStuckJobsAfter; got != jobs.JobRescueAfter {
+		t.Fatalf("RescueStuckJobsAfter = %v, want %v", got, jobs.JobRescueAfter)
+	}
+	// The worker declares its own timeout (River's default is a minute).
+	w := &jobs.AssetIngestWorker{}
+	if got := w.Timeout(&river.Job[jobs.AssetIngestArgs]{}); got != jobs.IngestTimeout {
+		t.Fatalf("Timeout = %v", got)
 	}
 }
 

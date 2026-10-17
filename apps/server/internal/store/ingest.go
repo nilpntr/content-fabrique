@@ -40,6 +40,8 @@ const (
 	FailureResolution        = "unsupported_resolution"
 	FailureKindMismatch      = "kind_mismatch"
 	FailureProcessing        = "processing_failed"
+	FailureTimeout           = "processing_timeout"     // the last attempt ran out of time
+	FailureInterrupted       = "processing_interrupted" // the last attempt was cut short (the worker was stopped)
 )
 
 // IngestStages are the values of assets.ingest_stage while an asset is processing, in order.
@@ -135,11 +137,22 @@ func (s *Store) FinishAssetIngest(ctx context.Context, ws ids.WorkspaceID, id id
 	return a, nil
 }
 
-// FailAssetIngest marks the asset failed with a reason (one of the Failure constants). ErrNotFound when it is not
-// uploaded or processing any more.
+// FailAssetIngest marks the asset failed with a reason (one of the Failure constants) and removes its derivative rows,
+// in one transaction: a failed asset has no derivatives, whether it failed on its first ingest or on a re-run (the caller
+// removes the objects). ErrNotFound when it is not uploaded or processing any more; nothing changes then.
 func (s *Store) FailAssetIngest(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, reason string) (Asset, error) {
-	a, err := s.q.FailAssetIngest(ctx, db.FailAssetIngestParams{WorkspaceID: ws, ID: id, FailureReason: reason})
-	return a, mapErr(err)
+	var a Asset
+	err := s.inTx(ctx, func(tx *Store) error {
+		var err error
+		if a, err = tx.q.FailAssetIngest(ctx, db.FailAssetIngestParams{WorkspaceID: ws, ID: id, FailureReason: reason}); err != nil {
+			return mapErr(err)
+		}
+		return mapErr(tx.q.DeleteAssetDerivatives(ctx, db.DeleteAssetDerivativesParams{WorkspaceID: ws, AssetID: id}))
+	})
+	if err != nil {
+		return Asset{}, err
+	}
+	return a, nil
 }
 
 // ListAssetDerivatives returns the derivatives of the given assets of the workspace, ordered by asset and kind.

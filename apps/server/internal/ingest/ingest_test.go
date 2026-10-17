@@ -79,6 +79,14 @@ func (f *fakeObjects) Put(_ context.Context, key string, body io.ReadSeeker, siz
 	return nil
 }
 
+func (f *fakeObjects) Delete(_ context.Context, key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.objects, key)
+	f.deleted = append(f.deleted, key)
+	return nil
+}
+
 func (f *fakeObjects) DeletePrefix(_ context.Context, prefix string) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -102,6 +110,8 @@ type fakeStore struct {
 	progress    []string
 	// onFinish runs before FinishAssetIngest looks at the asset (a test deletes it there).
 	onFinish func()
+	// onProgress runs before SetIngestProgress looks at the asset.
+	onProgress func(progress int, stage string)
 }
 
 func newFakeStore() *fakeStore {
@@ -134,6 +144,9 @@ func (f *fakeStore) ClaimAssetForIngest(_ context.Context, ws ids.WorkspaceID, i
 }
 
 func (f *fakeStore) SetIngestProgress(_ context.Context, ws ids.WorkspaceID, id ids.AssetID, progress int, stage string) error {
+	if f.onProgress != nil {
+		f.onProgress(progress, stage)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	a, ok := f.assets[fkey(ws, id)]
@@ -168,7 +181,20 @@ func (f *fakeStore) FailAssetIngest(_ context.Context, ws ids.WorkspaceID, id id
 		return store.Asset{}, store.ErrNotFound
 	}
 	a.Status, a.FailureReason = store.AssetFailed, &reason
+	delete(f.derivatives, fkey(ws, id)) // a failed asset has no derivatives
 	return *a, nil
+}
+
+func (f *fakeStore) ListAssetDerivatives(_ context.Context, ws ids.WorkspaceID, assetIDs []ids.AssetID) ([]store.Derivative, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []store.Derivative
+	for _, id := range assetIDs {
+		for _, d := range f.derivatives[fkey(ws, id)] {
+			out = append(out, store.Derivative{WorkspaceID: ws, AssetID: id, Kind: d.Kind, R2Key: d.Key, ContentType: d.ContentType, SizeBytes: d.SizeBytes})
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeStore) GetAssetForObjectDeletion(_ context.Context, ws ids.WorkspaceID, id ids.AssetID) (store.Asset, error) {
@@ -784,8 +810,9 @@ func TestIngestAssetDeletedWhileProcessingLeavesNoObjects(t *testing.T) {
 	if _, err := h.p.Run(context.Background(), a.WorkspaceID, a.ID); !errors.Is(err, ErrAssetGone) {
 		t.Fatalf("got %v", err)
 	}
-	// The derivatives went up before the commit found the asset gone; they are removed again, with the original.
-	if len(h.objects.puts) == 0 || len(h.objects.objects) != 0 {
+	// The derivatives went up before the commit found the asset gone; they are removed again. The original is the deletion
+	// job's to remove.
+	if len(h.objects.puts) == 0 || len(h.objects.objects) != 1 || h.objects.objects[a.R2Key] == nil {
 		t.Fatalf("puts %d, objects left %d", len(h.objects.puts), len(h.objects.objects))
 	}
 }

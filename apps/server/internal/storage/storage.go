@@ -310,6 +310,16 @@ func (c *Client) Put(ctx context.Context, key string, body io.ReadSeeker, size i
 	return nil
 }
 
+// Delete removes one object. An object that is not there is not an error: the goal is reached.
+func (c *Client) Delete(ctx context.Context, key string) error {
+	if _, err := c.s3.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(c.bucket), Key: aws.String(key)}); err != nil {
+		if mapped := mapError(err); !errors.Is(mapped, ErrNotFound) {
+			return fmt.Errorf("delete object: %w", mapped)
+		}
+	}
+	return nil
+}
+
 // PresignGet returns a URL that reads the object for the given time. The key is built by the server from ids, never by a
 // client.
 func (c *Client) PresignGet(ctx context.Context, key string, expires time.Duration) (string, error) {

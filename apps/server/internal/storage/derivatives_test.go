@@ -85,3 +85,28 @@ func TestGetPutAndPresignGet(t *testing.T) {
 		}
 	}
 }
+
+func TestDelete(t *testing.T) {
+	ctx := context.Background()
+	c, _ := newClient(t)
+	ws, asset := newIDs()
+	key, _ := storage.DerivativeKey(ws, asset, "hover_preview.mp4")
+	other, _ := storage.DerivativeKey(ws, asset, "poster.jpg")
+	for _, k := range []string{key, other} {
+		if err := c.Put(ctx, k, strings.NewReader("x"), 1, "video/mp4"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := c.Delete(ctx, key); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Head(ctx, key); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("after Delete: %v", err)
+	}
+	if _, err := c.Head(ctx, other); err != nil {
+		t.Fatalf("Delete removed another object: %v", err)
+	}
+	if err := c.Delete(ctx, key); err != nil {
+		t.Fatalf("deleting an object that is gone must not fail: %v", err)
+	}
+}

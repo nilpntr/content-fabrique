@@ -339,6 +339,43 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /v1/assets/{id}/sprite.vtt:
+    parameters:
+      - $ref: "#/components/parameters/AssetIdPath"
+    get:
+      operationId: getAssetSpriteVtt
+      tags: [assets]
+      summary: The hover-scrub thumbnails track, with working URLs
+      description: |
+        The WebVTT thumbnails track of a `ready` video, with every cue pointing at the sprite sheet through a fresh presigned
+        URL (`https://...?X-Amz-...#xywh=x,y,w,h`), so a player can use it as is. The file stored in object storage
+        (`derivatives.sprite_vtt`) names the sheet relatively and cannot work on its own, because the sheet's URL is signed and
+        expires; this endpoint is how to get a track that works. It needs the same authentication as the rest of the API, so
+        fetch it with the bearer token and hand the text to the player (for example as a Blob URL for a `<track>`). The cue URLs
+        stop working at the same time as `derivative_urls_expire_at`. `404 not_found` when the asset has no sprite track (not
+        ready yet, an audio file, an image).
+      responses:
+        "200":
+          description: The track, `text/vtt`.
+          content:
+            text/vtt:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
   /v1/assets/{id}/parts:
     parameters:
       - $ref: "#/components/parameters/AssetIdPath"
@@ -857,8 +894,10 @@ components:
             Why the asset is `failed`, as a code that is safe to show. The upload failed: `upload_expired`, `size_mismatch`,
             `upload_aborted`. The ingest could not process the file: `unsupported_format` (not a container we accept),
             `corrupt_media` (damaged or cut off), `no_video_stream`, `no_audio_stream`, `undecodable_video`,
-            `invalid_duration`, `too_long` (over 4 hours), `unsupported_resolution`, `kind_mismatch`; or `processing_failed`
-            (our fault: it failed on every retry). Null otherwise.
+            `invalid_duration`, `too_long` (over 30 minutes), `unsupported_resolution`, `kind_mismatch`; or, our fault, the
+            ingest failed on every retry: `processing_failed`, `processing_timeout` (it ran out of time) or
+            `processing_interrupted` (the worker was stopped on the last attempt). A failed asset has no derivatives.
+            Null otherwise.
         ingest_progress:
           type: integer
           minimum: 0
@@ -962,7 +1001,7 @@ components:
         sprite_vtt:
           allOf:
             - $ref: "#/components/schemas/DerivativeFile"
-          description: "`sprite.vtt`: a WebVTT thumbnails track. Each cue is `sprite.jpg#xywh=x,y,w,h`; resolve `sprite.jpg` to the `sprite` URL."
+          description: "`sprite.vtt` as stored: a WebVTT thumbnails track whose cues name the sheet relatively (`sprite.jpg#xywh=x,y,w,h`). Do not give this URL to a player; `GET /v1/assets/{id}/sprite.vtt` returns the same track with every cue pointing at the sprite URL."
         waveform:
           allOf:
             - $ref: "#/components/schemas/DerivativeFile"
