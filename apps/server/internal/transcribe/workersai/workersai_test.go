@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/transcribe"
 )
@@ -231,5 +232,133 @@ func TestCostIsUnpricedUntilAPriceIsConfigured(t *testing.T) {
 	p := New(Config{})
 	if p.Name() != "workersai" || p.Model() != "whisper-large-v3-turbo" {
 		t.Errorf("%s %s", p.Name(), p.Model())
+	}
+}
+
+// A chunk whose request went out and got no usable answer may have been billed: the provider reports it as an estimated call, after the
+// chunks that were answered. A definite refusal (an error status, a dial failure) is not reported.
+func TestChunkWithAnUnknownOutcomeIsReportedAsEstimated(t *testing.T) {
+	ok := `{"success":true,"errors":[],"result":{"words":[],"transcription_info":{"language":"en"}}}`
+	for name, tc := range map[string]struct {
+		handler   func(n int, w http.ResponseWriter)
+		client    *http.Client
+		estimated bool
+	}{
+		"timeout": {
+			handler: func(n int, w http.ResponseWriter) {
+				if n == 2 {
+					time.Sleep(400 * time.Millisecond)
+				}
+				_, _ = w.Write([]byte(ok))
+			},
+			client:    &http.Client{Timeout: 100 * time.Millisecond},
+			estimated: true,
+		},
+		"body cut off": {
+			handler: func(n int, w http.ResponseWriter) {
+				if n == 2 {
+					w.Header().Set("Content-Length", "500")
+					_, _ = w.Write([]byte(`{"success":tr`))
+					panic(http.ErrAbortHandler)
+				}
+				_, _ = w.Write([]byte(ok))
+			},
+			estimated: true,
+		},
+		"unparseable 200": {
+			handler: func(n int, w http.ResponseWriter) {
+				if n == 2 {
+					_, _ = w.Write([]byte(`<html>gateway</html>`))
+					return
+				}
+				_, _ = w.Write([]byte(ok))
+			},
+			estimated: true,
+		},
+		"server error": {
+			handler: func(n int, w http.ResponseWriter) {
+				if n == 2 {
+					w.WriteHeader(http.StatusBadGateway)
+					_, _ = w.Write([]byte(`{"success":false,"errors":[{"code":1,"message":"bad gateway"}]}`))
+					return
+				}
+				_, _ = w.Write([]byte(ok))
+			},
+		},
+		"rejected audio": {
+			handler: func(n int, w http.ResponseWriter) {
+				if n == 2 {
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = w.Write([]byte(`{"success":false,"errors":[{"code":1,"message":"bad audio"}]}`))
+					return
+				}
+				_, _ = w.Write([]byte(ok))
+			},
+		},
+		"success false": {
+			handler: func(n int, w http.ResponseWriter) {
+				if n == 2 {
+					_, _ = w.Write([]byte(`{"success":false,"errors":[{"code":9,"message":"no"}]}`))
+					return
+				}
+				_, _ = w.Write([]byte(ok))
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var mu sync.Mutex
+			n := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				mu.Lock()
+				n++
+				k := n
+				mu.Unlock()
+				tc.handler(k, w)
+			}))
+			defer srv.Close()
+			p := New(Config{AccountID: "a", APIToken: "tok", BaseURL: srv.URL, ChunkSeconds: 2, Client: tc.client, PriceMicrosPerMinute: 6000})
+			tr, err := p.Transcribe(context.Background(), writeWAV(t, 5), transcribe.Options{})
+			if err == nil {
+				t.Fatal("the failed chunk was swallowed")
+			}
+			// Chunk 1 was answered, chunk 2 failed, chunk 3 was never sent.
+			want := []transcribe.Call{{AudioMs: 2000}}
+			if tc.estimated {
+				want = append(want, transcribe.Call{AudioMs: 2000, Estimated: true})
+			}
+			if len(tr.Calls) != len(want) {
+				t.Fatalf("calls = %+v, want %+v", tr.Calls, want)
+			}
+			for i := range want {
+				if tr.Calls[i] != want[i] {
+					t.Errorf("call %d = %+v, want %+v", i, tr.Calls[i], want[i])
+				}
+			}
+		})
+	}
+	// A request that never connected is not billed.
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	url := srv.URL
+	srv.Close() // nothing listens any more: the dial is refused
+	p := New(Config{AccountID: "a", APIToken: "tok", BaseURL: url, ChunkSeconds: 2, PriceMicrosPerMinute: 6000})
+	if tr, err := p.Transcribe(context.Background(), writeWAV(t, 3), transcribe.Options{}); err == nil || len(tr.Calls) != 0 {
+		t.Errorf("a refused connection: calls %+v, err %v", tr.Calls, err)
+	}
+}
+
+func TestPriceAndLifetime(t *testing.T) {
+	p := New(Config{AccountID: "a", APIToken: "t", PriceMicrosPerMinute: 500, PriceVersion: "2026-10b"})
+	if micros, v := p.CostMicros(90_000); micros != 750 || v != "2026-10b" {
+		t.Errorf("a minute and a half: %d %s", micros, v)
+	}
+	if micros, _ := p.CostMicros(1); micros != 1 {
+		t.Errorf("rounds up to a micro-dollar: %d", micros)
+	}
+	// 25 minutes of audio is three 10-minute chunks, each allowed the client's five minutes.
+	if d := p.MaxDuration(25 * 60_000); d != 15*time.Minute {
+		t.Errorf("max duration %v", d)
+	}
+	if micros, v := New(Config{}).CostMicros(60_000); micros != 0 || v != "unpriced" {
+		t.Errorf("unpriced: %d %s", micros, v)
 	}
 }

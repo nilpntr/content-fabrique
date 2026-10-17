@@ -28,6 +28,9 @@ const (
 	DefaultMaxRequestMicros int64 = 2_000_000
 	// DefaultDailySpendCapMicros is $20.
 	DefaultDailySpendCapMicros int64 = 20_000_000
+	// DefaultPlatformDailySpendCapMicros is $100: the breaker over all platform-billed cost per UTC day. Staging and production should
+	// set their own on purpose (cfctl doctor requires it); the default only keeps an unset one from meaning "no breaker".
+	DefaultPlatformDailySpendCapMicros int64 = 100_000_000
 	// DefaultConcurrency is the per-key limit on requests in flight.
 	DefaultConcurrency = 4
 	// DefaultCassetteDir is relative to the working directory, which is the package directory under `go test`.
@@ -51,6 +54,9 @@ type Settings struct {
 	MaxRequestMicros int64
 	// DailySpendCapMicros is DAILY_SPEND_CAP_MICROS: per workspace, per UTC day.
 	DailySpendCapMicros int64
+	// PlatformDailySpendCapMicros is PLATFORM_DAILY_SPEND_CAP_MICROS: the breaker over every billed_to=platform cost (all workspaces, all
+	// kinds) per UTC day. When it trips, managed paid calls are refused until the next UTC day.
+	PlatformDailySpendCapMicros int64
 	// Concurrency is LLM_KEY_CONCURRENCY: requests in flight per API key.
 	Concurrency int
 	// AllowUnpriced is LLM_ALLOW_UNPRICED=1: run a model that has no price (cost recorded as 0).
@@ -103,6 +109,9 @@ func LoadSettings(getenv func(string) string) (Settings, error) {
 	if s.DailySpendCapMicros, err = positiveInt(get("DAILY_SPEND_CAP_MICROS"), DefaultDailySpendCapMicros); err != nil {
 		errs = append(errs, fmt.Errorf("DAILY_SPEND_CAP_MICROS: %w", err))
 	}
+	if s.PlatformDailySpendCapMicros, err = positiveInt(get("PLATFORM_DAILY_SPEND_CAP_MICROS"), DefaultPlatformDailySpendCapMicros); err != nil {
+		errs = append(errs, fmt.Errorf("PLATFORM_DAILY_SPEND_CAP_MICROS: %w", err))
+	}
 	conc, err := positiveInt(get("LLM_KEY_CONCURRENCY"), DefaultConcurrency)
 	if err != nil || conc > 64 {
 		errs = append(errs, errors.New("LLM_KEY_CONCURRENCY: must be an integer from 1 to 64"))
@@ -111,6 +120,10 @@ func LoadSettings(getenv func(string) string) (Settings, error) {
 	switch v := get("LLM_ALLOW_UNPRICED"); v {
 	case "", "0":
 	case "1":
+		// An unpriced paid call cannot be capped or metered: only development and ci may run one (D-31). config.Load refuses it too.
+		if s.Env != "local" && s.Env != "ci" {
+			errs = append(errs, errors.New("LLM_ALLOW_UNPRICED: honoured only in local and ci; staging, production and bench refuse an unpriced paid provider"))
+		}
 		s.AllowUnpriced = true
 	default:
 		errs = append(errs, errors.New("LLM_ALLOW_UNPRICED: must be 1 or empty"))

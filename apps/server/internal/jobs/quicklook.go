@@ -107,7 +107,9 @@ func (w *QuickLookWorker) Work(ctx context.Context, job *river.Job[QuickLookArgs
 	if w.deps.QuickLook == nil {
 		return w.snooze(ctx, job, QuickLookFailModelUnavailable, noQuickLookSnooze, "this worker cannot run quick looks (no object storage, sandbox or model access)")
 	}
+	began := w.deps.now()
 	out, gone, err := w.deps.QuickLook.RunJob(ctx, ws, id)
+	w.deps.meterMedia(ctx, ws, id, "quick_look", job.ID, job.Attempt, began)
 	switch {
 	case errors.Is(err, ErrModelUnavailable):
 		return w.snooze(ctx, job, QuickLookFailModelUnavailable, noQuickLookSnooze, err.Error())

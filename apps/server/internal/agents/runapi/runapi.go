@@ -212,7 +212,7 @@ func (h *Runs) startEdit(ctx context.Context, req api.StartEditRequestObject) (s
 	}
 	run, err := h.svc.StartGuarded(ctx, runtime.StartParams{
 		Agent: editor.Name, WorkspaceID: who.Workspace, ProjectID: project.UUID, Input: input, Profile: profile,
-		Budgets: runtime.Budgets{Micros: budget},
+		Budgets: runtime.Budgets{Micros: budget}, StartedBy: who.User,
 	}, guard)
 	switch {
 	case err == nil:

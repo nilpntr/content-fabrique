@@ -40,6 +40,8 @@ type StartParams struct {
 	Profile string
 	// Budgets override the agent's defaults field by field; zero fields keep them.
 	Budgets Budgets
+	// StartedBy is the member who started the run, for the usage ledger's member_user_id; the zero value when nobody did (cfctl).
+	StartedBy ids.UserID
 }
 
 // Errors of the service.
@@ -91,7 +93,7 @@ func (s *Service) Create(ctx context.Context, tx *store.Store, p StartParams) (s
 		// Effort is always set explicitly: a stage whose profile says nothing runs at medium.
 		Effort: cmp.Or(route.Effort, "medium"), MaxTokens: route.MaxTokens,
 		BudgetMicros: budgets.Micros, BudgetTokens: budgets.Tokens, BudgetToolCalls: budgets.ToolCalls,
-		BudgetWallClockMs: budgets.WallClock.Milliseconds(), BilledTo: string(billing),
+		BudgetWallClockMs: budgets.WallClock.Milliseconds(), BilledTo: string(billing), StartedBy: p.StartedBy,
 	})
 }
 

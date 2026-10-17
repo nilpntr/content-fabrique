@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -21,6 +20,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/projects"
+	"github.com/nilpntr/content-fabrique/internal/spend/spendtest"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
@@ -118,13 +118,6 @@ func message(block string, in, cacheWrite, cacheRead, out int) string {
 		fmt.Sprintf(`"usage":{"input_tokens":%d,"cache_creation_input_tokens":%d,"cache_read_input_tokens":%d,"cache_creation":{"ephemeral_5m_input_tokens":%d,"ephemeral_1h_input_tokens":0},"output_tokens":%d}}`, in, cacheWrite, cacheRead, cacheWrite, out)
 }
 
-type nopLedger struct{}
-
-func (nopLedger) InsertUsage(context.Context, store.UsageEntry) error { return nil }
-func (nopLedger) UsageCostMicros(context.Context, ids.WorkspaceID, time.Time, time.Time) (int64, error) {
-	return 0, nil
-}
-
 // e2e is one editor run over the generated project.
 type e2e struct {
 	*env
@@ -178,7 +171,7 @@ func newE2E(t *testing.T, vars map[string]string, api *fakeAnthropic) *e2e {
 	}
 	opts := llm.FactoryOptions{Settings: settings, Getenv: getenv, Prices: prices, Logger: quiet, Images: ImageResolver{Objects: e.objs}}
 	if api != nil {
-		opts.HTTPClient, opts.Ledger = api.client(), nopLedger{}
+		opts.HTTPClient, opts.Ledger = api.client(), &spendtest.Memory{}
 	}
 	factory, err := llm.NewFactory(opts)
 	if err != nil {

@@ -13,11 +13,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
 	"github.com/nilpntr/content-fabrique/internal/media"
 	"github.com/nilpntr/content-fabrique/internal/projects"
 	"github.com/nilpntr/content-fabrique/internal/render"
+	"github.com/nilpntr/content-fabrique/internal/spend"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
@@ -44,7 +47,9 @@ type Config struct {
 	TempDir string
 	// CPUs is the CPU limit of the runner's sandbox, for the cpu_ms estimate (wall time of the sandbox runs x CPUs). Zero
 	// means render.DefaultLimits().CPU.
-	CPUs   float64
+	CPUs float64
+	// Meter writes the ledger row of the render's CPU time (kind render, vCPU-milliseconds from cpu_ms). Nil records nothing.
+	Meter  *spend.ComputeMeter
 	Logger *slog.Logger
 }
 
@@ -225,6 +230,9 @@ func (p *Pipeline) Run(ctx context.Context, ws ids.WorkspaceID, id ids.RenderID)
 
 	done, err := r.execute(ctx)
 	wall := time.Since(r.began)
+	// Whatever the attempt came to (ready, failed, or an error that sends the job to a retry), its CPU was spent: meter it once per
+	// job attempt.
+	r.meter(ctx)
 	var fe *fileError
 	switch {
 	case errors.As(err, &fe):
@@ -285,6 +293,34 @@ type run struct {
 // finished is what a successful run reports for its log line.
 type finished struct {
 	durationMs, sizeBytes int64
+}
+
+// meter writes the render's CPU time to the usage ledger (P7-09a): the sandbox's allotted CPU time, attributed to the project, to the
+// member who asked for the render (or the run that did) and, as the action, to the render. Its key names the job attempt.
+func (r *run) meter(ctx context.Context) {
+	if r.p.cfg.Meter == nil {
+		return
+	}
+	u := spend.ComputeUse{
+		Workspace: r.ws, Kind: store.KindRender, Stage: "render", VCPUMs: r.cpuMs(), Project: r.render.ProjectID,
+		Action: r.render.ID.UUID, Key: "render:" + r.render.ID.String(),
+	}
+	if ji, ok := jobs.JobInfoFrom(ctx); ok {
+		u.Key = fmt.Sprintf("render:%s:%d:%d", r.render.ID, ji.ID, ji.Attempt)
+	} else {
+		u.Key += ":" + uuid.NewString() // outside a job (a test, a tool): never mistaken for a retry
+	}
+	switch r.render.RequestedByKind {
+	case "user":
+		if id, err := ids.ParseUserID(r.render.RequestedByID); err == nil {
+			u.Member = id
+		}
+	case "agent":
+		if run, err := uuid.Parse(r.render.RequestedByID); err == nil {
+			u.Action = run // the agent run is the action until P7-01a
+		}
+	}
+	r.p.cfg.Meter.Record(ctx, u)
 }
 
 func (r *run) cpuMs() int64 { return int64(float64(r.sandbox.Milliseconds()) * r.p.cfg.CPUs) }

@@ -27,6 +27,8 @@ const (
 	FailModelError          = "model_error"
 	FailModelAccess         = "model_access"
 	FailDailyCap            = "daily_cap"
+	// FailPlatformSpendPaused: the platform's daily spend breaker is open (D-31); managed paid calls are refused until the next UTC day.
+	FailPlatformSpendPaused = "platform_spend_paused"
 	FailRequestCap          = "request_cap"
 	FailReplayMiss          = "replay_miss"
 	FailMaxTokens           = "max_tokens"
@@ -543,7 +545,11 @@ func (l *loop) request() llm.Request {
 		MaxTokens: int(l.run.MaxTokens),
 		Effort:    l.run.Effort,
 		Thinking:  l.agent.Thinking,
-		Run:       llm.RunInfo{ID: l.run.ID, Profile: l.run.RoutingProfile, Budget: l.budget},
+		Run: llm.RunInfo{
+			ID: l.run.ID, Profile: l.run.RoutingProfile, Budget: l.budget,
+			// The ledger attributes the call to the project and the member who started the run (P7-09a).
+			ProjectID: l.run.ProjectID, MemberUserID: ids.UserID{UUID: l.run.StartedBy.Bytes},
+		},
 	}
 }
 
@@ -698,6 +704,8 @@ func (l *loop) modelFailed(ctx context.Context, err error, wallExpired bool, usa
 			return l.stopBudgetWithUsage(ctx, LimitDollars, usage, cost)
 		case llm.CapDaily:
 			return l.failWithUsage(ctx, FailDailyCap, err.Error(), usage, cost)
+		case llm.CapPlatform:
+			return l.failWithUsage(ctx, FailPlatformSpendPaused, err.Error(), usage, cost)
 		default:
 			return l.failWithUsage(ctx, FailRequestCap, err.Error(), usage, cost)
 		}

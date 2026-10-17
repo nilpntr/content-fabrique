@@ -11,6 +11,7 @@ import (
 
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/spend"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
@@ -417,5 +418,20 @@ func TestAnAPIOutageIsRetried(t *testing.T) {
 	}
 	if a := r.store.snapshot(); *a.QuickLookStatus != store.QuickLookPending {
 		t.Errorf("status = %v, want it still pending", *a.QuickLookStatus)
+	}
+}
+
+// The platform breaker (D-31) pauses the quick look instead of failing the clip's label for good: nothing is sent, and the job
+// retries (the breaker closes at the next UTC day).
+func TestPlatformBreakerRetriesTheQuickLook(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	r.ledger.FailReserve = &store.SpendCapError{Cap: store.CapPlatformDaily, Requested: 100, Room: 0}
+	_, err := r.svc.Run(context.Background(), r.asset.WorkspaceID, r.asset.ID, Options{})
+	var ce *llm.CapError
+	if err == nil || !errors.As(err, &ce) || ce.Kind != llm.CapPlatform || !errors.Is(err, spend.ErrPlatformPaused) {
+		t.Fatalf("err = %v, want the platform pause to come back as an error the job retries", err)
+	}
+	if len(r.api.messageCalls()) != 0 || len(r.ledger.snapshot()) != 0 {
+		t.Errorf("the paused call was sent (%d) or metered (%d)", len(r.api.messageCalls()), len(r.ledger.snapshot()))
 	}
 }

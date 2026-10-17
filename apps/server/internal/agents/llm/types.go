@@ -227,6 +227,10 @@ type RunInfo struct {
 	ID uuid.UUID
 	// Profile is the routing profile of the run, for the gateway metadata and the ledger log.
 	Profile string
+	// ProjectID and MemberUserID attribute the call in the ledger: the project the run edits and the member who started it (both
+	// optional; the zero value is none). The ledger's action_id is the run's ID until P7-01a introduces real actions.
+	ProjectID    ids.ProjectID
+	MemberUserID ids.UserID
 	// Budget is the run's dollar budget: a call reserves its worst-case cost before it is sent and is refused when
 	// the run cannot cover it. Nil means no per-run limit.
 	Budget Budget

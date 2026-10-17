@@ -1,6 +1,6 @@
 # Design note: spend control v1, profitable by construction
 
-> Status: **accepted** · 2026-10-17 · Founder request: "build in spend control so we still have profit in the end, and spend stats in the org; think of everything needed for a prod-ready thing." Implements [D-31](../05-decisions.md#d-31-spend-control-credits-per-action-cogs-budgets-derived-from-price). Builds on [D-13](../05-decisions.md#d-13-billing), [D-18](../05-decisions.md#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key), [architecture §13](../03-architecture.md#13-cost-model), the P4-00a ledger (`usage_ledger`, `config/pricing`) and the P0-16 plans. Checkout through the merchant of record ([D-29](../05-decisions.md#d-29-legal-entity-an-operating-bv-under-the-holding-paddle-as-merchant-of-record)) stays a separate, later task. Everything here works with manual grants.
+> Status: **accepted** · 2026-10-17 · **P7-09a (the foundation, §6 and §10) is built; see "As built" at the end of §6** · Founder request: "build in spend control so we still have profit in the end, and spend stats in the org; think of everything needed for a prod-ready thing." Implements [D-31](../05-decisions.md#d-31-spend-control-credits-per-action-cogs-budgets-derived-from-price). Builds on [D-13](../05-decisions.md#d-13-billing), [D-18](../05-decisions.md#d-18-who-pays-for-tokens-managed-credits-or-bring-your-own-key), [architecture §13](../03-architecture.md#13-cost-model), the P4-00a ledger (`usage_ledger`, `config/pricing`) and the P0-16 plans. Checkout through the merchant of record ([D-29](../05-decisions.md#d-29-legal-entity-an-operating-bv-under-the-holding-paddle-as-merchant-of-record)) stays a separate, later task. Everything here works with manual grants.
 
 ## 1. Goals and non-goals
 
@@ -143,6 +143,64 @@ Caps, all enforced the same way:
 
 **Rule of thumb:** credits stop a customer from overusing what they paid for. The COGS caps stop a bug, a loop or an abuser from costing us money even when credits are fine.
 
+### As built (P7-09a)
+
+Built: the ledger kinds, units and attribution; the holds and counters in the database; the platform breaker; fail-closed pricing; the append-only ledger; the price-table sections; metering of model calls, transcription, renders and media jobs; the two P2-05 review fixes. Not built (P7-09b, as in §11): storage snapshots and egress rows (the kinds, units and the `storage:` prices are ready), the outlier alerts, the reconciliation job, `cfctl spend report`.
+
+**Tables.**
+- `spend_holds`: `scope` (workspace or platform), `workspace_id`, `billed_to`, `kind`, `period`, `micros`, `audio_ms`, `expires_at`, `idempotency_key` (unique).
+- `spend_counters`: one row per workspace and period and one platform row per period, with `platform_micros`, `test_micros` and `audio_ms`, plus `alerted_80_at` and `tripped_at` on the platform row. The period is `day:YYYY-MM-DD` in UTC (the column also accepts `bill:...`, for billing periods later).
+- `usage_ledger` gained `quantity`, `unit`, `project_id`, `member_user_id`, `action_id` and `idempotency_key` (unique; old rows are `legacy:<id>`). `request_id` keeps its own unique index as a second guard.
+- The app role has SELECT and INSERT on `usage_ledger` (`cf_grant_app_append_only`), SELECT, INSERT and UPDATE on `spend_counters` (`cf_grant_app_no_delete`) and full DML on `spend_holds`.
+
+**Reserve, settle, release** (`store.ReserveSpend`, `SettleSpend`, `ReleaseSpend`; `internal/spend` adds the caps, the typed errors and the `spend.alert` log lines).
+- **Reserve** is one transaction. It makes sure the counter rows exist, locks the platform row `FOR UPDATE` and then the workspace row, sums the live holds, and checks `spent + held + estimate <= cap` for each cap that applies, in this order: the platform breaker, the workspace daily cap, the transcribed minutes. It inserts the hold, or commits with a typed `SpendCapError` naming the cap (committing, so the trip flag stays). A repeated reserve with the same key returns the same hold.
+- **Settle** is one transaction. It inserts the ledger rows (`ON CONFLICT DO NOTHING`), adds the cost of the rows that were new to the counters (the platform row first, then the workspace's, through upserts, which take the same locks in the same order), and deletes the hold. A replay inserts nothing, so it counts nothing. A settle for a hold that the sweep already deleted still records the cost.
+- **Release** deletes the hold. **The sweep** is the periodic job `spend_holds_sweep` (every minute, maintenance queue); every cap check ignores a hold past its expiry, so a dead caller stops blocking even before the sweep runs.
+- **Lock order** is always platform, then workspace. Several workspaces' platform-billed reserves therefore serialise on the platform row for the length of a short transaction; that is the price of an exact breaker.
+
+**What counts against what.**
+
+| `billed_to` | Workspace daily cap | Platform breaker | Recorded in the ledger |
+|---|---|---|---|
+| `platform` | yes | yes | yes |
+| `test` | yes | no | yes |
+| `workspace_key` | no | no | yes |
+
+Test traffic keeps the behaviour developers rely on: the workspace daily cap, the per-request cap and the run budget all apply locally exactly as before, because test cost counts toward the workspace cap. Only the platform breaker ignores it. The transcribed minutes count every `billed_to`.
+
+**Caps in the code.**
+- `DAILY_SPEND_CAP_MICROS` (workspace), `PLATFORM_DAILY_SPEND_CAP_MICROS` (breaker, default $100 when unset, which `cfctl doctor` rejects in staging and production) and `TRANSCRIBE_DAILY_MINUTES` (as an audio cap, in milliseconds) are enforced in the database. The per-request cap and the run budget stay in process.
+- A reservation that counts against a money cap with no positive limit is refused (`ErrSpendCapNotSet`). A database that cannot be asked is an error, never a pass.
+- The breaker logs `spend.alert` with `type=platform_breaker` and `threshold_pct=80` (warning) when the settled counter passes 80 % of the cap, and `threshold_pct=100` (error) when a call is refused for it or a settle reaches the cap, each once per UTC day however many processes see it. A refusal is `spend.ErrPlatformPaused`: a run fails with `platform_spend_paused`; a transcription or quick look waits and retries; `spend.HTTPError` maps it to `503 platform_spend_paused` (and a workspace cap to `429 daily_spend_cap`) for any API handler that meets one. No endpoint does yet, because the paid calls run in the worker.
+
+**Hold lifetimes.**
+- A model call: the request timeout (2 minutes plus three times the time `max_tokens` takes, 10 to 60 minutes) plus the retry wait (5 minutes) plus a 2-minute margin, but no longer than the run's wall-clock deadline plus the margin; never under 5 minutes.
+- Hosted transcription: one request per 10-minute chunk, each up to the client's 5-minute timeout, plus the margin. Local transcription: whisper's tool timeouts plus the margin.
+- A caller that dies therefore blocks at most one call's worth of budget, for at most that long.
+
+**Metering.**
+
+| Kind | Written by | Quantity | Key |
+|---|---|---|---|
+| `llm` | `llm.metered` | tokens | `llm:<call id>` |
+| `transcription` | the transcribe pipeline, one row per request | audio ms (Workers AI) or estimated vCPU ms (whisper.cpp) | `transcribe:<job id>:<attempt>:<chunk>` |
+| `render` | the render pipeline, every attempt | `renders.cpu_ms` | `render:<render id>:<job id>:<attempt>` |
+| `media` | the ingest, quick look and analysis jobs, every attempt | job wall time times the sandbox's vCPUs | `media:<stage>:<job id>:<attempt>` |
+
+Render and media rows are costs already incurred, so they are recorded, counted toward the breaker and never refused. There is no CPU measurement for them yet: `cpu_ms` of a render is its sandbox runs' wall time times the sandbox CPU limit, and the media jobs use their whole wall time (waiting on storage and the model API included), so both are upper-bound estimates priced from the table's compute estimate. Whisper.cpp's row is estimated the same way, from the audio's length (`wall_seconds_per_audio_second`, 1.0 until measured). A chunk of hosted transcription whose request went out and got no usable answer is written `estimated = true` at the price reserved for its audio.
+
+**Price table 2026-10b** adds `transcription` (Workers AI $0.0005 per audio minute, read from Cloudflare's pricing page on 2026-10-17 and to be confirmed against the first invoice; whisper.cpp as compute), `compute` ($0.000020 per vCPU-second, Cloudflare Containers' price, marked as an estimate) and `storage` (R2 Standard $0.015 per GB-month, egress free). Every ledger row records the version. `WORKERS_AI_PRICE_MICROS_PER_MINUTE` is now an optional override of the table.
+
+**Deviations from the text above, and why.**
+- Units are the smallest whole unit (`audio_ms`, `vcpu_ms`, `byte_days`, `bytes`), not seconds, GB-days and GB, so that quantities and costs stay integers for short chunks; reports divide.
+- The counters' minutes are milliseconds (`audio_ms`) for the same reason.
+- A counter row has `platform_micros` and `test_micros` instead of one number, because the workspace cap counts both (the local behaviour above) and the breaker counts only the first.
+- `LLM_ALLOW_UNPRICED` is honoured in `local` and `ci` only; `bench` refuses it too.
+- The `WORKERS_AI_PRICE_MICROS_PER_MINUTE` requirement of P2-05 is gone from `config.Load` and doctor: the price comes from the table, and the refusal sits where the provider is built.
+- Transcription chunks are metered when the provider returns, not one by one while it works. A worker that dies in the middle of a hosted transcription leaves its hold to expire and does not record the chunks it had paid for; the retry transcribes the audio again. Per-chunk settling is a later improvement.
+- Quick look metering uses the whole job's wall time (a model call included) times the frame sandbox's vCPUs, a deliberate over-count of about two vCPU-seconds.
+
 ## 7. Quotas and abuse controls
 
 - **Storage quota** per plan. It is checked when an upload is created, using the declared size plus the current usage, and refused with 402 `storage_quota_exceeded`. Deleted assets stop counting once their objects are purged.
@@ -233,7 +291,7 @@ API (OpenAPI, paid guard as usual):
 
 | Task | What | Needs |
 |---|---|---|
-| **P7-09a** Spend foundation | `usage_ledger` kinds and units and attribution columns; database holds and counters replacing in-memory reservations; platform breaker; fail closed on staging and production for every paid provider; append-only grants; price table sections for transcription, compute and storage; move the llm client and transcription onto it | P2-05 merged |
+| **P7-09a** Spend foundation (built) | `usage_ledger` kinds and units and attribution columns; database holds and counters replacing in-memory reservations; platform breaker; fail closed on staging and production for every paid provider; append-only grants; price table sections for transcription, compute and storage; move the llm client and transcription onto it | P2-05 merged |
 | **P7-01a** Credits | `config/plans` YAML and loader; `credit_accounts`, `credit_ledger`, `credit_holds`; period grants and expiry job; hold, settle and release wired into editor runs (first or revision decided by the server) and exports; budgets from the YAML; profit-invariant test; 402 `credits_exhausted`; `cfctl credits`; `/v1/me` credits | P7-09a |
 | **P7-01b** Usage UI | `/v1/usage/*`; Settings → Usage; header badge, banners, 402 dialog; credits in the run feed; role-based visibility | P7-01a |
 | **P7-09b** Guardrails and ops | Storage quota and upload limits; concurrent-run limit; outlier detection and `spend.alert` events; reconciliation job (fake-tested, key-gated); `cfctl spend report`; doctor checks; the runbook in docs/06 | P7-01a (in parallel with P7-01b) |

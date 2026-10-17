@@ -27,7 +27,8 @@ func (e *NoKeyError) Error() string {
 func (e *NoKeyError) Is(target error) bool { return target == ErrNoKey }
 
 // ErrUnpriced is returned, wrapped in an *UnpricedError, when a live call names a model the price table has no
-// complete price for. Set LLM_ALLOW_UNPRICED=1 to run anyway (the ledger then records cost 0).
+// complete price for. Development and ci can set LLM_ALLOW_UNPRICED=1 to run anyway (the ledger then records cost 0); staging and
+// production never run an unpriced paid provider.
 var ErrUnpriced = errors.New("llm: model has no price in the price table")
 
 // UnpricedError names the model and the table.
@@ -37,7 +38,7 @@ type UnpricedError struct {
 }
 
 func (e *UnpricedError) Error() string {
-	return fmt.Sprintf("llm: model %q has no price in price table %s, so its cost cannot be metered (add the price from Anthropic's pricing page, or set LLM_ALLOW_UNPRICED=1)", e.Model, e.TableVersion)
+	return fmt.Sprintf("llm: model %q has no price in price table %s, so its cost cannot be metered (add the price from the provider's pricing page in a new config/pricing file; only development and ci may set LLM_ALLOW_UNPRICED=1)", e.Model, e.TableVersion)
 }
 
 // Is makes errors.Is(err, ErrUnpriced) true.
@@ -54,6 +55,8 @@ const (
 	CapRun CapKind = "run"
 	// CapDaily is DAILY_SPEND_CAP_MICROS: the workspace's spend today plus this call's worst case.
 	CapDaily CapKind = "daily"
+	// CapPlatform is PLATFORM_DAILY_SPEND_CAP_MICROS, the breaker over all managed spend. errors.Is(err, spend.ErrPlatformPaused).
+	CapPlatform CapKind = "platform"
 )
 
 // ErrCapExceeded is wrapped by every *CapError.

@@ -15,6 +15,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/media"
 	"github.com/nilpntr/content-fabrique/internal/sandbox"
+	"github.com/nilpntr/content-fabrique/internal/spend"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/transcribe"
 	"github.com/nilpntr/content-fabrique/internal/transcribe/whispercpp"
@@ -38,8 +39,9 @@ type Parts struct {
 }
 
 // Build makes the provider and the detector of the configuration. It creates the directories it needs and never touches the network
-// (the models are downloaded on first use).
-func Build(cfg config.Config) (Parts, error) {
+// (the models are downloaded on first use). prices is the price table (transcription and compute sections): it prices Workers AI per
+// minute and local whisper.cpp as compute.
+func Build(cfg config.Config, prices *llm.PriceTable) (Parts, error) {
 	if err := os.MkdirAll(cfg.MediaTempDir, 0o750); err != nil {
 		return Parts{}, fmt.Errorf("MEDIA_TEMP_DIR: %w", err)
 	}
@@ -85,11 +87,28 @@ func Build(cfg config.Config) (Parts, error) {
 		TempDir:  tempDir,
 		Threads:  int(Limits().CPU),
 	}
+	if prices != nil {
+		if w := prices.WhisperLocal(); w.VCPUs > 0 && prices.VCPUSecondMicros() > 0 {
+			local.WallSecondsPerAudioSecond = w.WallSecondsPerAudioSecond
+			local.Threads = w.VCPUs
+			local.ComputeCost = func(vcpuMs int64) (int64, string) {
+				micros, _ := prices.ComputeCostMicros(vcpuMs)
+				return micros, prices.Version
+			}
+		}
+	}
 	parts := Parts{Local: local, Detector: local, Provider: local, TempDir: tempDir}
 	if cfg.TranscribeProvider == config.TranscribeWorkersAI {
+		price, version := cfg.WorkersAIPriceMicrosPerMinute, ""
+		switch {
+		case price > 0:
+			version = "env:WORKERS_AI_PRICE_MICROS_PER_MINUTE" // the operator's override of the table
+		case prices != nil:
+			price, version = prices.WorkersAIMicrosPerMinute(), prices.Version
+		}
 		parts.Provider = workersai.New(workersai.Config{
-			AccountID: cfg.WorkersAIAccountID, APIToken: cfg.WorkersAIAPIToken, PriceMicrosPerMinute: cfg.WorkersAIPriceMicrosPerMinute,
-			// Staging and production never call a provider whose spend cannot be capped (D-27).
+			AccountID: cfg.WorkersAIAccountID, APIToken: cfg.WorkersAIAPIToken, PriceMicrosPerMinute: price, PriceVersion: version,
+			// Staging and production never call a paid provider without a price: its spend could not be metered or capped (D-27, D-31).
 			RequirePrice: cfg.Env == config.EnvStaging || cfg.Env == config.EnvProduction,
 		})
 	}
@@ -106,12 +125,24 @@ func BilledTo(env string) string {
 	return store.BilledToTest
 }
 
-// Pipeline builds the job's pipeline over the parts. The daily spend cap is the one the model client uses
-// (DAILY_SPEND_CAP_MICROS, dailyCapMicros), read from the same ledger.
-func Pipeline(cfg config.Config, parts Parts, st *store.Store, objects transcribe.Objects, dailyCapMicros int64, logger *slog.Logger) (*transcribe.Pipeline, error) {
+// Pipeline builds the job's pipeline over the parts. gate is the spend gate (caps from the settings and TRANSCRIBE_DAILY_MINUTES): the
+// same holds, counters and caps the model client uses, in the database, so a day of transcription and a day of editing draw on one
+// budget and every worker sees the same reservations.
+func Pipeline(cfg config.Config, parts Parts, st *store.Store, objects transcribe.Objects, gate *spend.Gate, logger *slog.Logger) (*transcribe.Pipeline, error) {
 	return transcribe.New(transcribe.Config{
 		Store: st, Objects: objects, Provider: parts.Provider, Detector: parts.Detector, Language: cfg.TranscribeLanguage,
-		Spend: llm.NewDailyGuard(st, dailyCapMicros), DailyMinutes: cfg.TranscribeDailyMinutes,
-		BilledTo: BilledTo(cfg.Env), TempDir: parts.TempDir, Logger: logger,
+		Gate: gate, BilledTo: BilledTo(cfg.Env), TempDir: parts.TempDir, Logger: logger,
+	})
+}
+
+// Gate builds the spend gate of the transcription pipeline: the model settings' daily and platform caps, and the transcribed minutes
+// as the audio cap.
+func Gate(cfg config.Config, settings llm.Settings, st *store.Store, logger *slog.Logger) *spend.Gate {
+	return spend.NewGate(st, spend.Options{
+		Caps: store.SpendCaps{
+			WorkspaceDailyMicros: settings.DailySpendCapMicros, PlatformDailyMicros: settings.PlatformDailySpendCapMicros,
+			WorkspaceDailyAudioMs: int64(cfg.TranscribeDailyMinutes) * 60_000,
+		},
+		Logger: logger,
 	})
 }

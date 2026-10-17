@@ -11,7 +11,7 @@ func TestRepoPriceTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pt.Version != "2026-10" || pt.Source == "" || pt.Retrieved != "2026-10-17" {
+	if pt.Version != "2026-10b" || pt.Source == "" || pt.Retrieved != "2026-10-17" {
 		t.Fatalf("table header = %q %q %q", pt.Version, pt.Source, pt.Retrieved)
 	}
 	for _, m := range []string{"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"} {
