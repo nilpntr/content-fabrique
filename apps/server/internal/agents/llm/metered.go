@@ -319,7 +319,7 @@ func (m *metered) reserveCaps(ctx context.Context, req Request, rsv *reservation
 // so tests can shorten it.
 var busyBackoff = func(attempt int) time.Duration {
 	d := min(2*time.Second<<min(attempt, 5), time.Minute)
-	return d/2 + time.Duration(rand.Int64N(int64(d/2)+1))
+	return d/2 + time.Duration(rand.Int64N(int64(d/2)+1)) //nolint:gosec // backoff jitter, not a secret
 }
 
 // take reserves est against the run's budget and, in the database, the workspace's daily cap and the platform breaker, or returns
