@@ -9,7 +9,10 @@ export type AssetId = `ast_${string}`;
 export interface Asset {
   id: AssetId;
   title: string;
-  posterUrl: string;
+  /** A still of the clip. A clip without one shows a plain box. */
+  posterUrl?: string;
+  /** A short muted loop, played while the pointer rests on the card. */
+  hoverPreviewUrl?: string;
   durationMs: number;
   tags: string[];
 }
@@ -20,4 +23,6 @@ export interface NewProjectInput {
   assetIds: AssetId[];
   /** The trimmed free-text instructions; an empty string when the creator wrote none. */
   brief: string;
+  /** The trimmed project name. Left out when the creator gave none (the server names the project). */
+  title?: string;
 }

@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { NAV_ITEMS } from "@/nav";
 import { getRouter } from "@/router";
 
 let root: Root | undefined;
@@ -35,7 +36,7 @@ const options = () => screen.queryAllByRole("option").map((option) => option.tex
 
 test("the list keeps its filter while the palette fades out, and is reset once it is gone", async () => {
   const input = await openPalette();
-  expect(options()).toHaveLength(6);
+  expect(options()).toHaveLength(NAV_ITEMS.length + 1);
 
   fireEvent.change(input, { target: { value: "settings" } });
   await waitFor(() => expect(options()).toEqual(["Go to Settings"]));
@@ -51,7 +52,7 @@ test("the list keeps its filter while the palette fades out, and is reset once i
   fireEvent.keyDown(window, { key: "k", ctrlKey: true });
   const reopened = (await screen.findByPlaceholderText("Search pages and actions…")) as HTMLInputElement;
   expect(reopened.value).toBe("");
-  expect(within(document.body).queryAllByRole("option")).toHaveLength(6);
+  expect(within(document.body).queryAllByRole("option")).toHaveLength(NAV_ITEMS.length + 1);
 });
 
 test("reopening during the exit animation starts with an empty query", async () => {
@@ -63,6 +64,6 @@ test("reopening during the exit animation starts with an empty query", async () 
   await waitFor(() => expect(document.querySelector("[data-ending-style]")).toBeTruthy());
   fireEvent.keyDown(window, { key: "k", ctrlKey: true });
 
-  await waitFor(() => expect(options()).toHaveLength(6));
+  await waitFor(() => expect(options()).toHaveLength(NAV_ITEMS.length + 1));
   expect((screen.getByPlaceholderText("Search pages and actions…") as HTMLInputElement).value).toBe("");
 });

@@ -16,6 +16,9 @@ export function ReviewStep({
   brief,
   onEdit,
   disabled = false,
+  budgetUsd,
+  title = "",
+  onMediaError,
 }: {
   assets: readonly Asset[];
   format: Format;
@@ -24,6 +27,12 @@ export function ReviewStep({
   onEdit: (step: StepId) => void;
   /** Locks the Edit buttons, e.g. while the project is being created. */
   disabled?: boolean;
+  /** The most the editor may spend on the first cut, in dollars. Shown, not editable. */
+  budgetUsd?: number;
+  /** The project's name, when the creator gave one. */
+  title?: string;
+  /** A poster would not load: the caller can fetch the list again for fresh URLs. */
+  onMediaError?: () => void;
 }) {
   const info = formatInfo(format);
   const byId = new Map(assets.map((asset) => [asset.id, asset]));
@@ -54,7 +63,11 @@ export function ReviewStep({
         <ol className="mt-3 flex flex-wrap gap-2">
           {picked.map((asset, index) => (
             <li key={asset.id} className="relative w-16 overflow-hidden rounded-lg ring-1 ring-border">
-              <img src={asset.posterUrl} alt={asset.title} title={asset.title} className="aspect-4/5 w-full object-cover" />
+              {asset.posterUrl ? (
+                <img src={asset.posterUrl} alt={asset.title} title={asset.title} onError={onMediaError} className="aspect-4/5 w-full object-cover" />
+              ) : (
+                <div role="img" aria-label={asset.title} title={asset.title} className="aspect-4/5 w-full bg-wash" />
+              )}
               <span className="absolute bottom-0.5 left-0.5 rounded bg-black/65 px-1 font-mono text-[10px] leading-4 text-white tabular-nums">
                 {index + 1}
               </span>
@@ -64,12 +77,22 @@ export function ReviewStep({
       </Row>
 
       <Row disabled={disabled} term="Instructions" onEdit={() => onEdit("brief")} editLabel="Edit instructions">
+        {title.trim() === "" ? null : <p className="mb-1 font-medium">{title.trim()}</p>}
         {text === "" ? (
           <p className="text-muted-foreground">None. The editor will pick a cut from your clips.</p>
         ) : (
           <p className="max-w-prose whitespace-pre-line">{text}</p>
         )}
       </Row>
+      {budgetUsd === undefined ? null : (
+        <div className="grid gap-x-6 gap-y-2 p-4 sm:grid-cols-[8rem_1fr_auto]">
+          <dt className="text-muted-foreground">Spending cap</dt>
+          <dd className="min-w-0">
+            <p className="font-medium tabular-nums">${budgetUsd.toFixed(2)}</p>
+            <p className="text-muted-foreground">The most the editor spends on this cut. It stops there, whatever it has made so far is kept.</p>
+          </dd>
+        </div>
+      )}
     </dl>
   );
 }

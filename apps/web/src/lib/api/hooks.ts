@@ -13,7 +13,7 @@ import { ASSETS_QUERY_KEY, LIBRARY_SUMMARY_QUERY_KEY, ME_QUERY_KEY, PLAN_QUERY_K
  */
 
 /** A 4xx is an answer (no workspace, deleted account, no plan), so asking again will not change it; a 5xx or a lost connection is worth a couple more tries. */
-function retryUnlessClientError(failureCount: number, error: unknown): boolean {
+export function retryUnlessClientError(failureCount: number, error: unknown): boolean {
   return failureCount < 2 && !(error instanceof ApiError && error.status >= 400 && error.status < 500);
 }
 

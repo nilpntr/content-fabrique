@@ -33,16 +33,23 @@ export interface NewProjectFlowProps {
   onCancel?: () => void;
   /** The format that starts selected. TikTok is the only publishing target, so it defaults to 9:16. */
   initialFormat?: Format;
+  /** A poster or preview would not load (an expired URL): fetch the library again. */
+  onMediaError?: () => void;
+  /** The most the first edit may cost, in dollars. Shown on the review step. */
+  budgetUsd?: number;
+  /** Words for a failed `onCreate`, from the error it threw. Without it, or for an error it returns nothing for, a general line is shown. */
+  describeError?: (error: unknown) => string | undefined;
 }
 
 /** The new-project flow: format, footage, instructions, then a review. All state lives here until `onCreate`. */
-export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:16" }: NewProjectFlowProps) {
+export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:16", onMediaError, budgetUsd, describeError }: NewProjectFlowProps) {
   const [stepIndex, setStepIndex] = React.useState(0);
   const [format, setFormat] = React.useState<Format>(initialFormat);
   const [pickedIds, setAssetIds] = React.useState<AssetId[]>([]);
   const [brief, setBrief] = React.useState("");
   const [creating, setCreating] = React.useState(false);
-  const [failed, setFailed] = React.useState(false);
+  const [title, setTitle] = React.useState("");
+  const [failed, setFailed] = React.useState<string | false>(false);
   const headingRef = React.useRef<HTMLHeadingElement>(null);
   const createRef = React.useRef<HTMLButtonElement>(null);
   const shownStep = React.useRef(0);
@@ -79,9 +86,9 @@ export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:
     setCreating(true);
     setFailed(false);
     try {
-      await onCreate({ format, assetIds: [...assetIds], brief: brief.trim() });
-    } catch {
-      setFailed(true);
+      await onCreate({ format, assetIds: [...assetIds], brief: brief.trim(), ...(title.trim() === "" ? {} : { title: title.trim() }) });
+    } catch (error) {
+      setFailed(describeError?.(error) ?? "The project could not be created. Try again.");
       // The button stayed focusable while pending; make sure the focus is on it for the retry.
       createRef.current?.focus();
     } finally {
@@ -144,10 +151,15 @@ export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:
 
         <fieldset disabled={creating} className="m-0 min-w-0 border-0 p-0">
           {step.id === "format" ? <FormatStep value={format} onChange={setFormat} /> : null}
-          {step.id === "footage" ? <FootageStep assets={assets} selectedIds={assetIds} onChange={setAssetIds} /> : null}
-          {step.id === "brief" ? <BriefStep value={brief} onChange={setBrief} /> : null}
+          {step.id === "footage" ? <FootageStep assets={assets} selectedIds={assetIds} onChange={setAssetIds} onMediaError={onMediaError} /> : null}
+          {step.id === "brief" ? <BriefStep value={brief} onChange={setBrief} title={title} onTitleChange={setTitle} /> : null}
           {step.id === "review" ? (
-            <ReviewStep assets={assets} format={format} assetIds={assetIds} brief={brief} onEdit={(target) => go(STEPS.findIndex((s) => s.id === target))} disabled={creating} />
+            <ReviewStep assets={assets} format={format} assetIds={assetIds} brief={brief} onEdit={(target) => go(STEPS.findIndex((s) => s.id === target))}
+              disabled={creating}
+              budgetUsd={budgetUsd}
+              title={title}
+              onMediaError={onMediaError}
+            />
           ) : null}
         </fieldset>
       </section>
@@ -157,7 +169,7 @@ export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:
       </p>
       {failed ? (
         <p role="alert" className="rounded-xl bg-del-wash px-3 py-2 text-destructive">
-          The project could not be created. Try again.
+          {failed}
         </p>
       ) : null}
 
