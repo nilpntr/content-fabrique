@@ -1,0 +1,6 @@
+{
+  "op": "set_clip_audio",
+  "id": "c2",
+  "mode": "full",
+  "gain_db": -2
+}

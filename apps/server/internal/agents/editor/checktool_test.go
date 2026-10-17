@@ -10,6 +10,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/analysis"
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
 // gateEnv is an environment with the check gate on, a project with one analysed clip (reps from 6 s in steps of 3 s, a low-key
@@ -19,6 +20,21 @@ type fakeSampler struct {
 	series *analysis.Series
 	err    error
 	calls  int
+	// the ears
+	audio      *AudioResult
+	audioErr   error
+	audioCalls int
+}
+
+func (f *fakeSampler) Audio(context.Context, ids.WorkspaceID, ids.ProjectID, int, *timeline.Spec) (AudioResult, error) {
+	f.audioCalls++
+	switch {
+	case f.audioErr != nil:
+		return AudioResult{}, f.audioErr
+	case f.audio == nil:
+		return AudioResult{}, ErrNoPreview
+	}
+	return *f.audio, nil
 }
 
 func (f *fakeSampler) Rendered(context.Context, ids.WorkspaceID, ids.ProjectID, int) (analysis.Series, error) {
@@ -88,7 +104,7 @@ func TestCheckEditReadsTheTimelineAndTheAnalysis(t *testing.T) {
 		Kind string      `json:"kind"`
 		Data CheckRecord `json:"data"`
 	}
-	if err := json.Unmarshal((*g.artifacts)[len(*g.artifacts)-1], &rec); err != nil || rec.Kind != CheckArtifact || rec.Data.Nth != 1 || rec.Data.Version != 1 || rec.Data.Failed < 2 || len(rec.Data.Checks) != 14 || rec.Data.RecordVersion != CheckRecordVersion {
+	if err := json.Unmarshal((*g.artifacts)[len(*g.artifacts)-1], &rec); err != nil || rec.Kind != CheckArtifact || rec.Data.Nth != 1 || rec.Data.Version != 1 || rec.Data.Failed < 2 || len(rec.Data.Checks) != 17 || rec.Data.RecordVersion != CheckRecordVersion {
 		t.Fatalf("the recorded check: %v %+v", err, rec)
 	}
 

@@ -25,12 +25,31 @@ func summarise(r Report) string {
 	fmt.Fprintf(&b, "Length %.1f s at %.0f fps.\n", r.DurationS, r.FPS)
 
 	if r.HasAudio && r.Loudness.IntegratedLUFS > -69 {
-		fmt.Fprintf(&b, "Loudness: %.1f LUFS integrated, true peak %.1f dBTP, range %.1f LU (web target: about -14 LUFS, at most -1 dBTP).\n",
-			r.Loudness.IntegratedLUFS, r.Loudness.TruePeakDBTP, r.Loudness.RangeLU)
-		fmt.Fprintf(&b, "Start: first sound at %s, body level at %s. End: the last 3 s are %+.1f LU against the programme, %.2f s of silence at the very end.\n",
-			secondsOrNever(r.Hook.FirstSoundS), secondsOrNever(r.Hook.TimeToBodyS), r.Loudness.EndLU, r.Silence.EndS)
-		if n := len(r.Silence.Gaps); n > 0 {
-			fmt.Fprintf(&b, "Silence: %d gap(s) of %.1f s or more, the longest %.2f s.\n", n, silenceMinS, r.Silence.LongestS)
+		if r.Profile == ProfileSoundReady {
+			fmt.Fprintf(&b, "Profile: sound-ready (a bed and effects, no programme sound: the creator adds a trend sound in TikTok).\n")
+			fmt.Fprintf(&b, "Loudness: %.1f LUFS integrated (sound-ready target: %.0f to %.0f LUFS), true peak %.1f dBTP.\n",
+				r.Loudness.IntegratedLUFS, soundReadyLo, soundReadyHi, r.Loudness.TruePeakDBTP)
+			if r.Bed != nil {
+				fmt.Fprintf(&b, "Bed: %.1f LUFS in the middle, the quietest tenth %.1f LU lower, sound over %.0f LUFS for %.0f %% of the time.\n",
+					r.Bed.LevelLUFS, r.Bed.LevelLUFS-r.Bed.P10LUFS, bedPresentLUFS, r.Bed.Coverage*100)
+			}
+			for _, e := range r.Sync.SFX {
+				if e.Accent && e.PeakLUFS > -69 {
+					fmt.Fprintf(&b, "Effect %s (%s) at %d ms peaks at %.1f LUFS, %+.1f LU over the bed.\n", e.ID, e.Sfx, e.AtMs, e.PeakLUFS, e.MarginLU)
+				}
+			}
+		} else {
+			fmt.Fprintf(&b, "Loudness: %.1f LUFS integrated, true peak %.1f dBTP, range %.1f LU (web target: about -14 LUFS, at most -1 dBTP).\n",
+				r.Loudness.IntegratedLUFS, r.Loudness.TruePeakDBTP, r.Loudness.RangeLU)
+		}
+		if r.Profile == ProfileSoundReady {
+			fmt.Fprintf(&b, "First sound at %s; the longest silent gap is %.2f s.\n", secondsOrNever(r.Hook.FirstSoundS), r.Silence.LongestS)
+		} else {
+			fmt.Fprintf(&b, "Start: first sound at %s, body level at %s. End: the last 3 s are %+.1f LU against the programme, %.2f s of silence at the very end.\n",
+				secondsOrNever(r.Hook.FirstSoundS), secondsOrNever(r.Hook.TimeToBodyS), r.Loudness.EndLU, r.Silence.EndS)
+			if n := len(r.Silence.Gaps); n > 0 {
+				fmt.Fprintf(&b, "Silence: %d gap(s) of %.1f s or more, the longest %.2f s.\n", n, silenceMinS, r.Silence.LongestS)
+			}
 		}
 		fmt.Fprintf(&b, "Movement: %d new sounds (%.1f a second, %.1f of them big hits a second); the longest stretch with nothing new is %.1f s at %.1f s.\n",
 			r.Onsets.Count, r.Onsets.PerSecond, r.Onsets.SalientPerSecond, r.Onsets.LongestWithoutS, r.Onsets.LongestWithoutAtS)
@@ -39,7 +58,7 @@ func summarise(r Report) string {
 				r.Sync.CutsWithin100msShare*100, len(r.Sync.Cuts), r.Sync.CutsWithinFrameShare*100, r.Sync.ChanceWithin100msShare*100,
 				(r.Sync.CutsWithin100msShare-r.Sync.ChanceWithin100msShare)*100)
 		}
-		if r.Sync.SFXPlanned > 0 {
+		if r.Sync.SFXPlanned > 0 && r.Profile != ProfileSoundReady { // the sound-ready checklist judges them by attack
 			fmt.Fprintf(&b, "Effects: %d planned (%.1f per 10 s); %d heard near their time, %.0f %% within a frame.\n",
 				r.Sync.SFXPlanned, r.Density.SFXPer10s, r.Sync.SFXFound, r.Sync.SFXWithinFrameShare*100)
 		}

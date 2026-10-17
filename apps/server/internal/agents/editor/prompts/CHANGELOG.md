@@ -1,9 +1,9 @@
 # Editor system prompt: changelog
 
-The editor agent's system prompt is `editor.v2.0.md`, embedded in the Go binary, and the genre playbooks are the files in
+The editor agent's system prompt is `editor.v2.2.md`, embedded in the Go binary, and the genre playbooks are the files in
 `playbooks/`, embedded too. The text the model receives is the runtime's preamble (`runtime.SystemPreamble`, the untrusted-data
 rule) followed by this file. The prompt version (`PromptVersion` in `prompt.go`) is stored in every run's input, so a run can
-always be tied to the text it was given; a playbook has its own version (`workout.v1`, in `playbooks.go`) that the run's plan
+always be tied to the text it was given; a playbook has its own version (`workout.v2`, in `playbooks.go`) that the run's plan
 records.
 
 Both the prompt and the playbooks are Go templates over the features of the build (`features.go`): the sections about an effect,
@@ -21,6 +21,62 @@ Rules for changing it:
 - The cache hit rate of a run is visible: `cfctl agent show <run>` prints the cache write and read tokens of every model call and
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
+
+## editor.v2.2 (2026-10-17)
+
+The creator style profile (P6-05, `docs/design/style-profile-v1.md`). The prompt so far knew one way to edit: a fast cut-up with a
+beat grid, an effect every three or four cuts and a one to two second hook. A creator who lets long takes run, uses no effects and
+posts the natural picture (the first creator we measured) was told to do the opposite of what they do. The editor now follows the
+creator's style over the generic defaults. The file is `editor.v2.2.md`; it changes what the editor puts on the timeline for a workspace
+that has a profile, and nothing for one that has none, so it is a minor version.
+
+- **A new section, "Following the creator's style".** When the start of the conversation holds a `creator_style` block (an
+  `untrusted_data` block: the numbers are facts about the creator's videos, the titles in it are text read from pictures), the creator's
+  style wins over the playbook and over this prompt where they differ. It says how to read each line: pacing (a creator of long takes
+  gets a few long shots of full sets and short details between them, and the shot-length limits of the fast edit do not apply), the
+  hook (the opening shot runs as long as the creator's first cut, which can be a pose with the title on it, and ends where the music
+  lifts), effects, labels, look and sound effects (none when the profile says none; the bed of the Sound section stays), the title
+  (`title_series` for bold uppercase, `title_lowercase` for witty lowercase lines, upper third, in the creator's case), the cuts and the
+  music (no beat grid and `tempo_bpm 0` when the cuts sit loosely near onsets, cut on the drop when they are on the beat), the sound the
+  creator adds (the hook is the quiet intro, the energy builds with the music, the last shot is held) and the length.
+- **Two title styles in the list.** `title_series` (bold condensed uppercase in cream, no outline) and `title_lowercase` (a quiet lowercase
+  line in cream) join the title styles.
+- **The defaults say they are defaults.** The pacing and effects paragraphs say that a creator style block overrides them. Without a
+  block nothing changes.
+- **Tools.** `plan_edit` ends its answer with a "Creator style" note (computed from the profile) and the profile block; it notes a plan
+  that has effects for a creator who uses none, and it accepts tempo 0 for a workout when the profile says the cuts are not on the beat.
+  `check_edit` takes its thresholds from the profile and has a new check, `style_match`, with the distance per dimension and a
+  one-line fix for each that is out of range.
+
+## editor.v2.1 (2026-10-17)
+
+Sound-ready exports and ears in the editor (P3-12, decision D-33 in `docs/05-decisions.md`, proposed by the director and to be
+confirmed by the founder). The prompt was written when the editor had no sound tools: it left the clips silent, kept `gain_db` off and
+knew four effects. Since then P3-11 added the other seven effect categories and variants and the audio check, and P3-12 added the
+clip sound modes and the sound-ready mix, so the editor is taught all of it. The file is now `editor.v2.1.md`; it changes what the
+editor puts on the timeline (a bed under every shot), so it is a new version, a minor one because the process is the same.
+
+- **The export is sound-ready.** The Sound section is rewritten: the creator adds a trending sound in TikTok over the export, so the
+  export is not silent and does not fight it. A licensed trend sound is a cue, never exported; no music. Each clip has a sound mode
+  (`set_clip_audio`, new field `mode`): `mute`, `bed` (a low ambience at about -24 LUFS, evened out across the clips, short fades at
+  the cuts, never normalised up) and `full` (the programme, for speech, ducked under effects). The policy is one op with no id,
+  `{"op":"set_clip_audio","mode":"bed"}`, when nobody speaks; a clip with speech is `full` and the rest stay bed; `full` is never for
+  ambience. The mix is not normalised to a programme target: the bed stays at about -24 LUFS and the effects peak around -12 to -10 LUFS, so a trend sound at about -14 dominates the bed and the effects still cut through it; the export integrates at about -21 to -19 LUFS for few effects.
+- **Sound effects.** The effects bullet teaches all eleven categories (whoosh, swish, impact, riser and now downlifter, sub_drop, pop,
+  click, glitch, shimmer, sting) with their variants and what each is for, `variant` (omit it for the first, `"auto"` to vary by the
+  effect's id), the rule of one effect sound per visual effect and none on a plain cut, and that `gain_db` is left alone unless
+  `check_edit` says an effect is lost in the bed. A test checks that every category and variant name of the build is in the prompt.
+- **Loudness numbers are scoped.** The levels (bed about -24, export about -21, effects -12 to -10) are for an edit with no `full` clip; an edit with speech is the programme at -14 LUFS with the bed 10 LU under it. The prompt tells the editor to trust the target in each check's detail and never to switch speech to bed (or bed to full) because of a loudness number.
+- **Rhythm.** "You have no sound tools" is gone: the beat grid is still written, now so that the cuts and effects match the sound the
+  creator adds.
+- **check_edit listens.** Step 5 and "Checking and finishing" describe the three new checks (`audio_level`, `audio_bed`,
+  `audio_effects`, measured on the rendered preview without its beat guide) and what to do about each: a missing bed (bed policy, or an
+  effect on a clip with no sound), an effect lost in the bed (a few dB, or a heavier variant), a bed that is not at about -24 LUFS or an export outside -24 to -16 LUFS. A "borderline"
+  note is an estimate close to its bar and not a reason to revise.
+- **Playbooks** are all `v2`: workout (bed on, a whoosh on whips, a sub_drop with the impact on the drop, a riser into the hook, a sting
+  on the loop), unboxing (the reveal's own sound kept as `full`, the rest a bed, a sting or impact on the reveal, a pop and a click),
+  talking (`full` on speech, a bed on cutaways), general, vlog and tutorial (bed and full instead of `use_source`).
+- Cassettes re-recorded (the prompt, the ops schema and the tool contract changed). No live model call was made for this change.
 
 ## editor.v2.0 (2026-10-17)
 

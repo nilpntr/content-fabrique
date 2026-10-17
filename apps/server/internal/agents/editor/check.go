@@ -124,6 +124,10 @@ type CheckInput struct {
 	// Rendered is the luma of the version's preview render (a mean in Luma and a 90th percentile in High per sample, as the analysis
 	// series), nil when there is no preview of the version yet: the checks that look at the rendered picture do not apply then.
 	Rendered *analysis.Series
+	// Audio is the ears' report of the version's preview (P3-12); nil when it could not be measured, and then AudioSkip says why (the
+	// audio checks do not apply).
+	Audio     *AudioResult
+	AudioSkip string
 }
 
 // Metrics are the numbers behind the checks, for the run feed and for comparing runs.
@@ -154,6 +158,13 @@ type Metrics struct {
 	RenderedKept float64 `json:"rendered_kept"`
 	// StyleScore is the share of the style dimensions that are in the creator's range (0 when there is no profile).
 	StyleScore float64 `json:"style_score,omitempty"`
+	// The ears (P3-12), when the preview was listened to: the profile ("programme" or "sound_ready"), the integrated loudness and the
+	// bed level (LUFS; the bed only in the sound-ready profile), what was measured ("stem" or "preview") and how long listening took.
+	AudioProfile string  `json:"audio_profile,omitempty"`
+	AudioLUFS    float64 `json:"audio_lufs,omitempty"`
+	AudioBedLUFS float64 `json:"audio_bed_lufs,omitempty"`
+	AudioSource  string  `json:"audio_source,omitempty"`
+	AudioMs      int64   `json:"audio_ms,omitempty"`
 }
 
 // Report is the result of Check.
@@ -289,6 +300,15 @@ func RunChecks(in CheckInput) Report {
 		c.hookLength(), c.hookTitle(), c.shotPacing(), c.shotVariety(), c.paceBuilds(), c.repBoundaries(), c.deadTime(),
 		c.effectDensity(), c.textSafe(), c.duration(targetS), c.brightness(), c.crushed(), c.beatSync(), c.styleMatch(),
 	}
+	if a := in.Audio; a != nil {
+		r.Checks = append(r.Checks, audioChecks(*a)...)
+		r.Metrics.AudioProfile, r.Metrics.AudioLUFS, r.Metrics.AudioSource, r.Metrics.AudioMs = a.Report.Profile, a.Report.Loudness.IntegratedLUFS, a.Source, a.Elapsed.Milliseconds()
+		if a.Report.Bed != nil {
+			r.Metrics.AudioBedLUFS = a.Report.Bed.LevelLUFS
+		}
+	} else {
+		r.Checks = append(r.Checks, audioSkipped(cmp.Or(in.AudioSkip, "there is no preview render of this version to listen to"))...)
+	}
 	return r
 }
 
@@ -315,14 +335,14 @@ func (c *checker) skip(id, format string, a ...any) Check {
 
 func (c *checker) hookLength() Check {
 	d := c.durs[0]
-	max := c.lim.hookMaxMs
-	if d > max {
+	limit := c.lim.hookMaxMs
+	if d > limit {
 		if c.lim.styled {
-			return c.fail(CheckHookLength, "the first shot (%s) is %s long; the creator's first cut comes by %s", c.items[0].ID, secs2(d), secs2(max))
+			return c.fail(CheckHookLength, "the first shot (%s) is %s long; the creator's first cut comes by %s", c.items[0].ID, secs2(d), secs2(limit))
 		}
-		return c.fail(CheckHookLength, "the first shot (%s) is %s long; the hook should be at most %s. Trim it to its strongest 1 to 2 seconds, or speed it up", c.items[0].ID, secs2(d), secs2(max))
+		return c.fail(CheckHookLength, "the first shot (%s) is %s long; the hook should be at most %s. Trim it to its strongest 1 to 2 seconds, or speed it up", c.items[0].ID, secs2(d), secs2(limit))
 	}
-	return c.pass(CheckHookLength, "the first shot is %s long (at most %s)", secs2(d), secs2(max))
+	return c.pass(CheckHookLength, "the first shot is %s long (at most %s)", secs2(d), secs2(limit))
 }
 
 func (c *checker) hookTitle() Check {

@@ -153,3 +153,14 @@ var sfxGraphBytes = map[string]int{
 
 // SFXGraphBytes is the most a sound effect of the category adds to the filter graph, in bytes (0 for a name that is not one).
 func SFXGraphBytes(name string) int { return sfxGraphBytes[name] }
+
+// SFXIsAccent says whether a category is an accent (the loud, designed hits: impact, sting, sub_drop, riser, downlifter, whoosh, glitch)
+// and not detail (swish, shimmer, pop, click). Accents duck speech under them (render) and are the ones the audio check expects to cut
+// through the bed and to be heard under a trend sound.
+func SFXIsAccent(name string) bool {
+	switch name {
+	case SFXImpact, SFXSting, SFXSubDrop, SFXRiser, SFXDownlifter, SFXWhoosh, SFXGlitch:
+		return true
+	}
+	return false
+}

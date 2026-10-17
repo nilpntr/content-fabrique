@@ -123,12 +123,12 @@ func cmdStyleAnalyze(args []string, stdout, stderr io.Writer, lookup lookupEnv, 
 			_, _ = fmt.Fprintf(stderr, "cfctl %s: %s is not a file\n", name, f)
 			return 2
 		}
-		real, err := filepath.EvalSymlinks(filepath.Dir(abs))
+		resolved, err := filepath.EvalSymlinks(filepath.Dir(abs))
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "cfctl %s: %v\n", name, err)
 			return 2
 		}
-		roots = append(roots, real)
+		roots = append(roots, resolved)
 	}
 	if tmp, err := filepath.EvalSymlinks(os.TempDir()); err == nil {
 		roots = append(roots, tmp)
@@ -288,9 +288,9 @@ func printProfile(out io.Writer, p *styleprofile.Profile, asJSON, stored bool) {
 	}
 }
 
-func cmdStyleShow(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps agentDeps, clear bool) int {
+func cmdStyleShow(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps agentDeps, remove bool) int {
 	name := "style show"
-	if clear {
+	if remove {
 		name = "style clear"
 	}
 	flags := flag.NewFlagSet(name, flag.ContinueOnError)
@@ -310,7 +310,7 @@ func cmdStyleShow(args []string, stdout, stderr io.Writer, lookup lookupEnv, dep
 	if !ok {
 		return 2
 	}
-	env, code := guardDevCommand(name, *envFileArg, clear, *yes, stdout, stderr, lookup)
+	env, code := guardDevCommand(name, *envFileArg, remove, *yes, stdout, stderr, lookup)
 	if code != 0 {
 		return code
 	}
@@ -325,7 +325,7 @@ func cmdStyleShow(args []string, stdout, stderr io.Writer, lookup lookupEnv, dep
 	if code != 0 {
 		return code
 	}
-	if clear {
+	if remove {
 		if err := st.DeleteCreatorStyle(ctx, ws.ID); err != nil {
 			_, _ = fmt.Fprintf(env.err, "cfctl %s: %v\n", name, err)
 			return 1

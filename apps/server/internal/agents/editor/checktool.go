@@ -131,6 +131,21 @@ func CheckVersion(ctx context.Context, projects Projects, src AnalysisSource, ws
 			slog.WarnContext(ctx, "editor: the preview render could not be measured; the rendered-brightness checks do not apply", "project_id", pid.String(), "version", version, "error", err)
 		}
 	}
+	// The ears: the same preview, listened to (its audio stem when it has a beat guide). It is a separate, small step; when it cannot
+	// run the audio checks do not apply, and the picture checks are unaffected.
+	if as, ok := sampler.(AudioSampler); ok && sampler != nil {
+		switch res, err := as.Audio(ctx, ws, pid, version, spec); {
+		case err == nil:
+			in.Audio = &res
+			slog.InfoContext(ctx, "editor: the preview was listened to", "project_id", pid.String(), "version", version, "profile", res.Report.Profile, "source", res.Source, "audio_ms", res.Elapsed.Milliseconds())
+		case errors.Is(err, ErrNoPreview):
+		case errors.Is(err, ErrNoAudioStem):
+			in.AudioSkip = "the preview has no audio stem (it was rendered before stems existed, or the stem could not be stored), so its sound has the beat guide in it: call render_preview again, then check_edit; if it is the same again, say in finish that the sound was not checked"
+		default:
+			in.AudioSkip = "the preview's sound could not be measured"
+			slog.WarnContext(ctx, "editor: the preview's sound could not be measured; the audio checks do not apply", "project_id", pid.String(), "version", version, "error", err)
+		}
+	}
 	return RunChecks(in), nil
 }
 

@@ -411,7 +411,7 @@ func Aggregate(refs []Measures) *Profile {
 	if p.Text != nil {
 		p.Hook.TitleShare = p.Text.TitleShare
 	}
-	p.Audio = aggregateAudio(refs, pace)
+	p.Audio = aggregateAudio(refs)
 
 	// Confidence: the number of references (3 give 0.6, 5 give 0.8, 10 or more give 1), less the spread of the shot-length medians.
 	conf := math.Min(1, 0.2*float64(n)) * 0.9
@@ -532,9 +532,9 @@ func aggregateText(refs []Measures) *TextProfile {
 	return t
 }
 
-func aggregateAudio(refs []Measures, pace PacingProfile) AudioProfile {
+func aggregateAudio(refs []Measures) AudioProfile {
 	var intro, lift, ending, tempo, lufs, lra, cutOnset []float64
-	var within, within100n, liftN, firstAtLift, firstCuts, music, longT, montT, quarters float64
+	var within, within100n, liftN, firstAtLift, firstCuts, music float64
 	var arcs []string
 	var flats []float64
 	var longTempos, montTempos []float64
@@ -580,7 +580,6 @@ func aggregateAudio(refs []Measures, pace PacingProfile) AudioProfile {
 			flats = append(flats, a.Flatness)
 		}
 	}
-	_, _, _ = longT, montT, quarters
 	out := AudioProfile{Speech: "unknown", Content: ContentUnknown}
 	if have == 0 {
 		return out

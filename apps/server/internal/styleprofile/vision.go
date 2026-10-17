@@ -270,7 +270,7 @@ func (r *Reader) Frames(ctx context.Context, path string, atS []float64) ([][]by
 		out = append(out, b)
 	}
 	if len(out) == 0 {
-		var cause error = errors.New("no frame was written")
+		cause := errors.New("no frame was written")
 		if res.ExitCode != 0 {
 			cause = &media.ToolError{Tool: "ffmpeg", ExitCode: res.ExitCode, Stderr: media.StderrSnippet(res.Stderr)}
 		}

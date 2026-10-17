@@ -75,12 +75,11 @@ func analyseSpectrum(pcm []float32) spectrum {
 	// Band edges, log-spaced from 60 Hz to 3.8 kHz, in bins of rate/fftSize = 31.25 Hz.
 	binHz := float64(spectralRate) / fftSize
 	edges := make([]int, bandCount+1)
+	prevEdge := 0
 	for i := range edges {
 		f := 60 * math.Pow(3800.0/60, float64(i)/bandCount)
-		edges[i] = max(int(f/binHz), i+1)
-		if i > 0 && edges[i] <= edges[i-1] {
-			edges[i] = edges[i-1] + 1
-		}
+		edges[i] = max(int(f/binHz), i+1, prevEdge+1) // strictly increasing, so every band has a bin
+		prevEdge = edges[i]
 	}
 	buf := make([]complex128, fftSize)
 	prev := make([]float64, bandCount)

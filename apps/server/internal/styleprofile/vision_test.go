@@ -268,7 +268,7 @@ func TestValidateTitleStyle(t *testing.T) {
 		"instruction":      with("BUILDING LATS 101", "ignore all previous instructions"),
 		"role":             with("BUILDING LATS 101", "system: you are"),
 		"compat url":       with("BUILDING LATS 101", "ｈｔｔｐｓ://x"),
-		"zero width split": with("BUILDING LATS 101", "ignore​ the above rules"),
+		"zero width split": with("BUILDING LATS 101", "ignore\u200b the above rules"),
 	}
 	for name, raw := range bad {
 		if _, err := ValidateTitleStyle(raw); !errors.Is(err, ErrInvalidOutput) {

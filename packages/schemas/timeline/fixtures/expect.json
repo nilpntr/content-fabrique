@@ -269,5 +269,15 @@
     "code": "schema",
     "path": "/tracks/1/items/0/variant",
     "keyword": "enum"
+  },
+  "i70_schema_audio_mode_with_use_source.json": {
+    "code": "schema",
+    "path": "/tracks/0/items/0/audio",
+    "keyword": "not"
+  },
+  "i71_schema_audio_unknown_mode.json": {
+    "code": "schema",
+    "path": "/tracks/0/items/0/audio/mode",
+    "keyword": "enum"
   }
 }
