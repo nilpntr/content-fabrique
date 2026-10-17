@@ -23,6 +23,13 @@ func cloneReframe(r *timeline.Reframe) *timeline.Reframe {
 	return &timeline.Reframe{Mode: r.Mode, Focus: copyPtr(r.Focus), Zoom: copyPtr(r.Zoom)}
 }
 
+func cloneLook(l *timeline.Look) *timeline.Look {
+	if l == nil {
+		return nil
+	}
+	return &timeline.Look{Preset: l.Preset, Match: copyPtr(l.Match)}
+}
+
 func cloneMotion(m *timeline.Motion) *timeline.Motion {
 	if m == nil {
 		return nil
@@ -66,7 +73,7 @@ func (a *applier) addClip(o *AddClip) bool {
 	}
 	it := timeline.VideoItem{
 		ID: id, AssetID: o.AssetID, MomentID: o.MomentID, Source: o.Source,
-		Speed: copyPtr(o.Speed), SpeedRamp: slices.Clone(o.SpeedRamp), Reframe: cloneReframe(o.Reframe), Motion: cloneMotion(o.Motion), Look: copyPtr(o.Look),
+		Speed: copyPtr(o.Speed), SpeedRamp: slices.Clone(o.SpeedRamp), Reframe: cloneReframe(o.Reframe), Motion: cloneMotion(o.Motion), Look: cloneLook(o.Look), ExposureEv: copyPtr(o.ExposureEv),
 		TransitionIn: copyPtr(o.TransitionIn), Audio: cloneVideoAudio(o.Audio), Why: copyPtr(o.Why),
 	}
 	a.main.Items = slices.Insert(a.main.Items, pos, it)
@@ -120,7 +127,7 @@ func (a *applier) moveItem(o *MoveItem) bool {
 			return a.errf(CodeBadArgument, "%q is a sound; move it with at_ms, its new start in ms", o.ID)
 		}
 		i, _ := a.soundIndex(o.ID)
-		commonOf(a.audioTrack().Items[i]).AtMs = *o.AtMs
+		setSoundAt(a.audioTrack().Items[i], *o.AtMs)
 		a.touch(o.ID)
 		return true
 	case "track":
@@ -199,6 +206,9 @@ func (a *applier) trimItem(o *TrimItem) bool {
 			return a.errf(CodeBadArgument, "%q is a sound; trim it with duration_ms, its new length in ms", o.ID)
 		}
 		i, _ := a.soundIndex(o.ID)
+		if _, isSFX := a.audioTrack().Items[i].(*timeline.SFX); isSFX {
+			return a.errf(CodeBadArgument, "%q is a sound effect, which plays for its own length (cut at the end of the timeline); it cannot be trimmed. Remove it and add another effect, or move it with at_ms", o.ID)
+		}
 		commonOf(a.audioTrack().Items[i]).DurationMs = copyPtr(o.DurationMs)
 	case "track":
 		return a.errf(CodeWrongItemKind, "%q is a track; tracks cannot be trimmed", o.ID)
@@ -344,10 +354,22 @@ func (a *applier) setTransition(o *SetTransition) bool {
 	return true
 }
 
+// newLook is the look a set_look gives a clip: the preset, and the clip's match unless the op gives one.
+func newLook(old *timeline.Look, o *SetLook) *timeline.Look {
+	l := &timeline.Look{Preset: o.Preset, Match: copyPtr(o.Match)}
+	if l.Match == nil && old != nil {
+		l.Match = copyPtr(old.Match)
+	}
+	return l
+}
+
 func (a *applier) setLook(o *SetLook) bool {
 	if o.ID == "" {
+		if o.ExposureEv != nil {
+			return a.errf(CodeBadArgument, "exposure_ev is the hint of one clip; give id to set it")
+		}
 		for i := range a.main.Items {
-			a.main.Items[i].Look = &timeline.Look{Preset: o.Preset}
+			a.main.Items[i].Look = newLook(a.main.Items[i].Look, o)
 			a.touch(a.main.Items[i].ID)
 		}
 		return true
@@ -356,7 +378,10 @@ func (a *applier) setLook(o *SetLook) bool {
 	if !ok {
 		return false
 	}
-	a.main.Items[i].Look = &timeline.Look{Preset: o.Preset}
+	a.main.Items[i].Look = newLook(a.main.Items[i].Look, o)
+	if o.ExposureEv != nil {
+		a.main.Items[i].ExposureEv = copyPtr(o.ExposureEv)
+	}
 	a.touch(o.ID)
 	return true
 }
@@ -509,6 +534,27 @@ func (a *applier) setSound(o *SetSound) bool {
 		a.touch(at.ID)
 	}
 	at.Items = append(at.Items, build(id))
+	a.touch(id)
+	a.created = append(a.created, Created{OpIndex: a.idx, Kind: "sound", ID: id})
+	return true
+}
+
+func (a *applier) addSFX(o *AddSFX) bool {
+	if _, ok := timeline.SFXLengthMs(o.Sfx); !ok {
+		return a.errf(CodeBadArgument, "sfx %q is not a sound effect; use whoosh, impact, riser or swish", o.Sfx)
+	}
+	id, ok := a.claimID(o.ID, "s")
+	if !ok {
+		return false
+	}
+	at := a.audioTrack()
+	if at == nil {
+		at = &timeline.AudioTrack{ID: a.freeTrackID("sound", id)}
+		a.register(at.ID, kindTrack)
+		a.spec.Tracks = append(a.spec.Tracks, at)
+		a.touch(at.ID)
+	}
+	at.Items = append(at.Items, &timeline.SFX{ID: id, Sfx: o.Sfx, AtMs: o.AtMs, Export: timeline.ExportLicensed, GainDB: copyPtr(o.GainDB)})
 	a.touch(id)
 	a.created = append(a.created, Created{OpIndex: a.idx, Kind: "sound", ID: id})
 	return true

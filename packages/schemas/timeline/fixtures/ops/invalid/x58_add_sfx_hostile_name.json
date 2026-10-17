@@ -1,0 +1,5 @@
+{
+  "op": "add_sfx",
+  "sfx": "whoosh;amovie=/etc/passwd",
+  "at_ms": 100
+}

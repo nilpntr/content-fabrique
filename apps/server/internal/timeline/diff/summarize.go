@@ -427,7 +427,9 @@ func (s *summarizer) addedItem(typ string, v any) {
 		s.say("added text %s %s at %s", id, quoted(str(m["text"])), secs(intOf(m["at_ms"])))
 	case "audio":
 		ref := str(m["trend_id"])
-		if ref == "" {
+		if sfx := str(m["sfx"]); sfx != "" {
+			ref = sfx + " at " + secs(intOf(m["at_ms"]))
+		} else if ref == "" {
 			ref = s.assetName(str(m["asset_id"]))
 		}
 		s.say("added sound %s (%s %s)", id, str(m["kind"]), ref)
@@ -502,6 +504,12 @@ func (s *summarizer) itemField(typ, id string, rest []string, op Operation, item
 		once("motion", func() { s.finalMotion(id) })
 	case field == "reframe":
 		once("reframe", func() { s.finalReframe(id) })
+	case field == "exposure_ev":
+		if op.Op == OpRemove {
+			s.say("removed the exposure hint of %s", id)
+			return
+		}
+		s.say("set the exposure hint of %s to %s EV", id, scalar(newV))
 	case field == "look":
 		once("look", func() { s.finalLook(id) })
 	case field == "transition_in":
@@ -632,6 +640,10 @@ func (s *summarizer) finalLook(id string) {
 		return
 	}
 	if m, ok := it["look"].(map[string]any); ok {
+		if match, _ := m["match"].(bool); match {
+			s.say("set the look of %s to %s, matching exposure", id, str(m["preset"]))
+			return
+		}
 		s.say("set the look of %s to %s", id, str(m["preset"]))
 		return
 	}

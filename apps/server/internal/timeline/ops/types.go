@@ -41,13 +41,14 @@ const (
 	NameSetClipAudio    = "set_clip_audio"
 	NameSetMotion       = "set_motion"
 	NameSetSpeedRamp    = "set_speed_ramp"
+	NameAddSFX          = "add_sfx"
 )
 
 // Names lists the ops in the order of the schema.
 var Names = []string{
 	NameAddClip, NameRemoveItem, NameMoveItem, NameTrimItem, NameReplaceSource, NameSetSpeed, NameSetReframe,
 	NameAddText, NameUpdateText, NameRemoveText, NameSetTransition, NameSetSound, NameRemoveSound,
-	NameSnapCutsToBeats, NameSetLook, NameSetCaptions, NameSetClipAudio, NameSetMotion, NameSetSpeedRamp,
+	NameSnapCutsToBeats, NameSetLook, NameSetCaptions, NameSetClipAudio, NameSetMotion, NameSetSpeedRamp, NameAddSFX,
 }
 
 // MaxBatchOps is the most ops in one batch.
@@ -75,6 +76,7 @@ type AddClip struct {
 	Reframe      *timeline.Reframe     `json:"reframe,omitempty"`
 	Motion       *timeline.Motion      `json:"motion,omitempty"`
 	Look         *timeline.Look        `json:"look,omitempty"`
+	ExposureEv   *float64              `json:"exposure_ev,omitempty"`
 	TransitionIn *timeline.Transition  `json:"transition_in,omitempty"`
 	Audio        *timeline.VideoAudio  `json:"audio,omitempty"`
 	MomentID     string                `json:"moment_id,omitempty"`
@@ -213,6 +215,10 @@ type SnapCutsToBeats struct {
 type SetLook struct {
 	ID     string `json:"id,omitempty"`
 	Preset string `json:"preset"`
+	// Match is whether the clip's exposure_ev hint is applied; left out, the clip's own setting stays.
+	Match *bool `json:"match,omitempty"`
+	// ExposureEv sets the exposure hint of the clip ID names.
+	ExposureEv *float64 `json:"exposure_ev,omitempty"`
 }
 
 // SetCaptions creates or changes the captions track. The fields that are set change; the others stay.
@@ -237,6 +243,15 @@ type SetMotion struct {
 	Preset   string   `json:"preset"`
 	AtMs     *int64   `json:"at_ms,omitempty"`
 	Strength *float64 `json:"strength,omitempty"`
+}
+
+// AddSFX adds a generated sound effect to the audio track.
+type AddSFX struct {
+	// ID is optional; without it the next free "s<n>" is used.
+	ID     string   `json:"id,omitempty"`
+	Sfx    string   `json:"sfx"`
+	AtMs   int64    `json:"at_ms"`
+	GainDB *float64 `json:"gain_db,omitempty"`
 }
 
 // SetSpeedRamp gives a clip a speed ramp, which replaces its speed.
@@ -301,6 +316,9 @@ func (*SetMotion) OpName() string { return NameSetMotion }
 
 // OpName implements Op.
 func (*SetSpeedRamp) OpName() string { return NameSetSpeedRamp }
+
+// OpName implements Op.
+func (*AddSFX) OpName() string { return NameAddSFX }
 
 // ---- encoding ---------------------------------------------------------------------------------------------------
 
@@ -410,6 +428,9 @@ func (o SetSpeedRamp) MarshalJSON() ([]byte, error) {
 	return tagged(NameSetSpeedRamp, p(o))
 }
 
+// MarshalJSON writes the op with its "op" field.
+func (o AddSFX) MarshalJSON() ([]byte, error) { type p AddSFX; return tagged(NameAddSFX, p(o)) }
+
 // MarshalBatch encodes a batch of ops as a JSON array.
 func MarshalBatch(batch []Op) ([]byte, error) {
 	if batch == nil {
@@ -459,6 +480,8 @@ func newOp(name string) Op {
 		return &SetMotion{}
 	case NameSetSpeedRamp:
 		return &SetSpeedRamp{}
+	case NameAddSFX:
+		return &AddSFX{}
 	}
 	return nil
 }

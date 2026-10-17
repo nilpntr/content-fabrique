@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/nilpntr/content-fabrique/internal/timeline"
@@ -16,6 +17,24 @@ var looks = map[string]string{
 	"cool":   "format=gbrp,curves=r='0/0 0.5/0.45 1/1':b='0/0 0.5/0.56 1/1',format=yuv420p,eq=saturation=1.03",
 	"bw":     "eq=saturation=0:contrast=1.1",
 	"matte":  "format=gbrp,curves=all='0/0.07 1/0.93',format=yuv420p,eq=saturation=0.85:contrast=0.95",
+	// auto evens out each clip's exposure and contrast (P3-10 part B): the RGB normalize filter with the channels linked (no
+	// colour cast), at 80 % strength, smoothed over 15 frames against flicker, and a touch of contrast. It looks only at the
+	// clip's own frames, so it is deterministic.
+	"auto": "format=gbrp,normalize=independence=0:strength=0.8:smoothing=15,format=yuv420p,eq=contrast=1.04",
+	// gym_moody: deep blacks (the toe pulled down), warm skin (red up, blue down in the mids), a little less saturation and
+	// more contrast, and a slight vignette with the filter's random dither off.
+	"gym_moody": "format=gbrp,curves=r='0/0 0.12/0.07 0.5/0.53 1/1':g='0/0 0.12/0.07 0.5/0.49 1/1':b='0/0 0.12/0.08 0.5/0.45 1/0.97',format=yuv420p,eq=saturation=0.92:contrast=1.08,vignette=angle=0.8:dither=0",
+}
+
+// exposureFilter is the correction of a clip whose exposure hint is ev stops brighter than the target (look.match): the luma
+// is scaled by 2^-ev around the black level of limited range, and kept inside it. It works on 8-bit planar YUV, which the
+// clip is converted to in front of it. It returns "" for a hint too small to matter.
+func exposureFilter(ev float64) []string {
+	if math.Abs(ev) < 0.01 {
+		return nil
+	}
+	gain := math.Exp2(-ev)
+	return []string{"format=yuv420p", fmt.Sprintf("lutyuv=y='clip(16+(val-16)*%s,16,235)'", num(round6(gain)))}
 }
 
 // xfadeName maps a transition type to the xfade transition that renders it, from a fixed list: nothing from the spec is
@@ -123,6 +142,14 @@ func (c *compiler) clipGraph(cl clip) ([]string, error) {
 		return nil, err
 	}
 	tail = append(tail, cam.filters()...)
+	// look.match: correct the clip's exposure by its hint, before the preset.
+	if it.Look != nil && it.Look.MatchOrDefault() && it.ExposureEv != nil {
+		ev := *it.ExposureEv
+		if math.IsNaN(ev) || ev < -3 || ev > 3 {
+			return nil, fmt.Errorf("%w: clip %s has exposure_ev %s outside -3 to 3", ErrInvalidSpec, it.ID, num(ev))
+		}
+		tail = append(tail, exposureFilter(ev)...)
+	}
 	if lookFilter != "" {
 		tail = append(tail, lookFilter)
 	}

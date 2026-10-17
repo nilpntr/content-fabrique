@@ -230,6 +230,7 @@ type audioAux struct {
 	TrendID   *string `json:"trend_id"`
 	AssetID   *string `json:"asset_id"`
 	LicenseID *string `json:"license_id"`
+	Sfx       *string `json:"sfx"`
 }
 
 func decodeAudioItem(raw json.RawMessage) (AudioItem, error) {
@@ -246,7 +247,17 @@ func decodeAudioItem(raw json.RawMessage) (AudioItem, error) {
 		}
 		return *p
 	}
+	if a.Kind != AudioSFX && a.Sfx != nil {
+		return nil, notAllowed("sfx")
+	}
 	switch a.Kind {
+	case AudioSFX:
+		for field, set := range map[string]bool{"asset_id": a.AssetID != nil, "license_id": a.LicenseID != nil, "trend_id": a.TrendID != nil} {
+			if set {
+				return nil, notAllowed(field)
+			}
+		}
+		return &SFX{ID: a.ID, Sfx: str(a.Sfx), AtMs: a.AtMs, Export: a.Export, GainDB: a.GainDB}, nil
 	case AudioTrendSound:
 		if a.AssetID != nil {
 			return nil, notAllowed("asset_id")
@@ -336,6 +347,12 @@ func (a TrendSound) MarshalJSON() ([]byte, error) {
 func (a LicensedTrack) MarshalJSON() ([]byte, error) {
 	type plain LicensedTrack
 	return withTag("kind", string(AudioLicensedTrack), plain(a))
+}
+
+// MarshalJSON writes the item with its "kind".
+func (a SFX) MarshalJSON() ([]byte, error) {
+	type plain SFX
+	return withTag("kind", string(AudioSFX), plain(a))
 }
 
 // MarshalJSON writes the item with its "kind".

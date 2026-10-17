@@ -250,6 +250,13 @@
         "reframe": { "$ref": "#/$defs/reframe" },
         "motion": { "$ref": "#/$defs/motion" },
         "look": { "$ref": "#/$defs/look" },
+        "exposure_ev": {
+          "type": "number",
+          "minimum": -3,
+          "maximum": 3,
+          "title": "Exposure hint",
+          "description": "How many stops (EV) this clip is brighter than the exposure the edit should have, as measured by the analysis; the renderer applies the opposite when look.match is true. Positive means the clip is too bright and is darkened. -3 to 3. Without it, look.match changes nothing."
+        },
         "transition_in": { "$ref": "#/$defs/transition" },
         "audio": { "$ref": "#/$defs/videoAudio" },
         "why": {
@@ -347,9 +354,15 @@
       "required": ["preset"],
       "properties": {
         "preset": {
-          "enum": ["none", "punchy", "warm", "cool", "bw", "matte"],
+          "enum": ["none", "punchy", "warm", "cool", "bw", "matte", "auto", "gym_moody"],
           "title": "Preset",
-          "description": "A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white) or matte (lifted blacks)."
+          "description": "A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white), matte (lifted blacks), auto (evens out the clip's exposure and contrast, the same way for every clip, so cuts between angles do not jump) or gym_moody (deep blacks, warm skin, a slight vignette)."
+        },
+        "match": {
+          "type": "boolean",
+          "default": false,
+          "title": "Match exposure",
+          "description": "True to correct the clip's exposure by its exposure_ev hint (from the analysis) before the preset, so shots from different angles meet at one exposure. Default false. Without an exposure_ev on the clip it changes nothing."
         }
       }
     },
@@ -529,11 +542,12 @@
 
     "audioItem": {
       "title": "Audio item",
-      "description": "A sound in the mix, told apart by its \"kind\": trend_sound (cue-only, never reproduced by us), licensed_track (from the licensed library) or creator_audio (the creator's own upload).",
+      "description": "A sound in the mix, told apart by its \"kind\": trend_sound (cue-only, never reproduced by us), licensed_track (from the licensed library), creator_audio (the creator's own upload) or sfx (a sound effect the renderer synthesises: no asset, always in the export).",
       "oneOf": [
         { "$ref": "#/$defs/trendSound" },
         { "$ref": "#/$defs/licensedTrack" },
-        { "$ref": "#/$defs/creatorAudio" }
+        { "$ref": "#/$defs/creatorAudio" },
+        { "$ref": "#/$defs/sfxSound" }
       ],
       "if": { "type": "object", "properties": { "kind": { "const": "trend_sound" } }, "required": ["kind"] },
       "then": { "type": "object", "properties": { "export": { "const": "cue_only" } }, "required": ["export"] }
@@ -577,6 +591,26 @@
         "gain_db": { "$ref": "#/$defs/gainDb" },
         "fade_in_ms": { "$ref": "#/$defs/fadeIn" },
         "fade_out_ms": { "$ref": "#/$defs/fadeOut" }
+      }
+    },
+
+    "sfxSound": {
+      "type": "object",
+      "title": "Sound effect",
+      "description": "A sound effect that the renderer synthesises itself (no asset, no licence: it is ours, so its export is \"licensed\" and it is in every render and export). whoosh (0.6 s, a pass-by), impact (0.8 s, a low hit with a crack), riser (1.5 s, a rising tension build that peaks at its end) or swish (0.3 s, a quick air pass). It starts at at_ms and is cut at the end of the timeline. It is mixed after the loudness normalisation, at a fixed level plus gain_db, so it stays an accent above the programme.",
+      "additionalProperties": false,
+      "required": ["id", "kind", "sfx", "at_ms", "export"],
+      "properties": {
+        "id": { "$ref": "#/$defs/itemId" },
+        "kind": { "const": "sfx", "title": "Kind", "description": "\"sfx\"." },
+        "sfx": {
+          "enum": ["whoosh", "impact", "riser", "swish"],
+          "title": "Effect",
+          "description": "whoosh, impact, riser or swish."
+        },
+        "at_ms": { "$ref": "#/$defs/ms", "title": "Start", "description": "When the effect starts in the output, in ms. For an impact or a riser that should land on a beat, start it before the beat by the time it takes to build: a riser ends 1500 ms after it starts." },
+        "export": { "const": "licensed", "title": "Export policy", "description": "Always \"licensed\": the effect is ours and is mixed into the render." },
+        "gain_db": { "$ref": "#/$defs/gainDb" }
       }
     },
 

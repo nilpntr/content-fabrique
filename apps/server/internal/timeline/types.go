@@ -105,7 +105,14 @@ const (
 	ReframeContain  = "contain"
 	ReframeBlurFill = "blur_fill"
 
-	LookNone = "none"
+	LookNone     = "none"
+	LookAuto     = "auto"
+	LookGymMoody = "gym_moody"
+
+	SFXWhoosh = "whoosh"
+	SFXImpact = "impact"
+	SFXRiser  = "riser"
+	SFXSwish  = "swish"
 
 	AnimationNone = "none"
 
@@ -276,12 +283,14 @@ type VideoItem struct {
 	AtMs     int64    `json:"at_ms"`
 	Speed    *float64 `json:"speed,omitempty"`
 	// SpeedRamp replaces Speed when present: source-relative points between which the speed changes linearly.
-	SpeedRamp    []SpeedPoint `json:"speed_ramp,omitempty"`
-	Reframe      *Reframe     `json:"reframe,omitempty"`
-	Motion       *Motion      `json:"motion,omitempty"`
-	Look         *Look        `json:"look,omitempty"`
-	TransitionIn *Transition  `json:"transition_in,omitempty"`
-	Audio        *VideoAudio  `json:"audio,omitempty"`
+	SpeedRamp []SpeedPoint `json:"speed_ramp,omitempty"`
+	Reframe   *Reframe     `json:"reframe,omitempty"`
+	Motion    *Motion      `json:"motion,omitempty"`
+	Look      *Look        `json:"look,omitempty"`
+	// ExposureEv is the analysis's hint: how many stops brighter than the target the clip is. look.match applies the opposite.
+	ExposureEv   *float64    `json:"exposure_ev,omitempty"`
+	TransitionIn *Transition `json:"transition_in,omitempty"`
+	Audio        *VideoAudio `json:"audio,omitempty"`
 	// Why is the agent's one-line reason for the clip. It is never rendered. A pointer, because the empty string is
 	// valid and must survive a round trip.
 	Why *string `json:"why,omitempty"`
@@ -377,7 +386,12 @@ type SpeedPoint struct {
 // Look is a colour preset.
 type Look struct {
 	Preset string `json:"preset"`
+	// Match applies the clip's exposure_ev hint before the preset.
+	Match *bool `json:"match,omitempty"`
 }
+
+// MatchOrDefault is whether the look matches exposure: false when the spec leaves it out.
+func (l Look) MatchOrDefault() bool { return l.Match != nil && *l.Match }
 
 // Transition is how a clip comes in: a cut, or a crossfade, dip_to_black or whip of DurationMs (100 to 1000). A cut
 // has no duration.
@@ -436,7 +450,32 @@ const (
 	AudioTrendSound    AudioKind = "trend_sound"
 	AudioLicensedTrack AudioKind = "licensed_track"
 	AudioCreatorAudio  AudioKind = "creator_audio"
+	AudioSFX           AudioKind = "sfx"
 )
+
+// The synthesised sound effects (P3-10 part B): their natural lengths in ms. An effect plays for its length, cut at the end of
+// the timeline.
+const (
+	SFXWhooshMs = 600
+	SFXImpactMs = 800
+	SFXRiserMs  = 1500
+	SFXSwishMs  = 300
+)
+
+// SFXLengthMs is the natural length of a sound effect, and false for a name that is not one.
+func SFXLengthMs(name string) (int64, bool) {
+	switch name {
+	case SFXWhoosh:
+		return SFXWhooshMs, true
+	case SFXImpact:
+		return SFXImpactMs, true
+	case SFXRiser:
+		return SFXRiserMs, true
+	case SFXSwish:
+		return SFXSwishMs, true
+	}
+	return 0, false
+}
 
 // AudioItem is one of *TrendSound, *LicensedTrack and *CreatorAudio. The "kind" field tells them apart in JSON; each
 // type writes its own "kind" when encoded. As with Track, the interface is satisfied by the pointer types only.
@@ -510,6 +549,28 @@ type LicensedTrack struct {
 type CreatorAudio struct {
 	AudioCommon
 	AssetID string `json:"asset_id"`
+}
+
+// SFX is a sound effect the renderer synthesises (no asset, no licence: it is ours). It is not built on AudioCommon: it has
+// no source offset, and its length is the effect's own (SFXLengthMs), cut at the end of the timeline.
+type SFX struct {
+	ID     string   `json:"id"`
+	Sfx    string   `json:"sfx"`
+	AtMs   int64    `json:"at_ms"`
+	Export string   `json:"export"`
+	GainDB *float64 `json:"gain_db,omitempty"`
+}
+
+// AudioKind implements AudioItem.
+func (*SFX) AudioKind() AudioKind { return AudioSFX }
+
+// AssetRef implements AudioItem: an effect has no asset.
+func (*SFX) AssetRef() (string, bool) { return "", false }
+
+// Common implements AudioItem: the fields an effect shares with the other kinds. It has no duration_ms (it plays to its own
+// end or the timeline's) and no source offset.
+func (s *SFX) Common() AudioCommon {
+	return AudioCommon{ID: s.ID, AtMs: s.AtMs, Export: s.Export, GainDB: s.GainDB}
 }
 
 // AudioKind implements AudioItem.
