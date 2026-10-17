@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/api"
@@ -13,22 +14,17 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
-// Caller is the authenticated caller of a request: the workspace and user the verified token resolved to, and the role.
-type Caller struct {
-	Workspace ids.WorkspaceID
-	User      ids.UserID
-	Role      store.Role
-}
-
-// CallerFunc reads the Caller from the request context (internal/auth supplies it from the Principal). ok is false when the
-// request did not pass the authentication middleware.
-type CallerFunc func(ctx context.Context) (Caller, bool)
+// Caller and CallerFunc are the shared ones of package httpapi: the workspace, user and role the verified token resolved to.
+type (
+	Caller     = httpapi.Caller
+	CallerFunc = httpapi.CallerFunc
+)
 
 // Handler implements the assets operations of the generated api.StrictServerInterface. The workspace of every call comes
 // from the Caller and nowhere else: no request field names a workspace.
 type Handler struct {
 	svc    *Service // nil when object storage is not configured
-	caller CallerFunc
+	caller httpapi.CallerFunc
 	logger *slog.Logger
 }
 
@@ -43,12 +39,9 @@ func NewHandler(svc *Service, caller CallerFunc, logger *slog.Logger) *Handler {
 
 // begin authorises a call. Reads are open to every role, changes need an owner or an editor (a viewer only looks).
 func (h *Handler) begin(ctx context.Context, write bool) (Actor, *Error) {
-	c, ok := h.caller(ctx)
-	if !ok {
-		return Actor{}, &Error{Status: http.StatusUnauthorized, Code: api.ErrorCodeUnauthenticated, Message: "sign in to use the API"}
-	}
-	if write && c.Role != store.RoleOwner && c.Role != store.RoleEditor {
-		return Actor{}, &Error{Status: http.StatusForbidden, Code: api.ErrorCodeInsufficientRole, Message: "your role in this workspace cannot change assets"}
+	c, r := h.caller.Authorize(ctx, write, "assets")
+	if r != nil {
+		return Actor{}, &Error{Status: r.Status, Code: r.Code, Message: r.Message}
 	}
 	if h.svc == nil {
 		return Actor{}, &Error{Status: http.StatusServiceUnavailable, Code: api.ErrorCodeStorageNotConfigured, Message: "object storage is not configured on this server"}
@@ -81,11 +74,65 @@ func assetOf(a store.Asset) api.Asset {
 	if tags == nil {
 		tags = []string{}
 	}
-	return api.Asset{
+	out := api.Asset{
 		Id: a.ID.String(), Kind: api.AssetKind(a.Kind), Status: api.AssetStatus(a.Status), Filename: a.Filename,
 		ContentType: a.ContentType, SizeBytes: a.SizeBytes, Sha256: a.Sha256, Title: a.Title, Description: a.Description,
-		Tags: tags, FailureReason: a.FailureReason, CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt,
+		Tags: tags, FailureReason: a.FailureReason, IngestProgress: int(a.IngestProgress), IngestStage: a.IngestStage,
+		CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt,
 	}
+	if a.Status == store.AssetReady && a.DurationMs != nil {
+		out.Media = &api.MediaInfo{
+			DurationMs: *a.DurationMs, Width: intOf(a.Width), Height: intOf(a.Height), Fps: a.Fps,
+			Rotation: api.MediaInfoRotation(deref(a.Rotation)), VideoCodec: a.VideoCodec, AudioCodec: a.AudioCodec,
+			HasAudio: deref(a.HasAudio), Hdr: deref(a.Hdr),
+		}
+	}
+	return out
+}
+
+// viewOf is assetOf plus the derivative URLs of a ready asset.
+func viewOf(v View) api.Asset {
+	out := assetOf(v.Asset)
+	if len(v.Files) == 0 {
+		return out
+	}
+	d := &api.AssetDerivatives{}
+	for _, f := range v.Files {
+		switch f.Kind {
+		case store.DerivativeProxy720:
+			d.Proxy720 = f.file()
+		case store.DerivativePoster:
+			d.Poster = f.file()
+		case store.DerivativeHoverPreview:
+			d.HoverPreview = f.file()
+		case store.DerivativeSprite:
+			d.Sprite = f.file()
+		case store.DerivativeSpriteVTT:
+			d.SpriteVtt = f.file()
+		case store.DerivativeWaveform:
+			d.Waveform = f.file()
+		}
+	}
+	out.Derivatives = d
+	exp := v.URLsExpires
+	out.DerivativeUrlsExpireAt = &exp
+	return out
+}
+
+func intOf(n *int32) *int {
+	if n == nil {
+		return nil
+	}
+	v := int(*n)
+	return &v
+}
+
+func deref[T any](p *T) T {
+	var zero T
+	if p == nil {
+		return zero
+	}
+	return *p
 }
 
 func (h *Handler) uploadOf(u store.Upload) api.UploadInfo {
@@ -135,7 +182,7 @@ func (h *Handler) CreateAsset(ctx context.Context, req api.CreateAssetRequestObj
 func (h *Handler) ListAssets(ctx context.Context, req api.ListAssetsRequestObject) (api.ListAssetsResponseObject, error) {
 	who, e := h.begin(ctx, false)
 	var (
-		rows []store.Asset
+		rows []View
 		next string
 	)
 	if e == nil {
@@ -167,8 +214,8 @@ func (h *Handler) ListAssets(ctx context.Context, req api.ListAssetsRequestObjec
 		return nil, undocumented("listAssets", e)
 	}
 	items := make([]api.Asset, len(rows))
-	for i, a := range rows {
-		items[i] = assetOf(a)
+	for i, v := range rows {
+		items[i] = viewOf(v)
 	}
 	res := api.ListAssets200JSONResponse{Items: items}
 	if next != "" {
@@ -180,11 +227,11 @@ func (h *Handler) ListAssets(ctx context.Context, req api.ListAssetsRequestObjec
 // GetAsset is GET /v1/assets/{id}.
 func (h *Handler) GetAsset(ctx context.Context, req api.GetAssetRequestObject) (api.GetAssetResponseObject, error) {
 	who, e := h.begin(ctx, false)
-	var a store.Asset
+	var v View
 	if e == nil {
 		var id ids.AssetID
 		if id, e = parseID(req.Id); e == nil {
-			a, e = h.svc.Get(ctx, who, id)
+			v, e = h.svc.Get(ctx, who, id)
 		}
 	}
 	if e != nil {
@@ -204,7 +251,37 @@ func (h *Handler) GetAsset(ctx context.Context, req api.GetAssetRequestObject) (
 		}
 		return nil, undocumented("getAsset", e)
 	}
-	return api.GetAsset200JSONResponse(assetOf(a)), nil
+	return api.GetAsset200JSONResponse(viewOf(v)), nil
+}
+
+// GetAssetSpriteVtt is GET /v1/assets/{id}/sprite.vtt.
+func (h *Handler) GetAssetSpriteVtt(ctx context.Context, req api.GetAssetSpriteVttRequestObject) (api.GetAssetSpriteVttResponseObject, error) {
+	who, e := h.begin(ctx, false)
+	var vtt string
+	if e == nil {
+		var id ids.AssetID
+		if id, e = parseID(req.Id); e == nil {
+			vtt, e = h.svc.SpriteVTT(ctx, who, id)
+		}
+	}
+	if e != nil {
+		switch e.Status {
+		case 400:
+			return api.GetAssetSpriteVtt400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body(e))}, nil
+		case 401:
+			return api.GetAssetSpriteVtt401JSONResponse{UnauthenticatedJSONResponse: api.UnauthenticatedJSONResponse(body(e))}, nil
+		case 403:
+			return api.GetAssetSpriteVtt403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(body(e))}, nil
+		case 404:
+			return api.GetAssetSpriteVtt404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(body(e))}, nil
+		case 500:
+			return api.GetAssetSpriteVtt500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(body(e))}, nil
+		case 503:
+			return api.GetAssetSpriteVtt503JSONResponse{UnavailableJSONResponse: api.UnavailableJSONResponse(body(e))}, nil
+		}
+		return nil, undocumented("getAssetSpriteVtt", e)
+	}
+	return api.GetAssetSpriteVtt200TextvttResponse{Body: strings.NewReader(vtt), ContentLength: int64(len(vtt))}, nil
 }
 
 // DeleteAsset is DELETE /v1/assets/{id}.

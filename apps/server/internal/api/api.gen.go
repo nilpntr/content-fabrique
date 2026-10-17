@@ -13,11 +13,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"path"
 	"strings"
 	"time"
+
+	rawjson "encoding/json"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/oapi-codegen/runtime"
@@ -92,18 +95,60 @@ func (e AssetStatus) Valid() bool {
 	}
 }
 
+// Defines values for AuthorKind.
+const (
+	AuthorKindAgent AuthorKind = "agent"
+	AuthorKindUser  AuthorKind = "user"
+)
+
+// Valid indicates whether the value is a known member of the AuthorKind enum.
+func (e AuthorKind) Valid() bool {
+	switch e {
+	case AuthorKindAgent:
+		return true
+	case AuthorKindUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreatedItemKind.
+const (
+	CreatedItemKindClip  CreatedItemKind = "clip"
+	CreatedItemKindSound CreatedItemKind = "sound"
+	CreatedItemKindText  CreatedItemKind = "text"
+)
+
+// Valid indicates whether the value is a known member of the CreatedItemKind enum.
+func (e CreatedItemKind) Valid() bool {
+	switch e {
+	case CreatedItemKindClip:
+		return true
+	case CreatedItemKindSound:
+		return true
+	case CreatedItemKindText:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ErrorCode.
 const (
+	ErrorCodeAssetsNotUsable        ErrorCode = "assets_not_usable"
 	ErrorCodeAuthNotConfigured      ErrorCode = "auth_not_configured"
 	ErrorCodeFileTooLarge           ErrorCode = "file_too_large"
 	ErrorCodeIdentityUnavailable    ErrorCode = "identity_unavailable"
 	ErrorCodeInsufficientRole       ErrorCode = "insufficient_role"
 	ErrorCodeInternalError          ErrorCode = "internal_error"
 	ErrorCodeInvalidEvent           ErrorCode = "invalid_event"
+	ErrorCodeInvalidOps             ErrorCode = "invalid_ops"
 	ErrorCodeInvalidRequest         ErrorCode = "invalid_request"
 	ErrorCodeInvalidSignature       ErrorCode = "invalid_signature"
 	ErrorCodeInvalidToken           ErrorCode = "invalid_token"
 	ErrorCodeNoActiveWorkspace      ErrorCode = "no_active_workspace"
+	ErrorCodeNoChange               ErrorCode = "no_change"
 	ErrorCodeNotAMember             ErrorCode = "not_a_member"
 	ErrorCodeNotFound               ErrorCode = "not_found"
 	ErrorCodeOriginNotAllowed       ErrorCode = "origin_not_allowed"
@@ -120,6 +165,7 @@ const (
 	ErrorCodeUploadExpired          ErrorCode = "upload_expired"
 	ErrorCodeUploadNotActive        ErrorCode = "upload_not_active"
 	ErrorCodeUserDeleted            ErrorCode = "user_deleted"
+	ErrorCodeVersionConflict        ErrorCode = "version_conflict"
 	ErrorCodeWebhookNotConfigured   ErrorCode = "webhook_not_configured"
 	ErrorCodeWorkspaceDeleted       ErrorCode = "workspace_deleted"
 )
@@ -127,6 +173,8 @@ const (
 // Valid indicates whether the value is a known member of the ErrorCode enum.
 func (e ErrorCode) Valid() bool {
 	switch e {
+	case ErrorCodeAssetsNotUsable:
+		return true
 	case ErrorCodeAuthNotConfigured:
 		return true
 	case ErrorCodeFileTooLarge:
@@ -139,6 +187,8 @@ func (e ErrorCode) Valid() bool {
 		return true
 	case ErrorCodeInvalidEvent:
 		return true
+	case ErrorCodeInvalidOps:
+		return true
 	case ErrorCodeInvalidRequest:
 		return true
 	case ErrorCodeInvalidSignature:
@@ -146,6 +196,8 @@ func (e ErrorCode) Valid() bool {
 	case ErrorCodeInvalidToken:
 		return true
 	case ErrorCodeNoActiveWorkspace:
+		return true
+	case ErrorCodeNoChange:
 		return true
 	case ErrorCodeNotAMember:
 		return true
@@ -179,9 +231,53 @@ func (e ErrorCode) Valid() bool {
 		return true
 	case ErrorCodeUserDeleted:
 		return true
+	case ErrorCodeVersionConflict:
+		return true
 	case ErrorCodeWebhookNotConfigured:
 		return true
 	case ErrorCodeWorkspaceDeleted:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MediaInfoRotation.
+const (
+	MediaInfoRotationN0   MediaInfoRotation = 0
+	MediaInfoRotationN180 MediaInfoRotation = 180
+	MediaInfoRotationN270 MediaInfoRotation = 270
+	MediaInfoRotationN90  MediaInfoRotation = 90
+)
+
+// Valid indicates whether the value is a known member of the MediaInfoRotation enum.
+func (e MediaInfoRotation) Valid() bool {
+	switch e {
+	case MediaInfoRotationN0:
+		return true
+	case MediaInfoRotationN180:
+		return true
+	case MediaInfoRotationN270:
+		return true
+	case MediaInfoRotationN90:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OpIssueSeverity.
+const (
+	OpIssueSeverityError   OpIssueSeverity = "error"
+	OpIssueSeverityWarning OpIssueSeverity = "warning"
+)
+
+// Valid indicates whether the value is a known member of the OpIssueSeverity enum.
+func (e OpIssueSeverity) Valid() bool {
+	switch e {
+	case OpIssueSeverityError:
+		return true
+	case OpIssueSeverityWarning:
 		return true
 	default:
 		return false
@@ -263,6 +359,57 @@ func (e PlanStatus) Valid() bool {
 	}
 }
 
+// Defines values for ProjectFormat.
+const (
+	ProjectFormatN11  ProjectFormat = "1:1"
+	ProjectFormatN169 ProjectFormat = "16:9"
+	ProjectFormatN45  ProjectFormat = "4:5"
+	ProjectFormatN916 ProjectFormat = "9:16"
+)
+
+// Valid indicates whether the value is a known member of the ProjectFormat enum.
+func (e ProjectFormat) Valid() bool {
+	switch e {
+	case ProjectFormatN11:
+		return true
+	case ProjectFormatN169:
+		return true
+	case ProjectFormatN45:
+		return true
+	case ProjectFormatN916:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProjectStatus.
+const (
+	ProjectStatusApproved ProjectStatus = "approved"
+	ProjectStatusDraft    ProjectStatus = "draft"
+	ProjectStatusEditing  ProjectStatus = "editing"
+	ProjectStatusExported ProjectStatus = "exported"
+	ProjectStatusReview   ProjectStatus = "review"
+)
+
+// Valid indicates whether the value is a known member of the ProjectStatus enum.
+func (e ProjectStatus) Valid() bool {
+	switch e {
+	case ProjectStatusApproved:
+		return true
+	case ProjectStatusDraft:
+		return true
+	case ProjectStatusEditing:
+		return true
+	case ProjectStatusExported:
+		return true
+	case ProjectStatusReview:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Role.
 const (
 	RoleEditor Role = "editor"
@@ -278,6 +425,24 @@ func (e Role) Valid() bool {
 	case RoleOwner:
 		return true
 	case RoleViewer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TimelineIssueSeverity.
+const (
+	TimelineIssueSeverityError   TimelineIssueSeverity = "error"
+	TimelineIssueSeverityWarning TimelineIssueSeverity = "warning"
+)
+
+// Valid indicates whether the value is a known member of the TimelineIssueSeverity enum.
+func (e TimelineIssueSeverity) Valid() bool {
+	switch e {
+	case TimelineIssueSeverityError:
+		return true
+	case TimelineIssueSeverityWarning:
 		return true
 	default:
 		return false
@@ -312,32 +477,93 @@ func (e UploadStatus) Valid() bool {
 // has no active plan.
 type AiBilling string
 
+// ApplyTimelineOpsRequest defines model for ApplyTimelineOpsRequest.
+type ApplyTimelineOpsRequest struct {
+	// BaseVersion The version the ops are meant for; 0 when the project has no timeline yet.
+	BaseVersion int `json:"base_version"`
+
+	// Ops The edit ops, each an object with an `op` field (see `ops.v1.schema.json`). They are checked strictly.
+	Ops rawjson.RawMessage `json:"ops"`
+}
+
+// ApplyTimelineOpsResponse defines model for ApplyTimelineOpsResponse.
+type ApplyTimelineOpsResponse struct {
+	Created  []CreatedItem   `json:"created"`
+	Version  TimelineVersion `json:"version"`
+	Warnings []OpIssue       `json:"warnings"`
+}
+
 // Asset defines model for Asset.
 type Asset struct {
 	ContentType string    `json:"content_type"`
 	CreatedAt   time.Time `json:"created_at"`
-	Description string    `json:"description"`
 
-	// FailureReason Why the asset is `failed` (`upload_expired`, `size_mismatch`, `upload_aborted`). Null otherwise.
+	// DerivativeUrlsExpireAt When the URLs in `derivatives` stop working. Present with `derivatives`.
+	DerivativeUrlsExpireAt *time.Time `json:"derivative_urls_expire_at,omitempty"`
+
+	// Derivatives The files the ingest made, each as a short-lived presigned GET URL. Only the files that exist are present: an
+	// audio file has no picture files, and a clip without a decodable audio track has no `waveform`.
+	Derivatives *AssetDerivatives `json:"derivatives,omitempty"`
+	Description string            `json:"description"`
+
+	// FailureReason Why the asset is `failed`, as a code that is safe to show. The upload failed: `upload_expired`, `size_mismatch`,
+	// `upload_aborted`. The ingest could not process the file: `unsupported_format` (not a container we accept),
+	// `corrupt_media` (damaged or cut off), `no_video_stream`, `no_audio_stream`, `undecodable_video`,
+	// `invalid_duration`, `too_long` (over 30 minutes), `unsupported_resolution`, `kind_mismatch`; or, our fault, the
+	// ingest failed on every retry: `processing_failed`, `processing_timeout` (it ran out of time) or
+	// `processing_interrupted` (the worker was stopped on the last attempt). A failed asset has no derivatives.
+	// Null otherwise.
 	FailureReason *string `json:"failure_reason"`
 
 	// Filename The file's name as the server stored it (a path and control characters removed, at most 255 bytes).
-	Filename string    `json:"filename"`
-	Id       AssetId   `json:"id"`
-	Kind     AssetKind `json:"kind"`
+	Filename string  `json:"filename"`
+	Id       AssetId `json:"id"`
+
+	// IngestProgress How far the ingest is while `status` is `processing`; 100 when `ready`, 0 before it starts.
+	IngestProgress int `json:"ingest_progress"`
+
+	// IngestStage What the ingest is doing while `status` is `processing` (`starting`, `downloading`, `probing`, `proxy`, `derivatives`, `uploading`). Null otherwise.
+	IngestStage *string   `json:"ingest_stage"`
+	Kind        AssetKind `json:"kind"`
+
+	// Media What the ingest probe found in the original. Present once the asset is `ready`.
+	Media *MediaInfo `json:"media,omitempty"`
 
 	// Sha256 The SHA-256 (lowercase hex) the client claimed when it started the upload. Null when it did not say. Not verified by the upload itself.
 	Sha256    *string `json:"sha256"`
 	SizeBytes int64   `json:"size_bytes"`
 
 	// Status `uploading` (the multipart upload is in progress), `uploaded` (the object is complete; ingest is queued),
-	// `processing`, `ready`, or `failed` (see `failure_reason`).
+	// `processing` (the ingest is running: see `ingest_progress`), `ready` (probed, with its derivatives), or `failed`
+	// (see `failure_reason`).
 	Status AssetStatus `json:"status"`
 	Tags   []string    `json:"tags"`
 
 	// Title Editable. Starts as the file name without its extension.
 	Title     string    `json:"title"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// AssetDerivatives The files the ingest made, each as a short-lived presigned GET URL. Only the files that exist are present: an
+// audio file has no picture files, and a clip without a decodable audio track has no `waveform`.
+type AssetDerivatives struct {
+	// HoverPreview `hover_preview.mp4`: about 8 s made of four 2 s segments spread over the clip (the whole clip when it is shorter), muted, 360 px on the short side, under 1 MB.
+	HoverPreview *DerivativeFile `json:"hover_preview,omitempty"`
+
+	// Poster `poster.jpg`: a representative frame.
+	Poster *DerivativeFile `json:"poster,omitempty"`
+
+	// Proxy720 `proxy_720.mp4`: H.264, 720 px on the short side (a portrait clip is 720x1280), upright with no rotation flag, SDR BT.709, a keyframe every second, the index first, AAC audio. Plays and seeks in a plain `<video>`.
+	Proxy720 *DerivativeFile `json:"proxy_720,omitempty"`
+
+	// Sprite `sprite.jpg`: a grid of 160 px wide tiles, one per `interval_sec` seconds (at most 100), for hover scrubbing. `sprite_vtt` says where each tile is.
+	Sprite *DerivativeFile `json:"sprite,omitempty"`
+
+	// SpriteVtt `sprite.vtt` as stored: a WebVTT thumbnails track whose cues name the sheet relatively (`sprite.jpg#xywh=x,y,w,h`). Do not give this URL to a player; `GET /v1/assets/{id}/sprite.vtt` returns the same track with every cue pointing at the sprite URL.
+	SpriteVtt *DerivativeFile `json:"sprite_vtt,omitempty"`
+
+	// Waveform `waveform.json`: `{version, sample_rate, duration_ms, samples_per_peak, peaks}`, up to 1000 peaks from 0 to 1.
+	Waveform *DerivativeFile `json:"waveform,omitempty"`
 }
 
 // AssetId defines model for AssetId.
@@ -347,8 +573,12 @@ type AssetId = string
 type AssetKind string
 
 // AssetStatus `uploading` (the multipart upload is in progress), `uploaded` (the object is complete; ingest is queued),
-// `processing`, `ready`, or `failed` (see `failure_reason`).
+// `processing` (the ingest is running: see `ingest_progress`), `ready` (probed, with its derivatives), or `failed`
+// (see `failure_reason`).
 type AssetStatus string
+
+// AuthorKind defines model for AuthorKind.
+type AuthorKind string
 
 // CompleteAssetRequest defines model for CompleteAssetRequest.
 type CompleteAssetRequest struct {
@@ -382,6 +612,45 @@ type CreateAssetResponse struct {
 	Parts        []PartUrl  `json:"parts"`
 	Upload       UploadInfo `json:"upload"`
 	UrlsExpireAt time.Time  `json:"urls_expire_at"`
+}
+
+// CreateProjectRequest defines model for CreateProjectRequest.
+type CreateProjectRequest struct {
+	// AssetIds The footage the editor may use, in order. Each must be a `ready` video or audio asset of this workspace.
+	AssetIds []AssetId `json:"asset_ids"`
+
+	// Brief The creator's instructions, free text.
+	Brief *string `json:"brief,omitempty"`
+
+	// Format The output format (D-25). It fixes the size of the rendered video (1080x1920, 1080x1080, 1080x1350, 1920x1080).
+	Format ProjectFormat `json:"format"`
+
+	// Title Defaults to "Untitled project".
+	Title *string `json:"title,omitempty"`
+}
+
+// CreatedItem An item an `add_*` or `set_sound` op made, with the id it got.
+type CreatedItem struct {
+	Id      string          `json:"id"`
+	Kind    CreatedItemKind `json:"kind"`
+	OpIndex int             `json:"op_index"`
+}
+
+// CreatedItemKind defines model for CreatedItem.Kind.
+type CreatedItemKind string
+
+// DerivativeFile defines model for DerivativeFile.
+type DerivativeFile struct {
+	ContentType string `json:"content_type"`
+	DurationMs  *int64 `json:"duration_ms,omitempty"`
+	Height      *int   `json:"height,omitempty"`
+	SizeBytes   int64  `json:"size_bytes"`
+
+	// Url A presigned GET URL. It supports HTTP range requests. Treat it as a secret until it expires.
+	Url string `json:"url"`
+
+	// Width Pixels, for pictures and videos.
+	Width *int `json:"width,omitempty"`
 }
 
 // Entitlements The plan of the workspace as the API shows it.
@@ -433,6 +702,22 @@ type ListAssetsResponse struct {
 	NextCursor *string `json:"next_cursor"`
 }
 
+// ListProjectsResponse defines model for ListProjectsResponse.
+type ListProjectsResponse struct {
+	Items []ProjectSummary `json:"items"`
+
+	// NextCursor Pass it as `cursor` for the next page. Null on the last page.
+	NextCursor *string `json:"next_cursor"`
+}
+
+// ListTimelineVersionsResponse defines model for ListTimelineVersionsResponse.
+type ListTimelineVersionsResponse struct {
+	Items []TimelineVersionSummary `json:"items"`
+
+	// NextBefore Pass it as `before` for the next page. Null on the last page.
+	NextBefore *int `json:"next_before"`
+}
+
 // MeResponse defines model for MeResponse.
 type MeResponse struct {
 	// Entitlements The plan of the workspace as the API shows it.
@@ -461,6 +746,64 @@ type MeWorkspace struct {
 
 	// Role The caller's role in the workspace. Clerk's `org:admin` is `owner`, `org:member` is `editor`, any other role is `viewer`.
 	Role Role `json:"role"`
+}
+
+// MediaInfo What the ingest probe found in the original. Present once the asset is `ready`.
+type MediaInfo struct {
+	// AudioCodec The codec of the audio stream that was used. A file's other audio tracks that cannot be decoded (the APAC spatial-audio track of an iPhone clip) are ignored.
+	AudioCodec *string `json:"audio_codec"`
+
+	// DurationMs 0 for an image.
+	DurationMs int64    `json:"duration_ms"`
+	Fps        *float64 `json:"fps"`
+
+	// HasAudio True when a decodable audio stream was found and is in the proxy.
+	HasAudio bool `json:"has_audio"`
+
+	// Hdr True when the original is HDR (PQ or HLG). The proxy is always SDR BT.709.
+	Hdr bool `json:"hdr"`
+
+	// Height The upright (display) height. A phone clip held upright is portrait here although it is stored sideways.
+	Height *int `json:"height"`
+
+	// Rotation Degrees clockwise the stored picture of the original must turn to be upright. The derivatives have it applied already and carry no rotation flag.
+	Rotation   MediaInfoRotation `json:"rotation"`
+	VideoCodec *string           `json:"video_codec"`
+
+	// Width The upright (display) width of the original in pixels, rotation applied. Null for audio.
+	Width *int `json:"width"`
+}
+
+// MediaInfoRotation Degrees clockwise the stored picture of the original must turn to be upright. The derivatives have it applied already and carry no rotation flag.
+type MediaInfoRotation int
+
+// OpIssue One problem with an edit batch. It names the op that caused it when that is known.
+type OpIssue struct {
+	// Code An op code (`invalid_op`, `unknown_op`, `unknown_item`, `bad_position`, `id_taken`, ...) or a timeline code (`unknown_asset`, `shot_too_short`, ...).
+	Code string `json:"code"`
+
+	// Field A JSON Pointer into the op, for a problem with the op itself.
+	Field   *string `json:"field,omitempty"`
+	Message string  `json:"message"`
+
+	// Op The name of that op.
+	Op *string `json:"op,omitempty"`
+
+	// OpIndex The index in the batch of the op that caused the issue, -1 when no op in particular did.
+	OpIndex int `json:"op_index"`
+
+	// Path A JSON Pointer into the resulting spec, for a problem the validator found.
+	Path     *string         `json:"path,omitempty"`
+	Severity OpIssueSeverity `json:"severity"`
+}
+
+// OpIssueSeverity defines model for OpIssue.Severity.
+type OpIssueSeverity string
+
+// OpsRejected The error body of a batch that was refused. `issues` says why, op by op.
+type OpsRejected struct {
+	Error  ErrorDetail `json:"error"`
+	Issues []OpIssue   `json:"issues"`
 }
 
 // PartUrl defines model for PartUrl.
@@ -506,8 +849,133 @@ type PresignPartsResponse struct {
 	UrlsExpireAt time.Time `json:"urls_expire_at"`
 }
 
+// Project defines model for Project.
+type Project struct {
+	// AssetCount The footage that is not deleted (`assets` also lists an asset deleted since, with `available` false). The list shows the same count.
+	AssetCount int `json:"asset_count"`
+
+	// Assets The footage, in the order the creator chose.
+	Assets    []ProjectAsset `json:"assets"`
+	Brief     string         `json:"brief"`
+	CreatedAt time.Time      `json:"created_at"`
+
+	// CurrentTimelineVersion Null until the first edit creates version 1.
+	CurrentTimelineVersion *int                    `json:"current_timeline_version"`
+	CurrentVersion         *TimelineVersionSummary `json:"current_version"`
+
+	// Format The output format (D-25). It fixes the size of the rendered video (1080x1920, 1080x1080, 1080x1350, 1920x1080).
+	Format    ProjectFormat `json:"format"`
+	Id        ProjectId     `json:"id"`
+	Status    ProjectStatus `json:"status"`
+	Title     string        `json:"title"`
+	UpdatedAt time.Time     `json:"updated_at"`
+}
+
+// ProjectAsset defines model for ProjectAsset.
+type ProjectAsset struct {
+	AssetId AssetId `json:"asset_id"`
+
+	// Available False when the asset was deleted or is no longer `ready`; the editor cannot use it then.
+	Available  bool      `json:"available"`
+	DurationMs *int64    `json:"duration_ms"`
+	Kind       AssetKind `json:"kind"`
+	Position   int       `json:"position"`
+
+	// Status `uploading` (the multipart upload is in progress), `uploaded` (the object is complete; ingest is queued),
+	// `processing` (the ingest is running: see `ingest_progress`), `ready` (probed, with its derivatives), or `failed`
+	// (see `failure_reason`).
+	Status AssetStatus `json:"status"`
+	Title  string      `json:"title"`
+}
+
+// ProjectFormat The output format (D-25). It fixes the size of the rendered video (1080x1920, 1080x1080, 1080x1350, 1920x1080).
+type ProjectFormat string
+
+// ProjectId defines model for ProjectId.
+type ProjectId = string
+
+// ProjectStatus defines model for ProjectStatus.
+type ProjectStatus string
+
+// ProjectSummary defines model for ProjectSummary.
+type ProjectSummary struct {
+	AssetCount int       `json:"asset_count"`
+	CreatedAt  time.Time `json:"created_at"`
+
+	// CurrentTimelineVersion Null until the first edit.
+	CurrentTimelineVersion *int `json:"current_timeline_version"`
+
+	// Format The output format (D-25). It fixes the size of the rendered video (1080x1920, 1080x1080, 1080x1350, 1920x1080).
+	Format    ProjectFormat `json:"format"`
+	Id        ProjectId     `json:"id"`
+	Status    ProjectStatus `json:"status"`
+	Title     string        `json:"title"`
+	UpdatedAt time.Time     `json:"updated_at"`
+}
+
 // Role The caller's role in the workspace. Clerk's `org:admin` is `owner`, `org:member` is `editor`, any other role is `viewer`.
 type Role string
+
+// TimelineId defines model for TimelineId.
+type TimelineId = string
+
+// TimelineIssue One finding of validating a timeline spec (docs/design/timeline-v1.md, section 3).
+type TimelineIssue struct {
+	// Code `schema`, `duplicate_id`, `gap`, `overlap`, `source_out_of_range`, `unknown_asset`, ...
+	Code    string `json:"code"`
+	Message string `json:"message"`
+
+	// Path A JSON Pointer into the spec. Empty for the whole document.
+	Path     string                `json:"path"`
+	Severity TimelineIssueSeverity `json:"severity"`
+}
+
+// TimelineIssueSeverity defines model for TimelineIssue.Severity.
+type TimelineIssueSeverity string
+
+// TimelineVersion defines model for TimelineVersion.
+type TimelineVersion struct {
+	// AuthorId The user's TypeID, or the editor run's id.
+	AuthorId   string     `json:"author_id"`
+	AuthorKind AuthorKind `json:"author_kind"`
+	CreatedAt  time.Time  `json:"created_at"`
+
+	// Diff The RFC 6902 JSON Patch from the parent's spec to this one's.
+	Diff rawjson.RawMessage `json:"diff"`
+	Id   TimelineId         `json:"id"`
+
+	// Issues What validating the spec against the project's footage finds now. Empty for a clean version.
+	Issues []TimelineIssue `json:"issues"`
+
+	// Ops The batch that made this version from its parent. Empty for version 1 when it did not come from ops.
+	Ops rawjson.RawMessage `json:"ops"`
+
+	// ParentVersion The version this one was made from. Null for version 1.
+	ParentVersion *int `json:"parent_version"`
+
+	// Spec The timeline, as defined by `packages/schemas/timeline/v1.schema.json`.
+	Spec rawjson.RawMessage `json:"spec"`
+
+	// Summary One line per change, for the version list and the run feed.
+	Summary []string `json:"summary"`
+	Version int      `json:"version"`
+}
+
+// TimelineVersionSummary defines model for TimelineVersionSummary.
+type TimelineVersionSummary struct {
+	// AuthorId The user's TypeID, or the editor run's id.
+	AuthorId   string     `json:"author_id"`
+	AuthorKind AuthorKind `json:"author_kind"`
+	CreatedAt  time.Time  `json:"created_at"`
+	Id         TimelineId `json:"id"`
+
+	// ParentVersion The version this one was made from. Null for version 1.
+	ParentVersion *int `json:"parent_version"`
+
+	// Summary One line per change, for the version list and the run feed.
+	Summary []string `json:"summary"`
+	Version int      `json:"version"`
+}
 
 // UploadId defines model for UploadId.
 type UploadId = string
@@ -579,6 +1047,9 @@ type WorkspacePlanResponse struct {
 // AssetIdPath defines model for AssetIdPath.
 type AssetIdPath = AssetId
 
+// ProjectIdPath defines model for ProjectIdPath.
+type ProjectIdPath = ProjectId
+
 // BadRequest The error body of every endpoint.
 type BadRequest = Error
 
@@ -612,6 +1083,24 @@ type ListAssetsParams struct {
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
 
+// ListProjectsParams defines parameters for ListProjects.
+type ListProjectsParams struct {
+	// Limit How many projects to return (default 50).
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor The `next_cursor` of the previous page. Opaque.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListTimelineVersionsParams defines parameters for ListTimelineVersions.
+type ListTimelineVersionsParams struct {
+	// Limit How many versions to return (default 100).
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Before Only versions below this number.
+	Before *int `form:"before,omitempty" json:"before,omitempty"`
+}
+
 // CreateAssetJSONRequestBody defines body for CreateAsset for application/json ContentType.
 type CreateAssetJSONRequestBody = CreateAssetRequest
 
@@ -620,6 +1109,12 @@ type CompleteAssetUploadJSONRequestBody = CompleteAssetRequest
 
 // PresignAssetPartsJSONRequestBody defines body for PresignAssetParts for application/json ContentType.
 type PresignAssetPartsJSONRequestBody = PresignPartsRequest
+
+// CreateProjectJSONRequestBody defines body for CreateProject for application/json ContentType.
+type CreateProjectJSONRequestBody = CreateProjectRequest
+
+// ApplyTimelineOpsJSONRequestBody defines body for ApplyTimelineOps for application/json ContentType.
+type ApplyTimelineOpsJSONRequestBody = ApplyTimelineOpsRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -641,6 +1136,9 @@ type ServerInterface interface {
 	// PresignAssetParts Presigned URLs for more parts
 	// (POST /v1/assets/{id}/parts)
 	PresignAssetParts(w http.ResponseWriter, r *http.Request, id AssetIdPath)
+	// GetAssetSpriteVtt The hover-scrub thumbnails track, with working URLs
+	// (GET /v1/assets/{id}/sprite.vtt)
+	GetAssetSpriteVtt(w http.ResponseWriter, r *http.Request, id AssetIdPath)
 	// AbortAssetUpload Abort an upload
 	// (DELETE /v1/assets/{id}/upload)
 	AbortAssetUpload(w http.ResponseWriter, r *http.Request, id AssetIdPath)
@@ -653,6 +1151,27 @@ type ServerInterface interface {
 	// GetMe The signed-in user, the active workspace and its plan
 	// (GET /v1/me)
 	GetMe(w http.ResponseWriter, r *http.Request)
+	// ListProjects List the workspace's projects, newest first
+	// (GET /v1/projects)
+	ListProjects(w http.ResponseWriter, r *http.Request, params ListProjectsParams)
+	// CreateProject Start a project
+	// (POST /v1/projects)
+	CreateProject(w http.ResponseWriter, r *http.Request)
+	// DeleteProject Delete a project
+	// (DELETE /v1/projects/{id})
+	DeleteProject(w http.ResponseWriter, r *http.Request, id ProjectIdPath)
+	// GetProject One project, with its footage and current timeline version
+	// (GET /v1/projects/{id})
+	GetProject(w http.ResponseWriter, r *http.Request, id ProjectIdPath)
+	// ListTimelineVersions The versions of a project's timeline, newest first
+	// (GET /v1/projects/{id}/timelines)
+	ListTimelineVersions(w http.ResponseWriter, r *http.Request, id ProjectIdPath, params ListTimelineVersionsParams)
+	// ApplyTimelineOps Edit the timeline with ops (a manual tweak, or the editor agent's tool)
+	// (POST /v1/projects/{id}/timelines)
+	ApplyTimelineOps(w http.ResponseWriter, r *http.Request, id ProjectIdPath)
+	// GetTimelineVersion One version of a project's timeline, with its spec and validation issues
+	// (GET /v1/projects/{id}/timelines/{version})
+	GetTimelineVersion(w http.ResponseWriter, r *http.Request, id ProjectIdPath, version int)
 	// GetWorkspacePlan The plan of the active workspace and what it includes
 	// (GET /v1/workspace/plan)
 	GetWorkspacePlan(w http.ResponseWriter, r *http.Request)
@@ -831,6 +1350,32 @@ func (siw *ServerInterfaceWrapper) PresignAssetParts(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// GetAssetSpriteVtt operation middleware
+func (siw *ServerInterfaceWrapper) GetAssetSpriteVtt(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id AssetIdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAssetSpriteVtt(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // AbortAssetUpload operation middleware
 func (siw *ServerInterfaceWrapper) AbortAssetUpload(w http.ResponseWriter, r *http.Request) {
 
@@ -902,6 +1447,234 @@ func (siw *ServerInterfaceWrapper) GetMe(w http.ResponseWriter, r *http.Request)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetMe(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListProjects operation middleware
+func (siw *ServerInterfaceWrapper) ListProjects(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListProjectsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListProjects(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateProject operation middleware
+func (siw *ServerInterfaceWrapper) CreateProject(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateProject(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteProject operation middleware
+func (siw *ServerInterfaceWrapper) DeleteProject(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id ProjectIdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteProject(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetProject operation middleware
+func (siw *ServerInterfaceWrapper) GetProject(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id ProjectIdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProject(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListTimelineVersions operation middleware
+func (siw *ServerInterfaceWrapper) ListTimelineVersions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id ProjectIdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListTimelineVersionsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "before" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "before", r.URL.Query(), &params.Before, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "before"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "before", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListTimelineVersions(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApplyTimelineOps operation middleware
+func (siw *ServerInterfaceWrapper) ApplyTimelineOps(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id ProjectIdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyTimelineOps(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetTimelineVersion operation middleware
+func (siw *ServerInterfaceWrapper) GetTimelineVersion(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id ProjectIdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "version" -------------
+	var version int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "version", r.PathValue("version"), &version, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "version", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetTimelineVersion(w, r, id, version)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1054,8 +1827,16 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/assets/{id}", wrapper.GetAsset)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/assets/{id}/upload", wrapper.AbortAssetUpload)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/assets/{id}/upload", wrapper.GetAssetUpload)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/assets/{id}/sprite.vtt", wrapper.GetAssetSpriteVtt)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/assets/{id}/parts", wrapper.PresignAssetParts)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/assets/{id}/complete", wrapper.CompleteAssetUpload)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/projects", wrapper.ListProjects)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/projects", wrapper.CreateProject)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/projects/{id}", wrapper.DeleteProject)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/projects/{id}", wrapper.GetProject)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/projects/{id}/timelines", wrapper.ListTimelineVersions)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/projects/{id}/timelines", wrapper.ApplyTimelineOps)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/projects/{id}/timelines/{version}", wrapper.GetTimelineVersion)
 
 	return m
 }
@@ -1848,6 +2629,132 @@ func (response PresignAssetParts503JSONResponse) VisitPresignAssetPartsResponse(
 	return err
 }
 
+type GetAssetSpriteVttRequestObject struct {
+	Id AssetIdPath `json:"id"`
+}
+
+type GetAssetSpriteVttResponseObject interface {
+	VisitGetAssetSpriteVttResponse(w http.ResponseWriter) error
+}
+
+type GetAssetSpriteVtt200TextvttResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response GetAssetSpriteVtt200TextvttResponse) VisitGetAssetSpriteVttResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/vtt")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type GetAssetSpriteVtt400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response GetAssetSpriteVtt400JSONResponse) VisitGetAssetSpriteVttResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAssetSpriteVtt401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetAssetSpriteVtt401JSONResponse) VisitGetAssetSpriteVttResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAssetSpriteVtt402JSONResponse struct{ PlanRequiredJSONResponse }
+
+func (response GetAssetSpriteVtt402JSONResponse) VisitGetAssetSpriteVttResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAssetSpriteVtt403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetAssetSpriteVtt403JSONResponse) VisitGetAssetSpriteVttResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAssetSpriteVtt404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetAssetSpriteVtt404JSONResponse) VisitGetAssetSpriteVttResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAssetSpriteVtt500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response GetAssetSpriteVtt500JSONResponse) VisitGetAssetSpriteVttResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAssetSpriteVtt503JSONResponse struct{ UnavailableJSONResponse }
+
+func (response GetAssetSpriteVtt503JSONResponse) VisitGetAssetSpriteVttResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type AbortAssetUploadRequestObject struct {
 	Id AssetIdPath `json:"id"`
 }
@@ -2264,6 +3171,871 @@ func (response GetMe503JSONResponse) VisitGetMeResponse(w http.ResponseWriter) e
 	return err
 }
 
+type ListProjectsRequestObject struct {
+	Params ListProjectsParams
+}
+
+type ListProjectsResponseObject interface {
+	VisitListProjectsResponse(w http.ResponseWriter) error
+}
+
+type ListProjects200JSONResponse ListProjectsResponse
+
+func (response ListProjects200JSONResponse) VisitListProjectsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListProjects400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListProjects400JSONResponse) VisitListProjectsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListProjects401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListProjects401JSONResponse) VisitListProjectsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListProjects402JSONResponse struct{ PlanRequiredJSONResponse }
+
+func (response ListProjects402JSONResponse) VisitListProjectsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListProjects403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListProjects403JSONResponse) VisitListProjectsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListProjects500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response ListProjects500JSONResponse) VisitListProjectsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListProjects503JSONResponse struct{ UnavailableJSONResponse }
+
+func (response ListProjects503JSONResponse) VisitListProjectsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateProjectRequestObject struct {
+	Body *CreateProjectJSONRequestBody
+}
+
+type CreateProjectResponseObject interface {
+	VisitCreateProjectResponse(w http.ResponseWriter) error
+}
+
+type CreateProject201JSONResponse Project
+
+func (response CreateProject201JSONResponse) VisitCreateProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateProject400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateProject400JSONResponse) VisitCreateProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateProject401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateProject401JSONResponse) VisitCreateProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateProject402JSONResponse struct{ PlanRequiredJSONResponse }
+
+func (response CreateProject402JSONResponse) VisitCreateProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateProject403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateProject403JSONResponse) VisitCreateProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateProject404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateProject404JSONResponse) VisitCreateProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateProject422JSONResponse Error
+
+func (response CreateProject422JSONResponse) VisitCreateProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateProject500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response CreateProject500JSONResponse) VisitCreateProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateProject503JSONResponse struct{ UnavailableJSONResponse }
+
+func (response CreateProject503JSONResponse) VisitCreateProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteProjectRequestObject struct {
+	Id ProjectIdPath `json:"id"`
+}
+
+type DeleteProjectResponseObject interface {
+	VisitDeleteProjectResponse(w http.ResponseWriter) error
+}
+
+type DeleteProject204Response struct {
+}
+
+func (response DeleteProject204Response) VisitDeleteProjectResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteProject400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response DeleteProject400JSONResponse) VisitDeleteProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteProject401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteProject401JSONResponse) VisitDeleteProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteProject402JSONResponse struct{ PlanRequiredJSONResponse }
+
+func (response DeleteProject402JSONResponse) VisitDeleteProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteProject403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteProject403JSONResponse) VisitDeleteProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteProject404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteProject404JSONResponse) VisitDeleteProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteProject500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response DeleteProject500JSONResponse) VisitDeleteProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteProject503JSONResponse struct{ UnavailableJSONResponse }
+
+func (response DeleteProject503JSONResponse) VisitDeleteProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetProjectRequestObject struct {
+	Id ProjectIdPath `json:"id"`
+}
+
+type GetProjectResponseObject interface {
+	VisitGetProjectResponse(w http.ResponseWriter) error
+}
+
+type GetProject200JSONResponse Project
+
+func (response GetProject200JSONResponse) VisitGetProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetProject400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response GetProject400JSONResponse) VisitGetProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetProject401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetProject401JSONResponse) VisitGetProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetProject402JSONResponse struct{ PlanRequiredJSONResponse }
+
+func (response GetProject402JSONResponse) VisitGetProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetProject403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetProject403JSONResponse) VisitGetProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetProject404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetProject404JSONResponse) VisitGetProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetProject500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response GetProject500JSONResponse) VisitGetProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetProject503JSONResponse struct{ UnavailableJSONResponse }
+
+func (response GetProject503JSONResponse) VisitGetProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTimelineVersionsRequestObject struct {
+	Id     ProjectIdPath `json:"id"`
+	Params ListTimelineVersionsParams
+}
+
+type ListTimelineVersionsResponseObject interface {
+	VisitListTimelineVersionsResponse(w http.ResponseWriter) error
+}
+
+type ListTimelineVersions200JSONResponse ListTimelineVersionsResponse
+
+func (response ListTimelineVersions200JSONResponse) VisitListTimelineVersionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTimelineVersions400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListTimelineVersions400JSONResponse) VisitListTimelineVersionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTimelineVersions401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListTimelineVersions401JSONResponse) VisitListTimelineVersionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTimelineVersions402JSONResponse struct{ PlanRequiredJSONResponse }
+
+func (response ListTimelineVersions402JSONResponse) VisitListTimelineVersionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTimelineVersions403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListTimelineVersions403JSONResponse) VisitListTimelineVersionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTimelineVersions404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListTimelineVersions404JSONResponse) VisitListTimelineVersionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTimelineVersions500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response ListTimelineVersions500JSONResponse) VisitListTimelineVersionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTimelineVersions503JSONResponse struct{ UnavailableJSONResponse }
+
+func (response ListTimelineVersions503JSONResponse) VisitListTimelineVersionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyTimelineOpsRequestObject struct {
+	Id   ProjectIdPath `json:"id"`
+	Body *ApplyTimelineOpsJSONRequestBody
+}
+
+type ApplyTimelineOpsResponseObject interface {
+	VisitApplyTimelineOpsResponse(w http.ResponseWriter) error
+}
+
+type ApplyTimelineOps201JSONResponse ApplyTimelineOpsResponse
+
+func (response ApplyTimelineOps201JSONResponse) VisitApplyTimelineOpsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyTimelineOps400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ApplyTimelineOps400JSONResponse) VisitApplyTimelineOpsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyTimelineOps401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ApplyTimelineOps401JSONResponse) VisitApplyTimelineOpsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyTimelineOps402JSONResponse struct{ PlanRequiredJSONResponse }
+
+func (response ApplyTimelineOps402JSONResponse) VisitApplyTimelineOpsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyTimelineOps403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ApplyTimelineOps403JSONResponse) VisitApplyTimelineOpsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyTimelineOps404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ApplyTimelineOps404JSONResponse) VisitApplyTimelineOpsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyTimelineOps409JSONResponse Error
+
+func (response ApplyTimelineOps409JSONResponse) VisitApplyTimelineOpsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyTimelineOps422JSONResponse OpsRejected
+
+func (response ApplyTimelineOps422JSONResponse) VisitApplyTimelineOpsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyTimelineOps500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response ApplyTimelineOps500JSONResponse) VisitApplyTimelineOpsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyTimelineOps503JSONResponse struct{ UnavailableJSONResponse }
+
+func (response ApplyTimelineOps503JSONResponse) VisitApplyTimelineOpsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTimelineVersionRequestObject struct {
+	Id      ProjectIdPath `json:"id"`
+	Version int           `json:"version"`
+}
+
+type GetTimelineVersionResponseObject interface {
+	VisitGetTimelineVersionResponse(w http.ResponseWriter) error
+}
+
+type GetTimelineVersion200JSONResponse TimelineVersion
+
+func (response GetTimelineVersion200JSONResponse) VisitGetTimelineVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTimelineVersion400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response GetTimelineVersion400JSONResponse) VisitGetTimelineVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTimelineVersion401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetTimelineVersion401JSONResponse) VisitGetTimelineVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTimelineVersion402JSONResponse struct{ PlanRequiredJSONResponse }
+
+func (response GetTimelineVersion402JSONResponse) VisitGetTimelineVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTimelineVersion403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetTimelineVersion403JSONResponse) VisitGetTimelineVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTimelineVersion404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetTimelineVersion404JSONResponse) VisitGetTimelineVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTimelineVersion500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response GetTimelineVersion500JSONResponse) VisitGetTimelineVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTimelineVersion503JSONResponse struct{ UnavailableJSONResponse }
+
+func (response GetTimelineVersion503JSONResponse) VisitGetTimelineVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetWorkspacePlanRequestObject struct {
 }
 
@@ -2361,6 +4133,9 @@ type StrictServerInterface interface {
 	// PresignAssetParts Presigned URLs for more parts
 	// (POST /v1/assets/{id}/parts)
 	PresignAssetParts(ctx context.Context, request PresignAssetPartsRequestObject) (PresignAssetPartsResponseObject, error)
+	// GetAssetSpriteVtt The hover-scrub thumbnails track, with working URLs
+	// (GET /v1/assets/{id}/sprite.vtt)
+	GetAssetSpriteVtt(ctx context.Context, request GetAssetSpriteVttRequestObject) (GetAssetSpriteVttResponseObject, error)
 	// AbortAssetUpload Abort an upload
 	// (DELETE /v1/assets/{id}/upload)
 	AbortAssetUpload(ctx context.Context, request AbortAssetUploadRequestObject) (AbortAssetUploadResponseObject, error)
@@ -2373,6 +4148,27 @@ type StrictServerInterface interface {
 	// GetMe The signed-in user, the active workspace and its plan
 	// (GET /v1/me)
 	GetMe(ctx context.Context, request GetMeRequestObject) (GetMeResponseObject, error)
+	// ListProjects List the workspace's projects, newest first
+	// (GET /v1/projects)
+	ListProjects(ctx context.Context, request ListProjectsRequestObject) (ListProjectsResponseObject, error)
+	// CreateProject Start a project
+	// (POST /v1/projects)
+	CreateProject(ctx context.Context, request CreateProjectRequestObject) (CreateProjectResponseObject, error)
+	// DeleteProject Delete a project
+	// (DELETE /v1/projects/{id})
+	DeleteProject(ctx context.Context, request DeleteProjectRequestObject) (DeleteProjectResponseObject, error)
+	// GetProject One project, with its footage and current timeline version
+	// (GET /v1/projects/{id})
+	GetProject(ctx context.Context, request GetProjectRequestObject) (GetProjectResponseObject, error)
+	// ListTimelineVersions The versions of a project's timeline, newest first
+	// (GET /v1/projects/{id}/timelines)
+	ListTimelineVersions(ctx context.Context, request ListTimelineVersionsRequestObject) (ListTimelineVersionsResponseObject, error)
+	// ApplyTimelineOps Edit the timeline with ops (a manual tweak, or the editor agent's tool)
+	// (POST /v1/projects/{id}/timelines)
+	ApplyTimelineOps(ctx context.Context, request ApplyTimelineOpsRequestObject) (ApplyTimelineOpsResponseObject, error)
+	// GetTimelineVersion One version of a project's timeline, with its spec and validation issues
+	// (GET /v1/projects/{id}/timelines/{version})
+	GetTimelineVersion(ctx context.Context, request GetTimelineVersionRequestObject) (GetTimelineVersionResponseObject, error)
 	// GetWorkspacePlan The plan of the active workspace and what it includes
 	// (GET /v1/workspace/plan)
 	GetWorkspacePlan(ctx context.Context, request GetWorkspacePlanRequestObject) (GetWorkspacePlanResponseObject, error)
@@ -2592,6 +4388,32 @@ func (sh *strictHandler) PresignAssetParts(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+// GetAssetSpriteVtt operation middleware
+func (sh *strictHandler) GetAssetSpriteVtt(w http.ResponseWriter, r *http.Request, id AssetIdPath) {
+	var request GetAssetSpriteVttRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAssetSpriteVtt(ctx, request.(GetAssetSpriteVttRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAssetSpriteVtt")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAssetSpriteVttResponseObject); ok {
+		if err := validResponse.VisitGetAssetSpriteVttResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // AbortAssetUpload operation middleware
 func (sh *strictHandler) AbortAssetUpload(w http.ResponseWriter, r *http.Request, id AssetIdPath) {
 	var request AbortAssetUploadRequestObject
@@ -2692,6 +4514,202 @@ func (sh *strictHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ListProjects operation middleware
+func (sh *strictHandler) ListProjects(w http.ResponseWriter, r *http.Request, params ListProjectsParams) {
+	var request ListProjectsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListProjects(ctx, request.(ListProjectsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListProjects")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListProjectsResponseObject); ok {
+		if err := validResponse.VisitListProjectsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateProject operation middleware
+func (sh *strictHandler) CreateProject(w http.ResponseWriter, r *http.Request) {
+	var request CreateProjectRequestObject
+
+	var body CreateProjectJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateProject(ctx, request.(CreateProjectRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateProject")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateProjectResponseObject); ok {
+		if err := validResponse.VisitCreateProjectResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteProject operation middleware
+func (sh *strictHandler) DeleteProject(w http.ResponseWriter, r *http.Request, id ProjectIdPath) {
+	var request DeleteProjectRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteProject(ctx, request.(DeleteProjectRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteProject")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteProjectResponseObject); ok {
+		if err := validResponse.VisitDeleteProjectResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetProject operation middleware
+func (sh *strictHandler) GetProject(w http.ResponseWriter, r *http.Request, id ProjectIdPath) {
+	var request GetProjectRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetProject(ctx, request.(GetProjectRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetProject")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetProjectResponseObject); ok {
+		if err := validResponse.VisitGetProjectResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListTimelineVersions operation middleware
+func (sh *strictHandler) ListTimelineVersions(w http.ResponseWriter, r *http.Request, id ProjectIdPath, params ListTimelineVersionsParams) {
+	var request ListTimelineVersionsRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListTimelineVersions(ctx, request.(ListTimelineVersionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListTimelineVersions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListTimelineVersionsResponseObject); ok {
+		if err := validResponse.VisitListTimelineVersionsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ApplyTimelineOps operation middleware
+func (sh *strictHandler) ApplyTimelineOps(w http.ResponseWriter, r *http.Request, id ProjectIdPath) {
+	var request ApplyTimelineOpsRequestObject
+
+	request.Id = id
+
+	var body ApplyTimelineOpsJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ApplyTimelineOps(ctx, request.(ApplyTimelineOpsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ApplyTimelineOps")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ApplyTimelineOpsResponseObject); ok {
+		if err := validResponse.VisitApplyTimelineOpsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetTimelineVersion operation middleware
+func (sh *strictHandler) GetTimelineVersion(w http.ResponseWriter, r *http.Request, id ProjectIdPath, version int) {
+	var request GetTimelineVersionRequestObject
+
+	request.Id = id
+	request.Version = version
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetTimelineVersion(ctx, request.(GetTimelineVersionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetTimelineVersion")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetTimelineVersionResponseObject); ok {
+		if err := validResponse.VisitGetTimelineVersionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetWorkspacePlan operation middleware
 func (sh *strictHandler) GetWorkspacePlan(w http.ResponseWriter, r *http.Request) {
 	var request GetWorkspacePlanRequestObject
@@ -2721,108 +4739,195 @@ func (sh *strictHandler) GetWorkspacePlan(w http.ResponseWriter, r *http.Request
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
+	"yKYCbMEs22cnMAZwC/zfAQA=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

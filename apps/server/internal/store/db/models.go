@@ -8,27 +8,104 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 )
 
+type AgentEvent struct {
+	RunID       uuid.UUID
+	Seq         int32
+	WorkspaceID ids.WorkspaceID
+	Type        string
+	Payload     json.RawMessage
+	CreatedAt   time.Time
+}
+
+type AgentRun struct {
+	ID                uuid.UUID
+	WorkspaceID       ids.WorkspaceID
+	Agent             string
+	Stage             string
+	ParentRunID       pgtype.UUID
+	ProjectID         ids.ProjectID
+	Status            string
+	Input             json.RawMessage
+	Output            []byte
+	RoutingProfile    string
+	Model             string
+	Effort            string
+	MaxTokens         int32
+	Escalated         bool
+	InputTokens       int64
+	CacheWriteTokens  int64
+	CacheReadTokens   int64
+	OutputTokens      int64
+	ToolCalls         int32
+	CostMicros        int64
+	ActiveMs          int64
+	BudgetMicros      int64
+	BudgetTokens      int64
+	BudgetToolCalls   int32
+	BudgetWallClockMs int64
+	BilledTo          string
+	FailureReason     *string
+	CancelRequestedAt *time.Time
+	HeartbeatAt       *time.Time
+	Epoch             int64
+	Resumes           int32
+	ResumeEnqueuedAt  *time.Time
+	LastSeq           int32
+	StartedAt         *time.Time
+	FinishedAt        *time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
 type Asset struct {
-	ID            ids.AssetID
-	WorkspaceID   ids.WorkspaceID
-	Kind          string
-	Status        string
-	Filename      string
-	ContentType   string
-	SizeBytes     int64
-	Sha256        *string
-	Title         string
-	Description   string
-	Tags          []string
-	R2Key         string
-	FailureReason *string
-	CreatedBy     ids.UserID
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	DeletedAt     *time.Time
+	ID             ids.AssetID
+	WorkspaceID    ids.WorkspaceID
+	Kind           string
+	Status         string
+	Filename       string
+	ContentType    string
+	SizeBytes      int64
+	Sha256         *string
+	Title          string
+	Description    string
+	Tags           []string
+	R2Key          string
+	FailureReason  *string
+	CreatedBy      ids.UserID
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	DeletedAt      *time.Time
+	DurationMs     *int64
+	Width          *int32
+	Height         *int32
+	Fps            *float64
+	Rotation       *int32
+	VideoCodec     *string
+	AudioCodec     *string
+	HasAudio       *bool
+	Hdr            *bool
+	Probe          []byte
+	IngestProgress int16
+	IngestStage    *string
+	IngestedAt     *time.Time
+}
+
+type AssetDerivative struct {
+	ID          uuid.UUID
+	WorkspaceID ids.WorkspaceID
+	AssetID     ids.AssetID
+	Kind        string
+	R2Key       string
+	ContentType string
+	SizeBytes   int64
+	Meta        json.RawMessage
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type CreatorProfile struct {
@@ -43,6 +120,43 @@ type CreatorProfile struct {
 	UpdatedAt       time.Time
 }
 
+type Project struct {
+	ID                     ids.ProjectID
+	WorkspaceID            ids.WorkspaceID
+	Title                  string
+	Format                 string
+	Brief                  string
+	Status                 string
+	CurrentTimelineVersion *int32
+	CreatedBy              ids.UserID
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	DeletedAt              *time.Time
+}
+
+type ProjectAsset struct {
+	WorkspaceID ids.WorkspaceID
+	ProjectID   ids.ProjectID
+	AssetID     ids.AssetID
+	Position    int32
+	CreatedAt   time.Time
+}
+
+type TimelineVersion struct {
+	ID            ids.TimelineID
+	WorkspaceID   ids.WorkspaceID
+	ProjectID     ids.ProjectID
+	Version       int32
+	ParentVersion *int32
+	Spec          json.RawMessage
+	Ops           json.RawMessage
+	Diff          json.RawMessage
+	Summary       []string
+	AuthorKind    string
+	AuthorID      string
+	CreatedAt     time.Time
+}
+
 type Upload struct {
 	ID          ids.UploadID
 	WorkspaceID ids.WorkspaceID
@@ -55,6 +169,26 @@ type Upload struct {
 	AbortedAt   *time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+}
+
+type UsageLedger struct {
+	ID                 uuid.UUID
+	WorkspaceID        ids.WorkspaceID
+	RunID              pgtype.UUID
+	Stage              string
+	Kind               string
+	Model              string
+	InputTokens        int64
+	CacheWriteTokens   int64
+	CacheWrite1hTokens int64
+	CacheReadTokens    int64
+	OutputTokens       int64
+	ListCostMicros     int64
+	PriceTableVersion  string
+	BilledTo           string
+	RequestID          string
+	Estimated          bool
+	CreatedAt          time.Time
 }
 
 type User struct {

@@ -29,6 +29,8 @@ import (
 const (
 	// QueueDefault holds short, cheap jobs such as the welcome job.
 	QueueDefault = "default"
+	// QueueMedia holds the asset ingest: minutes of CPU per job in a sandbox, so few at a time.
+	QueueMedia = "media"
 	// QueueMaintenance holds housekeeping, so a flood of other work never delays it and it never uses much.
 	QueueMaintenance = "maintenance"
 )
@@ -62,11 +64,16 @@ type Config struct {
 	Queues []Queue
 }
 
+// DefaultMediaConcurrency is how many ingests run at once on one worker unless MEDIA_CONCURRENCY says otherwise.
+const DefaultMediaConcurrency = 2
+
 // DefaultConfig is the queue layout of the worker.
 func DefaultConfig() Config {
 	return Config{Queues: []Queue{
 		{Name: QueueDefault, MaxWorkers: 10},
 		{Name: QueueMaintenance, MaxWorkers: 2},
+		{Name: QueueMedia, MaxWorkers: DefaultMediaConcurrency},
+		{Name: QueueAgents, MaxWorkers: DefaultAgentConcurrency},
 	}}
 }
 
@@ -93,9 +100,9 @@ func NewInsertClient(pool *pgxpool.Pool, logger *slog.Logger) (*river.Client[pgx
 	return river.NewClient(riverpgxv5.New(pool), &river.Config{Logger: logger})
 }
 
-// NewWorkerClient returns the worker's client: the queues of cfg, every worker of this package and the periodic
-// jobs. pool must be on the direct URL (the listener holds a connection of it). The caller starts it (Runner).
-func NewWorkerClient(pool *pgxpool.Pool, cfg Config, deps Deps) (*river.Client[pgx.Tx], error) {
+// WorkerClientConfig is the River configuration of the worker's client: the queues of cfg, every worker of this package, the
+// periodic jobs and the stop and rescue timings. It is separate from NewWorkerClient so a test can look at it.
+func WorkerClientConfig(cfg Config, deps Deps) (*river.Config, error) {
 	queues, err := cfg.riverQueues()
 	if err != nil {
 		return nil, err
@@ -104,11 +111,24 @@ func NewWorkerClient(pool *pgxpool.Pool, cfg Config, deps Deps) (*river.Client[p
 	if err != nil {
 		return nil, err
 	}
-	return river.NewClient(riverpgxv5.New(pool), &river.Config{
+	return &river.Config{
 		Logger:          deps.logger(),
 		Queues:          queues,
 		Workers:         workers,
 		PeriodicJobs:    PeriodicJobs(),
 		SoftStopTimeout: SoftStopTimeout,
-	})
+		// Longer than the longest job (the ingest, IngestTimeout), so River never hands a job that is still running to a
+		// second worker.
+		RescueStuckJobsAfter: JobRescueAfter,
+	}, nil
+}
+
+// NewWorkerClient returns the worker's client: the queues of cfg, every worker of this package and the periodic
+// jobs. pool must be on the direct URL (the listener holds a connection of it). The caller starts it (Runner).
+func NewWorkerClient(pool *pgxpool.Pool, cfg Config, deps Deps) (*river.Client[pgx.Tx], error) {
+	rc, err := WorkerClientConfig(cfg, deps)
+	if err != nil {
+		return nil, err
+	}
+	return river.NewClient(riverpgxv5.New(pool), rc)
 }

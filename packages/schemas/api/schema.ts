@@ -75,7 +75,8 @@ export interface paths {
         };
         /**
          * List the workspace's assets, newest first
-         * @description Cursor pagination. Deleted assets are not listed.
+         * @description Cursor pagination. Deleted assets are not listed. A `ready` asset carries its `media` facts and short-lived
+         *     `derivatives` URLs, as in `getAsset`.
          */
         get: operations["listAssets"];
         put?: never;
@@ -108,7 +109,10 @@ export interface paths {
         };
         /**
          * One asset
-         * @description An asset of another workspace, or one that does not exist, is `404 not_found`.
+         * @description An asset of another workspace, or one that does not exist, is `404 not_found`. While the asset is `processing`,
+         *     `ingest_progress` and `ingest_stage` say how far the ingest is. Once it is `ready`, `media` holds what the probe
+         *     found and `derivatives` holds a presigned GET URL per generated file (see `AssetDerivatives`); the URLs stop working
+         *     at `derivative_urls_expire_at`, so fetch the asset again for fresh ones.
          */
         get: operations["getAsset"];
         put?: never;
@@ -150,6 +154,35 @@ export interface paths {
          *     Aborting twice is `404 not_found`; an upload that is already completed is `409 upload_not_active`.
          */
         delete: operations["abortAssetUpload"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/assets/{id}/sprite.vtt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The asset's TypeID. */
+                id: components["parameters"]["AssetIdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The hover-scrub thumbnails track, with working URLs
+         * @description The WebVTT thumbnails track of a `ready` video, with every cue pointing at the sprite sheet through a fresh presigned
+         *     URL (`https://...?X-Amz-...#xywh=x,y,w,h`), so a player can use it as is. The file stored in object storage
+         *     (`derivatives.sprite_vtt`) names the sheet relatively and cannot work on its own, because the sheet's URL is signed and
+         *     expires; this endpoint is how to get a track that works. It needs the same authentication as the rest of the API, so
+         *     fetch it with the bearer token and hand the text to the player (for example as a Blob URL for a `<track>`). The cue URLs
+         *     stop working at the same time as `derivative_urls_expire_at`. `404 not_found` when the asset has no sprite track (not
+         *     ready yet, an audio file, an image).
+         */
+        get: operations["getAssetSpriteVtt"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -204,6 +237,130 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the workspace's projects, newest first
+         * @description Cursor pagination. Deleted projects are not listed.
+         */
+        get: operations["listProjects"];
+        put?: never;
+        /**
+         * Start a project
+         * @description Creates a project from the new-project flow (P4-04b): the output `format`, the selected footage (`asset_ids`, 1 to 50,
+         *     in the order given) and the optional `brief`. Every asset must exist in this workspace and be `ready` (probed and
+         *     ingested) and a video or an audio file. An asset id that is unknown, deleted or belongs to another workspace is
+         *     `404 not_found` (the same answer for all three, so an id from another workspace cannot be told from one that never
+         *     existed); assets that exist but are not usable (still uploading or processing, failed, or an image) make it
+         *     `422 assets_not_usable`.
+         *     The project starts with no timeline: `current_timeline_version` is `null`. A timeline needs at least one clip, so
+         *     version 1 is made by the first edit (`POST /v1/projects/{id}/timelines` with `base_version` 0, or the editor run).
+         *     Only owners and editors may create projects.
+         */
+        post: operations["createProject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The project's TypeID. */
+                id: components["parameters"]["ProjectIdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * One project, with its footage and current timeline version
+         * @description A project of another workspace, a deleted one, or one that does not exist is `404 not_found`. `assets` lists the
+         *     footage in order (an asset deleted since is still listed, with `available` false). `current_version` is the summary
+         *     of the latest timeline version, `null` before the first edit.
+         */
+        get: operations["getProject"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a project
+         * @description Soft-deletes the project. Its assets stay in the library. Only owners and editors may delete.
+         */
+        delete: operations["deleteProject"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{id}/timelines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The project's TypeID. */
+                id: components["parameters"]["ProjectIdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The versions of a project's timeline, newest first
+         * @description One entry per version, without the spec: its number, parent, author, the summary lines of what changed
+         *     (`diff.Summarize`) and when it was made. Page with `before` (the `next_before` of the previous page).
+         */
+        get: operations["listTimelineVersions"];
+        put?: never;
+        /**
+         * Edit the timeline with ops (a manual tweak, or the editor agent's tool)
+         * @description Applies a batch of edit ops (`packages/schemas/timeline/ops.v1.schema.json`, 1 to 100) to version `base_version`,
+         *     atomically, and stores the result as the next version, with its diff and summary; the author is the caller (`user`).
+         *     `base_version` is the version the client was looking at, and 0 for a project that has no timeline yet (the first
+         *     batch builds version 1 from an empty timeline of the project's format and size). If it is not the current version
+         *     the answer is `409 version_conflict` and nothing is stored: fetch the project again and decide.
+         *     The ops may only use the project's own footage that is `ready`: an op that names any other asset (another project's,
+         *     another workspace's, one that does not exist) fails with an `unknown_asset` issue. A batch the engine refuses, or that
+         *     leaves the timeline invalid, is `422 invalid_ops` with the issues (each names the op); a batch that changes nothing is
+         *     `422 no_change`. Only owners and editors may edit.
+         */
+        post: operations["applyTimelineOps"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{id}/timelines/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The project's TypeID. */
+                id: components["parameters"]["ProjectIdPath"];
+                /** @description The version number, from 1. */
+                version: number;
+            };
+            cookie?: never;
+        };
+        /**
+         * One version of a project's timeline, with its spec and validation issues
+         * @description The full spec (`packages/schemas/timeline/v1.schema.json`), the ops and the diff that made it, and the issues of
+         *     validating the spec now against the project's footage (a clip whose asset was deleted since is reported as
+         *     `unknown_asset`; the stored version itself never changes).
+         */
+        get: operations["getTimelineVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -213,7 +370,7 @@ export interface components {
          *     code as a generic failure of its HTTP status.
          * @enum {string}
          */
-        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured";
+        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured" | "assets_not_usable" | "version_conflict" | "invalid_ops" | "no_change";
         ErrorDetail: {
             code: components["schemas"]["ErrorCode"];
             /** @description For people. It may change; do not branch on it. */
@@ -317,7 +474,8 @@ export interface components {
         AssetKind: "video" | "audio" | "image";
         /**
          * @description `uploading` (the multipart upload is in progress), `uploaded` (the object is complete; ingest is queued),
-         *     `processing`, `ready`, or `failed` (see `failure_reason`).
+         *     `processing` (the ingest is running: see `ingest_progress`), `ready` (probed, with its derivatives), or `failed`
+         *     (see `failure_reason`).
          * @enum {string}
          */
         AssetStatus: "uploading" | "uploaded" | "processing" | "ready" | "failed";
@@ -336,12 +494,87 @@ export interface components {
             title: string;
             description: string;
             tags: string[];
-            /** @description Why the asset is `failed` (`upload_expired`, `size_mismatch`, `upload_aborted`). Null otherwise. */
+            /**
+             * @description Why the asset is `failed`, as a code that is safe to show. The upload failed: `upload_expired`, `size_mismatch`,
+             *     `upload_aborted`. The ingest could not process the file: `unsupported_format` (not a container we accept),
+             *     `corrupt_media` (damaged or cut off), `no_video_stream`, `no_audio_stream`, `undecodable_video`,
+             *     `invalid_duration`, `too_long` (over 30 minutes), `unsupported_resolution`, `kind_mismatch`; or, our fault, the
+             *     ingest failed on every retry: `processing_failed`, `processing_timeout` (it ran out of time) or
+             *     `processing_interrupted` (the worker was stopped on the last attempt). A failed asset has no derivatives.
+             *     Null otherwise.
+             */
             failure_reason: string | null;
+            /** @description How far the ingest is while `status` is `processing`; 100 when `ready`, 0 before it starts. */
+            ingest_progress: number;
+            /** @description What the ingest is doing while `status` is `processing` (`starting`, `downloading`, `probing`, `proxy`, `derivatives`, `uploading`). Null otherwise. */
+            ingest_stage: string | null;
+            media?: components["schemas"]["MediaInfo"];
+            derivatives?: components["schemas"]["AssetDerivatives"];
+            /**
+             * Format: date-time
+             * @description When the URLs in `derivatives` stop working. Present with `derivatives`.
+             */
+            derivative_urls_expire_at?: string;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description What the ingest probe found in the original. Present once the asset is `ready`. */
+        MediaInfo: {
+            /**
+             * Format: int64
+             * @description 0 for an image.
+             */
+            duration_ms: number;
+            /** @description The upright (display) width of the original in pixels, rotation applied. Null for audio. */
+            width: number | null;
+            /** @description The upright (display) height. A phone clip held upright is portrait here although it is stored sideways. */
+            height: number | null;
+            /** Format: double */
+            fps: number | null;
+            /**
+             * @description Degrees clockwise the stored picture of the original must turn to be upright. The derivatives have it applied already and carry no rotation flag.
+             * @enum {integer}
+             */
+            rotation: 0 | 90 | 180 | 270;
+            video_codec: string | null;
+            /** @description The codec of the audio stream that was used. A file's other audio tracks that cannot be decoded (the APAC spatial-audio track of an iPhone clip) are ignored. */
+            audio_codec: string | null;
+            /** @description True when a decodable audio stream was found and is in the proxy. */
+            has_audio: boolean;
+            /** @description True when the original is HDR (PQ or HLG). The proxy is always SDR BT.709. */
+            hdr: boolean;
+        };
+        DerivativeFile: {
+            /** @description A presigned GET URL. It supports HTTP range requests. Treat it as a secret until it expires. */
+            url: string;
+            content_type: string;
+            /** Format: int64 */
+            size_bytes: number;
+            /** @description Pixels, for pictures and videos. */
+            width?: number;
+            height?: number;
+            /** Format: int64 */
+            duration_ms?: number;
+        };
+        /**
+         * @description The files the ingest made, each as a short-lived presigned GET URL. Only the files that exist are present: an
+         *     audio file has no picture files, and a clip without a decodable audio track has no `waveform`.
+         */
+        AssetDerivatives: {
+            /** @description `proxy_720.mp4`: H.264, 720 px on the short side (a portrait clip is 720x1280), upright with no rotation flag, SDR BT.709, a keyframe every second, the index first, AAC audio. Plays and seeks in a plain `<video>`. */
+            proxy_720?: components["schemas"]["DerivativeFile"];
+            /** @description `poster.jpg`: a representative frame. */
+            poster?: components["schemas"]["DerivativeFile"];
+            /** @description `hover_preview.mp4`: about 8 s made of four 2 s segments spread over the clip (the whole clip when it is shorter), muted, 360 px on the short side, under 1 MB. */
+            hover_preview?: components["schemas"]["DerivativeFile"];
+            /** @description `sprite.jpg`: a grid of 160 px wide tiles, one per `interval_sec` seconds (at most 100), for hover scrubbing. `sprite_vtt` says where each tile is. */
+            sprite?: components["schemas"]["DerivativeFile"];
+            /** @description `sprite.vtt` as stored: a WebVTT thumbnails track whose cues name the sheet relatively (`sprite.jpg#xywh=x,y,w,h`). Do not give this URL to a player; `GET /v1/assets/{id}/sprite.vtt` returns the same track with every cue pointing at the sprite URL. */
+            sprite_vtt?: components["schemas"]["DerivativeFile"];
+            /** @description `waveform.json`: `{version, sample_rate, duration_ms, samples_per_peak, peaks}`, up to 1000 peaks from 0 to 1. */
+            waveform?: components["schemas"]["DerivativeFile"];
         };
         CreateAssetRequest: {
             filename: string;
@@ -426,6 +659,156 @@ export interface components {
             items: components["schemas"]["Asset"][];
             /** @description Pass it as `cursor` for the next page. Null on the last page. */
             next_cursor: string | null;
+        };
+        /**
+         * @description The output format (D-25). It fixes the size of the rendered video (1080x1920, 1080x1080, 1080x1350, 1920x1080).
+         * @enum {string}
+         */
+        ProjectFormat: "9:16" | "1:1" | "4:5" | "16:9";
+        /** @enum {string} */
+        ProjectStatus: "draft" | "editing" | "review" | "approved" | "exported";
+        /** @enum {string} */
+        AuthorKind: "user" | "agent";
+        CreateProjectRequest: {
+            /** @description Defaults to "Untitled project". */
+            title?: string;
+            format: components["schemas"]["ProjectFormat"];
+            /** @description The footage the editor may use, in order. Each must be a `ready` video or audio asset of this workspace. */
+            asset_ids: components["schemas"]["AssetId"][];
+            /** @description The creator's instructions, free text. */
+            brief?: string;
+        };
+        ProjectAsset: {
+            asset_id: components["schemas"]["AssetId"];
+            position: number;
+            title: string;
+            kind: components["schemas"]["AssetKind"];
+            status: components["schemas"]["AssetStatus"];
+            /** Format: int64 */
+            duration_ms: number | null;
+            /** @description False when the asset was deleted or is no longer `ready`; the editor cannot use it then. */
+            available: boolean;
+        };
+        TimelineVersionSummary: {
+            id: components["schemas"]["TimelineId"];
+            version: number;
+            /** @description The version this one was made from. Null for version 1. */
+            parent_version: number | null;
+            author_kind: components["schemas"]["AuthorKind"];
+            /** @description The user's TypeID, or the editor run's id. */
+            author_id: string;
+            /** @description One line per change, for the version list and the run feed. */
+            summary: string[];
+            /** Format: date-time */
+            created_at: string;
+        };
+        ProjectSummary: {
+            id: components["schemas"]["ProjectId"];
+            title: string;
+            format: components["schemas"]["ProjectFormat"];
+            status: components["schemas"]["ProjectStatus"];
+            asset_count: number;
+            /** @description Null until the first edit. */
+            current_timeline_version: number | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        Project: {
+            id: components["schemas"]["ProjectId"];
+            title: string;
+            format: components["schemas"]["ProjectFormat"];
+            brief: string;
+            status: components["schemas"]["ProjectStatus"];
+            /** @description The footage that is not deleted (`assets` also lists an asset deleted since, with `available` false). The list shows the same count. */
+            asset_count: number;
+            /** @description Null until the first edit creates version 1. */
+            current_timeline_version: number | null;
+            current_version: components["schemas"]["TimelineVersionSummary"] | null;
+            /** @description The footage, in the order the creator chose. */
+            assets: components["schemas"]["ProjectAsset"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ListProjectsResponse: {
+            items: components["schemas"]["ProjectSummary"][];
+            /** @description Pass it as `cursor` for the next page. Null on the last page. */
+            next_cursor: string | null;
+        };
+        ListTimelineVersionsResponse: {
+            items: components["schemas"]["TimelineVersionSummary"][];
+            /** @description Pass it as `before` for the next page. Null on the last page. */
+            next_before: number | null;
+        };
+        /** @description One finding of validating a timeline spec (docs/design/timeline-v1.md, section 3). */
+        TimelineIssue: {
+            /** @description `schema`, `duplicate_id`, `gap`, `overlap`, `source_out_of_range`, `unknown_asset`, ... */
+            code: string;
+            /** @description A JSON Pointer into the spec. Empty for the whole document. */
+            path: string;
+            message: string;
+            /** @enum {string} */
+            severity: "error" | "warning";
+        };
+        /** @description One problem with an edit batch. It names the op that caused it when that is known. */
+        OpIssue: {
+            /** @description The index in the batch of the op that caused the issue, -1 when no op in particular did. */
+            op_index: number;
+            /** @description The name of that op. */
+            op?: string;
+            /** @description An op code (`invalid_op`, `unknown_op`, `unknown_item`, `bad_position`, `id_taken`, ...) or a timeline code (`unknown_asset`, `shot_too_short`, ...). */
+            code: string;
+            /** @description A JSON Pointer into the op, for a problem with the op itself. */
+            field?: string;
+            /** @description A JSON Pointer into the resulting spec, for a problem the validator found. */
+            path?: string;
+            message: string;
+            /** @enum {string} */
+            severity: "error" | "warning";
+        };
+        /** @description An item an `add_*` or `set_sound` op made, with the id it got. */
+        CreatedItem: {
+            op_index: number;
+            /** @enum {string} */
+            kind: "clip" | "text" | "sound";
+            id: string;
+        };
+        TimelineVersion: components["schemas"]["TimelineVersionSummary"] & {
+            /** @description The timeline, as defined by `packages/schemas/timeline/v1.schema.json`. */
+            spec: {
+                [key: string]: unknown;
+            };
+            /** @description The batch that made this version from its parent. Empty for version 1 when it did not come from ops. */
+            ops: {
+                [key: string]: unknown;
+            }[];
+            /** @description The RFC 6902 JSON Patch from the parent's spec to this one's. */
+            diff: {
+                [key: string]: unknown;
+            }[];
+            /** @description What validating the spec against the project's footage finds now. Empty for a clean version. */
+            issues: components["schemas"]["TimelineIssue"][];
+        };
+        ApplyTimelineOpsRequest: {
+            /** @description The version the ops are meant for; 0 when the project has no timeline yet. */
+            base_version: number;
+            /** @description The edit ops, each an object with an `op` field (see `ops.v1.schema.json`). They are checked strictly. */
+            ops: {
+                [key: string]: unknown;
+            }[];
+        };
+        ApplyTimelineOpsResponse: {
+            version: components["schemas"]["TimelineVersion"];
+            created: components["schemas"]["CreatedItem"][];
+            warnings: components["schemas"]["OpIssue"][];
+        };
+        /** @description The error body of a batch that was refused. `issues` says why, op by op. */
+        OpsRejected: {
+            error: components["schemas"]["ErrorDetail"];
+            issues: components["schemas"]["OpIssue"][];
         };
         WebhookResult: {
             /**
@@ -527,6 +910,8 @@ export interface components {
     parameters: {
         /** @description The asset's TypeID. */
         AssetIdPath: components["schemas"]["AssetId"];
+        /** @description The project's TypeID. */
+        ProjectIdPath: components["schemas"]["ProjectId"];
     };
     requestBodies: never;
     headers: never;
@@ -812,6 +1197,36 @@ export interface operations {
             503: components["responses"]["Unavailable"];
         };
     };
+    getAssetSpriteVtt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The asset's TypeID. */
+                id: components["parameters"]["AssetIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The track, `text/vtt`. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/vtt": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
     presignAssetParts: {
         parameters: {
             query?: never;
@@ -891,6 +1306,254 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    listProjects: {
+        parameters: {
+            query?: {
+                /** @description How many projects to return (default 50). */
+                limit?: number;
+                /** @description The `next_cursor` of the previous page. Opaque. */
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of projects. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListProjectsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    createProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateProjectRequest"];
+            };
+        };
+        responses: {
+            /** @description The project. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Project"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `assets_not_usable`: an asset is not `ready`, or is an image. The message names the assets. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The project's TypeID. */
+                id: components["parameters"]["ProjectIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The project. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Project"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    deleteProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The project's TypeID. */
+                id: components["parameters"]["ProjectIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    listTimelineVersions: {
+        parameters: {
+            query?: {
+                /** @description How many versions to return (default 100). */
+                limit?: number;
+                /** @description Only versions below this number. */
+                before?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The project's TypeID. */
+                id: components["parameters"]["ProjectIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of versions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListTimelineVersionsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    applyTimelineOps: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The project's TypeID. */
+                id: components["parameters"]["ProjectIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplyTimelineOpsRequest"];
+            };
+        };
+        responses: {
+            /** @description The new version. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplyTimelineOpsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `version_conflict`: `base_version` is not the project's current version. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `invalid_ops` or `no_change`, with the issues the engine found. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsRejected"];
+                };
+            };
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getTimelineVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The project's TypeID. */
+                id: components["parameters"]["ProjectIdPath"];
+                /** @description The version number, from 1. */
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The version. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimelineVersion"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["Unavailable"];
         };

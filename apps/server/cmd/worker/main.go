@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/app"
 	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
@@ -42,7 +43,10 @@ func run(args []string) error {
 		Addr:    func(config.Config) string { return *healthAddr },
 		Background: func(ctx context.Context, cfg config.Config, logger *slog.Logger, st *store.Store, health *httpapi.Health) (func(context.Context) error, error) {
 			// Object storage for the jobs that remove objects. Without the R2_* settings those jobs fail and are retried.
-			var objects jobs.ObjectStore
+			var (
+				objects  jobs.ObjectStore
+				ingester jobs.AssetIngester // nil without storage: asset_ingest jobs then wait (snoozed)
+			)
 			if cfg.ObjectStorageConfigured() {
 				client, err := storage.New(cfg.Storage())
 				if err != nil {
@@ -50,13 +54,29 @@ func run(args []string) error {
 				}
 				objects = client
 				health.AddCheck(httpapi.Check{Name: "object-storage", Fn: client.Ready})
+				pipeline, err := newIngestPipeline(cfg, st, client, logger)
+				if err != nil {
+					return nil, err
+				}
+				ingester = pipeline
+				logger.Info("media pipeline ready", "sandbox", cfg.MediaSandboxProvider, "image", cfg.MediaToolsImage, "temp_dir", cfg.MediaTempDir, "concurrency", cfg.MediaConcurrency)
+				warnIfImageMissing(ctx, cfg, logger)
 			} else {
-				logger.Warn("R2_* is not set: the jobs that delete objects or clean up uploads wait (snoozed, no attempt used) until a worker has it")
+				logger.Warn("R2_* is not set: the jobs that delete objects, clean up uploads or ingest assets wait (snoozed, no attempt used) until a worker has it")
+			}
+			queues := jobs.DefaultConfig()
+			for i := range queues.Queues {
+				if queues.Queues[i].Name == jobs.QueueMedia {
+					queues.Queues[i].MaxWorkers = cfg.MediaConcurrency
+				}
 			}
 			w, err := jobs.StartWorker(ctx, jobs.WorkerOptions{
+				Config:     queues,
 				DirectURL:  cfg.DatabaseDirectURL,
 				Store:      st,
 				Objects:    objects,
+				Ingest:     ingester,
+				Register:   runtime.Register(newAgentRunner(st, logger)),
 				Logger:     logger,
 				UIAddr:     *riverUIAddr,
 				UIPassword: cfg.RiverUIPassword,

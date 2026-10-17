@@ -18,10 +18,10 @@ function renderAt(path: string) {
   return router;
 }
 
-test("/library shows the sample library with a notice, and Library sits above Reports in the nav", async () => {
+test("/library shows the sample library with a notice while the workspace has no clips, and Library sits above Reports in the nav", async () => {
   renderAt("/library");
   expect(await screen.findByRole("heading", { name: "Library" })).toBeTruthy();
-  expect(screen.getByRole("note").textContent).toBe("Sample clips until upload lands (P1-01/P1-02)");
+  expect((await screen.findByRole("note")).textContent).toBe("Sample clips until you upload your own");
   expect(await screen.findByText("Back double biceps pose")).toBeTruthy();
   const nav = within(document.querySelector('[data-slot="sidebar"]') as HTMLElement);
   const links = nav.getAllByRole("link").map((link) => link.textContent);
