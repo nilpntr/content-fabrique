@@ -57,6 +57,18 @@ type Summary struct {
 	Gain          float64 `json:"exposure_gain"`
 	// Sharpness is the clip's mean edge energy.
 	Sharpness float64 `json:"sharpness"`
+	// Percentiles is the clip's percentile exposure (Exposure). It is not stored: the stored series holds what it is computed
+	// from, so the analysis fills it in when it has just run and a reader of the stored summary computes it from the series
+	// (Summary.WithSeries). Line falls back to the stored key brightness while it is nil.
+	Percentiles *Exposure `json:"-"`
+}
+
+// WithSeries returns the summary with its percentile exposure computed from the clip's series.
+func (s Summary) WithSeries(series Series) Summary {
+	if e, ok := series.WholeExposure(); ok {
+		s.Percentiles = &e
+	}
+	return s
 }
 
 // Analysis is everything the analysis of one clip produces.
@@ -333,6 +345,9 @@ func summarise(s Series, a Analysis, sets int, periods []float64) Summary {
 	meanY := KeyLuma(NormLuma(mean(s.Luma)), NormLuma(mean(s.High)))
 	h := NewExposureHint(meanY)
 	sum.MeanY, sum.Level, sum.Gain = h.MeanY, h.Level, h.Gain
+	if e, ok := s.WholeExposure(); ok {
+		sum.Percentiles = &e
+	}
 	for _, m := range a.Moments {
 		switch m.Kind {
 		case KindRep:
@@ -391,13 +406,27 @@ func (s Summary) Line() string {
 	if s.Shots > 1 {
 		parts = append(parts, fmt.Sprintf("%d shots", s.Shots))
 	}
-	switch s.Level {
-	case "dark":
-		parts = append(parts, fmt.Sprintf("dark (brightness %.0f%%, a gain of x%.1f would be needed)", s.MeanY*100, s.Gain))
-	case "bright":
-		parts = append(parts, fmt.Sprintf("bright (brightness %.0f%%)", s.MeanY*100))
+	if note := s.exposureNote(); note != "" {
+		parts = append(parts, note)
 	}
 	return strings.Join(parts, "; ")
+}
+
+// exposureNote is the exposure part of the line. It is judged by the 90th percentile of the picture, the lit part, and not by the
+// mean: low-key footage (a lit subject against a dark wall) has a low mean and is correctly exposed, so the note never suggests
+// a gain. A summary without percentiles (read from the store and not given its series) can only say what the stored key
+// brightness says, and says that it is not proof of a problem.
+func (s Summary) exposureNote() string {
+	if s.Percentiles != nil {
+		return s.Percentiles.Note()
+	}
+	switch s.Level {
+	case "dark":
+		return fmt.Sprintf("dark overall (key brightness %.0f%%; may be low-key footage, which is fine)", s.MeanY*100)
+	case "bright":
+		return fmt.Sprintf("bright (key brightness %.0f%%)", s.MeanY*100)
+	}
+	return ""
 }
 
 func plural(n int, one, many string) string {

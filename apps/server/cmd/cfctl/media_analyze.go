@@ -90,8 +90,12 @@ func cmdMediaAnalyze(args []string, stdout, stderr io.Writer, deps mediaDeps) in
 	}
 	_, _ = fmt.Fprintf(stdout, "%s: %d shot(s) in %s\n%s\n", filepath.Base(files[0]), len(an.Shots), time.Since(start).Round(time.Millisecond), an.Summary.Line())
 	for _, sh := range an.Shots {
-		_, _ = fmt.Fprintf(stdout, "shot %d  %.1f-%.1f s  brightness %.0f%% (%s, gain x%.2f)  sharpness %.2f (%.0f%% of the clip's best)  motion %.2f\n",
-			sh.Idx+1, float64(sh.StartMs)/1000, float64(sh.EndMs)/1000, sh.Exposure.MeanY*100, sh.Exposure.Level, sh.Exposure.Gain, sh.Sharpness, sh.SharpnessRel*100, sh.Motion)
+		expo := ""
+		if e, ok := an.Series.ExposureBetween(sh.StartMs, sh.EndMs); ok {
+			expo = fmt.Sprintf("  p90 luma %.2f, mean luma %.2f (%s)", e.P90, e.Mean, e.Level())
+		}
+		_, _ = fmt.Fprintf(stdout, "shot %d  %.1f-%.1f s  key brightness %.0f%% (%s)%s  sharpness %.2f (%.0f%% of the clip's best)  motion %.2f\n",
+			sh.Idx+1, float64(sh.StartMs)/1000, float64(sh.EndMs)/1000, sh.Exposure.MeanY*100, sh.Exposure.Level, expo, sh.Sharpness, sh.SharpnessRel*100, sh.Motion)
 	}
 	for _, m := range an.Moments {
 		_, _ = fmt.Fprintf(stdout, "%-5s %7.1f-%7.1f s  score %.2f  %s\n", m.Kind, float64(m.StartMs)/1000, float64(m.EndMs)/1000, m.Score, m.Description)

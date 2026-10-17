@@ -458,7 +458,12 @@ func TestOtherModelErrorsFailTheRun(t *testing.T) {
 	}
 	t.Run("max_tokens and refusal", func(t *testing.T) {
 		for stop, reason := range map[string]string{"max_tokens": FailMaxTokens, "refusal": FailRefusal} {
-			e := newEnv(t, newScripted(say(stop, llm.TextBlock("..."))))
+			// A cut-off answer is recovered from twice; the third fails the run.
+			steps := []scriptStep{say(stop, llm.TextBlock("..."))}
+			if stop == "max_tokens" {
+				steps = append(steps, steps[0], steps[0])
+			}
+			e := newEnv(t, newScripted(steps...))
 			run := e.create("echo", "hello", Budgets{})
 			e.execute(run)
 			if r := e.get(run); r.Status != store.AgentFailed || *r.FailureReason != reason {

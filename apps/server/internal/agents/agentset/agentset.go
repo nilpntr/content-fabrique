@@ -120,6 +120,7 @@ func Open(o Options) (*Runtime, error) {
 	case o.Objects != nil && o.Frames != nil && o.TempDir != "":
 		frames = &editor.FrameService{Store: o.Store, Objects: o.Objects, Runner: o.Frames, TempDir: o.TempDir, Logger: o.Logger}
 		deps.Frames = frames
+		deps.Rendered = &editor.RenderMeasurer{Store: o.Store, Objects: o.Objects, Runner: o.Frames, TempDir: o.TempDir, Logger: o.Logger}
 		images = editor.ImageResolver{Objects: o.Objects}
 	case o.RequireStorage && !o.DefinitionOnly:
 		return nil, ErrNoStorage

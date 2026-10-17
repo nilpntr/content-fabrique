@@ -14,7 +14,32 @@ import (
 // saveAnalysis stores an analysis for the asset: nReps reps of 3 s from 6 s on (scores rising by a tenth), a hold, dead time.
 func (e *env) saveAnalysis(ws store.Workspace, asset ids.AssetID, nReps int) {
 	e.t.Helper()
+	e.saveAnalysisSeries(ws, asset, nReps, nil)
+}
+
+// flatSeries is the stored series of a clip whose brightness never changes: the mean luma and the 90th percentile luma (8-bit, limited
+// range) of every sample of 60 s.
+func flatSeries(t *testing.T, luma, high float64) *analysis.Series {
+	t.Helper()
+	n := 600
+	s := analysis.Series{StepMs: 100, Motion: make([]float64, n), Luma: make([]float64, n), Contrast: make([]float64, n), High: make([]float64, n), Sharp: make([]float64, n), Scene: make([]float64, n)}
+	for i := range n {
+		s.Luma[i], s.High[i] = luma, high
+	}
+	return &s
+}
+
+// saveAnalysisSeries stores the analysis of the standard test clip, with its series when one is given.
+func (e *env) saveAnalysisSeries(ws store.Workspace, asset ids.AssetID, nReps int, series *analysis.Series) {
+	e.t.Helper()
 	res := store.AnalysisResult{Version: analysis.Version, StepMs: 100, DurationMs: 60000, Series: store.PackedSeries{}}
+	if series != nil {
+		packed, err := analysis.Pack(*series)
+		if err != nil {
+			e.t.Fatal(err)
+		}
+		res.Series = packed
+	}
 	sum := analysis.Summary{Version: analysis.Version, DurMs: 60000, Shots: 1, Sets: 1, Reps: nReps, CleanReps: nReps, PeriodMs: 3000, DeadMs: 12000, Level: "dark", MeanY: 0.1, Gain: 2.5}
 	for i := 0; i < nReps; i++ {
 		m := store.NewMoment{
@@ -173,10 +198,14 @@ func TestFootageListsCarryTheAnalysisLine(t *testing.T) {
 	ctx, _ := contextText(t, e, prj)
 	list := textOf(e.ok(e.runCtx(e.wsA, prj, ""), ToolListFootage, `{}`))
 	for name, text := range map[string]string{"run context": ctx, "list_footage": list} {
-		for _, want := range []string{"analysis: 1 set, 8 reps", "12 s dead time", "dark (brightness 10%", "not ready yet"} {
+		// No series is stored for the clip, so the line says only what the stored key brightness says, and not that it is a problem.
+		for _, want := range []string{"analysis: 1 set, 8 reps", "12 s dead time", "dark overall (key brightness 10%; may be low-key footage, which is fine)", "not ready yet"} {
 			if !strings.Contains(text, want) {
 				t.Errorf("%s lacks %q:\n%s", name, want, text)
 			}
+		}
+		if strings.Contains(text, "gain") {
+			t.Errorf("%s suggests a gain:\n%s", name, text)
 		}
 	}
 	// the analysis line sits under its own clip
@@ -200,5 +229,37 @@ func TestContextWithAnalysisLinesStillFits(t *testing.T) {
 	_, size := contextText(t, e, prj)
 	if size > maxContextBytes {
 		t.Fatalf("the context is %d bytes, over the budget of %d", size, maxContextBytes)
+	}
+}
+
+// The exposure note is judged by the percentiles of the stored series, never by the mean: a low-key clip (a lit lifter against a dark
+// wall) is not a clip to brighten, and no line suggests a gain.
+func TestFootageExposureNoteUsesPercentiles(t *testing.T) {
+	e := newEnv(t)
+	lowKey := e.asset(e.wsA, clip{title: "Low key"})
+	black := e.asset(e.wsA, clip{title: "Black"})
+	lit := e.asset(e.wsA, clip{title: "Lit"})
+	prj := e.project(e.wsA, "9:16", "", lowKey, black, lit)
+	// 8-bit limited range: mean 24 and p90 70 is 0.04 and 0.25; mean 17 and p90 20 is 0 and 0.02; mean 120 and p90 180 is 0.47 and 0.75.
+	e.saveAnalysisSeries(e.wsA, lowKey, 8, flatSeries(t, 24, 70))
+	e.saveAnalysisSeries(e.wsA, black, 8, flatSeries(t, 17, 20))
+	e.saveAnalysisSeries(e.wsA, lit, 8, flatSeries(t, 120, 180))
+
+	list := textOf(e.ok(e.runCtx(e.wsA, prj, ""), ToolListFootage, `{}`))
+	for _, want := range []string{"low-key (p90 luma 0.25)", "underexposed (p90 luma 0.02)"} {
+		if !strings.Contains(list, want) {
+			t.Errorf("list_footage lacks %q:\n%s", want, list)
+		}
+	}
+	// The well-lit clip gets no exposure note at all.
+	litLine := list[strings.Index(list, lit.String()):]
+	if i := strings.Index(litLine, "\n  title"); i > 0 {
+		litLine = litLine[:i]
+	}
+	if strings.Contains(litLine, "p90") || strings.Contains(litLine, "low-key") {
+		t.Errorf("a well-lit clip has an exposure note: %s", litLine)
+	}
+	if strings.Contains(list, "gain") || strings.Contains(list, "would be needed") {
+		t.Errorf("a line suggests a gain:\n%s", list)
 	}
 }

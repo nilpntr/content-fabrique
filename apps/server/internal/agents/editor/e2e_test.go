@@ -88,28 +88,81 @@ func use(id, name, input string) string {
 	return `{"type":"tool_use","id":"` + id + `","name":"` + name + `","input":` + input + `}`
 }
 
-// turn is the n-th answer. The usage follows what a real run does with the prompt cache: the first call writes the cache (system
-// prompt, tools and run context), the later ones read it and write the new turn.
+// The model's turns, scripted: understand (find_moments, view_clip), plan, edit, preview, check, one revision, preview, check, finish.
+// Each turn has its usage (input, cache write, cache read, output tokens): the first call writes the cache (system prompt, tools and run
+// context), the later ones read it and write the new turn.
+var turnUsage = [][4]int{
+	{410, 9200, 0, 61}, {380, 900, 9200, 74}, {430, 700, 10100, 210}, {450, 2100, 10800, 301}, {410, 600, 12900, 40},
+	{420, 700, 13500, 38}, {440, 800, 14200, 120}, {400, 600, 15000, 40}, {420, 700, 15600, 38}, {400, 650, 16300, 92},
+}
+
+// planInput is the creative plan of the scripted run: a workout of 14 seconds at 124 BPM.
+func planInput() string {
+	a, b, c := `"`+clipA.String()+`"`, `"`+clipB.String()+`"`, `"`+clipC.String()+`"`
+	return `{"content_type":"workout","story":"A heavy lat day in six quick cuts, ending on the wide gym.","hook":"The lat pulldown at full stretch, with the words HEAVY LAT DAY.",` +
+		`"arc":"Hook on the heaviest rep, the cable row, a second look at the pulldown, the wide gym and a last pulldown rep.","ending":"Back to the cable row, held a little longer.",` +
+		`"playbook":"workout","target_length_s":14,"tempo_bpm":124,"pace":"building","shots":[` +
+		`{"role":"hook","what":"Heaviest pulldown rep, first half","asset_id":` + a + `,"beats":3,"effect":"punch_in"},` +
+		`{"role":"build","what":"Cable row","asset_id":` + b + `,"beats":4},` +
+		`{"role":"peak","what":"The first pulldown rep, first half","asset_id":` + a + `,"beats":3},` +
+		`{"role":"detail","what":"The wide gym","asset_id":` + c + `,"beats":6,"effect":"flash"},` +
+		`{"role":"peak","what":"Last pulldown rep, second half","asset_id":` + a + `,"beats":3},` +
+		`{"role":"ending","what":"Cable row, held","asset_id":` + b + `,"beats":6}]}`
+}
+
+// editInput is the first edit: the clips, the flash into the wide shot, the beat grid, the punch-in and the title, in the order of
+// the prompt's "order of the ops".
+func editInput() string {
+	a, b, c := clipA.String(), clipB.String(), clipC.String()
+	clipOp := func(asset string, in, out int, extra string) string {
+		return fmt.Sprintf(`{"op":"add_clip","asset_id":%q,"source":{"in_ms":%d,"out_ms":%d}%s}`, asset, in, out, extra)
+	}
+	return `{"base_version":0,"ops":[` +
+		clipOp(a, 5000, 6500, `,"why":"The heaviest rep of the set, half of it, so it opens the video."`) + `,` +
+		clipOp(b, 1000, 3000, "") + `,` +
+		clipOp(a, 2000, 3500, "") + `,` +
+		clipOp(c, 3000, 6000, `,"reframe":{"mode":"blur_fill"}`) + `,` +
+		clipOp(a, 6500, 8000, "") + `,` +
+		clipOp(b, 4000, 7000, "") + `,` +
+		`{"op":"set_transition","id":"c4","type":"flash","duration_ms":150},` +
+		`{"op":"snap_cuts_to_beats","grid":{"bpm":124,"first_beat_ms":0},"options":{"write_markers":true,"max_shift_ms":80}},` +
+		`{"op":"set_motion","id":"c1","preset":"punch_in","at_ms":484},` +
+		`{"op":"add_text","text":"HEAVY LAT DAY","style":"title_bold","at_ms":0,"duration_ms":2000,"anchor":"upper_third"}]}`
+}
+
+// reviseInput is the revision pass after the first check, which said the cuts slow down toward the end: the wide shot loses half of
+// its length and the cuts snap to the beat again.
+func reviseInput() string {
+	return `{"base_version":1,"ops":[{"op":"trim_item","id":"c4","out_ms":4500},` +
+		`{"op":"snap_cuts_to_beats","grid":{"bpm":124,"first_beat_ms":0},"options":{"write_markers":true,"max_shift_ms":60}}]}`
+}
+
+// turn is the n-th answer.
 func (f *fakeAnthropic) turn(n int) string {
 	asset := func(a ids.AssetID) string { return `"` + a.String() + `"` }
+	u := turnUsage[min(n, len(turnUsage))-1]
+	m := func(block string) string { return message(block, u[0], u[1], u[2], u[3]) }
 	switch n {
 	case 1:
-		return message(use("toolu_ed_1", "find_moments", `{"asset_id":`+asset(clipA)+`,"kind":"rep","min_score":0.7}`), 410, 9200, 0, 61)
+		return m(use("toolu_ed_1", "find_moments", `{"asset_id":`+asset(clipA)+`,"kind":"rep","min_score":0.7}`))
 	case 2:
-		return message(use("toolu_ed_2", "view_clip", `{"asset_id":`+asset(clipA)+`}`), 380, 900, 9200, 74)
+		return m(use("toolu_ed_2", "view_clip", `{"asset_id":`+asset(clipA)+`}`))
 	case 3:
-		ops := `{"base_version":0,"ops":[` +
-			`{"op":"add_clip","asset_id":` + asset(clipA) + `,"source":{"in_ms":2000,"out_ms":8000},"why":"The heaviest set of the lat pulldown, so it opens the video."},` +
-			`{"op":"add_clip","asset_id":` + asset(clipB) + `,"source":{"in_ms":1000,"out_ms":6000}},` +
-			`{"op":"add_clip","asset_id":` + asset(clipC) + `,"source":{"in_ms":3000,"out_ms":9000},"reframe":{"mode":"blur_fill"}},` +
-			`{"op":"add_text","text":"HEAVY LAT DAY","style":"title_bold","at_ms":0,"duration_ms":2000,"anchor":"upper_third"}]}`
-		return message(use("toolu_ed_3", "edit_timeline", ops), 450, 2100, 10100, 301)
+		return m(use("toolu_ed_3", "plan_edit", planInput()))
 	case 4:
-		return message(use("toolu_ed_4", "get_timeline", `{}`), 420, 700, 12200, 58)
+		return m(use("toolu_ed_4", "edit_timeline", editInput()))
 	case 5:
-		return message(use("toolu_ed_5", "render_preview", `{}`), 410, 600, 13500, 40)
+		return m(use("toolu_ed_5", "render_preview", `{}`))
+	case 6:
+		return m(use("toolu_ed_6", "check_edit", `{}`))
+	case 7:
+		return m(use("toolu_ed_7", "edit_timeline", reviseInput()))
+	case 8:
+		return m(use("toolu_ed_8", "render_preview", `{}`))
+	case 9:
+		return m(use("toolu_ed_9", "check_edit", `{}`))
 	default:
-		return message(use("toolu_ed_6", "finish", `{"summary":"I cut a 17 second video from your three clips. It opens on the heaviest lat pulldown rep with the words HEAVY LAT DAY, then the cable row, then the wide gym shot. Check the wide shot: I framed it with a blurred fill so nobody is cropped out."}`), 400, 650, 14100, 92)
+		return m(use("toolu_ed_10", "finish", `{"summary":"I cut a 12 second video from your three clips. It opens on half of the heaviest lat pulldown rep with the words HEAVY LAT DAY and a punch-in on the beat, then the cable row, the pulldown again, the wide gym with a flash and a last rep. Check the wide shot: I framed it with a blurred fill so nobody is cropped out."}`))
 	}
 }
 
@@ -177,6 +230,7 @@ func newE2E(t *testing.T, vars map[string]string, api *fakeAnthropic) *e2e {
 	if err != nil {
 		t.Fatal(err)
 	}
+	e.deps.noPlanGate, e.deps.noCheckGate = false, false // the real run: a plan before the first edit, a check before finish
 	ag, err := NewAgent(e.deps)
 	if err != nil {
 		t.Fatal(err)
@@ -242,8 +296,8 @@ func TestEditorCassettesAreCurrent(t *testing.T) {
 		t.Fatalf("the recording run = %s %v %s", r.Status, r.FailureReason, r.Output)
 	}
 	fresh := cassetteNames(t, tmp)
-	if len(fresh) != 6 {
-		t.Fatalf("recorded %d cassettes, want 6: %v", len(fresh), fresh)
+	if len(fresh) != len(turnUsage) {
+		t.Fatalf("recorded %d cassettes, want %d: %v", len(fresh), len(turnUsage), fresh)
 	}
 	dest := filepath.Join(cassetteDir, editorStage)
 	if os.Getenv("CF_UPDATE_CASSETTES") == "1" {
@@ -285,8 +339,8 @@ func (x *e2e) get() store.AgentRun { return x.runRow(x.run) }
 func TestEditorRecordedRequests(t *testing.T) {
 	x := recordEditor(t, t.TempDir())
 	api := x.api
-	if len(api.requests) != 6 {
-		t.Fatalf("%d model calls, want 6", len(api.requests))
+	if len(api.requests) != len(turnUsage) {
+		t.Fatalf("%d model calls, want %d", len(api.requests), len(turnUsage))
 	}
 	for i, body := range api.bodies {
 		// An object key never goes to the model: images are bytes in the request, and the text names assets, not objects.
@@ -302,7 +356,7 @@ func TestEditorRecordedRequests(t *testing.T) {
 		}
 	}
 	first := api.requests[0]
-	if tools, _ := first["tools"].([]any); len(tools) != 9 {
+	if tools, _ := first["tools"].([]any); len(tools) != 12 {
 		t.Errorf("%d tools sent", len(tools))
 	} else {
 		var names []string
@@ -311,10 +365,10 @@ func TestEditorRecordedRequests(t *testing.T) {
 			name, _ := m["name"].(string)
 			names = append(names, name)
 		}
-		if strings.Join(names, ",") != "get_brief,list_footage,view_clip,find_moments,get_timeline,get_comments,edit_timeline,render_preview,finish" {
+		if strings.Join(names, ",") != "get_brief,list_footage,view_clip,find_moments,plan_edit,get_timeline,get_comments,edit_timeline,match_exposure,render_preview,check_edit,finish" {
 			t.Errorf("tools: %v", names)
 		}
-		editTool, _ := tools[6].(map[string]any)
+		editTool, _ := tools[7].(map[string]any)
 		viewTool, _ := tools[2].(map[string]any)
 		if editTool["strict"] == true || viewTool["strict"] != true {
 			t.Errorf("strict flags: edit_timeline %v, view_clip %v", editTool["strict"], viewTool["strict"])
@@ -361,15 +415,19 @@ func TestEditorRunInReplayMode(t *testing.T) {
 		t.Fatalf("run = %s %v %s (%d events)", r.Status, r.FailureReason, r.Output, len(events))
 	}
 	summary, version := runtime.OutputSummary(r.Output)
-	if !strings.HasPrefix(summary, "I cut a 17 second video") || version == nil || *version != 1 {
+	if !strings.HasPrefix(summary, "I cut a 12 second video") || version == nil || *version != 2 {
 		t.Fatalf("output: %s", r.Output)
 	}
-	if r.ToolCalls != 6 || r.BilledTo != "test" || r.Model != "claude-haiku-5-5" || r.ProjectID != x.prj {
+	if r.ToolCalls != int32(len(turnUsage)) || r.BilledTo != "test" || r.Model != "claude-haiku-5-5" || r.ProjectID != x.prj {
 		t.Fatalf("run: %+v", r)
 	}
 
 	// The cache numbers are in the run's totals and in every model call's event.
-	if r.InputTokens != 410+380+450+420+410+400 || r.CacheWriteTokens != 9200+900+2100+700+600+650 || r.CacheReadTokens != 9200+10100+12200+13500+14100 || r.OutputTokens != 61+74+301+58+40+92 {
+	var in, write, read, out int64
+	for _, u := range turnUsage {
+		in, write, read, out = in+int64(u[0]), write+int64(u[1]), read+int64(u[2]), out+int64(u[3])
+	}
+	if r.InputTokens != in || r.CacheWriteTokens != write || r.CacheReadTokens != read || r.OutputTokens != out {
 		t.Fatalf("token totals: in %d write %d read %d out %d", r.InputTokens, r.CacheWriteTokens, r.CacheReadTokens, r.OutputTokens)
 	}
 	var calls int
@@ -388,23 +446,23 @@ func TestEditorRunInReplayMode(t *testing.T) {
 			t.Errorf("call %d: no cache numbers in the event: %s", calls, ev.Payload)
 		}
 	}
-	if calls != 6 {
+	if calls != len(turnUsage) {
 		t.Fatalf("%d model calls", calls)
 	}
 	if r.CostMicros <= 0 || r.CostMicros >= r.BudgetMicros {
 		t.Fatalf("cost %d of budget %d", r.CostMicros, r.BudgetMicros)
 	}
 
-	// Version 1 exists, is valid, is in the project's format and uses only the project's footage.
+	// Version 2 (the revision) exists next to version 1, is valid, is in the project's format and uses only the project's footage.
 	var spec json.RawMessage
 	var count int
 	if err := x.pool.QueryRow(context.Background(), `SELECT count(*), max(spec::text)::jsonb FROM timeline_versions WHERE project_id = $1`, x.prj).Scan(&count, &spec); err != nil {
 		t.Fatal(err)
 	}
-	if count != 1 {
-		t.Fatalf("%d versions, want 1", count)
+	if count != 2 {
+		t.Fatalf("%d versions, want 2", count)
 	}
-	vd, perr := x.svc.Version(context.Background(), projects.Actor{Workspace: x.wsA.ID}, x.prj, 1)
+	vd, perr := x.svc.Version(context.Background(), projects.Actor{Workspace: x.wsA.ID}, x.prj, 2)
 	if perr != nil {
 		t.Fatal(perr)
 	}
@@ -421,8 +479,8 @@ func TestEditorRunInReplayMode(t *testing.T) {
 		t.Errorf("output: %+v", parsed.Output)
 	}
 	main, _, _ := timeline.MainTrack(parsed)
-	if len(main.Items) != 3 {
-		t.Fatalf("%d clips", len(main.Items))
+	if len(main.Items) != 6 {
+		t.Fatalf("%d clips, want 6", len(main.Items))
 	}
 	allowed := map[string]bool{clipA.String(): true, clipB.String(): true, clipC.String(): true}
 	for _, it := range main.Items {
@@ -430,7 +488,7 @@ func TestEditorRunInReplayMode(t *testing.T) {
 			t.Errorf("the timeline uses %s, which is not the project's footage", it.AssetID)
 		}
 	}
-	if d := timeline.TotalDuration(parsed); d != 17000 {
+	if d := timeline.TotalDuration(parsed); d != 10850 {
 		t.Errorf("duration %d ms", d)
 	}
 	if vd.Version.AuthorKind != "agent" || vd.Version.AuthorID != ids.Encode(ids.PrefixRun, x.run.ID) {
@@ -473,8 +531,8 @@ func TestEditorRunInReplayMode(t *testing.T) {
 	if sawFrames != 6 {
 		t.Errorf("%d frames in the events, want 6", sawFrames)
 	}
-	if sawSheet != 1 {
-		t.Errorf("%d contact sheets in the events, want 1", sawSheet)
+	if sawSheet != 2 {
+		t.Errorf("%d contact sheets in the events, want 2 (one per version)", sawSheet)
 	}
 	// And the artifact of the edit.
 	var artifacts int
@@ -492,6 +550,7 @@ func TestEditorRunInReplayMode(t *testing.T) {
 	if artifacts != 1 {
 		t.Errorf("%d timeline_version artifacts", artifacts)
 	}
+	checkPlanAndChecks(t, x)
 }
 
 func (x *e2e) events(run store.AgentRun) []store.AgentEvent {

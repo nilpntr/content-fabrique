@@ -385,6 +385,46 @@ func (q *Queries) GetLastAgentEvent(ctx context.Context, arg GetLastAgentEventPa
 	return i, err
 }
 
+const listAgentArtifactEvents = `-- name: ListAgentArtifactEvents :many
+SELECT run_id, seq, workspace_id, type, payload, created_at FROM agent_events
+WHERE workspace_id = $1 AND run_id = $2 AND type = 'artifact' AND payload ->> 'kind' = $3::text
+ORDER BY seq
+`
+
+type ListAgentArtifactEventsParams struct {
+	WorkspaceID ids.WorkspaceID
+	RunID       uuid.UUID
+	Kind        string
+}
+
+// The artifact events of a run with one kind (the payload's "kind"), oldest first: the editor reads back its plan and its checks.
+func (q *Queries) ListAgentArtifactEvents(ctx context.Context, arg ListAgentArtifactEventsParams) ([]AgentEvent, error) {
+	rows, err := q.db.Query(ctx, listAgentArtifactEvents, arg.WorkspaceID, arg.RunID, arg.Kind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AgentEvent
+	for rows.Next() {
+		var i AgentEvent
+		if err := rows.Scan(
+			&i.RunID,
+			&i.Seq,
+			&i.WorkspaceID,
+			&i.Type,
+			&i.Payload,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAgentEvents = `-- name: ListAgentEvents :many
 SELECT run_id, seq, workspace_id, type, payload, created_at FROM agent_events
 WHERE workspace_id = $1 AND run_id = $2 AND seq > $3
