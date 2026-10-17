@@ -58,22 +58,28 @@ BEGIN
     EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', app_role);
     EXECUTE format('REVOKE CONNECT ON DATABASE %I FROM PUBLIC', current_database());
     EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), app_role);
+    -- Temporary tables are DDL too, and PUBLIC may create them by default. Nobody gets TEMPORARY back until a feature
+    -- needs it, and then the migration that adds it says so.
+    EXECUTE format('REVOKE TEMPORARY ON DATABASE %I FROM PUBLIC', current_database());
 END
 $$;
 -- +goose StatementEnd
 
 -- The group role of this database.
 CREATE FUNCTION cf_app_role() RETURNS name
-    LANGUAGE sql STABLE AS $$ SELECT (current_database() || '_app')::name $$;
+    LANGUAGE sql STABLE SET search_path = pg_catalog
+    AS $$ SELECT (pg_catalog.current_database() || '_app')::pg_catalog.name $$;
 
 -- One line per table in later migrations: SELECT cf_grant_app_dml('table_name');
 -- Grants DML only (no TRUNCATE, TRIGGER or REFERENCES) plus USAGE and SELECT on the sequences the table owns.
--- Runs with the caller's rights, so only the table's owner (the migrate role) can use it.
+-- Runs with the caller's rights, so only the table's owner (the migrate role) can use it. It pins search_path, so a
+-- caller cannot make it resolve a name to an object of their own, and qualifies its call to cf_app_role.
 -- +goose StatementBegin
 CREATE FUNCTION cf_grant_app_dml(tbl regclass) RETURNS void
-    LANGUAGE plpgsql AS $$
+    LANGUAGE plpgsql SET search_path = pg_catalog, public
+    AS $$
 DECLARE
-    app_role name := cf_app_role();
+    app_role name := public.cf_app_role();
     seq regclass;
 BEGIN
     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %s TO %I', tbl, app_role);
@@ -106,7 +112,7 @@ BEGIN
         EXECUTE format('REVOKE CONNECT ON DATABASE %I FROM %I', current_database(), app_role);
         EXECUTE format('REVOKE USAGE ON SCHEMA public FROM %I', app_role);
     END IF;
-    EXECUTE format('GRANT CONNECT ON DATABASE %I TO PUBLIC', current_database());
+    EXECUTE format('GRANT CONNECT, TEMPORARY ON DATABASE %I TO PUBLIC', current_database());
 END
 $$;
 -- +goose StatementEnd

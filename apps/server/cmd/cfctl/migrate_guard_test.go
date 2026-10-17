@@ -8,76 +8,125 @@ import (
 	"testing"
 )
 
-// runMigrateWithEnvFile runs `cfctl migrate` with an env file holding body. The database URL points at a closed
-// port, so a run that gets past the checks fails with exit 1 (cannot connect) and one that is refused exits 2.
-func runMigrateWithEnvFile(t *testing.T, body string, args ...string) (code int, out, errOut string) {
+const guardPassword = "pw-for-guard-test"
+
+func guardURL(host string) string {
+	return "postgres://u:" + guardPassword + "@" + host + ":1/cf?sslmode=disable&connect_timeout=2"
+}
+
+// guardCase says where CF_ENV and DATABASE_MIGRATE_URL are set. An empty string leaves the setting out of that place.
+type guardCase struct {
+	name     string
+	args     []string
+	cfFile   string
+	cfProc   string
+	urlHost  string // the database host
+	urlInEnv bool   // true: the URL is in the process environment, false: in the env file
+	wantCode int    // 2: refused by the guard; 1: past the guard (the closed port refuses the connection)
+	wantErr  string
+}
+
+func (tc guardCase) run(t *testing.T) (code int, out, errOut string) {
 	t.Helper()
+	proc := map[string]string{}
+	var body strings.Builder
+	if tc.cfFile != "" {
+		body.WriteString("CF_ENV=" + tc.cfFile + "\n")
+	}
+	if tc.cfProc != "" {
+		proc["CF_ENV"] = tc.cfProc
+	}
+	if tc.urlInEnv {
+		proc["DATABASE_MIGRATE_URL"] = guardURL(tc.urlHost)
+	} else {
+		body.WriteString("DATABASE_MIGRATE_URL=" + guardURL(tc.urlHost) + "\n")
+	}
 	envFile := filepath.Join(t.TempDir(), "x.env")
-	if err := os.WriteFile(envFile, []byte(body), 0o600); err != nil {
+	if err := os.WriteFile(envFile, []byte(body.String()), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var o, e bytes.Buffer
-	code = cmdMigrate(append([]string{"--env-file", envFile}, args...), &o, &e, fakeProcessEnv(nil))
+	code = cmdMigrate(append([]string{"--env-file", envFile}, tc.args...), &o, &e, fakeProcessEnv(proc))
 	return code, o.String(), e.String()
 }
 
-const deadURL = "DATABASE_MIGRATE_URL=postgres://u:pw-for-guard-test@127.0.0.1:1/cf?sslmode=disable&connect_timeout=2\n"
-
-// down and redo drop tables, so staging wants --yes and production is refused unless --allow-production is given.
+// down and redo drop tables, so they fail closed: no --yes unless CF_ENV is explicitly local or ci, the host is this
+// machine, and CF_ENV and the URL come from one place. Production needs --allow-production on top.
 func TestMigrateDestructiveGuard(t *testing.T) {
-	tests := []struct {
-		name     string
-		cfEnv    string
-		args     []string
-		wantCode int
-		wantErr  string
-	}{
-		{"local down", "local", []string{"down"}, 1, ""},
-		{"local redo", "local", []string{"redo"}, 1, ""},
-		{"ci down to 0", "ci", []string{"down", "--to", "0"}, 1, ""},
-		{"staging down refused", "staging", []string{"down"}, 2, "without --yes"},
-		{"staging redo refused", "staging", []string{"redo"}, 2, "without --yes"},
-		{"staging down to 0 refused", "staging", []string{"down", "--to", "0"}, 2, "without --yes"},
-		{"staging down with --yes", "staging", []string{"down", "--yes"}, 1, ""},
-		{"staging up needs nothing", "staging", []string{"up"}, 1, ""},
-		{"staging status needs nothing", "staging", []string{"status"}, 1, ""},
-		{"production down refused", "production", []string{"down"}, 2, "--allow-production"},
-		{"production down with --yes still refused", "production", []string{"down", "--yes"}, 2, "--allow-production"},
-		{"production down with --allow-production still needs --yes", "production", []string{"down", "--allow-production"}, 2, "without --yes"},
-		{"production redo with both", "production", []string{"redo", "--yes", "--allow-production"}, 1, ""},
-		{"production up needs nothing", "production", []string{"up"}, 1, ""},
+	down, redo, downTo0 := []string{"down"}, []string{"redo"}, []string{"down", "--to", "0"}
+	tests := []guardCase{
+		// Allowed without --yes: explicit local or ci, loopback or the compose service, one source.
+		{name: "local localhost", args: down, cfFile: "local", urlHost: "localhost", wantCode: 1},
+		{name: "local 127.0.0.1 redo", args: redo, cfFile: "local", urlHost: "127.0.0.1", wantCode: 1},
+		{name: "local IPv6 loopback", args: downTo0, cfFile: "local", urlHost: "[::1]", wantCode: 1},
+		{name: "local compose service", args: down, cfFile: "local", urlHost: "postgres", wantCode: 1},
+		{name: "ci loopback", args: downTo0, cfFile: "ci", urlHost: "127.0.0.1", wantCode: 1},
+		{name: "both from the environment", args: down, cfProc: "local", urlHost: "localhost", urlInEnv: true, wantCode: 1},
+
+		// Refused without --yes.
+		{name: "CF_ENV missing", args: down, urlHost: "localhost", wantCode: 2, wantErr: "CF_ENV is not set"},
+		{name: "CF_ENV missing redo", args: redo, urlHost: "127.0.0.1", wantCode: 2, wantErr: "CF_ENV is not set"},
+		{name: "bench is not local", args: down, cfFile: "bench", urlHost: "localhost", wantCode: 2, wantErr: "CF_ENV=bench is not local or ci"},
+		{name: "staging", args: down, cfFile: "staging", urlHost: "localhost", wantCode: 2, wantErr: "CF_ENV=staging is not local or ci"},
+		{name: "staging to 0", args: downTo0, cfFile: "staging", urlHost: "db.invalid", wantCode: 2, wantErr: "CF_ENV=staging"},
+		{name: "local but a remote host", args: down, cfFile: "local", urlHost: "db.invalid", wantCode: 2, wantErr: "database host is not this machine"},
+		{name: "ci but a remote host", args: redo, cfFile: "ci", urlHost: "10.0.0.5", wantCode: 2, wantErr: "database host is not this machine"},
+		{name: "host that only starts with localhost", args: down, cfFile: "local", urlHost: "localhost.evil.invalid", wantCode: 2, wantErr: "database host is not this machine"},
+		{name: "CF_ENV from the file, URL from the environment", args: down, cfFile: "local", urlHost: "localhost", urlInEnv: true, wantCode: 2, wantErr: "CF_ENV comes from the env file but DATABASE_MIGRATE_URL from the process environment"},
+		{name: "CF_ENV from the environment, URL from the file", args: down, cfProc: "local", urlHost: "localhost", wantCode: 2, wantErr: "CF_ENV comes from the process environment but DATABASE_MIGRATE_URL from the env file"},
+		{name: "several reasons are all named", args: down, cfFile: "staging", urlHost: "db.invalid", urlInEnv: true, wantCode: 2, wantErr: "database host is not this machine"},
+
+		// --yes lifts everything except production.
+		{name: "staging with --yes", args: []string{"down", "--yes"}, cfFile: "staging", urlHost: "db.invalid", wantCode: 1},
+		{name: "missing CF_ENV with --yes", args: []string{"redo", "--yes"}, urlHost: "localhost", wantCode: 1},
+		{name: "mixed sources with --yes", args: []string{"down", "--yes"}, cfFile: "local", urlHost: "localhost", urlInEnv: true, wantCode: 1},
+
+		// Production.
+		{name: "production", args: down, cfFile: "production", urlHost: "db.invalid", wantCode: 2, wantErr: "--allow-production"},
+		{name: "production --yes only", args: []string{"down", "--yes"}, cfFile: "production", urlHost: "localhost", wantCode: 2, wantErr: "--allow-production"},
+		{name: "production --allow-production only", args: []string{"down", "--allow-production"}, cfFile: "production", urlHost: "db.invalid", wantCode: 2, wantErr: "--yes"},
+		{name: "production redo with both", args: []string{"redo", "--yes", "--allow-production"}, cfFile: "production", urlHost: "db.invalid", wantCode: 1},
+
+		// up, status and version are never guarded.
+		{name: "up on staging", args: []string{"up"}, cfFile: "staging", urlHost: "db.invalid", wantCode: 1},
+		{name: "status without CF_ENV", args: []string{"status"}, urlHost: "db.invalid", wantCode: 1},
+		{name: "up on production", args: []string{"up"}, cfFile: "production", urlHost: "db.invalid", wantCode: 1},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			code, out, errOut := runMigrateWithEnvFile(t, "CF_ENV="+tc.cfEnv+"\n"+deadURL, tc.args...)
+			// "Past the guard" cases fail at the connection: a closed local port, or a name under .invalid, which never
+			// resolves, so no test reaches the network.
+			code, out, errOut := tc.run(t)
 			if code != tc.wantCode {
 				t.Fatalf("exit %d, want %d\n%s%s", code, tc.wantCode, out, errOut)
 			}
 			if tc.wantErr != "" && !strings.Contains(errOut, tc.wantErr) {
 				t.Errorf("stderr %q does not contain %q", errOut, tc.wantErr)
 			}
-			if tc.wantCode == 2 && !strings.Contains(errOut, "CF_ENV="+tc.cfEnv) {
-				t.Errorf("a refusal must say which environment it is about: %q", errOut)
-			}
-			if strings.Contains(out+errOut, "pw-for-guard-test") {
+			if strings.Contains(out+errOut, guardPassword) {
 				t.Errorf("the password was printed:\n%s%s", out, errOut)
 			}
-			// A run that passes the guard says what it is about to touch: the environment and the env file.
-			if tc.wantCode == 1 && (!strings.Contains(out, "CF_ENV="+tc.cfEnv) || !strings.Contains(out, "x.env") || !strings.Contains(out, "127.0.0.1:1/cf")) {
+			if tc.wantCode == 1 && !strings.Contains(out, "env file") {
 				t.Errorf("header does not name the target:\n%s", out)
 			}
 		})
 	}
 }
 
-// CF_ENV comes from the process environment too, when the env file leaves it out.
-func TestMigrateGuardReadsTheProcessEnvironment(t *testing.T) {
-	envFile := filepath.Join(t.TempDir(), "x.env")
-	if err := os.WriteFile(envFile, []byte(deadURL), 0o600); err != nil {
-		t.Fatal(err)
+// A run that gets past the checks says what it is about to touch, including where CF_ENV and the URL came from.
+func TestMigrateHeaderNamesTheSources(t *testing.T) {
+	tc := guardCase{args: []string{"status"}, cfProc: "staging", urlHost: "127.0.0.1", wantCode: 1}
+	code, out, errOut := tc.run(t)
+	if code != 1 {
+		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}
-	var o, e bytes.Buffer
-	if code := cmdMigrate([]string{"--env-file", envFile, "down"}, &o, &e, fakeProcessEnv(map[string]string{"CF_ENV": "staging"})); code != 2 {
-		t.Fatalf("exit %d, want 2\n%s%s", code, o.String(), e.String())
+	for _, want := range []string{"127.0.0.1:1/cf", "CF_ENV=staging from the process environment", "DATABASE_MIGRATE_URL from the env file", "x.env"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("header %q does not contain %q", out, want)
+		}
+	}
+	tc = guardCase{args: []string{"status"}, urlHost: "127.0.0.1", wantCode: 1}
+	if _, out, _ := tc.run(t); !strings.Contains(out, "CF_ENV=(unset) from nowhere") {
+		t.Errorf("missing CF_ENV is not shown as unset: %q", out)
 	}
 }

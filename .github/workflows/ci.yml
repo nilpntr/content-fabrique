@@ -140,6 +140,8 @@ jobs:
     env:
       # The local default of .env.example. cfctl reads it from the process environment: there is no .env in CI.
       DATABASE_MIGRATE_URL: postgres://cf:cf@localhost:5432/cf?sslmode=disable
+      # down and redo run without --yes only for an explicit local or ci CF_ENV on localhost, both from one source.
+      CF_ENV: ci
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

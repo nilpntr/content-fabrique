@@ -114,8 +114,13 @@ func newFakeS3(t *testing.T, bucket string) *fakeS3 {
 // fakePG speaks just enough of the Postgres wire protocol for pgx to connect, run SELECT 1 and LISTEN.
 func fakePG(t *testing.T) string { return fakePGVersion(t, "180000") }
 
+// fakePGPrivileged is fakePG whose login is a superuser that owns schema public and its tables.
+func fakePGPrivileged(t *testing.T) string { return fakePGWith(t, "180000", true) }
+
 // fakePGVersion is fakePG reporting server_version_num = versionNum.
-func fakePGVersion(t *testing.T, versionNum string) string {
+func fakePGVersion(t *testing.T, versionNum string) string { return fakePGWith(t, versionNum, false) }
+
+func fakePGWith(t *testing.T, versionNum string, privileged bool) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -128,13 +133,13 @@ func fakePGVersion(t *testing.T, versionNum string) string {
 			if err != nil {
 				return
 			}
-			go servePG(conn, versionNum)
+			go servePG(conn, versionNum, privileged)
 		}
 	}()
 	return ln.Addr().String()
 }
 
-func servePG(conn net.Conn, versionNum string) {
+func servePG(conn net.Conn, versionNum string, privileged bool) {
 	defer func() { _ = conn.Close() }()
 	be := pgproto3.NewBackend(conn, conn)
 	if _, err := be.ReceiveStartupMessage(); err != nil {
@@ -156,7 +161,22 @@ func servePG(conn net.Conn, versionNum string) {
 		}
 		switch m := msg.(type) {
 		case *pgproto3.Query:
-			if strings.HasPrefix(strings.ToUpper(m.String), "SHOW SERVER_VERSION_NUM") {
+			if strings.Contains(m.String, "rolsuper") {
+				// dbrole.Query: six booleans, in this order: superuser, createrole, createdb, owns public, owns tables, create on public.
+				flag := []byte("f")
+				if privileged {
+					flag = []byte("t")
+				}
+				fields := make([]pgproto3.FieldDescription, 6)
+				values := make([][]byte, 6)
+				for i, n := range []string{"rolsuper", "rolcreaterole", "rolcreatedb", "owns_public", "owns_tables", "create_public"} {
+					fields[i] = pgproto3.FieldDescription{Name: []byte(n), DataTypeOID: 16, DataTypeSize: 1, TypeModifier: -1}
+					values[i] = flag
+				}
+				be.Send(&pgproto3.RowDescription{Fields: fields})
+				be.Send(&pgproto3.DataRow{Values: values})
+				be.Send(&pgproto3.CommandComplete{CommandTag: []byte("SELECT 1")})
+			} else if strings.HasPrefix(strings.ToUpper(m.String), "SHOW SERVER_VERSION_NUM") {
 				be.Send(&pgproto3.RowDescription{Fields: []pgproto3.FieldDescription{{Name: []byte("server_version_num"), DataTypeOID: 25, DataTypeSize: -1, TypeModifier: -1}}})
 				be.Send(&pgproto3.DataRow{Values: [][]byte{[]byte(versionNum)}})
 				be.Send(&pgproto3.CommandComplete{CommandTag: []byte("SHOW")})

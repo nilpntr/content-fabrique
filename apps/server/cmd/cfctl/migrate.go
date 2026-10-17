@@ -41,11 +41,14 @@ Commands:
               environment fills a name the file lacks or leaves empty (the same rule as cfctl doctor).
               Staging: --env-file .env.staging
   --to        a target version, for up and down
-  --yes       required for down and redo when CF_ENV (in the env file or the environment) is staging or production
+  --yes       down and redo drop tables and data, so they ask for this unless CF_ENV is set to local or ci, the
+              database host is localhost, 127.0.0.1, ::1 or the compose service "postgres", and CF_ENV and
+              DATABASE_MIGRATE_URL come from the same place (both the env file, or both the environment)
   --allow-production
-              required as well for down and redo when CF_ENV is production; without it they are refused
+              down and redo are refused when CF_ENV is production without this, and with it they still need --yes
 
-Every run prints the target as host:port/database with CF_ENV and the env file. Never prints the URL or the password.
+Every run prints the target as host:port/database with CF_ENV, where CF_ENV and the URL came from, and the env file.
+Never prints the URL or the password.
 `
 
 func cmdMigrate(args []string, stdout, stderr io.Writer, lookup lookupEnv) int {
@@ -145,16 +148,14 @@ func cmdMigrate(args []string, stdout, stderr io.Writer, lookup lookupEnv) int {
 	}
 	target := describeTarget(dsn)
 
-	// Rolling back drops tables and their data, so on a shared environment it must be asked for twice: by CF_ENV in
-	// the env file (a staging file says staging whatever the shell is pointed at) and by a flag.
-	cfEnv := cmp.Or(vars["CF_ENV"], config.EnvLocal)
+	// Rolling back drops tables and their data. It fails closed: without --yes it runs only when everything says
+	// "this is my laptop" (see destructiveRefusal).
+	cfEnv := vars["CF_ENV"]
+	cfSource := sourceOf("CF_ENV", file, lookup)
+	urlSource := sourceOf("DATABASE_MIGRATE_URL", file, lookup)
 	if command == "down" || command == "redo" {
-		switch {
-		case cfEnv == config.EnvProduction && !*allowProd:
-			_, _ = fmt.Fprintf(errOut, "cfctl migrate: refusing to %s with CF_ENV=production (env file %s). Pass --allow-production and --yes if you mean it\n", command, displayPath(root, path))
-			return 2
-		case (cfEnv == config.EnvStaging || cfEnv == config.EnvProduction) && !*yes:
-			_, _ = fmt.Fprintf(errOut, "cfctl migrate: refusing to %s with CF_ENV=%s (env file %s) without --yes: it drops tables and their data\n", command, cfEnv, displayPath(root, path))
+		if msg := destructiveRefusal(command, cfEnv, cfSource, urlSource, dsn, *yes, *allowProd); msg != "" {
+			_, _ = fmt.Fprintf(errOut, "cfctl migrate: %s (env file %s)\n", msg, displayPath(root, path))
 			return 2
 		}
 	}
@@ -169,7 +170,8 @@ func cmdMigrate(args []string, stdout, stderr io.Writer, lookup lookupEnv) int {
 	}
 	defer func() { _ = migrator.Close() }()
 
-	_, _ = fmt.Fprintf(out, "cfctl migrate %s on %s (CF_ENV=%s, env file %s)\n", command, target, cfEnv, displayPath(root, path))
+	_, _ = fmt.Fprintf(out, "cfctl migrate %s on %s (CF_ENV=%s from %s, DATABASE_MIGRATE_URL from %s, env file %s)\n",
+		command, target, cmp.Or(cfEnv, "(unset)"), cfSource, urlSource, displayPath(root, path))
 	if err := runMigrate(ctx, migrator, command, to, out); err != nil {
 		_, _ = fmt.Fprintf(errOut, "cfctl migrate: %s failed: %v\n", command, err)
 		return 1

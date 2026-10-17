@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/nilpntr/content-fabrique/internal/doctor"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/store/storetest"
 )
@@ -268,6 +269,53 @@ func assertGrantHelper(t *testing.T, srv *storetest.Server, database string) {
 	}
 }
 
+// assertLoginPrivileges runs the least-privilege check that cfctl doctor and the services use (dbrole) against the
+// real logins of the split. The app login passes. The migrate role (owner of the schema and tables) and the superuser
+// fail it: a DATABASE_URL that held either must be caught.
+func assertLoginPrivileges(t *testing.T, srv *storetest.Server, database string) {
+	t.Helper()
+	ctx := context.Background()
+	appDSN := srv.DSN(database, appLogin, rolePass)
+	migrateDSN := srv.DSN(database, migrateRole, rolePass)
+
+	// Doctor, as it reports on staging and production.
+	for _, env := range []string{"staging", "production"} {
+		if r := doctor.CheckAppLogin(ctx, env, appDSN); r.Status != doctor.OK || !strings.HasPrefix(r.Reason, "least privilege") {
+			t.Errorf("%s: doctor on the app login = %s (%s), want ok", env, r.Status, r.Reason)
+		}
+		r := doctor.CheckAppLogin(ctx, env, migrateDSN)
+		if r.Status != doctor.Invalid || !strings.Contains(r.Reason, "owns schema public") || !strings.Contains(r.Reason, "owns tables") || !strings.Contains(r.Reason, "can CREATE in schema public") {
+			t.Errorf("%s: doctor on the owner URL = %s (%s), want invalid naming ownership", env, r.Status, r.Reason)
+		}
+		r = doctor.CheckAppLogin(ctx, env, srv.SuperDSN(database))
+		if r.Status != doctor.Invalid || !strings.Contains(r.Reason, "is a superuser") {
+			t.Errorf("%s: doctor on a superuser URL = %s (%s), want invalid", env, r.Status, r.Reason)
+		}
+	}
+	// A login that is merely a member of the owner is as privileged as the owner.
+	srv.Exec(t, "postgres", `GRANT `+migrateRole+` TO `+otherLogin)
+	r := doctor.CheckAppLogin(ctx, "staging", srv.DSN(database, otherLogin, rolePass))
+	srv.Exec(t, "postgres", `REVOKE `+migrateRole+` FROM `+otherLogin)
+	if r.Status != doctor.Invalid || !strings.Contains(r.Reason, "member of") {
+		t.Errorf("doctor on a member of the owner = %s (%s), want invalid", r.Status, r.Reason)
+	}
+	// Locally the same finding is a note on an ok result.
+	if r := doctor.CheckAppLogin(ctx, "local", migrateDSN); r.Status != doctor.OK || !strings.HasPrefix(r.Reason, "privileged:") {
+		t.Errorf("local: doctor on the owner URL = %s (%s), want ok with a note", r.Status, r.Reason)
+	}
+
+	// The services' own check, which makes staging and production refuse to start or to be ready.
+	if err := openStore(t, appDSN).VerifyAppLogin(ctx); err != nil {
+		t.Errorf("VerifyAppLogin on the app login: %v", err)
+	}
+	if err := openStore(t, migrateDSN).VerifyAppLogin(ctx); !errors.Is(err, store.ErrPrivilegedLogin) {
+		t.Errorf("VerifyAppLogin on the owner: %v, want ErrPrivilegedLogin", err)
+	}
+	if err := openStore(t, srv.SuperDSN(database)).VerifyAppLogin(ctx); !errors.Is(err, store.ErrPrivilegedLogin) {
+		t.Errorf("VerifyAppLogin on a superuser: %v, want ErrPrivilegedLogin", err)
+	}
+}
+
 // assertAppRole connects as the app login role and checks both halves of the acceptance criterion.
 func assertAppRole(t *testing.T, srv *storetest.Server, database string) {
 	t.Helper()
@@ -292,6 +340,8 @@ func assertAppRole(t *testing.T, srv *storetest.Server, database string) {
 	// A login outside the group cannot even connect: CONNECT was revoked from PUBLIC.
 	assertConnectDenied(t, srv.DSN(database, otherLogin, rolePass), "a login without the group role connected")
 
+	assertLoginPrivileges(t, srv, database)
+
 	// 1. It can read and write rows: the whole repository suite, with every query as the app role.
 	repositorySuite(t, openStore(t, appDSN))
 
@@ -310,6 +360,7 @@ func assertAppRole(t *testing.T, srv *storetest.Server, database string) {
 	// 2. It gets a permission error on DDL. CREATE TABLE is the acceptance criterion; the rest are the ways round it.
 	denied := []string{
 		`CREATE TABLE app_made (id int)`,
+		`CREATE TEMP TABLE app_made_temp (id int)`, // TEMPORARY was revoked from PUBLIC
 		`CREATE TABLE public.app_made_too AS SELECT 1 AS id`,
 		`ALTER TABLE workspaces ADD COLUMN app_made int`,
 		`ALTER TABLE workspaces RENAME TO app_renamed`,

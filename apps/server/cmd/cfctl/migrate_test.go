@@ -50,7 +50,7 @@ func TestMigrateCLI(t *testing.T) {
 	}
 
 	// Flags after the command work too, and down --to 0 rolls everything back.
-	if code, out, errOut := migrateCLI(t, url, "down", "--to", "0"); code != 0 || !strings.Contains(out, "down") {
+	if code, out, errOut := migrateCLI(t, url, "down", "--to", "0", "--yes"); code != 0 || !strings.Contains(out, "down") {
 		t.Fatalf("down --to 0 = %d\n%s\n%s", code, out, errOut)
 	}
 	if n := countTables(t, url); n != 0 {
@@ -59,10 +59,10 @@ func TestMigrateCLI(t *testing.T) {
 	if code, _, errOut := migrateCLI(t, url, "up"); code != 0 {
 		t.Fatalf("up after down = %d %s", code, errOut)
 	}
-	if code, out, errOut := migrateCLI(t, url, "redo"); code != 0 || !strings.Contains(out, "down") || !strings.Contains(out, "up") {
+	if code, out, errOut := migrateCLI(t, url, "redo", "--yes"); code != 0 || !strings.Contains(out, "down") || !strings.Contains(out, "up") {
 		t.Fatalf("redo = %d\n%s\n%s", code, out, errOut)
 	}
-	if code, out, _ := migrateCLI(t, url, "down"); code != 0 || !strings.Contains(out, "00002_core_tables.sql") {
+	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00002_core_tables.sql") {
 		t.Fatalf("down one = %d %s", code, out)
 	}
 }
@@ -92,7 +92,7 @@ func TestMigrateCLIPrintsNoPassword(t *testing.T) {
 	const password = "very-secret-pw-7731"
 	// Port 1 refuses connections: the failure path prints the driver's error.
 	url := "postgres://someone:" + password + "@127.0.0.1:1/cf?sslmode=disable&connect_timeout=2"
-	for _, args := range [][]string{{"up"}, {"status"}, {"down", "--to", "0"}, {"version"}} {
+	for _, args := range [][]string{{"up"}, {"status"}, {"down", "--to", "0", "--yes"}, {"version"}} {
 		code, out, errOut := migrateCLI(t, url, args...)
 		if code != 1 {
 			t.Errorf("%v: exit %d, want 1 (database unreachable)", args, code)

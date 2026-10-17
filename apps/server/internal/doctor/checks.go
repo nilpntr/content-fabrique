@@ -27,6 +27,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/nilpntr/content-fabrique/internal/agents/llm/routing"
+	"github.com/nilpntr/content-fabrique/internal/dbrole"
 	"github.com/nilpntr/content-fabrique/internal/telemetry"
 )
 
@@ -43,10 +44,10 @@ func single(f func(ctx context.Context) Result) job {
 func (r *run) serviceJobs() []job {
 	var jobs []job
 	jobs = append(jobs,
-		r.postgres("postgres DATABASE_URL", "DATABASE_URL", false),
-		r.postgres("postgres DATABASE_DIRECT_URL", "DATABASE_DIRECT_URL", true),
+		r.postgres("postgres DATABASE_URL", "DATABASE_URL", false, true),
+		r.postgres("postgres DATABASE_DIRECT_URL", "DATABASE_DIRECT_URL", true, true),
 		// What `cfctl migrate` connects with. Doctor only proves it connects; the role split itself is tested in internal/store.
-		r.postgres("postgres DATABASE_MIGRATE_URL", "DATABASE_MIGRATE_URL", false),
+		r.postgres("postgres DATABASE_MIGRATE_URL", "DATABASE_MIGRATE_URL", false, false),
 		r.storage(),
 		r.cloudflare(),
 	)
@@ -112,23 +113,25 @@ func bearer(token string) map[string]string {
 const minPostgresVersionNum = 180000
 
 // postgres connects, runs SELECT 1 and, for the direct URL, LISTEN (which PgBouncer-style poolers cannot do).
-func (r *run) postgres(name, envName string, listen bool) job {
+// For the two app URLs (appLogin) it also reports whether the login is unprivileged, as a second result.
+func (r *run) postgres(name, envName string, listen, appLogin bool) job {
 	// gate: a variable that is not required here (DATABASE_MIGRATE_URL on an app server) and not set is skipped.
 	if res, ok := r.gate(name, envName); !ok {
 		return static(res)
 	}
 	dsn := r.vars[envName]
-	return single(func(ctx context.Context) Result {
+	env := r.opts.Env
+	return func(ctx context.Context) []Result {
 		cfg, err := pgx.ParseConfig(dsn)
 		if err != nil {
-			return failed(name, "bad format")
+			return []Result{failed(name, "bad format")}
 		}
 		cfg.ConnectTimeout = 5 * time.Second
 		// No prepared statements: the pooled URL may sit behind a transaction pooler.
 		cfg.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 		conn, err := pgx.ConnectConfig(ctx, cfg)
 		if err != nil {
-			return failed(name, classify(err))
+			return []Result{failed(name, classify(err))}
 		}
 		defer func() {
 			cctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -137,24 +140,70 @@ func (r *run) postgres(name, envName string, listen bool) job {
 		}()
 		var one int
 		if err := conn.QueryRow(ctx, "SELECT 1").Scan(&one); err != nil {
-			return failed(name, "SELECT 1: "+classify(err))
+			return []Result{failed(name, "SELECT 1: "+classify(err))}
 		}
 		// The schema's id defaults call uuidv7(), which Postgres 18 added (D-24).
 		var versionNum string
 		if err := conn.QueryRow(ctx, "SHOW server_version_num").Scan(&versionNum); err != nil {
-			return failed(name, "server version: "+classify(err))
+			return []Result{failed(name, "server version: "+classify(err))}
 		}
 		if n, err := strconv.Atoi(versionNum); err != nil || n < minPostgresVersionNum {
-			return failed(name, "Postgres 18 or newer required")
+			return []Result{failed(name, "Postgres 18 or newer required")}
 		}
+		main := okResult(name, "SELECT 1")
 		if listen {
 			if _, err := conn.Exec(ctx, "LISTEN cf_doctor"); err != nil {
-				return failed(name, "LISTEN: "+classify(err))
+				return []Result{failed(name, "LISTEN: "+classify(err))}
 			}
-			return okResult(name, "SELECT 1 and LISTEN")
+			main = okResult(name, "SELECT 1 and LISTEN")
 		}
-		return okResult(name, "SELECT 1")
-	})
+		if !appLogin {
+			return []Result{main}
+		}
+		return []Result{main, appLoginResult(ctx, env, name+" login", conn)}
+	}
+}
+
+// appLoginResult checks that the connected login is the app's unprivileged one (docs/06 section 3.4): no superuser,
+// CREATEROLE or CREATEDB, no ownership of schema public or of our tables, and no CREATE on public. An app login
+// that can do those makes the migrate/app role split decorative.
+//
+// Doctor's statuses are ok, missing, invalid and skipped, with nothing in between. Staging and production are where
+// the split exists, so a privileged login is invalid there. Locally the app and the migrate role are one login (the
+// compose superuser cf) on purpose, so the finding is reported as ok with the privileges named in the reason: the
+// note is visible and the local `task doctor` stays usable. CI and bench behave like local.
+func appLoginResult(ctx context.Context, env, name string, conn *pgx.Conn) Result {
+	rep, err := dbrole.Scan(conn.QueryRow(ctx, dbrole.Query))
+	if err != nil {
+		return failed(name, "privilege check: "+classify(err))
+	}
+	problems := rep.Problems()
+	switch {
+	case len(problems) == 0:
+		return okResult(name, "least privilege (not a superuser, no CREATEROLE or CREATEDB, owns nothing, no CREATE on public)")
+	case env == "staging" || env == "production":
+		return failed(name, "app login is privileged: "+strings.Join(problems, ", ")+". Use the app role, not the migrate role")
+	default:
+		return okResult(name, "privileged: "+strings.Join(problems, ", ")+" (allowed in "+env+", where app and migrate share one login; not on staging or production)")
+	}
+}
+
+// CheckAppLogin connects with dsn and returns the least-privilege result for env, as cfctl doctor reports it. It is
+// for tests and tools that hold a URL but not a whole doctor run.
+func CheckAppLogin(ctx context.Context, env, dsn string) Result {
+	const name = "postgres app login"
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return failed(name, "bad format")
+	}
+	cfg.ConnectTimeout = 5 * time.Second
+	cfg.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		return failed(name, classify(err))
+	}
+	defer func() { _ = conn.Close(context.Background()) }()
+	return appLoginResult(ctx, env, name, conn)
 }
 
 // ---- Object storage --------------------------------------------------------------------------------------------
