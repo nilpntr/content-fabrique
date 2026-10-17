@@ -73,7 +73,7 @@
     },
     {
       "name": "plan_edit",
-      "description": "Write your creative plan before the first edit. It is the understand step: from the footage, the analysis and the brief, say what kind of video this is and what you will make of it. content_type is one of talking, unboxing_product, workout, vlog, tutorial or general (the genre of the footage); playbook is the playbook you will follow (usually the same, general when nothing fits well). story is the video in one line (at most 200 characters), hook what the first 1 to 2 seconds show (at most 200), arc how it builds (at most 400), ending how it ends (at most 200). target_length_s is the length you aim for in whole seconds, 5 to 120. tempo_bpm is the beat grid's tempo, 120 to 128 for a short video cut to music later, or 0 for a video that follows speech and has no beat grid (60 to 200 are allowed). pace is steady, building or fast. shots is the shot list, 1 to 30 shots in order: its role (hook, build, peak, detail, step, reveal, payoff, broll or ending), what it shows in a few words (at most 160 characters), optionally the clip it comes from (asset_id from list_footage), its length in beats (1 to 64; with tempo_bpm 0 a beat is half a second) and optionally the effect it gets (none, punch_in, push_in, pull_back, shake, speed_ramp, whip, zoom_through or flash). The creator sees the plan in the run feed. The answer gives you the playbook for the genre you chose, the length of a beat in milliseconds and what your shot list adds up to. You can call it again to change the plan; the last one counts. The first edit_timeline call is refused until you have a plan.",
+      "description": "Write your creative plan before the first edit. It is the understand step: from the footage, the analysis and the brief, say what kind of video this is and what you will make of it. content_type is one of talking, unboxing_product, workout, vlog, tutorial or general (the genre of the footage); playbook is the playbook you will follow (usually the same, general when nothing fits well). story is the video in one line (at most 140 characters), hook what the first 1 to 2 seconds show (at most 140), arc how it builds (at most 240), ending how it ends (at most 140). target_length_s is the length you aim for in whole seconds, 5 to 120. tempo_bpm is the beat grid's tempo, 120 to 128 for a short video cut to music later, or 0 for a video that follows speech and has no beat grid (60 to 200 are allowed). pace is steady, building or fast. shots is the shot list, 1 to 16 shots in order: its role (hook, build, peak, detail, step, reveal, payoff, broll or ending), what it shows in a few words (at most 80 characters), optionally the clip it comes from (asset_id from list_footage), its length in beats (1 to 64; with tempo_bpm 0 a beat is half a second) and optionally the effect it gets (none, punch_in, push_in, pull_back, shake, speed_ramp, whip, zoom_through or flash). The plan is a short working note, not an essay: think briefly before you call it, and keep every field brief; a call that is too long is cut off at the output limit and you have to send it again. The creator sees the plan in the run feed. The answer gives you the playbook for the genre you chose, the length of a beat in milliseconds and what your shot list adds up to. You can call it again to change the plan; the last one counts. The first edit_timeline call is refused until you have a plan.",
       "strict": true,
       "input_schema": {
         "type": "object",
@@ -85,19 +85,19 @@
           },
           "story": {
             "type": "string",
-            "description": "The video in one line, at most 200 characters."
+            "description": "The video in one line, at most 140 characters."
           },
           "hook": {
             "type": "string",
-            "description": "What the first 1 to 2 seconds show, at most 200 characters."
+            "description": "What the first 1 to 2 seconds show, at most 140 characters."
           },
           "arc": {
             "type": "string",
-            "description": "How the video builds from hook to end, at most 400 characters."
+            "description": "How the video builds from hook to end, at most 240 characters."
           },
           "ending": {
             "type": "string",
-            "description": "How the video ends, at most 200 characters."
+            "description": "How the video ends, at most 140 characters."
           },
           "playbook": {
             "type": "string",
@@ -119,7 +119,7 @@
           },
           "shots": {
             "type": "array",
-            "description": "The shot list, 1 to 30 shots, in the order they play.",
+            "description": "The shot list, 1 to 16 shots, in the order they play.",
             "items": {
               "type": "object",
               "properties": {
@@ -130,7 +130,7 @@
                 },
                 "what": {
                   "type": "string",
-                  "description": "What the shot shows, in a few words, at most 160 characters."
+                  "description": "What the shot shows, in a few words, at most 80 characters."
                 },
                 "asset_id": {
                   "type": "string",

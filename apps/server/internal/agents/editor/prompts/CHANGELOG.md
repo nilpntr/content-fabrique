@@ -63,6 +63,10 @@ gym footage after clip analysis had every cut on a rep boundary and no dead time
   brighter than its neighbours; `render_preview` and `check_edit` report what is left of the tool calls and time, and the editor
   is told that a limit that comes after a preview ends the run with the version as it stands. `gym_moody` itself was retuned (no
   toe, a gentle S, a soft vignette).
+- **Review round 2** (a live Opus run was cut off in its `plan_edit` turn: thinking plus the plan used all 16000 output tokens): the
+  plan is "a short working note, not an essay", the prompt and the tool description say to think briefly before calling it and to use
+  6 to 12 shots, and its bounds are tighter (140 characters for the story, hook and ending, 240 for the arc, 80 for a shot's text, at
+  most 16 shots). The routing entries give the editor 24000 output tokens and the loop recovers from a cut-off turn.
 - **Playbook for talking video** has a TODO: the transcripts (P2-05) exist, but the editor has no tool to read them yet.
 - Cassettes re-recorded (the prompt, the tool list and the run context changed).
 

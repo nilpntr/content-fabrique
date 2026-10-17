@@ -4,12 +4,14 @@ profile: dev-mid
 editor:
   model: claude-sonnet-5-5
   effort: medium
+  max_tokens: 24000
   escalate: { when: hard_constraints_failed, effort: high, max_attempts: 1 }
   subagents:
     inspector: { enabled: false, model: claude-sonnet-5-5 }
 revision:
   model: claude-sonnet-5-5
   effort: medium
+  max_tokens: 24000
 research:
   lead:    { model: claude-sonnet-5-5, effort: medium }
   workers: { model: claude-sonnet-5-5, max_parallel: 6, budget_micros: 150000 }

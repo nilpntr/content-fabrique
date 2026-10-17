@@ -31,18 +31,20 @@ const PlanArtifact = "creative_plan"
 // PlanVersion is the version of the Plan shape (Plan.Version). A reader checks it before it reads the rest.
 const PlanVersion = 1
 
-// Bounds of a plan. The strict tool schema cannot hold ranges, so the tool checks them and says which one is broken.
+// Bounds of a plan. The strict tool schema cannot hold ranges, maxLength or maxItems, so the tool checks them and says which one is
+// broken. They are tight on purpose: the plan is a short working note, and a plan_edit turn that thinks and then writes an essay runs
+// out of output room (the first live Opus run's plan turn used all 16000 tokens and was cut off).
 const (
-	MaxPlanStoryChars  = 200
-	MaxPlanHookChars   = 200
-	MaxPlanArcChars    = 400
-	MaxPlanEndingChars = 200
-	MaxPlanWhatChars   = 160
+	MaxPlanStoryChars  = 140
+	MaxPlanHookChars   = 140
+	MaxPlanArcChars    = 240
+	MaxPlanEndingChars = 140
+	MaxPlanWhatChars   = 80
 	MinPlanTargetS     = 5
 	MaxPlanTargetS     = 120
 	MinTempoBPM        = 60
 	MaxTempoBPM        = 200
-	MaxPlanShots       = 30
+	MaxPlanShots       = 16
 	MaxShotBeats       = 64
 	// nominalBPM counts the beats of a plan without a tempo (tempo_bpm 0): half a second each.
 	nominalBPM = 120

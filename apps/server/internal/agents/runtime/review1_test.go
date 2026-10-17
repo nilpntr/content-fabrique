@@ -341,7 +341,7 @@ func TestStopReasons(t *testing.T) {
 		"stop_sequence":                  {[]scriptStep{say("stop_sequence", llm.TextBlock("done"))}, store.AgentSucceeded, ""},
 		"pause_turn continues":           {[]scriptStep{say("pause_turn", llm.TextBlock("thinking")), endTurn("done")}, store.AgentSucceeded, ""},
 		"context window":                 {[]scriptStep{say("model_context_window_exceeded", llm.TextBlock("..."))}, store.AgentFailed, FailContextWindow},
-		"max_tokens":                     {[]scriptStep{say("max_tokens", llm.TextBlock("..."))}, store.AgentFailed, FailMaxTokens},
+		"max_tokens":                     {[]scriptStep{say("max_tokens", llm.TextBlock("...")), say("max_tokens", llm.TextBlock("...")), say("max_tokens", llm.TextBlock("..."))}, store.AgentFailed, FailMaxTokens},
 		"refusal":                        {[]scriptStep{say("refusal")}, store.AgentFailed, FailRefusal},
 		"unknown":                        {[]scriptStep{say("something_new", llm.TextBlock("..."))}, store.AgentFailed, FailStopReason},
 		"empty":                          {[]scriptStep{say("", llm.TextBlock("..."))}, store.AgentFailed, FailStopReason},
