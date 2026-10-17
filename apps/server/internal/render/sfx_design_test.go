@@ -484,3 +484,19 @@ func truePeakOfGraph(t testing.TB, ffmpeg, graph string) float64 {
 	}
 	return v
 }
+
+// The timeline's per-category graph costs (the editor's effect budget) are an upper bound of what a variant adds to the graph.
+func TestSFXGraphBytesAreAnUpperBound(t *testing.T) {
+	for _, cv := range sfxVariants() {
+		for _, id := range []string{"s1", "s2", "s9", "s10", "s11"} {
+			g, _, err := SFXPreviewGraph(cv[0], cv[1], id, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The graph of an item in a render adds a stereo stage and a delay: allow a few hundred bytes.
+			if n := len(g) + 300; n > timeline.SFXGraphBytes(cv[0]) {
+				t.Errorf("%s/%s (%s): %d bytes in a graph, the timeline's cost for %s is %d", cv[0], cv[1], id, n, cv[0], timeline.SFXGraphBytes(cv[0]))
+			}
+		}
+	}
+}

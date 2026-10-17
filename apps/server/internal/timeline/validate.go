@@ -61,6 +61,8 @@ const (
 	// CodeInvalidSpeedRamp is a speed_ramp together with speed, points that are not sorted, or a point outside the clip's
 	// source range (P3-10).
 	CodeInvalidSpeedRamp Code = "invalid_speed_ramp"
+	// CodeTooManyEffects is a timeline whose sound effects add up to more than SFXBudgetBytes of the render's filter graph (P3-11).
+	CodeTooManyEffects Code = "too_many_effects"
 	// CodeRampAudioMuted is a warning: a clip with a speed ramp and use_source on. Its own audio cannot follow the ramp and
 	// is left out of the mix (P3-10).
 	CodeRampAudioMuted Code = "ramp_audio_muted"

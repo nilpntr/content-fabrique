@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -56,6 +57,31 @@ func TestSFXGalleryRefusesToWriteIntoTheRepository(t *testing.T) {
 	}
 	if root := galleryRepoRoot(); root == "" || outsideRepo(filepath.Join(root, "docs", "x.html"), root) {
 		t.Errorf("a path in the repository is outside it (root %q)", root)
+	}
+}
+
+// A page outside the repository whose files directory is a link into it is refused before anything is written, and the comparison
+// ignores case where the file system does.
+func TestSFXGalleryRefusesAFilesDirectoryThatLinksIntoTheRepository(t *testing.T) {
+	root := galleryRepoRoot()
+	if root == "" {
+		t.Skip("not in a repository checkout")
+	}
+	out := t.TempDir()
+	if err := os.Symlink(filepath.Join(root, "docs"), filepath.Join(out, "g_files")); err != nil {
+		t.Skip("cannot make a symlink:", err)
+	}
+	before, _ := os.ReadDir(filepath.Join(root, "docs"))
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"sfx", "gallery", "-o", filepath.Join(out, "g.html")}, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), "inside the repository") {
+		t.Errorf("code %d: %s", code, stderr.String())
+	}
+	after, _ := os.ReadDir(filepath.Join(root, "docs"))
+	if len(before) != len(after) {
+		t.Error("something was written into the repository")
+	}
+	if runtime.GOOS == "darwin" && outsideRepo(strings.ToUpper(filepath.Join(root, "docs", "x.html")), root) {
+		t.Error("the comparison is case-sensitive on macOS")
 	}
 }
 

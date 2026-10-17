@@ -165,3 +165,35 @@ func waveform(pcm []float32, width int) (lo, hi []float32) {
 	}
 	return lo, hi
 }
+
+// silenceGaps finds the silent gaps of an envelope: runs of windows under silenceDB that last at least silenceMinS. A window is
+// wholly inside the silence it is part of, so a gap starts at the start of its first window and ends at the end of its last (the
+// end of the sound for the last window of the file). audioEndS is the length of the sound.
+func silenceGaps(env []float64, audioEndS float64) []Gap {
+	var gaps []Gap
+	run := -1
+	flush := func(last int) {
+		if run < 0 {
+			return
+		}
+		start := float64(run*hopMs) / 1000
+		end := float64(last*hopMs+winSamples*1000/PCMRate) / 1000
+		if last == len(env)-1 {
+			end = audioEndS
+		}
+		if end-start >= silenceMinS {
+			gaps = append(gaps, Gap{StartS: start, EndS: end, DurationS: end - start})
+		}
+		run = -1
+	}
+	for i, v := range env {
+		switch {
+		case v < silenceDB && run < 0:
+			run = i
+		case v >= silenceDB && run >= 0:
+			flush(i - 1)
+		}
+	}
+	flush(len(env) - 1)
+	return gaps
+}

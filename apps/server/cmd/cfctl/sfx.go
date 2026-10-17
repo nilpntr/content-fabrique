@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -66,7 +67,9 @@ func galleryRepoRoot() string {
 	return root
 }
 
-// outsideRepo reports whether path (absolute) is outside the repository root, resolving links in the part that exists.
+// outsideRepo reports whether path (absolute) is outside the repository root, resolving links in the part that exists (a link on the
+// way to the path, or the path itself being a link into the repository, does not get it in). On a case-insensitive file system
+// (macOS by default, Windows) the comparison ignores case.
 func outsideRepo(path, root string) bool {
 	if root == "" {
 		return true
@@ -81,7 +84,11 @@ func outsideRepo(path, root string) bool {
 			}
 		}
 	}
-	rel, err := filepath.Rel(resolve(root), resolve(path))
+	a, b := resolve(root), resolve(path)
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		a, b = strings.ToLower(a), strings.ToLower(b)
+	}
+	rel, err := filepath.Rel(a, b)
 	return err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
@@ -133,6 +140,11 @@ func cmdSFXGallery(args []string, stdout, stderr io.Writer) int {
 	}
 	filesName := strings.TrimSuffix(filepath.Base(page), filepath.Ext(page)) + "_files"
 	filesDir := filepath.Join(filepath.Dir(page), filesName)
+	// The files directory is what the command creates and fills: check it as well (it may be a link into the repository).
+	if !outsideRepo(filesDir, galleryRepoRoot()) {
+		_, _ = fmt.Fprintf(stderr, "cfctl sfx gallery: %s is inside the repository: the gallery is written outside it\n", filesDir)
+		return 2
+	}
 	if err := os.MkdirAll(filesDir, 0o750); err != nil {
 		_, _ = fmt.Fprintf(stderr, "cfctl sfx gallery: %v\n", err)
 		return 1
@@ -140,6 +152,11 @@ func cmdSFXGallery(args []string, stdout, stderr io.Writer) int {
 	if filesDir, err = filepath.EvalSymlinks(filesDir); err != nil {
 		_, _ = fmt.Fprintf(stderr, "cfctl sfx gallery: %v\n", err)
 		return 1
+	}
+	// Re-check the resolved directory: nothing is written before this passes.
+	if !outsideRepo(filesDir, galleryRepoRoot()) {
+		_, _ = fmt.Fprintf(stderr, "cfctl sfx gallery: %s resolves to a place inside the repository: the gallery is written outside it\n", filesDir)
+		return 2
 	}
 	runner, err := newGalleryRunner(*providerArg, *dockerArg, *imageArg, filesDir)
 	if err != nil {

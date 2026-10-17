@@ -35,6 +35,7 @@ const (
 	endSilenceWarnS   = 1.5  // estimate
 	endLUMin          = -4.0 // earshot: the last 3 s reach body level, -2.2 to +5.6 LU against the integrated level (median +0.2)
 	endLUMax          = 6.0
+	cutSyncMinLift    = 0.15  // estimate: points over the chance level; dense sound scores 80+ % by chance, so the share alone proves nothing
 	cutSyncMinShare   = 0.5   // estimate: earshot measured a median of 81 % of cuts with an onset within 100 ms, but 86 % by chance
 	sfxFrameMinShare  = 0.8   // estimate: our effects start on their sample, so almost all should land within a frame unless masked
 	sfxPer10sMax      = 4.0   // estimate: the edit style asks for about one effect per 3 to 4 cuts; earshot's 1.2-1.7 salient hits a second include the music
@@ -96,7 +97,8 @@ func analyse(m measured, timeMap []render.TimeMapEntry, cfg config) Report {
 	r.Loudness.EndLU = round(endLU(m), 1)
 
 	// Silence.
-	for _, g := range m.silences {
+	env := envelopeDB(m.pcm)
+	for _, g := range silenceGaps(env, float64(len(m.pcm))/PCMRate) {
 		g.StartS, g.EndS, g.DurationS = round(g.StartS, 3), round(g.EndS, 3), round(g.DurationS, 3)
 		r.Silence.Gaps = append(r.Silence.Gaps, g)
 		if g.DurationS > r.Silence.LongestS {
@@ -111,7 +113,6 @@ func analyse(m measured, timeMap []render.TimeMapEntry, cfg config) Report {
 	}
 
 	// Onsets.
-	env := envelopeDB(m.pcm)
 	onsets := detectOnsets(env)
 	r.Onsets.List = onsets
 	if onsets == nil {

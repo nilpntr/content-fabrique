@@ -1,6 +1,8 @@
 package ops
 
 import (
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/nilpntr/content-fabrique/internal/timeline"
@@ -49,4 +51,27 @@ func TestAddSFXVariants(t *testing.T) {
 			}
 		}
 	})
+}
+
+// The budget of the effects reaches the editor through the op: a batch that adds too many is refused whole, with the validator's
+// message (the same batch of 5 is fine).
+func TestAddSFXOverTheBudgetIsRefused(t *testing.T) {
+	base := baseSpec(t)
+	batch := func(n int) []Op {
+		var ops []Op
+		for i := range n {
+			ops = append(ops, &AddSFX{Sfx: timeline.SFXRiser, AtMs: int64(i) * 20})
+		}
+		return ops
+	}
+	if _, res := Apply(base, batch(5), fixtureCatalog(t)); !res.OK() {
+		t.Fatalf("5 risers: %+v", res.Issues)
+	}
+	_, res := Apply(base, batch(25), fixtureCatalog(t))
+	if res.OK() || !slices.Contains(errorCodes(res), string(timeline.CodeTooManyEffects)) {
+		t.Fatalf("25 risers: %+v", res.Issues)
+	}
+	if msg := res.Errors()[0].Message; !strings.Contains(msg, "remove_sound") {
+		t.Errorf("message: %s", msg)
+	}
 }

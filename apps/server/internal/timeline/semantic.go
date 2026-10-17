@@ -450,6 +450,7 @@ func (c *checker) checkTextBox(it TextItem, path string, band style.Rect, captio
 // ---- audio ------------------------------------------------------------------------------------------------------
 
 func (c *checker) checkAudio() {
+	c.checkEffectBudget()
 	for ti, t := range c.spec.Tracks {
 		at, ok := t.(*AudioTrack)
 		if !ok {
@@ -540,4 +541,31 @@ func (c *checker) checkMarkers() {
 // num formats a number without trailing zeros, for messages.
 func num(f float64) string {
 	return fmt.Sprintf("%g", f)
+}
+
+// checkEffectBudget refuses a timeline whose sound effects would make the render's filter graph too long for one process
+// argument: the effects are the only part of a graph that grows with a count the editor controls freely.
+func (c *checker) checkEffectBudget() {
+	var n, bytes int
+	path := ""
+	for ti, t := range c.spec.Tracks {
+		at, ok := t.(*AudioTrack)
+		if !ok {
+			continue
+		}
+		for _, item := range at.Items {
+			if s, ok := item.(*SFX); ok {
+				n++
+				bytes += SFXGraphBytes(s.Sfx)
+				if path == "" {
+					path = fmt.Sprintf("/tracks/%d/items", ti)
+				}
+			}
+		}
+	}
+	if bytes > SFXBudgetBytes {
+		c.add(CodeTooManyEffects, path,
+			"the timeline has %d sound effects, which would add about %d kB to the render's filter graph (the limit is %d kB, about 30 effects): remove some with remove_sound; the edit style asks for at most 4 per 10 seconds",
+			n, bytes/1000, SFXBudgetBytes/1000)
+	}
 }

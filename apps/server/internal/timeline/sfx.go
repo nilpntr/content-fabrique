@@ -137,3 +137,19 @@ func SFXVariantLengthMs(name, variant string) (int64, bool) {
 	}
 	return 0, false
 }
+
+// The sound effects' budget (P3-11). Every effect is part of the render's filter graph, which is one argument of the ffmpeg process
+// (the renderer refuses a graph over render.MaxFilterGraphBytes, 120,000 bytes, because Linux limits an argument to 128 KiB). An
+// effect is 0.7 to 6 kB of it, so a spec may carry only so many: SFXGraphBytes is an upper bound for a category (its largest
+// variant, rounded up; render's TestSFXGraphBytesAreAnUpperBound keeps it honest) and SFXBudgetBytes what a spec's effects may add
+// up to, which leaves the rest of the 120,000 bytes for the clips, the text and the mix. That is about 30 effects of a middle size,
+// far more than the edit style asks for (at most 4 per 10 s).
+const SFXBudgetBytes = 100_000
+
+var sfxGraphBytes = map[string]int{
+	SFXWhoosh: 5500, SFXSwish: 4000, SFXImpact: 2800, SFXRiser: 6000, SFXDownlifter: 3900, SFXSubDrop: 1500,
+	SFXPop: 1400, SFXClick: 2100, SFXGlitch: 1400, SFXShimmer: 5200, SFXSting: 4200,
+}
+
+// SFXGraphBytes is the most a sound effect of the category adds to the filter graph, in bytes (0 for a name that is not one).
+func SFXGraphBytes(name string) int { return sfxGraphBytes[name] }

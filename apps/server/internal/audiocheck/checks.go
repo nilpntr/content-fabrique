@@ -111,11 +111,22 @@ func checklist(r Report) []CheckItem {
 	} else {
 		share := r.Sync.CutsWithin100msShare
 		lift := share - r.Sync.ChanceWithin100msShare
+		// Both: a share over the minimum and a lift over chance. With dense sound every cut has an onset near it, whatever the sync,
+		// so a high share with no lift is "covered by the music", which is a fine thing to be but not a sign of sync: it passes the
+		// share and is reported as info when the chance level is itself over the target.
+		status := st(share >= cutSyncMinShare && lift >= cutSyncMinLift, share >= cutSyncMinShare-0.2 && lift >= 0)
+		if share >= cutSyncMinShare && r.Sync.ChanceWithin100msShare >= cutSyncMinShare {
+			// Chance alone would pass: the sound is dense enough to cover every cut. Say so, and require the lift only when it can show.
+			status = StatusInfo
+			if lift >= cutSyncMinLift {
+				status = StatusPass
+			}
+		}
 		add(CheckItem{
-			ID: "cut_sync", Title: "Cuts with an onset within 100 ms", Status: st(share >= cutSyncMinShare, share >= cutSyncMinShare-0.2),
+			ID: "cut_sync", Title: "Cuts with an onset within 100 ms", Status: status,
 			Value:  fmt.Sprintf("%.0f %% (%.0f %% within a frame; %.0f %% by chance, lift %+.0f points)", share*100, r.Sync.CutsWithinFrameShare*100, r.Sync.ChanceWithin100msShare*100, lift*100),
-			Target: fmt.Sprintf("at least %.0f %%", cutSyncMinShare*100),
-			Source: srcEstimate + " (earshot measured a median of 81 % but 86 % by chance: dense music covers every cut, so look at the lift)", Estimate: true,
+			Target: fmt.Sprintf("at least %.0f %% and %.0f points over chance", cutSyncMinShare*100, cutSyncMinLift*100),
+			Source: srcEstimate + " (earshot measured a median of 81 % but 86 % by chance: dense music covers every cut, so the lift over chance is what shows sync)", Estimate: true,
 			Fix: "Put a whoosh, a hit or a music accent on the cuts that matter (a sparse sound track needs sound on every cut).",
 		})
 	}

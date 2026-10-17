@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "69bf6a18d85107a14d73e0924ed466545feb3fe209106f457f63c42abfdf5c61",
-  "recorded_at": "2026-10-17T17:59:23Z",
+  "key": "5589bd9bcc711e378f8f3a60920eec1e481dbb010873672e4e993be7d8ba8c2e",
+  "recorded_at": "2026-10-17T18:19:39Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,
@@ -21,6 +21,42 @@
           "text",
           "text",
           "text"
+        ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
+        ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
+        ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
         ]
       },
       {
@@ -145,6 +181,11 @@
         "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
         "media_type": "image/jpeg",
         "bytes": 9284
+      },
+      {
+        "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
+        "media_type": "image/jpeg",
+        "bytes": 9284
       }
     ]
   },
@@ -155,37 +196,19 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_7",
-        "name": "edit_timeline",
+        "id": "toolu_ed_10",
+        "name": "finish",
         "input": {
-          "base_version": 1,
-          "ops": [
-            {
-              "op": "trim_item",
-              "id": "c4",
-              "out_ms": 4500
-            },
-            {
-              "op": "snap_cuts_to_beats",
-              "grid": {
-                "bpm": 124,
-                "first_beat_ms": 0
-              },
-              "options": {
-                "write_markers": true,
-                "max_shift_ms": 60
-              }
-            }
-          ]
+          "summary": "I cut a 12 second video from your three clips. It opens on half of the heaviest lat pulldown rep with the words HEAVY LAT DAY and a punch-in on the beat, then the cable row, the pulldown again, the wide gym with a flash and a last rep. Check the wide shot: I framed it with a blurred fill so nobody is cropped out."
         }
       }
     ],
     "usage": {
-      "input_tokens": 440,
-      "cache_write_tokens": 800,
+      "input_tokens": 400,
+      "cache_write_tokens": 650,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 14200,
-      "output_tokens": 120
+      "cache_read_tokens": 16300,
+      "output_tokens": 92
     }
   },
   "count_tokens": 9000

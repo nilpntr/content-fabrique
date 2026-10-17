@@ -23,7 +23,9 @@ import (
 const PCMRate = 16000
 
 const (
-	// silenceDB and silenceMinS define a silent gap: under -50 dBFS for at least 100 ms (earshot's silent holes are 0.04 s and up).
+	// silenceDB and silenceMinS define a silent gap: windows under -50 dBFS RMS for at least 100 ms (earshot's silent holes are 0.04 s
+	// and up). Measured from the 16 kHz dump (silenceGaps), not parsed from a filter's log: the log's prefix and format differ between
+	// ffmpeg builds (the pinned static build prints Parsed_silencedetect_4 where others print silencedetect).
 	silenceDB   = -50.0
 	silenceMinS = 0.1
 	// maxPCMBytes caps the dump the sandbox writes: MaxDurationS at 16 kHz mono float.
@@ -41,7 +43,6 @@ type measured struct {
 
 	integrated, lra, truePeak float64
 	momentary                 []LoudnessPoint
-	silences                  []Gap
 	channels                  []chanStats
 	pcm                       []float32
 }
@@ -54,12 +55,11 @@ type chanStats struct {
 // graph is the one filter graph the check runs: the audio is split four ways: the loudness (ebur128 with its metadata written to
 // a file in the work directory, no per-frame log; the dump is downmixed by aformat, which keeps the level of a mono file and gives
 // 0.5 L + 0.5 R for a stereo one; the name is relative because the sandbox's working directory is the work
-// directory and an argument is only rewritten for the local provider when it is a whole path), the silences (silencedetect logs them), the per-channel statistics (astats logs
+// directory and an argument is only rewritten for the local provider when it is a whole path), the per-channel statistics (astats logs
 // a summary at the end) and the mono 16 kHz dump that the Go analysis reads. Nothing here comes from the file or the caller.
-var graph = "[0:a]asplit=4[a1][a2][a3][a4];" +
+var graph = "[0:a]asplit=3[a1][a2][a4];" +
 	"[a1]ebur128=peak=true:framelog=quiet:metadata=1,ametadata=mode=print:file=loudness.txt,anullsink;" +
-	"[a2]silencedetect=noise=" + strconv.Itoa(int(silenceDB)) + "dB:d=" + strconv.FormatFloat(silenceMinS, 'f', -1, 64) + ",anullsink;" +
-	"[a3]astats=metadata=0:reset=0,anullsink;" +
+	"[a2]astats=metadata=0:reset=0,anullsink;" +
 	"[a4]aresample=" + strconv.Itoa(PCMRate) + ",aformat=channel_layouts=mono[pcm]"
 
 // measure runs ffmpeg in the sandbox over mp4 and reads what it wrote.
@@ -91,7 +91,6 @@ func measure(ctx context.Context, runner media.Runner, mp4, dir string) (measure
 	if !parseSummary(log, &m) {
 		return measured{}, errors.New("audiocheck: ffmpeg's log has no loudness summary (the log was cut or ffmpeg's format changed)")
 	}
-	m.silences = parseSilences(log, m.durationS)
 	m.channels = parseAstats(log)
 	if len(m.channels) == 0 {
 		return measured{}, errors.New("audiocheck: ffmpeg's log has no channel statistics (the log was cut or ffmpeg's format changed)")
@@ -150,13 +149,11 @@ var (
 	// tag value is only ever printed after "name : " on its lines, so a line that starts with ffmpeg's own prefix is ffmpeg's.
 	reDuration = regexp.MustCompile(`(?m)^  Duration: (\d+):(\d+):(\d+(?:\.\d+)?)`)
 	reVideo    = regexp.MustCompile(`(?m)^  Stream #0:\d+.*Video:.*, (\d+(?:\.\d+)?) fps`)
-	reSummary  = regexp.MustCompile(`(?m)^\[Parsed_ebur128_\d+ @ 0x[0-9a-f]+\] Summary:`)
+	reSummary  = regexp.MustCompile(`(?m)^\[(?:Parsed_)?ebur128(?:_\d+)? @ 0x[0-9a-f]+\] Summary:`)
 	reLUFS     = regexp.MustCompile(`I:\s+(-?[0-9.]+|-inf) LUFS`)
 	reLRA      = regexp.MustCompile(`LRA:\s+(-?[0-9.]+) LU\b`)
 	rePeak     = regexp.MustCompile(`Peak:\s+(-?[0-9.]+|-inf) dBFS`)
-	reSilStart = regexp.MustCompile(`^\[silencedetect @ 0x[0-9a-f]+\] silence_start: (-?[0-9.e+-]+)`)
-	reSilEnd   = regexp.MustCompile(`^\[silencedetect @ 0x[0-9a-f]+\] silence_end: (-?[0-9.e+-]+) \| silence_duration: (-?[0-9.e+-]+)`)
-	reStat     = regexp.MustCompile(`^\[Parsed_astats_\d+ @ 0x[0-9a-f]+\] (.+)$`)
+	reStat     = regexp.MustCompile(`^\[(?:Parsed_)?astats(?:_\d+)? @ 0x[0-9a-f]+\] (.+)$`)
 	reFrame    = regexp.MustCompile(`^frame:\d+\s+pts:\d+\s+pts_time:(\S+)`)
 )
 
@@ -202,29 +199,6 @@ func parseSummary(log string, m *measured) bool {
 		m.truePeak = num(v[1])
 	}
 	return true
-}
-
-// parseSilences reads silencedetect's lines into gaps. A silence that runs to the end of the file is closed at the duration.
-func parseSilences(log string, durationS float64) []Gap {
-	var gaps []Gap
-	start := math.NaN()
-	for _, line := range strings.Split(log, "\n") {
-		line = strings.TrimRight(line, "\r")
-		if v := reSilStart.FindStringSubmatch(line); v != nil {
-			start = math.Max(0, num(v[1]))
-		} else if v := reSilEnd.FindStringSubmatch(line); v != nil {
-			end, dur := num(v[1]), num(v[2])
-			if math.IsNaN(start) {
-				start = math.Max(0, end-dur)
-			}
-			gaps = append(gaps, Gap{StartS: start, EndS: end, DurationS: end - start})
-			start = math.NaN()
-		}
-	}
-	if !math.IsNaN(start) && durationS > start {
-		gaps = append(gaps, Gap{StartS: start, EndS: durationS, DurationS: durationS - start})
-	}
-	return gaps
 }
 
 // parseAstats reads the per-channel statistics from astats' final log: one block per "Channel: n", then "Overall" (a line with no

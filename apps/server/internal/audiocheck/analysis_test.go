@@ -21,26 +21,21 @@ const sampleLog = `Input #0, mov,mp4,m4a,3gp,3g2,mj2, from '/in/0':
   Duration: 00:00:27.04, start: 0.000000, bitrate: 195 kb/s
   Stream #0:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(tv, bt709, progressive), 540x960 [SAR 1:1 DAR 9:16], 185 kb/s, 29.97 fps, 30 tbr, 15360 tbn (default)
   Stream #0:1[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 48000 Hz, stereo, fltp, 128 kb/s (default)
-[silencedetect @ 0x7736c54900] silence_start: 0
-[silencedetect @ 0x7736c54900] silence_end: 1.25 | silence_duration: 1.25
-[silencedetect @ 0x7736c54900] silence_start: 10.5
-[silencedetect @ 0x7736c54900] silence_end: 11.02 | silence_duration: 0.52
-[silencedetect @ 0x7736c54900] silence_start: 26.8
-[Parsed_astats_6 @ 0x7736c50c00] Channel: 1
-[Parsed_astats_6 @ 0x7736c50c00] DC offset: 0.000123
-[Parsed_astats_6 @ 0x7736c50c00] Peak level dB: -1.250000
-[Parsed_astats_6 @ 0x7736c50c00] RMS level dB: -18.500000
-[Parsed_astats_6 @ 0x7736c50c00] Peak count: 2
-[Parsed_astats_6 @ 0x7736c50c00] Channel: 2
-[Parsed_astats_6 @ 0x7736c50c00] DC offset: -0.000321
-[Parsed_astats_6 @ 0x7736c50c00] Peak level dB: -1.300000
-[Parsed_astats_6 @ 0x7736c50c00] RMS level dB: -19.250000
-[Parsed_astats_6 @ 0x7736c50c00] Peak count: 1
-[Parsed_astats_6 @ 0x7736c50c00] Overall
-[Parsed_astats_6 @ 0x7736c50c00] DC offset: 0.000000
-[Parsed_astats_6 @ 0x7736c50c00] Peak level dB: -1.250000
-[Parsed_astats_6 @ 0x7736c50c00] RMS level dB: -9.000000
-[Parsed_ebur128_1 @ 0x7736c50900] Summary:
+[astats @ 0x7736c50c00] Channel: 1
+[astats @ 0x7736c50c00] DC offset: 0.000123
+[astats @ 0x7736c50c00] Peak level dB: -1.250000
+[astats @ 0x7736c50c00] RMS level dB: -18.500000
+[astats @ 0x7736c50c00] Peak count: 2
+[astats @ 0x7736c50c00] Channel: 2
+[astats @ 0x7736c50c00] DC offset: -0.000321
+[astats @ 0x7736c50c00] Peak level dB: -1.300000
+[astats @ 0x7736c50c00] RMS level dB: -19.250000
+[astats @ 0x7736c50c00] Peak count: 1
+[astats @ 0x7736c50c00] Overall
+[astats @ 0x7736c50c00] DC offset: 0.000000
+[astats @ 0x7736c50c00] Peak level dB: -1.250000
+[astats @ 0x7736c50c00] RMS level dB: -9.000000
+[ebur128 @ 0x7736c50900] Summary:
 
   Integrated loudness:
     I:         -14.3 LUFS
@@ -69,16 +64,6 @@ func TestParsesTheLogOfTheGraph(t *testing.T) {
 	if m.integrated != -14.3 || m.lra != 5.6 || m.truePeak != -1.2 {
 		t.Errorf("summary %+v", m)
 	}
-	gaps := parseSilences(sampleLog, 27.04)
-	want := []Gap{{0, 1.25, 1.25}, {10.5, 11.02, 0.52}, {26.8, 27.04, 27.04 - 26.8}}
-	if len(gaps) != len(want) {
-		t.Fatalf("gaps %+v", gaps)
-	}
-	for i, g := range gaps {
-		if math.Abs(g.StartS-want[i].StartS) > 1e-9 || math.Abs(g.EndS-want[i].EndS) > 1e-9 || math.Abs(g.DurationS-want[i].DurationS) > 1e-9 {
-			t.Errorf("gap %d: %+v, want %+v", i, g, want[i])
-		}
-	}
 	ch := parseAstats(sampleLog)
 	if len(ch) != 2 || ch[0].peakDB != -1.25 || ch[1].rmsDB != -19.25 || ch[0].peakCount != 2 || ch[1].dc != -0.000321 {
 		t.Errorf("channels %+v (the Overall block must not leak into the last channel)", ch)
@@ -94,7 +79,7 @@ func TestParsesTheLogOfTheGraph(t *testing.T) {
 	// Digital silence is -inf in the logs; nothing infinite gets into the report.
 	var silent measured
 	silent.truePeak = math.Inf(-1)
-	if !parseSummary("[Parsed_ebur128_1 @ 0x1] Summary:\n  I:         -70.0 LUFS\n  LRA:         0.0 LU\n  Peak:       -inf dBFS\n", &silent) {
+	if !parseSummary("[ebur128 @ 0x1] Summary:\n  I:         -70.0 LUFS\n  LRA:         0.0 LU\n  Peak:       -inf dBFS\n", &silent) {
 		t.Error("no summary found in the log of a silent file")
 	}
 	if parseSummary("no summary here", &silent) {
@@ -181,7 +166,7 @@ func TestOnsetDetectorFindsABurstWhereItStarts(t *testing.T) {
 func TestChecklistTargetsAndSources(t *testing.T) {
 	m := measured{
 		durationS: 10, fps: 30, hasAudio: true, integrated: -14, lra: 5, truePeak: -1.5,
-		pcm:       pcmWith(10, 0.5, 0.1, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0),
+		pcm:       pcmWith(10, 0.5, 0.1, 0.6, 1.2, 1.8, 2.4, 3.0, 3.6, 4.2, 4.8, 5.4, 6.0, 6.6, 7.2, 7.8, 8.4, 9.0, 9.6),
 		momentary: []LoudnessPoint{{0.1, -40}, {0.2, -20}, {0.5, -14}, {9.5, -14}, {10, -14}},
 		channels:  []chanStats{{peakDB: -1.5, rmsDB: -20, peakCount: 1}, {peakDB: -1.5, rmsDB: -20, peakCount: 1}},
 	}
@@ -272,5 +257,57 @@ func TestCutTimesAndChance(t *testing.T) {
 	}
 	if got := chanceShare(nil, []int64{2000}, 6000); got != 0 {
 		t.Errorf("chance with no onsets: %.2f", got)
+	}
+}
+
+// Silence is measured from the sound itself, not from a filter's log (whose prefix differs between ffmpeg builds): gaps of at least
+// 100 ms under -50 dBFS, from the start of the first silent window to the end of the last, and to the end of the sound at the end.
+func TestSilenceGapsFromTheEnvelope(t *testing.T) {
+	// 4 s: silence, a burst at 1.0 s (80 ms decay, so it is under -50 dBFS again after about 0.7 s), a loud second burst at 3.0 s.
+	pcm := pcmWith(4, 0.5, 1.0, 3.0)
+	gaps := silenceGaps(envelopeDB(pcm), 4)
+	if len(gaps) != 3 {
+		t.Fatalf("gaps %+v", gaps)
+	}
+	if g := gaps[0]; g.StartS != 0 || g.EndS < 0.98 || g.EndS > 1.0 {
+		t.Errorf("first gap %+v, want 0 to just under 1.0 s", g)
+	}
+	if g := gaps[2]; g.EndS != 4 || g.StartS < 3.1 || g.StartS > 3.8 {
+		t.Errorf("last gap %+v, want to the end of the sound at 4 s", g)
+	}
+	// A gap shorter than 100 ms is not one, and digital silence is one gap.
+	short := pcmWith(1, 0.5, 0.0, 0.2, 0.34)
+	if g := silenceGaps(envelopeDB(short), 1); len(g) > 1 {
+		t.Errorf("short gaps: %+v", g)
+	}
+	if g := silenceGaps(envelopeDB(make([]float32, 3*PCMRate)), 3); len(g) != 1 || g[0].DurationS != 3 {
+		t.Errorf("digital silence: %+v", g)
+	}
+	if g := silenceGaps(nil, 0); len(g) != 0 {
+		t.Errorf("no sound: %+v", g)
+	}
+}
+
+// The share of cuts with an onset nearby is judged together with the chance level: a high share that chance alone would give
+// (dense sound covers every cut) is not sync, and a share without a lift over chance does not pass.
+func TestCutSyncNeedsALiftOverChance(t *testing.T) {
+	mk := func(share, chance float64) CheckItem {
+		r := Report{HasAudio: true, Sync: Sync{Cuts: []CutSync{{AtMs: 1}}, CutsWithin100msShare: share, ChanceWithin100msShare: chance}}
+		return find(Report{Checklist: checklist(r)}, "cut_sync")
+	}
+	for _, tc := range []struct {
+		share, chance float64
+		want          string
+	}{
+		{0.9, 0.2, StatusPass},   // sparse sound, cuts on hits: sync
+		{0.67, 0.5, StatusPass},  // chance is at the target, but the lift is 17 points
+		{0.9, 0.85, StatusInfo},  // dense sound: covered, not proven
+		{0.6, 0.55, StatusInfo},  // dense, no lift
+		{0.55, 0.45, StatusWarn}, // a share that passes with a lift of 10 points: not enough
+		{0.2, 0.1, StatusFail},   // few cuts with sound
+	} {
+		if got := mk(tc.share, tc.chance).Status; got != tc.want {
+			t.Errorf("share %.2f chance %.2f: %s, want %s", tc.share, tc.chance, got, tc.want)
+		}
 	}
 }
