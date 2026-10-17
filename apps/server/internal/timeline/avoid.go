@@ -62,6 +62,23 @@ func PlaceTextAvoiding(out Output, it TextItem, obstacles []style.Rect) (TextPla
 			scales = append(scales, sc)
 		}
 	}
+	// A smaller size that no longer reaches the obstacle clears it where it is: no move at all.
+	for _, sc := range scales[1:] {
+		cand := it
+		cand.Scale = &sc
+		cpl, err := PlaceText(out, cand)
+		if err != nil {
+			continue
+		}
+		if box, ok := cpl.Zone.Fit(cpl.Box); ok {
+			padded := box
+			padded.Bottom += gap // the same gap under the text as for a move
+			padded.Top -= gap
+			if !overlapsAny(padded, obstacles) {
+				return cpl, Avoidance{Overlapped: true, Cleared: true, Where: "smaller", Scale: sc}, nil
+			}
+		}
+	}
 	// Above the obstacles first, at every scale (the clear band above the head is where a title belongs), and only then below them.
 	for _, where := range []string{"above", "below"} {
 		for _, sc := range scales {

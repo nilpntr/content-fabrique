@@ -9,7 +9,7 @@ func TestTitleKind(t *testing.T) {
 	for text, want := range map[string]string{
 		"BUILDING LATS 101":                KindSeries,
 		"BRACHIORADIALIS BUILDER 101":      KindSeries,
-		"  chest   day 201 ":               KindSeries,
+		"  CHEST   DAY 201 ": KindSeries,
 		"how to bake a croissant tricep":   KindLowercase,
 		"is this the best row?":            KindQuestion,
 		"BACK DAY":                         KindCaps,
@@ -35,7 +35,7 @@ func TestTitlePatternsOfTheReferences(t *testing.T) {
 	if len(tx.Patterns) != 2 || tx.Patterns[0].Kind != KindSeries || tx.Patterns[0].Share < 0.6 || tx.Patterns[0].Number != "101" || len(tx.Patterns[0].Examples) != 2 {
 		t.Fatalf("patterns %+v", tx.Patterns)
 	}
-	if tx.Patterns[1].Kind != KindLowercase || tx.SeriesNumber() != "101" {
+	if tx.Patterns[1].Kind != KindLowercase || tx.Patterns[0].Number != "101" {
 		t.Errorf("patterns %+v", tx.Patterns)
 	}
 	if !tx.Follows(KindSeries) || !tx.Follows(KindLowercase) || tx.Follows(KindCaps) || tx.Follows(KindQuestion) {
@@ -52,7 +52,7 @@ func TestTitlePatternsOfTheReferences(t *testing.T) {
 		t.Errorf("fix %q", fix)
 	}
 	var none *TextProfile
-	if none.SeriesNumber() != "" {
+	if none.Follows(KindSeries) {
 		t.Error("nil text profile")
 	}
 	if patternsOf(nil) != nil || patternsOf([]string{"  "}) != nil {

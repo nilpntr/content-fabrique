@@ -689,6 +689,9 @@ func (c *checker) textOverSubject() Check {
 			band := head.Top - c.zoneTop()
 			where := fmt.Sprintf("the head starts at y %d (%.0f %% from the top) and the clear band above it is %d px tall", head.Top, float64(head.Top)/float64(max(out.Height, 1))*100, max(band, 0))
 			switch {
+			case it.AvoidsSubject() && avoided.Cleared && avoided.Where == "smaller":
+				moved++
+				notes = append(notes, fmt.Sprintf("%s covers the head, so the renderer shrinks it to scale %g (%s); one line keeps it at its size above the head", it.ID, avoided.Scale, where))
 			case it.AvoidsSubject() && avoided.Cleared:
 				moved++
 				notes = append(notes, fmt.Sprintf("%s covers the head, so the renderer moves it %s it (%s); one line and a smaller scale keep it above the head", it.ID, avoided.Where, where))
@@ -949,9 +952,9 @@ func (c *checker) titleLook(e *styleprofile.EditStats, it timeline.TextItem) {
 		if it.Scale != nil {
 			cur = *it.Scale
 		}
-		for s := math.Floor(cur*20) / 20; s >= style.MinScale-1e-9; s -= 0.05 {
+		for pct := int(math.Round(cur*100)) - 5; pct >= int(math.Round(style.MinScale*100)); pct -= 5 {
 			try := it
-			sc := math.Round(s*100) / 100
+			sc := float64(pct) / 100
 			try.Scale = &sc
 			if tp, err := timeline.PlaceText(out, try); err == nil && len(tp.Layout.Lines) == 1 {
 				e.TitleFitScale = sc
@@ -993,12 +996,12 @@ func (c *checker) styleMatch() Check {
 		for _, b := range bad[:min(4, len(bad))] {
 			parts = append(parts, fmt.Sprintf("%s: %s, expected %s (%s)", b.ID, b.Value, b.Expected, b.Fix))
 		}
-		return c.fail(CheckStyleMatch, "%d of %d style dimensions are out of the creator's range: %s%s", len(bad), len(d.Dimensions), strings.Join(parts, "; "), soft)
+		return c.fail(CheckStyleMatch, "%d of %d style dimensions are out of the creator's range: %s%s", len(bad), d.Hard(), strings.Join(parts, "; "), soft)
 	}
 	if soft != "" {
 		return c.pass(CheckStyleMatch, "every style dimension that has to match is in the creator's range%s", soft)
 	}
-	return c.pass(CheckStyleMatch, "all %d style dimensions are in the creator's range", len(d.Dimensions))
+	return c.pass(CheckStyleMatch, "all %d style dimensions are in the creator's range", d.Hard())
 }
 
 func (c *checker) beatSync() Check {

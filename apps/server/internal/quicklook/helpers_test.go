@@ -196,6 +196,25 @@ func (f *fakeStore) ApplyQuickLook(_ context.Context, ws ids.WorkspaceID, id ids
 	return f.asset, nil
 }
 
+func (f *fakeStore) MergeQuickLookDetail(_ context.Context, ws ids.WorkspaceID, id ids.AssetID, patch json.RawMessage) (store.Asset, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if ws != f.asset.WorkspaceID || id != f.asset.ID || f.asset.QuickLookStatus == nil || *f.asset.QuickLookStatus != store.QuickLookSucceeded {
+		return store.Asset{}, store.ErrNotFound
+	}
+	merged := map[string]json.RawMessage{}
+	_ = json.Unmarshal(f.asset.QuickLook, &merged)
+	var add map[string]json.RawMessage
+	if err := json.Unmarshal(patch, &add); err != nil {
+		return store.Asset{}, err
+	}
+	for k, v := range add {
+		merged[k] = v
+	}
+	f.asset.QuickLook, _ = json.Marshal(merged)
+	return f.asset, nil
+}
+
 func (f *fakeStore) SkipQuickLook(_ context.Context, ws ids.WorkspaceID, id ids.AssetID) (store.Asset, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -68,6 +68,7 @@ func footageText(rows []store.ProjectFootageRow, o footageOpts) string {
 		return "Footage: this project has no usable clips."
 	}
 	var b strings.Builder
+	anySubject := false
 	fmt.Fprintf(&b, "Footage: %d clips, in the creator's order. Only these can go on the timeline.\n", len(rows))
 	for n, r := range rows {
 		var dur int64
@@ -93,11 +94,12 @@ func footageText(rows []store.ProjectFootageRow, o footageOpts) string {
 		if sum, ok := o.Analysis[r.AssetID]; ok {
 			fmt.Fprintf(&b, "  analysis: %s\n", sum.Line())
 		}
-		if line := subjectLine(o.Subjects, r.AssetID.String()); line != "" {
-			fmt.Fprintf(&b, "  subject: %s\n", line)
-		}
 		if !o.Full && n >= o.Detailed {
 			continue
+		}
+		if line := subjectLine(o.Subjects, r.AssetID.String()); line != "" {
+			fmt.Fprintf(&b, "  subject: %s\n", line)
+			anySubject = true
 		}
 		if title := r.Title; o.Full || o.TitleChars > 0 {
 			if !o.Full {
@@ -111,6 +113,9 @@ func footageText(rows []store.ProjectFootageRow, o footageOpts) string {
 			}
 			fmt.Fprintf(&b, "  description: %s\n", runtime.Untrusted("clip_description", d))
 		}
+	}
+	if anySubject {
+		b.WriteString("\nA subject line says where the person's head is in the clip: its top as a percentage of the frame height at the sampled times. A title above the head needs the band between the top of the safe zone and that line; check_edit says when a title covers the head.\n")
 	}
 	if o.Analysis != nil {
 		if n := unanalysed(rows, o.Analysis); n > 0 {
@@ -131,11 +136,11 @@ func subjectLine(ix subject.Index, assetID string) string {
 		return ""
 	}
 	var parts []string
-	for _, s := range tr.Samples {
+	for _, s := range tr.Samples[:min(len(tr.Samples), 4)] {
 		parts = append(parts, fmt.Sprintf("%.0f %% at %s", s.HeadTopY*100, secs(s.AtMs)))
 	}
 	top, _ := subject.TopPct(tr.Samples)
-	return fmt.Sprintf("the top of the head is at about %.0f %% from the top of the frame (%s); a title above it needs the band between the top of the safe zone and that line. check_edit says when a title covers the head", top, strings.Join(parts, ", "))
+	return fmt.Sprintf("head top at about %.0f %% from the top (%s)", top, strings.Join(parts, ", "))
 }
 
 // unanalysed counts the video clips that have no analysis yet.

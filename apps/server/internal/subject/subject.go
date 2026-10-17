@@ -80,8 +80,11 @@ func Clean(t Track) (Track, bool) {
 	}
 	out := Track{Aspect: math.Round(t.Aspect*1000) / 1000}
 	for _, s := range t.Samples {
-		if s.Valid() {
-			out.Samples = append(out.Samples, s.Clamp())
+		if !s.Valid() {
+			continue
+		}
+		if c := s.Clamp(); c.Valid() { // clamping a box that overran by a hair must not leave a sliver
+			out.Samples = append(out.Samples, c)
 		}
 	}
 	slices.SortStableFunc(out.Samples, func(a, b Sample) int { return int(a.AtMs - b.AtMs) })
@@ -148,7 +151,7 @@ func abs64(v int64) int64 {
 }
 
 // Head is the head and shoulders of a sample as a box of fractions: the middle 60 % of the subject's width, from the top of the head down
-// a fifth of the subject's height. It is the part a title must not cover.
+// 22 % of the subject's height. It is the part a title must not cover.
 func (s Sample) Head() (x0, y0, x1, y1 float64) {
 	cx := s.X + s.W/2
 	half := s.W * headCentre / 2

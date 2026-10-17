@@ -98,6 +98,17 @@ func (d Distance) Failed() []Dimension {
 	return out
 }
 
+// Hard is how many dimensions have to match (the soft ones only advise).
+func (d Distance) Hard() int {
+	n := 0
+	for _, x := range d.Dimensions {
+		if !x.Soft {
+			n++
+		}
+	}
+	return n
+}
+
 // Borderline lists the soft dimensions that are out of range: advice, not a failure.
 func (d Distance) Borderline() []Dimension {
 	var out []Dimension
@@ -262,7 +273,7 @@ func (p *Profile) compareTitleLook(e EditStats, add, addSoft func(id, value, exp
 	wantOne := (t.OneLineChars > 0 && e.TitleChars > 0 && e.TitleChars <= t.OneLineChars) || (t.OneLineChars == 0 && t.OneLineShare >= 0.5)
 	if wantOne && e.TitleLines > 0 {
 		add("title_lines", fmt.Sprintf("%d lines (%d characters)", e.TitleLines, e.TitleChars), "one line (the creator's titles of this length are one line)", e.TitleLines == 1,
-			titleLinesFix(e))
+			titleLinesFix(e, t))
 	}
 	if patternKinds(t) != "" && e.TitleKind != "" {
 		addSoft("title_pattern", e.TitleKind, "one of the creator's forms: "+patternKinds(t), t.Follows(e.TitleKind),
@@ -280,14 +291,26 @@ func (p *Profile) compareTitleLook(e EditStats, add, addSoft func(id, value, exp
 }
 
 // titleLinesFix says how to make the title one line: take the line break out, lower the scale to the one that fits, or shorten the text.
-func titleLinesFix(e EditStats) string {
+func titleLinesFix(e EditStats, t *TextProfile) string {
 	switch {
 	case e.TitleBreak:
 		return "take the line break out of the title's text so it is one line"
-	case e.TitleFitScale > 0:
+	case e.TitleFitScale > 0 && fitsTheCreatorsSize(e, t):
 		return fmt.Sprintf("set the title's scale to %g to fit it on one line, or shorten the text", e.TitleFitScale)
 	}
-	return "shorten the title's text to fit one line"
+	return "shorten the title's text to fit one line (a smaller scale would make the letters smaller than the creator's)"
+}
+
+// fitsTheCreatorsSize says the scale at which the title fits one line still gives capitals within the creator's size range.
+func fitsTheCreatorsSize(e EditStats, t *TextProfile) bool {
+	if t.HeightPct <= 0 || e.TitleHeightPct <= 0 {
+		return true
+	}
+	cur := e.TitleScale
+	if cur <= 0 {
+		cur = 1
+	}
+	return e.TitleHeightPct*e.TitleFitScale/cur >= t.HeightPct*TitleSizeLo
 }
 
 // patternKinds lists the kinds the creator uses, for the expected column.
@@ -341,7 +364,7 @@ func cutsFix(pc PacingProfile, cuts, perMin, lo, hi, perMinHi float64) string {
 // Text is the distance as the editor and cfctl read it.
 func (d Distance) Text() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "style distance: %.0f %% of %d dimensions in the creator's range\n", d.Score*100, len(d.Dimensions))
+	fmt.Fprintf(&b, "style distance: %.0f %% of %d dimensions in the creator's range\n", d.Score*100, d.Hard())
 	for _, x := range d.Dimensions {
 		mark := "ok  "
 		switch {

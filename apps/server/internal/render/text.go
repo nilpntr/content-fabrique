@@ -64,6 +64,8 @@ func (c *compiler) subtitles() (*Subtitles, error) {
 					}
 				}
 				switch {
+				case av.Overlapped && av.Cleared && av.Where == "smaller":
+					b.warn("text_moved", "text item %s was shrunk to scale %g to keep it clear of the subject's head", it.ID, av.Scale)
 				case av.Overlapped && av.Cleared:
 					b.warn("text_moved", "text item %s was moved %s the subject's head to keep it clear of it", it.ID, av.Where)
 				case av.Overlapped:

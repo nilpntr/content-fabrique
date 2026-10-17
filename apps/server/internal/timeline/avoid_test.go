@@ -88,7 +88,8 @@ func TestAvoidingShrinksToFitAboveBeforeGoingBelow(t *testing.T) {
 	out := baseSpec().Output
 	h := []style.Rect{{Left: 346, Top: 460, Right: 734, Bottom: 760}}
 	pl, av, err := PlaceTextAvoiding(out, titleItem("BACK DAY\nBLUEPRINT"), h)
-	if err != nil || !av.Overlapped || !av.Cleared || av.Where != "above" || av.Scale < style.MinScale || av.Scale >= 1 {
+	// Smaller where it stands (it stays at the top of the zone) or above the head at a smaller size: never below the head.
+	if err != nil || !av.Overlapped || !av.Cleared || (av.Where != "above" && av.Where != "smaller") || av.Scale < style.MinScale || av.Scale >= 1 {
 		t.Fatalf("%+v %v", av, err)
 	}
 	if pl.Box.Bottom >= h[0].Top || pl.Box.Top < pl.Zone.Inner.Top {
@@ -99,7 +100,7 @@ func TestAvoidingShrinksToFitAboveBeforeGoingBelow(t *testing.T) {
 // A title lower in the frame, on the chest: it goes above the head if the band above fits it, else below.
 func TestAvoidingPlacesAboveWhenTheBandFits(t *testing.T) {
 	out := baseSpec().Output
-	high := []style.Rect{{Left: 346, Top: 700, Right: 734, Bottom: 900}} // a head far down the frame: a wide band above it
+	high := []style.Rect{{Left: 346, Top: 820, Right: 734, Bottom: 1100}} // a head far down the frame, across the middle: a wide band above it
 	it := titleItem("BACK DAY")
 	it.Anchor = AnchorCenter // at the vertical middle of the frame, over the head
 	pl, av, err := PlaceTextAvoiding(out, it, high)

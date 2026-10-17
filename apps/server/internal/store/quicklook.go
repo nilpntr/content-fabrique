@@ -100,6 +100,13 @@ func (s *Store) ApplyQuickLook(ctx context.Context, ws ids.WorkspaceID, id ids.A
 	return a, err
 }
 
+// MergeQuickLookDetail adds the keys of patch (a JSON object) to the detail of a succeeded quick look and writes nothing else. ErrNotFound
+// when the asset is not ready in this workspace or its quick look has not succeeded.
+func (s *Store) MergeQuickLookDetail(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, patch json.RawMessage) (Asset, error) {
+	a, err := s.q.MergeQuickLookDetail(ctx, db.MergeQuickLookDetailParams{WorkspaceID: ws, ID: id, Patch: patch})
+	return a, mapErr(err)
+}
+
 // FailQuickLook marks the quick look failed and records the detail (an error code, the frames when they were cut). The
 // title, description and tags are left as they were. ErrNotFound when the asset is not ready in this workspace any more.
 func (s *Store) FailQuickLook(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, detail json.RawMessage) (Asset, error) {

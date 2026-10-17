@@ -77,7 +77,7 @@ func TestTheFootageListSaysWhereTheHeadIs(t *testing.T) {
 	rows := []store.ProjectFootageRow{{AssetID: id, Kind: store.AssetKindVideo}}
 	ix := headAt22For(id.String())
 	text := footageText(rows, footageOpts{Full: true, Subjects: ix})
-	for _, want := range []string{"  subject: the top of the head is at about 22 % from the top of the frame (22 % at 1.0 s)", "check_edit says when a title covers the head"} {
+	for _, want := range []string{"  subject: head top at about 22 % from the top (22 % at 1.0 s)", "check_edit says when a title covers the head"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the line lacks %q:\n%s", want, text)
 		}
@@ -157,6 +157,11 @@ func TestTheNoteFollowsOnlyARealTemplate(t *testing.T) {
 	}
 }
 
-func patternsFor(titles ...string) []styleprofile.TitlePattern {
-	return styleprofile.PatternsOf(titles)
+// five forms at 20 % each: none of them is the creator's template.
+func patternsFor(_ ...string) []styleprofile.TitlePattern {
+	var out []styleprofile.TitlePattern
+	for _, k := range []string{styleprofile.KindSeries, styleprofile.KindLowercase, styleprofile.KindQuestion, styleprofile.KindCaps, styleprofile.KindOther} {
+		out = append(out, styleprofile.TitlePattern{Kind: k, Share: 0.2})
+	}
+	return out
 }

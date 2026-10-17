@@ -173,6 +173,15 @@ func analysisSuite(t *testing.T, st *store.Store, suffix string) {
 		if rows, err := st.ListAssetSubjects(ctx, wa.ID, nil); err != nil || rows != nil {
 			t.Fatalf("no assets: %+v %v", rows, err)
 		}
+		// A subjects-only update writes only its own keys: the labels and the rest of the detail stay, and a quick look that has not
+		// succeeded, or is another workspace's, is not touched.
+		patched, err := st.MergeQuickLookDetail(ctx, wa.ID, without.ID, []byte(`{"subjects_read":true,"subjects":{"aspect":0.5625,"samples":[{"at_ms":0,"x":0.1,"y":0.1,"w":0.5,"h":0.5,"head_top_y":0.12}]}}`))
+		if err != nil || patched.Title != "Row 2" || !strings.Contains(string(patched.QuickLook), "quicklook.v1") || !strings.Contains(string(patched.QuickLook), "subjects_read") {
+			t.Fatalf("merge: %+v %v", patched, err)
+		}
+		if _, err := st.MergeQuickLookDetail(ctx, wb.ID, without.ID, []byte(`{"x":1}`)); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("workspace B merged into A's detail: %v", err)
+		}
 		// A quick look that failed has no boxes to give, even if an earlier one had.
 		if _, err := st.FailQuickLook(ctx, wa.ID, with.ID, []byte(`{"error":"spend_cap"}`)); err != nil {
 			t.Fatal(err)

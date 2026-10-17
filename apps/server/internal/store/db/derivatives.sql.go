@@ -598,6 +598,65 @@ func (q *Queries) MarkQuickLookPending(ctx context.Context, arg MarkQuickLookPen
 	return i, err
 }
 
+const mergeQuickLookDetail = `-- name: MergeQuickLookDetail :one
+UPDATE assets SET quick_look = COALESCE(quick_look, '{}'::jsonb) || $1::jsonb, quick_look_at = now()
+WHERE workspace_id = $2 AND id = $3 AND status = 'ready' AND deleted_at IS NULL AND quick_look_status = 'succeeded'
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason
+`
+
+type MergeQuickLookDetailParams struct {
+	Patch       json.RawMessage
+	WorkspaceID ids.WorkspaceID
+	ID          ids.AssetID
+}
+
+// A run that only adds to a good quick look (the subject boxes, the frames): only those keys of the detail are written, the title, the
+// description, the tags and the rest of the detail stay as they are, whatever changed while the model call ran.
+func (q *Queries) MergeQuickLookDetail(ctx context.Context, arg MergeQuickLookDetailParams) (Asset, error) {
+	row := q.db.QueryRow(ctx, mergeQuickLookDetail, arg.Patch, arg.WorkspaceID, arg.ID)
+	var i Asset
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Kind,
+		&i.Status,
+		&i.Filename,
+		&i.ContentType,
+		&i.SizeBytes,
+		&i.Sha256,
+		&i.Title,
+		&i.Description,
+		&i.Tags,
+		&i.R2Key,
+		&i.FailureReason,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DurationMs,
+		&i.Width,
+		&i.Height,
+		&i.Fps,
+		&i.Rotation,
+		&i.VideoCodec,
+		&i.AudioCodec,
+		&i.HasAudio,
+		&i.Hdr,
+		&i.Probe,
+		&i.IngestProgress,
+		&i.IngestStage,
+		&i.IngestedAt,
+		&i.TitleSource,
+		&i.QuickLookStatus,
+		&i.QuickLook,
+		&i.QuickLookAt,
+		&i.Search,
+		&i.TranscriptStatus,
+		&i.TranscriptFailureReason,
+	)
+	return i, err
+}
+
 const setIngestProgress = `-- name: SetIngestProgress :one
 UPDATE assets SET ingest_progress = $1::smallint, ingest_stage = $2::text
 WHERE workspace_id = $3 AND id = $4 AND status = 'processing' AND deleted_at IS NULL

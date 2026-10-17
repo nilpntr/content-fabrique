@@ -34,8 +34,8 @@ func TitleKind(text string) (kind, number string) {
 	if t == "" {
 		return KindOther, ""
 	}
-	if m := seriesRe.FindStringSubmatch(t); m != nil && utf8.RuneCountInString(m[1]) >= 2 {
-		return KindSeries, m[2]
+	if m := seriesRe.FindStringSubmatch(t); m != nil && utf8.RuneCountInString(m[1]) >= 2 && CaseOf(m[1]) == "upper" {
+		return KindSeries, m[2] // "<TOPIC> <number>" in capitals; "week 2" or "I trained legs for 30" are not a series
 	}
 	if strings.HasSuffix(t, "?") {
 		return KindQuestion, ""
@@ -63,9 +63,6 @@ type TitlePattern struct {
 
 // MaxPatternExamples is how many examples a pattern keeps.
 const MaxPatternExamples = 2
-
-// PatternsOf groups the titles by kind, most common first.
-func PatternsOf(titles []string) []TitlePattern { return patternsOf(titles) }
 
 // patternsOf groups the titles by kind, most common first.
 func patternsOf(titles []string) []TitlePattern {
@@ -153,25 +150,15 @@ func patternLine(ps []TitlePattern) string {
 	return "title templates: " + strings.Join(parts, "; ") + ". Prefer the most common template, with a topic taken from the footage (the muscle or the exercise)."
 }
 
-// SeriesNumber is the number the creator's series titles end in ("101"), or "" when they have no series or no single number.
-func (t *TextProfile) SeriesNumber() string {
-	if t == nil {
-		return ""
-	}
-	for _, p := range t.Patterns {
-		if p.Kind == KindSeries {
-			return p.Number
-		}
-	}
-	return ""
-}
-
 // PatternMinShare is the share of the creator's titles a form needs to count as theirs.
 const PatternMinShare = 0.3
 
 // Follows says whether a title of this kind is one of the creator's forms (a share of at least PatternMinShare). A profile with no
 // patterns follows nothing and judges nothing.
 func (t *TextProfile) Follows(kind string) bool {
+	if t == nil {
+		return false
+	}
 	for _, p := range t.Patterns {
 		if p.Kind == kind && p.Share >= PatternMinShare {
 			return true

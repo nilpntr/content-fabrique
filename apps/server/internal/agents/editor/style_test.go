@@ -89,7 +89,7 @@ func TestBuildingLatsPassesWithTheProfileAndFailsWithout(t *testing.T) {
 		t.Fatalf("with the profile the edit fails %v:\n%s", f, with.Text())
 	}
 	c := wantStatus(t, with, CheckStyleMatch, CheckPass)
-	if !strings.Contains(c.Detail, "all 16 style dimensions") || with.Style == nil || with.Style.Score != 1 || with.Metrics.StyleScore != 1 {
+	if !strings.Contains(c.Detail, "all 15 style dimensions") || with.Style == nil || with.Style.Score != 1 || with.Metrics.StyleScore != 1 {
 		t.Errorf("style match: %s / %+v", c.Detail, with.Style)
 	}
 

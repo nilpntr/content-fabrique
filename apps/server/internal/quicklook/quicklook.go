@@ -69,6 +69,7 @@ type Store interface {
 	ApplyQuickLook(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, r store.QuickLookResult) (store.Asset, error)
 	SkipQuickLook(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (store.Asset, error)
 	FailQuickLook(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, detail json.RawMessage) (store.Asset, error)
+	MergeQuickLookDetail(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, patch json.RawMessage) (store.Asset, error)
 }
 
 // Objects is the object storage the quick look reads its frames from. *storage.Client is the real one.
@@ -247,11 +248,20 @@ func (s *Service) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, o
 		}
 		return s.fail(ctx, a, d, reason, log, res)
 	}
-	out := store.QuickLookResult{Title: res.Title, Description: res.Description, Tags: res.Tags, Detail: d.json()}
 	if keep {
-		out.Title, out.Description, out.Tags = a.Title, a.Description, a.Tags
+		// Only the new keys of the detail are written: what a person edited while the model call ran stays, and so do the labels.
 		res.Title, res.Description, res.Tags = a.Title, a.Description, a.Tags
+		patch := detail{Frames: d.Frames, Subjects: d.Subjects, SubjectsRead: d.SubjectsRead}
+		if _, err := s.cfg.Store.MergeQuickLookDetail(ctx, ws, id, patch.json()); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return Result{Outcome: OutcomeGone}, nil
+			}
+			return Result{}, fmt.Errorf("store the subject boxes: %w", err)
+		}
+		res.Outcome = OutcomeDone
+		return res, nil
 	}
+	out := store.QuickLookResult{Title: res.Title, Description: res.Description, Tags: res.Tags, Detail: d.json()}
 	if _, err := s.cfg.Store.ApplyQuickLook(ctx, ws, id, out); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return Result{Outcome: OutcomeGone}, nil
@@ -373,11 +383,24 @@ func (s *Service) ask(ctx context.Context, a store.Asset, fr frameSet, d *detail
 		return res, FailInvalidOutput, nil
 	}
 	res.Title, res.Description, res.Tags = out.Title, out.Description, out.Tags
-	d.Subjects, d.SubjectsRead = subjectTrack(out.Subjects, fr), true
+	d.Subjects = subjectTrack(out.Subjects, fr)
+	// The boxes count as asked for when the answer had usable ones, or said for the frames it spoke of that nobody is there; an answer that
+	// had none, or only boxes that did not hold up, leaves the clip to be asked again.
+	d.SubjectsRead = d.Subjects != nil || nobodyThere(out.Subjects)
 	if d.Subjects != nil {
 		res.Subjects = len(d.Subjects.Samples)
 	}
 	return res, "", nil
+}
+
+// nobodyThere says the answer had subject entries and none of them put a person in a frame.
+func nobodyThere(reads []SubjectRead) bool {
+	for _, r := range reads {
+		if r.Present {
+			return false
+		}
+	}
+	return len(reads) > 0
 }
 
 // subjectTrack turns what the model said about each frame into the clip's subject track: the frame numbers become the times the frames
