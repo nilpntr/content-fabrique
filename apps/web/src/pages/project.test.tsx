@@ -1,10 +1,10 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { createMemoryCommentsStore, type CommentsStore } from "@/components/project/comments-store";
 import { rememberRun } from "@/components/project/last-run";
 import { apiError, type FakeApi, installApi, json, renderApp } from "@/test-api";
-import { clip, event, project, projectId, readyRender, render, renderId, run, runId, timelineVersion, versionSummary } from "@/test-fixtures";
+import { ME } from "@/test-clerk";
+import { annotation, annotationId, clip, event, project, projectId, readyRender, render, renderId, run, runId, timelineVersion, versionSummary } from "@/test-fixtures";
 import { ProjectPage } from "./project";
 
 vi.mock("@tanstack/react-router", async (original) => ({
@@ -41,6 +41,8 @@ const SUMMARIES = [3, 2, 1].map((n) => versionSummary(n, { summary: SPECS[n - 1]
 /** The API of a project with three versions and a finished run. Renders are answered by the test. */
 function api(extra: Record<string, object> = {}): FakeApi {
   return installApi({
+    "GET /v1/me": ME,
+    "GET /v1/annotations": { items: [], next_cursor: null },
     "GET /v1/projects/{id}": project(1, { current_timeline_version: 3, current_version: SUMMARIES[0] }),
     "GET /v1/projects/{id}/timelines": { items: SUMMARIES, next_before: null },
     "GET /v1/projects/{id}/timelines/{version}": (call: { path: string }) => SPECS[Number(call.path.split("/").at(-1)) - 1] as object,
@@ -49,8 +51,8 @@ function api(extra: Record<string, object> = {}): FakeApi {
   });
 }
 
-function page(props: Partial<Parameters<typeof ProjectPage>[0]> = {}, comments?: CommentsStore) {
-  return renderApp(<ProjectPage projectId={P} onRunStarted={vi.fn()} comments={comments ?? createMemoryCommentsStore()} {...props} />);
+function page(props: Partial<Parameters<typeof ProjectPage>[0]> = {}) {
+  return renderApp(<ProjectPage projectId={P} onRunStarted={vi.fn()} {...props} />);
 }
 
 /** The review screen is up: the versions and their specs have loaded. */
@@ -186,25 +188,244 @@ test("choosing another version shows it, and asks for that version's preview", a
   expect(selectorButton(3).getAttribute("aria-pressed")).toBe("true");
 });
 
-test("comments are kept in the store, labelled as not saved, and come back after the screen reopens", async () => {
-  api(noRenders);
-  const store = createMemoryCommentsStore();
-  const first = page({}, store);
-  await reviewUp();
-  const panel = screen.getByRole("complementary", { name: "Comment history" });
-  expect(within(panel).getByText(/Comments aren't saved yet/)).toBeTruthy();
+// ── Comments (P1-08) ────────────────────────────────────────────────────────
 
+const panel = () => screen.getByRole("complementary", { name: "Comment history" });
+const noMs = (n: number) => n;
+
+/** A stateful /v1/annotations: what was written is what the next list returns. */
+function annotationsApi(initial: ReturnType<typeof annotation>[] = [], extra: Record<string, object> = {}) {
+  const stored = [...initial];
+  const fake = api({
+    ...noRenders,
+    "GET /v1/annotations": () => ({ items: stored, next_cursor: null }),
+    "POST /v1/annotations": (call: { body: unknown }) => {
+      const body = call.body as { target_type: "render" | "timeline_version"; target_id: string; start_ms: number; end_ms: number; body: string; pin?: { x: number; y: number } };
+      const made = annotation(stored.length + 1, {
+        id: annotationId(100 + stored.length),
+        target_type: body.target_type,
+        target_id: body.target_id,
+        start_ms: body.start_ms,
+        end_ms: body.end_ms,
+        body: body.body,
+        pin: body.pin ?? null,
+      });
+      stored.push(made);
+      return json(201, made);
+    },
+    "PATCH /v1/annotations/{id}": (call: { path: string; body: unknown }) => {
+      const i = stored.findIndex((a) => call.path.endsWith(a.id));
+      stored[i] = { ...(stored[i] as (typeof stored)[number]), ...(call.body as object), status: ((call.body as { status?: string }).status ?? stored[i]?.status) as "open" } as (typeof stored)[number];
+      return stored[i] as object;
+    },
+    "DELETE /v1/annotations/{id}": (call: { path: string }) => {
+      const i = stored.findIndex((a) => call.path.endsWith(a.id));
+      stored.splice(i, 1);
+      return json(204, null);
+    },
+    ...extra,
+  });
+  return { fake, stored };
+}
+
+const saveComment = (body: string) => {
   fireEvent.keyDown(window, { key: "c" });
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Tighten this" } });
+  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: body } });
   fireEvent.click(screen.getByRole("button", { name: /Save comment/ }));
-  expect(within(panel).getByText("Tighten this")).toBeTruthy();
-  expect(store.list(P)).toHaveLength(1);
-  expect(store.list(P)[0]).toMatchObject({ body: "Tighten this", version: 3 });
+};
+
+test("the project's comments come from the API: yours, a teammate's and the editor's reply, with their status and the version they were made on", async () => {
+  const { fake } = annotationsApi([
+    annotation(1, { body: "Tighten this", pin: { x: 0.25, y: 0.5 } }),
+    annotation(2, { body: "Use the other take", author: { kind: "user", id: "usr_01other" }, timeline_version: 1 }),
+    annotation(3, { body: "Done: trimmed.", parent_id: annotationId(1), author: { kind: "agent", id: runId(1) }, status: "open" }),
+    annotation(4, { body: "Make the title bigger", status: "applied", addressed_in_version: 3, timeline_version: 2, author: { kind: "user", id: "usr_01test" } }),
+  ]);
+  page();
+  await reviewUp();
+  await waitFor(() => expect(within(panel()).getByText("Tighten this")).toBeTruthy());
+  expect(fake.callsTo("GET /v1/annotations")[0]?.query.get("project_id")).toBe(P);
+  const row = (text: string) => within(panel()).getByText(text).closest("li") as HTMLElement;
+  expect(within(row("Tighten this")).getByText("You")).toBeTruthy();
+  expect(within(row("Use the other take")).getByText("Teammate")).toBeTruthy();
+  expect(within(row("Done: trimmed.")).getByText("Editor")).toBeTruthy();
+  expect(within(row("Done: trimmed.")).getByText("Agent reply")).toBeTruthy();
+  expect(within(row("Make the title bigger")).getByText("made on v2")).toBeTruthy();
+  expect(within(row("Make the title bigger")).getAllByText(/Addressed in v3/).length).toBeGreaterThan(0);
+  expect(within(panel()).queryByText(/aren't saved/)).toBeNull();
+});
+
+test("a comment is written to the API with its version as the target, shows at once, and is still there after the page reopens", async () => {
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const { fake, stored } = annotationsApi([], {});
+  const post = fake.callsTo;
+  const first = page();
+  await reviewUp();
+  fake.on("POST /v1/annotations", async (call: { body: unknown }) => {
+    await gate;
+    const body = call.body as { target_type: string; target_id: string; start_ms: number; end_ms: number; body: string };
+    const made = annotation(1, { id: annotationId(100), target_id: body.target_id, start_ms: body.start_ms, end_ms: body.end_ms, body: body.body });
+    stored.push(made);
+    return json(201, made);
+  });
+
+  saveComment("Tighten this");
+  // Shown before the API has answered.
+  expect(within(panel()).getByText("Tighten this")).toBeTruthy();
+  await waitFor(() => expect(post("POST /v1/annotations")).toHaveLength(1));
+  expect(post("POST /v1/annotations")[0]?.body).toEqual({
+    target_type: "timeline_version",
+    target_id: SUMMARIES[0]?.id,
+    project_id: P,
+    start_ms: noMs(0),
+    end_ms: noMs(0),
+    body: "Tighten this",
+  });
+  release?.();
+  await waitFor(() => expect(within(panel()).getByText("Tighten this").closest("li")?.getAttribute("data-comment-id")).toBe(annotationId(100)));
+  // The placeholder was swapped for the saved comment, which stays selected.
+  expect(within(panel()).getAllByRole("listitem")).toHaveLength(1);
+  expect(within(panel()).getByText("Tighten this").closest("li")?.getAttribute("data-selected")).toBe("true");
 
   first.unmount();
-  page({}, store);
+  page();
   await reviewUp();
-  expect(within(screen.getByRole("complementary", { name: "Comment history" })).getByText("Tighten this")).toBeTruthy();
+  expect(await within(panel()).findByText("Tighten this")).toBeTruthy();
+});
+
+test("with the preview of the version on screen ready, the comment is about the render", async () => {
+  const { fake } = annotationsApi([], {
+    "GET /v1/projects/{id}/renders": { items: [render({ id: renderId(1), timeline_version: 3, status: "ready" })], next_cursor: null },
+    "GET /v1/renders/{id}": readyRender({ id: renderId(1), timeline_version: 3 }),
+    "GET /time-map.json": [],
+  });
+  page();
+  await waitFor(() => expect(document.querySelector("video")?.getAttribute("src")).toBe("https://files.test/preview.mp4"));
+  saveComment("On the video");
+  await waitFor(() => expect(fake.callsTo("POST /v1/annotations")).toHaveLength(1));
+  expect(fake.callsTo("POST /v1/annotations")[0]?.body).toMatchObject({ target_type: "render", target_id: renderId(1), body: "On the video" });
+});
+
+test("a comment the API refuses is taken back, with the reason; the others stay", async () => {
+  const { fake } = annotationsApi([annotation(1, { body: "Already saved" })], { "POST /v1/annotations": apiError(403, "insufficient_role") });
+  page();
+  await reviewUp();
+  await within(panel()).findByText("Already saved");
+  saveComment("Will be refused");
+  await waitFor(() => expect(fake.callsTo("POST /v1/annotations")).toHaveLength(1));
+  await waitFor(() => expect(within(panel()).queryByText("Will be refused")).toBeNull());
+  expect(within(panel()).getByText("Already saved")).toBeTruthy();
+  expect(within(panel()).getByRole("alert").textContent).toMatch(/role in this workspace can't change this comment/);
+  // Dismissed.
+  fireEvent.click(within(panel()).getByRole("button", { name: "Dismiss" }));
+  expect(within(panel()).queryByRole("alert")).toBeNull();
+});
+
+test("a comment dragged past the end of the render stops at its last frame", async () => {
+  const { fake } = annotationsApi([], {
+    "GET /v1/projects/{id}/renders": { items: [render({ id: renderId(1), timeline_version: 3, status: "ready" })], next_cursor: null },
+    "GET /v1/renders/{id}": readyRender({ id: renderId(1), timeline_version: 3, duration_ms: 1000 }),
+    "GET /time-map.json": [],
+  });
+  page();
+  await waitFor(() => expect(document.querySelector("video")?.getAttribute("src")).toBe("https://files.test/preview.mp4"));
+  fireEvent.change(screen.getByRole("slider", { name: "Scrub" }), { target: { value: "3000" } });
+  saveComment("Past the end");
+  await waitFor(() => expect(fake.callsTo("POST /v1/annotations")).toHaveLength(1));
+  expect(fake.callsTo("POST /v1/annotations")[0]?.body).toMatchObject({ target_type: "render", start_ms: 1000, end_ms: 1000 });
+});
+
+test("a comment whose refetch overtook it is put back when it is saved, and a delete is not undone by a refetch that started before it", async () => {
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const { fake, stored } = annotationsApi([annotation(7, { body: "Old one" })]);
+  const { queryClient } = page();
+  await reviewUp();
+  await within(panel()).findByText("Old one");
+  fake.on("POST /v1/annotations", async (call: { body: unknown }) => {
+    await gate;
+    const body = call.body as { target_id: string; start_ms: number; end_ms: number; body: string };
+    const made = annotation(1, { id: annotationId(100), target_id: body.target_id, start_ms: body.start_ms, end_ms: body.end_ms, body: body.body });
+    stored.push(made);
+    return json(201, made);
+  });
+  saveComment("Raced");
+  await waitFor(() => expect(fake.callsTo("POST /v1/annotations")).toHaveLength(1));
+  // The list is fetched again before the POST has answered: the server does not have the comment yet.
+  fake.on("GET /v1/annotations", () => ({ items: stored.filter((a) => a.id !== annotationId(100)), next_cursor: null }));
+  await queryClient.invalidateQueries({ queryKey: ["annotations"] });
+  release?.();
+  await waitFor(() => expect(within(panel()).getByText("Raced").closest("li")?.getAttribute("data-comment-id")).toBe(annotationId(100)));
+  expect(within(panel()).getAllByRole("listitem")).toHaveLength(2);
+});
+
+test("resolving and reopening a comment goes through the API; a refusal puts it back", async () => {
+  const { fake } = annotationsApi([annotation(1, { body: "Tighten this" }), annotation(2, { body: "Someone else's", author: { kind: "user", id: "usr_01other" } })]);
+  page();
+  await reviewUp();
+  const mine = async () => (await within(panel()).findByText("Tighten this")).closest("li") as HTMLElement;
+  fireEvent.click(within(await mine()).getByRole("button", { name: "Resolve" }));
+  await waitFor(() => expect(within(panel()).getByText("Tighten this").closest("li")?.getAttribute("data-status")).toBe("resolved"));
+  expect(fake.callsTo("PATCH /v1/annotations/{id}")[0]?.body).toEqual({ status: "resolved" });
+  expect(fake.callsTo("PATCH /v1/annotations/{id}")[0]?.path).toBe(`/v1/annotations/${annotationId(1)}`);
+  fireEvent.click(within(await mine()).getByRole("button", { name: "Reopen" }));
+  await waitFor(() => expect(within(panel()).getByText("Tighten this").closest("li")?.getAttribute("data-status")).toBe("open"));
+  expect(fake.callsTo("PATCH /v1/annotations/{id}")[1]?.body).toEqual({ status: "open" });
+
+  // Anyone who can comment can resolve a teammate's comment, but not edit or delete it.
+  const theirs = within(panel()).getByText("Someone else's").closest("li") as HTMLElement;
+  expect(within(theirs).getByRole("button", { name: "Resolve" })).toBeTruthy();
+  expect(within(theirs).queryByRole("button", { name: "Edit" })).toBeNull();
+  expect(within(theirs).queryByRole("button", { name: "Delete" })).toBeNull();
+
+  fake.on("PATCH /v1/annotations/{id}", apiError(403, "insufficient_role"));
+  fireEvent.click(within(await mine()).getByRole("button", { name: "Resolve" }));
+  await waitFor(() => expect(within(panel()).getByRole("alert")).toBeTruthy());
+  expect(within(panel()).getByText("Tighten this").closest("li")?.getAttribute("data-status")).toBe("open");
+});
+
+test("the author edits the text of a comment and deletes it (asking twice); a failed delete brings it back", async () => {
+  const { fake, stored } = annotationsApi([annotation(1, { body: "Tighten this" }), annotation(2, { body: "Reply", parent_id: annotationId(1), author: { kind: "agent", id: runId(1) } })]);
+  page();
+  await reviewUp();
+  const li = async () => (await within(panel()).findByText(/Tighten this|Tighten the cut/)).closest("li") as HTMLElement;
+  fireEvent.click(within(await li()).getByRole("button", { name: "Edit" }));
+  const box = screen.getByRole("textbox", { name: "Edit comment text" });
+  fireEvent.change(box, { target: { value: "  Tighten the cut  " } });
+  fireEvent.click(within(screen.getByRole("form", { name: "Edit comment" })).getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(fake.callsTo("PATCH /v1/annotations/{id}")).toHaveLength(1));
+  expect(fake.callsTo("PATCH /v1/annotations/{id}")[0]?.body).toEqual({ body: "Tighten the cut" });
+  expect(within(panel()).getByText("Tighten the cut")).toBeTruthy();
+
+  // A refused delete: the comment and its reply come back.
+  fake.on("DELETE /v1/annotations/{id}", apiError(500, "internal_error"));
+  fireEvent.click(within(await li()).getByRole("button", { name: "Delete" }));
+  fireEvent.click(within(await li()).getByRole("button", { name: "Delete for good" }));
+  await waitFor(() => expect(within(panel()).getByRole("alert")).toBeTruthy());
+  await waitFor(() => expect(within(panel()).getAllByRole("listitem")).toHaveLength(2));
+
+  // And a delete that works takes the reply with it.
+  fake.on("DELETE /v1/annotations/{id}", (call: { path: string }) => {
+    stored.splice(0, stored.length);
+    return json(204, call.path ? null : null);
+  });
+  fireEvent.click(within(await li()).getByRole("button", { name: "Delete" }));
+  fireEvent.click(within(await li()).getByRole("button", { name: "Delete for good" }));
+  await waitFor(() => expect(within(panel()).queryAllByRole("listitem")).toHaveLength(0));
+  expect(fake.callsTo("DELETE /v1/annotations/{id}").at(-1)?.path).toBe(`/v1/annotations/${annotationId(1)}`);
+});
+
+test("if the comments cannot be loaded the review still works and says so", async () => {
+  api({ ...noRenders, "GET /v1/annotations": apiError(404, "not_found") });
+  page();
+  await reviewUp();
+  expect(await within(panel()).findByText(/Your comments could not be loaded/)).toBeTruthy();
+  expect(screen.getByRole("group", { name: /Timeline tracks/ })).toBeTruthy();
 });
 
 test("edit again starts a run with the new instructions and reports it; the spending cap is shown", async () => {

@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/nilpntr/content-fabrique/internal/agents/runapi"
+	"github.com/nilpntr/content-fabrique/internal/annotations"
 	"github.com/nilpntr/content-fabrique/internal/api"
 	"github.com/nilpntr/content-fabrique/internal/assets"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
@@ -21,13 +22,14 @@ import (
 // GetLibrarySummary in entitlements.go, and the assets operations come from the embedded *assets.Handler (package assets,
 // which reads the workspace from the Principal through callerOf), and the projects and timeline operations come from the
 // embedded *projects.API (package projects, the same way), the runs operations (start an editor run, read, cancel and answer a
-// run) from the embedded *runapi.Runs, and the renders operations from the embedded *renderjobs.RenderAPI. The Clerk webhook is not here: it reads the raw body and the Svix headers
+// run) from the embedded *runapi.Runs, the renders operations from the embedded *renderjobs.RenderAPI, and the annotations operations from the embedded *annotations.CommentAPI. The Clerk webhook is not here: it reads the raw body and the Svix headers
 // itself (webhook.go), so the spec documents it and the generator leaves it out.
 type apiServer struct {
 	*assets.Handler
 	*projects.API
 	*runapi.Runs
 	*renderjobs.RenderAPI
+	*annotations.CommentAPI
 	ents   EntitlementReader
 	logger *slog.Logger
 }
@@ -41,7 +43,7 @@ func newAPIServer(ents EntitlementReader, logger *slog.Logger) *apiServer {
 	// Without a configured object store the assets operations answer 503 storage_not_configured (Mount replaces this
 	// handler when it is given a service).
 	return &apiServer{Handler: assets.NewHandler(nil, callerOf, logger), API: projects.NewAPI(nil, callerOf, logger),
-		Runs: runapi.New(nil, callerOf, runapi.Options{}, logger), RenderAPI: renderjobs.NewAPI(nil, callerOf, logger), ents: ents, logger: logger}
+		Runs: runapi.New(nil, callerOf, runapi.Options{}, logger), RenderAPI: renderjobs.NewAPI(nil, callerOf, logger), CommentAPI: annotations.NewAPI(nil, callerOf, logger), ents: ents, logger: logger}
 }
 
 // callerOf is how the handlers learn who is calling: the Principal the authentication middleware resolved from the verified

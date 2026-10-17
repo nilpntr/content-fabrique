@@ -39,6 +39,7 @@ describe("editor tools contract", () => {
       "view_clip",
       "find_moments",
       "get_timeline",
+      "get_comments",
       "edit_timeline",
       "render_preview",
       "finish",

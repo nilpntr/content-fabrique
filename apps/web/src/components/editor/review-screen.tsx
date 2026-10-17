@@ -13,6 +13,9 @@ import type { CommentDraft, Pin, ReviewAnnotation, ReviewVersion } from "./types
 import { usePlayerController } from "./use-player";
 import { VersionSelector } from "./version-selector";
 
+/** Makes the placeholder ids of the comments this tab writes; they differ across screens so that two never collide. */
+let localComments = 0;
+
 /** How far J and L jump. */
 const JUMP_MS = 5000;
 
@@ -28,9 +31,19 @@ export interface ReviewScreenProps {
   src?: string;
   /** The version to open on. Falls back to the latest version when it is not given or does not exist. */
   initialVersion?: number;
-  onCommentCreate?: (comment: ReviewAnnotation) => void;
-  /** Called with the whole list after every change to it (a comment added, and later edited, resolved or deleted). */
+  /** A promise that resolves with `{ id }` (the id the API issued) keeps the new comment selected under that id. */
+  onCommentCreate?: (comment: ReviewAnnotation) => unknown;
+  /** Called with the whole list after every change to it (a comment added, edited, resolved or deleted). */
   onCommentsChange?: (comments: ReviewAnnotation[]) => void;
+  /**
+   * A comment was edited or resolved (`status`) in the panel. Giving it, with `onCommentDelete`, turns the actions on: Resolve and
+   * Reopen for every comment, Edit and Delete for the ones marked `author.own`.
+   */
+  onCommentUpdate?: (id: string, patch: { body?: string; status?: "open" | "resolved" }) => void;
+  onCommentDelete?: (id: string) => void;
+  /** Why the last change could not be saved. The screen has already taken its own copy of the change back when `comments` says so. */
+  commentsError?: string;
+  onDismissCommentsError?: () => void;
   /** Whether the "Local video" button is offered (it plays a file from the computer instead of the placeholder). Default true. */
   localVideo?: boolean;
   /** What the frame says when there is no video to play. Default "Placeholder preview". */
@@ -93,6 +106,10 @@ function ReviewWorkspace({
   initialVersion,
   onCommentCreate,
   onCommentsChange,
+  onCommentUpdate,
+  onCommentDelete,
+  commentsError,
+  onDismissCommentsError,
   onSeek,
   className,
   localVideo = true,
@@ -111,6 +128,16 @@ function ReviewWorkspace({
 
   const [comments, setComments] = React.useState(initialComments);
   const commentsRef = React.useRef(comments);
+  // The comments the parent holds are the truth: when it hands over a new list (a comment was saved and got its id, a change was
+  // refused and taken back, a teammate commented) the screen takes it. The screen's own changes show at once and the parent
+  // follows in the same breath, so the two meet.
+  const handedOver = React.useRef(initialComments);
+  React.useEffect(() => {
+    if (handedOver.current === initialComments) return;
+    handedOver.current = initialComments;
+    commentsRef.current = initialComments;
+    setComments(initialComments);
+  }, [initialComments]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [hoveredId, setHoveredId] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState<CommentDraft | null>(null);
@@ -119,7 +146,6 @@ function ReviewWorkspace({
   const [composing, setComposing] = React.useState(false);
   const [pinMode, setPinMode] = React.useState(false);
   const [localSrc, setLocalSrc] = React.useState<{ url: string; name: string } | null>(null);
-  const created = React.useRef(0);
   const fileInput = React.useRef<HTMLInputElement>(null);
   /** Set when "Open vN" switches version: the seek has to wait for the new version's duration. */
   const pendingSeek = React.useRef<{ version: number; ms: number } | null>(null);
@@ -235,10 +261,10 @@ function ReviewWorkspace({
   const saveDraft = React.useCallback(
     (body: string) => {
       if (!draft) return;
-      created.current += 1;
+      localComments += 1;
       const comment: ReviewAnnotation = {
         // Placeholder until the annotations API issues a TypeID.
-        id: `ann_local_${created.current}`,
+        id: `ann_local_${localComments}`,
         version: version.version,
         start_ms: draft.start_ms,
         end_ms: draft.end_ms,
@@ -246,7 +272,7 @@ function ReviewWorkspace({
         kind: "comment",
         body,
         status: "open",
-        author: { kind: "creator", name: "You" },
+        author: { kind: "creator", name: "You", own: true },
         created_at: new Date().toISOString(),
       };
       const next = [...commentsRef.current, comment];
@@ -255,9 +281,50 @@ function ReviewWorkspace({
       onCommentsChange?.(next);
       setSelectedId(comment.id);
       clearDraft();
-      onCommentCreate?.(comment);
+      const saved = onCommentCreate?.(comment);
+      // The API gives the comment its own id: keep it selected.
+      if (saved instanceof Promise) {
+        void saved.then((result: unknown) => {
+          const id = (result as { id?: unknown } | undefined)?.id;
+          if (typeof id === "string") setSelectedId((current) => (current === comment.id ? id : current));
+        });
+      }
     },
     [draft, version.version, clearDraft, onCommentCreate, onCommentsChange],
+  );
+
+  const change = React.useCallback(
+    (next: ReviewAnnotation[]) => {
+      commentsRef.current = next;
+      setComments(next);
+      onCommentsChange?.(next);
+    },
+    [onCommentsChange],
+  );
+
+  const updateComment = React.useCallback(
+    (id: string, patch: { body?: string; status?: "open" | "resolved" }) => {
+      change(
+        commentsRef.current.map((comment) => {
+          if (comment.id !== id) return comment;
+          // What the editor applied is not what is written now, or what was just reopened: it is open again.
+          const status = patch.status ?? (comment.status === "applied" && patch.body !== undefined ? "open" : comment.status);
+          const reopened = status !== comment.status;
+          return { ...comment, ...(patch.body !== undefined ? { body: patch.body } : {}), status, ...(reopened ? { applied_in_version: undefined } : {}) };
+        }),
+      );
+      onCommentUpdate?.(id, patch);
+    },
+    [change, onCommentUpdate],
+  );
+
+  const deleteComment = React.useCallback(
+    (id: string) => {
+      change(commentsRef.current.filter((comment) => comment.id !== id && comment.reply_to !== id));
+      setSelectedId((current) => (current === id ? null : current));
+      onCommentDelete?.(id);
+    },
+    [change, onCommentDelete],
   );
 
   const changeDraft = React.useCallback(
@@ -407,6 +474,11 @@ function ReviewWorkspace({
         onHover={setHoveredId}
         onOpenVersion={openVersion}
         note={commentsNote}
+        error={commentsError}
+        onDismissError={onDismissCommentsError}
+        onResolve={onCommentUpdate ? (id, resolved) => updateComment(id, { status: resolved ? "resolved" : "open" }) : undefined}
+        onEdit={onCommentUpdate ? (id, body) => updateComment(id, { body }) : undefined}
+        onDelete={onCommentDelete ? deleteComment : undefined}
         className="lg:sticky lg:top-4 lg:max-h-[calc(100svh-2rem)]"
       />
     </section>

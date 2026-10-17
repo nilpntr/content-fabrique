@@ -24,6 +24,8 @@ export const RUN_QUERY_KEY = "run";
 /** The preview render of a version: `[RENDERS_QUERY_KEY, user, org, projectId, version]` (the list), `[RENDER_QUERY_KEY, ..., renderId]` (one). */
 export const RENDERS_QUERY_KEY = "renders";
 export const RENDER_QUERY_KEY = "render";
+/** The comments of a project: `[ANNOTATIONS_QUERY_KEY, user, org, projectId]`. */
+export const ANNOTATIONS_QUERY_KEY = "annotations";
 
 /** Whether an error is the API's 402: the workspace's plan lapsed (or was revoked) since `me` was fetched. */
 export function isPlanRequired(error: unknown): boolean {

@@ -104,7 +104,7 @@ func newAssetsEnv(t *testing.T, opts ...func(*assetsEnvOptions)) *assetsEnv {
 	}
 
 	dir := newFakeDir()
-	for _, u := range []string{"ada", "bob", "vic"} {
+	for _, u := range []string{"ada", "bob", "vic", "dan"} {
 		dir.users["user_"+u] = ClerkUser{ID: "user_" + u, Email: u + "@example.com", UpdatedAt: 1}
 	}
 	dir.orgs["org_ada"] = ClerkOrg{ID: "org_ada", Name: "Ada Studio", UpdatedAt: 1}
@@ -136,7 +136,8 @@ func newAssetsEnv(t *testing.T, opts ...func(*assetsEnvOptions)) *assetsEnv {
 		return e.f.token(t, map[string]any{"sub": "user_" + user, "o": map[string]any{"id": org, "rol": role, "slg": "x"}, "exp": time.Now().Add(2 * time.Hour).Unix()})
 	}
 	e.token["ada"], e.token["bob"], e.token["viewer"] = tok("ada", "org_ada", "admin"), tok("bob", "org_bob", "admin"), tok("vic", "org_ada", "guest")
-	for _, who := range []string{"ada", "bob", "viewer"} {
+	e.token["editor"] = tok("dan", "org_ada", "member")
+	for _, who := range []string{"ada", "bob", "viewer", "editor"} {
 		if rec := e.do(http.MethodGet, "/v1/me", who, nil); rec.Code != http.StatusOK {
 			t.Fatalf("/v1/me as %s: %d %s", who, rec.Code, rec.Body)
 		}
@@ -151,7 +152,7 @@ func newAssetsEnv(t *testing.T, opts ...func(*assetsEnvOptions)) *assetsEnv {
 			t.Fatal(err)
 		}
 	}
-	e.ws["viewer"] = e.ws["ada"]
+	e.ws["viewer"], e.ws["editor"] = e.ws["ada"], e.ws["ada"]
 	return e
 }
 

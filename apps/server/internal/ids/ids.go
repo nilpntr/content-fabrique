@@ -131,22 +131,24 @@ func (id *ID[P]) Scan(src any) error { return id.UUID.Scan(src) }
 
 // The kinds that have a Go type so far.
 type (
-	workspaceKind struct{}
-	userKind      struct{}
-	assetKind     struct{}
-	uploadKind    struct{}
-	projectKind   struct{}
-	timelineKind  struct{}
-	renderKind    struct{}
+	workspaceKind  struct{}
+	userKind       struct{}
+	assetKind      struct{}
+	uploadKind     struct{}
+	projectKind    struct{}
+	timelineKind   struct{}
+	renderKind     struct{}
+	annotationKind struct{}
 )
 
-func (workspaceKind) Prefix() string { return PrefixWorkspace }
-func (userKind) Prefix() string      { return PrefixUser }
-func (assetKind) Prefix() string     { return PrefixAsset }
-func (uploadKind) Prefix() string    { return PrefixUpload }
-func (projectKind) Prefix() string   { return PrefixProject }
-func (timelineKind) Prefix() string  { return PrefixTimeline }
-func (renderKind) Prefix() string    { return PrefixRender }
+func (workspaceKind) Prefix() string  { return PrefixWorkspace }
+func (userKind) Prefix() string       { return PrefixUser }
+func (assetKind) Prefix() string      { return PrefixAsset }
+func (uploadKind) Prefix() string     { return PrefixUpload }
+func (projectKind) Prefix() string    { return PrefixProject }
+func (timelineKind) Prefix() string   { return PrefixTimeline }
+func (renderKind) Prefix() string     { return PrefixRender }
+func (annotationKind) Prefix() string { return PrefixAnnotation }
 
 type (
 	// WorkspaceID is the key of a workspace (wks_...). Every tenant-owned row carries one.
@@ -163,6 +165,8 @@ type (
 	TimelineID = ID[timelineKind]
 	// RenderID is the key of a render (ren_...), one run of a timeline version through a profile.
 	RenderID = ID[renderKind]
+	// AnnotationID is the key of an annotation (ann_...), a comment on a clip, a render or a timeline version.
+	AnnotationID = ID[annotationKind]
 )
 
 // ParseWorkspaceID reads a wks_ TypeID.
@@ -185,3 +189,6 @@ func ParseTimelineID(s string) (TimelineID, error) { return Parse[timelineKind](
 
 // ParseRenderID reads a ren_ TypeID.
 func ParseRenderID(s string) (RenderID, error) { return Parse[renderKind](s) }
+
+// ParseAnnotationID reads an ann_ TypeID.
+func ParseAnnotationID(s string) (AnnotationID, error) { return Parse[annotationKind](s) }
