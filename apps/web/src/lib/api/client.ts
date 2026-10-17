@@ -49,6 +49,31 @@ export type ApiAsset = components["schemas"]["Asset"];
 /** GET /v1/assets: a page of assets, newest first. */
 export type AssetsPage = components["schemas"]["ListAssetsResponse"];
 
+/** POST /v1/projects: the new-project flow's request. */
+export type CreateProjectRequest = components["schemas"]["CreateProjectRequest"];
+export type ProjectFormat = components["schemas"]["ProjectFormat"];
+export type ProjectStatus = components["schemas"]["ProjectStatus"];
+/** GET /v1/projects/{id}: a project with its footage and current timeline version. */
+export type Project = components["schemas"]["Project"];
+/** An entry of GET /v1/projects. */
+export type ProjectSummary = components["schemas"]["ProjectSummary"];
+export type ProjectsPage = components["schemas"]["ListProjectsResponse"];
+/** One timeline version without its spec: number, author, the summary lines of what changed. */
+export type TimelineVersionSummary = components["schemas"]["TimelineVersionSummary"];
+/** One timeline version with its spec. */
+export type TimelineVersion = components["schemas"]["TimelineVersion"];
+export type StartEditRequest = components["schemas"]["StartEditRequest"];
+export type RunProfile = components["schemas"]["RunProfile"];
+export type RunStatus = components["schemas"]["RunStatus"];
+export type RunEvent = components["schemas"]["RunEvent"];
+/** An agent run, with its cost, budgets and a summary of its events. */
+export type Run = components["schemas"]["Run"];
+
+export type RenderProfile = components["schemas"]["RenderProfile"];
+export type RenderStatus = components["schemas"]["RenderStatus"];
+/** A render of a timeline version. In a list it has no presigned URLs (`files` is null): fetch it with GET /v1/renders/{id}. */
+export type Render = components["schemas"]["Render"];
+
 export interface ApiClientOptions {
   getToken: GetToken;
   /** For tests. Defaults to `apiBaseUrl()`. */
@@ -125,3 +150,64 @@ export const deleteAsset = async (client: ApiClient, id: string): Promise<void> 
 /** The hover-scrub track of a ready video as WebVTT text, every cue pointing at the sprite sheet through a fresh URL. It needs the bearer token, so it cannot be a plain `<track src>`. */
 export const fetchSpriteVtt = async (client: ApiClient, id: string, signal?: AbortSignal): Promise<string> =>
   unwrap(await client.GET("/v1/assets/{id}/sprite.vtt", { params: { path: { id: id as ApiAsset["id"] } }, parseAs: "text", signal }));
+
+// ── Projects ────────────────────────────────────────────────────────────────
+
+export const createProject = async (client: ApiClient, body: CreateProjectRequest): Promise<Project> => unwrap(await client.POST("/v1/projects", { body }));
+
+/** One page of the workspace's projects (newest first). `cursor` is the previous page's `next_cursor`. */
+export const fetchProjects = async (client: ApiClient, cursor?: string, signal?: AbortSignal): Promise<ProjectsPage> =>
+  unwrap(await client.GET("/v1/projects", { params: { query: { limit: 50, cursor } }, signal }));
+
+export const fetchProject = async (client: ApiClient, id: string, signal?: AbortSignal): Promise<Project> =>
+  unwrap(await client.GET("/v1/projects/{id}", { params: { path: { id } }, signal }));
+
+/** All versions of a project's timeline, newest first, without their specs. */
+export const fetchTimelineVersions = async (client: ApiClient, id: string, signal?: AbortSignal): Promise<TimelineVersionSummary[]> => {
+  const all: TimelineVersionSummary[] = [];
+  let before: number | undefined;
+  // 100 a page, so a second page is rare; the loop is bounded.
+  for (let page = 0; page < 20; page++) {
+    const data = unwrap(await client.GET("/v1/projects/{id}/timelines", { params: { path: { id }, query: { limit: 100, before } }, signal }));
+    all.push(...(Array.isArray(data.items) ? data.items : []));
+    if (typeof data.next_before !== "number") break;
+    before = data.next_before;
+  }
+  return all;
+};
+
+export const fetchTimelineVersion = async (client: ApiClient, id: string, version: number, signal?: AbortSignal): Promise<TimelineVersion> =>
+  unwrap(await client.GET("/v1/projects/{id}/timelines/{version}", { params: { path: { id, version } }, signal }));
+
+// ── Runs ────────────────────────────────────────────────────────────────────
+
+/** POST /v1/projects/{id}/edit: starts the editor agent. The answer is the run, `queued`. */
+export const startEdit = async (client: ApiClient, id: string, body: StartEditRequest): Promise<Run> =>
+  unwrap(await client.POST("/v1/projects/{id}/edit", { params: { path: { id } }, body }));
+
+/** The run, with its events after `afterSeq`. */
+export const fetchRun = async (client: ApiClient, id: string, afterSeq = 0, signal?: AbortSignal): Promise<Run> =>
+  unwrap(await client.GET("/v1/runs/{id}", { params: { path: { id }, query: { after_seq: afterSeq, limit: RUN_EVENTS_PAGE } }, signal }));
+
+/** How many events one GET /v1/runs/{id} asks for. */
+export const RUN_EVENTS_PAGE = 200;
+
+export const cancelRun = async (client: ApiClient, id: string): Promise<Run> => unwrap(await client.POST("/v1/runs/{id}/cancel", { params: { path: { id } } }));
+
+export const replyToRun = async (client: ApiClient, id: string, text: string): Promise<Run> =>
+  unwrap(await client.POST("/v1/runs/{id}/reply", { params: { path: { id } }, body: { text } }));
+
+// ── Renders ─────────────────────────────────────────────────────────────────
+
+/** The renders of a version, newest first. A list carries no URLs: fetch the one you want with {@link fetchRender}. */
+export const fetchRenders = async (client: ApiClient, id: string, version: number, profile: RenderProfile, signal?: AbortSignal): Promise<Render[]> => {
+  const data = unwrap(await client.GET("/v1/projects/{id}/renders", { params: { path: { id }, query: { version, profile, limit: 10 } }, signal }));
+  return Array.isArray(data.items) ? data.items : [];
+};
+
+export const fetchRender = async (client: ApiClient, id: string, signal?: AbortSignal): Promise<Render> =>
+  unwrap(await client.GET("/v1/renders/{id}", { params: { path: { id } }, signal }));
+
+/** Queues a render (202), or returns the render that already waits, runs or is ready for that version and profile (200). */
+export const createRender = async (client: ApiClient, id: string, version: number, profile: RenderProfile): Promise<Render> =>
+  unwrap(await client.POST("/v1/projects/{id}/renders", { params: { path: { id } }, body: { version, profile } }));

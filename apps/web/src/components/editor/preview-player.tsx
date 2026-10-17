@@ -22,13 +22,17 @@ export interface PreviewPlayerProps {
   /** A video to play instead of the generated placeholder. */
   src?: string;
   assetNames?: Record<string, string>;
+  /** What the placeholder frame says. Default "Placeholder preview". */
+  placeholderLabel?: string;
+  /** The video would not load or play (an expired URL, say). */
+  onVideoError?: () => void;
   pinMode: boolean;
   onPinModeChange: (on: boolean) => void;
   onPlacePin: (pin: Pin) => void;
   pins: FramePin[];
 }
 
-export function PreviewPlayer({ player, version, src, assetNames, pinMode, onPinModeChange, onPlacePin, pins }: PreviewPlayerProps) {
+export function PreviewPlayer({ player, version, src, assetNames, placeholderLabel, onVideoError, pinMode, onPinModeChange, onPlacePin, pins }: PreviewPlayerProps) {
   const [w, h] = RATIO[version.output.format];
 
   const frameClick = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -57,9 +61,10 @@ export function PreviewPlayer({ player, version, src, assetNames, pinMode, onPin
               playsInline
               preload="metadata"
               onLoadedMetadata={(event) => player.syncMedia(event.currentTarget)}
+              onError={onVideoError}
             />
           ) : (
-            <PlaceholderFrame version={version} player={player} assetNames={assetNames} />
+            <PlaceholderFrame version={version} player={player} assetNames={assetNames} label={placeholderLabel} />
           )}
 
           <button
@@ -128,10 +133,12 @@ function PlaceholderFrame({
   version,
   player,
   assetNames,
+  label = "Placeholder preview",
 }: {
   version: ReviewVersion;
   player: PlayerController;
   assetNames?: Record<string, string>;
+  label?: string;
 }) {
   const currentMs = usePlayhead(player);
   const entry = entryAt(version.time_map, Math.min(currentMs, version.duration_ms - 1));
@@ -142,7 +149,7 @@ function PlaceholderFrame({
   return (
     <div
       role="img"
-      aria-label={`Placeholder frame at ${formatTimecode(currentMs)}${entry ? `, clip ${entry.item_id}` : ""}`}
+      aria-label={`${label}, frame at ${formatTimecode(currentMs)}${entry ? `, clip ${entry.item_id}` : ""}`}
       data-testid="placeholder-frame"
       className="relative size-full select-none text-white"
       style={{ background: `linear-gradient(165deg, hsl(${base} 52% 44%), hsl(${(base + 50) % 360} 58% 20%))` }}
@@ -152,7 +159,7 @@ function PlaceholderFrame({
         style={{ left: `${50 + Math.cos(angle) * 26}%`, top: `${38 + Math.sin(angle) * 14}%`, transform: "translate(-50%, -50%)" }}
       />
       <div className="absolute inset-x-0 top-[8%] text-center text-[11px] font-medium tracking-[0.14em] text-white/70 uppercase">
-        Placeholder preview
+        {label}
       </div>
       <div className="absolute inset-x-0 bottom-[12%] px-4 text-center">
         <div className="font-mono text-[11px] text-white/70">{entry?.item_id ?? "end"}</div>

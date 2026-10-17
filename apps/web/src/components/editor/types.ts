@@ -52,6 +52,8 @@ export interface ReviewVersion {
   time_map: TimeMapEntry[];
   /** The preview render. Without one the screen plays a generated placeholder. */
   preview_url?: string;
+  /** The version's spec has not arrived: it is listed, but has no clips yet (so comments cannot be moved through it). */
+  loading?: boolean;
 }
 
 /** A normalised point on the frame: x and y in [0, 1], from the top left. */

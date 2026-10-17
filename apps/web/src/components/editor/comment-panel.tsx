@@ -13,10 +13,12 @@ export interface CommentPanelProps {
   onHover: (id: string | null) => void;
   /** For a comment that no longer maps: show the version it was made on. */
   onOpenVersion: (version: number, commentId: string) => void;
+  /** A line under the header, e.g. that the comments are not saved. */
+  note?: string;
   className?: string;
 }
 
-function CommentPanelView({ items, selectedId, hoveredId, onSelect, onHover, onOpenVersion, className }: CommentPanelProps) {
+function CommentPanelView({ items, selectedId, hoveredId, onSelect, onHover, onOpenVersion, note, className }: CommentPanelProps) {
   const [filter, setFilter] = React.useState<CommentFilter>("all");
   const visible = React.useMemo(() => filterComments(items, filter), [items, filter]);
   const open = countOpen(items);
@@ -59,6 +61,11 @@ function CommentPanelView({ items, selectedId, hoveredId, onSelect, onHover, onO
           ))}
         </fieldset>
       </div>
+      {note ? (
+        <p role="note" className="border-b border-hairline bg-wash px-3 py-1.5 text-[12px] text-muted-foreground">
+          {note}
+        </p>
+      ) : null}
 
       {visible.length === 0 ? (
         <p className="px-4 py-8 text-center text-[13px] text-muted-foreground text-pretty">

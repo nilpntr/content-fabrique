@@ -29,9 +29,34 @@ export interface ReviewScreenProps {
   /** The version to open on. Falls back to the latest version when it is not given or does not exist. */
   initialVersion?: number;
   onCommentCreate?: (comment: ReviewAnnotation) => void;
+  /** Called with the whole list after every change to it (a comment added, and later edited, resolved or deleted). */
+  onCommentsChange?: (comments: ReviewAnnotation[]) => void;
+  /** Whether the "Local video" button is offered (it plays a file from the computer instead of the placeholder). Default true. */
+  localVideo?: boolean;
+  /** What the frame says when there is no video to play. Default "Placeholder preview". */
+  placeholderLabel?: string;
+  /** Shown above the player: e.g. the state of the preview render. */
+  aboveVideo?: (context: ReviewContext) => React.ReactNode;
+  /** Shown under the timeline: e.g. the list of versions. */
+  belowTimeline?: (context: ReviewContext) => React.ReactNode;
+  /** Called with the version on screen: at the start, and whenever another is chosen. */
+  onVersionChange?: (version: number) => void;
+  /** Called when the video would not load (an expired URL, say). */
+  onVideoError?: () => void;
+  /** A line at the top of the comment panel, e.g. that comments are not saved. */
+  commentsNote?: string;
   /** Called when the creator moves the playhead: scrubbing, stepping, clicking a comment. Not on playback progress. */
   onSeek?: (ms: number) => void;
   className?: string;
+}
+
+/** What the slots of the screen get to know about it. */
+export interface ReviewContext {
+  /** The version on screen. */
+  version: ReviewVersion;
+  latest: number;
+  /** Shows another version (refused, with a notice, while a comment is being typed). */
+  selectVersion: (version: number) => void;
 }
 
 export function ReviewScreen(props: ReviewScreenProps) {
@@ -60,7 +85,24 @@ function NoVersions({ className }: { className?: string }) {
 const spaceBelongsToTarget = (event: KeyboardEvent) =>
   event.target instanceof HTMLElement && event.target.matches('button, input, select, textarea, a[href], summary, [role="button"], [role="slider"]');
 
-function ReviewWorkspace({ versions, comments: initialComments, assetNames, src, initialVersion, onCommentCreate, onSeek, className }: ReviewScreenProps) {
+function ReviewWorkspace({
+  versions,
+  comments: initialComments,
+  assetNames,
+  src,
+  initialVersion,
+  onCommentCreate,
+  onCommentsChange,
+  onSeek,
+  className,
+  localVideo = true,
+  placeholderLabel,
+  aboveVideo,
+  belowTimeline,
+  onVersionChange,
+  onVideoError,
+  commentsNote,
+}: ReviewScreenProps) {
   const latest = React.useMemo(() => Math.max(...versions.map((candidate) => candidate.version)), [versions]);
   const [versionNumber, setVersionNumber] = React.useState(() =>
     versions.some((candidate) => candidate.version === initialVersion) ? (initialVersion as number) : latest,
@@ -68,6 +110,7 @@ function ReviewWorkspace({ versions, comments: initialComments, assetNames, src,
   const version = versions.find((candidate) => candidate.version === versionNumber) ?? (versions.find((candidate) => candidate.version === latest) as ReviewVersion);
 
   const [comments, setComments] = React.useState(initialComments);
+  const commentsRef = React.useRef(comments);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [hoveredId, setHoveredId] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState<CommentDraft | null>(null);
@@ -80,6 +123,13 @@ function ReviewWorkspace({ versions, comments: initialComments, assetNames, src,
   const fileInput = React.useRef<HTMLInputElement>(null);
   /** Set when "Open vN" switches version: the seek has to wait for the new version's duration. */
   const pendingSeek = React.useRef<{ version: number; ms: number } | null>(null);
+
+  const versionChanged = React.useRef(onVersionChange);
+  versionChanged.current = onVersionChange;
+  const shownVersion = version.version;
+  React.useEffect(() => {
+    versionChanged.current?.(shownVersion);
+  }, [shownVersion]);
 
   const player = usePlayerController({ durationMs: version.duration_ms, fps: version.output.fps, onSeek });
   const videoSrc = localSrc?.url ?? version.preview_url ?? src;
@@ -199,12 +249,15 @@ function ReviewWorkspace({ versions, comments: initialComments, assetNames, src,
         author: { kind: "creator", name: "You" },
         created_at: new Date().toISOString(),
       };
-      setComments((current) => [...current, comment]);
+      const next = [...commentsRef.current, comment];
+      commentsRef.current = next;
+      setComments(next);
+      onCommentsChange?.(next);
       setSelectedId(comment.id);
       clearDraft();
       onCommentCreate?.(comment);
     },
-    [draft, version.version, clearDraft, onCommentCreate],
+    [draft, version.version, clearDraft, onCommentCreate, onCommentsChange],
   );
 
   const changeDraft = React.useCallback(
@@ -280,23 +333,25 @@ function ReviewWorkspace({ versions, comments: initialComments, assetNames, src,
       <div className="min-w-0 space-y-3">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <VersionSelector versions={versions} latest={latest} selected={version.version} onSelect={selectVersion} className="min-w-0 flex-1" />
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              title="Play a video from your computer instead of the placeholder"
-              onClick={() => fileInput.current?.click()}
-            >
-              <FolderOpen />
-              {localSrc ? <span className="max-w-32 truncate">{localSrc.name}</span> : "Local video"}
-            </Button>
-            <input ref={fileInput} type="file" accept="video/*" hidden aria-label="Choose a local video file" onChange={pickFile} />
-            {localSrc && (
-              <Button variant="ghost" size="icon-sm" aria-label="Use the placeholder again" onClick={() => setLocalSrc(null)}>
-                <X />
+          {localVideo && (
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                title="Play a video from your computer instead of the placeholder"
+                onClick={() => fileInput.current?.click()}
+              >
+                <FolderOpen />
+                {localSrc ? <span className="max-w-32 truncate">{localSrc.name}</span> : "Local video"}
               </Button>
-            )}
-          </div>
+              <input ref={fileInput} type="file" accept="video/*" hidden aria-label="Choose a local video file" onChange={pickFile} />
+              {localSrc && (
+                <Button variant="ghost" size="icon-sm" aria-label="Use the placeholder again" onClick={() => setLocalSrc(null)}>
+                  <X />
+                </Button>
+              )}
+            </div>
+          )}
         </div>
 
         {version.version !== latest && (
@@ -305,10 +360,14 @@ function ReviewWorkspace({ versions, comments: initialComments, assetNames, src,
           </p>
         )}
 
+        {aboveVideo?.({ version, latest, selectVersion })}
+
         <PreviewPlayer
           player={player}
           version={version}
           src={videoSrc}
+          placeholderLabel={placeholderLabel}
+          onVideoError={onVideoError}
           assetNames={assetNames}
           pinMode={pinMode}
           onPinModeChange={setPinMode}
@@ -336,6 +395,8 @@ function ReviewWorkspace({ versions, comments: initialComments, assetNames, src,
         />
 
         <ShortcutLegend />
+
+        {belowTimeline?.({ version, latest, selectVersion })}
       </div>
 
       <CommentPanel
@@ -345,6 +406,7 @@ function ReviewWorkspace({ versions, comments: initialComments, assetNames, src,
         onSelect={selectComment}
         onHover={setHoveredId}
         onOpenVersion={openVersion}
+        note={commentsNote}
         className="lg:sticky lg:top-4 lg:max-h-[calc(100svh-2rem)]"
       />
     </section>

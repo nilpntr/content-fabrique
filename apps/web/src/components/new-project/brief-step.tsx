@@ -20,7 +20,21 @@ export function withExample(brief: string, example: string): string {
   return current === "" ? example : `${current}\n\n${example}`;
 }
 
-export function BriefStep({ value, onChange }: { value: string; onChange: (brief: string) => void }) {
+export const TITLE_MAX_LENGTH = 255;
+
+export function BriefStep({
+  value,
+  onChange,
+  title = "",
+  onTitleChange,
+}: {
+  value: string;
+  onChange: (brief: string) => void;
+  /** The project name; the field shows when `onTitleChange` is given. */
+  title?: string;
+  onTitleChange?: (title: string) => void;
+}) {
+  const titleId = React.useId();
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const textareaId = React.useId();
   const hintId = React.useId();
@@ -40,6 +54,14 @@ export function BriefStep({ value, onChange }: { value: string; onChange: (brief
 
   return (
     <div className="space-y-6">
+      {onTitleChange ? (
+        <div className="space-y-2">
+          <label htmlFor={titleId} className="block font-medium">
+            Project name <span className="font-normal text-subtle-foreground">(optional)</span>
+          </label>
+          <Input id={titleId} value={title} maxLength={TITLE_MAX_LENGTH} placeholder="Untitled project" onChange={(event) => onTitleChange(event.target.value)} className="sm:max-w-md" />
+        </div>
+      ) : null}
       <div className="space-y-2">
         <div className="flex items-baseline justify-between gap-3">
           <label htmlFor={textareaId} className="font-medium">
