@@ -18,7 +18,8 @@
 --
 -- spend_holds:  money and audio set aside for a call that is in flight, in the database, so that every API and worker process
 --               sees the same reservations (the in-process reservations of internal/agents/llm could not).
---   scope:      'workspace' (workspace_id set) or 'platform' (no workspace: spend that only the platform breaker sees).
+--   scope:      'workspace' (workspace_id set) or 'platform' (no workspace: spend that only the platform breaker sees; nothing makes one
+--               yet, because every ledger row belongs to a workspace).
 --   billed_to:  platform | workspace_key | test, as in usage_ledger. A platform hold counts against the breaker and the
 --               workspace's daily cap, a test hold against the workspace's daily cap only, and no hold is made for workspace_key.
 --   period:     the counter period the hold was made in ('day:YYYY-MM-DD' in UTC).
@@ -37,52 +38,46 @@
 
 -- +goose Up
 
+-- The grant helpers. cf_grant_app_dml (migration 00001) gives the app role all four verbs; these give fewer. Both revoke what the role
+-- had, grant their verbs, and hand out the sequences the table owns, through one private function. Like cf_grant_app_dml they run with
+-- the caller's rights, so only the table's owner (the migrate role) can use them.
 -- +goose StatementBegin
+CREATE FUNCTION cf_grant_app_verbs(tbl regclass, verbs text) RETURNS void
+    LANGUAGE plpgsql SET search_path = pg_catalog, public
+    AS $$
+DECLARE
+    app_role name := public.cf_app_role();
+    seq regclass;
+BEGIN
+    IF verbs NOT IN ('SELECT, INSERT', 'SELECT, INSERT, UPDATE') THEN
+        RAISE EXCEPTION 'cf_grant_app_verbs: % is not one of the verb lists this helper hands out', verbs;
+    END IF;
+    EXECUTE format('REVOKE ALL ON TABLE %s FROM %I', tbl, app_role);
+    EXECUTE format('GRANT %s ON TABLE %s TO %I', verbs, tbl, app_role);
+    FOR seq IN
+        SELECT d.objid::regclass
+        FROM pg_depend d
+        JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S'
+        WHERE d.refobjid = tbl AND d.classid = 'pg_class'::regclass AND d.deptype IN ('a', 'i')
+    LOOP
+        EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %s TO %I', seq, app_role);
+    END LOOP;
+END
+$$;
+-- +goose StatementEnd
+
+-- SELECT and INSERT only: an append-only table.
 CREATE FUNCTION cf_grant_app_append_only(tbl regclass) RETURNS void
-    LANGUAGE plpgsql SET search_path = pg_catalog, public
-    AS $$
-DECLARE
-    app_role name := public.cf_app_role();
-    seq regclass;
-BEGIN
-    EXECUTE format('REVOKE ALL ON TABLE %s FROM %I', tbl, app_role);
-    EXECUTE format('GRANT SELECT, INSERT ON TABLE %s TO %I', tbl, app_role);
-    FOR seq IN
-        SELECT d.objid::regclass
-        FROM pg_depend d
-        JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S'
-        WHERE d.refobjid = tbl AND d.classid = 'pg_class'::regclass AND d.deptype IN ('a', 'i')
-    LOOP
-        EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %s TO %I', seq, app_role);
-    END LOOP;
-END
-$$;
--- +goose StatementEnd
+    LANGUAGE sql SET search_path = pg_catalog, public
+    AS $$ SELECT public.cf_grant_app_verbs(tbl, 'SELECT, INSERT') $$;
 
-REVOKE ALL ON FUNCTION cf_grant_app_append_only(regclass) FROM PUBLIC;
-
--- +goose StatementBegin
+-- SELECT, INSERT and UPDATE, no DELETE: rows that are kept and changed in place.
 CREATE FUNCTION cf_grant_app_no_delete(tbl regclass) RETURNS void
-    LANGUAGE plpgsql SET search_path = pg_catalog, public
-    AS $$
-DECLARE
-    app_role name := public.cf_app_role();
-    seq regclass;
-BEGIN
-    EXECUTE format('REVOKE ALL ON TABLE %s FROM %I', tbl, app_role);
-    EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %s TO %I', tbl, app_role);
-    FOR seq IN
-        SELECT d.objid::regclass
-        FROM pg_depend d
-        JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S'
-        WHERE d.refobjid = tbl AND d.classid = 'pg_class'::regclass AND d.deptype IN ('a', 'i')
-    LOOP
-        EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %s TO %I', seq, app_role);
-    END LOOP;
-END
-$$;
--- +goose StatementEnd
+    LANGUAGE sql SET search_path = pg_catalog, public
+    AS $$ SELECT public.cf_grant_app_verbs(tbl, 'SELECT, INSERT, UPDATE') $$;
 
+REVOKE ALL ON FUNCTION cf_grant_app_verbs(regclass, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION cf_grant_app_append_only(regclass) FROM PUBLIC;
 REVOKE ALL ON FUNCTION cf_grant_app_no_delete(regclass) FROM PUBLIC;
 
 ALTER TABLE usage_ledger
@@ -166,6 +161,23 @@ CREATE UNIQUE INDEX spend_counters_platform_key ON spend_counters (period) WHERE
 
 SELECT cf_grant_app_no_delete('spend_counters');
 
+-- The counters start from what the ledger already holds, so the day's caps do not reset when this migration deploys: one workspace row
+-- per workspace and UTC day and one platform row per day, from the existing rows. (Until now the daily cap summed every row of the
+-- workspace; from here on a workspace_key row counts toward no cap, which is what BYOK needs.)
+INSERT INTO spend_counters (scope, workspace_id, period, platform_micros, test_micros, audio_ms)
+SELECT 'workspace', workspace_id, 'day:' || to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD'),
+       COALESCE(sum(list_cost_micros) FILTER (WHERE billed_to = 'platform'), 0),
+       COALESCE(sum(list_cost_micros) FILTER (WHERE billed_to = 'test'), 0),
+       COALESCE(sum(audio_ms) FILTER (WHERE kind = 'transcription'), 0)
+FROM usage_ledger
+GROUP BY workspace_id, 'day:' || to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD');
+
+INSERT INTO spend_counters (scope, period, platform_micros)
+SELECT 'platform', 'day:' || to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD'), sum(list_cost_micros)
+FROM usage_ledger
+WHERE billed_to = 'platform'
+GROUP BY 'day:' || to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD');
+
 -- Who started an agent run, for the ledger's member_user_id. Null for a run nobody started by hand (cfctl).
 ALTER TABLE agent_runs ADD COLUMN started_by uuid REFERENCES users (id) ON DELETE SET NULL;
 
@@ -201,3 +213,4 @@ SELECT cf_grant_app_dml('usage_ledger');
 
 DROP FUNCTION cf_grant_app_no_delete(regclass);
 DROP FUNCTION cf_grant_app_append_only(regclass);
+DROP FUNCTION cf_grant_app_verbs(regclass, text);

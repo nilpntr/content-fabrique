@@ -108,18 +108,6 @@ func (q *Queries) DeleteExpiredSpendHolds(ctx context.Context, now time.Time) (D
 	return i, err
 }
 
-const deletePlatformSpendHold = `-- name: DeletePlatformSpendHold :execrows
-DELETE FROM spend_holds WHERE idempotency_key = $1 AND scope = 'platform'
-`
-
-func (q *Queries) DeletePlatformSpendHold(ctx context.Context, idempotencyKey string) (int64, error) {
-	result, err := q.db.Exec(ctx, deletePlatformSpendHold, idempotencyKey)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const deleteWorkspaceSpendHold = `-- name: DeleteWorkspaceSpendHold :execrows
 DELETE FROM spend_holds WHERE idempotency_key = $1 AND scope = 'workspace' AND workspace_id = $2
 `

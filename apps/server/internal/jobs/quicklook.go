@@ -54,7 +54,8 @@ func (e *Enqueuer) EnqueueQuickLook(ctx context.Context, tx *store.Store, a stor
 
 // Errors a QuickLooker returns for the worker to act on.
 var (
-	// ErrModelUnavailable: the worker has no model access (no key, a bad setting). The job waits, snoozed, instead of failing.
+	// ErrModelUnavailable: the worker has no model access (no key, a bad setting), or the platform spend breaker is open (D-31). The
+	// job waits, snoozed, instead of failing.
 	ErrModelUnavailable = errors.New("jobs: model access is not configured")
 	// ErrQuickLookNotReady: the asset is being ingested again. The job looks again in a minute.
 	ErrQuickLookNotReady = errors.New("jobs: the asset is not ready")

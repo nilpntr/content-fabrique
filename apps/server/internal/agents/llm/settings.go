@@ -7,6 +7,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/nilpntr/content-fabrique/internal/config"
+	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
 // Mode is LLM_MODE.
@@ -65,6 +68,12 @@ type Settings struct {
 	CassetteDir string
 }
 
+// SpendCaps are the money caps the settings say, for the spend gate: the workspace's daily cap and the platform breaker. The audio cap
+// (TRANSCRIBE_DAILY_MINUTES) is the transcription pipeline's to add.
+func (s Settings) SpendCaps() store.SpendCaps {
+	return store.SpendCaps{WorkspaceDailyMicros: s.DailySpendCapMicros, PlatformDailyMicros: s.PlatformDailySpendCapMicros}
+}
+
 // LoadSettings parses the settings from environment variables, returning every problem found. Messages name the
 // variable and never repeat a value.
 func LoadSettings(getenv func(string) string) (Settings, error) {
@@ -121,7 +130,7 @@ func LoadSettings(getenv func(string) string) (Settings, error) {
 	case "", "0":
 	case "1":
 		// An unpriced paid call cannot be capped or metered: only development and ci may run one (D-31). config.Load refuses it too.
-		if s.Env != "local" && s.Env != "ci" {
+		if !config.UnpricedAllowedIn(s.Env) {
 			errs = append(errs, errors.New("LLM_ALLOW_UNPRICED: honoured only in local and ci; staging, production and bench refuse an unpriced paid provider"))
 		}
 		s.AllowUnpriced = true

@@ -298,9 +298,9 @@ func (s *Service) ask(ctx context.Context, a store.Asset, fr frameSet, d *detail
 		// still worth keeping.
 		log.Error("quick look: the usage ledger row was not written", "error", err)
 	case errors.As(err, &capErr) && capErr.Kind == llm.CapPlatform:
-		// The platform breaker is open (D-31): nothing was sent, and it closes at the next UTC day. The job waits and retries rather
-		// than failing the clip's label for good.
-		return Result{}, "", fmt.Errorf("model call: %w", err)
+		// The platform breaker is open (D-31): nothing was sent, and it closes at the next UTC day. The job waits (snoozed, no attempt
+		// used) like one without model access, rather than failing the clip's label for good.
+		return Result{}, "", fmt.Errorf("%w: %w", ErrModelUnavailable, err)
 	case errors.As(err, &capErr):
 		return res, FailSpendCap, nil
 	case errors.Is(err, llm.ErrReplayMiss):

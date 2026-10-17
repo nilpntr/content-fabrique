@@ -112,16 +112,13 @@ func (m *Memory) ReserveSpend(_ context.Context, p store.ReserveSpendParams) (st
 	if m.FailReserve != nil {
 		return store.SpendHold{}, nil, m.FailReserve
 	}
-	if p.Scope == "" {
-		p.Scope = store.SpendScopeWorkspace
-	}
 	now := p.Now.UTC()
 	period := store.DayPeriod(now)
-	hold := store.SpendHold{Key: p.Key, Scope: p.Scope, Workspace: p.Workspace, BilledTo: p.BilledTo, Kind: p.Kind, Period: period, Micros: p.Micros, AudioMs: p.AudioMs, ExpiresAt: now.Add(p.TTL)}
+	hold := store.SpendHold{Key: p.Key, Workspace: p.Workspace, BilledTo: p.BilledTo, Kind: p.Kind, Period: period, Micros: p.Micros, AudioMs: p.AudioMs, ExpiresAt: now.Add(p.TTL)}
 
 	platformMicros := p.BilledTo == store.BilledToPlatform && p.Micros > 0
-	workspaceMicros := p.Scope == store.SpendScopeWorkspace && p.BilledTo != store.BilledToWorkspaceKey && p.Micros > 0
-	workspaceAudio := p.Scope == store.SpendScopeWorkspace && p.AudioMs > 0
+	workspaceMicros := p.BilledTo != store.BilledToWorkspaceKey && p.Micros > 0
+	workspaceAudio := p.AudioMs > 0
 	if !platformMicros && !workspaceMicros && !workspaceAudio {
 		return hold, nil, nil
 	}
@@ -154,7 +151,7 @@ func (m *Memory) ReserveSpend(_ context.Context, p store.ReserveSpendParams) (st
 		c := m.counter(p.Workspace, period)
 		st.WorkspaceSpent, st.WorkspaceAudio = c.PlatformMicros+c.TestMicros, c.AudioMs
 		for _, h := range m.holds {
-			if h.Scope != store.SpendScopeWorkspace || h.Workspace != p.Workspace || h.Period != period || !h.ExpiresAt.After(now) {
+			if h.Workspace != p.Workspace || h.Period != period || !h.ExpiresAt.After(now) {
 				continue
 			}
 			if h.BilledTo != store.BilledToWorkspaceKey {
@@ -221,7 +218,7 @@ func (m *Memory) SettleSpend(_ context.Context, p store.SettleSpendParams) (int,
 }
 
 // ReleaseSpend implements spend.Backend.
-func (m *Memory) ReleaseSpend(_ context.Context, _ string, _ ids.WorkspaceID, key string) error {
+func (m *Memory) ReleaseSpend(_ context.Context, _ ids.WorkspaceID, key string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.Releases++

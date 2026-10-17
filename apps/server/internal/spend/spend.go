@@ -32,7 +32,7 @@ import (
 type Backend interface {
 	ReserveSpend(ctx context.Context, p store.ReserveSpendParams) (store.SpendHold, []store.SpendAlert, error)
 	SettleSpend(ctx context.Context, p store.SettleSpendParams) (int, []store.SpendAlert, error)
-	ReleaseSpend(ctx context.Context, scope string, ws ids.WorkspaceID, key string) error
+	ReleaseSpend(ctx context.Context, ws ids.WorkspaceID, key string) error
 }
 
 var _ Backend = (*store.Store)(nil)
@@ -145,7 +145,7 @@ func (h *Hold) Release(ctx context.Context) error {
 	if h.h.ID == uuid.Nil {
 		return nil // nothing was set aside
 	}
-	if err := h.g.b.ReleaseSpend(ctx, h.h.Scope, h.h.Workspace, h.h.Key); err != nil {
+	if err := h.g.b.ReleaseSpend(ctx, h.h.Workspace, h.h.Key); err != nil {
 		return fmt.Errorf("spend: releasing: %w", err)
 	}
 	return nil

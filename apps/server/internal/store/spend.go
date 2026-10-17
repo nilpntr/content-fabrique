@@ -44,11 +44,9 @@ const (
 	UnitBytes    = "bytes"
 )
 
-// The scopes of a hold or a counter.
-const (
-	SpendScopeWorkspace = "workspace"
-	SpendScopePlatform  = "platform"
-)
+// Holds are made for a workspace (spend_holds.scope = 'workspace'). The column also allows a platform-scope hold, with no workspace, for
+// spend that only the platform breaker should see; nothing makes one yet, because every ledger row belongs to a workspace.
+const spendScopeWorkspace = "workspace"
 
 // DayPeriod is the counter period of the UTC day containing t: "day:2026-10-17". Billing periods ("bill:...") are for later.
 func DayPeriod(t time.Time) string { return "day:" + t.UTC().Format("2006-01-02") }
@@ -117,9 +115,7 @@ const AlertPlatformBreaker = "platform_breaker"
 // ReserveSpendParams is one reservation.
 type ReserveSpendParams struct {
 	// Key identifies the call. A second reservation with the same key returns the first one's hold and sets nothing more aside.
-	Key string
-	// Scope is SpendScopeWorkspace (the default) or SpendScopePlatform (no workspace: only the breaker counts it).
-	Scope     string
+	Key       string
 	Workspace ids.WorkspaceID
 	// BilledTo is platform, workspace_key or test. A workspace_key reservation counts against no money cap.
 	BilledTo string
@@ -137,7 +133,6 @@ type ReserveSpendParams struct {
 type SpendHold struct {
 	ID        uuid.UUID
 	Key       string
-	Scope     string
 	Workspace ids.WorkspaceID
 	BilledTo  string
 	Kind      string
@@ -168,16 +163,11 @@ func validKey(k string) bool { return len(k) >= 1 && len(k) <= 200 }
 // ReserveSpend sets the worst case of a call aside, in one transaction that locks the counters in the fixed order, or refuses
 // with a *SpendCapError naming the cap. Nothing is set aside on an error.
 func (s *Store) ReserveSpend(ctx context.Context, p ReserveSpendParams) (SpendHold, []SpendAlert, error) {
-	if p.Scope == "" {
-		p.Scope = SpendScopeWorkspace
-	}
 	switch {
 	case !validKey(p.Key):
 		return SpendHold{}, nil, fmt.Errorf("%w: a spend hold needs a key of 1 to 200 characters", ErrInvalid)
-	case p.Scope != SpendScopeWorkspace && p.Scope != SpendScopePlatform:
-		return SpendHold{}, nil, fmt.Errorf("%w: spend scope %q", ErrInvalid, p.Scope)
-	case p.Scope == SpendScopeWorkspace && p.Workspace.IsZero(), p.Scope == SpendScopePlatform && !p.Workspace.IsZero():
-		return SpendHold{}, nil, fmt.Errorf("%w: a workspace hold needs a workspace and a platform hold must not have one", ErrInvalid)
+	case p.Workspace.IsZero():
+		return SpendHold{}, nil, fmt.Errorf("%w: a spend hold needs a workspace", ErrInvalid)
 	case !validBilledTo(p.BilledTo), !validKind(p.Kind):
 		return SpendHold{}, nil, fmt.Errorf("%w: billed_to %q or kind %q", ErrInvalid, p.BilledTo, p.Kind)
 	case p.Micros < 0 || p.AudioMs < 0 || p.TTL <= 0 || p.Now.IsZero():
@@ -185,12 +175,12 @@ func (s *Store) ReserveSpend(ctx context.Context, p ReserveSpendParams) (SpendHo
 	}
 	now := p.Now.UTC()
 	period := DayPeriod(now)
-	hold := SpendHold{Key: p.Key, Scope: p.Scope, Workspace: p.Workspace, BilledTo: p.BilledTo, Kind: p.Kind, Period: period, Micros: p.Micros, AudioMs: p.AudioMs, ExpiresAt: now.Add(p.TTL)}
+	hold := SpendHold{Key: p.Key, Workspace: p.Workspace, BilledTo: p.BilledTo, Kind: p.Kind, Period: period, Micros: p.Micros, AudioMs: p.AudioMs, ExpiresAt: now.Add(p.TTL)}
 
 	// What counts against which cap.
 	platformMicros := p.BilledTo == BilledToPlatform && p.Micros > 0
-	workspaceMicros := p.Scope == SpendScopeWorkspace && p.BilledTo != BilledToWorkspaceKey && p.Micros > 0
-	workspaceAudio := p.Scope == SpendScopeWorkspace && p.AudioMs > 0
+	workspaceMicros := p.BilledTo != BilledToWorkspaceKey && p.Micros > 0
+	workspaceAudio := p.AudioMs > 0
 	if !platformMicros && !workspaceMicros && !workspaceAudio {
 		return hold, nil, nil // free, or paid by the creator's own key: nothing to set aside
 	}
@@ -206,7 +196,7 @@ func (s *Store) ReserveSpend(ctx context.Context, p ReserveSpendParams) (SpendHo
 		q := tx.q
 		// A repeated reservation (a retried step with the same key) finds its hold; a stale one is replaced.
 		if old, err := q.GetSpendHoldByKey(ctx, p.Key); err == nil {
-			if old.WorkspaceID.Valid != (p.Scope == SpendScopeWorkspace) || (old.WorkspaceID.Valid && old.WorkspaceID.Bytes != p.Workspace.UUID) {
+			if !old.WorkspaceID.Valid || old.WorkspaceID.Bytes != p.Workspace.UUID {
 				return fmt.Errorf("%w: the hold key belongs to another owner", ErrConflict)
 			}
 			if old.ExpiresAt.After(now) {
@@ -216,7 +206,7 @@ func (s *Store) ReserveSpend(ctx context.Context, p ReserveSpendParams) (SpendHo
 				}
 				return nil
 			}
-			if _, err := deleteHold(ctx, q, p.Scope, p.Workspace, p.Key); err != nil {
+			if _, err := deleteHold(ctx, q, p.Workspace, p.Key); err != nil {
 				return err
 			}
 		} else if !errors.Is(err, errNoRows) {
@@ -289,7 +279,7 @@ func (s *Store) ReserveSpend(ctx context.Context, p ReserveSpendParams) (SpendHo
 			audio = &p.AudioMs
 		}
 		row, err := q.InsertSpendHold(ctx, db.InsertSpendHoldParams{
-			Scope: p.Scope, WorkspaceID: nullableWorkspace(p.Workspace), BilledTo: p.BilledTo, Kind: p.Kind, Period: period,
+			Scope: spendScopeWorkspace, WorkspaceID: nullableWorkspace(p.Workspace), BilledTo: p.BilledTo, Kind: p.Kind, Period: period,
 			Micros: p.Micros, AudioMs: audio, ExpiresAt: hold.ExpiresAt, IdempotencyKey: p.Key,
 		})
 		if errors.Is(err, errNoRows) {
@@ -333,12 +323,12 @@ func CheckSpendCaps(p ReserveSpendParams, st SpendState) *SpendCapError {
 			return &SpendCapError{Cap: CapPlatformDaily, Requested: p.Micros, Room: max(limit-st.PlatformSpent-st.PlatformHeld, 0)}
 		}
 	}
-	if p.Scope != SpendScopePlatform && p.BilledTo != BilledToWorkspaceKey && p.Micros > 0 {
+	if p.BilledTo != BilledToWorkspaceKey && p.Micros > 0 {
 		if limit := p.Caps.WorkspaceDailyMicros; st.WorkspaceSpent+st.WorkspaceHeld+p.Micros > limit {
 			return &SpendCapError{Cap: CapWorkspaceDaily, Requested: p.Micros, Room: max(limit-st.WorkspaceSpent-st.WorkspaceHeld, 0)}
 		}
 	}
-	if p.Scope != SpendScopePlatform && p.AudioMs > 0 && p.Caps.WorkspaceDailyAudioMs > 0 {
+	if p.AudioMs > 0 && p.Caps.WorkspaceDailyAudioMs > 0 {
 		if limit := p.Caps.WorkspaceDailyAudioMs; st.WorkspaceAudio+st.WorkspaceHeldAudio+p.AudioMs > limit {
 			return &SpendCapError{Cap: CapWorkspaceAudio, Requested: p.AudioMs, Room: max(limit-st.WorkspaceAudio-st.WorkspaceHeldAudio, 0)}
 		}
@@ -350,7 +340,6 @@ func CheckSpendCaps(p ReserveSpendParams, st SpendState) *SpendCapError {
 type SettleSpendParams struct {
 	// HoldKey is the key of the hold to remove; empty for a cost with no hold (a render, say).
 	HoldKey   string
-	Scope     string
 	Workspace ids.WorkspaceID
 	// Rows are the ledger rows; every row needs an IdempotencyKey. A row whose key is already in the ledger is skipped, and its
 	// cost is not added to the counters again.
@@ -363,9 +352,6 @@ type SettleSpendParams struct {
 // SettleSpend writes the rows, adds their cost to the counters and deletes the hold, in one transaction. It is idempotent on the
 // rows' keys: a replayed settle changes nothing. It returns how many rows were new.
 func (s *Store) SettleSpend(ctx context.Context, p SettleSpendParams) (int, []SpendAlert, error) {
-	if p.Scope == "" {
-		p.Scope = SpendScopeWorkspace
-	}
 	if p.Now.IsZero() {
 		p.Now = time.Now()
 	}
@@ -477,7 +463,7 @@ func (s *Store) SettleSpend(ctx context.Context, p SettleSpendParams) (int, []Sp
 			}
 		}
 		if p.HoldKey != "" {
-			if _, err := deleteHold(ctx, q, p.Scope, p.Workspace, p.HoldKey); err != nil {
+			if _, err := deleteHold(ctx, q, p.Workspace, p.HoldKey); err != nil {
 				return err
 			}
 		}
@@ -491,14 +477,11 @@ func (s *Store) SettleSpend(ctx context.Context, p SettleSpendParams) (int, []Sp
 
 // ReleaseSpend gives a reservation back without charging anything (the call never went out, or failed with nothing billed). A hold
 // that is already gone is not an error.
-func (s *Store) ReleaseSpend(ctx context.Context, scope string, ws ids.WorkspaceID, key string) error {
-	if scope == "" {
-		scope = SpendScopeWorkspace
-	}
+func (s *Store) ReleaseSpend(ctx context.Context, ws ids.WorkspaceID, key string) error {
 	if !validKey(key) {
 		return fmt.Errorf("%w: a spend hold needs a key", ErrInvalid)
 	}
-	_, err := deleteHold(ctx, s.q, scope, ws, key)
+	_, err := deleteHold(ctx, s.q, ws, key)
 	return mapErr(err)
 }
 
@@ -547,10 +530,7 @@ func counterOf(c db.SpendCounter) SpendCounter {
 	return SpendCounter{Period: c.Period, PlatformMicros: c.PlatformMicros, TestMicros: c.TestMicros, AudioMs: c.AudioMs, Alerted80At: c.Alerted80At, TrippedAt: c.TrippedAt}
 }
 
-func deleteHold(ctx context.Context, q *db.Queries, scope string, ws ids.WorkspaceID, key string) (int64, error) {
-	if scope == SpendScopePlatform {
-		return q.DeletePlatformSpendHold(ctx, key)
-	}
+func deleteHold(ctx context.Context, q *db.Queries, ws ids.WorkspaceID, key string) (int64, error) {
 	return q.DeleteWorkspaceSpendHold(ctx, db.DeleteWorkspaceSpendHoldParams{IdempotencyKey: key, WorkspaceID: nullableWorkspace(ws)})
 }
 

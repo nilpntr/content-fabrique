@@ -47,9 +47,6 @@ SELECT * FROM spend_holds WHERE idempotency_key = @idempotency_key;
 -- name: DeleteWorkspaceSpendHold :execrows
 DELETE FROM spend_holds WHERE idempotency_key = @idempotency_key AND scope = 'workspace' AND workspace_id = @workspace_id;
 
--- name: DeletePlatformSpendHold :execrows
-DELETE FROM spend_holds WHERE idempotency_key = @idempotency_key AND scope = 'platform';
-
 -- The sweep: holds past their expiry. The totals are for the log.
 -- name: DeleteExpiredSpendHolds :one
 WITH gone AS (

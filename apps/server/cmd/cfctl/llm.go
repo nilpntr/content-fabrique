@@ -92,7 +92,7 @@ func (noLedger) SettleSpend(context.Context, store.SettleSpendParams) (int, []st
 	return 0, nil, errNoLedger
 }
 
-func (noLedger) ReleaseSpend(context.Context, string, ids.WorkspaceID, string) error {
+func (noLedger) ReleaseSpend(context.Context, ids.WorkspaceID, string) error {
 	return errNoLedger
 }
 

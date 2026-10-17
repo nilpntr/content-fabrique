@@ -306,7 +306,7 @@ func (r *run) meter(ctx context.Context) {
 		Action: r.render.ID.UUID, Key: "render:" + r.render.ID.String(),
 	}
 	if ji, ok := jobs.JobInfoFrom(ctx); ok {
-		u.Key = fmt.Sprintf("render:%s:%d:%d", r.render.ID, ji.ID, ji.Attempt)
+		u.Key = fmt.Sprintf("render:%s:%d:%d:%d", r.render.ID, ji.ID, ji.Attempt, r.began.UnixMilli())
 	} else {
 		u.Key += ":" + uuid.NewString() // outside a job (a test, a tool): never mistaken for a retry
 	}

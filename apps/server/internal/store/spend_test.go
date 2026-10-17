@@ -325,7 +325,7 @@ func TestSpendReleaseGivesTheReservationBack(t *testing.T) {
 		t.Fatalf("a full cap let a call through: %v", err)
 	}
 	for range 2 { // releasing twice is fine
-		if err := rig.b.ReleaseSpend(ctx, "", w.ID, h.Key); err != nil {
+		if err := rig.b.ReleaseSpend(ctx, w.ID, h.Key); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -472,7 +472,7 @@ func TestSpendHoldsAndCountersNeverCrossWorkspaces(t *testing.T) {
 		t.Fatalf("workspace B was blocked by A: %v", err)
 	}
 	// B cannot release or settle A's hold, nor read its key through a reserve.
-	if err := rig.b.ReleaseSpend(ctx, "", b.ID, ha.Key); err != nil {
+	if err := rig.b.ReleaseSpend(ctx, b.ID, ha.Key); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := rig.b.SettleSpend(ctx, store.SettleSpendParams{HoldKey: ha.Key, Workspace: b.ID, Rows: []store.UsageEntry{llmRow(b, "llm:tenant-b", store.BilledToPlatform, 10, spendDay)}, Now: spendDay}); err != nil {
@@ -616,14 +616,33 @@ func TestSpendMigrationBackfillsLegacyRows(t *testing.T) {
 		 VALUES ('0192f3a0-0000-7000-8000-000000000001', 'editor', 'llm', 'm', 100, 20, 5, '2026-10', 'test', 'req_legacy')`,
 		`INSERT INTO usage_ledger (workspace_id, stage, kind, model, input_tokens, output_tokens, list_cost_micros, price_table_version, billed_to, provider, audio_ms)
 		 VALUES ('0192f3a0-0000-7000-8000-000000000001', 'transcription', 'transcription', 'w', 0, 0, 7, 'x', 'test', 'workersai', 90000)`,
+		// Platform-billed today, a creator-key call today, and a platform call on an older day.
+		`INSERT INTO usage_ledger (workspace_id, stage, kind, model, input_tokens, output_tokens, list_cost_micros, price_table_version, billed_to)
+		 VALUES ('0192f3a0-0000-7000-8000-000000000001', 'editor', 'llm', 'm', 1, 1, 11, '2026-10', 'platform')`,
+		`INSERT INTO usage_ledger (workspace_id, stage, kind, model, input_tokens, output_tokens, list_cost_micros, price_table_version, billed_to)
+		 VALUES ('0192f3a0-0000-7000-8000-000000000001', 'editor', 'llm', 'm', 1, 1, 1000, '2026-10', 'workspace_key')`,
+		`INSERT INTO usage_ledger (workspace_id, stage, kind, model, input_tokens, output_tokens, list_cost_micros, price_table_version, billed_to, created_at)
+		 VALUES ('0192f3a0-0000-7000-8000-000000000001', 'editor', 'llm', 'm', 1, 1, 13, '2026-10', 'platform', '2026-01-02 23:30:00+00')`,
 	)
 	if _, err := m.Up(ctx); err != nil {
 		t.Fatal(err)
 	}
 	st := openStore(t, dsn)
 	rows, err := st.RecentUsage(ctx, ids.WorkspaceID{UUID: uuid.MustParse("0192f3a0-0000-7000-8000-000000000001")}, 10)
-	if err != nil || len(rows) != 2 {
+	if err != nil || len(rows) != 5 {
 		t.Fatalf("rows = %d, %v", len(rows), err)
+	}
+	// The counters start from the ledger, so the day's caps do not reset when the migration deploys.
+	wsID := ids.WorkspaceID{UUID: uuid.MustParse("0192f3a0-0000-7000-8000-000000000001")}
+	today := store.DayPeriod(time.Now())
+	if c, err := st.WorkspaceSpend(ctx, wsID, today); err != nil || c.PlatformMicros != 11 || c.TestMicros != 12 || c.AudioMs != 90000 {
+		t.Errorf("today's workspace counter = %+v, %v (want platform 11, test 12, audio 90000; the creator-key row counts for nothing)", c, err)
+	}
+	if c, err := st.PlatformSpend(ctx, today); err != nil || c.PlatformMicros != 11 {
+		t.Errorf("today's platform counter = %+v, %v", c, err)
+	}
+	if c, err := st.PlatformSpend(ctx, "day:2026-01-02"); err != nil || c.PlatformMicros != 13 {
+		t.Errorf("the older day's platform counter = %+v, %v", c, err)
 	}
 	for _, r := range rows {
 		if r.IdempotencyKey != "legacy:"+r.ID.String() {
@@ -631,7 +650,7 @@ func TestSpendMigrationBackfillsLegacyRows(t *testing.T) {
 		}
 		switch r.Kind {
 		case store.KindLLM:
-			if r.Quantity != 120 || r.Unit != store.UnitTokens {
+			if r.Quantity != r.InputTokens+r.OutputTokens || r.Unit != store.UnitTokens {
 				t.Errorf("llm row = %+v", r)
 			}
 		case store.KindTranscription:

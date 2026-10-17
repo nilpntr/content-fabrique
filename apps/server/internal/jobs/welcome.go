@@ -61,9 +61,14 @@ func (d Deps) meterMedia(ctx context.Context, ws ids.WorkspaceID, asset ids.Asse
 	}
 	u := spend.ComputeUse{
 		Workspace: ws, Kind: store.KindMedia, Stage: stage, VCPUMs: d.Meter.VCPUMsOfWall(stage, d.now().Sub(began)),
-		Key: fmt.Sprintf("media:%s:%d:%d", stage, jobID, attempt), Action: asset.UUID,
+		// River does not count a snoozed run as an attempt, so the run's start time is part of the key: a snooze and the run after it are
+		// two rows, never one.
+		Key: fmt.Sprintf("media:%s:%d:%d:%d", stage, jobID, attempt, began.UnixMilli()), Action: asset.UUID,
 	}
-	if a, err := d.Store.GetAsset(ctx, ws, asset); err == nil {
+	// The job's own context may be what ended (a timeout, a shutdown); the lookup and the row are for work that was done anyway.
+	lctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if a, err := d.Store.GetAsset(lctx, ws, asset); err == nil {
 		u.Member = a.CreatedBy
 	}
 	d.Meter.Record(ctx, u)

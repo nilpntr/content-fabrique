@@ -116,7 +116,7 @@ func (c *Config) loadSpend(getenv Getenv) []error {
 	switch v := strings.TrimSpace(getenv("LLM_ALLOW_UNPRICED")); v {
 	case "", "0":
 	case "1":
-		if c.Env != EnvLocal && c.Env != EnvCI {
+		if !UnpricedAllowedIn(c.Env) {
 			errs = append(errs, errors.New("LLM_ALLOW_UNPRICED: honoured only in local and ci; in "+c.Env+" a paid provider without a price is refused (add the price to config/pricing)"))
 		}
 	default:
@@ -131,3 +131,7 @@ func (c *Config) loadSpend(getenv Getenv) []error {
 	}
 	return errs
 }
+
+// UnpricedAllowedIn reports whether LLM_ALLOW_UNPRICED is honoured in the environment: development and ci only (D-31). It is the one
+// predicate behind the refusals of config.Load, the model settings, the client factory and cfctl doctor.
+func UnpricedAllowedIn(env string) bool { return env == EnvLocal || env == EnvCI }

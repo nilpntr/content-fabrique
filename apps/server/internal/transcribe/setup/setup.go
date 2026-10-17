@@ -138,11 +138,7 @@ func Pipeline(cfg config.Config, parts Parts, st *store.Store, objects transcrib
 // Gate builds the spend gate of the transcription pipeline: the model settings' daily and platform caps, and the transcribed minutes
 // as the audio cap.
 func Gate(cfg config.Config, settings llm.Settings, st *store.Store, logger *slog.Logger) *spend.Gate {
-	return spend.NewGate(st, spend.Options{
-		Caps: store.SpendCaps{
-			WorkspaceDailyMicros: settings.DailySpendCapMicros, PlatformDailyMicros: settings.PlatformDailySpendCapMicros,
-			WorkspaceDailyAudioMs: int64(cfg.TranscribeDailyMinutes) * 60_000,
-		},
-		Logger: logger,
-	})
+	caps := settings.SpendCaps()
+	caps.WorkspaceDailyAudioMs = int64(cfg.TranscribeDailyMinutes) * 60_000
+	return spend.NewGate(st, spend.Options{Caps: caps, Logger: logger})
 }

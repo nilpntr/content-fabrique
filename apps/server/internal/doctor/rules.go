@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/envfile"
 )
 
@@ -204,7 +205,7 @@ var validators = map[string]validator{
 		if val != "1" && val != "0" {
 			return "bad format (expected 1 or empty)"
 		}
-		if val == "1" && r.opts.Env != "local" && r.opts.Env != "ci" {
+		if val == "1" && !config.UnpricedAllowedIn(r.opts.Env) {
 			return "honoured only in local and ci: " + r.opts.Env + " refuses an unpriced paid provider (add the price to config/pricing)"
 		}
 		return ""

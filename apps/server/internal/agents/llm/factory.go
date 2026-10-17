@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/spend"
-	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
 // ClientFactory hands out the Client for a workspace and a stage, with the label of who pays for its calls. Agents
@@ -89,7 +89,7 @@ func NewFactory(opts FactoryOptions) (*Factory, error) {
 		return nil, err
 	}
 	// Fail closed (D-31): an unpriced paid provider is never allowed to run in staging or production, whatever the settings say.
-	if opts.Settings.AllowUnpriced && opts.Settings.Env != "local" && opts.Settings.Env != "ci" {
+	if opts.Settings.AllowUnpriced && !config.UnpricedAllowedIn(opts.Settings.Env) {
 		return nil, errors.New("llm: LLM_ALLOW_UNPRICED is honoured only in local and ci")
 	}
 	if opts.Logger == nil {
@@ -104,12 +104,7 @@ func NewFactory(opts FactoryOptions) (*Factory, error) {
 	}
 	f := &Factory{opts: opts, keys: keys}
 	if opts.Ledger != nil {
-		f.gate = spend.NewGate(opts.Ledger, spend.Options{
-			Caps: store.SpendCaps{
-				WorkspaceDailyMicros: opts.Settings.DailySpendCapMicros, PlatformDailyMicros: opts.Settings.PlatformDailySpendCapMicros,
-			},
-			Now: opts.now, Logger: opts.Logger,
-		})
+		f.gate = spend.NewGate(opts.Ledger, spend.Options{Caps: opts.Settings.SpendCaps(), Now: opts.now, Logger: opts.Logger})
 	}
 	return f, nil
 }
