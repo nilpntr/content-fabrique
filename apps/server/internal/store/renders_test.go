@@ -103,6 +103,13 @@ func rendersSuite(t *testing.T, st *store.Store, suffix string) {
 		if err != nil || got.Status != store.RenderRendering || got.Progress != 42 || got.Stage == nil || *got.Stage != store.RenderStageRendering || got.StartedAt == nil {
 			t.Fatalf("running render: %+v, %v", got, err)
 		}
+		// 100 is for a ready row only: a running render shows at most 99, whatever is written.
+		if err := st.SetRenderProgress(ctx, wa.ID, r.ID, 100, store.RenderStageUploading); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := st.GetRender(ctx, wa.ID, r.ID); got.Progress != store.MaxRunningProgress {
+			t.Errorf("a running render shows progress %d after 100 was written, want %d", got.Progress, store.MaxRunningProgress)
+		}
 		// A retry claims it again and starts over.
 		again, err := st.ClaimRender(ctx, wa.ID, r.ID)
 		if err != nil || again.Progress != 0 || again.Status != store.RenderRendering {

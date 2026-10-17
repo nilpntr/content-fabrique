@@ -61,7 +61,11 @@ func TestRenderPreviewAndFinal(t *testing.T) {
 			go func() {
 				defer close(done)
 				for {
-					if cur, err := e.svc.Get(context.Background(), w.ID, r.ID); err == nil {
+					// A row that is ready (100) is not part of the run's progress: ready and 100 arrive in one write.
+					if cur, err := e.svc.Get(context.Background(), w.ID, r.ID); err == nil && cur.Status != store.RenderReady {
+						if cur.Progress >= 100 {
+							t.Errorf("a %s render shows progress %d", cur.Status, cur.Progress)
+						}
 						mu.Lock()
 						if n := len(seen); n == 0 || seen[n-1] != int(cur.Progress) {
 							seen = append(seen, int(cur.Progress))
@@ -86,9 +90,9 @@ func TestRenderPreviewAndFinal(t *testing.T) {
 				t.Fatalf("outcome %+v", outcome)
 			}
 			mu.Lock()
-			// The watcher stops with the job, so the last value it saw is the one before the row turned ready (100).
-			if !slices.IsSorted(seen) || len(seen) < 4 || seen[len(seen)-1] < 90 || seen[len(seen)-1] >= 100 {
-				t.Errorf("progress went %v, want a rising sequence that ends below 100 until the row is ready", seen)
+			// The watcher only counts rows that are not ready, so what it saw is a rising sequence below 100.
+			if !slices.IsSorted(seen) || len(seen) < 4 || seen[len(seen)-1] >= 100 {
+				t.Errorf("progress went %v, want a rising sequence below 100 until the row is ready", seen)
 			}
 			mu.Unlock()
 

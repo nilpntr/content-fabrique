@@ -129,9 +129,13 @@ func (s *Store) ClaimRender(ctx context.Context, ws ids.WorkspaceID, id ids.Rend
 	return r, mapErr(err)
 }
 
-// SetRenderProgress records how far a running render is. ErrNotFound when it is not running any more.
+// MaxRunningProgress is the highest progress a render that is not ready shows: 100 is written only together with status ready
+// (FinishRender, in one statement), so a poller never sees 100 on a row that is still running.
+const MaxRunningProgress = 99
+
+// SetRenderProgress records how far a running render is (at most MaxRunningProgress). ErrNotFound when it is not running any more.
 func (s *Store) SetRenderProgress(ctx context.Context, ws ids.WorkspaceID, id ids.RenderID, progress int, stage string) error {
-	_, err := s.q.SetRenderProgress(ctx, db.SetRenderProgressParams{WorkspaceID: ws, ID: id, Progress: int16(min(max(progress, 0), 100)), Stage: stage}) //nolint:gosec // clamped
+	_, err := s.q.SetRenderProgress(ctx, db.SetRenderProgressParams{WorkspaceID: ws, ID: id, Progress: int16(min(max(progress, 0), MaxRunningProgress)), Stage: stage}) //nolint:gosec // clamped
 	return mapErr(err)
 }
 
