@@ -82,7 +82,8 @@ filter_complex:
   [abed][as1]amix=inputs=2:duration=first:normalize=0:dropout_transition=0,loudnorm=I=-14:TP=-1:LRA=11,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[aprog];
   sine=frequency=1000:sample_rate=48000:duration=10.100:samples_per_frame=48,volume='8*(between(t,2.2,2.23))':eval=frame:precision=float,aformat=sample_fmts=fltp:channel_layouts=stereo[abeatb];
   [abeatb]volume=-12dB[abeat];
-  [aprog][abeat]amix=inputs=2:duration=first:normalize=0:dropout_transition=0[aout]
+  [aprog]asplit=2[astem][acg];
+  [acg][abeat]amix=inputs=2:duration=first:normalize=0:dropout_transition=0[aout]
 
 loudnorm:
   filter: loudnorm=I=-14:TP=-1:LRA=11

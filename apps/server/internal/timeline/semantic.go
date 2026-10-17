@@ -170,7 +170,7 @@ func (c *checker) checkSpeedRamp(it VideoItem, path string) {
 				i, it.ID, p.AtMs, span, it.Source.InMs, it.Source.OutMs, span)
 		}
 	}
-	if a := it.Audio; a != nil && a.UseSourceOrDefault() {
+	if a := it.Audio; a != nil && a.Plays() {
 		c.addSeverity(SeverityWarning, CodeRampAudioMuted, path+"/audio/use_source",
 			"item %s has a speed ramp, so its own audio is muted: the audio cannot follow a changing speed. Turn use_source off, or give the clip a constant speed to keep its sound",
 			it.ID)

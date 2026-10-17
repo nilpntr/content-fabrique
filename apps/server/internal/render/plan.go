@@ -36,6 +36,13 @@ type Plan struct {
 
 	// Loudnorm is nil when the mix has no signal to normalise (a silent timeline).
 	Loudnorm *LoudnormPlan `json:"loudnorm,omitempty"`
+	// SoundReady is true for an edit whose sound is a bed and the effects (P3-12): see SoundReadyLUFS.
+	SoundReady bool `json:"sound_ready,omitempty"`
+	// Bed is the loudness evening of the clips' own sound, nil when no clip is in bed mode.
+	Bed *BedPlan `json:"bed,omitempty"`
+	// StemLabel is the pad of the audio mix without the preview's beat guide ("" when there is no guide): Execute can write it as a
+	// second output (ExecuteOptions.StemOutput) for the audio check, which must not measure the guide.
+	StemLabel string `json:"stem_label,omitempty"`
 
 	// Subtitles is the generated ASS script for the text items, the captions and the preview watermark (P3-04), burned in
 	// by the ass filter that ends the video graph; nil when there is nothing to draw. Execute writes the script and the
@@ -146,7 +153,60 @@ type LoudnormPlan struct {
 	// Pass1Args measures the mix: the audio part of the graph ending in loudnorm with print_format=json. Like Args it
 	// stops before the output (Execute adds "-f null -").
 	Pass1Args []string `json:"pass1_args,omitempty"`
+	// MaxGainDB, when positive, caps the gain the second pass applies: a sound-ready mix is lifted toward its target by at most this
+	// much, so a nearly silent bed is not boosted into hiss (P3-12).
+	MaxGainDB float64 `json:"max_gain_db,omitempty"`
 }
+
+// BedPlan is the loudness evening of the clips' own sound (P3-12). The clips in bed mode are set to one level, whatever they were
+// recorded at: Execute measures each clip's sound (ebur128 over the part it plays) in a pass of its own, and swaps the measured gain
+// for the nominal one in the graph, the way the two-pass loudnorm swaps its measured values.
+type BedPlan struct {
+	// TargetLUFS is the integrated loudness every bed clip is brought to when the edit has no speech to sit under.
+	TargetLUFS float64 `json:"target_lufs"`
+	// BelowLU is how far under the median of the speech clips (role "ref") the bed sits when the edit has speech.
+	BelowLU float64 `json:"below_lu"`
+	// MaxGainDB limits the correction of a clip either way.
+	MaxGainDB float64   `json:"max_gain_db"`
+	Clips     []BedClip `json:"clips"`
+	// MeterArgs measures the clips: one branch per clip ending in ebur128 with its metadata written to MeterFile. Like Args it
+	// stops before the output (Execute adds "-f null -").
+	MeterArgs []string `json:"meter_args,omitempty"`
+}
+
+// BedClip is one clip of the evening.
+type BedClip struct {
+	ItemID string `json:"item_id"`
+	// Role is "bed" (set to the level) or "ref" (a clip in full mode, measured so that the bed can sit under it).
+	Role string `json:"role"`
+	// Filter is the volume filter of a bed clip exactly as it is in the graph, with the nominal gain; TrimDB is the clip's own gain_db,
+	// added to the measured correction.
+	Filter string  `json:"filter,omitempty"`
+	TrimDB float64 `json:"trim_db,omitempty"`
+	// MeterFile is the file in the work directory that the measuring pass writes this clip's ebur128 metadata to.
+	MeterFile string `json:"meter_file"`
+}
+
+// The levels of the bed (P3-12). The bed is a low ambience under the edit: about -24 LUFS integrated, per clip, so a quiet clip and a
+// loud one sit at the same level. With speech in the edit it sits BedBelowSpeechLU under the speech. The correction of a clip is
+// limited to bedMaxGainDB either way, and a clip that is silent (under bedSilentLUFS) is left alone.
+const (
+	BedTargetLUFS    = -24.0
+	BedBelowSpeechLU = 10.0
+	bedMaxGainDB     = 18.0
+	bedSilentLUFS    = -60.0
+	// bedFadeMs is the fade at the edges of a bed clip that is not crossfaded with its neighbour, so that the bed does not click at a cut.
+	bedFadeMs = 20
+)
+
+// The sound-ready mix (P3-12): an edit with no programme sound (no speech, no music) is a bed and the effects, so it is not normalised
+// to the web's -14 LUFS (gym clatter at -14 would be wrong) but to SoundReadyLUFS as a whole, lifted by at most SoundReadyMaxBoostDB,
+// with true-peak headroom for the trend sound the creator layers on in TikTok.
+const (
+	SoundReadyLUFS       = -17.0
+	SoundReadyTP         = -2.0
+	SoundReadyMaxBoostDB = 8.0
+)
 
 // OutputArgs returns Args followed by -y and the output path, so an existing file is replaced.
 func (p Plan) OutputArgs(output string) []string {

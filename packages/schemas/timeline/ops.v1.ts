@@ -709,7 +709,11 @@ export type Type1 = "crossfade" | "dip_to_black" | "whip" | "whip_left" | "whip_
  */
 export type Duration = number;
 /**
- * True to mix the clip's own audio. Default false.
+ * What the clip's own sound does. mute: nothing (the default: a clip with no audio settings is silent). bed: a low ambience under the edit, evened out across the clips and never normalised up to the programme, so the export is not silent where no sound is playing and the creator can add a trend sound on top; use it for footage with no speech (gym clatter, room tone). full: the programme: the clip's sound at its own level, normalised with the rest and ducked under sound effects; use it for speech. gain_db is a trim on top of the mode's level.
+ */
+export type Mode1 = "mute" | "bed" | "full";
+/**
+ * The old spelling of mode: true is full, false is mute. Not together with mode.
  */
 export type UseSourceAudio = boolean;
 /**
@@ -827,7 +831,7 @@ export type ClipId4 = string;
 /**
  * cover fills the frame and crops around the focus point. contain fits the whole source and pads with the background colour. blur_fill fits the whole source over a blurred, scaled copy of itself.
  */
-export type Mode1 = "cover" | "contain" | "blur_fill";
+export type Mode2 = "cover" | "contain" | "blur_fill";
 /**
  * 0 is the left edge of the source, 1 the right edge.
  */
@@ -1180,10 +1184,13 @@ export type Uppercase = boolean;
  */
 export type MaximumWords = number;
 /**
- * Set whether a clip's own sound is in the mix and how loud. The fields you leave out stay as they are; clips are silent by default.
+ * Set what a clip's own sound does and how loud. mode is mute (nothing; the default), bed (a low ambience under the edit, evened out across clips and never normalised up to the programme: for footage with no speech) or full (the programme, for speech). Without id it sets every clip of the main track, which is how to set the bed policy once. The fields you leave out stay as they are. use_source is the old spelling of full and mute; give mode or use_source, not both.
  */
 export type SetClipAudio = SetClipAudio1 & SetClipAudio2;
 export type SetClipAudio1 =
+  | {
+      mode: unknown;
+    }
   | {
       use_source: unknown;
     }
@@ -1195,11 +1202,15 @@ export type SetClipAudio1 =
  */
 export type Op18 = "set_clip_audio";
 /**
- * The id of the main-track clip.
+ * The id of the main-track clip. Without it every clip of the main track.
  */
 export type ClipId7 = string;
 /**
- * True to mix the clip's own audio. Default false.
+ * What the clip's own sound does. mute: nothing (the default: a clip with no audio settings is silent). bed: a low ambience under the edit, evened out across the clips and never normalised up to the programme, so the export is not silent where no sound is playing and the creator can add a trend sound on top; use it for footage with no speech (gym clatter, room tone). full: the programme: the clip's sound at its own level, normalised with the rest and ducked under sound effects; use it for speech. gain_db is a trim on top of the mode's level.
+ */
+export type Mode3 = "mute" | "bed" | "full";
+/**
+ * The old spelling of mode: true is full, false is mute. Not together with mode.
  */
 export type UseSourceAudio1 = boolean;
 /**
@@ -1333,9 +1344,10 @@ export interface Look {
   match?: MatchExposure;
 }
 /**
- * Whether the clip's own sound is in the mix. Without it, the clip is silent.
+ * What the clip's own sound does: mode mute, bed or full (or the old use_source). Without it, the clip is silent.
  */
 export interface ClipAudio {
+  mode?: Mode1;
   use_source?: UseSourceAudio;
   gain_db?: Gain;
 }
@@ -1384,7 +1396,7 @@ export interface SetSpeed {
 export interface SetReframe {
   op: Op6;
   id: ClipId4;
-  mode: Mode1;
+  mode: Mode2;
   focus?: FocusPoint1;
   zoom?: Zoom1;
 }
@@ -1545,7 +1557,8 @@ export interface SetCaptions2 {
 }
 export interface SetClipAudio2 {
   op: Op18;
-  id: ClipId7;
+  id?: ClipId7;
+  mode?: Mode3;
   use_source?: UseSourceAudio1;
   gain_db?: GainInDB1;
 }

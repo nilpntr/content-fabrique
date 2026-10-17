@@ -398,11 +398,38 @@ type Transition struct {
 	DurationMs int64  `json:"duration_ms,omitempty"`
 }
 
-// VideoAudio controls the source audio of a clip.
+// The modes of a clip's own sound (P3-12): mute (nothing), bed (a low ambience under the edit, evened out across clips and
+// never normalised up to the programme) and full (the programme: speech, normalised with the rest and ducked under accents).
+const (
+	AudioModeMute = "mute"
+	AudioModeBed  = "bed"
+	AudioModeFull = "full"
+)
+
+// VideoAudio controls the source audio of a clip. Mode is the P3-12 way to say it; use_source true is the old spelling of full and
+// false of mute, and a clip never has both (the schema refuses it). gain_db is a trim on top of the mode's own level.
 type VideoAudio struct {
 	UseSource *bool    `json:"use_source,omitempty"`
 	GainDB    *float64 `json:"gain_db,omitempty"`
+	Mode      string   `json:"mode,omitempty"`
 }
+
+// ClipAudioMode is what a clip's own sound does: mute for a clip with no audio settings, the mode when it has one, else full for
+// use_source true and mute for anything else.
+func ClipAudioMode(a *VideoAudio) string {
+	switch {
+	case a == nil:
+		return AudioModeMute
+	case a.Mode != "":
+		return a.Mode
+	case a.UseSourceOrDefault():
+		return AudioModeFull
+	}
+	return AudioModeMute
+}
+
+// Plays is whether the mode puts the clip's own sound in the mix at all.
+func (a VideoAudio) Plays() bool { return ClipAudioMode(&a) != AudioModeMute }
 
 // UseSourceOrDefault is whether the clip's own audio plays: false when the spec leaves it out.
 func (a VideoAudio) UseSourceOrDefault() bool {

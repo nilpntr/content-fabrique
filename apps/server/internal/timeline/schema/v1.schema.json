@@ -404,14 +404,20 @@
     "videoAudio": {
       "type": "object",
       "title": "Clip audio",
-      "description": "Whether the clip's own sound is in the mix. Without it, the clip is silent.",
+      "description": "What the clip's own sound does: mode mute, bed or full (or the old use_source). Without it, the clip is silent.",
       "additionalProperties": false,
+      "not": { "properties": { "mode": {}, "use_source": {} }, "required": ["mode", "use_source"] },
       "properties": {
+        "mode": {
+          "enum": ["mute", "bed", "full"],
+          "title": "Mode",
+          "description": "What the clip's own sound does. mute: nothing (the default: a clip with no audio settings is silent). bed: a low ambience under the edit, evened out across the clips and never normalised up to the programme, so the export is not silent where no sound is playing and the creator can add a trend sound on top; use it for footage with no speech (gym clatter, room tone). full: the programme: the clip's sound at its own level, normalised with the rest and ducked under sound effects; use it for speech. gain_db is a trim on top of the mode's level."
+        },
         "use_source": {
           "type": "boolean",
           "default": false,
           "title": "Use source audio",
-          "description": "True to mix the clip's own audio. Default false."
+          "description": "The old spelling of mode: true is full, false is mute. Not together with mode."
         },
         "gain_db": {
           "$ref": "#/$defs/gainDb",

@@ -767,7 +767,11 @@ export type Type1 = "crossfade" | "dip_to_black" | "whip" | "whip_left" | "whip_
  */
 export type Duration = number;
 /**
- * True to mix the clip's own audio. Default false.
+ * What the clip's own sound does. mute: nothing (the default: a clip with no audio settings is silent). bed: a low ambience under the edit, evened out across the clips and never normalised up to the programme, so the export is not silent where no sound is playing and the creator can add a trend sound on top; use it for footage with no speech (gym clatter, room tone). full: the programme: the clip's sound at its own level, normalised with the rest and ducked under sound effects; use it for speech. gain_db is a trim on top of the mode's level.
+ */
+export type Mode1 = "mute" | "bed" | "full";
+/**
+ * The old spelling of mode: true is full, false is mute. Not together with mode.
  */
 export type UseSourceAudio = boolean;
 /**
@@ -1174,12 +1178,13 @@ export interface Look {
   match?: MatchExposure;
 }
 /**
- * Whether the clip's own sound is in the mix. Without it, the clip is silent.
+ * What the clip's own sound does: mode mute, bed or full (or the old use_source). Without it, the clip is silent.
  *
  * This interface was referenced by `Timeline`'s JSON-Schema
  * via the `definition` "videoAudio".
  */
 export interface ClipAudio {
+  mode?: Mode1;
   use_source?: UseSourceAudio;
   gain_db?: Gain;
 }

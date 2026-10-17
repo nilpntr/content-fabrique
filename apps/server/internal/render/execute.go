@@ -11,6 +11,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -59,6 +61,9 @@ type ExecuteOptions struct {
 	WorkDir string
 	// Progress, if set, is called for every progress block ffmpeg prints (about twice a second).
 	Progress func(Progress)
+	// StemOutput, when the plan has an audio stem (Plan.StemLabel), is where the audio mix without the preview's beat guide is
+	// written, as AAC in an MP4 container (m4a), in the same run as the video.
+	StemOutput string
 	// FontsDir is the host directory that holds the font files the plan's subtitles name (packages/media-tools/fonts). Empty
 	// means packages/media-tools/fonts found above the working directory. It is only used when the runner runs the host's ffmpeg (the
 	// local provider): in the media-tools image (docker, hardened) the render reads the image's own fonts, ImageFontsDir, and
@@ -68,6 +73,7 @@ type ExecuteOptions struct {
 
 const (
 	outName       = "out.mp4"
+	stemName      = "stem.m4a"
 	pollInterval  = 200 * time.Millisecond
 	ffmpegProgram = "ffmpeg"
 )
@@ -95,7 +101,7 @@ func Execute(ctx context.Context, plan Plan, runner media.Runner, opts ExecuteOp
 		defer func() { _ = os.RemoveAll(work) }()
 	}
 	// Only a clean slate: a left-over output must never be taken for this run's.
-	for _, n := range []string{outName, "progress-render.txt", "progress-measure.txt", subtitleFile} {
+	for _, n := range []string{outName, stemName, "progress-render.txt", "progress-measure.txt", "progress-bed.txt", subtitleFile} {
 		_ = os.Remove(filepath.Join(work, n))
 	}
 	_ = os.RemoveAll(filepath.Join(work, fontsDirName))
@@ -105,6 +111,19 @@ func Execute(ctx context.Context, plan Plan, runner media.Runner, opts ExecuteOp
 	}
 
 	args := plan.Args
+	// The bed clips are set to their level first: the measured gains go into the graph and into the loudness pass that follows.
+	if plan.Bed != nil && len(plan.Bed.MeterArgs) > 0 {
+		swaps, err := measureBed(ctx, plan, runner, inputs, work, opts)
+		if err != nil {
+			return err
+		}
+		args = applySwaps(args, swaps)
+		if plan.Loudnorm != nil {
+			ln := *plan.Loudnorm
+			ln.Pass1Args = applySwaps(ln.Pass1Args, swaps)
+			plan.Loudnorm = &ln
+		}
+	}
 	if ln := plan.Loudnorm; ln != nil && ln.TwoPass {
 		measured, err := measureLoudness(ctx, plan, runner, inputs, work, opts)
 		if err != nil {
@@ -112,7 +131,7 @@ func Execute(ctx context.Context, plan Plan, runner media.Runner, opts ExecuteOp
 		}
 		if measured != "" {
 			var swapped bool
-			if args, swapped = swapFilter(plan.Args, ln.Filter, measured); !swapped {
+			if args, swapped = swapFilter(args, ln.Filter, measured); !swapped {
 				return errors.New("render: the loudnorm filter is missing from the plan")
 			}
 		}
@@ -123,8 +142,19 @@ func Execute(ctx context.Context, plan Plan, runner media.Runner, opts ExecuteOp
 	}
 	full := append(ffmpegPrefix("error", "progress-render.txt"), containerArgs(args, inputs)...)
 	full = append(full, "-y", media.OutputPath(outName))
+	withStem := plan.StemLabel != "" // the pad is in the graph, so it is always written; the file is kept only when the caller asked for it
+	if withStem {
+		// The audio mix without the beat guide, as a second output of the same run.
+		full = append(full, "-map", "["+plan.StemLabel+"]", "-vn", "-c:a", "aac", "-b:a", "128k", "-ar", strconv.Itoa(AudioSampleRate), "-ac", "2",
+			"-map_metadata", "-1", "-fflags", "+bitexact", "-flags:a", "+bitexact", media.OutputPath(stemName))
+	}
 	if _, err := runFFmpeg(ctx, runner, full, inputs, work, plan, "render", "progress-render.txt", opts.Progress); err != nil {
 		return err
+	}
+	if withStem && opts.StemOutput != "" {
+		if err := moveFile(filepath.Join(work, stemName), opts.StemOutput); err != nil {
+			return err
+		}
 	}
 	return moveFile(filepath.Join(work, outName), opts.Output)
 }
@@ -313,11 +343,11 @@ func measureLoudness(ctx context.Context, plan Plan, runner media.Runner, inputs
 	if err != nil {
 		return "", err
 	}
-	return measuredFilter(ln.Filter, string(stderr))
+	return measuredFilter(ln.Filter, string(stderr), ln.MaxGainDB)
 }
 
 // measuredFilter reads the loudnorm JSON out of ffmpeg's log and builds the second-pass filter.
-func measuredFilter(base, log string) (string, error) {
+func measuredFilter(base, log string, maxGain float64) (string, error) {
 	end := strings.LastIndex(log, "}")
 	start := strings.LastIndex(log, "{")
 	if start < 0 || end < start {
@@ -338,8 +368,105 @@ func measuredFilter(base, log string) (string, error) {
 	if math.IsInf(vals[0], 0) || math.IsNaN(vals[0]) || vals[0] < silenceFloor {
 		return "", nil
 	}
+	// A capped mix (a sound-ready one) is lifted by at most maxGain. In linear mode loudnorm applies target_I - measured_I (it computes
+	// that itself and ignores the offset it is given), so the cap is a lower target: measured_I + maxGain.
+	if m := targetIRe.FindStringSubmatch(base); m != nil && maxGain > 0 {
+		if target, err := strconv.ParseFloat(m[1], 64); err == nil && target-vals[0] > maxGain {
+			base = targetIRe.ReplaceAllString(base, "I="+num(math.Round((vals[0]+maxGain)*100)/100))
+		}
+	}
 	return fmt.Sprintf("%s:measured_I=%s:measured_TP=%s:measured_LRA=%s:measured_thresh=%s:offset=%s:linear=true",
 		base, num(vals[0]), num(vals[1]), num(vals[2]), num(vals[3]), num(vals[4])), nil
+}
+
+// targetIRe is the I= (integrated target) of a loudnorm filter.
+var targetIRe = regexp.MustCompile(`I=(-?[0-9.]+)`)
+
+// applySwaps returns a copy of args with every old filter text replaced by its new one (each is unique: a bed filter is named by its
+// clip).
+func applySwaps(args []string, swaps map[string]string) []string {
+	out := make([]string, len(args))
+	copy(out, args)
+	for i, a := range out {
+		for old, repl := range swaps {
+			if strings.Contains(a, old) {
+				a = strings.Replace(a, old, repl, 1)
+			}
+		}
+		out[i] = a
+	}
+	return out
+}
+
+// measureBed runs the evening pass: the loudness of every clip that plays its own sound, over the part it plays, and returns the
+// swaps from each bed clip's nominal filter to its measured one. A bed clip is brought to the bed's level (Bed.TargetLUFS, or
+// Bed.BelowLU under the median of the speech clips when there are any); a clip too quiet to measure keeps the nominal gain.
+func measureBed(ctx context.Context, plan Plan, runner media.Runner, inputs []media.Input, work string, opts ExecuteOptions) (map[string]string, error) {
+	bed := plan.Bed
+	args := append(ffmpegPrefix("error", "progress-bed.txt"), containerArgs(bed.MeterArgs, inputs)...)
+	args = append(args, "-f", "null", "-")
+	for _, bc := range bed.Clips {
+		_ = os.Remove(filepath.Join(work, bc.MeterFile))
+	}
+	if _, err := runFFmpeg(ctx, runner, args, inputs, work, plan, "measure", "progress-bed.txt", opts.Progress); err != nil {
+		return nil, err
+	}
+	measured := map[string]float64{}
+	var refs []float64
+	for _, bc := range bed.Clips {
+		lufs, ok := readMeterFile(filepath.Join(work, bc.MeterFile))
+		if !ok || lufs < bedSilentLUFS {
+			continue
+		}
+		measured[bc.ItemID] = lufs
+		if bc.Role == "ref" {
+			refs = append(refs, lufs)
+		}
+	}
+	target := bed.TargetLUFS
+	if len(refs) > 0 {
+		slices.Sort(refs)
+		target = refs[len(refs)/2] - bed.BelowLU
+	}
+	swaps := map[string]string{}
+	for _, bc := range bed.Clips {
+		if bc.Role != "bed" {
+			continue
+		}
+		gain := bc.TrimDB
+		if lufs, ok := measured[bc.ItemID]; ok {
+			gain += math.Max(-bed.MaxGainDB, math.Min(bed.MaxGainDB, target-lufs))
+		}
+		name, _, _ := strings.Cut(bc.Filter, "=")
+		swaps[bc.Filter] = name + "=" + num(math.Round(gain*10)/10) + "dB"
+	}
+	return swaps, nil
+}
+
+// readMeterFile reads the last integrated loudness out of an ebur128 metadata file the evening pass wrote.
+func readMeterFile(path string) (float64, bool) {
+	fi, err := os.Lstat(path)
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() > 16<<20 {
+		return 0, false
+	}
+	data, err := os.ReadFile(path) //nolint:gosec // a file in our work directory, checked above
+	if err != nil {
+		return 0, false
+	}
+	s := string(data)
+	i := strings.LastIndex(s, "lavfi.r128.I=")
+	if i < 0 {
+		return 0, false
+	}
+	v := s[i+len("lavfi.r128.I="):]
+	if j := strings.IndexAny(v, "\r\n"); j >= 0 {
+		v = v[:j]
+	}
+	lufs, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+	if err != nil || math.IsNaN(lufs) || math.IsInf(lufs, 0) {
+		return 0, false
+	}
+	return lufs, true
 }
 
 func lastLines(s string, n int) string {

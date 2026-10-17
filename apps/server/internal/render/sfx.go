@@ -186,7 +186,7 @@ func (c *compiler) speechSpans() [][2]int64 {
 	audible := func(ci int) bool {
 		cl := c.clips[ci]
 		a := cl.item.Audio
-		return a != nil && a.UseSourceOrDefault() && cl.asset.HasAudio && !cl.item.HasRamp() && a.GainDBOrDefault() > duckMinClipGainDB
+		return timeline.ClipAudioMode(a) == timeline.AudioModeFull && cl.asset.HasAudio && !cl.item.HasRamp() && a.GainDBOrDefault() > duckMinClipGainDB
 	}
 	for _, w := range c.mapWordsOf(audible) {
 		start, end := timeline.FrameStartMs(w.startF, c.fps), timeline.FrameStartMs(w.endF, c.fps)

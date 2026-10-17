@@ -491,7 +491,9 @@ func TestBeatGuide(t *testing.T) {
 		"sine=frequency=1500:sample_rate=48000:duration=4.000:samples_per_frame=48,volume='8*(between(t,0,0.03))':eval=frame:precision=float",
 		"sine=frequency=2000:sample_rate=48000:duration=4.000:samples_per_frame=48,volume='8*(between(t,2,2.15))':eval=frame:precision=float",
 		"[abeatb][abeatd][abeatp]amix=inputs=3:duration=first:normalize=0:dropout_transition=0,volume=-12dB[abeat]",
-		"[abed][abeat]amix=inputs=2:duration=first:normalize=0:dropout_transition=0[aout]",
+		// The beat guide goes on top of the core mix; the core without it is the audio stem (P3-12).
+		"[abed]asplit=2[astem][acg]",
+		"[acg][abeat]amix=inputs=2:duration=first:normalize=0:dropout_transition=0[aout]",
 	} {
 		if !strings.Contains(g, want) {
 			t.Errorf("graph lacks %q:\n%s", want, PrettyFilter(g))

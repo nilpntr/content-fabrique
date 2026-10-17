@@ -689,6 +689,9 @@ func (s *summarizer) finalClipAudio(id string) {
 	if b, _ := m["use_source"].(bool); b {
 		on = "on"
 	}
+	if mode, _ := m["mode"].(string); mode != "" {
+		on = mode
+	}
 	line := fmt.Sprintf("set the source audio of %s %s", id, on)
 	if g, ok := m["gain_db"]; ok {
 		line += fmt.Sprintf(" at %s dB", scalar(g))
