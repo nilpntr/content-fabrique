@@ -14,23 +14,49 @@ import (
 )
 
 type Asset struct {
-	ID            ids.AssetID
-	WorkspaceID   ids.WorkspaceID
-	Kind          string
-	Status        string
-	Filename      string
-	ContentType   string
-	SizeBytes     int64
-	Sha256        *string
-	Title         string
-	Description   string
-	Tags          []string
-	R2Key         string
-	FailureReason *string
-	CreatedBy     ids.UserID
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	DeletedAt     *time.Time
+	ID             ids.AssetID
+	WorkspaceID    ids.WorkspaceID
+	Kind           string
+	Status         string
+	Filename       string
+	ContentType    string
+	SizeBytes      int64
+	Sha256         *string
+	Title          string
+	Description    string
+	Tags           []string
+	R2Key          string
+	FailureReason  *string
+	CreatedBy      ids.UserID
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	DeletedAt      *time.Time
+	DurationMs     *int64
+	Width          *int32
+	Height         *int32
+	Fps            *float64
+	Rotation       *int32
+	VideoCodec     *string
+	AudioCodec     *string
+	HasAudio       *bool
+	Hdr            *bool
+	Probe          []byte
+	IngestProgress int16
+	IngestStage    *string
+	IngestedAt     *time.Time
+}
+
+type AssetDerivative struct {
+	ID          uuid.UUID
+	WorkspaceID ids.WorkspaceID
+	AssetID     ids.AssetID
+	Kind        string
+	R2Key       string
+	ContentType string
+	SizeBytes   int64
+	Meta        json.RawMessage
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type CreatorProfile struct {

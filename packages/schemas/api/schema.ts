@@ -75,7 +75,8 @@ export interface paths {
         };
         /**
          * List the workspace's assets, newest first
-         * @description Cursor pagination. Deleted assets are not listed.
+         * @description Cursor pagination. Deleted assets are not listed. A `ready` asset carries its `media` facts and short-lived
+         *     `derivatives` URLs, as in `getAsset`.
          */
         get: operations["listAssets"];
         put?: never;
@@ -108,7 +109,10 @@ export interface paths {
         };
         /**
          * One asset
-         * @description An asset of another workspace, or one that does not exist, is `404 not_found`.
+         * @description An asset of another workspace, or one that does not exist, is `404 not_found`. While the asset is `processing`,
+         *     `ingest_progress` and `ingest_stage` say how far the ingest is. Once it is `ready`, `media` holds what the probe
+         *     found and `derivatives` holds a presigned GET URL per generated file (see `AssetDerivatives`); the URLs stop working
+         *     at `derivative_urls_expire_at`, so fetch the asset again for fresh ones.
          */
         get: operations["getAsset"];
         put?: never;
@@ -150,6 +154,35 @@ export interface paths {
          *     Aborting twice is `404 not_found`; an upload that is already completed is `409 upload_not_active`.
          */
         delete: operations["abortAssetUpload"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/assets/{id}/sprite.vtt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The asset's TypeID. */
+                id: components["parameters"]["AssetIdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The hover-scrub thumbnails track, with working URLs
+         * @description The WebVTT thumbnails track of a `ready` video, with every cue pointing at the sprite sheet through a fresh presigned
+         *     URL (`https://...?X-Amz-...#xywh=x,y,w,h`), so a player can use it as is. The file stored in object storage
+         *     (`derivatives.sprite_vtt`) names the sheet relatively and cannot work on its own, because the sheet's URL is signed and
+         *     expires; this endpoint is how to get a track that works. It needs the same authentication as the rest of the API, so
+         *     fetch it with the bearer token and hand the text to the player (for example as a Blob URL for a `<track>`). The cue URLs
+         *     stop working at the same time as `derivative_urls_expire_at`. `404 not_found` when the asset has no sprite track (not
+         *     ready yet, an audio file, an image).
+         */
+        get: operations["getAssetSpriteVtt"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -317,7 +350,8 @@ export interface components {
         AssetKind: "video" | "audio" | "image";
         /**
          * @description `uploading` (the multipart upload is in progress), `uploaded` (the object is complete; ingest is queued),
-         *     `processing`, `ready`, or `failed` (see `failure_reason`).
+         *     `processing` (the ingest is running: see `ingest_progress`), `ready` (probed, with its derivatives), or `failed`
+         *     (see `failure_reason`).
          * @enum {string}
          */
         AssetStatus: "uploading" | "uploaded" | "processing" | "ready" | "failed";
@@ -336,12 +370,87 @@ export interface components {
             title: string;
             description: string;
             tags: string[];
-            /** @description Why the asset is `failed` (`upload_expired`, `size_mismatch`, `upload_aborted`). Null otherwise. */
+            /**
+             * @description Why the asset is `failed`, as a code that is safe to show. The upload failed: `upload_expired`, `size_mismatch`,
+             *     `upload_aborted`. The ingest could not process the file: `unsupported_format` (not a container we accept),
+             *     `corrupt_media` (damaged or cut off), `no_video_stream`, `no_audio_stream`, `undecodable_video`,
+             *     `invalid_duration`, `too_long` (over 30 minutes), `unsupported_resolution`, `kind_mismatch`; or, our fault, the
+             *     ingest failed on every retry: `processing_failed`, `processing_timeout` (it ran out of time) or
+             *     `processing_interrupted` (the worker was stopped on the last attempt). A failed asset has no derivatives.
+             *     Null otherwise.
+             */
             failure_reason: string | null;
+            /** @description How far the ingest is while `status` is `processing`; 100 when `ready`, 0 before it starts. */
+            ingest_progress: number;
+            /** @description What the ingest is doing while `status` is `processing` (`starting`, `downloading`, `probing`, `proxy`, `derivatives`, `uploading`). Null otherwise. */
+            ingest_stage: string | null;
+            media?: components["schemas"]["MediaInfo"];
+            derivatives?: components["schemas"]["AssetDerivatives"];
+            /**
+             * Format: date-time
+             * @description When the URLs in `derivatives` stop working. Present with `derivatives`.
+             */
+            derivative_urls_expire_at?: string;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description What the ingest probe found in the original. Present once the asset is `ready`. */
+        MediaInfo: {
+            /**
+             * Format: int64
+             * @description 0 for an image.
+             */
+            duration_ms: number;
+            /** @description The upright (display) width of the original in pixels, rotation applied. Null for audio. */
+            width: number | null;
+            /** @description The upright (display) height. A phone clip held upright is portrait here although it is stored sideways. */
+            height: number | null;
+            /** Format: double */
+            fps: number | null;
+            /**
+             * @description Degrees clockwise the stored picture of the original must turn to be upright. The derivatives have it applied already and carry no rotation flag.
+             * @enum {integer}
+             */
+            rotation: 0 | 90 | 180 | 270;
+            video_codec: string | null;
+            /** @description The codec of the audio stream that was used. A file's other audio tracks that cannot be decoded (the APAC spatial-audio track of an iPhone clip) are ignored. */
+            audio_codec: string | null;
+            /** @description True when a decodable audio stream was found and is in the proxy. */
+            has_audio: boolean;
+            /** @description True when the original is HDR (PQ or HLG). The proxy is always SDR BT.709. */
+            hdr: boolean;
+        };
+        DerivativeFile: {
+            /** @description A presigned GET URL. It supports HTTP range requests. Treat it as a secret until it expires. */
+            url: string;
+            content_type: string;
+            /** Format: int64 */
+            size_bytes: number;
+            /** @description Pixels, for pictures and videos. */
+            width?: number;
+            height?: number;
+            /** Format: int64 */
+            duration_ms?: number;
+        };
+        /**
+         * @description The files the ingest made, each as a short-lived presigned GET URL. Only the files that exist are present: an
+         *     audio file has no picture files, and a clip without a decodable audio track has no `waveform`.
+         */
+        AssetDerivatives: {
+            /** @description `proxy_720.mp4`: H.264, 720 px on the short side (a portrait clip is 720x1280), upright with no rotation flag, SDR BT.709, a keyframe every second, the index first, AAC audio. Plays and seeks in a plain `<video>`. */
+            proxy_720?: components["schemas"]["DerivativeFile"];
+            /** @description `poster.jpg`: a representative frame. */
+            poster?: components["schemas"]["DerivativeFile"];
+            /** @description `hover_preview.mp4`: about 8 s made of four 2 s segments spread over the clip (the whole clip when it is shorter), muted, 360 px on the short side, under 1 MB. */
+            hover_preview?: components["schemas"]["DerivativeFile"];
+            /** @description `sprite.jpg`: a grid of 160 px wide tiles, one per `interval_sec` seconds (at most 100), for hover scrubbing. `sprite_vtt` says where each tile is. */
+            sprite?: components["schemas"]["DerivativeFile"];
+            /** @description `sprite.vtt` as stored: a WebVTT thumbnails track whose cues name the sheet relatively (`sprite.jpg#xywh=x,y,w,h`). Do not give this URL to a player; `GET /v1/assets/{id}/sprite.vtt` returns the same track with every cue pointing at the sprite URL. */
+            sprite_vtt?: components["schemas"]["DerivativeFile"];
+            /** @description `waveform.json`: `{version, sample_rate, duration_ms, samples_per_peak, peaks}`, up to 1000 peaks from 0 to 1. */
+            waveform?: components["schemas"]["DerivativeFile"];
         };
         CreateAssetRequest: {
             filename: string;
@@ -808,6 +917,36 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["UploadConflict"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getAssetSpriteVtt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The asset's TypeID. */
+                id: components["parameters"]["AssetIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The track, `text/vtt`. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/vtt": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["Unavailable"];
         };

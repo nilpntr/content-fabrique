@@ -94,8 +94,8 @@ func TestFactoryWithTheRealLedger(t *testing.T) {
 	defer func() { _ = conn.Close(ctx) }()
 	_, err = conn.Exec(ctx, `DELETE FROM workspaces WHERE id = $1`, w.ID)
 	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
-		t.Fatalf("deleting a workspace that has ledger rows: %v, want a foreign key violation", err)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23001" {
+		t.Fatalf("deleting a workspace that has ledger rows: %v, want a restrict violation (23001)", err)
 	}
 }
 

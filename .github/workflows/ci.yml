@@ -39,6 +39,7 @@ jobs:
       env: ${{ steps.filter.outputs.env || 'true' }}
       doctor: ${{ steps.filter.outputs.doctor || 'true' }}
       contract: ${{ steps.filter.outputs.contract || 'true' }}
+      render: ${{ steps.filter.outputs.render || 'true' }}
       # On pull requests the first filter decides; on pushes to main the second one (so the heavy media jobs do not run on
       # every push); on manual runs both are skipped and everything runs.
       media_sandbox: ${{ steps.filter.outputs.media_sandbox || steps.filter_push.outputs.media_sandbox || 'true' }}
@@ -82,7 +83,22 @@ jobs:
               - 'packages/media-tools/**'
               - 'apps/server/internal/sandbox/**'
               - 'apps/server/internal/media/**'
+              - 'apps/server/internal/ingest/**'
               - 'apps/server/cmd/cfctl/media*.go'
+              - '.github/workflows/ci.yml'
+            # The renderer and what it compiles: the Go timeline package and the fixtures (the 20 render fixtures and the
+            # asset catalog) that the golden tests read, the sandbox and media packages it runs ffmpeg through, and the Go
+            # module files (a dependency bump can change what the tests build).
+            render:
+              - 'apps/server/internal/render/**'
+              - 'apps/server/internal/timeline/**'
+              - 'apps/server/internal/sandbox/**'
+              - 'apps/server/internal/media/**'
+              - 'packages/schemas/timeline/**'
+              - 'apps/server/go.mod'
+              - 'apps/server/go.sum'
+              - 'go.work'
+              - 'go.work.sum'
               - '.github/workflows/ci.yml'
             # The OpenAPI contract: the spec, the Go server interface and the TypeScript types generated from it, and the
             # web client built on them.
@@ -106,6 +122,7 @@ jobs:
               - 'packages/media-tools/**'
               - 'apps/server/internal/sandbox/**'
               - 'apps/server/internal/media/**'
+              - 'apps/server/internal/ingest/**'
               - 'apps/server/cmd/cfctl/media*.go'
               - '.github/workflows/ci.yml'
 
@@ -372,6 +389,60 @@ jobs:
       - name: cfctl doctor --env ci
         run: '"$RUNNER_TEMP/cfctl" doctor --env ci --env-file "$RUNNER_TEMP/ci.env"'
 
+  # The golden renders (P3-03, docs/design/timeline-v1.md section 7): every render fixture is rendered with ffmpeg and
+  # frames are compared with the committed PNGs (SSIM >= 0.98). The golden plans and the compiler's unit tests run in
+  # go-test as well; this job is the one that has ffmpeg, so it is the one that renders.
+  #
+  # ffmpeg is a pinned static build (BtbN, GPL, n8.1.3, from the monthly tag autobuild-2026-09-30-13-08, which the project
+  # keeps) with its SHA-256 checked before anything is unpacked. The golden frames need the host's ffmpeg to generate the test
+  # media and extract frames, and the media-tools image takes 10+ minutes to build, so this job does not use it; the
+  # render's own path through the sandbox and the image is tested in the media-tools job (TestIntegrationRenderInDocker).
+  # TODO(P1-03 follow-up): when the media-tools image is published to a registry, pull it here, run the golden renders
+  # through the docker provider and drop the download; keep the version pin in one place, the image.
+  render:
+    needs: changes
+    if: needs.changes.outputs.render == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FFMPEG_URL: https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz
+      FFMPEG_SHA256: 97ce978979194b5cf7e06a5e68020dbdaa7a4f3294c5452b6a1bc347100dbb79
+    defaults:
+      run:
+        working-directory: apps/server
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: apps/server/go.mod
+          cache: false
+      # The download is 150 MB: keep it between runs. The key is the checksum, so a new pin is a new entry.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: ffmpeg-cache
+        with:
+          path: ~/ffmpeg-download
+          key: ffmpeg-${{ env.FFMPEG_SHA256 }}
+      - name: Download ffmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$HOME/ffmpeg-download"
+          curl -fsSL --retry 3 -o "$HOME/ffmpeg-download/ffmpeg.tar.xz" "$FFMPEG_URL"
+      - name: Verify and install ffmpeg
+        run: |
+          echo "$FFMPEG_SHA256  $HOME/ffmpeg-download/ffmpeg.tar.xz" | sha256sum --check --strict -
+          mkdir -p "$HOME/ffmpeg"
+          tar -xJf "$HOME/ffmpeg-download/ffmpeg.tar.xz" -C "$HOME/ffmpeg" --strip-components=1
+          echo "$HOME/ffmpeg/bin" >> "$GITHUB_PATH"
+          "$HOME/ffmpeg/bin/ffmpeg" -hide_banner -version | head -1
+      # CF_RENDER_REQUIRE_FFMPEG turns "ffmpeg is missing" and "ffmpeg is not the pinned major version" from a skip into a
+      # failure, so a broken install can never make this job pass by skipping every render.
+      - name: Golden renders
+        env:
+          CF_RENDER_REQUIRE_FFMPEG: n8.
+        run: go test -race -count=1 -v ./internal/render/...
+
   # The media-tools image (P1-03): build it, check its shape and its licences. The licence check fails on anything outside
   # packages/media-tools/licenses/policy.json, the allowlist D-16 (as amended) asks for: permissive licences, plus the named
   # GPL/LGPL exceptions (ffmpeg, x264 and their runtime libraries, run as separate processes in our containers). It also
@@ -457,6 +528,22 @@ jobs:
         working-directory: apps/server
         run: go test ./internal/sandbox ./internal/media -run Integration -docker-image media-tools:ci -v
 
+      # The renderer through the docker provider and this image: the timeline's full edit, both profiles (the final one with
+      # the two loudness passes), inputs mounted read-only, output and progress in the work directory.
+      - name: Render integration test against the image
+        working-directory: apps/server
+        run: go test ./internal/render -run Integration -docker-image media-tools:ci -v
+
+      # P1-04: the ingest pipeline end to end with its tools running in the image. The test clips (portrait and rotated, HDR
+      # PQ and HLG, a second audio track with the 'apac' tag) are generated with the runner's own ffmpeg; the image does all
+      # the work under test.
+      - name: Ingest pipeline against the image
+        working-directory: apps/server
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          go test ./internal/ingest -docker-image media-tools:ci -v
+
   # gVisor overhead (D-08, P1-03): installs runsc (pinned and checksum-verified), registers it with Docker, then transcodes a
   # generated 1080p 30 s clip with the docker and hardened providers three times each and prints the table. It also runs the
   # sandbox integration tests under runsc. Runs on manual dispatch, and on pull requests and pushes to main that touch the sandbox, the media wrappers or the image.
@@ -536,7 +623,7 @@ jobs:
   # needed job succeeded or was skipped, and fails on any failure or cancellation. Add every new job to `needs`.
   required:
     if: always()
-    needs: [changes, go-lint, go-test, db, web, contract, env-lint, doctor, media-tools, gvisor-bench]
+    needs: [changes, go-lint, go-test, db, web, contract, env-lint, doctor, render, media-tools, gvisor-bench]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:

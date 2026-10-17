@@ -165,7 +165,9 @@ func TestTransitions(t *testing.T) {
 		{"one ms late is a gap", second(1701, cross(300), 2000), []Code{CodeGap}},
 		{"one ms early is an overlap", second(1699, cross(300), 2000), []Code{CodeOverlap}},
 		{"a cut at the previous end", second(2000, &Transition{Type: TransitionCut}, 2000), nil},
-		{"transition shorter than both clips", second(1601, cross(399), 400), nil},
+		{"transition shorter than both clips", second(1700, cross(300), 400), nil},
+		// 399 ms is shorter than 400 ms, but both snap to 12 frames at 30 fps: nothing of the clip would play on its own.
+		{"transition as long as the next clip after snapping to frames", second(1601, cross(399), 400), []Code{CodeTransitionTooLong}},
 		{"transition as long as the next clip", second(1600, cross(400), 400), []Code{CodeTransitionTooLong}},
 	}
 	for _, tc := range cases {

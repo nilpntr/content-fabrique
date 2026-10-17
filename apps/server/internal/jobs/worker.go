@@ -34,6 +34,8 @@ type WorkerOptions struct {
 	Logger *slog.Logger
 	// Objects is object storage, for the jobs that remove objects. Nil when R2_* is not set.
 	Objects ObjectStore
+	// Ingest is the media pipeline, for the jobs that ingest assets. Nil when the sandbox or object storage is not set up.
+	Ingest AssetIngester
 	// UIAddr is the listen address of River UI, such as "127.0.0.1:8082". Empty turns River UI off.
 	UIAddr string
 	// UIPassword is RIVER_UI_PASSWORD. River UI refuses to start without it.
@@ -98,7 +100,7 @@ func StartWorker(ctx context.Context, opts WorkerOptions) (*Worker, error) {
 		}
 	}
 
-	client, err := NewWorkerClient(pool, cfg, Deps{Store: opts.Store, Logger: logger, Objects: opts.Objects, Register: opts.Register})
+	client, err := NewWorkerClient(pool, cfg, Deps{Store: opts.Store, Logger: logger, Objects: opts.Objects, Ingest: opts.Ingest, Register: opts.Register})
 	if err != nil {
 		pool.Close()
 		return nil, err
