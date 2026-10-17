@@ -1,0 +1,402 @@
+{
+  "schema": "contentfabrique.timeline/v1",
+  "output": {
+    "format": "16:9",
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "background": "#000000"
+  },
+  "tracks": [
+    {
+      "id": "main",
+      "type": "video",
+      "items": [
+        {
+          "id": "c1",
+          "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+          "source": {
+            "in_ms": 2000,
+            "out_ms": 3500
+          },
+          "at_ms": 0,
+          "look": {
+            "preset": "auto",
+            "match": true
+          },
+          "audio": {
+            "use_source": true
+          }
+        },
+        {
+          "id": "c2",
+          "asset_id": "ast_01jex6xx15ayjx8epfhfjj9s11",
+          "source": {
+            "in_ms": 1000,
+            "out_ms": 2500
+          },
+          "at_ms": 1500,
+          "look": {
+            "preset": "gym_moody"
+          },
+          "exposure_ev": 0.8
+        },
+        {
+          "id": "c3",
+          "asset_id": "ast_01jdsx72atvnb7ssgbc57zbxj9",
+          "source": {
+            "in_ms": 5000,
+            "out_ms": 6500
+          },
+          "at_ms": 3000,
+          "look": {
+            "preset": "gym_moody",
+            "match": true
+          },
+          "exposure_ev": -0.9
+        },
+        {
+          "id": "c4",
+          "asset_id": "ast_01jfbemsc6way7dnfebdf8tf3g",
+          "source": {
+            "in_ms": 8000,
+            "out_ms": 9500
+          },
+          "at_ms": 4500,
+          "look": {
+            "preset": "auto"
+          }
+        }
+      ]
+    },
+    {
+      "id": "sound",
+      "type": "audio",
+      "items": [
+        {
+          "id": "s1",
+          "kind": "sfx",
+          "sfx": "whoosh",
+          "variant": "air",
+          "at_ms": 0,
+          "export": "licensed"
+        },
+        {
+          "id": "s2",
+          "kind": "sfx",
+          "sfx": "whoosh",
+          "variant": "fast",
+          "at_ms": 150,
+          "export": "licensed"
+        },
+        {
+          "id": "s3",
+          "kind": "sfx",
+          "sfx": "whoosh",
+          "variant": "heavy",
+          "at_ms": 300,
+          "export": "licensed"
+        },
+        {
+          "id": "s4",
+          "kind": "sfx",
+          "sfx": "swish",
+          "variant": "thin",
+          "at_ms": 450,
+          "export": "licensed"
+        },
+        {
+          "id": "s5",
+          "kind": "sfx",
+          "sfx": "swish",
+          "variant": "blade",
+          "at_ms": 600,
+          "export": "licensed"
+        },
+        {
+          "id": "s6",
+          "kind": "sfx",
+          "sfx": "swish",
+          "variant": "cloth",
+          "at_ms": 750,
+          "export": "licensed"
+        },
+        {
+          "id": "s7",
+          "kind": "sfx",
+          "sfx": "impact",
+          "variant": "punch",
+          "at_ms": 900,
+          "export": "licensed"
+        },
+        {
+          "id": "s8",
+          "kind": "sfx",
+          "sfx": "impact",
+          "variant": "deep",
+          "at_ms": 1050,
+          "export": "licensed"
+        },
+        {
+          "id": "s9",
+          "kind": "sfx",
+          "sfx": "impact",
+          "variant": "crack",
+          "at_ms": 1200,
+          "export": "licensed"
+        },
+        {
+          "id": "s10",
+          "kind": "sfx",
+          "sfx": "impact",
+          "variant": "metal",
+          "at_ms": 1350,
+          "export": "licensed"
+        },
+        {
+          "id": "s11",
+          "kind": "sfx",
+          "sfx": "riser",
+          "variant": "tension",
+          "at_ms": 1500,
+          "export": "licensed"
+        },
+        {
+          "id": "s12",
+          "kind": "sfx",
+          "sfx": "riser",
+          "variant": "sweep",
+          "at_ms": 1650,
+          "export": "licensed"
+        },
+        {
+          "id": "s13",
+          "kind": "sfx",
+          "sfx": "riser",
+          "variant": "pitch",
+          "at_ms": 1800,
+          "export": "licensed"
+        },
+        {
+          "id": "s14",
+          "kind": "sfx",
+          "sfx": "riser",
+          "variant": "long",
+          "at_ms": 1950,
+          "export": "licensed"
+        },
+        {
+          "id": "s15",
+          "kind": "sfx",
+          "sfx": "downlifter",
+          "variant": "fall",
+          "at_ms": 2100,
+          "export": "licensed"
+        },
+        {
+          "id": "s16",
+          "kind": "sfx",
+          "sfx": "downlifter",
+          "variant": "short",
+          "at_ms": 2250,
+          "export": "licensed"
+        },
+        {
+          "id": "s17",
+          "kind": "sfx",
+          "sfx": "downlifter",
+          "variant": "tape",
+          "at_ms": 2400,
+          "export": "licensed"
+        },
+        {
+          "id": "s18",
+          "kind": "sfx",
+          "sfx": "sub_drop",
+          "variant": "boom",
+          "at_ms": 2550,
+          "export": "licensed"
+        },
+        {
+          "id": "s19",
+          "kind": "sfx",
+          "sfx": "sub_drop",
+          "variant": "quick",
+          "at_ms": 2700,
+          "export": "licensed"
+        },
+        {
+          "id": "s20",
+          "kind": "sfx",
+          "sfx": "sub_drop",
+          "variant": "long",
+          "at_ms": 2850,
+          "export": "licensed"
+        },
+        {
+          "id": "s21",
+          "kind": "sfx",
+          "sfx": "pop",
+          "variant": "bubble",
+          "at_ms": 3000,
+          "export": "licensed"
+        },
+        {
+          "id": "s22",
+          "kind": "sfx",
+          "sfx": "pop",
+          "variant": "tick",
+          "at_ms": 3150,
+          "export": "licensed"
+        },
+        {
+          "id": "s23",
+          "kind": "sfx",
+          "sfx": "pop",
+          "variant": "double",
+          "at_ms": 3300,
+          "export": "licensed"
+        },
+        {
+          "id": "s24",
+          "kind": "sfx",
+          "sfx": "click",
+          "variant": "ui",
+          "at_ms": 3450,
+          "export": "licensed"
+        },
+        {
+          "id": "s25",
+          "kind": "sfx",
+          "sfx": "click",
+          "variant": "soft",
+          "at_ms": 3600,
+          "export": "licensed"
+        },
+        {
+          "id": "s26",
+          "kind": "sfx",
+          "sfx": "click",
+          "variant": "tonal",
+          "at_ms": 3750,
+          "export": "licensed"
+        },
+        {
+          "id": "s27",
+          "kind": "sfx",
+          "sfx": "click",
+          "variant": "mech",
+          "at_ms": 3900,
+          "export": "licensed"
+        },
+        {
+          "id": "s28",
+          "kind": "sfx",
+          "sfx": "glitch",
+          "variant": "stutter",
+          "at_ms": 4050,
+          "export": "licensed"
+        },
+        {
+          "id": "s29",
+          "kind": "sfx",
+          "sfx": "glitch",
+          "variant": "crush",
+          "at_ms": 4200,
+          "export": "licensed"
+        },
+        {
+          "id": "s30",
+          "kind": "sfx",
+          "sfx": "glitch",
+          "variant": "chirp",
+          "at_ms": 4350,
+          "export": "licensed"
+        },
+        {
+          "id": "s31",
+          "kind": "sfx",
+          "sfx": "shimmer",
+          "variant": "sparkle",
+          "at_ms": 4500,
+          "export": "licensed"
+        },
+        {
+          "id": "s32",
+          "kind": "sfx",
+          "sfx": "shimmer",
+          "variant": "wash",
+          "at_ms": 4650,
+          "export": "licensed"
+        },
+        {
+          "id": "s33",
+          "kind": "sfx",
+          "sfx": "shimmer",
+          "variant": "rise",
+          "at_ms": 4800,
+          "export": "licensed"
+        },
+        {
+          "id": "s34",
+          "kind": "sfx",
+          "sfx": "sting",
+          "variant": "hit",
+          "at_ms": 4950,
+          "export": "licensed"
+        },
+        {
+          "id": "s35",
+          "kind": "sfx",
+          "sfx": "sting",
+          "variant": "bright",
+          "at_ms": 5100,
+          "export": "licensed"
+        },
+        {
+          "id": "s36",
+          "kind": "sfx",
+          "sfx": "sting",
+          "variant": "dark",
+          "at_ms": 5250,
+          "export": "licensed"
+        },
+        {
+          "id": "s37",
+          "kind": "sfx",
+          "sfx": "whoosh",
+          "variant": "auto",
+          "at_ms": 5400,
+          "export": "licensed",
+          "gain_db": -3
+        },
+        {
+          "id": "s38",
+          "kind": "sfx",
+          "sfx": "swish",
+          "variant": "auto",
+          "at_ms": 5550,
+          "export": "licensed",
+          "gain_db": -3
+        },
+        {
+          "id": "s39",
+          "kind": "sfx",
+          "sfx": "impact",
+          "variant": "auto",
+          "at_ms": 5700,
+          "export": "licensed",
+          "gain_db": -3
+        },
+        {
+          "id": "s40",
+          "kind": "sfx",
+          "sfx": "whoosh",
+          "at_ms": 5850,
+          "export": "licensed"
+        }
+      ]
+    }
+  ],
+  "markers": []
+}

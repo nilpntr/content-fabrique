@@ -1,0 +1,88 @@
+{
+  "schema": "contentfabrique.timeline/v1",
+  "output": {
+    "format": "16:9",
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "background": "#000000"
+  },
+  "tracks": [
+    {
+      "id": "main",
+      "type": "video",
+      "items": [
+        {
+          "id": "c1",
+          "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+          "source": {
+            "in_ms": 2000,
+            "out_ms": 3500
+          },
+          "at_ms": 0,
+          "look": {
+            "preset": "auto",
+            "match": true
+          },
+          "audio": {
+            "use_source": true
+          }
+        },
+        {
+          "id": "c2",
+          "asset_id": "ast_01jex6xx15ayjx8epfhfjj9s11",
+          "source": {
+            "in_ms": 1000,
+            "out_ms": 2500
+          },
+          "at_ms": 1500,
+          "look": {
+            "preset": "gym_moody"
+          },
+          "exposure_ev": 0.8
+        },
+        {
+          "id": "c3",
+          "asset_id": "ast_01jdsx72atvnb7ssgbc57zbxj9",
+          "source": {
+            "in_ms": 5000,
+            "out_ms": 6500
+          },
+          "at_ms": 3000,
+          "look": {
+            "preset": "gym_moody",
+            "match": true
+          },
+          "exposure_ev": -0.9
+        },
+        {
+          "id": "c4",
+          "asset_id": "ast_01jfbemsc6way7dnfebdf8tf3g",
+          "source": {
+            "in_ms": 8000,
+            "out_ms": 9500
+          },
+          "at_ms": 4500,
+          "look": {
+            "preset": "auto"
+          }
+        }
+      ]
+    },
+    {
+      "id": "sound",
+      "type": "audio",
+      "items": [
+        {
+          "id": "s1",
+          "kind": "sfx",
+          "at_ms": 500,
+          "export": "licensed",
+          "sfx": "whoosh",
+          "variant": "air;amovie=/etc/passwd"
+        }
+      ]
+    }
+  ],
+  "markers": []
+}

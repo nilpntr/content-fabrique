@@ -971,15 +971,43 @@ export type SourceOffset3 = number;
  */
 export type ExportPolicy2 = "licensed";
 /**
+ * A sound effect that the renderer synthesises itself (no asset, no licence: it is ours, so its export is "licensed" and it is in every render and export). Each effect is built from layers (a transient, a body, a sub with a pitch drop, air or tail), banded, lightly saturated, glued by a compressor and given a short dark room, then loudness-matched to its category. Categories: whoosh (an air pass-by for a whip or a cut; variants air 0.6 s, fast 0.35 s, heavy 1.0 s with weight), swish (a quick thin air pass for small moves; thin 0.3 s, blade 0.2 s, cloth 0.4 s), impact (a low hit with a crack for a punch-in or the drop; punch 0.8 s, deep 1.4 s with a long sub, crack 0.5 s bright, metal 1.2 s), riser (a rising tension build that peaks at its end, so start it that long before the moment it leads to; tension 1.5 s, sweep 1.0 s filter sweep, pitch 2.0 s tonal, long 3.0 s), downlifter (a falling release after a hit or on the new section; fall 1.2 s, short 0.6 s, tape 0.8 s tape stop), sub_drop (a pitch-dropping sine under a hit; boom 1.0 s, quick 0.5 s, long 2.0 s), pop (a small bubble for an element appearing; bubble 0.3 s, tick 0.15 s, double 0.35 s), click (a UI click on the frame of an on-screen press; ui 80 ms, soft 100 ms, tonal 120 ms, mech 180 ms), glitch (a digital stutter for a glitchy cut; stutter 0.3 s, crush 0.25 s, chirp 0.4 s), shimmer (a sparkle for something magical or new; sparkle 1.2 s, wash 1.5 s, rise 1.0 s), sting (a logo or reveal hit with a tonal bloom; hit 2.5 s, bright 2.0 s, dark 3.0 s). It starts at at_ms and is cut at the end of the timeline. It is mixed after the loudness normalisation, at a fixed level plus gain_db, so it stays an accent above the programme, and where it overlaps speech from a clip's own sound the programme is ducked a few dB around it.
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "sfxSound".
+ */
+export type SoundEffect = SfxSound;
+/**
  * "sfx".
  */
 export type Kind3 = "sfx";
 /**
- * whoosh, impact, riser or swish.
+ * The effect category: whoosh, swish, impact, riser, downlifter, sub_drop, pop, click, glitch, shimmer, sting.
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "sfxName".
  */
-export type Effect = "whoosh" | "impact" | "riser" | "swish";
+export type Effect =
+  | "whoosh"
+  | "swish"
+  | "impact"
+  | "riser"
+  | "downlifter"
+  | "sub_drop"
+  | "pop"
+  | "click"
+  | "glitch"
+  | "shimmer"
+  | "sting";
 /**
- * When the effect starts in the output, in ms. For an impact or a riser that should land on a beat, start it before the beat by the time it takes to build: a riser ends 1500 ms after it starts.
+ * Optional variant of the effect, one of the variants of its category: whoosh: air, fast, heavy; swish: thin, blade, cloth; impact: punch, deep, crack, metal; riser: tension, sweep, pitch, long; downlifter: fall, short, tape; sub_drop: boom, quick, long; pop: bubble, tick, double; click: ui, soft, tonal, mech; glitch: stutter, crush, chirp; shimmer: sparkle, wash, rise; sting: hit, bright, dark. Without it the category's first variant is used, which is what the effects were before variants existed. "auto" picks one of the category's variants from a hash of the item id, so repeats of one effect differ. Every item also gets a small, deterministic jitter of pitch, length and filter from its id, so two items of the same variant are never exactly the same sample.
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "sfxVariant".
+ */
+export type Variant = string;
+/**
+ * When the effect starts in the output, in ms. For an impact or a riser that should land on a beat, start it before the beat by the time it takes to build: a riser ends as long after it starts as its variant is long (1500 ms for the default).
  */
 export type Start4 = number;
 /**
@@ -1264,16 +1292,11 @@ export interface CreatorAudio {
   fade_in_ms?: FadeIn;
   fade_out_ms?: FadeOut;
 }
-/**
- * A sound effect that the renderer synthesises itself (no asset, no licence: it is ours, so its export is "licensed" and it is in every render and export). whoosh (0.6 s, a pass-by), impact (0.8 s, a low hit with a crack), riser (1.5 s, a rising tension build that peaks at its end) or swish (0.3 s, a quick air pass). It starts at at_ms and is cut at the end of the timeline. It is mixed after the loudness normalisation, at a fixed level plus gain_db, so it stays an accent above the programme.
- *
- * This interface was referenced by `Timeline`'s JSON-Schema
- * via the `definition` "sfxSound".
- */
-export interface SoundEffect {
+export interface SfxSound {
   id: ItemId;
   kind: Kind3;
   sfx: Effect;
+  variant?: Variant;
   at_ms: Start4;
   export: ExportPolicy3;
   gain_db?: GainInDB;

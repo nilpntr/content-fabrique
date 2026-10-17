@@ -109,7 +109,8 @@ describe("op schema", () => {
     expect(schema.$defs.sourceRange).toEqual(item.source);
     expect(schema.$defs.why).toEqual(item.why);
     expect(schema.$defs.exposureEv).toEqual(item.exposure_ev);
-    expect(schema.$defs.sfxName).toEqual(timelineSchema.$defs.sfxSound.properties.sfx);
+    expect(schema.$defs.sfxName).toEqual(timelineSchema.$defs.sfxName);
+    expect(schema.$defs.sfxVariant).toEqual(timelineSchema.$defs.sfxVariant);
     const text = timelineSchema.$defs.textItem.properties;
     expect(schema.$defs.textBody).toEqual(text.text);
     expect(schema.$defs.textDuration).toEqual(text.duration_ms);
