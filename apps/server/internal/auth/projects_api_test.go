@@ -54,7 +54,7 @@ func TestProjectsCreateAndRead(t *testing.T) {
 	if p.CurrentTimelineVersion != nil || p.CurrentVersion != nil {
 		t.Fatalf("a new project has no timeline: %+v", p)
 	}
-	if len(p.Assets) != 2 || p.Assets[0].AssetId != a2 || p.Assets[0].Position != 0 || p.Assets[1].AssetId != a1 || p.Assets[1].Position != 1 ||
+	if p.AssetCount != 2 || len(p.Assets) != 2 || p.Assets[0].AssetId != a2 || p.Assets[0].Position != 0 || p.Assets[1].AssetId != a1 || p.Assets[1].Position != 1 ||
 		!p.Assets[0].Available || p.Assets[0].DurationMs == nil || *p.Assets[0].DurationMs != 87135 || p.Assets[0].Title != "two" {
 		t.Fatalf("assets: %+v", p.Assets)
 	}
@@ -400,8 +400,14 @@ func TestTimelineVersions(t *testing.T) {
 		// And the project page shows the asset as gone.
 		var pg api.Project
 		e.call(http.MethodGet, "/v1/projects/"+p.Id, "ada", nil, http.StatusOK, &pg)
-		if len(pg.Assets) != 2 || pg.Assets[1].Available {
-			t.Fatalf("assets: %+v", pg.Assets)
+		if len(pg.Assets) != 2 || pg.Assets[1].Available || pg.AssetCount != 1 {
+			t.Fatalf("assets: %+v (count %d)", pg.Assets, pg.AssetCount)
+		}
+		// The list counts the same: the deleted asset is left out.
+		var pl api.ListProjectsResponse
+		e.call(http.MethodGet, "/v1/projects", "ada", nil, http.StatusOK, &pl)
+		if len(pl.Items) != 1 || pl.Items[0].AssetCount != 1 {
+			t.Fatalf("list after deleting an asset: %+v", pl.Items)
 		}
 		// A new edit that keeps using the deleted asset is refused (unknown_asset); removing the clip is fine.
 		rec := e.do(http.MethodPost, projectPath(p, "/timelines"), "ada", map[string]any{"base_version": 2, "ops": []map[string]any{{"op": "set_look", "id": "c1", "preset": "bw"}}})

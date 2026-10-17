@@ -721,6 +721,8 @@ export interface components {
             format: components["schemas"]["ProjectFormat"];
             brief: string;
             status: components["schemas"]["ProjectStatus"];
+            /** @description The footage that is not deleted (`assets` also lists an asset deleted since, with `available` false). The list shows the same count. */
+            asset_count: number;
             /** @description Null until the first edit creates version 1. */
             current_timeline_version: number | null;
             current_version: components["schemas"]["TimelineVersionSummary"] | null;

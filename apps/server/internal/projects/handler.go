@@ -15,27 +15,17 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/timeline/ops"
 )
 
-// Caller is the authenticated caller of a request: the workspace and user the verified token resolved to, and the role.
-type Caller struct {
-	Workspace ids.WorkspaceID
-	User      ids.UserID
-	Role      store.Role
-}
-
-// CallerFunc reads the Caller from the request context (internal/auth supplies it from the Principal). ok is false when the
-// request did not pass the authentication middleware.
-type CallerFunc func(ctx context.Context) (Caller, bool)
-
 // API implements the projects operations of the generated api.StrictServerInterface. The workspace of every call comes from
 // the Caller and nowhere else: no request field names a workspace.
 type API struct {
 	svc    *Service
-	caller CallerFunc
+	caller httpapi.CallerFunc
 	logger *slog.Logger
 }
 
-// NewAPI returns the handler. The service is required.
-func NewAPI(svc *Service, caller CallerFunc, logger *slog.Logger) *API {
+// NewAPI returns the handler. With a nil service (a server wired without one) every operation answers 503 after the checks of
+// authentication and role, as the assets handler does without object storage.
+func NewAPI(svc *Service, caller httpapi.CallerFunc, logger *slog.Logger) *API {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -44,12 +34,12 @@ func NewAPI(svc *Service, caller CallerFunc, logger *slog.Logger) *API {
 
 // begin authorises a call. Reads are open to every role, changes need an owner or an editor (a viewer only looks).
 func (h *API) begin(ctx context.Context, write bool) (Actor, *Error) {
-	c, ok := h.caller(ctx)
-	if !ok {
-		return Actor{}, &Error{Status: http.StatusUnauthorized, Code: api.ErrorCodeUnauthenticated, Message: "sign in to use the API"}
+	c, r := h.caller.Authorize(ctx, write, "projects")
+	if r != nil {
+		return Actor{}, &Error{Status: r.Status, Code: r.Code, Message: r.Message}
 	}
-	if write && c.Role != store.RoleOwner && c.Role != store.RoleEditor {
-		return Actor{}, &Error{Status: http.StatusForbidden, Code: api.ErrorCodeInsufficientRole, Message: "your role in this workspace cannot change projects"}
+	if h.svc == nil {
+		return Actor{}, &Error{Status: http.StatusServiceUnavailable, Code: api.ErrorCodeInternalError, Message: "the projects API is not available on this server"}
 	}
 	return Actor{Workspace: c.Workspace, User: c.User}, nil
 }
@@ -111,7 +101,7 @@ func projectOf(d Detail) api.Project {
 	}
 	out := api.Project{
 		Id: p.ID.String(), Title: p.Title, Format: api.ProjectFormat(p.Format), Brief: p.Brief, Status: api.ProjectStatus(p.Status),
-		CurrentTimelineVersion: intPtr(p.CurrentTimelineVersion), Assets: assets, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
+		AssetCount: d.AssetCount, CurrentTimelineVersion: intPtr(p.CurrentTimelineVersion), Assets: assets, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
 	if d.Current != nil {
 		cur := briefOf(*d.Current)
@@ -175,6 +165,8 @@ func (h *API) CreateProject(ctx context.Context, req api.CreateProjectRequestObj
 			return api.CreateProject422JSONResponse(body(e)), nil
 		case 500:
 			return api.CreateProject500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(body(e))}, nil
+		case 503:
+			return api.CreateProject503JSONResponse{UnavailableJSONResponse: api.UnavailableJSONResponse(body(e))}, nil
 		}
 		return nil, undocumented("createProject", e)
 	}
@@ -211,6 +203,8 @@ func (h *API) ListProjects(ctx context.Context, req api.ListProjectsRequestObjec
 			return api.ListProjects403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(body(e))}, nil
 		case 500:
 			return api.ListProjects500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(body(e))}, nil
+		case 503:
+			return api.ListProjects503JSONResponse{UnavailableJSONResponse: api.UnavailableJSONResponse(body(e))}, nil
 		}
 		return nil, undocumented("listProjects", e)
 	}
@@ -250,6 +244,8 @@ func (h *API) GetProject(ctx context.Context, req api.GetProjectRequestObject) (
 			return api.GetProject404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(body(e))}, nil
 		case 500:
 			return api.GetProject500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(body(e))}, nil
+		case 503:
+			return api.GetProject503JSONResponse{UnavailableJSONResponse: api.UnavailableJSONResponse(body(e))}, nil
 		}
 		return nil, undocumented("getProject", e)
 	}
@@ -277,6 +273,8 @@ func (h *API) DeleteProject(ctx context.Context, req api.DeleteProjectRequestObj
 			return api.DeleteProject404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(body(e))}, nil
 		case 500:
 			return api.DeleteProject500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(body(e))}, nil
+		case 503:
+			return api.DeleteProject503JSONResponse{UnavailableJSONResponse: api.UnavailableJSONResponse(body(e))}, nil
 		}
 		return nil, undocumented("deleteProject", e)
 	}
@@ -321,6 +319,8 @@ func (h *API) ListTimelineVersions(ctx context.Context, req api.ListTimelineVers
 			return api.ListTimelineVersions404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(body(e))}, nil
 		case 500:
 			return api.ListTimelineVersions500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(body(e))}, nil
+		case 503:
+			return api.ListTimelineVersions503JSONResponse{UnavailableJSONResponse: api.UnavailableJSONResponse(body(e))}, nil
 		}
 		return nil, undocumented("listTimelineVersions", e)
 	}
@@ -357,6 +357,8 @@ func (h *API) GetTimelineVersion(ctx context.Context, req api.GetTimelineVersion
 			return api.GetTimelineVersion404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(body(e))}, nil
 		case 500:
 			return api.GetTimelineVersion500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(body(e))}, nil
+		case 503:
+			return api.GetTimelineVersion503JSONResponse{UnavailableJSONResponse: api.UnavailableJSONResponse(body(e))}, nil
 		}
 		return nil, undocumented("getTimelineVersion", e)
 	}
@@ -402,6 +404,8 @@ func (h *API) ApplyTimelineOps(ctx context.Context, req api.ApplyTimelineOpsRequ
 			return api.ApplyTimelineOps422JSONResponse(api.OpsRejected{Error: body(e).Error, Issues: opIssuesOf(e.Issues)}), nil
 		case 500:
 			return api.ApplyTimelineOps500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(body(e))}, nil
+		case 503:
+			return api.ApplyTimelineOps503JSONResponse{UnavailableJSONResponse: api.UnavailableJSONResponse(body(e))}, nil
 		}
 		return nil, undocumented("applyTimelineOps", e)
 	}

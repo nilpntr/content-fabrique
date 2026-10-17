@@ -156,9 +156,20 @@ func projectsSuite(t *testing.T, st *store.Store, suffix string) {
 				}
 			}
 		}
-		locked, err := st.LockAssetsForProject(ctx, wa.ID, []ids.AssetID{a1.ID, b1.ID})
-		if err != nil || len(locked) != 1 || locked[0].ID != a1.ID {
-			t.Errorf("LockAssetsForProject(A, [a1, b1]) = %+v, %v; want only a1", locked, err)
+		listed, err := st.ListAssetsForProject(ctx, wa.ID, []ids.AssetID{a1.ID, b1.ID})
+		if err != nil || len(listed) != 1 || listed[0].ID != a1.ID {
+			t.Errorf("ListAssetsForProject(A, [a1, b1]) = %+v, %v; want only a1", listed, err)
+		}
+		// The assets of this suite are still uploading, so none is ready to lock.
+		err = st.InTx(ctx, func(tx *store.Store) error {
+			locked, err := tx.LockReadyAssetsForProject(ctx, wa.ID, []ids.AssetID{a1.ID, b1.ID})
+			if err == nil && len(locked) != 0 {
+				t.Errorf("LockReadyAssetsForProject locked %+v, want nothing (not ready, or another workspace's)", locked)
+			}
+			return err
+		})
+		if err != nil {
+			t.Error(err)
 		}
 		// The composite foreign key refuses another workspace's asset even when the service did not check.
 		err = st.InTx(ctx, func(tx *store.Store) error {
@@ -175,6 +186,45 @@ func projectsSuite(t *testing.T, st *store.Store, suffix string) {
 		if _, err := st.Pool().Exec(ctx, `INSERT INTO timeline_versions (workspace_id, project_id, version, spec, author_kind, author_id)
 			VALUES ($1, $2, 1, '{}', 'user', 'x')`, wb.ID.UUID, p.ID.UUID); err == nil {
 			t.Error("a version of workspace B was inserted for A's project")
+		}
+	})
+
+	t.Run("asset_count leaves out deleted assets; the app role cannot delete projects", func(t *testing.T) {
+		c1, c2 := newAsset(wa, ua, "count-one"), newAsset(wa, ua, "count-two")
+		p := newProject(wa, ua, c1, c2)
+		count := func() int {
+			t.Helper()
+			rows, err := st.ListProjects(ctx, wa.ID, nil, 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, r := range rows {
+				if r.ID == p.ID {
+					return int(r.AssetCount)
+				}
+			}
+			t.Fatal("project not listed")
+			return 0
+		}
+		if n := count(); n != 2 {
+			t.Fatalf("asset_count = %d, want 2", n)
+		}
+		if _, err := st.SoftDeleteAsset(ctx, wa.ID, c2.ID); err != nil {
+			t.Fatal(err)
+		}
+		if n := count(); n != 1 {
+			t.Fatalf("asset_count after deleting an asset = %d, want 1", n)
+		}
+		var super bool
+		if err := st.Pool().QueryRow(ctx, `SELECT rolsuper FROM pg_roles WHERE rolname = current_user`).Scan(&super); err != nil {
+			t.Fatal(err)
+		}
+		if !super {
+			_, err := st.Pool().Exec(ctx, `DELETE FROM projects WHERE id = $1`, p.ID.UUID)
+			var pgErr *pgconn.PgError
+			if !errors.As(err, &pgErr) || pgErr.Code != permissionDenied {
+				t.Errorf("DELETE of a project as the app role: err = %v, want permission denied", err)
+			}
 		}
 	})
 
@@ -215,11 +265,14 @@ func projectsSuite(t *testing.T, st *store.Store, suffix string) {
 
 		// A version that does not follow the current one, or repeats a number, is a conflict and stores nothing.
 		for name, in := range map[string]store.NewTimelineVersion{
-			"a repeated number": version(2, 1), "a gap": version(4, 3), "the wrong parent": version(3, 1), "a first version again": version(1, 0),
+			"a repeated number": version(2, 1), "a gap": version(4, 3), "a first version again": version(1, 0),
 		} {
 			if _, err := st.AddTimelineVersion(ctx, wa.ID, p.ID, in); !errors.Is(err, store.ErrVersionConflict) {
 				t.Errorf("%s: err = %v, want ErrVersionConflict", name, err)
 			}
+		}
+		if _, err := st.AddTimelineVersion(ctx, wa.ID, p.ID, version(3, 1)); !errors.Is(err, store.ErrInvalid) {
+			t.Errorf("a parent that is not the version before: err = %v, want ErrInvalid", err)
 		}
 		bad := version(3, 2)
 		bad.AuthorKind = "robot"
@@ -230,6 +283,11 @@ func projectsSuite(t *testing.T, st *store.Store, suffix string) {
 		bad.Spec = json.RawMessage(`[1]`)
 		if _, err := st.AddTimelineVersion(ctx, wa.ID, p.ID, bad); !errors.Is(err, store.ErrInvalid) {
 			t.Errorf("a spec that is not an object: err = %v, want ErrInvalid", err)
+		}
+		big := version(3, 2)
+		big.Spec = json.RawMessage(`{"pad":"` + strings.Repeat("x", 1<<20) + `"}`)
+		if _, err := st.AddTimelineVersion(ctx, wa.ID, p.ID, big); !errors.Is(err, store.ErrInvalid) {
+			t.Errorf("a spec over 1 MiB: err = %v, want ErrInvalid", err)
 		}
 		rows, err := st.ListTimelineVersions(ctx, wa.ID, p.ID, 0, 10)
 		if err != nil || len(rows) != 2 || rows[0].Version != 2 || rows[1].Version != 1 {

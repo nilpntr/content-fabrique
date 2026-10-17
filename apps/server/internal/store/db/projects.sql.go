@@ -217,6 +217,69 @@ func (q *Queries) InsertTimelineVersion(ctx context.Context, arg InsertTimelineV
 	return i, err
 }
 
+const listAssetsForProject = `-- name: ListAssetsForProject :many
+SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at FROM assets
+WHERE workspace_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL
+`
+
+type ListAssetsForProjectParams struct {
+	WorkspaceID ids.WorkspaceID
+	AssetIds    []uuid.UUID
+}
+
+// The (not deleted) assets of this workspace that the ids name, unlocked: the first look, to tell unknown ids from assets that
+// are not ready. Ids of other workspaces and unknown ids simply do not come back.
+func (q *Queries) ListAssetsForProject(ctx context.Context, arg ListAssetsForProjectParams) ([]Asset, error) {
+	rows, err := q.db.Query(ctx, listAssetsForProject, arg.WorkspaceID, arg.AssetIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Asset
+	for rows.Next() {
+		var i Asset
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Kind,
+			&i.Status,
+			&i.Filename,
+			&i.ContentType,
+			&i.SizeBytes,
+			&i.Sha256,
+			&i.Title,
+			&i.Description,
+			&i.Tags,
+			&i.R2Key,
+			&i.FailureReason,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.DurationMs,
+			&i.Width,
+			&i.Height,
+			&i.Fps,
+			&i.Rotation,
+			&i.VideoCodec,
+			&i.AudioCodec,
+			&i.HasAudio,
+			&i.Hdr,
+			&i.Probe,
+			&i.IngestProgress,
+			&i.IngestStage,
+			&i.IngestedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listProjectAssets = `-- name: ListProjectAssets :many
 SELECT pa.position, a.id AS asset_id, a.title, a.kind, a.status, a.duration_ms, (a.deleted_at IS NOT NULL)::boolean AS deleted
 FROM project_assets pa
@@ -312,7 +375,10 @@ func (q *Queries) ListProjectCatalogAssets(ctx context.Context, arg ListProjectC
 
 const listProjects = `-- name: ListProjects :many
 SELECT p.id, p.workspace_id, p.title, p.format, p.brief, p.status, p.current_timeline_version, p.created_by, p.created_at, p.updated_at, p.deleted_at,
-       (SELECT count(*) FROM project_assets pa WHERE pa.workspace_id = p.workspace_id AND pa.project_id = p.id)::integer AS asset_count
+       (SELECT count(*)
+        FROM project_assets pa
+        JOIN assets a ON a.workspace_id = pa.workspace_id AND a.id = pa.asset_id
+        WHERE pa.workspace_id = p.workspace_id AND pa.project_id = p.id AND a.deleted_at IS NULL)::integer AS asset_count
 FROM projects p
 WHERE p.workspace_id = $1
   AND p.deleted_at IS NULL
@@ -440,21 +506,22 @@ func (q *Queries) ListTimelineVersions(ctx context.Context, arg ListTimelineVers
 	return items, nil
 }
 
-const lockAssetsForProject = `-- name: LockAssetsForProject :many
+const lockReadyAssetsForProject = `-- name: LockReadyAssetsForProject :many
 SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at FROM assets
-WHERE workspace_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL
+WHERE workspace_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL AND status = 'ready'
 FOR SHARE
 `
 
-type LockAssetsForProjectParams struct {
+type LockReadyAssetsForProjectParams struct {
 	WorkspaceID ids.WorkspaceID
 	AssetIds    []uuid.UUID
 }
 
-// Locks the assets (not deleted) of this workspace that the ids name, so that none is deleted before the project that uses
-// it is stored. Ids of other workspaces and unknown ids simply do not come back.
-func (q *Queries) LockAssetsForProject(ctx context.Context, arg LockAssetsForProjectParams) ([]Asset, error) {
-	rows, err := q.db.Query(ctx, lockAssetsForProject, arg.WorkspaceID, arg.AssetIds)
+// Locks the READY ones until the end of the transaction, so that none is deleted before the project that uses it is stored.
+// Only ready assets are locked: an asset still being ingested is being updated by the worker, which must not wait for a
+// project to be created.
+func (q *Queries) LockReadyAssetsForProject(ctx context.Context, arg LockReadyAssetsForProjectParams) ([]Asset, error) {
+	rows, err := q.db.Query(ctx, lockReadyAssetsForProject, arg.WorkspaceID, arg.AssetIds)
 	if err != nil {
 		return nil, err
 	}
@@ -507,6 +574,7 @@ func (q *Queries) LockAssetsForProject(ctx context.Context, arg LockAssetsForPro
 const setCurrentTimelineVersion = `-- name: SetCurrentTimelineVersion :one
 UPDATE projects SET current_timeline_version = $1
 WHERE workspace_id = $2 AND id = $3 AND deleted_at IS NULL
+  AND current_timeline_version IS NOT DISTINCT FROM $4::integer
 RETURNING id, workspace_id, title, format, brief, status, current_timeline_version, created_by, created_at, updated_at, deleted_at
 `
 
@@ -514,10 +582,18 @@ type SetCurrentTimelineVersionParams struct {
 	Version     *int32
 	WorkspaceID ids.WorkspaceID
 	ID          ids.ProjectID
+	Parent      *int32
 }
 
+// Moves the project to a new version, only if it is still at the parent the version was made from (null for the first): the
+// one check that two writers cannot both pass. No row: the project is gone, or another writer moved it first.
 func (q *Queries) SetCurrentTimelineVersion(ctx context.Context, arg SetCurrentTimelineVersionParams) (Project, error) {
-	row := q.db.QueryRow(ctx, setCurrentTimelineVersion, arg.Version, arg.WorkspaceID, arg.ID)
+	row := q.db.QueryRow(ctx, setCurrentTimelineVersion,
+		arg.Version,
+		arg.WorkspaceID,
+		arg.ID,
+		arg.Parent,
+	)
 	var i Project
 	err := row.Scan(
 		&i.ID,

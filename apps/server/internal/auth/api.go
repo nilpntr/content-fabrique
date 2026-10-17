@@ -35,26 +35,17 @@ func newAPIServer(ents EntitlementReader, logger *slog.Logger) *apiServer {
 	}
 	// Without a configured object store the assets operations answer 503 storage_not_configured (Mount replaces this
 	// handler when it is given a service).
-	return &apiServer{Handler: assets.NewHandler(nil, callerOf, logger), API: projects.NewAPI(nil, projectsCallerOf, logger), ents: ents, logger: logger}
+	return &apiServer{Handler: assets.NewHandler(nil, callerOf, logger), API: projects.NewAPI(nil, callerOf, logger), ents: ents, logger: logger}
 }
 
-// callerOf is how the assets package learns who is calling: the Principal the authentication middleware resolved from the
-// verified token. Nothing else names the workspace.
-func callerOf(ctx context.Context) (assets.Caller, bool) {
+// callerOf is how the handlers learn who is calling: the Principal the authentication middleware resolved from the verified
+// token. Nothing else names the workspace.
+func callerOf(ctx context.Context) (httpapi.Caller, bool) {
 	p, ok := PrincipalFromContext(ctx)
 	if !ok {
-		return assets.Caller{}, false
+		return httpapi.Caller{}, false
 	}
-	return assets.Caller{Workspace: p.WorkspaceID, User: p.UserID, Role: p.Role}, true
-}
-
-// projectsCallerOf is callerOf for the projects package: the same Principal, read the same way.
-func projectsCallerOf(ctx context.Context) (projects.Caller, bool) {
-	p, ok := PrincipalFromContext(ctx)
-	if !ok {
-		return projects.Caller{}, false
-	}
-	return projects.Caller{Workspace: p.WorkspaceID, User: p.UserID, Role: p.Role}, true
+	return httpapi.Caller{Workspace: p.WorkspaceID, User: p.UserID, Role: p.Role}, true
 }
 
 // maxBodyBytes caps the body of every API request. The largest legitimate one is the completion of a 10,000 part upload

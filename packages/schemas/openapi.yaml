@@ -1591,7 +1591,7 @@ components:
 
     Project:
       type: object
-      required: [id, title, format, brief, status, current_timeline_version, current_version, assets, created_at, updated_at]
+      required: [id, title, format, brief, status, asset_count, current_timeline_version, current_version, assets, created_at, updated_at]
       properties:
         id:
           $ref: "#/components/schemas/ProjectId"
@@ -1603,6 +1603,10 @@ components:
           type: string
         status:
           $ref: "#/components/schemas/ProjectStatus"
+        asset_count:
+          type: integer
+          minimum: 0
+          description: The footage that is not deleted (`assets` also lists an asset deleted since, with `available` false). The list shows the same count.
         current_timeline_version:
           type: [integer, "null"]
           description: Null until the first edit creates version 1.

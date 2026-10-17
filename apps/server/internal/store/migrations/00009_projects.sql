@@ -14,7 +14,8 @@
 --                    UPDATE, no DELETE), and a trigger refuses UPDATE for every other role as well. Deleting a project's
 --                    versions happens only through the foreign key's cascade, which runs with the table owner's rights.
 --
--- Tenancy: every table carries workspace_id and every query filters by it.
+-- Grants: the app role may SELECT, INSERT and UPDATE projects (no DELETE), SELECT and INSERT timeline_versions, and has full DML
+-- on project_assets. Tenancy: every table carries workspace_id and every query filters by it.
 
 -- +goose Up
 
@@ -45,7 +46,15 @@ CREATE INDEX projects_workspace_listing_idx ON projects (workspace_id, id DESC) 
 CREATE TRIGGER projects_set_updated_at BEFORE UPDATE ON projects
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
-SELECT cf_grant_app_dml('projects');
+-- Not cf_grant_app_dml: no DELETE. A project is soft-deleted (UPDATE), and the app role must not be able to delete a project
+-- row, which would cascade to its footage and to its timeline versions (the history is append-only).
+-- +goose StatementBegin
+DO $$
+BEGIN
+    EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE projects TO %I', public.cf_app_role());
+END
+$$;
+-- +goose StatementEnd
 
 CREATE TABLE project_assets (
     workspace_id uuid        NOT NULL,
@@ -96,7 +105,9 @@ CREATE TABLE timeline_versions (
     CONSTRAINT timeline_versions_author_id_check CHECK (char_length(author_id) BETWEEN 1 AND 128),
     CONSTRAINT timeline_versions_spec_check CHECK (jsonb_typeof(spec) = 'object'),
     CONSTRAINT timeline_versions_ops_check CHECK (jsonb_typeof(ops) = 'array'),
-    CONSTRAINT timeline_versions_diff_check CHECK (jsonb_typeof(diff) = 'array')
+    CONSTRAINT timeline_versions_diff_check CHECK (jsonb_typeof(diff) = 'array'),
+    -- At most 1 MiB of spec (the service refuses a bigger one first, with a message).
+    CONSTRAINT timeline_versions_spec_size_check CHECK (octet_length(spec::text) <= 1048576)
 );
 
 -- The project's current version points at a stored one.

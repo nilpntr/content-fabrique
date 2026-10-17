@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,7 +30,7 @@ import (
 )
 
 const assetsUsage = `Usage:
-  cfctl assets import --workspace <wks_... or org_...> [--title-from-filename] [--wait] [flags] <files...>
+  cfctl assets import --workspace <wks_... or org_...> [--title-from-filename] [--wait] [flags] [--] <files...>
 
 Development only. Imports local media files into a workspace's library through the same code as the browser: each file becomes
 an asset (uploading), its bytes go to object storage as a multipart upload (16 MiB parts, presigned like the API's), the upload
@@ -92,9 +93,13 @@ func cmdAssetsImport(args []string, stdout, stderr io.Writer, lookup lookupEnv) 
 	timeout := flags.Duration("timeout", 15*time.Minute, "how long --wait waits")
 	envFileArg := flags.String("env-file", "", "env file")
 	yes := flags.Bool("yes", false, "confirm outside the plain local setup")
-	// Flags may follow the files: `import --workspace x a.mp4 --wait`.
+	// Flags may follow the files (`import --workspace x a.mp4 --wait`), and everything after a lone `--` is a file, whatever it
+	// looks like (`import --workspace x -- -odd-name.mp4`).
+	rest, afterDashes := args, []string(nil)
+	if i := slices.Index(args, "--"); i >= 0 {
+		rest, afterDashes = args[:i], args[i+1:]
+	}
 	var files []string
-	rest := args
 	for {
 		if err := flags.Parse(rest); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
@@ -108,6 +113,7 @@ func cmdAssetsImport(args []string, stdout, stderr io.Writer, lookup lookupEnv) 
 		files = append(files, flags.Arg(0))
 		rest = flags.Args()[1:]
 	}
+	files = append(files, afterDashes...)
 
 	// Arguments first, so a typo never needs a database.
 	var (
@@ -272,7 +278,7 @@ type importPlan struct {
 func planImports(files []string) ([]importPlan, error) {
 	plans := make([]importPlan, 0, len(files))
 	for _, f := range files {
-		info, err := os.Stat(f)
+		info, err := os.Stat(f) //nolint:gosec // G703: the operator names the files to import on the command line
 		if err != nil {
 			return nil, err
 		}
@@ -343,15 +349,49 @@ func chooseImportActor(ctx context.Context, st *store.Store, wantWS ids.Workspac
 	return assets.Actor{}, store.Workspace{}, 2
 }
 
+// refreshMargin is how long a part URL must still be valid when it is used: with less left, the importer asks for a new one
+// first. The 15 minutes of a URL are plenty for a 16 MiB part, but a slow disk or link, or a stalled earlier part, can use
+// them up.
+const refreshMargin = time.Minute
+
+// errURLRefused is object storage saying 403: the signature is not accepted (it expired, or the clock differs). That URL is
+// dead; retrying it is pointless.
+var errURLRefused = errors.New("object storage refused the part URL")
+
+// signedPart is a part's presigned URL and when it stops working.
+type signedPart struct {
+	url     api.PartUrl
+	expires time.Time
+}
+
 // importer uploads files through the assets service: the same Create, PresignParts and Complete calls the API makes.
 type importer struct {
 	svc  *assets.Service
 	who  assets.Actor
 	http *http.Client
+	// now replaces time.Now and margin refreshMargin (tests).
+	now    func() time.Time
+	margin time.Duration
+	// presigns counts the calls that fetched new part URLs after the first batch (tests).
+	presigns int
+}
+
+func (im *importer) expiring(t time.Time) bool {
+	now, margin := time.Now(), refreshMargin
+	if im.now != nil {
+		now = im.now()
+	}
+	if im.margin > 0 {
+		margin = im.margin
+	}
+	return !now.Add(margin).Before(t)
 }
 
 // importFile creates the asset, uploads every part from the file and completes the upload. A failure after the asset was
 // created aborts the upload, so it does not count against the workspace's 25 uploads in progress.
+//
+// A part URL is used only while it has time left: with less than a minute to go, or when object storage answers 403 for
+// it, the importer fetches new URLs (the next 100 parts') and uses those. A 403 is not retried on the same URL.
 func (im *importer) importFile(ctx context.Context, p importPlan) (a store.Asset, err error) {
 	created, e := im.svc.Create(ctx, im.who, api.CreateAssetRequest{Filename: p.name, SizeBytes: p.size, ContentType: p.contentType})
 	if e != nil {
@@ -375,42 +415,57 @@ func (im *importer) importFile(ctx context.Context, p importPlan) (a store.Asset
 	}
 	defer func() { _ = f.Close() }()
 
-	urls := map[int]api.PartUrl{}
-	for _, u := range created.Parts {
-		urls[u.PartNumber] = u
-	}
 	count := int(created.Upload.PartCount)
+	parts := map[int]signedPart{}
+	for _, u := range created.Parts {
+		parts[u.PartNumber] = signedPart{url: u, expires: created.URLsExpires}
+	}
+	// refresh fetches new URLs for part n and the 99 after it.
+	refresh := func(n int) error {
+		var numbers []int
+		for k := n; k <= count && len(numbers) < assets.MaxPartBatch; k++ {
+			numbers = append(numbers, k)
+		}
+		more, expires, e := im.svc.PresignParts(ctx, im.who, id, numbers)
+		if e != nil {
+			return e
+		}
+		im.presigns++
+		for _, m := range more {
+			parts[m.PartNumber] = signedPart{url: m, expires: expires}
+		}
+		return nil
+	}
+
 	refs := make([]api.CompletedPartRef, 0, count)
 	buf := make([]byte, created.Upload.PartSize)
 	for n := 1; n <= count; n++ {
-		u, ok := urls[n]
-		if !ok { // past the first batch (or the URL has expired): ask for the next 100
-			var numbers []int
-			for k := n; k <= count && len(numbers) < assets.MaxPartBatch; k++ {
-				numbers = append(numbers, k)
+		sp, ok := parts[n]
+		if !ok || im.expiring(sp.expires) {
+			if err := refresh(n); err != nil {
+				return store.Asset{}, err
 			}
-			more, _, e := im.svc.PresignParts(ctx, im.who, id, numbers)
-			if e != nil {
-				return store.Asset{}, e
-			}
-			for _, m := range more {
-				urls[m.PartNumber] = m
-			}
-			u = urls[n]
+			sp = parts[n]
 		}
-		size := int(u.SizeBytes)
+		size := int(sp.url.SizeBytes)
 		if size > len(buf) {
 			return store.Asset{}, fmt.Errorf("part %d is larger than the part size", n)
 		}
 		if _, err := io.ReadFull(io.NewSectionReader(f, int64(n-1)*created.Upload.PartSize, int64(size)), buf[:size]); err != nil {
 			return store.Asset{}, fmt.Errorf("read part %d (did the file change while it was imported?): %w", n, err)
 		}
-		etag, err := im.put(ctx, u.Url, buf[:size])
+		etag, err := im.put(ctx, sp.url.Url, buf[:size])
+		if errors.Is(err, errURLRefused) { // expired after all: new URLs, once
+			if err := refresh(n); err != nil {
+				return store.Asset{}, err
+			}
+			etag, err = im.put(ctx, parts[n].url.Url, buf[:size])
+		}
 		if err != nil {
 			return store.Asset{}, fmt.Errorf("upload part %d of %d: %w", n, count, err)
 		}
 		refs = append(refs, api.CompletedPartRef{PartNumber: n, Etag: etag})
-		delete(urls, n)
+		delete(parts, n)
 	}
 	done, e := im.svc.Complete(ctx, im.who, id, refs)
 	if e != nil {
@@ -419,7 +474,8 @@ func (im *importer) importFile(ctx context.Context, p importPlan) (a store.Asset
 	return done, nil
 }
 
-// put sends one part to its presigned URL and returns its ETag, retrying a few times (a local MinIO can hiccup).
+// put sends one part to its presigned URL and returns its ETag. A network error or a 5xx is retried a few times on the same
+// URL (a local MinIO can hiccup); a 403 is errURLRefused at once.
 func (im *importer) put(ctx context.Context, target string, data []byte) (string, error) {
 	var last error
 	for attempt := range 3 {
@@ -446,7 +502,10 @@ func (im *importer) put(ctx context.Context, target string, data []byte) (string
 		}
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
+		switch {
+		case resp.StatusCode == http.StatusForbidden:
+			return "", errURLRefused
+		case resp.StatusCode != http.StatusOK:
 			last = fmt.Errorf("object storage answered %s", resp.Status)
 			continue
 		}

@@ -105,7 +105,7 @@ func Mount(mux *http.ServeMux, d Deps) (*V1, error) {
 	if err != nil {
 		return nil, err
 	}
-	srv.API = projects.NewAPI(projectsSvc, projectsCallerOf, logger)
+	srv.API = projects.NewAPI(projectsSvc, callerOf, logger)
 	for pattern, h := range apiRoutes(srv, logger) {
 		if open[pattern] {
 			mux.Handle(pattern, mw(h))

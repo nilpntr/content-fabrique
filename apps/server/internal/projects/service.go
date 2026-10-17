@@ -22,6 +22,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"golang.org/x/text/unicode/norm"
+
 	"github.com/nilpntr/content-fabrique/internal/api"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
@@ -35,6 +37,11 @@ const (
 	MaxBriefChars = 4000
 	// DefaultTitle is the title of a project created without one.
 	DefaultTitle = "Untitled project"
+
+	// MaxSpecBytes is the largest timeline spec a version may hold, and MaxItemsPerTrack the most items one track may hold. The
+	// editor never needs more (a 180 s timeline), and a version is stored for good.
+	MaxSpecBytes     = 1 << 20
+	MaxItemsPerTrack = 500
 
 	DefaultPageSize = 50
 	MaxPageSize     = 100
@@ -91,6 +98,8 @@ type Actor struct {
 type Detail struct {
 	Project store.Project
 	Assets  []store.ProjectAssetRow
+	// AssetCount is the number of assets that are not deleted (the same count the project list shows).
+	AssetCount int
 	// Current is the latest version (without its spec), nil before the first edit.
 	Current *store.TimelineVersionBrief
 }
@@ -105,8 +114,7 @@ func (s *Service) Create(ctx context.Context, who Actor, req api.CreateProjectRe
 	}
 	var created store.Project
 	err := s.store.InTx(ctx, func(tx *store.Store) error {
-		// The assets are locked (FOR SHARE) until the project is stored, so none is deleted in between.
-		rows, err := tx.LockAssetsForProject(ctx, who.Workspace, assetIDs)
+		rows, err := tx.ListAssetsForProject(ctx, who.Workspace, assetIDs)
 		if err != nil {
 			return err
 		}
@@ -133,6 +141,16 @@ func (s *Service) Create(ctx context.Context, who Actor, req api.CreateProjectRe
 				msg += fmt.Sprintf(" and %d more", len(notUsable)-len(shown))
 			}
 			return &Error{Status: 422, Code: api.ErrorCodeAssetsNotUsable, Message: msg}
+		}
+		// All of them are ready: lock them (FOR SHARE) until the project is stored, so none is deleted in between. Only ready
+		// assets are locked, so a worker that is still ingesting another asset is never held up. One that changed since the
+		// first look is a race the caller can simply repeat.
+		locked, err := tx.LockReadyAssetsForProject(ctx, who.Workspace, assetIDs)
+		if err != nil {
+			return err
+		}
+		if len(locked) != len(assetIDs) {
+			return &Error{Status: 422, Code: api.ErrorCodeAssetsNotUsable, Message: "an asset changed while the project was being created; try again"}
 		}
 		if created, err = tx.CreateProject(ctx, who.Workspace, store.NewProject{Title: title, Format: format, Brief: brief, CreatedBy: who.User}); err != nil {
 			return err
@@ -166,14 +184,14 @@ func validateCreate(req api.CreateProjectRequest) (title, brief, format string, 
 
 	title = DefaultTitle
 	if req.Title != nil {
-		title = strings.TrimSpace(*req.Title)
-		if n := utf8.RuneCountInString(title); n < 1 || n > MaxTitleChars || !utf8.ValidString(title) || hasControl(title, false) {
-			return "", "", "", nil, invalid("title must be 1 to 255 characters without control characters")
+		var ok bool
+		if title, ok = cleanText(*req.Title, false); !ok || title == "" || utf8.RuneCountInString(title) > MaxTitleChars {
+			return "", "", "", nil, invalid("title must be 1 to 255 characters of text")
 		}
 	}
 	if req.Brief != nil {
-		brief = *req.Brief
-		if !utf8.ValidString(brief) || utf8.RuneCountInString(brief) > MaxBriefChars || hasControl(brief, true) {
+		var ok bool
+		if brief, ok = cleanText(*req.Brief, true); !ok || utf8.RuneCountInString(brief) > MaxBriefChars {
 			return "", "", "", nil, invalid("brief must be text of at most 4,000 characters")
 		}
 	}
@@ -195,17 +213,31 @@ func validateCreate(req api.CreateProjectRequest) (title, brief, format string, 
 	return title, brief, format, assetIDs, nil
 }
 
-// hasControl reports whether s has a control character; a brief may have line breaks and tabs.
-func hasControl(s string, allowWhitespace bool) bool {
-	for _, r := range s {
-		if allowWhitespace && (r == '\n' || r == '\r' || r == '\t') {
-			continue
-		}
-		if unicode.IsControl(r) || unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r) {
-			return true
+// cleanText makes a title or a brief safe to store, show and hand to a model: valid UTF-8 in NFC, without the Unicode format
+// characters (the bidirectional overrides and isolates that make text read differently from what it says, zero-width spaces
+// and joiners, the byte order mark), which are removed as sanitizeFilename of package assets does, and with other spaces
+// turned into plain ones. A control character, the line and paragraph separators, or a NUL byte makes the text invalid (ok is
+// false); a brief (multiline) may keep line breaks and tabs. A title is trimmed and may end up empty: the caller refuses that.
+func cleanText(raw string, multiline bool) (string, bool) {
+	if !utf8.ValidString(raw) {
+		return "", false
+	}
+	var b strings.Builder
+	for _, r := range norm.NFC.String(raw) {
+		switch {
+		case multiline && (r == '\n' || r == '\r' || r == '\t'):
+			b.WriteRune(r)
+		case unicode.IsControl(r), unicode.Is(unicode.Zl, r), unicode.Is(unicode.Zp, r), r == utf8.RuneError:
+			return "", false
+		case unicode.Is(unicode.Cf, r):
+			// dropped
+		case unicode.Is(unicode.Zs, r):
+			b.WriteRune(' ')
+		default:
+			b.WriteRune(r)
 		}
 	}
-	return false
+	return strings.TrimSpace(b.String()), true
 }
 
 // ---- Read ------------------------------------------------------------------------------------------------------
@@ -228,6 +260,11 @@ func (s *Service) detail(ctx context.Context, ws ids.WorkspaceID, p store.Projec
 		return Detail{}, s.internal(ctx, "list project assets", err)
 	}
 	d := Detail{Project: p, Assets: assets}
+	for _, a := range assets {
+		if !a.Deleted {
+			d.AssetCount++
+		}
+	}
 	if p.CurrentTimelineVersion != nil {
 		latest, err := s.store.ListTimelineVersions(ctx, ws, p.ID, 0, 1)
 		if err != nil {
@@ -367,6 +404,11 @@ func (s *Service) ApplyOps(ctx context.Context, ws ids.WorkspaceID, id ids.Proje
 	if baseVersion < 0 || baseVersion > 1<<30 {
 		return Edit{}, invalid("base_version must be 0 or a version number")
 	}
+	// The batch is parsed (strictly, and size-checked) before the transaction opens, so a malformed one never holds the row lock.
+	batch, pres := ops.ParseBatch(rawOps)
+	if !pres.OK() {
+		return Edit{}, rejected(api.ErrorCodeInvalidOps, "the ops are not valid", pres.Issues)
+	}
 	var out Edit
 	err := s.store.InTx(ctx, func(tx *store.Store) error {
 		p, err := tx.GetProjectForUpdate(ctx, ws, id)
@@ -385,10 +427,6 @@ func (s *Service) ApplyOps(ctx context.Context, ws ids.WorkspaceID, id ids.Proje
 		if err != nil {
 			return err
 		}
-		batch, pres := ops.ParseBatch(rawOps)
-		if !pres.OK() {
-			return rejected(api.ErrorCodeInvalidOps, "the ops are not valid", pres.Issues)
-		}
 		rows, err := tx.ListProjectCatalogAssets(ctx, ws, id)
 		if err != nil {
 			return err
@@ -400,9 +438,16 @@ func (s *Service) ApplyOps(ctx context.Context, ws ids.WorkspaceID, id ids.Proje
 			}
 			return rejected(api.ErrorCodeNoChange, "the ops left the timeline as it was, so there is no new version", res.Issues)
 		}
+		if is := tooBig(next.Spec); is != nil {
+			return rejected(api.ErrorCodeInvalidOps, "the timeline would be too large; nothing was stored", []ops.Issue{*is})
+		}
 		in, err := storable(next)
 		if err != nil {
 			return err
+		}
+		if len(in.Spec) > MaxSpecBytes {
+			return rejected(api.ErrorCodeInvalidOps, "the timeline would be too large; nothing was stored",
+				[]ops.Issue{limitIssue(fmt.Sprintf("the timeline is %d bytes, at most %d are allowed", len(in.Spec), MaxSpecBytes))})
 		}
 		if out.Version, err = tx.AddTimelineVersion(ctx, ws, id, in); err != nil {
 			return err
@@ -426,6 +471,31 @@ func (s *Service) ApplyOps(ctx context.Context, ws ids.WorkspaceID, id ids.Proje
 		return Edit{}, s.internal(ctx, "apply ops", err)
 	}
 	return out, nil
+}
+
+// limitIssue is the issue of a timeline over the size limits.
+func limitIssue(msg string) ops.Issue {
+	return ops.Issue{OpIndex: ops.NoOp, Code: "timeline_too_large", Message: msg, Severity: timeline.SeverityError}
+}
+
+// tooBig reports a track with more than MaxItemsPerTrack items, or nil.
+func tooBig(spec timeline.Spec) *ops.Issue {
+	for _, t := range spec.Tracks {
+		n := 0
+		switch t := t.(type) {
+		case *timeline.VideoTrack:
+			n = len(t.Items)
+		case *timeline.TextTrack:
+			n = len(t.Items)
+		case *timeline.AudioTrack:
+			n = len(t.Items)
+		}
+		if n > MaxItemsPerTrack {
+			is := limitIssue(fmt.Sprintf("track %q has %d items, at most %d are allowed", t.TrackID(), n, MaxItemsPerTrack))
+			return &is
+		}
+	}
+	return nil
 }
 
 // rejected is the *Error of a refused batch.

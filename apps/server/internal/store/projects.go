@@ -71,11 +71,18 @@ func (s *Store) AddProjectAssets(ctx context.Context, ws ids.WorkspaceID, projec
 	return mapErr(err)
 }
 
-// LockAssetsForProject locks the (not deleted) assets of this workspace that the ids name until the end of the transaction
-// and returns them. An id that is unknown, deleted or belongs to another workspace is simply missing from the result: the
-// caller compares, and answers the same for all three. Use it inside InTx.
-func (s *Store) LockAssetsForProject(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]Asset, error) {
-	rows, err := s.q.LockAssetsForProject(ctx, db.LockAssetsForProjectParams{WorkspaceID: ws, AssetIds: uuids(assets)})
+// ListAssetsForProject returns the (not deleted) assets of this workspace that the ids name. An id that is unknown, deleted
+// or belongs to another workspace is simply missing from the result: the caller compares, and answers the same for all three.
+func (s *Store) ListAssetsForProject(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]Asset, error) {
+	rows, err := s.q.ListAssetsForProject(ctx, db.ListAssetsForProjectParams{WorkspaceID: ws, AssetIds: uuids(assets)})
+	return rows, mapErr(err)
+}
+
+// LockReadyAssetsForProject locks the ready (not deleted) assets of this workspace that the ids name until the end of the
+// transaction and returns them. Only ready assets are locked, so an ingest that is still updating an asset never waits for a
+// project. Use it inside InTx.
+func (s *Store) LockReadyAssetsForProject(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]Asset, error) {
+	rows, err := s.q.LockReadyAssetsForProject(ctx, db.LockReadyAssetsForProjectParams{WorkspaceID: ws, AssetIds: uuids(assets)})
 	return rows, mapErr(err)
 }
 
@@ -145,40 +152,34 @@ type NewTimelineVersion struct {
 	AuthorID   string
 }
 
-// ErrVersionConflict is returned by AddTimelineVersion when the version is not the project's next one: another writer was
-// first, or the caller built on a version that is not the current one.
+// ErrVersionConflict is returned by AddTimelineVersion when the project is no longer at the version the new one was made
+// from: another writer was first.
 var ErrVersionConflict = errors.New("store: timeline version conflict")
 
-// AddTimelineVersion stores the next version of a project's timeline and makes it the project's current one, in one
-// transaction. Versions are immutable and numbered 1, 2, 3 ...: one that is not current+1 (or whose parent is not the
-// current version) is ErrVersionConflict, and so is a number another writer took. It locks the project row, so two writers
-// queue; the unique key (project, version) is the backstop. ErrNotFound when the project is not in this workspace or was
-// deleted.
+// AddTimelineVersion stores a version of a project's timeline and makes it the project's current one, in one transaction.
+// Versions are immutable and numbered 1, 2, 3 ...; in.Parent is the version this one was made from (0 for the first), and
+// the project moves to the new version only if it is still at the parent. That guarded update is the one check, and the
+// unique key (project, version) backs it: a writer that lost the race gets ErrVersionConflict and nothing is stored.
+// ErrNotFound when the project is not in this workspace or was deleted. Callers that read the current version first lock the
+// project (GetProjectForUpdate) so that they do not do the work of an edit that is bound to lose.
 func (s *Store) AddTimelineVersion(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, in NewTimelineVersion) (TimelineVersion, error) {
+	if in.Version < 1 || in.Version > 1<<30 || in.Parent != in.Version-1 {
+		return TimelineVersion{}, fmt.Errorf("%w: version %d with parent %d", ErrInvalid, in.Version, in.Parent)
+	}
 	var v TimelineVersion
 	err := s.inTx(ctx, func(tx *Store) error {
-		p, err := tx.q.GetProjectForUpdate(ctx, db.GetProjectForUpdateParams{WorkspaceID: ws, ID: project})
-		if err != nil {
-			return mapErr(err)
-		}
-		current := 0
-		if p.CurrentTimelineVersion != nil {
-			current = int(*p.CurrentTimelineVersion)
-		}
-		if in.Version != current+1 || in.Parent != current {
-			return ErrVersionConflict
-		}
 		var parent *int32
 		if in.Parent > 0 {
-			n := int32(in.Parent) //nolint:gosec // equals the current version, which the table keeps small
+			n := int32(in.Parent) //nolint:gosec // range checked above
 			parent = &n
 		}
 		summary := in.Summary
 		if summary == nil {
 			summary = []string{}
 		}
+		var err error
 		v, err = tx.q.InsertTimelineVersion(ctx, db.InsertTimelineVersionParams{
-			WorkspaceID: ws, ProjectID: project, Version: int32(in.Version), //nolint:gosec // see above
+			WorkspaceID: ws, ProjectID: project, Version: int32(in.Version), //nolint:gosec // range checked above
 			ParentVersion: parent, Spec: in.Spec, Ops: orEmptyArray(in.Ops), Diff: orEmptyArray(in.Diff), Summary: summary,
 			AuthorKind: in.AuthorKind, AuthorID: in.AuthorID,
 		})
@@ -188,7 +189,14 @@ func (s *Store) AddTimelineVersion(ctx context.Context, ws ids.WorkspaceID, proj
 			}
 			return mapErr(err)
 		}
-		_, err = tx.q.SetCurrentTimelineVersion(ctx, db.SetCurrentTimelineVersionParams{WorkspaceID: ws, ID: project, Version: &v.Version})
+		_, err = tx.q.SetCurrentTimelineVersion(ctx, db.SetCurrentTimelineVersionParams{WorkspaceID: ws, ID: project, Version: &v.Version, Parent: parent})
+		if errors.Is(mapErr(err), ErrNotFound) {
+			// Either the project is gone (deleted) or another writer moved it on.
+			if _, perr := tx.q.GetProject(ctx, db.GetProjectParams{WorkspaceID: ws, ID: project}); perr != nil {
+				return mapErr(perr)
+			}
+			return ErrVersionConflict
+		}
 		return mapErr(err)
 	})
 	if err != nil {

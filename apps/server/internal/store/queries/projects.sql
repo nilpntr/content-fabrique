@@ -12,11 +12,18 @@ INSERT INTO project_assets (workspace_id, project_id, asset_id, position)
 SELECT @workspace_id::uuid, @project_id::uuid, a.asset_id, (a.ord - 1)::integer
 FROM unnest(@asset_ids::uuid[]) WITH ORDINALITY AS a (asset_id, ord);
 
--- Locks the assets (not deleted) of this workspace that the ids name, so that none is deleted before the project that uses
--- it is stored. Ids of other workspaces and unknown ids simply do not come back.
--- name: LockAssetsForProject :many
+-- The (not deleted) assets of this workspace that the ids name, unlocked: the first look, to tell unknown ids from assets that
+-- are not ready. Ids of other workspaces and unknown ids simply do not come back.
+-- name: ListAssetsForProject :many
 SELECT * FROM assets
-WHERE workspace_id = @workspace_id AND id = ANY(@asset_ids::uuid[]) AND deleted_at IS NULL
+WHERE workspace_id = @workspace_id AND id = ANY(@asset_ids::uuid[]) AND deleted_at IS NULL;
+
+-- Locks the READY ones until the end of the transaction, so that none is deleted before the project that uses it is stored.
+-- Only ready assets are locked: an asset still being ingested is being updated by the worker, which must not wait for a
+-- project to be created.
+-- name: LockReadyAssetsForProject :many
+SELECT * FROM assets
+WHERE workspace_id = @workspace_id AND id = ANY(@asset_ids::uuid[]) AND deleted_at IS NULL AND status = 'ready'
 FOR SHARE;
 
 -- A (not deleted) project of this workspace.
@@ -33,7 +40,10 @@ FOR UPDATE;
 -- The project page: newest first (UUIDv7 ids sort by creation time), after the cursor when there is one.
 -- name: ListProjects :many
 SELECT p.*,
-       (SELECT count(*) FROM project_assets pa WHERE pa.workspace_id = p.workspace_id AND pa.project_id = p.id)::integer AS asset_count
+       (SELECT count(*)
+        FROM project_assets pa
+        JOIN assets a ON a.workspace_id = pa.workspace_id AND a.id = pa.asset_id
+        WHERE pa.workspace_id = p.workspace_id AND pa.project_id = p.id AND a.deleted_at IS NULL)::integer AS asset_count
 FROM projects p
 WHERE p.workspace_id = @workspace_id
   AND p.deleted_at IS NULL
@@ -46,9 +56,12 @@ UPDATE projects SET deleted_at = now()
 WHERE workspace_id = @workspace_id AND id = @id AND deleted_at IS NULL
 RETURNING id;
 
+-- Moves the project to a new version, only if it is still at the parent the version was made from (null for the first): the
+-- one check that two writers cannot both pass. No row: the project is gone, or another writer moved it first.
 -- name: SetCurrentTimelineVersion :one
 UPDATE projects SET current_timeline_version = @version
 WHERE workspace_id = @workspace_id AND id = @id AND deleted_at IS NULL
+  AND current_timeline_version IS NOT DISTINCT FROM sqlc.narg('parent')::integer
 RETURNING *;
 
 -- The footage of a project with what the library knows about each asset. A deleted asset is still listed (the project
