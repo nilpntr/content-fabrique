@@ -132,6 +132,8 @@ Tokens. Apart from the tunnel token, which `cfctl bootstrap` makes, you create e
 
 ### 3.4 Postgres
 
+> The database also needs the **`pgvector`** extension for semantic search ([D-30](05-decisions.md#d-30-semantic-search-pgvector-in-postgres-hybrid-with-full-text)); check that PlanetScale offers it, together with Postgres 18, when you create the staging database.
+
 **Postgres 18 or newer is required**: the schema's id columns default to the native `uuidv7()` that 18 added ([D-24](05-decisions.md#d-24-public-ids-are-typeids-over-uuidv7)). The first migration refuses an older server, and `cfctl doctor` fails a Postgres URL with "Postgres 18 or newer required".
 
 - **Local:** docker compose with the image `pgvector/pgvector:pg18` (pinned by digest, the same one as CI) and the `POSTGRES_*` values. Nothing to create, and all three database URLs point at the same local database and the same user (`cf`, a superuser), so the role split below does not apply locally. `task migrate` (or `task dev`, which runs it) creates the tables and, harmlessly, the unused group role `cf_app`. **Old data:** the volume is now `postgres18-data`, mounted at `/var/lib/postgresql` (Postgres 18 images moved their data directory), so an older Postgres 17 volume is left alone and unused. Run `task reset` to delete the old volumes, and `docker volume rm content-fabrique_postgres-data` for the Postgres 17 one.
