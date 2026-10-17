@@ -52,6 +52,8 @@ type compiler struct {
 	// inputs are the ffmpeg inputs: one per clip, then one per audio track item.
 	inputs []Input
 	plan   Plan
+	// sfxBoostDB is added to the level of every sound effect (SoundReadyEffectGainDB in a sound-ready edit, otherwise 0).
+	sfxBoostDB float64
 }
 
 // Compile builds the Plan for rendering spec with profile. It is pure and deterministic: no process is started and

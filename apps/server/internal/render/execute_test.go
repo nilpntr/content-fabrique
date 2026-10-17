@@ -328,14 +328,14 @@ func TestProgressWriterChunks(t *testing.T) {
 }
 
 func TestMeasuredFilter(t *testing.T) {
-	f, err := measuredFilter("loudnorm=I=-14:TP=-1:LRA=11", "some log\n"+loudnormJSON+"\n", 0)
+	f, err := measuredFilter("loudnorm=I=-14:TP=-1:LRA=11", "some log\n"+loudnormJSON+"\n")
 	if err != nil || !strings.HasPrefix(f, "loudnorm=I=-14:TP=-1:LRA=11:measured_I=-23.45:") || !strings.HasSuffix(f, ":linear=true") {
 		t.Errorf("%q %v", f, err)
 	}
-	if _, err := measuredFilter("x", "no json here", 0); err == nil {
+	if _, err := measuredFilter("x", "no json here"); err == nil {
 		t.Error("a log without statistics must be an error")
 	}
-	if _, err := measuredFilter("x", `{"input_i":"abc"}`, 0); err == nil {
+	if _, err := measuredFilter("x", `{"input_i":"abc"}`); err == nil {
 		t.Error("a statistic that is not a number must be an error")
 	}
 }

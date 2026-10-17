@@ -240,6 +240,11 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 	// timeline are not boosted to -14 LUFS.
 	guide := c.beatGuide()
 	// The sound effects are the same kind of thing: an accent mixed in after the normalisation, at a fixed level.
+	// In a sound-ready edit (a bed and no programme sound) the effects are lifted over the bed, which is not normalised up to them.
+	c.sfxBoostDB = 0
+	if len(mixPads) == 0 && len(bedPads) > 0 {
+		c.sfxBoostDB = SoundReadyEffectGainDB
+	}
 	places, err := c.sfxPlacements()
 	if err != nil {
 		return audioResult{}, err
@@ -266,7 +271,7 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 	bed := fmt.Sprintf("anullsrc=r=%d:cl=stereo:d=%s[abed]", AudioSampleRate, secs(c.totalMs))
 	stmts = append([]string{bed}, stmts...)
 
-	// An edit with no programme sound is a bed and the effects: it is mixed and normalised as a whole (soundReadyMix). With a
+	// An edit with no programme sound is a bed and the effects: it is mixed as it is, with no normalisation (soundReadyMix). With a
 	// programme (speech, music) the bed clips join it, below the speech.
 	if len(mixPads) == 0 && len(bedPads) > 0 {
 		return c.soundReadyMix(stmts, bedPads, sfxStmts, sfxPads, guide)
@@ -337,10 +342,10 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 	return res, nil
 }
 
-// soundReadyMix mixes an edit whose sound is the bed and the effects: the bed clips and the effects are summed and the whole is
-// normalised to SoundReadyLUFS, lifted by at most SoundReadyMaxBoostDB (the cap is applied by the second loudnorm pass, which this
-// mix always has, in the preview as in the final: the check measures the preview). The beat guide (preview only) goes after the
-// normalisation, so it is neither measured nor lifted; the mix without it is the audio stem (StemLabel).
+// soundReadyMix mixes an edit whose sound is the bed and the effects. The bed clips were set to their own level by the evening pass
+// (BedPlan) and the effects to their category's level plus SoundReadyEffectGainDB (sfxPlacements); they are summed and limited under
+// the sound-ready ceiling, and nothing is normalised: the integrated loudness of the export results from the bed and the effects. The
+// beat guide (preview only) goes on top, and the mix without it is the audio stem (StemLabel).
 func (c *compiler) soundReadyMix(stmts, bedPads, sfxStmts, sfxPads []string, guide []string) (audioResult, error) {
 	var res audioResult
 	c.plan.SoundReady = true
@@ -354,16 +359,11 @@ func (c *compiler) soundReadyMix(stmts, bedPads, sfxStmts, sfxPads []string, gui
 	for _, p := range sfxPads {
 		mixIn += "[" + p + "]"
 	}
-	mix := fmt.Sprintf("%samix=inputs=%d:duration=first:normalize=0:dropout_transition=0", mixIn, len(sfxPads)+1)
-	ln := soundReadyLoudnorm()
 	core := "aout"
 	if len(guide) > 0 {
 		core = "acore"
 	}
-	res.loudnorm = &LoudnormPlan{Filter: ln, TwoPass: true, MaxGainDB: SoundReadyMaxBoostDB}
-	measure := append(slices.Clone(stmts), mix+","+ln+":print_format=json[aout]")
-	res.pass1Graph = strings.Join(measure, ";")
-	stmts = append(stmts, mix+","+ln+","+stereo48+","+sfxLimiter+"["+core+"]")
+	stmts = append(stmts, fmt.Sprintf("%samix=inputs=%d:duration=first:normalize=0:dropout_transition=0,%s,%s[%s]", mixIn, len(sfxPads)+1, stereo48, limiterAt(SoundReadyCeilingDB), core))
 	if len(guide) > 0 {
 		stmts = append(stmts, guide...)
 		stmts = append(stmts, "[acore]asplit=2[astem][acg]", "[acg][abeat]amix=inputs=2:duration=first:normalize=0:dropout_transition=0,"+sfxLimiter+"[aout]")
@@ -371,11 +371,6 @@ func (c *compiler) soundReadyMix(stmts, bedPads, sfxStmts, sfxPads []string, gui
 	}
 	res.statements = stmts
 	return res, nil
-}
-
-// soundReadyLoudnorm is the loudnorm filter of a sound-ready mix.
-func soundReadyLoudnorm() string {
-	return fmt.Sprintf("loudnorm=I=%d:TP=%s:LRA=%d", int(SoundReadyLUFS), num(SoundReadyTP), TargetLRA)
 }
 
 // beatGuide returns the statements of the generated click track, ending in [abeat], or nil when the profile has none or

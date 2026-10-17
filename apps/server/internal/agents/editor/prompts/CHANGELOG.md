@@ -35,7 +35,7 @@ editor puts on the timeline (a bed under every shot), so it is a new version, a 
   (`set_clip_audio`, new field `mode`): `mute`, `bed` (a low ambience at about -24 LUFS, evened out across the clips, short fades at
   the cuts, never normalised up) and `full` (the programme, for speech, ducked under effects). The policy is one op with no id,
   `{"op":"set_clip_audio","mode":"bed"}`, when nobody speaks; a clip with speech is `full` and the rest stay bed; `full` is never for
-  ambience. The whole mix (bed and effects) is normalised together to about -17 LUFS with room for a trend sound at -14.
+  ambience. The mix is not normalised to a programme target: the bed stays at about -24 LUFS and the effects peak around -12 to -10 LUFS, so a trend sound at about -14 dominates the bed and the effects still cut through it; the export integrates at about -21 to -19 LUFS for few effects.
 - **Sound effects.** The effects bullet teaches all eleven categories (whoosh, swish, impact, riser and now downlifter, sub_drop, pop,
   click, glitch, shimmer, sting) with their variants and what each is for, `variant` (omit it for the first, `"auto"` to vary by the
   effect's id), the rule of one effect sound per visual effect and none on a plain cut, and that `gain_db` is left alone unless
@@ -44,7 +44,7 @@ editor puts on the timeline (a bed under every shot), so it is a new version, a 
   creator adds.
 - **check_edit listens.** Step 5 and "Checking and finishing" describe the three new checks (`audio_level`, `audio_bed`,
   `audio_effects`, measured on the rendered preview without its beat guide) and what to do about each: a missing bed (bed policy, or an
-  effect on a clip with no sound), an effect lost in the bed (a few dB, or a heavier variant), a level far from -17 LUFS. A "borderline"
+  effect on a clip with no sound), an effect lost in the bed (a few dB, or a heavier variant), a bed that is not at about -24 LUFS or an export outside -24 to -16 LUFS. A "borderline"
   note is an estimate close to its bar and not a reason to revise.
 - **Playbooks** are all `v2`: workout (bed on, a whoosh on whips, a sub_drop with the impact on the drop, a riser into the hook, a sting
   on the loop), unboxing (the reveal's own sound kept as `full`, the rest a bed, a sting or impact on the reveal, a pop and a click),

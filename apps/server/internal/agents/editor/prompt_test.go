@@ -216,7 +216,7 @@ func TestPromptTeachesTheSoundReadyExport(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{`"auto"`, "mute", "bed", "full", "audio_bed", "audio_effects", "audio_level", "-17 LUFS", `{"op":"set_clip_audio","mode":"bed"}`} {
+	for _, want := range []string{`"auto"`, "mute", "bed", "full", "audio_bed", "audio_effects", "audio_level", "-24 LUFS", "-12 to -10", `{"op":"set_clip_audio","mode":"bed"}`} {
 		if !strings.Contains(p, want) {
 			t.Errorf("the prompt lacks %q", want)
 		}

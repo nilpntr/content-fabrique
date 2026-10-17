@@ -44,9 +44,8 @@ func TestBedModeCompilesToASoundReadyMix(t *testing.T) {
 		if !plan.SoundReady || plan.Bed == nil || len(plan.Bed.Clips) != 2 {
 			t.Fatalf("%s: sound ready %v bed %+v", prof.Name, plan.SoundReady, plan.Bed)
 		}
-		ln := plan.Loudnorm
-		if ln == nil || !ln.TwoPass || ln.MaxGainDB != SoundReadyMaxBoostDB || !strings.Contains(ln.Filter, "I=-17:TP=-2.5") || len(ln.Pass1Args) == 0 {
-			t.Errorf("%s: loudnorm %+v", prof.Name, ln)
+		if plan.Loudnorm != nil {
+			t.Errorf("%s: a sound-ready mix is not normalised to a programme target: %+v", prof.Name, plan.Loudnorm)
 		}
 		g := plan.FilterComplex
 		for _, want := range []string{"volume@bed0=0dB", "volume@bed1=0dB", "afade=t=in:st=0:d=0.020", "afade=t=out:st=1.980:d=0.020", "[abed][as0][as1]amix=inputs=3"} {
@@ -54,12 +53,16 @@ func TestBedModeCompilesToASoundReadyMix(t *testing.T) {
 				t.Errorf("%s: the graph lacks %q", prof.Name, want)
 			}
 		}
-		// The export is limited under the peak ceiling after the normalisation, so the stem (the same core) is what the export is.
-		if !strings.Contains(g, "aformat=sample_fmts=fltp:channel_layouts=stereo,alimiter=") {
-			t.Errorf("%s: the sound-ready core has no limiter after the normalisation", prof.Name)
+		// The core is limited under the sound-ready ceiling (-4.5 dBFS), so the stem (the same core) is what the export is; the effects
+		// are lifted by SoundReadyEffectGainDB over their programme level (the -6 dB base plus the lift).
+		if !strings.Contains(g, "aformat=sample_fmts=fltp:channel_layouts=stereo,alimiter=limit=0.595662:") {
+			t.Errorf("%s: the sound-ready core has no limiter at the ceiling:\n%s", prof.Name, PrettyFilter(g))
 		}
-		if strings.Contains(g, "loudnorm=I=-14") {
-			t.Errorf("%s: the bed was normalised to the programme's -14", prof.Name)
+		if !strings.Contains(g, "volume="+num(sfxBaseDB+SoundReadyEffectGainDB)+"dB,atrim=end=0.760") {
+			t.Errorf("%s: the effect is not lifted over the bed:\n%s", prof.Name, PrettyFilter(g))
+		}
+		if strings.Contains(g, "loudnorm") {
+			t.Errorf("%s: the sound-ready mix has a loudnorm", prof.Name)
 		}
 		if !graphAlphabet.MatchString(g) {
 			t.Errorf("%s: a character outside the alphabet: %q", prof.Name, regexpOutside.FindString(g))
@@ -82,8 +85,8 @@ func TestBedModeCompilesToASoundReadyMix(t *testing.T) {
 	if plan.SoundReady || plan.Bed == nil || !strings.Contains(plan.Loudnorm.Filter, "I=-14") {
 		t.Errorf("speech plus a bed is the programme: sound ready %v loudnorm %+v", plan.SoundReady, plan.Loudnorm)
 	}
-	if plan.Loudnorm.MaxGainDB != 0 {
-		t.Error("the programme's normalisation is not capped")
+	if strings.Contains(plan.FilterComplex, "volume="+num(sfxBaseDB+SoundReadyEffectGainDB)+"dB,atrim=end=0.760") {
+		t.Error("the programme's effects are lifted")
 	}
 	roles := []string{}
 	for _, bc := range plan.Bed.Clips {
@@ -99,32 +102,6 @@ func TestBedModeCompilesToASoundReadyMix(t *testing.T) {
 	}
 	if plan := mustCompile(t, specOf(30, []timeline.VideoItem{clipAt("c1", assetA, 0, 2000, 0, withMode(timeline.AudioModeMute))}), Final); plan.Loudnorm != nil || plan.Bed != nil {
 		t.Error("a muted clip has sound")
-	}
-}
-
-func TestMeasuredFilterCapsTheBoost(t *testing.T) {
-	// A mix measured at -23.45 LUFS with a target of -17 is lifted by 6.45 dB: a cap of 5 dB lowers the target to -18.45 (linear loudnorm
-	// applies target - measured and ignores the offset), a cap of 20 leaves it, and a cut is never capped.
-	f, err := measuredFilter("loudnorm=I=-17:TP=-1.5:LRA=11", loudnormJSON, 5)
-	if err != nil || !strings.HasPrefix(f, "loudnorm=I=-18.45:TP=-1.5") {
-		t.Errorf("capped: %q %v", f, err)
-	}
-	f, err = measuredFilter("loudnorm=I=-17:TP=-1.5:LRA=11", loudnormJSON, 20)
-	if err != nil || !strings.HasPrefix(f, "loudnorm=I=-17:") {
-		t.Errorf("uncapped: %q %v", f, err)
-	}
-	f, err = measuredFilter("loudnorm=I=-30:TP=-1.5:LRA=11", loudnormJSON, 5)
-	if err != nil || !strings.HasPrefix(f, "loudnorm=I=-30:") {
-		t.Errorf("a cut: %q %v", f, err)
-	}
-	// A nearly silent mix is not normalised at all when it is capped (the single-pass filter would boost its hiss), and keeps the
-	// single-pass filter when it is not.
-	silent := strings.Replace(loudnormJSON, `"-23.45"`, `"-inf"`, 1)
-	if f, err = measuredFilter("loudnorm=I=-17:TP=-1.5:LRA=11", silent, 8); err != nil || f != "anull" {
-		t.Errorf("a silent capped mix: %q %v", f, err)
-	}
-	if f, err = measuredFilter("loudnorm=I=-14:TP=-1:LRA=11", silent, 0); err != nil || f != "" {
-		t.Errorf("a silent programme: %q %v", f, err)
 	}
 }
 
@@ -153,10 +130,10 @@ func TestBedClipsAreEvenedOutAndTheMixIsSoundReady(t *testing.T) {
 				t.Errorf("the beds are %.1f and %.1f dBFS: not evened out (24 dB apart at the source)", qa, lb)
 			}
 			lufs, tp := loudness(t, ffmpeg, out)
-			if lufs < -19.5 || lufs > -15.5 {
-				t.Errorf("integrated loudness %.1f LUFS, want the sound-ready range around -17", lufs)
+			if lufs < -24 || lufs > -16 {
+				t.Errorf("integrated loudness %.1f LUFS, want the sound-ready range (-24 to -16: the bed at -24 plus a few effects)", lufs)
 			}
-			if tp > -1.0 {
+			if tp > -2.5 {
 				t.Errorf("true peak %.2f dBTP", tp)
 			}
 			// The bed is low: far under the programme's -14 LUFS in the stretches without an effect.

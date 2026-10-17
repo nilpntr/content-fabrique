@@ -129,7 +129,7 @@ Every number is computed in Go from the stored timeline version and the stored c
   "metrics": {"duration_ms": 12350, "shots": 6, "shot_min_ms": 1470, "shot_median_ms": 1930, "shot_max_ms": 3150, "longest_equal_run": 1,
               "rep_edges_on": 6, "rep_edges_total": 6, "dead_share": 0.02, "effects": 2, "ramps": 0, "effects_per_cut": 0.4,
               "cuts_on_beat": 5, "cuts": 5, "brightness_max_jump": 0.07, "brightness_range": 0.12,
-              "audio_profile": "sound_ready", "audio_lufs": -17.1, "audio_bed_lufs": -18, "audio_source": "stem", "audio_ms": 310},
+              "audio_profile": "sound_ready", "audio_lufs": -21, "audio_bed_lufs": -24.2, "audio_source": "stem", "audio_ms": 310},
   "passed": 13, "failed": 1, "skipped": 1, "nth": 1}}
 ```
 
@@ -177,9 +177,9 @@ The export has no music and no trend sound, and the creator adds a trending soun
 - **No speech:** the clips' own sound is a **low bed** (`set_clip_audio` mode `bed`, once, without `id`: about -24 LUFS, evened out across clips, short fades at the cuts, never normalised up to the programme), and the generated effects go on top.
 - **Speech** (the brief or description says so, or the playbook is talking): that clip is `full`, the programme at its own level, ducked under effects; the other clips stay a bed. `full` is never for ambience.
 - **A trend sound stays a cue**: never exported; the preview keeps the beat guide, and the edit is still cut to the grid so it matches what the creator adds.
-- **Levels:** the bed and the effects are normalised together to about -17 LUFS (the export lands at -18 to -16) with the effects peaking within 6 LU of a -14 LUFS trend sound. The editor leaves `gain_db` alone unless `check_edit` says an effect is lost in the bed.
+- **Levels:** the bed is about -24 LUFS short-term and nothing is normalised to a programme target; the effects peak around -12 to -10 LUFS (within 6 LU of a -14 LUFS trend sound, which dominates the bed); the export integrates at about -21 to -19 LUFS for few effects. The editor leaves `gain_db` alone unless `check_edit` says an effect is lost in the bed.
 - **The playbooks** (all at `v2`): workout keeps the gym as a bed, a whoosh on each whip, a sub_drop with the impact on the drop, a riser into the hook and a sting on the loop; unboxing keeps the reveal's own sound as `full` and the rest a bed; talking is `full` on speech and a bed on cutaways; general, vlog and tutorial use bed and full instead of `use_source`.
-- **The checks** `audio_level`, `audio_bed` and `audio_effects` (section 7) listen to the preview and say what to change: a missing bed, an effect lost in the bed (a few dB or a heavier variant), a level far from -17 LUFS.
+- **The checks** `audio_level`, `audio_bed` and `audio_effects` (section 7) listen to the preview and say what to change: a missing bed, an effect lost in the bed (a few dB or a heavier variant), a bed that is not at about -24 LUFS or an export outside -24 to -16 LUFS.
 
 ## Sound (P3-11)
 

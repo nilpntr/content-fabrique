@@ -9,7 +9,7 @@ import (
 )
 
 // soundReadyMeasured is a healthy sound-ready file: 10 s of a steady bed at -24 LUFS (momentary every 100 ms) with two accents that
-// peak 8 LU over it, a cut at 5 s, integrated loudness at -17.
+// peak 8 LU over it, a cut at 5 s, integrated loudness at -20.
 func soundReadyMeasured() measured {
 	pcm := pcmWith(10, 0.5, 2.0, 5.0)
 	for i := range pcm { // a low steady bed under the hits
@@ -25,7 +25,7 @@ func soundReadyMeasured() measured {
 		mom = append(mom, LoudnessPoint{TimeS: ts, LUFS: l})
 	}
 	return measured{
-		durationS: 10, fps: 30, hasAudio: true, integrated: -17, lra: 6, truePeak: -2.5, pcm: pcm, momentary: mom,
+		durationS: 10, fps: 30, hasAudio: true, integrated: -20, lra: 6, truePeak: -2.5, pcm: pcm, momentary: mom,
 		channels: []chanStats{{peakDB: -3, rmsDB: -24, peakCount: 1}, {peakDB: -3, rmsDB: -24, peakCount: 1}},
 	}
 }
@@ -39,7 +39,7 @@ func TestSoundReadyProfileHealthyFile(t *testing.T) {
 	if r.Bed.LevelLUFS != -24 || r.Bed.Coverage < 0.99 {
 		t.Errorf("bed %+v", r.Bed)
 	}
-	for _, id := range []string{"loudness", "bed_gaps", "bed_present", "bed_steady", "sfx_cut_through", "trend_audible", "true_peak"} {
+	for _, id := range []string{"loudness", "bed_gaps", "bed_present", "bed_level", "bed_steady", "sfx_cut_through", "trend_audible", "true_peak"} {
 		if c := find(r, id); c.Status != StatusPass {
 			t.Errorf("%s: %s (%s, target %s)", id, c.Status, c.Value, c.Target)
 		}
@@ -189,6 +189,15 @@ func TestEffectPeakIsReadOverTheEffect(t *testing.T) {
 	}
 	if pop.PeakLUFS > -20 {
 		t.Errorf("the pop at 7.3 s sees the hit before it (windows ending at 7.0 to 7.3 s hold mostly that): %+v", pop)
+	}
+}
+
+// A bed at -18 LUFS competes with a trend sound at -14: the check says so; at -24 it is on level.
+func TestBedLevelCheck(t *testing.T) {
+	for level, want := range map[float64]string{-24: StatusPass, -26: StatusPass, -20: StatusWarn, -18: StatusFail, -31: StatusFail} {
+		if got := bedLevelStatus(level); got != want {
+			t.Errorf("bed at %.0f LUFS: %s, want %s", level, got, want)
+		}
 	}
 }
 

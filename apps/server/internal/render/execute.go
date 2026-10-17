@@ -11,7 +11,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -346,11 +345,11 @@ func measureLoudness(ctx context.Context, plan Plan, runner media.Runner, inputs
 	if err != nil {
 		return "", err
 	}
-	return measuredFilter(ln.Filter, string(stderr), ln.MaxGainDB)
+	return measuredFilter(ln.Filter, string(stderr))
 }
 
 // measuredFilter reads the loudnorm JSON out of ffmpeg's log and builds the second-pass filter.
-func measuredFilter(base, log string, maxGain float64) (string, error) {
+func measuredFilter(base, log string) (string, error) {
 	end := strings.LastIndex(log, "}")
 	start := strings.LastIndex(log, "{")
 	if start < 0 || end < start {
@@ -369,26 +368,11 @@ func measuredFilter(base, log string, maxGain float64) (string, error) {
 		vals[i] = v
 	}
 	if math.IsInf(vals[0], 0) || math.IsNaN(vals[0]) || vals[0] < silenceFloor {
-		if maxGain > 0 {
-			// A capped mix that is (nearly) silent is not lifted at all: the single-pass filter would boost its hiss by whatever
-			// its dynamic mode allows, which is what the cap is there to prevent.
-			return "anull", nil
-		}
 		return "", nil
-	}
-	// A capped mix (a sound-ready one) is lifted by at most maxGain. In linear mode loudnorm applies target_I - measured_I (it computes
-	// that itself and ignores the offset it is given), so the cap is a lower target: measured_I + maxGain.
-	if m := targetIRe.FindStringSubmatch(base); m != nil && maxGain > 0 {
-		if target, err := strconv.ParseFloat(m[1], 64); err == nil && target-vals[0] > maxGain {
-			base = targetIRe.ReplaceAllString(base, "I="+num(math.Round((vals[0]+maxGain)*100)/100))
-		}
 	}
 	return fmt.Sprintf("%s:measured_I=%s:measured_TP=%s:measured_LRA=%s:measured_thresh=%s:offset=%s:linear=true",
 		base, num(vals[0]), num(vals[1]), num(vals[2]), num(vals[3]), num(vals[4])), nil
 }
-
-// targetIRe is the I= (integrated target) of a loudnorm filter.
-var targetIRe = regexp.MustCompile(`I=(-?[0-9.]+)`)
 
 // applySwaps returns a copy of args with every old filter text replaced by its new one (each is unique: a bed filter is named by its
 // clip).

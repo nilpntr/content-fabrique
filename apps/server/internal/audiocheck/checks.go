@@ -268,9 +268,9 @@ func soundReadyChecklist(r Report, cs []CheckItem) []CheckItem {
 			li := r.Loudness.IntegratedLUFS
 			out = append(out, CheckItem{
 				ID: "loudness", Title: "Integrated loudness (sound-ready range)", Status: st(li >= soundReadyLo && li <= soundReadyHi, li >= soundReadyLo-soundReadyWarn && li <= soundReadyHi+soundReadyWarn),
-				Value: fmt.Sprintf("%.1f LUFS", li), Target: fmt.Sprintf("%.0f to %.0f LUFS (about -17)", soundReadyLo, soundReadyHi),
-				Source: srcEstimate + " (D-33: the web's -14 is for a programme; a bed is lifted to about -17 so a trend sound at -14 can be layered on top)", Estimate: true,
-				Fix: "The renderer lifts a bed and effects toward -17 LUFS by at most 8 dB: a lower reading means the bed is almost silent (check the clips have sound), a higher one that effects are very loud or numerous.",
+				Value: fmt.Sprintf("%.1f LUFS", li), Target: fmt.Sprintf("%.0f to %.0f LUFS (about -20 for few effects)", soundReadyLo, soundReadyHi),
+				Source: srcEstimate + " (D-33: sound-ready: the creator's trend sound brings the programme loudness; a bed at -24 and a few effects integrate at about -20, and the export is not normalised to the web's -14)", Estimate: true,
+				Fix: "A lower reading means the bed is almost silent (check the clips have sound: set_clip_audio mode bed), a higher one that there are many effects or a clip that is far too loud.",
 			})
 		case "silent_gap":
 			g := r.Silence.LongestS
@@ -300,6 +300,12 @@ func soundReadyChecklist(r Report, cs []CheckItem) []CheckItem {
 			Value:  fmt.Sprintf("sound over %.0f LUFS for %.0f %% of the time, bed at %.1f LUFS", bedPresentLUFS, bed.Coverage*100, bed.LevelLUFS),
 			Target: fmt.Sprintf("at least %.0f %% of the time", bedCoverageMin*100), Source: srcEstimate + " (D-33: an export that is silent until a sound is added feels broken)", Estimate: true,
 			Fix: "Put the clips' own sound in as a bed: set_clip_audio with mode bed (no id) for the footage without speech.",
+		},
+		CheckItem{
+			ID: "bed_level", Title: "The bed is a low ambience", Status: bedLevelStatus(bed.LevelLUFS),
+			Value: fmt.Sprintf("%.1f LUFS (median)", bed.LevelLUFS), Target: fmt.Sprintf("%.0f LUFS, within %.0f LU", bedLevelLUFS, bedLevelTolLU),
+			Source: srcEstimate + " (D-33: a trend sound layered in TikTok is at about -14 LUFS and must dominate; a bed within 10 LU of it competes with it)", Estimate: true,
+			Fix: "The bed is louder or quieter than an ambience should be: lower or raise it with gain_db on the clip that sticks out (set_clip_audio), or mute a clip whose sound is not an ambience.",
 		},
 		CheckItem{
 			ID: "bed_steady", Title: "The bed is steady", Status: st(bed.LevelLUFS-bed.P10LUFS <= bedSteadyDipLU, bed.LevelLUFS-bed.P10LUFS <= bedSteadyWarnLU),
@@ -401,4 +407,19 @@ func soundReadySync(r Report) CheckItem {
 	}
 	c.Fix = "Move " + strings.Join(late, ", ") + " to the frame of the cut or hit (at_ms), or raise its gain_db: it is not heard on its frame, so the bed or another sound covers it."
 	return c
+}
+
+// bedLevelStatus judges the median short-term loudness of the bed against bedLevelLUFS.
+func bedLevelStatus(level float64) string {
+	d := level - bedLevelLUFS
+	if d < 0 {
+		d = -d
+	}
+	switch {
+	case d <= bedLevelTolLU:
+		return StatusPass
+	case d <= bedLevelWarnLU:
+		return StatusWarn
+	}
+	return StatusFail
 }

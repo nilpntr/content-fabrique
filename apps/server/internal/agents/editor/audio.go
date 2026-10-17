@@ -165,7 +165,7 @@ func audioChecks(res AudioResult) []Check {
 		ids []string
 	}{
 		{CheckAudioLevel, []string{"has_audio", "loudness", "true_peak", "clipping", "dc_offset", "channel_balance", "silent_gap"}},
-		{CheckAudioBed, []string{"bed_present", "bed_gaps", "bed_steady"}},
+		{CheckAudioBed, []string{"bed_present", "bed_level", "bed_gaps", "bed_steady"}},
 		{CheckAudioEffects, []string{"sfx_sync", "sfx_cut_through", "trend_audible", "sfx_density"}},
 	}
 	byID := map[string]audiocheck.CheckItem{}

@@ -37,10 +37,15 @@ const (
 	endLUMin        = -4.0 // earshot: the last 3 s reach body level, -2.2 to +5.6 LU against the integrated level (median +0.2)
 	endLUMax        = 6.0
 	// The sound-ready profile (P3-12), sources: our own design (D-33) and the earshot/practice notes in audio-v1.md; all are estimates.
-	// The export is a bed and effects, lifted toward soundReadyLUFS (render.SoundReadyLUFS), so the creator can layer a trend sound.
-	soundReadyLo      = -19.0
-	soundReadyHi      = -15.0
+	// The export is a bed (about -24 LUFS) and effects, not normalised to a programme target: the creator's trend sound brings the
+	// programme loudness. The integrated loudness simply results, about -21 to -19 for an edit with few effects; the window is wide
+	// enough for many effects (up to -16) and for a very sparse edit (down to -24, the bed alone).
+	soundReadyLo      = -24.0
+	soundReadyHi      = -16.0
 	soundReadyWarn    = 2.0
+	bedLevelLUFS      = -24.0 // the bed's median short-term loudness (render.BedTargetLUFS)
+	bedLevelTolLU     = 3.0   // the bed is on level within this many LU of that, and competes with a trend sound at -14 when louder
+	bedLevelWarnLU    = 5.0
 	bedGapMaxS        = 0.5 // the bed has no gap longer than this (a cut fades for 20 ms, so a longer hole is a clip with no sound or an error)
 	bedGapWarnS       = 1.0
 	bedPresentLUFS    = -45.0 // the momentary loudness above which the bed is there

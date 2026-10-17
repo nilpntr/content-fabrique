@@ -36,7 +36,7 @@ type Plan struct {
 
 	// Loudnorm is nil when the mix has no signal to normalise (a silent timeline).
 	Loudnorm *LoudnormPlan `json:"loudnorm,omitempty"`
-	// SoundReady is true for an edit whose sound is a bed and the effects (P3-12): see SoundReadyLUFS.
+	// SoundReady is true for an edit whose sound is a bed and the effects (P3-12): see SoundReadyEffectGainDB.
 	SoundReady bool `json:"sound_ready,omitempty"`
 	// Bed is the loudness evening of the clips' own sound, nil when no clip is in bed mode.
 	Bed *BedPlan `json:"bed,omitempty"`
@@ -153,9 +153,6 @@ type LoudnormPlan struct {
 	// Pass1Args measures the mix: the audio part of the graph ending in loudnorm with print_format=json. Like Args it
 	// stops before the output (Execute adds "-f null -").
 	Pass1Args []string `json:"pass1_args,omitempty"`
-	// MaxGainDB, when positive, caps the gain the second pass applies: a sound-ready mix is lifted toward its target by at most this
-	// much, so a nearly silent bed is not boosted into hiss (P3-12).
-	MaxGainDB float64 `json:"max_gain_db,omitempty"`
 }
 
 // BedPlan is the loudness evening of the clips' own sound (P3-12). The clips in bed mode are set to one level, whatever they were
@@ -199,13 +196,19 @@ const (
 	bedFadeMs = 20
 )
 
-// The sound-ready mix (P3-12): an edit with no programme sound (no speech, no music) is a bed and the effects, so it is not normalised
-// to the web's -14 LUFS (gym clatter at -14 would be wrong) but to SoundReadyLUFS as a whole, lifted by at most SoundReadyMaxBoostDB,
-// with true-peak headroom for the trend sound the creator layers on in TikTok.
+// The sound-ready mix (P3-12): an edit with no programme sound (no speech, no music) is a bed and the effects. It is not normalised to
+// a programme target (gym clatter at the web's -14 LUFS would be wrong, and a bed lifted to -18 competes with the trend sound the
+// creator layers on in TikTok at about -14, which must dominate). The bed is set to its own level (BedTargetLUFS, per clip), the
+// effects are set by their category's loudness plus SoundReadyEffectGainDB, and the integrated loudness of the export simply results:
+// about -21 to -19 LUFS for an edit with few effects. A ceiling limiter keeps the true peak under -2.5 dBTP.
 const (
-	SoundReadyLUFS       = -17.0
-	SoundReadyTP         = -2.5
-	SoundReadyMaxBoostDB = 8.0
+	// SoundReadyEffectGainDB is added to every effect's level in a sound-ready mix, so that its short-term peak lands around -12 to -10
+	// LUFS over a bed at -24 and still cuts through a trend sound at -14. The effects are matched per category for a programme that
+	// is normalised to -14 LUFS; the bed is far under that, so they are lifted as the bed was not.
+	SoundReadyEffectGainDB = 4.5
+	// SoundReadyCeilingDB is the sample-peak ceiling of the sound-ready core, in dBFS. The AAC encoder adds up to about 1 dB of
+	// inter-sample overshoot, so a true peak of -2.5 dBTP or less needs a ceiling under it.
+	SoundReadyCeilingDB = -4.5
 )
 
 // OutputArgs returns Args followed by -y and the output path, so an existing file is replaced. A plan with an audio stem pad (a

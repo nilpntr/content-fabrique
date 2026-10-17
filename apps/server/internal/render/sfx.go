@@ -38,7 +38,12 @@ const (
 
 // sfxLimiter is the limiter stage that follows the mix of the effects (auto level off: it would normalise the mix). The ceiling is
 // sfxLimitDB as the linear value alimiter takes (0.841395), and the attack is written out so that no default can change it.
-var sfxLimiter = "alimiter=limit=" + f(math.Pow(10, sfxLimitDB/20)) + ":attack=5:release=50:level=false:latency=1"
+var sfxLimiter = limiterAt(sfxLimitDB)
+
+// limiterAt is the limiter stage with its sample-peak ceiling at db dBFS.
+func limiterAt(db float64) string {
+	return "alimiter=limit=" + f(math.Pow(10, db/20)) + ":attack=5:release=50:level=false:latency=1"
+}
 
 // sfxSpecError is the error for an item whose category or variant the renderer does not know.
 func sfxSpecError(it *timeline.SFX) error {
@@ -108,7 +113,7 @@ func (c *compiler) sfxPlacements() ([]sfxPlacement, error) {
 				continue
 			}
 			dur := min(it.ms, c.totalMs-sfx.AtMs)
-			db := float64(sfxBaseDB)
+			db := float64(sfxBaseDB) + c.sfxBoostDB
 			if gain != nil {
 				db += *gain
 			}
