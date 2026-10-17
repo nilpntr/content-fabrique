@@ -167,8 +167,11 @@ func TestRunStoresTheAnalysis(t *testing.T) {
 		t.Fatalf("summary %s: %v", saved.Summary, err)
 	}
 	var series map[string]any
-	if err := json.Unmarshal(saved.Series, &series); err != nil || len(series["motion"].([]any)) != 400 {
+	if err := json.Unmarshal(saved.Series, &series); err != nil {
 		t.Fatalf("series: %v", err)
+	}
+	if motion, _ := series["motion"].([]any); len(motion) != 400 {
+		t.Fatalf("%d motion samples, want 400", len(motion))
 	}
 	if len(saved.Series) > 40_000 {
 		t.Errorf("the series of 40 s is %d bytes of JSON", len(saved.Series))

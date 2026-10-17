@@ -255,6 +255,12 @@ sequenceDiagram
 4. **Speech.** Word-level transcript for talking clips (captions, hooks, quotes).
 5. **Moments.** Merge the above into `moments` with labels, descriptions, quality scores and full-text search (optional embeddings). User annotations become moments too (`source=user`).
 
+**Built so far: the deterministic slice** (`apps/server/internal/analysis`, the `analyze` job on its own `analysis` queue, enqueued in the transaction that marks a video ready, like the quick look). One ffmpeg pass over `proxy_720` in the sandbox samples 10 times a second and writes a 32x32 grey thumbnail, an edge-energy sharpness value and the `scdet` score per sample; everything else is computed in Go and stored (`asset_signals`: the series as whole numbers plus a summary; `shots`; `moments`, migration `00014`).
+- **Shots** are cut at `scdet` peaks over a threshold with a one second minimum; each carries mean brightness, sharpness and motion, and an **exposure hint** (the gain and the `eq` gamma that would bring its brightness to a target; the renderer does not use it yet, `look.match` will).
+- **Reps** come from the periodicity of the picture's movement, not from the frame difference (a speed, with two humps per rep): per 20 s window the top three principal components of the thumbnails are searched for an autocorrelation peak of 1.2 to 6 s, windows that repeat are chained into one position-like signal, its tops and bottoms are found with a zigzag, and the kind the lifter pauses at (less motion) are the rep boundaries. Reps are scored (completeness 0.4, regularity 0.25, sharpness 0.2, exposure 0.15) and described ("rep 3 of 8, clean, full range"). Still stretches are **holds** for a posing clip (the title, file name or quick-look tags say so) or a clip with no reps, and **dead time** otherwise; movement that is not periodic for more than 2 s is dead time too.
+- `find_moments` (editor, §7.2) ranks the moments of the project's clips; the run context and `list_footage` carry a one-line summary per clip. `cfctl assets analyze` backfills, `cfctl media analyze <proxy.mp4>` runs the analysis on a local file.
+- Not built: pose keypoints (P2-09 proper), keyframes (P2-04), the full-text and embedding columns of `moments` (P2-06), the `auto` look preset.
+
 All CPU/ML steps run in the `media-tools` image inside the sandbox layer (§8), because they parse untrusted user files.
 
 ## 6. Timeline spec and renderer
@@ -366,6 +372,7 @@ A Go-native agent loop on the Claude Messages API (`anthropic-sdk-go`, using its
 |---|---|
 | `get_brief()` | Creator profile, idea/concept, brief text, annotations as constraints (include, exclude, prefer), output limits |
 | `search_moments(query, filters)` | Full-text and attribute search over the clip index (exercise, pose, quality, asset) |
+| `find_moments(asset_id?, kind?, min_score?, limit≤20)` | **Built (P2 slice):** the best reps and holds of the project's clips, ranked by score, with exact start and end times and the dead time to skip; computed from the picture, so it is not untrusted text |
 | `view_moment(id, frames≤8)` | Sampled low-res frames as images, so the model judges visually |
 | `get_sound(trend_id)` | Tempo, beats, downbeats, sections, recommended start, licence policy |
 | `get_timeline()` | Current spec + validation warnings |

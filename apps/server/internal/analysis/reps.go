@@ -241,7 +241,6 @@ func stitchRun(ws []windowCourses, hop int) []signal {
 			flush()
 			aligned = append([]float64(nil), w.courses[w.best]...)
 			cur = &signal{from: w.from}
-			prevFrom = w.from
 		} else {
 			// the overlap of this window with the previous one
 			lo, hi := w.from, prevFrom+len(prev)
@@ -257,7 +256,6 @@ func stitchRun(ws []windowCourses, hop int) []signal {
 				flush()
 				aligned = append([]float64(nil), w.courses[w.best]...)
 				cur = &signal{from: w.from}
-				prevFrom = w.from
 			} else {
 				bestSign = math.Copysign(1, bestCorr)
 				course := w.courses[bestC]
