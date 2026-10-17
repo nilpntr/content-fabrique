@@ -12,6 +12,8 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/ingest"
 	"github.com/nilpntr/content-fabrique/internal/media"
+	"github.com/nilpntr/content-fabrique/internal/render"
+	"github.com/nilpntr/content-fabrique/internal/renderjobs"
 	"github.com/nilpntr/content-fabrique/internal/sandbox"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
@@ -60,6 +62,32 @@ func newIngestPipeline(cfg config.Config, st *store.Store, objects *storage.Clie
 		Objects: objects,
 		Runner:  &media.SandboxRunner{Provider: provider, Image: cfg.MediaToolsImage, Limits: ingestLimits()},
 		TempDir: filepath.Join(root, "ingest"),
+		Logger:  logger,
+	})
+}
+
+// newRenderPipeline builds the pipeline of the render job over the same sandbox, image and job directory root as the ingest,
+// with the render limits (render.DefaultLimits: 4 CPUs, 4 GiB, 30 minutes a run). Its job directories are siblings of the
+// ingest's.
+func newRenderPipeline(cfg config.Config, st *store.Store, objects *storage.Client, logger *slog.Logger) (*renderjobs.Pipeline, error) {
+	if err := os.MkdirAll(cfg.MediaTempDir, 0o750); err != nil {
+		return nil, fmt.Errorf("MEDIA_TEMP_DIR: %w", err)
+	}
+	root, err := filepath.EvalSymlinks(cfg.MediaTempDir)
+	if err != nil {
+		return nil, fmt.Errorf("MEDIA_TEMP_DIR: %w", err)
+	}
+	provider, err := newSandboxProvider(cfg, root)
+	if err != nil {
+		return nil, err
+	}
+	limits := render.DefaultLimits()
+	return renderjobs.New(renderjobs.Config{
+		Store:   st,
+		Objects: objects,
+		Runner:  &media.SandboxRunner{Provider: provider, Image: cfg.MediaToolsImage, Limits: limits},
+		TempDir: filepath.Join(root, "render"),
+		CPUs:    limits.CPU,
 		Logger:  logger,
 	})
 }

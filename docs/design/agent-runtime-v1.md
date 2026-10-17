@@ -115,7 +115,7 @@ This is enough for a first edit of a few short clips. It is not the product's fi
 | `view_clip(asset_id, at_ms[≤8])` | Those frames as images (384 px), with timestamps |
 | `get_timeline()` | The current spec and its validation warnings |
 | `edit_timeline(ops[])` | Applies the P3-02 ops atomically → the new version number, a summary and the issues |
-| `render_preview()` | Renders the current version with the `preview` profile (P3-06) → a contact sheet image and the duration |
+| `render_preview()` | Renders the current version with the `preview` profile (P3-06) → a contact sheet image and the duration. Calls `renderjobs.RenderAndWait(ctx, svc, renderjobs.AgentCaller(ws, runID), project, version, "preview", timeout)`: an identical render that exists is reused, a timeout (`ErrWaitTimeout`) leaves the render running and asking again returns it, and `Service.ContactSheetJPEG` reads the picture; its tiles' layout (output time and item per tile) is in the render's `contact_sheet` |
 | `finish(summary)` | Ends the run |
 
 `search_moments`, `get_sound`, `ask_user` and `delegate` come with P2, P5 and later P4 tasks. The tool contracts are JSON Schemas in `packages/schemas/agents/editor-tools.v1.json`. `edit_timeline`'s `ops` reuses `ops.v1.schema.json`.

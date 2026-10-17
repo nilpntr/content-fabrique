@@ -44,6 +44,8 @@ tags:
     description: Projects (a video job with its format, footage and brief) and their timeline versions (paid-only).
   - name: runs
     description: Agent runs. The editor agent edits a project's timeline in a run; the run is a record of every step, its cost and its result (paid-only).
+  - name: renders
+    description: Renders of a project's timeline versions, the preview and the final MP4, with their time map and contact sheet (paid-only).
   - name: webhooks
     description: Called by other services, not by the web app. Not part of the generated TypeScript client or of the generated Go server interface.
 
@@ -988,6 +990,158 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /v1/projects/{id}/renders:
+    parameters:
+      - $ref: "#/components/parameters/ProjectIdPath"
+    post:
+      operationId: createRender
+      tags: [renders]
+      summary: Render a version of the project's timeline
+      description: |
+        Queues a render of `version` with `profile`: `preview` (half size, from the 720p proxies, with the beat guide) or
+        `final` (full size, from the originals). The answer is the render, usually `queued`; poll `GET /v1/renders/{id}` for
+        `progress` and the files. Asking again for a version and profile that has a render waiting, running or ready returns
+        that render (`200`) and queues nothing; a failed render does not count, so asking again after a failure starts a new one.
+        The version must exist and validate against the project's footage as it is now (`422 timeline_invalid` otherwise: an asset
+        deleted since the edit, say). At most 5 renders per workspace are in flight at once (`429 too_many_renders`). Only
+        owners and editors may render.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRenderRequest"
+      responses:
+        "200":
+          description: The existing render of that version and profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Render"
+        "202":
+          description: A new render was queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Render"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: "`timeline_invalid`: the version does not validate against the project's footage now."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: "`too_many_renders`: the workspace already has 5 renders waiting or running."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    get:
+      operationId: listRenders
+      tags: [renders]
+      summary: The renders of a project, newest first
+      description: |
+        Page with `cursor` (the `next_cursor` of the previous page). `version` and `profile` narrow the list. The renders in a list
+        carry no presigned URLs (`files` and `urls_expires_at` are `null`); fetch the one you want with `GET /v1/renders/{id}`.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: How many renders to return (default 50).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          description: The `next_cursor` of the previous page.
+          schema:
+            type: string
+        - name: version
+          in: query
+          required: false
+          description: Only renders of this timeline version.
+          schema:
+            type: integer
+            minimum: 1
+        - name: profile
+          in: query
+          required: false
+          description: Only renders of this profile.
+          schema:
+            $ref: "#/components/schemas/RenderProfile"
+      responses:
+        "200":
+          description: A page of renders.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListRendersResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/renders/{id}:
+    parameters:
+      - $ref: "#/components/parameters/RenderIdPath"
+    get:
+      operationId: getRender
+      tags: [renders]
+      summary: One render, with its progress and, once ready, presigned URLs for its files
+      description: |
+        A render of another workspace, of a deleted project, or one that does not exist is `404 not_found`. While `status` is
+        `queued` or `rendering`, `progress` (0 to 100) and `stage` say how far it is. Once `ready`, `files` holds a presigned GET
+        URL for the MP4, the contact sheet (a JPEG) and the time map (JSON), each valid for 30 minutes (`urls_expires_at`);
+        fetch the render again for fresh ones. `failure_reason` is a code that is safe to show when `status` is `failed`.
+      responses:
+        "200":
+          description: The render.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Render"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
   /v1/webhooks/clerk:
     post:
       operationId: receiveClerkWebhook
@@ -1081,6 +1235,14 @@ components:
       description: The project's TypeID.
       schema:
         $ref: "#/components/schemas/ProjectId"
+
+    RenderIdPath:
+      name: id
+      in: path
+      required: true
+      description: The render's TypeID.
+      schema:
+        $ref: "#/components/schemas/RenderId"
 
     RunIdPath:
       name: id
@@ -1191,6 +1353,8 @@ components:
         - version_conflict # 409: the timeline moved on since base_version
         - invalid_ops # 422: an edit batch was refused (see its issues)
         - no_change # 422: an edit batch changed nothing
+        - timeline_invalid # 422: a timeline version cannot be rendered (it does not validate against the footage now)
+        - too_many_renders # 429: the workspace already has 5 renders waiting or running
         - run_in_progress # 409: the project already has an editor run that has not finished
         - run_not_waiting # 409: the run is not waiting for an answer
         - model_not_configured # 503: the server has no model access (ANTHROPIC_API_KEY or LLM_MODE) or no such routing profile
@@ -2232,6 +2396,205 @@ components:
         last_seq:
           type: integer
           description: The sequence number of the run's last event (not only of the ones returned), 0 before the first.
+
+    # ── Renders ─────────────────────────────────────────────────────────────────
+
+    RenderProfile:
+      type: string
+      description: "`preview`: half the format's size, from the 720p proxies, x264 veryfast, with the beat guide. `final`: the format's size, from the originals, x264 medium, two-pass loudness."
+      enum: [preview, final]
+
+    RenderStatus:
+      type: string
+      enum: [queued, rendering, ready, failed]
+
+    CreateRenderRequest:
+      type: object
+      required: [version, profile]
+      properties:
+        version:
+          type: integer
+          minimum: 1
+          description: The timeline version to render.
+        profile:
+          $ref: "#/components/schemas/RenderProfile"
+
+    RenderFile:
+      type: object
+      required: [url, content_type, size_bytes]
+      properties:
+        url:
+          type: string
+          description: A presigned GET URL. Treat it as a secret until it expires.
+        content_type:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+
+    ContactSheetTile:
+      type: object
+      required: [index, out_ms, frame, kind]
+      properties:
+        index:
+          type: integer
+          minimum: 0
+          description: The tile's place in the sheet, row by row, from 0.
+        out_ms:
+          type: integer
+          format: int64
+          description: The output time of the frame shown, the timestamp drawn on the tile.
+        frame:
+          type: integer
+          format: int64
+          description: The output frame number.
+        item_id:
+          type: string
+          description: The main-track item that owns that time (the shot).
+        kind:
+          type: string
+          enum: [shot, last]
+          description: "`shot`: 100 ms after the shot starts (the first shot starts at 0, the others at each cut). `last`: the last frame of the video."
+
+    ContactSheet:
+      type: object
+      description: |
+        The layout of the contact sheet: one tile per shot (the frame 100 ms after the cut that starts it) and the last frame,
+        tiled `columns` across, each with its output timestamp (`m:ss.mmm`) drawn on it.
+      required: [columns, tile_width, tile_height, tiles]
+      properties:
+        columns:
+          type: integer
+        tile_width:
+          type: integer
+        tile_height:
+          type: integer
+        tiles:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContactSheetTile"
+
+    RenderFiles:
+      type: object
+      required: [mp4, contact_sheet, time_map]
+      properties:
+        mp4:
+          $ref: "#/components/schemas/RenderFile"
+        contact_sheet:
+          $ref: "#/components/schemas/RenderFile"
+        time_map:
+          allOf:
+            - $ref: "#/components/schemas/RenderFile"
+          description: "A JSON array of `{out_start_ms, out_end_ms, item_id, asset_id?, source_in_ms?, speed?}`: main items carry the asset, the source in point and the speed, text items the first three fields only. An output time `t` inside an item is the source time `source_in_ms + (t - out_start_ms) * speed`."
+
+    SoundCue:
+      type: object
+      description: A sound the timeline asks for that is never mixed in (decision D-03); the creator adds it in the app.
+      required: [item_id, trend_id, at_ms, source_offset_ms, duration_ms, gain_db]
+      properties:
+        item_id:
+          type: string
+        trend_id:
+          type: string
+          description: The trend's TypeID.
+        at_ms:
+          type: integer
+          format: int64
+        source_offset_ms:
+          type: integer
+          format: int64
+        duration_ms:
+          type: integer
+          format: int64
+        gain_db:
+          type: number
+
+    RequestedBy:
+      type: object
+      required: [kind, id]
+      properties:
+        kind:
+          $ref: "#/components/schemas/AuthorKind"
+        id:
+          type: string
+          description: The user's TypeID, or the editor run's id.
+
+    Render:
+      type: object
+      required: [id, project_id, timeline_version, profile, status, progress, stage, duration_ms, width, height, size_bytes, contact_sheet, sound_cues, files, urls_expires_at, failure_reason, requested_by, created_at, started_at, finished_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/RenderId"
+        project_id:
+          $ref: "#/components/schemas/ProjectId"
+        timeline_version:
+          type: integer
+          minimum: 1
+        profile:
+          $ref: "#/components/schemas/RenderProfile"
+        status:
+          $ref: "#/components/schemas/RenderStatus"
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        stage:
+          type: [string, "null"]
+          description: "What a running render is doing: `staging` (fetching the footage), `measuring` (the loudness pass of the final profile), `rendering`, `contact_sheet`, `uploading`. Null otherwise."
+        duration_ms:
+          type: [integer, "null"]
+          format: int64
+          description: The length of the video. Null until ready.
+        width:
+          type: [integer, "null"]
+        height:
+          type: [integer, "null"]
+        size_bytes:
+          type: [integer, "null"]
+          format: int64
+          description: The size of the MP4. Null until ready.
+        contact_sheet:
+          oneOf:
+            - $ref: "#/components/schemas/ContactSheet"
+            - type: "null"
+        sound_cues:
+          type: array
+          items:
+            $ref: "#/components/schemas/SoundCue"
+        files:
+          oneOf:
+            - $ref: "#/components/schemas/RenderFiles"
+            - type: "null"
+          description: Null until the render is ready, and in lists (fetch the render itself for the URLs).
+        urls_expires_at:
+          type: [string, "null"]
+          format: date-time
+        failure_reason:
+          type: [string, "null"]
+          description: "When `failed`: `invalid_timeline`, `source_unavailable` (an asset or its proxy is gone), `inputs_too_large`, `render_failed` (ffmpeg could not make the video), `project_deleted`, `job_lost` (the job that should have rendered it was gone), `timeout`, `interrupted` or `processing_failed`."
+        requested_by:
+          $ref: "#/components/schemas/RequestedBy"
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: [string, "null"]
+          format: date-time
+        finished_at:
+          type: [string, "null"]
+          format: date-time
+
+    ListRendersResponse:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Render"
+        next_cursor:
+          type: [string, "null"]
+          description: Pass it as `cursor` for the next page. Null on the last page.
 
     # ── Webhooks ────────────────────────────────────────────────────────────────
 

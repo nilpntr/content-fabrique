@@ -84,6 +84,7 @@ jobs:
               - 'apps/server/internal/sandbox/**'
               - 'apps/server/internal/media/**'
               - 'apps/server/internal/ingest/**'
+              - 'apps/server/internal/renderjobs/**'
               - 'apps/server/cmd/cfctl/media*.go'
               - '.github/workflows/ci.yml'
             # The renderer and what it compiles: the Go timeline package and the fixtures (the 20 render fixtures and the
@@ -124,6 +125,7 @@ jobs:
               - 'apps/server/internal/sandbox/**'
               - 'apps/server/internal/media/**'
               - 'apps/server/internal/ingest/**'
+              - 'apps/server/internal/renderjobs/**'
               - 'apps/server/cmd/cfctl/media*.go'
               - '.github/workflows/ci.yml'
 
@@ -554,6 +556,23 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends ffmpeg
           go test ./internal/ingest -docker-image media-tools:ci -v
+
+      # P3-06: the render job end to end with ffmpeg running in the image: a 30 s edit rendered as preview and final through the
+      # service, the queue row, the pipeline and storage (Postgres and MinIO in Docker), with the time map, the contact sheet,
+      # dedupe, tenancy and the failure paths. The test clips are generated with the runner's own ffmpeg (installed above). -timing
+      # logs how long the 30 s edit takes as a job (the acceptance criterion, preview <= 10 s and final <= 60 s, is for the target
+      # host class; this is a CI runner, and a timing assertion would be flaky). The figures go to the step summary.
+      - name: Render jobs against the image
+        working-directory: apps/server
+        run: |
+          set -o pipefail
+          go test ./internal/renderjobs -docker-image media-tools:ci -timing -count=1 -v 2>&1 | tee "$RUNNER_TEMP/renderjobs.txt"
+          {
+            echo "### Render timing (30 s edit, media-tools image, $(nproc) vCPUs, $(free -m | awk '/Mem:/ {print $2}') MiB RAM)"
+            echo '```'
+            grep -E 'sandbox:|TIMING' "$RUNNER_TEMP/renderjobs.txt" | sed 's/^ *//'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # gVisor overhead (D-08, P1-03): installs runsc (pinned and checksum-verified), registers it with Docker, then transcodes a
   # generated 1080p 30 s clip with the docker and hardened providers three times each and prints the table. It also runs the

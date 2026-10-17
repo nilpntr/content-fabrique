@@ -47,6 +47,7 @@ func run(args []string) error {
 				objects  jobs.ObjectStore
 				storageC *storage.Client    // the same client, for the agents
 				ingester jobs.AssetIngester // nil without storage: asset_ingest jobs then wait (snoozed)
+				renderer jobs.Renderer      // nil without storage: render jobs then wait (snoozed)
 			)
 			if cfg.ObjectStorageConfigured() {
 				client, err := storage.New(cfg.Storage())
@@ -60,10 +61,15 @@ func run(args []string) error {
 					return nil, err
 				}
 				ingester = pipeline
-				logger.Info("media pipeline ready", "sandbox", cfg.MediaSandboxProvider, "image", cfg.MediaToolsImage, "temp_dir", cfg.MediaTempDir, "concurrency", cfg.MediaConcurrency)
+				rp, err := newRenderPipeline(cfg, st, client, logger)
+				if err != nil {
+					return nil, err
+				}
+				renderer = rp
+				logger.Info("media pipeline ready", "sandbox", cfg.MediaSandboxProvider, "image", cfg.MediaToolsImage, "temp_dir", cfg.MediaTempDir, "concurrency", cfg.MediaConcurrency, "render_concurrency", cfg.RenderConcurrency)
 				warnIfImageMissing(ctx, cfg, logger)
 			} else {
-				logger.Warn("R2_* is not set: the jobs that delete objects, clean up uploads or ingest assets wait (snoozed, no attempt used) until a worker has it")
+				logger.Warn("R2_* is not set: the jobs that delete objects, clean up uploads ingest assets or render timelines wait (snoozed, no attempt used) until a worker has it")
 			}
 			// The agent runtime and the quick look share their model access and frame cache; both wait when it is off.
 			var (
@@ -75,8 +81,11 @@ func run(args []string) error {
 			}
 			queues := jobs.DefaultConfig()
 			for i := range queues.Queues {
-				if queues.Queues[i].Name == jobs.QueueMedia {
+				switch queues.Queues[i].Name {
+				case jobs.QueueMedia:
 					queues.Queues[i].MaxWorkers = cfg.MediaConcurrency
+				case jobs.QueueRender:
+					queues.Queues[i].MaxWorkers = cfg.RenderConcurrency
 				}
 			}
 			w, err := jobs.StartWorker(ctx, jobs.WorkerOptions{
@@ -85,6 +94,7 @@ func run(args []string) error {
 				Store:      st,
 				Objects:    objects,
 				Ingest:     ingester,
+				Render:     renderer,
 				Register:   runtime.Register(runner),
 				QuickLook:  quickLooker,
 				Logger:     logger,

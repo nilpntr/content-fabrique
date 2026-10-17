@@ -38,6 +38,8 @@ type WorkerOptions struct {
 	Ingest AssetIngester
 	// QuickLook is the quick look, for the quick_look job. Nil when the sandbox, object storage or model access is not set up.
 	QuickLook QuickLooker
+	// Render is the render pipeline, for the jobs that render timelines. Nil when the sandbox or object storage is not set up.
+	Render Renderer
 	// UIAddr is the listen address of River UI, such as "127.0.0.1:8082". Empty turns River UI off.
 	UIAddr string
 	// UIPassword is RIVER_UI_PASSWORD. River UI refuses to start without it.
@@ -102,7 +104,7 @@ func StartWorker(ctx context.Context, opts WorkerOptions) (*Worker, error) {
 		}
 	}
 
-	client, err := NewWorkerClient(pool, cfg, Deps{Store: opts.Store, Logger: logger, Objects: opts.Objects, Ingest: opts.Ingest, QuickLook: opts.QuickLook, Register: opts.Register})
+	client, err := NewWorkerClient(pool, cfg, Deps{Store: opts.Store, Logger: logger, Objects: opts.Objects, Ingest: opts.Ingest, QuickLook: opts.QuickLook, Render: opts.Render, Register: opts.Register})
 	if err != nil {
 		pool.Close()
 		return nil, err
