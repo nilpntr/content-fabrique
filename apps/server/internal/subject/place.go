@@ -70,58 +70,148 @@ func HeadRects(spec *timeline.Spec, lookup Lookup, startMs, endMs int64) []style
 		if it.Reframe != nil {
 			rf = *it.Reframe
 		}
-		zoom, shake := cameraZoom(items, i)
+		cam := cameraOver(items, i, spec.Output.FPS, os-cs, oe-cs)
 		for _, s := range tr.Near(in, outMs) {
 			x0, y0, x1, y1 := s.Head()
 			r := MapBox(x0, y0, x1, y1, tr.Aspect, rf, spec.Output)
-			out = append(out, withCamera(r, zoom, shake, spec.Output))
+			out = append(out, withCamera(r, cam, spec.Output))
 		}
 	}
 	return out
 }
 
-// zoomThroughStrength is how far a zoom_through transition zooms into the outgoing clip and out of the incoming one (render's constant).
-const zoomThroughStrength = 0.45
+// The shapes of the camera, as the renderer has them (render/camera.go, which this package cannot import): a zoom_through zooms by
+// zoomThroughStrength, a punch_in takes punchSeconds (clamped to punchMinF..punchMaxF frames) to land, a shake lasts shakeSeconds, reaches
+// full size in shakeAttackF frames and uses shakeRoom of the room the zoom leaves.
+const (
+	zoomThroughStrength = 0.45
+	punchSeconds        = 0.15
+	punchMinF           = 4
+	punchMaxF           = 6
+	shakeSeconds        = 0.4
+	shakeAttackF        = 2
+	shakeRoom           = 0.9
+)
 
-// shakeRoom is the share of the room the zoom leaves at the edges that a shake may use (render's constant).
-const shakeRoom = 0.9
-
-// cameraZoom is the strongest zoom the camera gives the clip at items[i] during its play, and whether it shakes: the peak of its motion
-// preset (a punch_in lands at 1 + strength, a push_in ends there, a pull_back starts there, a shake peaks there) and of the
-// zoom_through transitions into and out of it. The renderer's own maths, taken at its extremes (render/camera.go).
-func cameraZoom(items []timeline.VideoItem, i int) (zoom float64, shake bool) {
-	zoom = 1
-	if m := items[i].Motion; m.Active() {
-		zoom = 1 + m.StrengthOrDefault()
-		shake = m.Preset == timeline.MotionShake
-	}
-	into := items[i].TransitionIn != nil && items[i].TransitionIn.Type == timeline.TransitionZoomThrough
-	out := i+1 < len(items) && items[i+1].TransitionIn != nil && items[i+1].TransitionIn.Type == timeline.TransitionZoomThrough
-	if into || out {
-		zoom *= 1 + zoomThroughStrength // the renderer multiplies the factors
-	}
-	return zoom, shake
+// camera is the zoom the camera gives one clip over a window of its play: the range of the total zoom (the factors of the motion preset and
+// of the zoom_through transitions multiply, as in the renderer), and the largest zoom a shake reaches in it, 1 when there is no shake.
+type camera struct {
+	lo, hi, shake float64
 }
 
-// withCamera is the box a head can be in at any moment of the clip: the union of where it is with no camera move and where it is at the
-// strongest zoom (the camera zooms about the middle of the frame, and a coordinate moves linearly with the zoom, so the bounding box of the
-// two ends holds every frame in between), widened by what a shake can add.
-func withCamera(r style.Rect, zoom float64, shake bool, out timeline.Output) style.Rect {
-	if zoom <= 1 {
+// cameraOver is the camera of items[i] while the part of its output from fromMs to toMs (ms into the clip's own play) is on screen. It is
+// the renderer's own maths, evaluated frame by frame: a punch_in is zoomed from its landing on, a push_in or pull_back at the zoom its easing
+// has reached by then, a zoom_through only through the overlap of the transition, and a shake only while it lasts. A text that is on
+// screen before the camera moves is therefore not widened by what happens after it.
+func cameraOver(items []timeline.VideoItem, i int, fps int, fromMs, toMs int64) camera {
+	if fps <= 0 {
+		fps = 30
+	}
+	it := items[i]
+	startF := timeline.Frame(it.AtMs, fps)
+	outF := timeline.Frame(timeline.EndMs(it), fps) - startF
+	if outF < 1 {
+		return camera{lo: 1, hi: 1, shake: 1}
+	}
+	// The transitions into and out of the clip that are zoom_throughs, with the frames they overlap (the first clip never has one in).
+	var inOverlap, outOverlap int64
+	if i > 0 && it.TransitionIn != nil && it.TransitionIn.Type == timeline.TransitionZoomThrough {
+		inOverlap = max(timeline.Frame(timeline.EndMs(items[i-1]), fps)-startF, 0)
+	}
+	if i+1 < len(items) && items[i+1].TransitionIn != nil && items[i+1].TransitionIn.Type == timeline.TransitionZoomThrough {
+		outOverlap = max(timeline.Frame(timeline.EndMs(it), fps)-timeline.Frame(items[i+1].AtMs, fps), 0)
+	}
+	motion := func(int64) (z, shake float64) { return 1, 1 }
+	if m := it.Motion; m.Active() {
+		motion = motionAt(*m, outF, fps)
+	}
+	from := min(max(timeline.Frame(fromMs, fps), 0), outF-1)
+	to := min(max(timeline.Frame(toMs, fps), from), outF-1)
+	c := camera{lo: math.Inf(1), hi: 1, shake: 1}
+	for f := from; f <= to; f++ {
+		z, sh := motion(f)
+		if inOverlap > 0 { // zoomed through the first half of the overlap, then zooming out over the second half
+			half := float64(inOverlap) / 2
+			z *= 1 + zoomThroughStrength*math.Pow(1-ramp(float64(f)-half, half), 3)
+		}
+		if outOverlap > 0 { // zooming in over the first half of the overlap, then held to the end
+			half := float64(outOverlap) / 2
+			z *= 1 + zoomThroughStrength*math.Pow(ramp(float64(f-(outF-outOverlap)), half), 3)
+		}
+		c.lo, c.hi, c.shake = math.Min(c.lo, z), math.Max(c.hi, z), math.Max(c.shake, sh)
+	}
+	if math.IsInf(c.lo, 1) {
+		c.lo = 1
+	}
+	return c
+}
+
+// ramp is how far through a window of length `length` a point is, from 0 to 1 (clamped).
+func ramp(from, length float64) float64 { return math.Min(math.Max(from/length, 0), 1) }
+
+// motionAt is the zoom of a motion preset at a frame of the clip (outF frames long), and the zoom of its shake (1 when it does not shake).
+func motionAt(m timeline.Motion, outF int64, fps int) func(f int64) (z, shake float64) {
+	s := m.StrengthOrDefault()
+	last := float64(max(outF-1, 1))
+	at := int64(-1)
+	if m.AtMs != nil {
+		at = min(timeline.Frame(*m.AtMs, fps), outF-1)
+	}
+	smooth := func(p float64) float64 { return p * p * (3 - 2*p) }
+	switch m.Preset {
+	case timeline.MotionPunchIn:
+		rampF := int64(min(max(math.Floor(punchSeconds*float64(fps)+0.5), punchMinF), punchMaxF))
+		land := rampF
+		if at >= 0 {
+			land = at
+		}
+		start := max(0, land-rampF)
+		return func(f int64) (float64, float64) {
+			if land == start {
+				return 1 + s, 1
+			}
+			return 1 + s*(1-math.Pow(1-ramp(float64(f-start), float64(land-start)), 3)), 1
+		}
+	case timeline.MotionPushIn:
+		return func(f int64) (float64, float64) { return 1 + s*smooth(ramp(float64(f), last)), 1 }
+	case timeline.MotionPullBack:
+		return func(f int64) (float64, float64) { return 1 + s*(1-smooth(ramp(float64(f), last))), 1 }
+	case timeline.MotionShake:
+		start := max(at, 0)
+		length := max(int64(math.Floor(shakeSeconds*float64(fps)+0.5)), shakeAttackF+1)
+		return func(f int64) (float64, float64) {
+			m := f - start
+			if m < 0 || m > length {
+				return 1, 1
+			}
+			env := math.Min(float64(m)/shakeAttackF, 1) * math.Pow(1-float64(m)/float64(length), 2)
+			return 1 + s*env, 1 + s*env
+		}
+	}
+	return func(int64) (float64, float64) { return 1, 1 }
+}
+
+// withCamera is the box a head can be in while the camera is as c says: the union of where it is at the least and at the greatest zoom of
+// the window (the camera zooms about the middle of the frame, and a coordinate moves linearly with the zoom, so the bounding box of the two
+// ends holds every moment in between), widened by what a shake can add.
+func withCamera(r style.Rect, c camera, out timeline.Output) style.Rect {
+	if c.hi <= 1 && c.lo <= 1 {
 		return r
 	}
 	w, h := float64(out.Width), float64(out.Height)
-	zx := func(x float64) float64 { return (x-w/2)*zoom + w/2 }
-	zy := func(y float64) float64 { return (y-h/2)*zoom + h/2 }
-	u := style.Rect{
-		Left:   min(r.Left, int(math.Floor(zx(float64(r.Left))))),
-		Top:    min(r.Top, int(math.Floor(zy(float64(r.Top))))),
-		Right:  max(r.Right, int(math.Ceil(zx(float64(r.Right))))),
-		Bottom: max(r.Bottom, int(math.Ceil(zy(float64(r.Bottom))))),
+	at := func(z float64) style.Rect {
+		zx := func(x float64) float64 { return (x-w/2)*z + w/2 }
+		zy := func(y float64) float64 { return (y-h/2)*z + h/2 }
+		return style.Rect{
+			Left: int(math.Floor(zx(float64(r.Left)))), Top: int(math.Floor(zy(float64(r.Top)))),
+			Right: int(math.Ceil(zx(float64(r.Right)))), Bottom: int(math.Ceil(zy(float64(r.Bottom)))),
+		}
 	}
-	if shake {
-		padX := int(math.Ceil(shakeRoom * w * (1 - 1/zoom) / 2 * zoom))
-		padY := int(math.Ceil(shakeRoom * h * (1 - 1/zoom) / 2 * zoom))
+	a, b := at(c.lo), at(c.hi)
+	u := style.Rect{Left: min(a.Left, b.Left), Top: min(a.Top, b.Top), Right: max(a.Right, b.Right), Bottom: max(a.Bottom, b.Bottom)}
+	if c.shake > 1 {
+		padX := int(math.Ceil(shakeRoom * w * (1 - 1/c.shake) / 2 * c.hi))
+		padY := int(math.Ceil(shakeRoom * h * (1 - 1/c.shake) / 2 * c.hi))
 		u.Left, u.Right, u.Top, u.Bottom = u.Left-padX, u.Right+padX, u.Top-padY, u.Bottom+padY
 	}
 	return u
