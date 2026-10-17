@@ -34,7 +34,7 @@ var finalFixtures = []string{"v01_minimal_9x16", "v10_transition_whip", "v14_ref
 // sample is a frame of the output that the golden test looks at.
 type sample struct {
 	frame int64
-	// kind says why the frame is sampled: first, last, cut-1, cut, transition or mid.
+	// kind says why the frame is sampled: first, last, cut-1, cut, transition, after-transition or mid.
 	kind string
 	// sensitive is set for mid frames of clips that play at normal or higher speed, whose next frame must look
 	// different, or the frame number could not tell an off-by-one apart.
@@ -42,7 +42,7 @@ type sample struct {
 }
 
 // sampleFrames picks the frames to compare: the first and last frame, the frames around every cut (the last frame before it and
-// the first of the next item: a cut that is one frame early shows in the first, one that is late in the second), the middle of every transition and the middle of every item.
+// the first of the next item: a cut that is one frame early shows in the first, one that is late in the second), the middle of every transition, the first frame after it and the middle of every item.
 func sampleFrames(p Plan) []sample {
 	byFrame := map[int64]sample{}
 	add := func(f int64, kind string, sensitive bool) {
@@ -64,6 +64,9 @@ func sampleFrames(p Plan) []sample {
 		add(c.Frame, "cut", false)
 		if c.TransitionFrames > 0 {
 			add(c.Frame+c.TransitionFrames/2, "transition", false)
+			// The first frame after the transition is the incoming clip alone: a transition effect (the whip's blur) that
+			// runs one frame too long shows here.
+			add(c.Frame+c.TransitionFrames, "after-transition", false)
 		}
 	}
 	// The middle of each item, from the time map (which assigns [out_start, out_end) to each main item).
@@ -71,8 +74,8 @@ func sampleFrames(p Plan) []sample {
 		if e.SourceInMs == nil {
 			continue
 		}
-		startF := msToFrame(e.OutStartMs, p.FPS)
-		endF := msToFrame(e.OutEndMs, p.FPS)
+		startF := timeline.Frame(e.OutStartMs, p.FPS)
+		endF := timeline.Frame(e.OutEndMs, p.FPS)
 		add((startF+endF)/2, "mid", *e.Speed >= 1 && endF-startF > 4 && (startF+endF)/2+1 < p.TotalFrames)
 	}
 	out := make([]sample, 0, len(byFrame))
@@ -81,10 +84,6 @@ func sampleFrames(p Plan) []sample {
 	}
 	slices.SortFunc(out, func(a, b sample) int { return int(a.frame - b.frame) })
 	return out
-}
-
-func msToFrame(ms int64, fps int) int64 {
-	return (2*ms*int64(fps) + 1000) / 2000
 }
 
 // toolSem limits how many ffmpeg processes the golden tests start at once.
@@ -119,7 +118,7 @@ func goldenRender(t *testing.T, ffmpeg, ffprobe, name string, spec *timeline.Spe
 		t.Fatal(err)
 	}
 	out := filepath.Join(t.TempDir(), "out.mp4")
-	if err := Execute(context.Background(), plan, LocalRunner{Binary: ffmpeg}, ExecuteOptions{Output: out}); err != nil {
+	if err := Execute(context.Background(), plan, testRunner(t), ExecuteOptions{Output: out}); err != nil {
 		t.Fatal(err)
 	}
 

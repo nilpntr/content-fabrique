@@ -68,7 +68,7 @@ func loudness(t *testing.T, ffmpeg, file string) (lufs, truePeak float64) {
 	return lufs, truePeak
 }
 
-func renderFixture(t *testing.T, ffmpeg, name string, prof Profile) (Plan, string) {
+func renderFixture(t *testing.T, name string, prof Profile) (Plan, string) {
 	t.Helper()
 	dir, cat := ensureMedia(t)
 	spec := loadFixture(t, name, cat)
@@ -77,7 +77,7 @@ func renderFixture(t *testing.T, ffmpeg, name string, prof Profile) (Plan, strin
 		t.Fatal(err)
 	}
 	out := filepath.Join(t.TempDir(), "out.mp4")
-	if err := Execute(context.Background(), plan, LocalRunner{Binary: ffmpeg}, ExecuteOptions{Output: out}); err != nil {
+	if err := Execute(context.Background(), plan, testRunner(t), ExecuteOptions{Output: out}); err != nil {
 		t.Fatal(err)
 	}
 	return plan, out
@@ -89,7 +89,7 @@ func TestRenderedAudio(t *testing.T) {
 	ffmpeg, _ := ffmpegTools(t)
 
 	t.Run("licensed track is mixed and normalised", func(t *testing.T) {
-		_, out := renderFixture(t, ffmpeg, "v26_audio_licensed_track", Final)
+		_, out := renderFixture(t, "v26_audio_licensed_track", Final)
 		lufs, tp := loudness(t, ffmpeg, out)
 		if math.Abs(lufs-TargetLUFS) > 1.5 {
 			t.Errorf("integrated loudness %.2f LUFS, want %d +-1.5", lufs, TargetLUFS)
@@ -100,21 +100,21 @@ func TestRenderedAudio(t *testing.T) {
 	})
 
 	t.Run("preview mixes the track in a single pass", func(t *testing.T) {
-		_, out := renderFixture(t, ffmpeg, "v26_audio_licensed_track", Preview)
+		_, out := renderFixture(t, "v26_audio_licensed_track", Preview)
 		if p := peakDB(t, ffmpeg, out); p < -20 {
 			t.Errorf("peak %.1f dBFS: the licensed track is not audible", p)
 		}
 	})
 
 	t.Run("no audio at all is silence", func(t *testing.T) {
-		_, out := renderFixture(t, ffmpeg, "v01_minimal_9x16", Final)
+		_, out := renderFixture(t, "v01_minimal_9x16", Final)
 		if p := peakDB(t, ffmpeg, out); p > -80 {
 			t.Errorf("peak %.1f dBFS, want silence", p)
 		}
 	})
 
 	t.Run("cue_only trend sound is not in the final file", func(t *testing.T) {
-		plan, out := renderFixture(t, ffmpeg, "v25_audio_trend_sound_cue_only", Final)
+		plan, out := renderFixture(t, "v25_audio_trend_sound_cue_only", Final)
 		if p := peakDB(t, ffmpeg, out); p > -80 {
 			t.Errorf("peak %.1f dBFS: something is playing, but the only sound is cue_only", p)
 		}
@@ -124,7 +124,7 @@ func TestRenderedAudio(t *testing.T) {
 	})
 
 	t.Run("preview of the cue_only fixture holds the beat guide and nothing else", func(t *testing.T) {
-		_, out := renderFixture(t, ffmpeg, "v25_audio_trend_sound_cue_only", Preview)
+		_, out := renderFixture(t, "v25_audio_trend_sound_cue_only", Preview)
 		// Three markers: the clicks are -12 dBFS sines, mixed in after loudnorm.
 		if p := peakDB(t, ffmpeg, out); p < -16 || p > -9 {
 			t.Errorf("peak %.1f dBFS, want the beat guide at about -12", p)
@@ -184,7 +184,7 @@ func TestRenderTiming(t *testing.T) {
 	if !*timing {
 		t.Skip("run with -timing to measure")
 	}
-	ffmpeg, _ := ffmpegTools(t)
+	ffmpegTools(t)
 	dir, cat := ensureMedia(t)
 	spec := timedSpec(cat)
 	for _, prof := range Profiles() {
@@ -194,7 +194,7 @@ func TestRenderTiming(t *testing.T) {
 		}
 		out := filepath.Join(t.TempDir(), "out.mp4")
 		start := time.Now()
-		if err := Execute(context.Background(), plan, LocalRunner{Binary: ffmpeg}, ExecuteOptions{Output: out}); err != nil {
+		if err := Execute(context.Background(), plan, testRunner(t), ExecuteOptions{Output: out}); err != nil {
 			t.Fatal(err)
 		}
 		t.Logf("%s: %.1f s of video (%d frames, %dx%d) rendered in %.1f s", prof.Name, float64(plan.DurationMs)/1000, plan.TotalFrames, plan.OutputSize.Width, plan.OutputSize.Height, time.Since(start).Seconds())

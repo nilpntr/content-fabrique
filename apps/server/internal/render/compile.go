@@ -3,21 +3,18 @@ package render
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/nilpntr/content-fabrique/internal/media"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
 // ErrInvalidSpec is wrapped by every error Compile returns for a spec it cannot render. Compile does not validate:
 // it expects a spec that timeline.Validate accepted, and only refuses what it cannot build a graph from.
 var ErrInvalidSpec = errors.New("render: spec cannot be compiled")
-
-// protocolWhitelist limits what ffmpeg may open from inside a media file. An uploaded file can be a playlist
-// (HLS, concat) that names other files or hosts; with this list the file and http(s) inputs we pass are all it can
-// reach.
-const protocolWhitelist = "file,http,https,tcp,tls,crypto"
 
 // clip is a main-track item with everything the compiler derives from its position.
 type clip struct {
@@ -172,8 +169,9 @@ func (c *compiler) layout(resolver AssetResolver) error {
 			return fmt.Errorf("%w: clip %s overlaps clip %s by %d frames without a transition", ErrInvalidSpec, cl.item.ID, prev.item.ID, overlap)
 		case cl.transition != timeline.TransitionCut && overlap == 0:
 			return fmt.Errorf("%w: clip %s has a %s transition but does not overlap clip %s at %d fps", ErrInvalidSpec, cl.item.ID, cl.transition, prev.item.ID, c.fps)
-		case overlap > min(prev.outFrames, cl.outFrames):
-			return fmt.Errorf("%w: the transition into clip %s is longer than the clips it joins", ErrInvalidSpec, cl.item.ID)
+		case overlap >= min(prev.outFrames, cl.outFrames):
+			return fmt.Errorf("%w: the transition into clip %s overlaps %d frames, which is not fewer than the frames of the clips it joins (%s plays %d, %s plays %d)",
+				ErrInvalidSpec, cl.item.ID, overlap, prev.item.ID, prev.outFrames, cl.item.ID, cl.outFrames)
 		}
 		cl.overlapFrames = overlap
 		if cl.transition != timeline.TransitionCut && xfadeName(cl.transition) == "" {
@@ -181,11 +179,20 @@ func (c *compiler) layout(resolver AssetResolver) error {
 		}
 	}
 
-	last := c.clips[len(c.clips)-1]
-	c.total = last.endFrame
-	for _, cl := range c.clips {
-		c.total = max(c.total, cl.endFrame)
+	// The transitions into and out of a clip must leave at least one frame of the clip on its own.
+	for i, cl := range c.clips {
+		in := cl.overlapFrames
+		var out int64
+		if i+1 < len(c.clips) {
+			out = c.clips[i+1].overlapFrames
+		}
+		if in+out >= cl.outFrames {
+			return fmt.Errorf("%w: clip %s plays %d frames, but the transitions into and out of it take %d and %d: together they must be fewer than the clip's frames", ErrInvalidSpec, cl.item.ID, cl.outFrames, in, out)
+		}
 	}
+
+	// The timeline ends where the latest clip ends (the same definition Validate uses).
+	c.total = timeline.Frame(timeline.PlayableEnd(items), c.fps)
 	c.totalMs = timeline.FrameStartMs(c.total, c.fps)
 
 	// One input per clip, in track order.
@@ -205,7 +212,7 @@ func (c *compiler) layout(resolver AssetResolver) error {
 
 // args builds the ffmpeg argument list up to the output path.
 func (c *compiler) args() []string {
-	args := c.inputArgs()
+	args := c.inputArgs(nil)
 	args = append(args, "-filter_complex", c.plan.FilterComplex, "-map", "[vout]", "-map", "[aout]")
 	p := c.profile
 	args = append(args, "-c:v", "libx264", "-preset", p.X264Preset, "-crf", strconv.Itoa(p.CRF))
@@ -222,16 +229,50 @@ func (c *compiler) args() []string {
 	return args
 }
 
-// pass1Args is the loudness measuring pass: the audio graph only, to a null muxer.
+// pass1Args is the loudness measuring pass: the audio graph only, to a null muxer, with only the inputs whose audio it
+// uses. The graph (built with the clips' and items' own input numbers) is renumbered to match.
 func (c *compiler) pass1Args(graph string) []string {
-	args := c.inputArgs()
-	return append(args, "-filter_complex", graph, "-map", "[aout]", "-vn")
+	used := map[int]int{}
+	for _, st := range strings.Split(graph, ";") {
+		if m := audioInputRe.FindStringSubmatch(st); m != nil {
+			k, _ := strconv.Atoi(m[1])
+			if _, ok := used[k]; !ok {
+				used[k] = -1
+			}
+		}
+	}
+	keep := make([]int, 0, len(used))
+	for k := range used {
+		keep = append(keep, k)
+	}
+	slices.Sort(keep)
+	for rank, k := range keep {
+		used[k] = rank
+	}
+	stmts := strings.Split(graph, ";")
+	for i, st := range stmts {
+		if m := audioInputRe.FindStringSubmatch(st); m != nil {
+			k, _ := strconv.Atoi(m[1])
+			stmts[i] = fmt.Sprintf("[%d:a]", used[k]) + st[len(m[0]):]
+		}
+	}
+	args := c.inputArgs(keep)
+	return append(args, "-filter_complex", strings.Join(stmts, ";"), "-map", "[aout]", "-vn")
 }
 
-func (c *compiler) inputArgs() []string {
+// audioInputRe matches the input label that starts a statement of the audio graph.
+var audioInputRe = regexp.MustCompile(`^\[(\d+):a\]`)
+
+// inputArgs returns the input arguments of the inputs with the given indexes, or of all of them when only is nil. Every
+// input is opened as an untrusted file: local files only (the sandbox has no network and the worker stages the assets),
+// and only the container formats uploads may have, so an uploaded playlist cannot make ffmpeg read other files.
+func (c *compiler) inputArgs(only []int) []string {
 	var args []string
 	for _, in := range c.inputs {
-		args = append(args, "-protocol_whitelist", protocolWhitelist)
+		if only != nil && !slices.Contains(only, in.Index) {
+			continue
+		}
+		args = append(args, "-protocol_whitelist", "file", "-format_whitelist", media.UntrustedFormats)
 		if in.SeekMs > 0 {
 			args = append(args, "-ss", secs(in.SeekMs))
 		}

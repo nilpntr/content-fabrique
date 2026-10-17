@@ -1,6 +1,7 @@
 package render
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -604,4 +605,95 @@ func TestPrettyFilterAndFormatting(t *testing.T) {
 	if scaledDim(1350, 2) != 676 || scaledDim(1080, 2) != 540 || scaledDim(1920, 1) != 1920 {
 		t.Error("scaledDim")
 	}
+}
+
+// A plan is plain data: it survives JSON, profile included, so it can be stored with a render and run by another process.
+func TestPlanSurvivesJSON(t *testing.T) {
+	cat := testAssets(t)
+	for _, name := range []string{"v30_full_edit", "v26_audio_licensed_track", "v25_audio_trend_sound_cue_only"} {
+		spec := loadFixture(t, name, cat)
+		for _, prof := range Profiles() {
+			plan, err := Compile(spec, prof, fakeResolver(cat))
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := json.Marshal(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var back Plan
+			if err := json.Unmarshal(data, &back); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(plan, back) {
+				t.Errorf("%s/%s: the plan changed in a JSON round trip (profile %+v and %+v)", name, prof.Name, plan.Profile, back.Profile)
+			}
+		}
+	}
+}
+
+// The whip's blur runs while the transition does and not a frame longer: the window is end-exclusive.
+func TestWhipBlurWindowIsEndExclusive(t *testing.T) {
+	items := []timeline.VideoItem{
+		clipAt("c1", assetA, 0, 2000, 0),
+		clipAt("c2", assetB, 0, 2000, 1700, withTransition(timeline.TransitionWhip, 300)),
+	}
+	g := mustCompile(t, specOf(30, items), Final).FilterComplex
+	if want := "gblur=sigma=12:enable='gte(t,1.700000)*lt(t,2.000000)'"; !strings.Contains(g, want) {
+		t.Errorf("graph lacks %q:\n%s", want, PrettyFilter(g))
+	}
+}
+
+func TestEveryLookWithCurvesIsInPlanarRGB(t *testing.T) {
+	for name, f := range looks {
+		if strings.Contains(f, "curves") && !strings.Contains(f, "format=gbrp,curves") {
+			t.Errorf("look %s uses curves outside planar RGB: %s", name, f)
+		}
+	}
+}
+
+// A transition must overlap fewer frames than either clip it joins, and the two transitions of a clip together must leave
+// a frame of it: Compile refuses what timeline.Validate refuses (transition_too_long), after snapping to frames.
+func TestCompileRefusesTransitionsThatDoNotFit(t *testing.T) {
+	cross := func(ms int64) func(*timeline.VideoItem) { return withTransition(timeline.TransitionCrossfade, ms) }
+	cases := map[string][]timeline.VideoItem{
+		// 399 ms into a 400 ms clip: both are 12 frames at 30 fps.
+		"as long as the next clip": {clipAt("c1", assetA, 0, 2000, 0), clipAt("c2", assetA, 0, 400, 1601, cross(399))},
+		// 2000 ms clip c1, then c2 of 800 ms with 500 ms in and 400 ms out: 15 + 12 frames of 24.
+		"in and out together": {
+			clipAt("c1", assetA, 0, 3000, 0),
+			clipAt("c2", assetA, 0, 800, 2500, cross(500)),
+			clipAt("c3", assetA, 0, 3000, 2900, withTransition(timeline.TransitionWhip, 400)),
+		},
+	}
+	for name, items := range cases {
+		if _, err := Compile(specOf(30, items), Final, plainResolver()); !errors.Is(err, ErrInvalidSpec) {
+			t.Errorf("%s: err %v, want ErrInvalidSpec", name, err)
+		}
+		// The validator agrees: the same spec raises transition_too_long.
+		res := timeline.Validate(mustMarshal(t, specOf(30, items)), timeline.MemoryCatalog{assetA: {DurationMs: 60000, Kind: timeline.AssetVideo, Rights: timeline.RightsAttested}})
+		var found bool
+		for _, is := range res.Issues {
+			if is.Code == timeline.CodeTransitionTooLong {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s: Validate does not raise transition_too_long: %+v", name, res.Issues)
+		}
+	}
+	// And a fitting one compiles and validates.
+	ok := []timeline.VideoItem{clipAt("c1", assetA, 0, 2000, 0), clipAt("c2", assetA, 0, 2000, 1700, cross(300))}
+	if _, err := Compile(specOf(30, ok), Final, plainResolver()); err != nil {
+		t.Error(err)
+	}
+}
+
+func mustMarshal(t *testing.T, spec *timeline.Spec) []byte {
+	t.Helper()
+	data, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }

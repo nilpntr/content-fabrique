@@ -4,13 +4,17 @@ output: 540x960 at 30 fps, 240 frames, 8000 ms
 
 args:
   -protocol_whitelist
-  file,http,https,tcp,tls,crypto
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
   -t
   8.000
   -i
   /assets/proxy/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4
   -protocol_whitelist
-  file,http,https,tcp,tls,crypto
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
   -ss
   4.000
   -t
@@ -61,20 +65,6 @@ loudnorm:
   filter: loudnorm=I=-14:TP=-1:LRA=11
   two_pass: false
   pass1_args:
-    -protocol_whitelist
-    file,http,https,tcp,tls,crypto
-    -t
-    8.000
-    -i
-    /assets/proxy/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4
-    -protocol_whitelist
-    file,http,https,tcp,tls,crypto
-    -ss
-    4.000
-    -t
-    7.000
-    -i
-    /assets/proxy/ast_01j0h9rew727hk2pt0v5b31h44.m4a
     -filter_complex
     <filter_complex of the measuring pass>
       

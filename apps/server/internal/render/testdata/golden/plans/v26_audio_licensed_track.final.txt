@@ -4,13 +4,17 @@ output: 1080x1920 at 30 fps, 240 frames, 8000 ms
 
 args:
   -protocol_whitelist
-  file,http,https,tcp,tls,crypto
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
   -t
   8.000
   -i
   /assets/original/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4
   -protocol_whitelist
-  file,http,https,tcp,tls,crypto
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
   -ss
   4.000
   -t
@@ -66,13 +70,9 @@ loudnorm:
   two_pass: true
   pass1_args:
     -protocol_whitelist
-    file,http,https,tcp,tls,crypto
-    -t
-    8.000
-    -i
-    /assets/original/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4
-    -protocol_whitelist
-    file,http,https,tcp,tls,crypto
+    file
+    -format_whitelist
+    mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
     -ss
     4.000
     -t
@@ -82,7 +82,7 @@ loudnorm:
     -filter_complex
     <filter_complex of the measuring pass>
       anullsrc=r=48000:cl=stereo:d=8.000[abed];
-      [1:a]atrim=end=7.000,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,afade=t=in:st=0:d=0.500,afade=t=out:st=5.500:d=1.500,volume=-6dB[au1];
+      [0:a]atrim=end=7.000,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,afade=t=in:st=0:d=0.500,afade=t=out:st=5.500:d=1.500,volume=-6dB[au1];
       [abed][au1]amix=inputs=2:duration=first:normalize=0:dropout_transition=0,loudnorm=I=-14:TP=-1:LRA=11:print_format=json[aout]
     -map
     [aout]

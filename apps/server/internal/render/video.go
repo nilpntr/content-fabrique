@@ -7,15 +7,15 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
-// looks holds the fixed colour presets (design note: eq and curves settings per preset, no LUT files in v1). A preset
-// that needs per-channel curves works in planar RGB, and converts back, so the filter's pixel format does not depend on
+// looks holds the fixed colour presets (design note: eq and curves settings per preset, no LUT files in v1). Every preset
+// that uses curves works in planar RGB (format=gbrp) and converts back, so the filter's pixel format does not depend on
 // what the ffmpeg version would pick.
 var looks = map[string]string{
 	"punchy": "eq=contrast=1.12:saturation=1.25:gamma=0.97",
 	"warm":   "format=gbrp,curves=r='0/0 0.5/0.56 1/1':b='0/0 0.5/0.44 1/1',format=yuv420p,eq=saturation=1.05",
 	"cool":   "format=gbrp,curves=r='0/0 0.5/0.45 1/1':b='0/0 0.5/0.56 1/1',format=yuv420p,eq=saturation=1.03",
 	"bw":     "eq=saturation=0:contrast=1.1",
-	"matte":  "curves=all='0/0.07 1/0.93',eq=saturation=0.85:contrast=0.95",
+	"matte":  "format=gbrp,curves=all='0/0.07 1/0.93',format=yuv420p,eq=saturation=0.85:contrast=0.95",
 }
 
 // xfadeName maps a transition type to the xfade transition that renders it. A whip is a slideleft, with a blur added
@@ -195,7 +195,8 @@ func (c *compiler) joinGraph() []string {
 		stmts = append(stmts,
 			chain(pair, []string{xf}, mid),
 			chain([]string{mid}, []string{
-				fmt.Sprintf("gblur=sigma=%d:enable='between(t,%s,%s)'", sigma, offset, c.frameSecs(cl.startFrame+cl.overlapFrames)),
+				// End-exclusive: the first frame after the transition is not blurred.
+				fmt.Sprintf("gblur=sigma=%d:enable='gte(t,%s)*lt(t,%s)'", sigma, offset, c.frameSecs(cl.startFrame+cl.overlapFrames)),
 			}, out),
 		)
 		acc = out

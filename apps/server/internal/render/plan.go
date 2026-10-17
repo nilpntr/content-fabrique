@@ -8,7 +8,7 @@ import (
 // Plan is everything Compile knows about one render. It is plain data: it can be stored next to the render, diffed
 // in a golden test and handed to Execute later, possibly in another process.
 type Plan struct {
-	Profile Profile `json:"-"`
+	Profile Profile `json:"profile"`
 	// OutputSize is the size of the rendered video: the spec's size divided by the profile's SizeDivisor.
 	OutputSize Size `json:"output_size"`
 	FPS        int  `json:"fps"`
@@ -54,7 +54,7 @@ type Input struct {
 	Role    string `json:"role"` // RoleClip or RoleAudio
 	ItemID  string `json:"item_id"`
 	AssetID string `json:"asset_id"`
-	// Location is what the resolver returned.
+	// Location is what the resolver returned: an absolute local path.
 	Location string `json:"location"`
 	// SeekMs and DurationMs are the -ss and -t of the input: the window of the asset the item plays.
 	SeekMs     int64 `json:"seek_ms"`

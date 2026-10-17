@@ -9,50 +9,31 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"os/exec"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/nilpntr/content-fabrique/internal/media"
+	"github.com/nilpntr/content-fabrique/internal/sandbox"
 )
 
-// ErrFFmpegNotFound is returned by LocalRunner when the ffmpeg binary is not on PATH.
-var ErrFFmpegNotFound = errors.New("render: ffmpeg not found")
+// Execute runs ffmpeg through a media.Runner, which in production is a media.SandboxRunner over one of the sandbox
+// providers of P1-03 (docker, hardened) and in development the local provider (sandbox.NewLocal, no isolation).
+//
+// Every input of the plan is a local file that the sandbox mounts read-only at /in/<n>; the sandbox has no network, so
+// the worker stages assets before rendering and the resolver returns their paths. ffmpeg writes its output and its
+// -progress file into a work directory, the one writable mount; Execute polls the progress file on the host while the
+// job runs, and moves the output to ExecuteOptions.Output when it is done.
 
-// Command is one ffmpeg invocation.
-type Command struct {
-	// Args are the arguments, without the program name.
-	Args []string
-	// Stdout receives ffmpeg's standard output (the -progress stream) and Stderr its log. Either may be nil.
-	Stdout io.Writer
-	Stderr io.Writer
+// DefaultLimits are the sandbox limits of a render job. The local provider enforces only the timeout.
+func DefaultLimits() sandbox.Limits {
+	return sandbox.Limits{CPU: 4, MemoryMB: 4096, Timeout: 30 * time.Minute, PIDs: 1024}
 }
 
-// Runner starts ffmpeg. LocalRunner runs it as a child process of this one; the sandbox providers of P1-03 implement
-// the same interface to run it in an isolated container, with the plan's inputs and the output path mapped to what
-// the sandbox can see.
-type Runner interface {
-	Run(ctx context.Context, cmd Command) error
-}
-
-// LocalRunner runs ffmpeg from PATH, or from Binary when it is set.
-type LocalRunner struct {
-	Binary string
-}
-
-// Run implements Runner.
-func (r LocalRunner) Run(ctx context.Context, cmd Command) error {
-	bin := r.Binary
-	if bin == "" {
-		bin = "ffmpeg"
-	}
-	path, err := exec.LookPath(bin)
-	if err != nil {
-		return fmt.Errorf("%w: %w", ErrFFmpegNotFound, err)
-	}
-	c := exec.CommandContext(ctx, path, cmd.Args...) //nolint:gosec // the arguments come from Compile, not from a shell
-	c.Stdout = cmd.Stdout
-	c.Stderr = cmd.Stderr
-	return c.Run()
-}
+// ErrRemoteInput is returned when a plan input is not a local file path.
+var ErrRemoteInput = errors.New("render: input is not a local file: stage the asset before rendering")
 
 // Progress is one progress event of a render.
 type Progress struct {
@@ -73,19 +54,49 @@ type Progress struct {
 type ExecuteOptions struct {
 	// Output is the path of the MP4 to write.
 	Output string
+	// WorkDir is the host directory mounted writable in the sandbox. It must be inside the provider's allowed roots, and
+	// empty or unused by anything else. Empty means a fresh directory under os.TempDir, removed afterwards.
+	WorkDir string
 	// Progress, if set, is called for every progress block ffmpeg prints (about twice a second).
 	Progress func(Progress)
 }
 
+const (
+	outName       = "out.mp4"
+	pollInterval  = 200 * time.Millisecond
+	ffmpegProgram = "ffmpeg"
+)
+
 // Execute renders plan to opts.Output. The final profile first runs the loudness measuring pass and swaps the measured
 // values into the graph; every other profile is a single run.
-func Execute(ctx context.Context, plan Plan, runner Runner, opts ExecuteOptions) error {
+func Execute(ctx context.Context, plan Plan, runner media.Runner, opts ExecuteOptions) error {
 	if opts.Output == "" {
 		return errors.New("render: no output path")
 	}
+	if runner == nil {
+		return errors.New("render: no runner")
+	}
+	inputs, err := mountInputs(plan.Inputs)
+	if err != nil {
+		return err
+	}
+
+	work := opts.WorkDir
+	if work == "" {
+		work, err = os.MkdirTemp("", "cf-render-")
+		if err != nil {
+			return fmt.Errorf("render: work directory: %w", err)
+		}
+		defer func() { _ = os.RemoveAll(work) }()
+	}
+	// Only a clean slate: a left-over output must never be taken for this run's.
+	for _, n := range []string{outName, "progress-render.txt", "progress-measure.txt"} {
+		_ = os.Remove(filepath.Join(work, n))
+	}
+
 	args := plan.Args
 	if ln := plan.Loudnorm; ln != nil && ln.TwoPass {
-		measured, err := measureLoudness(ctx, plan, runner, opts)
+		measured, err := measureLoudness(ctx, plan, runner, inputs, work, opts)
 		if err != nil {
 			return err
 		}
@@ -96,8 +107,157 @@ func Execute(ctx context.Context, plan Plan, runner Runner, opts ExecuteOptions)
 			}
 		}
 	}
-	full := append(append([]string{"-hide_banner", "-nostdin", "-loglevel", "error", "-nostats", "-progress", "pipe:1"}, args...), "-y", opts.Output)
-	return run(ctx, runner, full, plan, "render", opts.Progress)
+
+	full := append(ffmpegPrefix("error", "progress-render.txt"), containerArgs(args, inputs)...)
+	full = append(full, "-y", media.OutputPath(outName))
+	if _, err := runFFmpeg(ctx, runner, full, inputs, work, plan, "render", "progress-render.txt", opts.Progress); err != nil {
+		return err
+	}
+	return moveFile(filepath.Join(work, outName), opts.Output)
+}
+
+// ffmpegPrefix is the start of every ffmpeg command: no stdin, quiet, no stats, and a -progress file in the work
+// directory (the sandbox does not stream stdout).
+func ffmpegPrefix(logLevel, progressFile string) []string {
+	return []string{ffmpegProgram, "-hide_banner", "-nostdin", "-loglevel", logLevel, "-nostats", "-progress", media.OutputPath(progressFile)}
+}
+
+// mountInputs gives every distinct local file of the plan a container path. The result is indexed like plan.Inputs.
+func mountInputs(in []Input) ([]media.Input, error) {
+	seen := map[string]string{}
+	out := make([]media.Input, len(in))
+	for i, p := range in {
+		if !filepath.IsAbs(p.Location) {
+			return nil, fmt.Errorf("%w: %q (item %s)", ErrRemoteInput, p.Location, p.ItemID)
+		}
+		container, ok := seen[p.Location]
+		if !ok {
+			container = media.InputPath(len(seen))
+			seen[p.Location] = container
+		}
+		out[i] = media.Input{Host: p.Location, Container: container}
+	}
+	return out, nil
+}
+
+// containerArgs replaces the input locations of an argument list (the argument after each -i) with their container paths.
+// It works for the main command and for the measuring pass, which opens only some of the inputs.
+func containerArgs(args []string, inputs []media.Input) []string {
+	byHost := make(map[string]string, len(inputs))
+	for _, in := range inputs {
+		byHost[in.Host] = in.Container
+	}
+	out := make([]string, len(args))
+	copy(out, args)
+	for i := 0; i+1 < len(out); i++ {
+		if out[i] == "-i" {
+			if c, ok := byHost[out[i+1]]; ok {
+				out[i+1] = c
+			}
+			i++
+		}
+	}
+	return out
+}
+
+// usedInputs returns the mounts a command needs: every distinct container path that appears after -i.
+func usedInputs(args []string, inputs []media.Input) []media.Input {
+	want := map[string]bool{}
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-i" {
+			want[args[i+1]] = true
+		}
+	}
+	var out []media.Input
+	seen := map[string]bool{}
+	for _, in := range inputs {
+		if want[in.Container] && !seen[in.Container] {
+			seen[in.Container] = true
+			out = append(out, in)
+		}
+	}
+	return out
+}
+
+// runFFmpeg runs one ffmpeg command in the sandbox, feeds its progress file to the callback and turns a failure into an
+// error with the tail of its log. It returns the job's stderr.
+func runFFmpeg(ctx context.Context, runner media.Runner, args []string, inputs []media.Input, work string, plan Plan, stage, progressFile string, onProgress func(Progress)) ([]byte, error) {
+	pw := &progressWriter{plan: plan, stage: stage, fn: onProgress}
+	stop := tailProgress(filepath.Join(work, progressFile), pw)
+	res, err := runner.Run(ctx, media.Invocation{Args: args, Inputs: usedInputs(args, inputs), OutputDir: work})
+	stop()
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("render: %s: %w", stage, ctx.Err())
+		}
+		return nil, fmt.Errorf("render: ffmpeg (%s): %w", stage, err)
+	}
+	if res.ExitCode != 0 {
+		return res.Stderr, &media.ToolError{Tool: "ffmpeg (" + stage + ")", ExitCode: res.ExitCode, Stderr: lastLines(string(res.Stderr), 20)}
+	}
+	return res.Stderr, nil
+}
+
+// tailProgress reads a growing -progress file in the background and feeds new bytes to w; the returned function stops it
+// after one last read.
+func tailProgress(path string, w *progressWriter) (stop func()) {
+	if w.fn == nil {
+		return func() {}
+	}
+	done, finished := make(chan struct{}), make(chan struct{})
+	var offset int64
+	read := func() {
+		f, err := os.Open(path) //nolint:gosec // a file in the work directory we created
+		if err != nil {
+			return
+		}
+		defer f.Close() //nolint:errcheck // read-only
+		if _, err := f.Seek(offset, io.SeekStart); err != nil {
+			return
+		}
+		n, _ := io.Copy(w, f)
+		offset += n
+	}
+	go func() {
+		defer close(finished)
+		t := time.NewTicker(pollInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				read()
+			case <-done:
+				read()
+				w.flush()
+				return
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		<-finished
+	}
+}
+
+// moveFile renames src to dst, or copies it when they are on different file systems.
+func moveFile(src, dst string) error {
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	}
+	in, err := os.Open(src) //nolint:gosec // the render's own output
+	if err != nil {
+		return fmt.Errorf("render: the output was not written: %w", err)
+	}
+	defer in.Close()           //nolint:errcheck // read-only
+	out, err := os.Create(dst) //nolint:gosec // the caller's output path
+	if err != nil {
+		return fmt.Errorf("render: write output: %w", err)
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return fmt.Errorf("render: write output: %w", err)
+	}
+	return out.Close()
 }
 
 // swapFilter returns a copy of args with the first occurrence of old in an argument replaced by repl.
@@ -111,24 +271,6 @@ func swapFilter(args []string, old, repl string) ([]string, bool) {
 		}
 	}
 	return out, false
-}
-
-// run starts one ffmpeg process, feeds its progress stream to the callback and wraps a failure with the tail of its log.
-func run(ctx context.Context, runner Runner, args []string, plan Plan, stage string, onProgress func(Progress)) error {
-	var stderr tailBuffer
-	pw := &progressWriter{plan: plan, stage: stage, fn: onProgress}
-	err := runner.Run(ctx, Command{Args: args, Stdout: pw, Stderr: &stderr})
-	pw.flush()
-	if err != nil {
-		if ctx.Err() != nil {
-			return fmt.Errorf("render: %s: %w", stage, ctx.Err())
-		}
-		if errors.Is(err, ErrFFmpegNotFound) {
-			return err
-		}
-		return fmt.Errorf("render: ffmpeg (%s) failed: %w\n%s", stage, err, strings.TrimSpace(stderr.String()))
-	}
-	return nil
 }
 
 // loudnormStats is the JSON loudnorm prints at the end of a measuring pass. Its numbers are strings.
@@ -146,26 +288,19 @@ const silenceFloor = -70.0
 
 // measureLoudness runs the first pass and returns the loudnorm filter with the measured values, or "" when the mix is
 // silent and should go through the single-pass filter as it is.
-func measureLoudness(ctx context.Context, plan Plan, runner Runner, opts ExecuteOptions) (string, error) {
+func measureLoudness(ctx context.Context, plan Plan, runner media.Runner, inputs []media.Input, work string, opts ExecuteOptions) (string, error) {
 	ln := plan.Loudnorm
 	if len(ln.Pass1Args) == 0 {
 		return "", errors.New("render: two-pass loudnorm without pass 1 arguments")
 	}
-	args := append(append([]string{"-hide_banner", "-nostdin", "-loglevel", "info", "-nostats", "-progress", "pipe:1"}, ln.Pass1Args...), "-f", "null", "-")
-	var log bytes.Buffer
-	pw := &progressWriter{plan: plan, stage: "measure", fn: opts.Progress}
-	err := runner.Run(ctx, Command{Args: args, Stdout: pw, Stderr: &log})
-	pw.flush()
+	// The measuring pass opens only the inputs whose audio it uses.
+	args := append(ffmpegPrefix("info", "progress-measure.txt"), containerArgs(ln.Pass1Args, inputs)...)
+	args = append(args, "-f", "null", "-")
+	stderr, err := runFFmpeg(ctx, runner, args, inputs, work, plan, "measure", "progress-measure.txt", opts.Progress)
 	if err != nil {
-		if ctx.Err() != nil {
-			return "", fmt.Errorf("render: measure: %w", ctx.Err())
-		}
-		if errors.Is(err, ErrFFmpegNotFound) {
-			return "", err
-		}
-		return "", fmt.Errorf("render: ffmpeg (measure) failed: %w\n%s", err, lastLines(log.String(), 20))
+		return "", err
 	}
-	return measuredFilter(ln.Filter, log.String())
+	return measuredFilter(ln.Filter, string(stderr))
 }
 
 // measuredFilter reads the loudnorm JSON out of ffmpeg's log and builds the second-pass filter.
@@ -267,20 +402,3 @@ func (w *progressWriter) line(l string) {
 		w.cur = Progress{}
 	}
 }
-
-// tailBuffer keeps the last 8 KiB written to it.
-type tailBuffer struct {
-	b []byte
-}
-
-const tailSize = 8 << 10
-
-func (t *tailBuffer) Write(p []byte) (int, error) {
-	t.b = append(t.b, p...)
-	if len(t.b) > tailSize {
-		t.b = t.b[len(t.b)-tailSize:]
-	}
-	return len(p), nil
-}
-
-func (t *tailBuffer) String() string { return string(t.b) }

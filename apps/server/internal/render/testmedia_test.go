@@ -14,6 +14,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/nilpntr/content-fabrique/internal/media"
+	"github.com/nilpntr/content-fabrique/internal/sandbox"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
@@ -298,6 +300,22 @@ func generateOne(ffmpeg string, ms mediaSpec, out string) error {
 		return fmt.Errorf("generate %s: %w\n%s", ms.filename, err, stderr.String())
 	}
 	return os.Rename(tmp, out)
+}
+
+// testRunner runs ffmpeg through the sandbox's local provider (no isolation: development and tests only), the same code
+// path as production, which uses the docker provider with the media-tools image.
+func testRunner(t testing.TB) media.Runner {
+	t.Helper()
+	dir, _ := ensureMedia(t)
+	var roots []string
+	for _, p := range []string{dir, os.TempDir()} {
+		r, err := filepath.EvalSymlinks(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		roots = append(roots, r)
+	}
+	return &media.SandboxRunner{Provider: sandbox.NewLocal(sandbox.Policy{AllowedRoots: roots}), Limits: DefaultLimits()}
 }
 
 // mediaResolver resolves the fixtures' assets to the generated files, for both variants.

@@ -7,8 +7,9 @@
 //     the filter_complex, the frame-snapped cut list, the time map and the sound cues. It never starts a process, reads
 //     a file or looks at the clock, so the same input gives the same Plan, byte for byte, and the golden plan tests
 //     need no ffmpeg.
-//   - Execute runs a Plan through a Runner and turns ffmpeg's -progress output into callbacks. The Runner is the seam
-//     where the sandbox providers of P1-03 plug in; LocalRunner starts ffmpeg as a child process.
+//   - Execute runs a Plan through a media.Runner (internal/media) and turns ffmpeg's -progress file into callbacks. In
+//     production the runner is a media.SandboxRunner over the docker or hardened provider of internal/sandbox, with the
+//     media-tools image; in development, the local provider.
 //
 // What this package does not do yet: text and captions (P3-04, which adds the ASS file and the style registry) and the
 // preview watermark (it needs a font from the same registry). Text items compile to nothing and are listed in

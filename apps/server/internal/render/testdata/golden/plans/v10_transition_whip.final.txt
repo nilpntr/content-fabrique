@@ -4,19 +4,25 @@ output: 1080x1920 at 30 fps, 165 frames, 5500 ms
 
 args:
   -protocol_whitelist
-  file,http,https,tcp,tls,crypto
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
   -t
   2.000
   -i
   /assets/original/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4
   -protocol_whitelist
-  file,http,https,tcp,tls,crypto
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
   -t
   2.000
   -i
   /assets/original/ast_01jex6xx15ayjx8epfhfjj9s11.mp4
   -protocol_whitelist
-  file,http,https,tcp,tls,crypto
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
   -t
   2.000
   -i
@@ -63,9 +69,9 @@ filter_complex:
   [1:v]trim=end=2.000,setpts=PTS-STARTPTS,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS,scale=1080:1920:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=1080:1920:x='clip(0.5*iw-540,0,iw-1080)':y='clip(0.5*ih-960,0,ih-1920)',setsar=1,format=yuv420p,setsar=1,fps=30,settb=AVTB[v1];
   [2:v]trim=end=2.000,setpts=PTS-STARTPTS,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS,scale=1080:1920:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=1080:1920:x='clip(0.5*iw-540,0,iw-1080)':y='clip(0.5*ih-960,0,ih-1920)',setsar=1,format=yuv420p,setsar=1,fps=30,settb=AVTB[v2];
   [v0][v1]xfade=transition=slideleft:duration=0.233333:offset=1.766667[w1];
-  [w1]gblur=sigma=12:enable='between(t,1.766667,2.000000)'[j1];
+  [w1]gblur=sigma=12:enable='gte(t,1.766667)*lt(t,2.000000)'[j1];
   [j1][v2]xfade=transition=slideleft:duration=0.266667:offset=3.500000[w2];
-  [w2]gblur=sigma=12:enable='between(t,3.500000,3.766667)'[vout];
+  [w2]gblur=sigma=12:enable='gte(t,3.500000)*lt(t,3.766667)'[vout];
   anullsrc=r=48000:cl=stereo:d=5.500[abed];
   [abed]anull[aout]
 

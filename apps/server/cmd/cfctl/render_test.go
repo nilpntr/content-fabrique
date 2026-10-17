@@ -34,6 +34,9 @@ func TestRenderUsageErrors(t *testing.T) {
 			t.Errorf("%s: exit %d, want 2", name, code)
 		}
 	}
+	if code, out, _ := runRender("help"); code != 0 || !strings.Contains(out, "cfctl render <spec.json>") {
+		t.Errorf("render help: exit %d, %s", code, out)
+	}
 	// flag.ErrHelp prints the usage to stderr and exits 0.
 	if code, _, errOut := runRender("--help"); code != 0 || !strings.Contains(errOut, "cfctl render <spec.json>") {
 		t.Errorf("--help: exit %d, %s", code, errOut)
@@ -81,6 +84,21 @@ func TestRenderRefusesWhatItCannotFind(t *testing.T) {
 	}
 	if code, _, _ := runRender(bad, "--assets", dir, "--dry-run"); code != 1 {
 		t.Errorf("an unknown field must be refused, exit %d", code)
+	}
+	// Asset ids are compared with the names in the directory exactly: no glob, no extension in the id.
+	for _, f := range []string{"ast_a.mp4", "ast_ab.mp4", "ast_a.b.mp4"} {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gr := &dirResolver{dir: dir, ffmpeg: "/nonexistent/ffmpeg"}
+	if got, err := gr.Resolve("ast_a", ""); err != nil || filepath.Base(got.Location) != "ast_a.mp4" {
+		t.Errorf("ast_a: %+v %v", got, err)
+	}
+	for _, id := range []string{"ast_*", "ast_?", "ast_[a]", "ast_a.mp4", "ast_"} {
+		if got, err := gr.Resolve(id, ""); err == nil {
+			t.Errorf("asset id %q must not match anything, got %+v", id, got)
+		}
 	}
 	// An asset id from a spec must not leave the assets directory.
 	r := &dirResolver{dir: dir}

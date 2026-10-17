@@ -14,12 +14,14 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/nilpntr/content-fabrique/internal/media"
 	"github.com/nilpntr/content-fabrique/internal/render"
+	"github.com/nilpntr/content-fabrique/internal/sandbox"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
 const renderUsage = `Usage:
-  cfctl render <spec.json> --assets <dir> -o <out.mp4> [--profile preview|final] [--dry-run]
+  cfctl render <spec.json> --assets <dir> -o <out.mp4> [--profile preview|final] [--provider local|docker|hardened] [--dry-run]
 
 Renders a timeline spec with ffmpeg, for local manual runs (the platform renders through its jobs, P3-06). The spec is
 decoded strictly (unknown fields are errors) and compiled by internal/render; it is not checked against an asset catalog,
@@ -29,7 +31,11 @@ so run it through the validator first if it did not come from one.
                file is used for both profiles: there is no proxy locally.
   -o           the MP4 to write (replaced if it exists)
   --profile    preview (half size, fast, with the beat guide; the default) or final (full size, two-pass loudness)
-  --ffmpeg     the ffmpeg binary (default: ffmpeg from PATH). ffprobe is used from the same directory or PATH
+  --provider   the sandbox provider ffmpeg runs in: local (default: ffmpeg on this machine, no isolation, development only),
+               docker or hardened (the media-tools image)
+  --image      the media-tools image for docker and hardened (default media-tools:dev)
+  --docker     the docker CLI (default docker)
+  --ffmpeg     the ffmpeg binary used by --dry-run's printout, and ffprobe's directory (default: from PATH)
   --dry-run    print the ffmpeg command line and the filter graph, and do not run it
 
 Prints the sound cues (cue_only sounds are never mixed in) and progress while it runs.
@@ -43,6 +49,9 @@ func cmdRender(args []string, stdout, stderr io.Writer) int {
 	outArg := flags.String("o", "", "output MP4")
 	profileArg := flags.String("profile", "preview", "preview or final")
 	ffmpegArg := flags.String("ffmpeg", "ffmpeg", "ffmpeg binary")
+	providerArg := flags.String("provider", "local", "local, docker or hardened")
+	imageArg := flags.String("image", "media-tools:dev", "media-tools image")
+	dockerArg := flags.String("docker", "docker", "docker CLI")
 	dryRun := flags.Bool("dry-run", false, "print the command and do not run it")
 
 	// The spec path may come before or after the flags.
@@ -61,7 +70,7 @@ func cmdRender(args []string, stdout, stderr io.Writer) int {
 		positional = append(positional, flags.Arg(0))
 		rest = flags.Args()[1:]
 	}
-	if len(positional) == 0 && len(args) > 0 && (args[0] == "help" || args[0] == "-h") {
+	if len(positional) == 1 && positional[0] == "help" {
 		_, _ = fmt.Fprint(stdout, renderUsage)
 		return 0
 	}
@@ -106,11 +115,29 @@ func cmdRender(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
+	if *providerArg == "local" {
+		env, _ := os.LookupEnv("CF_ENV")
+		if err := sandbox.CheckLocalAllowed(env); err != nil {
+			_, _ = fmt.Fprintf(stderr, "cfctl render: %v\n", err)
+			return 2
+		}
+	}
+	runner, workDir, cleanup, err := newRenderRunner(*providerArg, *dockerArg, *imageArg, *assetsArg, *outArg)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "cfctl render: %v\n", err)
+		return 2
+	}
+	defer cleanup()
+	if *providerArg == "local" {
+		_, _ = fmt.Fprintln(stderr, "cfctl: the local provider runs ffmpeg on this machine without isolation: development only")
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	lastTenth := -1
-	err = render.Execute(ctx, plan, render.LocalRunner{Binary: *ffmpegArg}, render.ExecuteOptions{
-		Output: *outArg,
+	err = render.Execute(ctx, plan, runner, render.ExecuteOptions{
+		Output:  *outArg,
+		WorkDir: workDir,
 		Progress: func(p render.Progress) {
 			if tenth := int(p.Fraction * 10); tenth != lastTenth || p.Done {
 				lastTenth = tenth
@@ -124,6 +151,49 @@ func cmdRender(args []string, stdout, stderr io.Writer) int {
 	}
 	_, _ = fmt.Fprintf(stdout, "wrote %s (%dx%d, %.1f s, %s profile)\n", *outArg, plan.OutputSize.Width, plan.OutputSize.Height, float64(plan.DurationMs)/1000, plan.Profile.Name)
 	return 0
+}
+
+// newRenderRunner builds the sandbox runner for a render: the provider may read the assets directory and write the work
+// directory, a fresh directory next to the output (so that moving the result is a rename).
+func newRenderRunner(name, dockerBin, image, assetsDir, output string) (runner media.Runner, workDir string, cleanup func(), err error) {
+	assets, err := filepath.Abs(assetsDir)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if assets, err = filepath.EvalSymlinks(assets); err != nil {
+		return nil, "", nil, err
+	}
+	outDir, err := filepath.Abs(filepath.Dir(output))
+	if err != nil {
+		return nil, "", nil, err
+	}
+	work, err := os.MkdirTemp(outDir, ".cf-render-")
+	if err != nil {
+		return nil, "", nil, err
+	}
+	cleanup = func() { _ = os.RemoveAll(work) }
+	if work, err = filepath.EvalSymlinks(work); err != nil {
+		cleanup()
+		return nil, "", nil, err
+	}
+	pol := sandbox.Policy{AllowedRoots: []string{assets, work}}
+	var p sandbox.Provider
+	switch name {
+	case "local":
+		p = sandbox.NewLocal(pol)
+	case "docker":
+		d := sandbox.NewDocker(pol)
+		d.Binary = dockerBin
+		p = d
+	case "hardened":
+		h := sandbox.NewHardened(pol)
+		h.Binary = dockerBin
+		p = h
+	default:
+		cleanup()
+		return nil, "", nil, fmt.Errorf("unknown provider %q (use local, docker or hardened)", name)
+	}
+	return &media.SandboxRunner{Provider: p, Image: image, Limits: render.DefaultLimits(), Labels: map[string]string{"kind": "render"}}, work, cleanup, nil
 }
 
 // quoteAll quotes the arguments that a shell would split, for the dry run's printout.
@@ -145,13 +215,25 @@ type dirResolver struct {
 }
 
 func (r *dirResolver) Resolve(assetID string, _ render.Variant) (render.ResolvedAsset, error) {
-	// The id comes from a spec: refuse anything that could leave the directory.
+	// The id comes from a spec: refuse anything that could leave the directory (and a glob character is never special:
+	// the directory is listed and names are compared exactly).
 	if assetID == "" || strings.ContainsAny(assetID, `/\`) || strings.Contains(assetID, "..") {
 		return render.ResolvedAsset{}, fmt.Errorf("invalid asset id %q", assetID)
 	}
-	matches, err := filepath.Glob(filepath.Join(r.dir, assetID+".*"))
+	dir, err := filepath.Abs(r.dir)
 	if err != nil {
 		return render.ResolvedAsset{}, err
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return render.ResolvedAsset{}, err
+	}
+	var matches []string
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() && strings.TrimSuffix(name, filepath.Ext(name)) == assetID {
+			matches = append(matches, filepath.Join(dir, name))
+		}
 	}
 	sort.Strings(matches)
 	if len(matches) == 0 {

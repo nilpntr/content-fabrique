@@ -35,26 +35,26 @@ const AudioSampleRate = 48000
 
 // Profile is one row of the design note's profile table.
 type Profile struct {
-	Name ProfileName
+	Name ProfileName `json:"name"`
 	// SizeDivisor divides the spec's output size: 2 for the preview (half the format's size), 1 for the final.
-	SizeDivisor int
+	SizeDivisor int `json:"size_divisor"`
 	// Source is the asset variant the resolver is asked for.
-	Source Variant
+	Source Variant `json:"source"`
 	// X264Preset, CRF and X264Profile ("" for none) configure the video encoder.
-	X264Preset  string
-	CRF         int
-	X264Profile string
+	X264Preset  string `json:"x264_preset"`
+	CRF         int    `json:"crf"`
+	X264Profile string `json:"x264_profile,omitempty"`
 	// AudioBitrate is the AAC bitrate, for example "128k".
-	AudioBitrate string
+	AudioBitrate string `json:"audio_bitrate"`
 	// Faststart moves the MP4 index to the front (+faststart).
-	Faststart bool
+	Faststart bool `json:"faststart"`
 	// BeatGuide mixes in the clicks generated from the markers (preview only).
-	BeatGuide bool
+	BeatGuide bool `json:"beat_guide"`
 	// Watermark marks the profile as watermarked. The watermark needs a font, so it arrives with P3-04: until then the
 	// Plan reports it in PendingWatermark and draws nothing.
-	Watermark bool
+	Watermark bool `json:"watermark"`
 	// LoudnormPasses is 1 for a single dynamic pass and 2 for measure-then-apply.
-	LoudnormPasses int
+	LoudnormPasses int `json:"loudnorm_passes"`
 }
 
 // Preview is the cheap profile the editor and the agent look at.

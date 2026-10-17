@@ -4,7 +4,9 @@ output: 540x540 at 30 fps, 90 frames, 3000 ms
 
 args:
   -protocol_whitelist
-  file,http,https,tcp,tls,crypto
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
   -t
   3.000
   -i

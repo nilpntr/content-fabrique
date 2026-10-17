@@ -176,5 +176,8 @@
   },
   "i46_first_transition_first_in_time_not_first_in_array.json": {
     "code": "first_transition"
+  },
+  "i47_transitions_in_and_out_too_long_for_clip.json": {
+    "code": "transition_too_long"
   }
 }

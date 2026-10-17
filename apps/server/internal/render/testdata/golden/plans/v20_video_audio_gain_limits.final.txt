@@ -4,13 +4,17 @@ output: 1080x1920 at 30 fps, 240 frames, 8000 ms
 
 args:
   -protocol_whitelist
-  file,http,https,tcp,tls,crypto
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
   -t
   2.000
   -i
   /assets/original/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4
   -protocol_whitelist
-  file,http,https,tcp,tls,crypto
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
   -ss
   3.000
   -t
@@ -18,7 +22,9 @@ args:
   -i
   /assets/original/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4
   -protocol_whitelist
-  file,http,https,tcp,tls,crypto
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
   -ss
   6.000
   -t
@@ -26,7 +32,9 @@ args:
   -i
   /assets/original/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4
   -protocol_whitelist
-  file,http,https,tcp,tls,crypto
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
   -ss
   9.000
   -t
@@ -86,31 +94,19 @@ loudnorm:
   two_pass: true
   pass1_args:
     -protocol_whitelist
-    file,http,https,tcp,tls,crypto
+    file
+    -format_whitelist
+    mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
     -t
     2.000
     -i
     /assets/original/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4
     -protocol_whitelist
-    file,http,https,tcp,tls,crypto
+    file
+    -format_whitelist
+    mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
     -ss
     3.000
-    -t
-    2.000
-    -i
-    /assets/original/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4
-    -protocol_whitelist
-    file,http,https,tcp,tls,crypto
-    -ss
-    6.000
-    -t
-    2.000
-    -i
-    /assets/original/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4
-    -protocol_whitelist
-    file,http,https,tcp,tls,crypto
-    -ss
-    9.000
     -t
     2.000
     -i
