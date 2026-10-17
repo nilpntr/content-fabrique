@@ -44,7 +44,11 @@ func parseScene(data []byte) ([]scorePoint, error) {
 		line := strings.TrimSpace(sc.Text())
 		if rest, ok := strings.CutPrefix(line, "frame:"); ok {
 			if i := strings.Index(rest, "pts_time:"); i >= 0 {
-				v, err := strconv.ParseFloat(strings.Fields(rest[i+len("pts_time:"):])[0], 64)
+				f := strings.Fields(rest[i+len("pts_time:"):])
+				if len(f) == 0 {
+					return nil, fmt.Errorf("styleprofile: bad frame line %q", line)
+				}
+				v, err := strconv.ParseFloat(f[0], 64)
 				if err != nil {
 					return nil, fmt.Errorf("styleprofile: bad frame line %q", line)
 				}

@@ -167,7 +167,7 @@ func TestStyleBlocksAreUntrustedData(t *testing.T) {
 		t.Errorf("the introduction: %s", blocks[0].Text)
 	}
 	note := styleNote(p)
-	for _, want := range []string{"lets takes run", "first cut comes at about", "quiet intro", "not on a beat grid", "no effects", "no exercise labels", "no look", "no sound effects"} {
+	for _, want := range []string{"lets takes run", "first cut comes at about", "quiet intro", "do not sit on a beat grid", "no effects", "no exercise labels", "no look", "no sound effects"} {
 		if !strings.Contains(note, want) {
 			t.Errorf("the note lacks %q:\n%s", want, note)
 		}
@@ -214,10 +214,14 @@ func TestRunContextAndPlanCarryTheStoredStyle(t *testing.T) {
 	// plan_edit: the generic workout plan has effects and a beat grid; the answer says what this creator does instead.
 	res := e.ok(rc, ToolPlanEdit, planCall(validPlanArgs(a.String())))
 	text := textOf(res)
-	for _, want := range []string{"Creator style:", "lets takes run", "This creator's videos have none: set every effect to none", `kind="creator_style"`} {
+	for _, want := range []string{"Creator style:", "lets takes run", "This creator's videos have none: set every effect to none"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("plan_edit's answer lacks %q:\n%s", want, text)
 		}
+	}
+	// The profile block is in the run context; the answer does not send it a second time.
+	if strings.Contains(text, `kind="creator_style"`) {
+		t.Errorf("plan_edit repeats the creator_style block:\n%s", text)
 	}
 	// A creator whose beat is not locked is not made to write a beat grid: a workout plan with tempo 0 is accepted.
 	in := validPlanArgs(a.String())
@@ -227,5 +231,42 @@ func TestRunContextAndPlanCarryTheStoredStyle(t *testing.T) {
 	}
 	if msg := e.toolErr(e.runCtx(e.wsB, prjB, ""), ToolPlanEdit, planCall(func() planArgs { x := validPlanArgs(b.String()); x.TempoBPM = 0; return x }())); !strings.Contains(msg, "beat grid") {
 		t.Errorf("workspace B without a style: %s", msg)
+	}
+}
+
+// A profile of one or two videos is a hint: the block says so, and the checks and the plan do not use it.
+func TestAWeakProfileIsAHint(t *testing.T) {
+	p := styleprofile.Aggregate(ginoMeasures(t)[:2])
+	if p.Firm() {
+		t.Fatalf("two references are firm: %+v", p.References)
+	}
+	blocks := styleBlocks(p)
+	if len(blocks) != 2 || !strings.Contains(blocks[0].Text, "only 2 reference videos") {
+		t.Errorf("the introduction does not say it is a hint: %+v", blocks)
+	}
+	spec := buildingLats(t)
+	with := RunChecks(CheckInput{Spec: spec, Plan: workoutPlan(), Style: p})
+	without := RunChecks(CheckInput{Spec: spec, Plan: workoutPlan()})
+	if strings.Join(with.Failed(), ",") != strings.Join(without.Failed(), ",") || with.Style != nil {
+		t.Errorf("a weak profile changed the checks: %v against %v", with.Failed(), without.Failed())
+	}
+	if c := wantStatus(t, with, CheckStyleMatch, CheckSkip); !strings.Contains(c.Detail, "rests on 2 reference videos") {
+		t.Errorf("style_match: %s", c.Detail)
+	}
+	if _, err := BuildPlan(func() planArgs { x := validPlanArgs(assetA); x.TempoBPM = 0; return x }(), map[string]bool{assetA: true}, AvailableFeatures(), p); err == nil {
+		t.Error("a weak profile let a workout plan go without a beat grid")
+	}
+}
+
+// The case of the title is judged on the earliest title, whatever track or order it comes in.
+func TestTheEarliestTitleIsJudged(t *testing.T) {
+	spec := buildingLats(t)
+	texts := &timeline.TextTrack{ID: "text2", Items: []timeline.TextItem{{ID: "t9", AtMs: 9000, DurationMs: 1000, Text: "later words", Style: "title_bold", Anchor: "upper_third"}}}
+	spec.Tracks = append([]timeline.Track{texts}, spec.Tracks...) // the later title's track comes first
+	r := RunChecks(CheckInput{Spec: spec, Plan: workoutPlan(), Style: ginoProfile(t)})
+	for _, d := range r.Style.Dimensions {
+		if d.ID == "title_case" && !d.OK {
+			t.Errorf("the case of the wrong title was judged: %+v", d)
+		}
 	}
 }

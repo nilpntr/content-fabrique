@@ -218,6 +218,8 @@ type limits struct {
 	noEffects, noTitle bool
 	durLo, durHi       int64
 	styled             bool
+	// looseBeat says the creator's cuts are known not to sit on a beat grid, so beat_sync does not apply.
+	looseBeat bool
 }
 
 // applyStyle sets the thresholds from the creator's style profile: a creator who lets takes run, uses no effects, cuts loosely near the
@@ -226,8 +228,8 @@ type limits struct {
 // measures the edit against the profile instead.
 func applyStyle(l limits, p *styleprofile.Profile) limits {
 	l.hookMaxMs = hookMaxMs
-	if p == nil {
-		return l
+	if !p.Firm() {
+		return l // a profile of one or two videos is a hint for the prompt, not a rule for the checks
 	}
 	l.styled = true
 	pc := p.Pacing
@@ -238,8 +240,8 @@ func applyStyle(l limits, p *styleprofile.Profile) limits {
 	if p.Effects.Verdict == styleprofile.EffectsNone {
 		l.noEffects = true
 	}
-	if !p.Audio.BeatLocked {
-		l.beatGrid, l.gridRequired = false, false
+	if p.CutsOffBeat() {
+		l.beatGrid, l.gridRequired, l.looseBeat = false, false, true
 	}
 	if p.Hook.FirstCutS.Max > 0 {
 		l.hookMaxMs = max(hookMaxMs, int64((p.Hook.FirstCutS.Max+0.5)*1000))
@@ -278,10 +280,15 @@ func RunChecks(in CheckInput) Report {
 	items := slices.Clone(main.Items)
 	slices.SortStableFunc(items, func(a, b timeline.VideoItem) int { return cmp.Compare(a.AtMs, b.AtMs) })
 	lim := applyStyle(typeLimits[typ], in.Style)
+	weakStyle := ""
+	if in.Style != nil && !in.Style.Firm() {
+		weakStyle = fmt.Sprintf("the creator style profile rests on %d reference videos; it sets thresholds from %d", in.Style.References, styleprofile.MinReferences)
+		in.Style = nil
+	}
 	if in.Plan != nil && in.Plan.TempoBPM == 0 {
 		lim.beatGrid = false // the plan has no beat grid (a vlog or a general video that follows speech, say): the cuts are not judged against one
 	}
-	c := &checker{in: in, items: items, lim: lim, typ: typ, m: &r.Metrics, dist: &r.Style}
+	c := &checker{in: in, items: items, lim: lim, typ: typ, m: &r.Metrics, dist: &r.Style, weakStyle: weakStyle}
 	c.total = timeline.TotalDuration(in.Spec)
 	// A shot's length is what it is on screen: from where it starts to where the next one starts, so the overlap of a transition
 	// into the next shot is not counted (a 1.95 s hook with a 250 ms whip out of it is still a 1.95 s hook). The last shot runs to
@@ -321,6 +328,8 @@ type checker struct {
 	typ   string
 	m     *Metrics
 	dist  **styleprofile.Distance
+	// weakStyle is why a profile that is there is not used (too few references), for the style_match line.
+	weakStyle string
 }
 
 func (c *checker) pass(id, format string, a ...any) Check {
@@ -572,9 +581,9 @@ func (c *checker) deadTime() Check {
 	return c.pass(CheckDeadTime, "%.0f %% of the screen time is dead time (at most %.0f %%)", share*100, deadShareMax*100)
 }
 
-func (c *checker) effectDensity() Check {
-	effects, ramps := 0, 0
-	for i, it := range c.items {
+// countEffects counts the effects of the main track: motion presets, transitions that are not cuts and speed ramps (also separately).
+func countEffects(items []timeline.VideoItem) (effects, ramps int) {
+	for i, it := range items {
 		if it.Motion.Active() {
 			effects++
 		}
@@ -586,6 +595,11 @@ func (c *checker) effectDensity() Check {
 			ramps++
 		}
 	}
+	return effects, ramps
+}
+
+func (c *checker) effectDensity() Check {
+	effects, ramps := countEffects(c.items)
 	cuts := len(c.items) - 1
 	c.m.Effects, c.m.Ramps, c.m.Cuts = effects, ramps, cuts
 	if c.lim.noEffects {
@@ -808,37 +822,28 @@ func (c *checker) editStats() styleprofile.EditStats {
 	if len(c.items) > 1 {
 		e.FirstCutS = float64(c.items[1].AtMs) / 1000
 	}
-	for i, it := range c.items {
-		if it.Motion.Active() {
-			e.Effects++
-		}
-		if i > 0 && it.TransitionIn != nil && it.TransitionIn.Type != timeline.TransitionCut && it.TransitionIn.Type != "" {
-			e.Effects++
-		}
-		if it.HasRamp() {
-			e.Effects++
-		}
+	e.Effects, _ = countEffects(c.items)
+	for _, it := range c.items {
 		if it.Look != nil && it.Look.Preset != "" && it.Look.Preset != timeline.LookNone {
 			e.Graded = true
 		}
 	}
-	firstTitle := true
+	firstTitleAt := int64(math.MaxInt64)
 	for _, t := range c.in.Spec.Tracks {
 		switch t := t.(type) {
 		case *timeline.CaptionsTrack:
 			e.Captions = e.Captions || t.Enabled
 		case *timeline.TextTrack:
 			for _, it := range t.Items {
-				if strings.HasPrefix(it.Style, "title_") && firstTitle {
-					e.Titles++
-					e.TitleCase, e.TitleAtS = styleprofile.CaseOf(it.Text), float64(it.AtMs)/1000
-					firstTitle = false
+				if !strings.HasPrefix(it.Style, "title_") {
+					e.Labels++
 					continue
 				}
-				if strings.HasPrefix(it.Style, "title_") {
-					e.Titles++
+				e.Titles++
+				if it.AtMs < firstTitleAt { // the case judged is the earliest title's, whatever track it is on
+					firstTitleAt = it.AtMs
+					e.TitleCase, e.TitleAtS = styleprofile.CaseOf(it.Text), float64(it.AtMs)/1000
 				}
-				e.Labels++
 			}
 		case *timeline.AudioTrack:
 			for _, a := range t.Items {
@@ -854,6 +859,9 @@ func (c *checker) editStats() styleprofile.EditStats {
 // styleMatch measures the edit against the creator's profile: one line per dimension, with the fix for the ones out of range.
 func (c *checker) styleMatch() Check {
 	if c.in.Style == nil {
+		if c.weakStyle != "" {
+			return c.skip(CheckStyleMatch, "%s", c.weakStyle)
+		}
 		return c.skip(CheckStyleMatch, "this workspace has no creator style profile")
 	}
 	d := c.in.Style.Compare(c.editStats())
@@ -880,13 +888,10 @@ func (c *checker) beatSync() Check {
 	if cuts < 1 {
 		return c.skip(CheckBeatSync, "there are no cuts")
 	}
-	if c.lim.styled && !c.lim.beatGrid {
-		return c.skip(CheckBeatSync, "the creator's cuts sit loosely near the music's onsets, not on a grid: no beat grid is needed")
+	if c.lim.looseBeat {
+		return c.skip(CheckBeatSync, "the creator's cuts do not sit on a beat grid (loose near the music's onsets, or too few cuts): no beat grid is needed")
 	}
 	if len(beats) == 0 {
-		if c.lim.styled && !c.lim.beatGrid {
-			return c.skip(CheckBeatSync, "the creator's cuts sit loosely near the music's onsets, not on a grid: no beat grid is needed")
-		}
 		if c.lim.beatGrid {
 			return c.fail(CheckBeatSync, "there is no beat grid; write one with snap_cuts_to_beats (a bpm from 120 to 128, first_beat_ms 0, write_markers true) so the cuts land on the beat")
 		}

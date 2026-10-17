@@ -238,15 +238,15 @@ func HookTimes(durationS float64) []float64 {
 	return []float64{round2(span * 0.12), round2(span * 0.5), round2(span * 0.88)}
 }
 
-// Frames cuts the hook frames of the file in the sandbox, as JPEGs of visionLongSide px.
-func (r *Reader) Frames(ctx context.Context, path string, atS []float64) ([][]byte, error) {
+// Frames cuts the hook frames of the file in the sandbox, as JPEGs of visionLongSide px, and returns the times of the ones that were cut.
+func (r *Reader) Frames(ctx context.Context, path string, atS []float64) ([][]byte, []float64, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	dir, err := os.MkdirTemp("", "stylevision-")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 	specs := make([]media.FrameSpec, len(atS))
@@ -255,28 +255,30 @@ func (r *Reader) Frames(ctx context.Context, path string, atS []float64) ([][]by
 	}
 	args, err := media.FramesArgs(media.InputPath(0), specs, visionLongSide)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	res, err := r.Runner.Run(ctx, media.Invocation{Args: args, Inputs: []media.Input{{Host: abs, Container: media.InputPath(0)}}, OutputDir: dir, Timeout: 2 * time.Minute})
 	if err != nil {
-		return nil, fmt.Errorf("styleprofile: ffmpeg: %w", err)
+		return nil, nil, fmt.Errorf("styleprofile: ffmpeg: %w", err)
 	}
 	var out [][]byte
+	var kept []float64
 	for i := range specs {
 		b, rerr := readRegular(filepath.Join(dir, fmt.Sprintf("f%d.jpg", i)), 2<<20)
 		if rerr != nil || !bytes.HasPrefix(b, []byte{0xFF, 0xD8, 0xFF}) {
 			continue
 		}
 		out = append(out, b)
+		kept = append(kept, atS[i])
 	}
 	if len(out) == 0 {
 		cause := errors.New("no frame was written")
 		if res.ExitCode != 0 {
 			cause = &media.ToolError{Tool: "ffmpeg", ExitCode: res.ExitCode, Stderr: media.StderrSnippet(res.Stderr)}
 		}
-		return nil, fmt.Errorf("styleprofile: no frame of the hook could be cut: %w", cause)
+		return nil, nil, fmt.Errorf("styleprofile: no frame of the hook could be cut: %w", cause)
 	}
-	return out, nil
+	return out, kept, nil
 }
 
 // Read makes the text read of the file for a workspace. runID is the ledger's run id (one query gives the cost of an analysis).
@@ -290,12 +292,9 @@ func (r *Reader) Read(ctx context.Context, ws ids.WorkspaceID, runID uuid.UUID, 
 		return VisionResult{}, fmt.Errorf("model client: %w", err)
 	}
 	atS := HookTimes(durationS)
-	frames, err := r.Frames(ctx, path, atS)
+	frames, atS, err := r.Frames(ctx, path, atS) // atS is now the times of the frames that were cut, in step with them
 	if err != nil {
 		return VisionResult{}, err
-	}
-	if len(frames) < len(atS) {
-		atS = atS[:len(frames)]
 	}
 	req := route.Apply(BuildVisionRequest(frames, atS))
 	req.Run = llm.RunInfo{ID: runID, Profile: route.Profile, Budget: llm.NewRunBudget(MaxVisionMicros)}

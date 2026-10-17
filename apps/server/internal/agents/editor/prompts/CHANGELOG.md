@@ -43,7 +43,7 @@ that has a profile, and nothing for one that has none, so it is a minor version.
   line in cream) join the title styles.
 - **The defaults say they are defaults.** The pacing and effects paragraphs say that a creator style block overrides them. Without a
   block nothing changes.
-- **Tools.** `plan_edit` ends its answer with a "Creator style" note (computed from the profile) and the profile block; it notes a plan
+- **Tools.** `plan_edit` ends its answer with a "Creator style" note (computed from the profile; the profile block itself is in the run context only); it notes a plan
   that has effects for a creator who uses none, and it accepts tempo 0 for a workout when the profile says the cuts are not on the beat.
   `check_edit` takes its thresholds from the profile and has a new check, `style_match`, with the distance per dimension and a
   one-line fix for each that is out of range.

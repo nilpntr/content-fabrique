@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"math"
 	"slices"
-	"sort"
 	"strings"
 )
 
@@ -175,12 +174,28 @@ const FlatnessAmbience = 0.2
 
 // ---- the profile ---------------------------------------------------------------------------------------------------------
 
+// MinReferences is how many references a profile needs before the editor sets thresholds from it (fewer are a hint). MinCutsForBeat is
+// how many measured cuts it takes to call the cuts loose against the beat.
+const (
+	MinReferences  = 3
+	MinCutsForBeat = 3
+)
+
+// Firm says the profile rests on enough references to set thresholds from.
+func (p *Profile) Firm() bool { return p != nil && p.References >= MinReferences }
+
+// CutsOffBeat says the creator's cuts are known not to sit on a beat grid: measured loose, or too few to snap (a creator of long takes
+// has almost no cuts, and a grid means nothing to them).
+func (p *Profile) CutsOffBeat() bool {
+	return p != nil && !p.Audio.BeatLocked && (p.Audio.CutsMeasured >= MinCutsForBeat || p.Pacing.Style == PaceLongTake)
+}
+
 // Profile is the aggregated creator style.
 type Profile struct {
 	Version    int `json:"version"`
 	References int `json:"references"`
-	// Confidence is 0 to 1: it grows with the number of references (three give about 0.6, ten 1) and falls when the references differ
-	// a lot from each other.
+	// Confidence is 0 to 1 and grows with the number of references (0.9 x 0.2 a reference: one gives 0.2, three 0.54, five 0.9; ten or
+	// more give 1). The editor treats a profile of fewer than MinReferences references as a hint and does not set thresholds from it.
 	Confidence float64 `json:"confidence"`
 
 	Format  FormatProfile  `json:"format"`
@@ -210,16 +225,15 @@ const (
 
 // PacingProfile is how the creator cuts.
 type PacingProfile struct {
-	Style         string    `json:"style"`
-	CutsPerVideo  Range     `json:"cuts_per_video"`
-	CutsPerMinute Range     `json:"cuts_per_minute"`
-	ShotMedianS   Range     `json:"shot_median_s"`
-	LongestShotS  Range     `json:"longest_shot_s"`
-	ShortestShotS Range     `json:"shortest_shot_s"`
-	ZeroCutShare  float64   `json:"zero_cut_share"`
-	LongTakeShare float64   `json:"long_take_share"` // the share of the screen time in shots of 6 s or more
-	HasLongTakes  bool      `json:"has_long_takes"`
-	ShotLengthsS  []float64 `json:"shot_lengths_s,omitempty"`
+	Style         string  `json:"style"`
+	CutsPerVideo  Range   `json:"cuts_per_video"`
+	CutsPerMinute Range   `json:"cuts_per_minute"`
+	ShotMedianS   Range   `json:"shot_median_s"`
+	LongestShotS  Range   `json:"longest_shot_s"`
+	ShortestShotS Range   `json:"shortest_shot_s"`
+	ZeroCutShare  float64 `json:"zero_cut_share"`
+	LongTakeShare float64 `json:"long_take_share"` // the share of the screen time in shots of 6 s or more
+	HasLongTakes  bool    `json:"has_long_takes"`
 }
 
 // HookProfile is how the videos open.
@@ -300,11 +314,14 @@ type AudioProfile struct {
 	NoFadeOut bool    `json:"no_fade_out"`
 	TempoBPM  Range   `json:"tempo_bpm"`
 	// TempoByPacing is the median tempo of the long-take references and of the montage ones (0 when there are none of that kind).
-	TempoLongTakeBPM    float64 `json:"tempo_long_take_bpm"`
-	TempoMontageBPM     float64 `json:"tempo_montage_bpm"`
-	CutOnsetMs          Range   `json:"cut_onset_ms"` // the absolute distance of a cut to the nearest onset, over all the cuts
-	CutsWithin100ms     float64 `json:"cuts_within_100ms"`
-	BeatLocked          bool    `json:"beat_locked"`
+	TempoLongTakeBPM float64 `json:"tempo_long_take_bpm"`
+	TempoMontageBPM  float64 `json:"tempo_montage_bpm"`
+	CutOnsetMs       Range   `json:"cut_onset_ms"` // the absolute distance of a cut to the nearest onset, over all the cuts
+	CutsWithin100ms  float64 `json:"cuts_within_100ms"`
+	BeatLocked       bool    `json:"beat_locked"`
+	// CutsMeasured is how many cuts had a strong onset to be measured against: the evidence behind BeatLocked (a creator of long takes has
+	// few cuts, and few is not "loose").
+	CutsMeasured        int     `json:"cuts_measured"`
 	FirstCutAtLiftShare float64 `json:"first_cut_at_lift_share"`
 	Content             string  `json:"content"`
 	MusicShare          float64 `json:"music_share"`
@@ -323,7 +340,6 @@ func Aggregate(refs []Measures) *Profile {
 	}
 	p := &Profile{Version: ProfileVersion, References: n}
 	var dur, cutsPer, cutsMin, shotMed, longest, shortest, firstCut, fx, push []float64
-	var pooled []float64
 	var zeroCuts, totalMin, zooms, flashes float64
 	var longTime, allTime float64
 	var luma, lumaP, sat, vig []float64
@@ -348,7 +364,6 @@ func Aggregate(refs []Measures) *Profile {
 			shortest = append(shortest, s[0])
 		}
 		for _, l := range m.ShotsS {
-			pooled = append(pooled, l)
 			allTime += l
 			if l >= 6 {
 				longTime += l
@@ -378,14 +393,6 @@ func Aggregate(refs []Measures) *Profile {
 	default:
 		pace.Style = PaceMixed
 	}
-	sort.Float64s(pooled)
-	if len(pooled) > 40 {
-		pooled = pooled[:40]
-	}
-	for i := range pooled {
-		pooled[i] = round2(pooled[i])
-	}
-	pace.ShotLengthsS = pooled
 	p.Pacing = pace
 
 	p.Hook = HookProfile{FirstCutS: RangeOf(firstCut)}
@@ -413,7 +420,7 @@ func Aggregate(refs []Measures) *Profile {
 	}
 	p.Audio = aggregateAudio(refs)
 
-	// Confidence: the number of references (3 give 0.6, 5 give 0.8, 10 or more give 1), less the spread of the shot-length medians.
+	// Confidence: 0.9 x 0.2 a reference (five give 0.9), 1 for ten or more, 0.2 for one.
 	conf := math.Min(1, 0.2*float64(n)) * 0.9
 	if n >= 10 {
 		conf = 1
@@ -593,6 +600,7 @@ func aggregateAudio(refs []Measures) AudioProfile {
 		out.CutsWithin100ms = round2(within / within100n)
 	}
 	// Beat-locked only when the cuts sit on the onsets: a median distance under 50 ms and nearly all within 100 ms.
+	out.CutsMeasured = len(cutOnset)
 	out.BeatLocked = len(cutOnset) >= 2 && out.CutOnsetMs.Median <= 50 && out.CutsWithin100ms >= 0.8
 	if firstCuts > 0 {
 		out.FirstCutAtLiftShare = round2(firstAtLift / firstCuts)
@@ -695,6 +703,8 @@ func (a AudioProfile) Describe() string {
 	}
 	if a.BeatLocked {
 		parts = append(parts, "cuts sit on the beat")
+	} else if a.CutsMeasured < MinCutsForBeat {
+		parts = append(parts, "too few cuts to say whether they sit on the beat")
 	} else {
 		parts = append(parts, "cuts sit loosely near onsets (not beat-locked)")
 	}

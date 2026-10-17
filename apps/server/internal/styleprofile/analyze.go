@@ -81,18 +81,8 @@ type StyleReader interface {
 // Load reads the workspace's profile and the measures it was made from. It returns nil (and no error) when the workspace has none, or
 // when the stored one is of a shape this version does not know (the editor then works without a style, as it did before).
 func Load(ctx context.Context, st StyleReader, ws ids.WorkspaceID) (*Profile, []Measures, error) {
-	row, err := st.GetCreatorStyle(ctx, ws)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil, nil, nil
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-	p, err := ParseProfile(row.Profile)
-	if errors.Is(err, ErrUnsupportedVersion) {
-		return nil, nil, nil
-	}
-	if err != nil {
+	p, row, err := loadRow(ctx, st, ws)
+	if p == nil || err != nil {
 		return nil, nil, err
 	}
 	var ms []Measures
@@ -100,6 +90,28 @@ func Load(ctx context.Context, st StyleReader, ws ids.WorkspaceID) (*Profile, []
 		return nil, nil, fmt.Errorf("styleprofile: the stored measures: %w", err)
 	}
 	return p, ms, nil
+}
+
+// LoadProfile returns only the profile (the editor reads it on every tool call and has no use for the measures), or nil when the
+// workspace has none or the stored shape is one this version does not know.
+func LoadProfile(ctx context.Context, st StyleReader, ws ids.WorkspaceID) (*Profile, error) {
+	p, _, err := loadRow(ctx, st, ws)
+	return p, err
+}
+
+func loadRow(ctx context.Context, st StyleReader, ws ids.WorkspaceID) (*Profile, store.CreatorStyle, error) {
+	row, err := st.GetCreatorStyle(ctx, ws)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, row, nil
+	}
+	if err != nil {
+		return nil, row, err
+	}
+	p, err := ParseProfile(row.Profile)
+	if errors.Is(err, ErrUnsupportedVersion) {
+		return nil, row, nil
+	}
+	return p, row, err
 }
 
 // Save aggregates the measures into a profile and stores both, replacing the workspace's profile.

@@ -297,3 +297,40 @@ func TestMeasureARealVideo(t *testing.T) {
 		t.Error("junk was analysed")
 	}
 }
+
+func TestParseSceneRefusesATruncatedLine(t *testing.T) {
+	if _, err := parseScene([]byte("frame:12 pts:400 pts_time:")); err == nil {
+		t.Error("a line cut off after pts_time: was accepted")
+	}
+}
+
+func TestBeatEvidence(t *testing.T) {
+	p := Aggregate(referenceMeasures(t))
+	if !p.Firm() || !p.CutsOffBeat() || p.Audio.CutsMeasured < MinCutsForBeat {
+		t.Fatalf("firm %v, off beat %v, cuts measured %d", p.Firm(), p.CutsOffBeat(), p.Audio.CutsMeasured)
+	}
+	// A creator of montages whose cuts we could not measure is not called loose; one of long takes is (a grid means nothing to them).
+	m := referenceMeasures(t)
+	for i := range m {
+		m[i].Audio.CutOnsetMs, m[i].Audio.CutBeatMs = nil, nil
+	}
+	q := Aggregate(m)
+	if q.Audio.CutsMeasured != 0 || !q.CutsOffBeat() || !strings.Contains(q.Describe(), "too few cuts to say") {
+		t.Errorf("long takes, no measured cuts: %d %v\n%s", q.Audio.CutsMeasured, q.CutsOffBeat(), q.Describe())
+	}
+	for i := range m {
+		m[i].CutsS = []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
+		m[i].ShotsS = []float64{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}
+		m[i].DurationS = 13
+	}
+	if q = Aggregate(m); q.Pacing.Style != PaceMontage || q.CutsOffBeat() {
+		t.Errorf("a montage with unmeasured cuts is called loose: %s %v", q.Pacing.Style, q.CutsOffBeat())
+	}
+	var nilP *Profile
+	if nilP.Firm() || nilP.CutsOffBeat() {
+		t.Error("a nil profile")
+	}
+	if !Aggregate(m[:3]).Firm() || Aggregate(m[:2]).Firm() {
+		t.Error("the profile is firm from three references")
+	}
+}

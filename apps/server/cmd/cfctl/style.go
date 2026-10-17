@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -179,12 +180,15 @@ func cmdStyleAnalyze(args []string, stdout, stderr io.Writer, lookup lookupEnv, 
 		}
 		measures = old
 	}
-	var cost int64
+	var costBefore int64
+	if st != nil {
+		costBefore, _ = styleCost(ctx, st, ws)
+	}
 	for _, f := range files {
 		start := time.Now()
 		res, err := an.AnalyzeFile(ctx, ws, f)
 		if err != nil {
-			_, _ = fmt.Fprintf(errOut, "cfctl %s: %s: %v\n", name, filepath.Base(f), err)
+			_, _ = fmt.Fprintf(errOut, "cfctl %s: %s: %v (nothing was stored)\n", name, filepath.Base(f), err)
 			return 1
 		}
 		line := fmt.Sprintf("analysed %s in %s: %.1f s, %d cuts", res.Measures.Name, time.Since(start).Round(time.Millisecond), res.Measures.DurationS, len(res.Measures.CutsS))
@@ -199,6 +203,10 @@ func cmdStyleAnalyze(args []string, stdout, stderr io.Writer, lookup lookupEnv, 
 			}
 		}
 		_, _ = fmt.Fprintln(out, line)
+		// The same file analysed again replaces its earlier measures instead of counting twice.
+		measures = slices.DeleteFunc(measures, func(m styleprofile.Measures) bool {
+			return m.Name == res.Measures.Name && m.DurationS == res.Measures.DurationS
+		})
 		measures = append(measures, res.Measures)
 	}
 	if len(measures) > styleprofile.MaxReferences {
@@ -210,8 +218,8 @@ func cmdStyleAnalyze(args []string, stdout, stderr io.Writer, lookup lookupEnv, 
 			_, _ = fmt.Fprintf(errOut, "cfctl %s: %v\n", name, err)
 			return 1
 		}
-		if cost, err = styleCost(ctx, st, ws); err == nil && cost > 0 {
-			_, _ = fmt.Fprintf(out, "model cost of the title reads (this workspace's ledger, today): %s\n", usd(cost))
+		if after, cerr := styleCost(ctx, st, ws); cerr == nil && after > costBefore {
+			_, _ = fmt.Fprintf(out, "model cost of the title reads (the growth of this workspace's ledger during the command): %s\n", usd(after-costBefore))
 		}
 	}
 	printProfile(out, prof, *asJSON, !*noStore)

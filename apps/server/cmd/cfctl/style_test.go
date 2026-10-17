@@ -133,12 +133,12 @@ func TestStyleAnalyzeAStoredProfile(t *testing.T) {
 	if row, err := r.st.GetCreatorStyle(context.Background(), r.ws.ID); err != nil || row.ReferencesCount != 1 {
 		t.Fatalf("stored: %+v %v", row, err)
 	}
-	// --append adds a reference to it.
+	// --append of the same file replaces its measures instead of counting it twice.
 	code, out, errOut = r.runStyle("analyze", "--workspace", r.ws.ID.String(), "--provider", "local", "--no-vision", "--append", "--files", clip)
 	if code != 0 {
 		t.Fatalf("analyze --append: %d\n%s%s", code, out, errOut)
 	}
-	if row, err := r.st.GetCreatorStyle(context.Background(), r.ws.ID); err != nil || row.ReferencesCount != 2 {
+	if row, err := r.st.GetCreatorStyle(context.Background(), r.ws.ID); err != nil || row.ReferencesCount != 1 {
 		t.Fatalf("after append: %+v %v", row, err)
 	}
 	// A file that is not a video is an error and changes nothing.
@@ -149,7 +149,7 @@ func TestStyleAnalyzeAStoredProfile(t *testing.T) {
 	if code, _, errOut = r.runStyle("analyze", "--workspace", r.ws.ID.String(), "--provider", "local", "--no-vision", "--files", junk); code != 1 || !strings.Contains(errOut, "junk.mp4") {
 		t.Errorf("junk: %d %q", code, errOut)
 	}
-	if row, err := r.st.GetCreatorStyle(context.Background(), r.ws.ID); err != nil || row.ReferencesCount != 2 {
+	if row, err := r.st.GetCreatorStyle(context.Background(), r.ws.ID); err != nil || row.ReferencesCount != 1 {
 		t.Fatalf("a failed analysis changed the profile: %+v %v", row, err)
 	}
 }

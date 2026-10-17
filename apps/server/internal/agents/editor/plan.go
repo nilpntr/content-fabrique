@@ -180,7 +180,7 @@ func BuildPlan(in planArgs, footage map[string]bool, f Features, style *stylepro
 		return fail("tempo_bpm is %d; use 0 for a video with no beat grid, or %d to %d (120 to 128 is the default for a short video)", in.TempoBPM, MinTempoBPM, MaxTempoBPM)
 	}
 	// A creator whose cuts sit loosely near the music's onsets (not on a grid) needs no beat grid, whatever the content type.
-	if in.TempoBPM == 0 && typeLimits[p.ContentType].gridRequired && (style == nil || style.Audio.BeatLocked) {
+	if in.TempoBPM == 0 && typeLimits[p.ContentType].gridRequired && (!style.Firm() || !style.CutsOffBeat()) {
 		return fail("tempo_bpm 0 means no beat grid, which a %s video needs: use 120 to 128 so the cuts land on the beat", p.ContentType)
 	}
 	p.TempoBPM = in.TempoBPM
@@ -321,12 +321,12 @@ func (d Deps) planEdit(ctx context.Context, rc runtime.RunContext, in planArgs) 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Plan saved (it is shown to the creator). Content type %s, playbook %s.\n", plan.ContentType, plan.PlaybookVersion)
 	b.WriteString(plan.describe())
-	for _, n := range planNotes(plan, style) {
+	for _, n := range planNotes(plan, firmStyle(style)) {
 		b.WriteString("Note: " + n + "\n")
 	}
 	b.WriteString("\nThe playbook for this kind of video. Follow it; it is the craft of the genre, and check_edit will measure your edit against it.\n\n")
-	blocks := []llm.Block{llm.TextBlock(b.String() + book + styleNote(style))}
-	return runtime.Result{Content: append(blocks, styleBlocks(style)...)}, nil
+	// The profile block itself is in the run context already; the note carries the points that decide the plan.
+	return runtime.Result{Content: []llm.Block{llm.TextBlock(b.String() + book + styleNote(style))}}, nil
 }
 
 // features is what the build offers (the tests of the gate replace it).
