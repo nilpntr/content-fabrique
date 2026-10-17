@@ -1,0 +1,5 @@
+{
+  "op": "set_clip_audio",
+  "id": "c1",
+  "gain_db": -30
+}

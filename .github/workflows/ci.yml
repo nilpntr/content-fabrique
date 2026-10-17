@@ -38,8 +38,10 @@ jobs:
       web: ${{ steps.filter.outputs.web || 'true' }}
       env: ${{ steps.filter.outputs.env || 'true' }}
       doctor: ${{ steps.filter.outputs.doctor || 'true' }}
-      media_licences: ${{ steps.filter.outputs.media_licences || 'true' }}
-      media_sandbox: ${{ steps.filter.outputs.media_sandbox || 'true' }}
+      contract: ${{ steps.filter.outputs.contract || 'true' }}
+      # On pull requests the first filter decides; on pushes to main the second one (so the heavy media jobs do not run on
+      # every push); on manual runs both are skipped and everything runs.
+      media_sandbox: ${{ steps.filter.outputs.media_sandbox || steps.filter_push.outputs.media_sandbox || 'true' }}
     steps:
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
@@ -48,6 +50,9 @@ jobs:
           filters: |
             go:
               - 'apps/server/**'
+              # The timeline schema is embedded in the Go package (apps/server/internal/timeline), and its fixtures
+              # are read by the Go tests.
+              - 'packages/schemas/**'
               - '.env.example'
               - 'go.work'
               - 'go.work.sum'
@@ -71,11 +76,32 @@ jobs:
               - 'go.work'
               - 'compose.yaml'
               - '.github/workflows/ci.yml'
-            # The media-tools image and its licence allowlist (P1-03, D-16).
-            media_licences:
+            # Everything that decides how media jobs are sandboxed: the image and its licence allowlist (P1-03, D-16), the
+            # providers, the media wrappers, cfctl media.
+            media_sandbox:
               - 'packages/media-tools/**'
+              - 'apps/server/internal/sandbox/**'
+              - 'apps/server/internal/media/**'
+              - 'apps/server/cmd/cfctl/media*.go'
               - '.github/workflows/ci.yml'
-            # Everything that decides how media jobs are sandboxed: the image, the providers, the media wrappers, cfctl media.
+            # The OpenAPI contract: the spec, the Go server interface and the TypeScript types generated from it, and the
+            # web client built on them.
+            contract:
+              - 'packages/schemas/**'
+              - 'apps/server/**'
+              - 'apps/web/**'
+              - 'Taskfile.yml'
+              - 'go.work'
+              - 'go.work.sum'
+              - 'package.json'
+              - 'bun.lock'
+              - '.github/workflows/ci.yml'
+      # Pushes to main: only the media paths (the other jobs run on every push).
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter_push
+        if: github.event_name == 'push'
+        with:
+          filters: |
             media_sandbox:
               - 'packages/media-tools/**'
               - 'apps/server/internal/sandbox/**'
@@ -127,6 +153,13 @@ jobs:
           go-version-file: apps/server/go.mod
           cache-dependency-path: apps/server/go.sum
       - run: go test -race ./...
+      # internal/timeline embeds a copy of packages/schemas/timeline/v1.schema.json, and internal/timeline/ops one of
+      # ops.v1.schema.json; `task gen` refreshes them. A diff means a copy is stale.
+      - name: Timeline schema copy drift check
+        run: |
+          go generate ./internal/timeline/...
+          git diff --exit-code -- internal/timeline/schema internal/timeline/ops/schema
+          test -z "$(git status --porcelain -- internal/timeline/schema internal/timeline/ops/schema)" || { git status --porcelain -- internal/timeline/schema internal/timeline/ops/schema; exit 1; }
 
   # `cfctl migrate` against a real Postgres: up, down to 0, up again, redo. The sqlc output must match what is committed.
   # The repository, round-trip and role-split tests run in go-test (they start Postgres themselves).
@@ -214,6 +247,44 @@ jobs:
       - run: bun run --filter @cf/web build
       # Start regenerates the route tree on build; a diff means the committed one is stale.
       - run: git diff --exit-code -- apps/web/src/routeTree.gen.ts
+
+  # The OpenAPI contract (P0-08, D-14): packages/schemas/openapi.yaml is the source of truth. The spec is linted, then
+  # `task gen:api` regenerates the Go server interface (apps/server/internal/api) and the TypeScript types
+  # (packages/schemas/api), and any difference from what is committed fails the job: changing the spec without
+  # regenerating fails CI.
+  contract:
+    needs: changes
+    if: needs.changes.outputs.contract == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: apps/server/go.mod
+          cache: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - name: Lint the spec
+        run: bun run --filter @cf/schemas lint:api
+      # oapi-codegen is pinned by a `tool` directive in go.mod and openapi-typescript by bun.lock, so the only thing to
+      # fetch is Task itself (pinned here, through `go run`, like golangci-lint in `task lint`).
+      - name: Regenerate the contract code (task gen:api)
+        run: go run github.com/go-task/task/v3/cmd/task@v3.54.0 gen:api
+      - name: Drift check
+        run: |
+          git diff --exit-code
+          test -z "$(git status --porcelain)" || { git status --porcelain; exit 1; }
+          echo "the generated contract code is up to date"
 
   # Fails when the code reads a variable that .env.example does not list.
   env-lint:
@@ -309,7 +380,7 @@ jobs:
   # snapshot date, ffmpeg checksum), so the result does not drift on its own.
   media-tools:
     needs: changes
-    if: needs.changes.outputs.media_licences == 'true'
+    if: needs.changes.outputs.media_sandbox == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -380,10 +451,10 @@ jobs:
 
   # gVisor overhead (D-08, P1-03): installs runsc (pinned and checksum-verified), registers it with Docker, then transcodes a
   # generated 1080p 30 s clip with the docker and hardened providers three times each and prints the table. It also runs the
-  # sandbox integration tests under runsc. Runs on manual dispatch and on pull requests that touch the sandbox or the image.
+  # sandbox integration tests under runsc. Runs on manual dispatch, and on pull requests and pushes to main that touch the sandbox, the media wrappers or the image.
   gvisor-bench:
     needs: changes
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && needs.changes.outputs.media_sandbox == 'true')
+    if: needs.changes.outputs.media_sandbox == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
@@ -457,7 +528,7 @@ jobs:
   # needed job succeeded or was skipped, and fails on any failure or cancellation. Add every new job to `needs`.
   required:
     if: always()
-    needs: [changes, go-lint, go-test, db, web, env-lint, doctor, media-tools, gvisor-bench]
+    needs: [changes, go-lint, go-test, db, web, contract, env-lint, doctor, media-tools, gvisor-bench]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:

@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import { ApiError } from "@/lib/api";
-import { ME_QUERY_KEY, createQueryClient, isPlanRequired } from "@/lib/query-client";
+import { ME_QUERY_KEY, PLAN_QUERY_KEY, createQueryClient, isPlanRequired } from "@/lib/query-client";
 
 test("only the API's 402 plan_required counts", () => {
   expect(isPlanRequired(new ApiError(402, "plan_required", "no plan"))).toBe(true);
@@ -57,4 +57,23 @@ test("other errors leave `me` alone", async () => {
     }),
   ).rejects.toBeInstanceOf(ApiError);
   expect(client.getQueryState([ME_QUERY_KEY, "u", "o"])?.isInvalidated).toBe(false);
+});
+
+test("the plan query is fetched again with `me`, and a query with another key is left alone", async () => {
+  const client = createQueryClient();
+  await client.fetchQuery({ queryKey: [ME_QUERY_KEY, "u", "o"], queryFn: async () => 1 });
+  await client.fetchQuery({ queryKey: [PLAN_QUERY_KEY, "u", "o"], queryFn: async () => 1 });
+  await client.fetchQuery({ queryKey: ["other"], queryFn: async () => 1 });
+  await expect(
+    client.fetchQuery({
+      queryKey: ["library-summary", "u", "o"],
+      queryFn: async () => {
+        throw new ApiError(402, "plan_required", "no plan");
+      },
+      retry: false,
+    }),
+  ).rejects.toBeInstanceOf(ApiError);
+  expect(client.getQueryState([PLAN_QUERY_KEY, "u", "o"])?.isInvalidated).toBe(true);
+  expect(client.getQueryState([ME_QUERY_KEY, "u", "o"])?.isInvalidated).toBe(true);
+  expect(client.getQueryState(["other"])?.isInvalidated).toBe(false);
 });

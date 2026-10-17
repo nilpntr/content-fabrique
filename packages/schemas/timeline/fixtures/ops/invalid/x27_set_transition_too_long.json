@@ -1,0 +1,6 @@
+{
+  "op": "set_transition",
+  "id": "c2",
+  "type": "whip",
+  "duration_ms": 1001
+}

@@ -1,0 +1,6 @@
+{
+  "op": "set_transition",
+  "id": "c2",
+  "type": "crossfade",
+  "duration_ms": 300
+}

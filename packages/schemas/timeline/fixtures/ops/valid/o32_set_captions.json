@@ -1,0 +1,7 @@
+{
+  "op": "set_captions",
+  "enabled": true,
+  "style": "chunk",
+  "uppercase": false,
+  "max_words": 3
+}

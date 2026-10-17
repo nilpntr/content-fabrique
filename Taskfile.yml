@@ -79,6 +79,31 @@ tasks:
     cmds:
       - bun run --filter @cf/schemas gen
 
+  gen:timeline:
+    desc: Copy the timeline and edit-op JSON Schemas into the Go packages that embed them (internal/timeline/schema, internal/timeline/ops/schema). Commit the result
+    dir: apps/server
+    cmds:
+      - go generate ./internal/timeline/...
+
+  gen:api:
+    desc: Regenerate the code of the OpenAPI contract (packages/schemas/openapi.yaml) - the Go server interface (apps/server/internal/api) and the TypeScript types (packages/schemas/api). Commit the result
+    cmds:
+      - cd apps/server && go generate ./internal/api
+      - bun run --filter @cf/schemas gen:api
+
+  lint:api:
+    desc: Lint the OpenAPI spec (Redocly recommended-strict ruleset, so any finding fails)
+    cmds:
+      - bun run --filter @cf/schemas lint:api
+
+  gen:
+    desc: Regenerate everything generated (sqlc code, the timeline types, the Go copy of the timeline schema, the API contract code). Commit the result
+    cmds:
+      - task: gen:sql
+      - task: gen:schemas
+      - task: gen:timeline
+      - task: gen:api
+
   # ── Build and test ──────────────────────────────────────────────────────────
 
   install:
@@ -102,10 +127,11 @@ tasks:
       - cd apps/server && go test ./...
 
   lint:
-    desc: Lint the Go code (golangci-lint, if installed) and the web code (Biome)
+    desc: Lint the Go code (golangci-lint), the web code (Biome) and the OpenAPI spec (Redocly)
     cmds:
       - task: lint:go
       - bun run --filter @cf/web lint
+      - task: lint:api
 
   # The same pinned version as .github/workflows/ci.yml (change both together), run through `go run`, so it needs no install.
   lint:go:

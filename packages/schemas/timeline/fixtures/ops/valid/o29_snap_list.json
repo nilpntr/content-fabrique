@@ -1,0 +1,16 @@
+{
+  "op": "snap_cuts_to_beats",
+  "grid": {
+    "beats_ms": [
+      0,
+      500,
+      1000,
+      1520.5,
+      2000
+    ],
+    "downbeats_ms": [
+      0
+    ],
+    "beats_per_bar": 4
+  }
+}

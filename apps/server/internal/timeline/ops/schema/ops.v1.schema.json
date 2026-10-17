@@ -1,0 +1,1513 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contentfabrique.app/schemas/timeline/ops.v1.json",
+  "title": "EditOp",
+  "description": "One edit op on a timeline (timeline spec v1), told apart by its \"op\" field. The editor agent changes a timeline only by sending a batch of these ops (the opBatch definition). A batch is atomic: every op is applied in order to a copy, the main track is rippled so it stays contiguous, new ids are assigned, and the result is validated. If anything is wrong, nothing changes and every problem is reported with the index of the op that caused it. All times are integer milliseconds.",
+  "$comment": "Structure only. The Go package apps/server/internal/timeline/ops applies the ops and checks what a schema cannot: that ids exist and are of the right kind, that a clip index is in range, that the result is a valid timeline (docs/design/timeline-v1.md sections 3 and 4). The shared definitions (ms, itemId, assetId, reframe, transition, ...) are copies of the ones in v1.schema.json; a test keeps them equal. The schema is closed: no property is allowed outside the ones listed.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/add_clip"
+    },
+    {
+      "$ref": "#/$defs/remove_item"
+    },
+    {
+      "$ref": "#/$defs/move_item"
+    },
+    {
+      "$ref": "#/$defs/trim_item"
+    },
+    {
+      "$ref": "#/$defs/replace_source"
+    },
+    {
+      "$ref": "#/$defs/set_speed"
+    },
+    {
+      "$ref": "#/$defs/set_reframe"
+    },
+    {
+      "$ref": "#/$defs/add_text"
+    },
+    {
+      "$ref": "#/$defs/update_text"
+    },
+    {
+      "$ref": "#/$defs/remove_text"
+    },
+    {
+      "$ref": "#/$defs/set_transition"
+    },
+    {
+      "$ref": "#/$defs/set_sound"
+    },
+    {
+      "$ref": "#/$defs/remove_sound"
+    },
+    {
+      "$ref": "#/$defs/snap_cuts_to_beats"
+    },
+    {
+      "$ref": "#/$defs/set_look"
+    },
+    {
+      "$ref": "#/$defs/set_captions"
+    },
+    {
+      "$ref": "#/$defs/set_clip_audio"
+    }
+  ],
+  "$defs": {
+    "ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 86400000,
+      "title": "Milliseconds",
+      "description": "A time or duration as a whole number of milliseconds, from 0 to 86 400 000 (24 hours). No floats."
+    },
+    "unit": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "title": "Unit interval",
+      "description": "A number from 0 to 1."
+    },
+    "gainDb": {
+      "type": "number",
+      "minimum": -30,
+      "maximum": 6,
+      "title": "Gain in dB",
+      "description": "Volume change in decibels, from -30 to +6. 0 leaves the level as it is."
+    },
+    "itemId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,31}$",
+      "title": "Item id",
+      "description": "A lowercase id of 1 to 32 characters: a letter, then letters, digits or underscores, such as \"c1\" or \"t3\". Ids are unique across the whole spec. The edit ops name items by these ids."
+    },
+    "styleId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,31}$",
+      "title": "Style id",
+      "description": "The id of a text style from the style registry, such as \"title_bold\". The spec can't name a font directly."
+    },
+    "assetId": {
+      "type": "string",
+      "pattern": "^ast_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+      "title": "Asset id",
+      "description": "TypeID of an asset: the prefix \"ast_\" and a 26-character base32 UUIDv7."
+    },
+    "momentId": {
+      "type": "string",
+      "pattern": "^mom_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+      "title": "Moment id",
+      "description": "TypeID of a moment: the prefix \"mom_\" and a 26-character base32 UUIDv7."
+    },
+    "trendId": {
+      "type": "string",
+      "pattern": "^trd_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+      "title": "Trend id",
+      "description": "TypeID of a trend: the prefix \"trd_\" and a 26-character base32 UUIDv7."
+    },
+    "licenseId": {
+      "type": "string",
+      "pattern": "^lic_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+      "title": "Licence id",
+      "description": "TypeID of a licence: the prefix \"lic_\" and a 26-character base32 UUIDv7."
+    },
+    "reframe": {
+      "type": "object",
+      "title": "Reframe",
+      "description": "How the source is fitted to the output frame. Without it, the clip uses cover, focus 0.5/0.5 and zoom 1.",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "cover",
+            "contain",
+            "blur_fill"
+          ],
+          "title": "Mode",
+          "description": "cover fills the frame and crops around the focus point. contain fits the whole source and pads with the background colour. blur_fill fits the whole source over a blurred, scaled copy of itself."
+        },
+        "focus": {
+          "type": "object",
+          "title": "Focus point",
+          "description": "The point of the source that the crop is centred on, as fractions of its width and height. Default 0.5/0.5. Only cover uses it.",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y"
+          ],
+          "properties": {
+            "x": {
+              "$ref": "#/$defs/unit",
+              "title": "Focus x",
+              "description": "0 is the left edge of the source, 1 the right edge."
+            },
+            "y": {
+              "$ref": "#/$defs/unit",
+              "title": "Focus y",
+              "description": "0 is the top edge of the source, 1 the bottom edge."
+            }
+          }
+        },
+        "zoom": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 3,
+          "default": 1,
+          "title": "Zoom",
+          "description": "Extra zoom into the centre of the framed clip, from 1 (none) to 3. Default 1."
+        }
+      }
+    },
+    "look": {
+      "type": "object",
+      "title": "Look",
+      "description": "A colour treatment for the clip. Without it, the clip has no treatment.",
+      "additionalProperties": false,
+      "required": [
+        "preset"
+      ],
+      "properties": {
+        "preset": {
+          "enum": [
+            "none",
+            "punchy",
+            "warm",
+            "cool",
+            "bw",
+            "matte"
+          ],
+          "title": "Preset",
+          "description": "A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white) or matte (lifted blacks)."
+        }
+      }
+    },
+    "transition": {
+      "title": "Transition in",
+      "description": "How the clip begins. A cut is instant. The other types blend with the previous clip over duration_ms, and the clip then starts that long before the previous one ends. The first clip must have a cut.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "cut",
+              "title": "Type",
+              "description": "\"cut\": no blend, no duration."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "duration_ms"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "crossfade",
+                "dip_to_black",
+                "whip"
+              ],
+              "title": "Type",
+              "description": "crossfade blends the two clips. dip_to_black fades out to black and in again. whip is a fast sideways slide with motion blur."
+            },
+            "duration_ms": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 1000,
+              "title": "Duration",
+              "description": "Length of the transition in ms, 100 to 1000. It must be shorter than both clips it joins (checked by the Go layer)."
+            }
+          }
+        }
+      ]
+    },
+    "videoAudio": {
+      "type": "object",
+      "title": "Clip audio",
+      "description": "Whether the clip's own sound is in the mix. Without it, the clip is silent.",
+      "additionalProperties": false,
+      "properties": {
+        "use_source": {
+          "type": "boolean",
+          "default": false,
+          "title": "Use source audio",
+          "description": "True to mix the clip's own audio. Default false."
+        },
+        "gain_db": {
+          "$ref": "#/$defs/gainDb",
+          "default": 0,
+          "title": "Gain",
+          "description": "Volume change of the clip's audio in dB, from -30 to +6. Default 0."
+        }
+      }
+    },
+    "audioDuration": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 86400000,
+      "title": "Duration",
+      "description": "How long the sound plays, in ms, 1 or more. Without it, it plays to the end of the timeline. The sound must end inside the total duration, and source_offset_ms + this duration must fit inside the asset (both checked by the Go layer)."
+    },
+    "fadeIn": {
+      "$ref": "#/$defs/ms",
+      "title": "Fade in",
+      "description": "Length of the fade in at the start, in ms. Without it, there is no fade. fade_in_ms + fade_out_ms must not exceed the sound's duration (checked by the Go layer)."
+    },
+    "fadeOut": {
+      "$ref": "#/$defs/ms",
+      "title": "Fade out",
+      "description": "Length of the fade out at the end, in ms. Without it, there is no fade. fade_in_ms + fade_out_ms must not exceed the sound's duration (checked by the Go layer)."
+    },
+    "speed": {
+      "type": "number",
+      "minimum": 0.25,
+      "maximum": 4,
+      "default": 1,
+      "title": "Speed",
+      "description": "Playback speed from 0.25 (slow motion) to 4 (fast). Default 1."
+    },
+    "sourceRange": {
+      "type": "object",
+      "title": "Source range",
+      "description": "The part of the asset to use, in the asset's own time. in_ms must be below out_ms and out_ms within the asset's duration (checked by the Go layer).",
+      "additionalProperties": false,
+      "required": [
+        "in_ms",
+        "out_ms"
+      ],
+      "properties": {
+        "in_ms": {
+          "$ref": "#/$defs/ms",
+          "title": "In point",
+          "description": "Where the clip starts in the asset, in ms."
+        },
+        "out_ms": {
+          "$ref": "#/$defs/ms",
+          "title": "Out point",
+          "description": "Where the clip ends in the asset, in ms. Exclusive."
+        }
+      }
+    },
+    "why": {
+      "type": "string",
+      "maxLength": 280,
+      "title": "Why",
+      "description": "Why the editor picked this clip, 280 characters at most. Shown to the creator in the UI and never rendered."
+    },
+    "textBody": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "^[^\\p{Cc}\\p{Zl}\\p{Zp}]*(\\n[^\\p{Cc}\\p{Zl}\\p{Zp}]*){0,2}$",
+      "title": "Text",
+      "description": "The words to show: 1 to 120 characters and at most 3 lines. Lines are separated by a newline (\\n). No other control character is allowed, and neither are the line and paragraph separators U+2028 and U+2029."
+    },
+    "textAnimation": {
+      "enum": [
+        "none",
+        "pop_in",
+        "fade",
+        "typewriter",
+        "slide_up"
+      ],
+      "default": "none",
+      "title": "Animation",
+      "description": "How the text enters: none, pop_in, fade, typewriter or slide_up. Default none."
+    },
+    "textAnchor": {
+      "enum": [
+        "upper_third",
+        "center",
+        "lower_third"
+      ],
+      "title": "Anchor",
+      "description": "A safe place for the text: upper_third, center or lower_third. Set this or position, not both."
+    },
+    "textPosition": {
+      "type": "object",
+      "title": "Position",
+      "description": "A free place for the text's centre as fractions of the frame. The text must stay inside the format's safe zone (checked by the Go layer). Set this or anchor, not both.",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/unit",
+          "title": "Position x",
+          "description": "0 is the left edge of the frame, 1 the right edge."
+        },
+        "y": {
+          "$ref": "#/$defs/unit",
+          "title": "Position y",
+          "description": "0 is the top edge of the frame, 1 the bottom edge."
+        }
+      }
+    },
+    "textDuration": {
+      "type": "integer",
+      "minimum": 300,
+      "maximum": 86400000,
+      "title": "Duration",
+      "description": "How long the text stays, in ms. At least 300. It must end inside the total duration (checked by the Go layer)."
+    },
+    "captionsStyle": {
+      "enum": [
+        "word_highlight",
+        "chunk"
+      ],
+      "title": "Style",
+      "description": "word_highlight shows a few words and highlights the one being said. chunk shows each group of words at once."
+    },
+    "maxWords": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4,
+      "default": 2,
+      "title": "Maximum words",
+      "description": "The most words on screen at once, 1 to 4. Default 2."
+    },
+    "add_clip": {
+      "type": "object",
+      "title": "add_clip",
+      "description": "Add a clip from a source asset to the main track. Give the part of the asset to use as source.in_ms and source.out_ms (in the asset's own time; in_ms below out_ms, out_ms within the asset's duration). Say where it goes with index (the position it will have, 0 is the start) or after_id (right after that clip); without either it goes at the end. The clips after it move later (ripple) and their at_ms is recomputed. Without id, the clip gets the next free id such as \"c7\"; the result reports it. speed, reframe, look, transition_in and audio are optional and default as in the timeline spec. A transition_in on a clip that ends up first is an error.",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "asset_id",
+        "source"
+      ],
+      "properties": {
+        "op": {
+          "const": "add_clip",
+          "title": "Op",
+          "description": "\"add_clip\"."
+        },
+        "id": {
+          "$ref": "#/$defs/itemId",
+          "title": "Clip id",
+          "description": "Optional id for the new clip. Without it the next free \"c<n>\" is used. It must not be in use anywhere in the timeline."
+        },
+        "asset_id": {
+          "$ref": "#/$defs/assetId"
+        },
+        "source": {
+          "$ref": "#/$defs/sourceRange"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000,
+          "title": "Index",
+          "description": "The position the new clip will have among the main clips, 0 for the start. Equal to the number of clips appends. Not together with after_id."
+        },
+        "after_id": {
+          "$ref": "#/$defs/itemId",
+          "title": "After",
+          "description": "Put the new clip right after the clip with this id. Not together with index."
+        },
+        "speed": {
+          "$ref": "#/$defs/speed"
+        },
+        "reframe": {
+          "$ref": "#/$defs/reframe"
+        },
+        "look": {
+          "$ref": "#/$defs/look"
+        },
+        "transition_in": {
+          "$ref": "#/$defs/transition"
+        },
+        "audio": {
+          "$ref": "#/$defs/videoAudio"
+        },
+        "moment_id": {
+          "$ref": "#/$defs/momentId"
+        },
+        "why": {
+          "$ref": "#/$defs/why"
+        }
+      },
+      "not": {
+        "required": [
+          "index",
+          "after_id"
+        ],
+        "properties": {
+          "index": {},
+          "after_id": {}
+        }
+      }
+    },
+    "remove_item": {
+      "type": "object",
+      "title": "remove_item",
+      "description": "Remove a clip from the main track. The clips after it move earlier (ripple). If the removed clip was first, the new first clip loses its transition_in (it becomes a cut). Text and sounds keep their times, so one that now runs past the end of the timeline is an error: shorten or move it in the same batch.",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "id"
+      ],
+      "properties": {
+        "op": {
+          "const": "remove_item",
+          "title": "Op",
+          "description": "\"remove_item\"."
+        },
+        "id": {
+          "$ref": "#/$defs/itemId",
+          "title": "Clip id",
+          "description": "The id of the main-track clip to remove."
+        }
+      }
+    },
+    "move_item": {
+      "type": "object",
+      "title": "move_item",
+      "description": "Move an item. For a main-track clip, give index (the position it will have, 0 is the start) or after_id (right after that clip); the clips between shift and every at_ms is recomputed. For a text item or a sound, give at_ms, its new absolute start; nothing else moves. Give exactly one of at_ms, index and after_id. A clip that moves to the first position loses its transition_in.",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "id"
+      ],
+      "properties": {
+        "op": {
+          "const": "move_item",
+          "title": "Op",
+          "description": "\"move_item\"."
+        },
+        "id": {
+          "$ref": "#/$defs/itemId",
+          "title": "Item id",
+          "description": "The id of the clip, text item or sound to move."
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms",
+          "title": "Start",
+          "description": "New start in ms. Only for a text item or a sound."
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000,
+          "title": "Index",
+          "description": "The position the clip will have among the main clips, 0 for the start. Only for a clip."
+        },
+        "after_id": {
+          "$ref": "#/$defs/itemId",
+          "title": "After",
+          "description": "Put the clip right after the clip with this id. Only for a clip."
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "at_ms"
+          ],
+          "properties": {
+            "at_ms": {}
+          }
+        },
+        {
+          "required": [
+            "index"
+          ],
+          "properties": {
+            "index": {}
+          }
+        },
+        {
+          "required": [
+            "after_id"
+          ],
+          "properties": {
+            "after_id": {}
+          }
+        }
+      ]
+    },
+    "trim_item": {
+      "type": "object",
+      "title": "trim_item",
+      "description": "Trim an item. For a main-track clip, give in_ms and/or out_ms: the new source range in the asset's own time (absolute values, not changes). The clip's length changes and the clips after it ripple. For a text item or a sound, give duration_ms, its new length; it starts where it did. Do not mix the two kinds of fields.",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "id"
+      ],
+      "properties": {
+        "op": {
+          "const": "trim_item",
+          "title": "Op",
+          "description": "\"trim_item\"."
+        },
+        "id": {
+          "$ref": "#/$defs/itemId",
+          "title": "Item id",
+          "description": "The id of the clip, text item or sound to trim."
+        },
+        "in_ms": {
+          "$ref": "#/$defs/ms",
+          "title": "In point",
+          "description": "New source in point of a clip, in ms. Must stay below the out point."
+        },
+        "out_ms": {
+          "$ref": "#/$defs/ms",
+          "title": "Out point",
+          "description": "New source out point of a clip, in ms. Must stay within the asset's duration."
+        },
+        "duration_ms": {
+          "$ref": "#/$defs/ms",
+          "title": "Duration",
+          "description": "New length of a text item (at least 300) or a sound (at least 1), in ms."
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "in_ms"
+          ],
+          "properties": {
+            "in_ms": {}
+          }
+        },
+        {
+          "required": [
+            "out_ms"
+          ],
+          "properties": {
+            "out_ms": {}
+          }
+        },
+        {
+          "required": [
+            "duration_ms"
+          ],
+          "properties": {
+            "duration_ms": {}
+          }
+        }
+      ]
+    },
+    "replace_source": {
+      "type": "object",
+      "title": "replace_source",
+      "description": "Swap the asset and source range of a clip and keep everything else about it: its place, speed, reframe, look, transition and audio settings. The clips after it ripple if the new range has another length. The clip's moment_id is replaced by the given one, or removed when you give none, because the old moment no longer matches.",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "id",
+        "asset_id",
+        "source"
+      ],
+      "properties": {
+        "op": {
+          "const": "replace_source",
+          "title": "Op",
+          "description": "\"replace_source\"."
+        },
+        "id": {
+          "$ref": "#/$defs/itemId",
+          "title": "Clip id",
+          "description": "The id of the main-track clip to change."
+        },
+        "asset_id": {
+          "$ref": "#/$defs/assetId"
+        },
+        "source": {
+          "$ref": "#/$defs/sourceRange"
+        },
+        "moment_id": {
+          "$ref": "#/$defs/momentId"
+        }
+      }
+    },
+    "set_speed": {
+      "type": "object",
+      "title": "set_speed",
+      "description": "Set the playback speed of a clip, from 0.25 (slow motion) to 4 (fast). A faster speed makes the clip shorter and the clips after it ripple earlier.",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "id",
+        "speed"
+      ],
+      "properties": {
+        "op": {
+          "const": "set_speed",
+          "title": "Op",
+          "description": "\"set_speed\"."
+        },
+        "id": {
+          "$ref": "#/$defs/itemId",
+          "title": "Clip id",
+          "description": "The id of the main-track clip."
+        },
+        "speed": {
+          "$ref": "#/$defs/speed"
+        }
+      }
+    },
+    "set_reframe": {
+      "type": "object",
+      "title": "set_reframe",
+      "description": "Set how a clip is fitted to the output frame: cover (fill and crop around focus), contain (fit and pad) or blur_fill (fit over a blurred copy). This replaces the whole reframe of the clip, so fields you leave out go back to their defaults (focus 0.5/0.5, zoom 1).",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "id",
+        "mode"
+      ],
+      "properties": {
+        "op": {
+          "const": "set_reframe",
+          "title": "Op",
+          "description": "\"set_reframe\"."
+        },
+        "id": {
+          "$ref": "#/$defs/itemId",
+          "title": "Clip id",
+          "description": "The id of the main-track clip."
+        },
+        "mode": {
+          "enum": [
+            "cover",
+            "contain",
+            "blur_fill"
+          ],
+          "title": "Mode",
+          "description": "cover fills the frame and crops around the focus point. contain fits the whole source and pads with the background colour. blur_fill fits the whole source over a blurred, scaled copy of itself."
+        },
+        "focus": {
+          "type": "object",
+          "title": "Focus point",
+          "description": "The point of the source that the crop is centred on, as fractions of its width and height. Default 0.5/0.5. Only cover uses it.",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y"
+          ],
+          "properties": {
+            "x": {
+              "$ref": "#/$defs/unit",
+              "title": "Focus x",
+              "description": "0 is the left edge of the source, 1 the right edge."
+            },
+            "y": {
+              "$ref": "#/$defs/unit",
+              "title": "Focus y",
+              "description": "0 is the top edge of the source, 1 the bottom edge."
+            }
+          }
+        },
+        "zoom": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 3,
+          "default": 1,
+          "title": "Zoom",
+          "description": "Extra zoom into the centre of the framed clip, from 1 (none) to 3. Default 1."
+        }
+      }
+    },
+    "add_text": {
+      "type": "object",
+      "title": "add_text",
+      "description": "Add a text overlay. It keeps its absolute time when clips move, and it must end inside the total duration of the timeline and inside the safe zone of the format. Give exactly one of anchor and position. Without id, the text gets the next free id such as \"t3\"; the result reports it. The text track is created when there is none.",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "at_ms",
+        "duration_ms",
+        "text",
+        "style"
+      ],
+      "properties": {
+        "op": {
+          "const": "add_text",
+          "title": "Op",
+          "description": "\"add_text\"."
+        },
+        "id": {
+          "$ref": "#/$defs/itemId",
+          "title": "Text id",
+          "description": "Optional id for the new text item. Without it the next free \"t<n>\" is used."
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms",
+          "title": "Start",
+          "description": "When the text appears, in ms."
+        },
+        "duration_ms": {
+          "$ref": "#/$defs/textDuration"
+        },
+        "text": {
+          "$ref": "#/$defs/textBody"
+        },
+        "style": {
+          "$ref": "#/$defs/styleId"
+        },
+        "anchor": {
+          "$ref": "#/$defs/textAnchor"
+        },
+        "position": {
+          "$ref": "#/$defs/textPosition"
+        },
+        "animation": {
+          "$ref": "#/$defs/textAnimation"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "anchor"
+          ],
+          "properties": {
+            "anchor": {}
+          }
+        },
+        {
+          "required": [
+            "position"
+          ],
+          "properties": {
+            "position": {}
+          }
+        }
+      ]
+    },
+    "update_text": {
+      "type": "object",
+      "title": "update_text",
+      "description": "Change fields of a text item; the fields you leave out stay as they are. Setting anchor removes the position and the other way round. Give at least one field.",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "id"
+      ],
+      "properties": {
+        "op": {
+          "const": "update_text",
+          "title": "Op",
+          "description": "\"update_text\"."
+        },
+        "id": {
+          "$ref": "#/$defs/itemId",
+          "title": "Text id",
+          "description": "The id of the text item."
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms",
+          "title": "Start",
+          "description": "New start in ms."
+        },
+        "duration_ms": {
+          "$ref": "#/$defs/textDuration"
+        },
+        "text": {
+          "$ref": "#/$defs/textBody"
+        },
+        "style": {
+          "$ref": "#/$defs/styleId"
+        },
+        "anchor": {
+          "$ref": "#/$defs/textAnchor"
+        },
+        "position": {
+          "$ref": "#/$defs/textPosition"
+        },
+        "animation": {
+          "$ref": "#/$defs/textAnimation"
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "at_ms"
+          ],
+          "properties": {
+            "at_ms": {}
+          }
+        },
+        {
+          "required": [
+            "duration_ms"
+          ],
+          "properties": {
+            "duration_ms": {}
+          }
+        },
+        {
+          "required": [
+            "text"
+          ],
+          "properties": {
+            "text": {}
+          }
+        },
+        {
+          "required": [
+            "style"
+          ],
+          "properties": {
+            "style": {}
+          }
+        },
+        {
+          "required": [
+            "anchor"
+          ],
+          "properties": {
+            "anchor": {}
+          }
+        },
+        {
+          "required": [
+            "position"
+          ],
+          "properties": {
+            "position": {}
+          }
+        },
+        {
+          "required": [
+            "animation"
+          ],
+          "properties": {
+            "animation": {}
+          }
+        }
+      ],
+      "not": {
+        "required": [
+          "anchor",
+          "position"
+        ],
+        "properties": {
+          "anchor": {},
+          "position": {}
+        }
+      }
+    },
+    "remove_text": {
+      "type": "object",
+      "title": "remove_text",
+      "description": "Remove a text item.",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "id"
+      ],
+      "properties": {
+        "op": {
+          "const": "remove_text",
+          "title": "Op",
+          "description": "\"remove_text\"."
+        },
+        "id": {
+          "$ref": "#/$defs/itemId",
+          "title": "Text id",
+          "description": "The id of the text item to remove."
+        }
+      }
+    },
+    "set_transition": {
+      "type": "object",
+      "title": "set_transition",
+      "description": "Set how a clip begins. cut is instant. crossfade, dip_to_black and whip blend with the previous clip over duration_ms (100 to 1000) and the clip then starts that long before the previous one ends, so the clips after it ripple earlier. The first clip must have a cut, and a transition must be shorter than both clips it joins.",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "id",
+        "type"
+      ],
+      "properties": {
+        "op": {
+          "const": "set_transition",
+          "title": "Op",
+          "description": "\"set_transition\"."
+        },
+        "id": {
+          "$ref": "#/$defs/itemId",
+          "title": "Clip id",
+          "description": "The id of the main-track clip whose start gets the transition."
+        },
+        "type": {
+          "enum": [
+            "cut",
+            "crossfade",
+            "dip_to_black",
+            "whip"
+          ],
+          "title": "Type",
+          "description": "cut, crossfade, dip_to_black or whip."
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 1000,
+          "title": "Duration",
+          "description": "Length of the transition in ms, 100 to 1000. It must be shorter than both clips it joins (checked by the Go layer)."
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "cut"
+            }
+          },
+          "not": {
+            "required": [
+              "duration_ms"
+            ],
+            "properties": {
+              "duration_ms": {}
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "crossfade",
+                "dip_to_black",
+                "whip"
+              ]
+            }
+          },
+          "required": [
+            "duration_ms"
+          ]
+        }
+      ]
+    },
+    "set_sound": {
+      "title": "set_sound",
+      "description": "Add a sound, or replace the sound with the same id (a full replacement: fields you leave out go back to their defaults). export is set for you from the kind: a trend_sound is cue_only (a cue for the creator to add the sound in TikTok; we never reproduce it), the other two are licensed. Sounds keep their absolute time when clips move, must end inside the total duration, and the audio track is created when there is none. A licensed_track needs an audio asset with a licence, a creator_audio an audio asset with a rights attestation.",
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "set_sound trend_sound",
+          "description": "Add a sound, or replace the sound with the same id (a full replacement: fields you leave out go back to their defaults). export is set for you from the kind: a trend_sound is cue_only (a cue for the creator to add the sound in TikTok; we never reproduce it), the other two are licensed. Sounds keep their absolute time when clips move, must end inside the total duration, and the audio track is created when there is none. A licensed_track needs an audio asset with a licence, a creator_audio an audio asset with a rights attestation. This variant: trend_sound.",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "kind",
+            "trend_id"
+          ],
+          "properties": {
+            "op": {
+              "const": "set_sound",
+              "title": "Op",
+              "description": "\"set_sound\"."
+            },
+            "kind": {
+              "const": "trend_sound",
+              "title": "Kind",
+              "description": "\"trend_sound\"."
+            },
+            "trend_id": {
+              "$ref": "#/$defs/trendId"
+            },
+            "id": {
+              "$ref": "#/$defs/itemId",
+              "title": "Sound id",
+              "description": "Optional id. If a sound with this id exists, it is replaced entirely; if not, a new sound gets this id. Without id, a new sound gets the next free \"s<n>\"."
+            },
+            "at_ms": {
+              "$ref": "#/$defs/ms",
+              "title": "Start",
+              "description": "When the sound starts in the output, in ms. Default 0."
+            },
+            "source_offset_ms": {
+              "$ref": "#/$defs/ms",
+              "title": "Source offset",
+              "description": "Where in the sound to start playing, in ms. Default 0."
+            },
+            "duration_ms": {
+              "$ref": "#/$defs/audioDuration"
+            },
+            "gain_db": {
+              "$ref": "#/$defs/gainDb"
+            },
+            "fade_in_ms": {
+              "$ref": "#/$defs/fadeIn"
+            },
+            "fade_out_ms": {
+              "$ref": "#/$defs/fadeOut"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "title": "set_sound licensed_track",
+          "description": "Add a sound, or replace the sound with the same id (a full replacement: fields you leave out go back to their defaults). export is set for you from the kind: a trend_sound is cue_only (a cue for the creator to add the sound in TikTok; we never reproduce it), the other two are licensed. Sounds keep their absolute time when clips move, must end inside the total duration, and the audio track is created when there is none. A licensed_track needs an audio asset with a licence, a creator_audio an audio asset with a rights attestation. This variant: licensed_track.",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "kind",
+            "asset_id",
+            "license_id"
+          ],
+          "properties": {
+            "op": {
+              "const": "set_sound",
+              "title": "Op",
+              "description": "\"set_sound\"."
+            },
+            "kind": {
+              "const": "licensed_track",
+              "title": "Kind",
+              "description": "\"licensed_track\"."
+            },
+            "asset_id": {
+              "$ref": "#/$defs/assetId"
+            },
+            "license_id": {
+              "$ref": "#/$defs/licenseId"
+            },
+            "id": {
+              "$ref": "#/$defs/itemId",
+              "title": "Sound id",
+              "description": "Optional id. If a sound with this id exists, it is replaced entirely; if not, a new sound gets this id. Without id, a new sound gets the next free \"s<n>\"."
+            },
+            "at_ms": {
+              "$ref": "#/$defs/ms",
+              "title": "Start",
+              "description": "When the sound starts in the output, in ms. Default 0."
+            },
+            "source_offset_ms": {
+              "$ref": "#/$defs/ms",
+              "title": "Source offset",
+              "description": "Where in the sound to start playing, in ms. Default 0."
+            },
+            "duration_ms": {
+              "$ref": "#/$defs/audioDuration"
+            },
+            "gain_db": {
+              "$ref": "#/$defs/gainDb"
+            },
+            "fade_in_ms": {
+              "$ref": "#/$defs/fadeIn"
+            },
+            "fade_out_ms": {
+              "$ref": "#/$defs/fadeOut"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "title": "set_sound creator_audio",
+          "description": "Add a sound, or replace the sound with the same id (a full replacement: fields you leave out go back to their defaults). export is set for you from the kind: a trend_sound is cue_only (a cue for the creator to add the sound in TikTok; we never reproduce it), the other two are licensed. Sounds keep their absolute time when clips move, must end inside the total duration, and the audio track is created when there is none. A licensed_track needs an audio asset with a licence, a creator_audio an audio asset with a rights attestation. This variant: creator_audio.",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "kind",
+            "asset_id"
+          ],
+          "properties": {
+            "op": {
+              "const": "set_sound",
+              "title": "Op",
+              "description": "\"set_sound\"."
+            },
+            "kind": {
+              "const": "creator_audio",
+              "title": "Kind",
+              "description": "\"creator_audio\"."
+            },
+            "asset_id": {
+              "$ref": "#/$defs/assetId"
+            },
+            "id": {
+              "$ref": "#/$defs/itemId",
+              "title": "Sound id",
+              "description": "Optional id. If a sound with this id exists, it is replaced entirely; if not, a new sound gets this id. Without id, a new sound gets the next free \"s<n>\"."
+            },
+            "at_ms": {
+              "$ref": "#/$defs/ms",
+              "title": "Start",
+              "description": "When the sound starts in the output, in ms. Default 0."
+            },
+            "source_offset_ms": {
+              "$ref": "#/$defs/ms",
+              "title": "Source offset",
+              "description": "Where in the sound to start playing, in ms. Default 0."
+            },
+            "duration_ms": {
+              "$ref": "#/$defs/audioDuration"
+            },
+            "gain_db": {
+              "$ref": "#/$defs/gainDb"
+            },
+            "fade_in_ms": {
+              "$ref": "#/$defs/fadeIn"
+            },
+            "fade_out_ms": {
+              "$ref": "#/$defs/fadeOut"
+            }
+          }
+        }
+      ]
+    },
+    "remove_sound": {
+      "type": "object",
+      "title": "remove_sound",
+      "description": "Remove a sound from the audio track.",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "id"
+      ],
+      "properties": {
+        "op": {
+          "const": "remove_sound",
+          "title": "Op",
+          "description": "\"remove_sound\"."
+        },
+        "id": {
+          "$ref": "#/$defs/itemId",
+          "title": "Sound id",
+          "description": "The id of the sound to remove."
+        }
+      }
+    },
+    "beatGrid": {
+      "title": "Beat grid",
+      "description": "The beats of a sound, in the sound's own time (ms from its start) unless the op says otherwise. Either a constant tempo (bpm and first_beat_ms) or an explicit list of beat times (beats_ms) from beat tracking.",
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "Constant tempo",
+          "description": "A grid of evenly spaced beats: beat n is at first_beat_ms + n * 60000 / bpm.",
+          "additionalProperties": false,
+          "required": [
+            "bpm",
+            "first_beat_ms"
+          ],
+          "properties": {
+            "bpm": {
+              "type": "number",
+              "minimum": 40,
+              "maximum": 240,
+              "title": "Tempo",
+              "description": "Beats per minute, 40 to 240."
+            },
+            "first_beat_ms": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 86400000,
+              "title": "First beat",
+              "description": "Time of the first beat in ms from the start of the sound. May have a fraction."
+            },
+            "beats_per_bar": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16,
+              "default": 4,
+              "title": "Beats per bar",
+              "description": "Beats in a bar, 1 to 16. Default 4."
+            },
+            "downbeat_offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 15,
+              "default": 0,
+              "title": "Downbeat offset",
+              "description": "Number of beats from the first beat to the first downbeat, less than beats_per_bar. Default 0."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "title": "Beat list",
+          "description": "An explicit list of beat times, possibly irregular.",
+          "additionalProperties": false,
+          "required": [
+            "beats_ms"
+          ],
+          "properties": {
+            "beats_ms": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 20000,
+              "items": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 86400000
+              },
+              "title": "Beats",
+              "description": "Beat times in ms from the start of the sound: at least two, strictly increasing and at least 250 ms apart."
+            },
+            "downbeats_ms": {
+              "type": "array",
+              "maxItems": 20000,
+              "items": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 86400000
+              },
+              "title": "Downbeats",
+              "description": "Times of the downbeats; each must coincide with one of the beats. Without it, every beats_per_bar-th beat from the first is a downbeat."
+            },
+            "beats_per_bar": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16,
+              "default": 4,
+              "title": "Beats per bar",
+              "description": "Beats in a bar, 1 to 16. Default 4."
+            }
+          }
+        }
+      ]
+    },
+    "snapOptions": {
+      "type": "object",
+      "title": "Snap options",
+      "description": "How hard to snap.",
+      "additionalProperties": false,
+      "properties": {
+        "max_shift_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000,
+          "title": "Maximum shift",
+          "description": "The furthest a cut may move to reach a beat, in ms. When both limits are given the smaller applies; without either it is half a beat."
+        },
+        "max_shift_beats": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 16,
+          "title": "Maximum shift in beats",
+          "description": "The furthest a cut may move, in beats."
+        },
+        "prefer_downbeats": {
+          "type": "boolean",
+          "default": false,
+          "title": "Prefer downbeats",
+          "description": "Pick the nearest downbeat within the limit when there is one. A cut already on a beat stays there. Default false."
+        },
+        "min_shot_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000,
+          "title": "Minimum shot",
+          "description": "The shortest shot to keep, in ms. Default 300."
+        },
+        "write_markers": {
+          "type": "boolean",
+          "default": false,
+          "title": "Write markers",
+          "description": "Also replace the beat and downbeat markers of the timeline with this grid's beats. Default false."
+        }
+      }
+    },
+    "snap_cuts_to_beats": {
+      "type": "object",
+      "title": "snap_cuts_to_beats",
+      "description": "Move the cuts between main-track clips onto the beats of a grid, so the edit cuts on the music. Each cut (the at_ms of every clip after the first) moves to the nearest beat within the maximum shift (half a beat unless set), aligned to a frame, by trimming the end of the clip before it and the start of the clip after it; the total length does not change. A cut with no beat in range, or where moving would make a shot too short (under 300 ms) or run a clip past the end of its asset, stays where it is, and the result says so in a warning. If sound_id names a sound on the audio track, the grid is in that sound's time and is placed with the sound's at_ms and source_offset_ms; without it the grid is in timeline time.",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "grid"
+      ],
+      "properties": {
+        "op": {
+          "const": "snap_cuts_to_beats",
+          "title": "Op",
+          "description": "\"snap_cuts_to_beats\"."
+        },
+        "grid": {
+          "$ref": "#/$defs/beatGrid"
+        },
+        "sound_id": {
+          "$ref": "#/$defs/itemId",
+          "title": "Sound id",
+          "description": "The id of the sound the grid belongs to. Without it the grid is in timeline time."
+        },
+        "options": {
+          "$ref": "#/$defs/snapOptions"
+        }
+      }
+    },
+    "set_look": {
+      "type": "object",
+      "title": "set_look",
+      "description": "Set the colour look of a clip. Without id it applies to every clip on the main track.",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "preset"
+      ],
+      "properties": {
+        "op": {
+          "const": "set_look",
+          "title": "Op",
+          "description": "\"set_look\"."
+        },
+        "id": {
+          "$ref": "#/$defs/itemId",
+          "title": "Clip id",
+          "description": "The id of the main-track clip. Leave it out for all clips."
+        },
+        "preset": {
+          "enum": [
+            "none",
+            "punchy",
+            "warm",
+            "cool",
+            "bw",
+            "matte"
+          ],
+          "title": "Preset",
+          "description": "A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white) or matte (lifted blacks)."
+        }
+      }
+    },
+    "set_captions": {
+      "type": "object",
+      "title": "set_captions",
+      "description": "Create or change the captions track (burned-in captions from the transcript). The fields you leave out stay as they are; on a new captions track style defaults to word_highlight and enabled to true. Give at least one field.",
+      "additionalProperties": false,
+      "required": [
+        "op"
+      ],
+      "properties": {
+        "op": {
+          "const": "set_captions",
+          "title": "Op",
+          "description": "\"set_captions\"."
+        },
+        "enabled": {
+          "type": "boolean",
+          "title": "Enabled",
+          "description": "True to render the captions."
+        },
+        "style": {
+          "$ref": "#/$defs/captionsStyle"
+        },
+        "uppercase": {
+          "type": "boolean",
+          "default": true,
+          "title": "Uppercase",
+          "description": "True to write the captions in capitals. Default true."
+        },
+        "max_words": {
+          "$ref": "#/$defs/maxWords"
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {}
+          }
+        },
+        {
+          "required": [
+            "style"
+          ],
+          "properties": {
+            "style": {}
+          }
+        },
+        {
+          "required": [
+            "uppercase"
+          ],
+          "properties": {
+            "uppercase": {}
+          }
+        },
+        {
+          "required": [
+            "max_words"
+          ],
+          "properties": {
+            "max_words": {}
+          }
+        }
+      ]
+    },
+    "set_clip_audio": {
+      "type": "object",
+      "title": "set_clip_audio",
+      "description": "Set whether a clip's own sound is in the mix and how loud. The fields you leave out stay as they are; clips are silent by default.",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "id"
+      ],
+      "properties": {
+        "op": {
+          "const": "set_clip_audio",
+          "title": "Op",
+          "description": "\"set_clip_audio\"."
+        },
+        "id": {
+          "$ref": "#/$defs/itemId",
+          "title": "Clip id",
+          "description": "The id of the main-track clip."
+        },
+        "use_source": {
+          "type": "boolean",
+          "default": false,
+          "title": "Use source audio",
+          "description": "True to mix the clip's own audio. Default false."
+        },
+        "gain_db": {
+          "$ref": "#/$defs/gainDb",
+          "default": 0,
+          "title": "Gain",
+          "description": "Volume change of the clip's audio in dB, from -30 to +6. Default 0."
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "use_source"
+          ],
+          "properties": {
+            "use_source": {}
+          }
+        },
+        {
+          "required": [
+            "gain_db"
+          ],
+          "properties": {
+            "gain_db": {}
+          }
+        }
+      ]
+    },
+    "opBatch": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "title": "EditBatch",
+      "description": "A batch of edit ops, applied in order and atomically: all of them or none. At most 100 ops.",
+      "items": {
+        "$ref": "#"
+      }
+    }
+  }
+}

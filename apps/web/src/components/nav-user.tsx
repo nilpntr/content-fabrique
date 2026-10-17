@@ -2,7 +2,7 @@ import { UserButton, useUser } from "@clerk/tanstack-react-start";
 import { MoonIcon, SunIcon } from "lucide-react";
 import { SidebarMenu, SidebarMenuItem } from "@/components/ui/sidebar";
 import { toggleTheme, useTheme } from "@/hooks/use-theme";
-import { useMe } from "@/lib/use-me";
+import { useMe } from "@/lib/api/hooks";
 
 const collapsedFade =
   "transition-opacity delay-90 duration-(--dur-base) group-data-[collapsible=icon]:pointer-events-none group-data-[collapsible=icon]:hidden";

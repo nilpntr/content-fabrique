@@ -1,0 +1,12 @@
+{
+  "op": "add_text",
+  "at_ms": 0,
+  "duration_ms": 1000,
+  "text": "x",
+  "style": "title_bold",
+  "anchor": "center",
+  "position": {
+    "x": 0.5,
+    "y": 0.5
+  }
+}

@@ -1,0 +1,608 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contentfabrique.app/schemas/timeline/v1.json",
+  "title": "Timeline",
+  "description": "A Content Fabrique edit: the declarative timeline (an EDL in JSON) that agents and users change through edit ops and that the Go compiler turns into one ffmpeg invocation. Every time is an integer number of milliseconds.",
+  "$comment": "Structure only. The Go layer (apps/server/internal/timeline, docs/design/timeline-v1.md section 3) checks what a schema cannot: unique ids across the spec (duplicate_id), contiguity of the main track including the first item starting at 0 (gap, overlap), source ranges inside the asset, for video and audio, with in < out (source_out_of_range), output duration of an item >= 300 ms (shot_too_short), total duration 1 s to 180 s (duration_out_of_range), every text item, audio item and marker inside the total duration (outside_timeline), text inside the format safe zone (unsafe_text), asset ids that exist in the catalog (unknown_asset), transitions shorter than both items they join (transition_too_long), audio assets that are licensed or attested (unlicensed_audio), fades that fit the sound (fade_too_long), assets of the right kind (wrong_asset_kind), no transition on the first clip in time (first_transition) and text styles that exist in the style registry (unknown_style). The schema is closed: no property is allowed outside the ones listed, at any level.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "output", "tracks", "markers"],
+  "properties": {
+    "schema": {
+      "const": "contentfabrique.timeline/v1",
+      "title": "Schema version",
+      "description": "The constant \"contentfabrique.timeline/v1\". It names the spec version the document follows."
+    },
+    "output": { "$ref": "#/$defs/output" },
+    "tracks": {
+      "type": "array",
+      "title": "Tracks",
+      "description": "Exactly one video track (its id is \"main\"), at most one text track, at most one captions track and at most one audio track, in any order.",
+      "items": { "$ref": "#/$defs/track" },
+      "allOf": [
+        {
+          "contains": { "type": "object", "properties": { "type": { "const": "video" } }, "required": ["type"] },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": { "type": "object", "properties": { "type": { "const": "text" } }, "required": ["type"] },
+          "minContains": 0,
+          "maxContains": 1
+        },
+        {
+          "contains": { "type": "object", "properties": { "type": { "const": "captions" } }, "required": ["type"] },
+          "minContains": 0,
+          "maxContains": 1
+        },
+        {
+          "contains": { "type": "object", "properties": { "type": { "const": "audio" } }, "required": ["type"] },
+          "minContains": 0,
+          "maxContains": 1
+        }
+      ]
+    },
+    "markers": {
+      "type": "array",
+      "title": "Markers",
+      "description": "Beat grid and section marks that the editor uses to place cuts. They are never rendered.",
+      "items": { "$ref": "#/$defs/marker" }
+    },
+    "meta": { "$ref": "#/$defs/meta" }
+  },
+
+  "$defs": {
+    "ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 86400000,
+      "title": "Milliseconds",
+      "description": "A time or duration as a whole number of milliseconds, from 0 to 86 400 000 (24 hours). No floats."
+    },
+    "unit": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "title": "Unit interval",
+      "description": "A number from 0 to 1."
+    },
+    "gainDb": {
+      "type": "number",
+      "minimum": -30,
+      "maximum": 6,
+      "title": "Gain in dB",
+      "description": "Volume change in decibels, from -30 to +6. 0 leaves the level as it is."
+    },
+    "itemId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,31}$",
+      "title": "Item id",
+      "description": "A lowercase id of 1 to 32 characters: a letter, then letters, digits or underscores, such as \"c1\" or \"t3\". Ids are unique across the whole spec. The edit ops name items by these ids."
+    },
+    "styleId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,31}$",
+      "title": "Style id",
+      "description": "The id of a text style from the style registry, such as \"title_bold\". The spec can't name a font directly."
+    },
+    "assetId": {
+      "type": "string",
+      "pattern": "^ast_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+      "title": "Asset id",
+      "description": "TypeID of an asset: the prefix \"ast_\" and a 26-character base32 UUIDv7."
+    },
+    "momentId": {
+      "type": "string",
+      "pattern": "^mom_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+      "title": "Moment id",
+      "description": "TypeID of a moment: the prefix \"mom_\" and a 26-character base32 UUIDv7."
+    },
+    "trendId": {
+      "type": "string",
+      "pattern": "^trd_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+      "title": "Trend id",
+      "description": "TypeID of a trend: the prefix \"trd_\" and a 26-character base32 UUIDv7."
+    },
+    "ideaId": {
+      "type": "string",
+      "pattern": "^ide_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+      "title": "Idea id",
+      "description": "TypeID of an idea: the prefix \"ide_\" and a 26-character base32 UUIDv7."
+    },
+    "conceptId": {
+      "type": "string",
+      "pattern": "^con_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+      "title": "Concept id",
+      "description": "TypeID of a concept: the prefix \"con_\" and a 26-character base32 UUIDv7."
+    },
+    "licenseId": {
+      "type": "string",
+      "pattern": "^lic_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+      "title": "Licence id",
+      "description": "TypeID of a licence: the prefix \"lic_\" and a 26-character base32 UUIDv7."
+    },
+
+    "output": {
+      "type": "object",
+      "title": "Output",
+      "description": "The rendered video: format, size, frame rate and background. The size must be the one of the format: 9:16 is 1080x1920, 1:1 is 1080x1080, 4:5 is 1080x1350 and 16:9 is 1920x1080.",
+      "additionalProperties": false,
+      "required": ["format", "width", "height", "fps", "background"],
+      "properties": {
+        "format": {
+          "enum": ["9:16", "1:1", "4:5", "16:9"],
+          "title": "Format",
+          "description": "The aspect ratio the project was created with (D-25). It fixes the width and height."
+        },
+        "width": {
+          "type": "integer",
+          "title": "Width",
+          "description": "Width in pixels. 1080, except 1920 for 16:9."
+        },
+        "height": {
+          "type": "integer",
+          "title": "Height",
+          "description": "Height in pixels. 1920 for 9:16, 1080 for 1:1 and 16:9, 1350 for 4:5."
+        },
+        "fps": {
+          "enum": [24, 25, 30, 60],
+          "title": "Frame rate",
+          "description": "Frames per second of the render."
+        },
+        "background": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "title": "Background",
+          "description": "Colour behind the video where nothing covers it (letterboxing in contain mode), as #rrggbb."
+        }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": { "format": { "const": "9:16" }, "width": { "const": 1080 }, "height": { "const": 1920 } }
+        },
+        {
+          "type": "object",
+          "properties": { "format": { "const": "1:1" }, "width": { "const": 1080 }, "height": { "const": 1080 } }
+        },
+        {
+          "type": "object",
+          "properties": { "format": { "const": "4:5" }, "width": { "const": 1080 }, "height": { "const": 1350 } }
+        },
+        {
+          "type": "object",
+          "properties": { "format": { "const": "16:9" }, "width": { "const": 1920 }, "height": { "const": 1080 } }
+        }
+      ]
+    },
+
+    "track": {
+      "title": "Track",
+      "description": "A track, told apart by its \"type\": video, text, captions or audio.",
+      "oneOf": [
+        { "$ref": "#/$defs/videoTrack" },
+        { "$ref": "#/$defs/textTrack" },
+        { "$ref": "#/$defs/captionsTrack" },
+        { "$ref": "#/$defs/audioTrack" }
+      ]
+    },
+
+    "videoTrack": {
+      "type": "object",
+      "title": "Video track",
+      "description": "The main track: the clips of the edit, one after the other. Items are sorted by at_ms, the first starts at 0 and has a cut, and each next one starts where the previous one ends (minus its own transition duration).",
+      "additionalProperties": false,
+      "required": ["id", "type", "items"],
+      "properties": {
+        "id": { "const": "main", "title": "Track id", "description": "Always \"main\" for the video track." },
+        "type": { "const": "video", "title": "Track type", "description": "\"video\"." },
+        "items": {
+          "type": "array",
+          "title": "Clips",
+          "description": "The clips in time order. The first clip must have a cut (or no transition_in). An empty list is structurally valid and fails the duration check.",
+          "items": { "$ref": "#/$defs/videoItem" },
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/videoItem",
+              "type": "object",
+              "properties": { "transition_in": { "type": "object", "properties": { "type": { "const": "cut" } } } }
+            }
+          ]
+        }
+      }
+    },
+
+    "videoItem": {
+      "type": "object",
+      "title": "Video clip",
+      "description": "A cut from a source asset placed on the main track. Its output duration is floor((source.out_ms - source.in_ms) / speed + 0.5) ms.",
+      "additionalProperties": false,
+      "required": ["id", "asset_id", "source", "at_ms"],
+      "properties": {
+        "id": { "$ref": "#/$defs/itemId" },
+        "asset_id": { "$ref": "#/$defs/assetId" },
+        "moment_id": { "$ref": "#/$defs/momentId" },
+        "source": {
+          "type": "object",
+          "title": "Source range",
+          "description": "The part of the asset to use, in the asset's own time. in_ms must be below out_ms and out_ms within the asset's duration (checked by the Go layer).",
+          "additionalProperties": false,
+          "required": ["in_ms", "out_ms"],
+          "properties": {
+            "in_ms": { "$ref": "#/$defs/ms", "title": "In point", "description": "Where the clip starts in the asset, in ms." },
+            "out_ms": { "$ref": "#/$defs/ms", "title": "Out point", "description": "Where the clip ends in the asset, in ms. Exclusive." }
+          }
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms",
+          "title": "Start on the timeline",
+          "description": "When the clip starts in the output, in ms. It is redundant with the durations on purpose: the first clip is at 0 and each next one at the end of the previous one minus its own transition duration."
+        },
+        "speed": {
+          "type": "number",
+          "minimum": 0.25,
+          "maximum": 4,
+          "default": 1,
+          "title": "Speed",
+          "description": "Playback speed from 0.25 (slow motion) to 4 (fast). Default 1."
+        },
+        "reframe": { "$ref": "#/$defs/reframe" },
+        "look": { "$ref": "#/$defs/look" },
+        "transition_in": { "$ref": "#/$defs/transition" },
+        "audio": { "$ref": "#/$defs/videoAudio" },
+        "why": {
+          "type": "string",
+          "maxLength": 280,
+          "title": "Why",
+          "description": "Why the editor picked this clip, 280 characters at most. Shown to the creator in the UI and never rendered."
+        }
+      }
+    },
+
+    "reframe": {
+      "type": "object",
+      "title": "Reframe",
+      "description": "How the source is fitted to the output frame. Without it, the clip uses cover, focus 0.5/0.5 and zoom 1.",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {
+          "enum": ["cover", "contain", "blur_fill"],
+          "title": "Mode",
+          "description": "cover fills the frame and crops around the focus point. contain fits the whole source and pads with the background colour. blur_fill fits the whole source over a blurred, scaled copy of itself."
+        },
+        "focus": {
+          "type": "object",
+          "title": "Focus point",
+          "description": "The point of the source that the crop is centred on, as fractions of its width and height. Default 0.5/0.5. Only cover uses it.",
+          "additionalProperties": false,
+          "required": ["x", "y"],
+          "properties": {
+            "x": { "$ref": "#/$defs/unit", "title": "Focus x", "description": "0 is the left edge of the source, 1 the right edge." },
+            "y": { "$ref": "#/$defs/unit", "title": "Focus y", "description": "0 is the top edge of the source, 1 the bottom edge." }
+          }
+        },
+        "zoom": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 3,
+          "default": 1,
+          "title": "Zoom",
+          "description": "Extra zoom into the centre of the framed clip, from 1 (none) to 3. Default 1."
+        }
+      }
+    },
+
+    "look": {
+      "type": "object",
+      "title": "Look",
+      "description": "A colour treatment for the clip. Without it, the clip has no treatment.",
+      "additionalProperties": false,
+      "required": ["preset"],
+      "properties": {
+        "preset": {
+          "enum": ["none", "punchy", "warm", "cool", "bw", "matte"],
+          "title": "Preset",
+          "description": "A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white) or matte (lifted blacks)."
+        }
+      }
+    },
+
+    "transition": {
+      "title": "Transition in",
+      "description": "How the clip begins. A cut is instant. The other types blend with the previous clip over duration_ms, and the clip then starts that long before the previous one ends. The first clip must have a cut.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": { "const": "cut", "title": "Type", "description": "\"cut\": no blend, no duration." }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "duration_ms"],
+          "properties": {
+            "type": {
+              "enum": ["crossfade", "dip_to_black", "whip"],
+              "title": "Type",
+              "description": "crossfade blends the two clips. dip_to_black fades out to black and in again. whip is a fast sideways slide with motion blur."
+            },
+            "duration_ms": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 1000,
+              "title": "Duration",
+              "description": "Length of the transition in ms, 100 to 1000. It must be shorter than both clips it joins (checked by the Go layer)."
+            }
+          }
+        }
+      ]
+    },
+
+    "videoAudio": {
+      "type": "object",
+      "title": "Clip audio",
+      "description": "Whether the clip's own sound is in the mix. Without it, the clip is silent.",
+      "additionalProperties": false,
+      "properties": {
+        "use_source": {
+          "type": "boolean",
+          "default": false,
+          "title": "Use source audio",
+          "description": "True to mix the clip's own audio. Default false."
+        },
+        "gain_db": {
+          "$ref": "#/$defs/gainDb",
+          "default": 0,
+          "title": "Gain",
+          "description": "Volume change of the clip's audio in dB, from -30 to +6. Default 0."
+        }
+      }
+    },
+
+    "textTrack": {
+      "type": "object",
+      "title": "Text track",
+      "description": "Titles and captions that are written by hand. They are rendered as styled, animated text. At most one text track.",
+      "additionalProperties": false,
+      "required": ["id", "type", "items"],
+      "properties": {
+        "id": { "$ref": "#/$defs/itemId", "title": "Track id", "description": "The track's id, such as \"text\". Unique across the whole spec." },
+        "type": { "const": "text", "title": "Track type", "description": "\"text\"." },
+        "items": {
+          "type": "array",
+          "title": "Text items",
+          "description": "The text items. They may overlap each other and may sit anywhere inside the total duration.",
+          "items": { "$ref": "#/$defs/textItem" }
+        }
+      }
+    },
+
+    "textItem": {
+      "type": "object",
+      "title": "Text item",
+      "description": "A piece of text shown for a while. Give it exactly one of anchor or position.",
+      "additionalProperties": false,
+      "required": ["id", "at_ms", "duration_ms", "text", "style"],
+      "properties": {
+        "id": { "$ref": "#/$defs/itemId" },
+        "at_ms": { "$ref": "#/$defs/ms", "title": "Start", "description": "When the text appears, in ms. Text keeps its absolute time when clips move." },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 300,
+          "maximum": 86400000,
+          "title": "Duration",
+          "description": "How long the text stays, in ms. At least 300. It must end inside the total duration (checked by the Go layer)."
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "^[^\\p{Cc}\\p{Zl}\\p{Zp}]*(\\n[^\\p{Cc}\\p{Zl}\\p{Zp}]*){0,2}$",
+          "title": "Text",
+          "description": "The words to show: 1 to 120 characters and at most 3 lines. Lines are separated by a newline (\\n). No other control character is allowed, and neither are the line and paragraph separators U+2028 and U+2029."
+        },
+        "style": { "$ref": "#/$defs/styleId" },
+        "anchor": {
+          "enum": ["upper_third", "center", "lower_third"],
+          "title": "Anchor",
+          "description": "A safe place for the text: upper_third, center or lower_third. Set this or position, not both."
+        },
+        "position": {
+          "type": "object",
+          "title": "Position",
+          "description": "A free place for the text's centre as fractions of the frame. The text must stay inside the format's safe zone (checked by the Go layer). Set this or anchor, not both.",
+          "additionalProperties": false,
+          "required": ["x", "y"],
+          "properties": {
+            "x": { "$ref": "#/$defs/unit", "title": "Position x", "description": "0 is the left edge of the frame, 1 the right edge." },
+            "y": { "$ref": "#/$defs/unit", "title": "Position y", "description": "0 is the top edge of the frame, 1 the bottom edge." }
+          }
+        },
+        "animation": {
+          "enum": ["none", "pop_in", "fade", "typewriter", "slide_up"],
+          "default": "none",
+          "title": "Animation",
+          "description": "How the text enters: none, pop_in, fade, typewriter or slide_up. Default none."
+        }
+      },
+      "oneOf": [
+        { "required": ["anchor"], "properties": { "anchor": {} } },
+        { "required": ["position"], "properties": { "position": {} } }
+      ]
+    },
+
+    "captionsTrack": {
+      "type": "object",
+      "title": "Captions track",
+      "description": "Captions made from the transcript's word timestamps. It holds settings, not items. At most one captions track.",
+      "additionalProperties": false,
+      "required": ["id", "type", "from", "style", "enabled"],
+      "properties": {
+        "id": { "$ref": "#/$defs/itemId", "title": "Track id", "description": "The track's id, such as \"captions\". Unique across the whole spec." },
+        "type": { "const": "captions", "title": "Track type", "description": "\"captions\"." },
+        "from": { "const": "transcript", "title": "Source", "description": "\"transcript\": the words come from the transcript of the clips' audio." },
+        "style": {
+          "enum": ["word_highlight", "chunk"],
+          "title": "Style",
+          "description": "word_highlight shows a few words and highlights the one being said. chunk shows each group of words at once."
+        },
+        "enabled": { "type": "boolean", "title": "Enabled", "description": "True to render the captions. False keeps the settings without rendering them." },
+        "uppercase": { "type": "boolean", "default": true, "title": "Uppercase", "description": "True to write the captions in capitals. Default true." },
+        "max_words": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4,
+          "default": 2,
+          "title": "Maximum words",
+          "description": "The most words on screen at once, 1 to 4. Default 2."
+        }
+      }
+    },
+
+    "audioTrack": {
+      "type": "object",
+      "title": "Audio track",
+      "description": "Music and sound on top of the clips' own audio. Items may overlap, because they are mixed. At most one audio track.",
+      "additionalProperties": false,
+      "required": ["id", "type", "items"],
+      "properties": {
+        "id": { "$ref": "#/$defs/itemId", "title": "Track id", "description": "The track's id, such as \"sound\". Unique across the whole spec." },
+        "type": { "const": "audio", "title": "Track type", "description": "\"audio\"." },
+        "items": {
+          "type": "array",
+          "title": "Audio items",
+          "description": "The sounds in the mix.",
+          "items": { "$ref": "#/$defs/audioItem" }
+        }
+      }
+    },
+
+    "audioItem": {
+      "title": "Audio item",
+      "description": "A sound in the mix, told apart by its \"kind\": trend_sound (cue-only, never reproduced by us), licensed_track (from the licensed library) or creator_audio (the creator's own upload).",
+      "oneOf": [
+        { "$ref": "#/$defs/trendSound" },
+        { "$ref": "#/$defs/licensedTrack" },
+        { "$ref": "#/$defs/creatorAudio" }
+      ],
+      "if": { "type": "object", "properties": { "kind": { "const": "trend_sound" } }, "required": ["kind"] },
+      "then": { "type": "object", "properties": { "export": { "const": "cue_only" } }, "required": ["export"] }
+    },
+
+    "trendSound": {
+      "type": "object",
+      "title": "Trend sound",
+      "description": "A trending sound. It is a cue for the creator to add the sound in TikTok and is never mixed or exported by us (D-03), so its export must be \"cue_only\". Previews play a generated beat guide instead.",
+      "additionalProperties": false,
+      "required": ["id", "kind", "trend_id", "at_ms", "source_offset_ms", "export"],
+      "properties": {
+        "id": { "$ref": "#/$defs/itemId" },
+        "kind": { "const": "trend_sound", "title": "Kind", "description": "\"trend_sound\"." },
+        "trend_id": { "$ref": "#/$defs/trendId" },
+        "at_ms": { "$ref": "#/$defs/ms", "title": "Start", "description": "When the sound starts in the output, in ms." },
+        "source_offset_ms": { "$ref": "#/$defs/ms", "title": "Source offset", "description": "Where in the sound to start playing, in ms." },
+        "export": { "const": "cue_only", "title": "Export policy", "description": "Always \"cue_only\" for a trend sound: it is never reproduced by us." },
+        "duration_ms": { "$ref": "#/$defs/audioDuration" },
+        "gain_db": { "$ref": "#/$defs/gainDb" },
+        "fade_in_ms": { "$ref": "#/$defs/fadeIn" },
+        "fade_out_ms": { "$ref": "#/$defs/fadeOut" }
+      }
+    },
+
+    "licensedTrack": {
+      "type": "object",
+      "title": "Licensed track",
+      "description": "A track from the licensed library. It is mixed into the render, so its export must be \"licensed\".",
+      "additionalProperties": false,
+      "required": ["id", "kind", "asset_id", "license_id", "at_ms", "source_offset_ms", "export"],
+      "properties": {
+        "id": { "$ref": "#/$defs/itemId" },
+        "kind": { "const": "licensed_track", "title": "Kind", "description": "\"licensed_track\"." },
+        "asset_id": { "$ref": "#/$defs/assetId" },
+        "license_id": { "$ref": "#/$defs/licenseId" },
+        "at_ms": { "$ref": "#/$defs/ms", "title": "Start", "description": "When the track starts in the output, in ms." },
+        "source_offset_ms": { "$ref": "#/$defs/ms", "title": "Source offset", "description": "Where in the track to start playing, in ms." },
+        "export": { "const": "licensed", "title": "Export policy", "description": "Always \"licensed\": the track is mixed into the render." },
+        "duration_ms": { "$ref": "#/$defs/audioDuration" },
+        "gain_db": { "$ref": "#/$defs/gainDb" },
+        "fade_in_ms": { "$ref": "#/$defs/fadeIn" },
+        "fade_out_ms": { "$ref": "#/$defs/fadeOut" }
+      }
+    },
+
+    "creatorAudio": {
+      "type": "object",
+      "title": "Creator audio",
+      "description": "Audio the creator uploaded themselves, with a rights attestation. It is mixed into the render, so its export must be \"licensed\".",
+      "additionalProperties": false,
+      "required": ["id", "kind", "asset_id", "at_ms", "source_offset_ms", "export"],
+      "properties": {
+        "id": { "$ref": "#/$defs/itemId" },
+        "kind": { "const": "creator_audio", "title": "Kind", "description": "\"creator_audio\"." },
+        "asset_id": { "$ref": "#/$defs/assetId" },
+        "at_ms": { "$ref": "#/$defs/ms", "title": "Start", "description": "When the audio starts in the output, in ms." },
+        "source_offset_ms": { "$ref": "#/$defs/ms", "title": "Source offset", "description": "Where in the audio to start playing, in ms." },
+        "export": { "const": "licensed", "title": "Export policy", "description": "Always \"licensed\": the audio is mixed into the render." },
+        "duration_ms": { "$ref": "#/$defs/audioDuration" },
+        "gain_db": { "$ref": "#/$defs/gainDb" },
+        "fade_in_ms": { "$ref": "#/$defs/fadeIn" },
+        "fade_out_ms": { "$ref": "#/$defs/fadeOut" }
+      }
+    },
+
+    "audioDuration": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 86400000,
+      "title": "Duration",
+      "description": "How long the sound plays, in ms, 1 or more. Without it, it plays to the end of the timeline. The sound must end inside the total duration, and source_offset_ms + this duration must fit inside the asset (both checked by the Go layer)."
+    },
+    "fadeIn": {
+      "$ref": "#/$defs/ms",
+      "title": "Fade in",
+      "description": "Length of the fade in at the start, in ms. Without it, there is no fade. fade_in_ms + fade_out_ms must not exceed the sound's duration (checked by the Go layer)."
+    },
+    "fadeOut": {
+      "$ref": "#/$defs/ms",
+      "title": "Fade out",
+      "description": "Length of the fade out at the end, in ms. Without it, there is no fade. fade_in_ms + fade_out_ms must not exceed the sound's duration (checked by the Go layer)."
+    },
+
+    "marker": {
+      "type": "object",
+      "title": "Marker",
+      "description": "A point on the beat grid or a section boundary, in output time.",
+      "additionalProperties": false,
+      "required": ["at_ms", "kind"],
+      "properties": {
+        "at_ms": { "$ref": "#/$defs/ms", "title": "Time", "description": "Where the marker is in the output, in ms. It must be inside the total duration (checked by the Go layer)." },
+        "kind": {
+          "enum": ["beat", "downbeat", "drop", "section"],
+          "title": "Kind",
+          "description": "beat is a beat of the bar, downbeat the first beat of a bar, drop the big moment of the track and section the start of a part."
+        },
+        "strength": {
+          "$ref": "#/$defs/unit",
+          "default": 1,
+          "title": "Strength",
+          "description": "How strong the marker is, from 0 to 1. Default 1."
+        }
+      }
+    },
+
+    "meta": {
+      "type": "object",
+      "title": "Meta",
+      "description": "Links back to the idea and concept this edit was made for.",
+      "additionalProperties": false,
+      "properties": {
+        "idea_id": { "$ref": "#/$defs/ideaId" },
+        "concept_id": { "$ref": "#/$defs/conceptId" }
+      }
+    }
+  }
+}

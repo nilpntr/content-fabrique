@@ -17,7 +17,7 @@ func TestMissingQueueTablesAre503WithACode(t *testing.T) {
 	err := fmt.Errorf("sync workspace: enqueue workspace_welcome: %w", store.ErrQueueNotMigrated)
 	rec := httptest.NewRecorder()
 	writeResolveError(rec, httptest.NewRequest(http.MethodGet, "/v1/me", nil), slog.New(slog.NewTextHandler(io.Discard, nil)), err)
-	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), CodeQueueNotMigrated) {
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), string(CodeQueueNotMigrated)) {
 		t.Fatalf("status %d, body %s", rec.Code, rec.Body.String())
 	}
 }
