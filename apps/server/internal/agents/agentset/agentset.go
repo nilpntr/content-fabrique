@@ -19,6 +19,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/agents/editor"
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
+	"github.com/nilpntr/content-fabrique/internal/annotations"
 	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
@@ -104,6 +105,13 @@ func Open(o Options) (*Runtime, error) {
 		return nil, err
 	}
 	deps := editor.Deps{Projects: projectsSvc, Store: o.Store, Preview: o.Preview}
+	// The creator's comments reach the editor through the time maps of the renders they were made on, read from object storage; a
+	// process without storage still lists them, unmapped.
+	comments := &annotations.Source{Store: o.Store, Logger: o.Logger}
+	if o.Objects != nil {
+		comments.TimeMaps = annotations.ObjectTimeMaps{Objects: o.Objects}
+	}
+	deps.Comments = comments
 	var (
 		images llm.ImageResolver
 		frames *editor.FrameService

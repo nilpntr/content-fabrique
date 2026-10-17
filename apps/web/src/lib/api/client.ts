@@ -74,6 +74,14 @@ export type RenderStatus = components["schemas"]["RenderStatus"];
 /** A render of a timeline version. In a list it has no presigned URLs (`files` is null): fetch it with GET /v1/renders/{id}. */
 export type Render = components["schemas"]["Render"];
 
+/** A comment on a clip, a render or a version of a timeline (P1-08). */
+export type Annotation = components["schemas"]["Annotation"];
+export type AnnotationKind = components["schemas"]["AnnotationKind"];
+export type AnnotationStatus = components["schemas"]["AnnotationStatus"];
+export type AnnotationTargetType = components["schemas"]["AnnotationTargetType"];
+export type CreateAnnotationRequest = components["schemas"]["CreateAnnotationRequest"];
+export type UpdateAnnotationRequest = components["schemas"]["UpdateAnnotationRequest"];
+
 export interface ApiClientOptions {
   getToken: GetToken;
   /** For tests. Defaults to `apiBaseUrl()`. */
@@ -211,3 +219,28 @@ export const fetchRender = async (client: ApiClient, id: string, signal?: AbortS
 /** Queues a render (202), or returns the render that already waits, runs or is ready for that version and profile (200). */
 export const createRender = async (client: ApiClient, id: string, version: number, profile: RenderProfile): Promise<Render> =>
   unwrap(await client.POST("/v1/projects/{id}/renders", { params: { path: { id } }, body: { version, profile } }));
+
+// ── Annotations ─────────────────────────────────────────────────────────────
+
+/** Every comment (and reply) on the renders and versions of a project, oldest first. */
+export const fetchAnnotations = async (client: ApiClient, projectId: string, signal?: AbortSignal): Promise<Annotation[]> => {
+  const all: Annotation[] = [];
+  let cursor: string | undefined;
+  // 500 a page, so a second page is rare; the loop is bounded.
+  for (let page = 0; page < 20; page++) {
+    const data = unwrap(await client.GET("/v1/annotations", { params: { query: { project_id: projectId, limit: 500, cursor } }, signal }));
+    all.push(...(Array.isArray(data.items) ? data.items : []));
+    if (typeof data.next_cursor !== "string") break;
+    cursor = data.next_cursor;
+  }
+  return all;
+};
+
+export const createAnnotation = async (client: ApiClient, body: CreateAnnotationRequest): Promise<Annotation> => unwrap(await client.POST("/v1/annotations", { body }));
+
+export const updateAnnotation = async (client: ApiClient, id: string, body: UpdateAnnotationRequest): Promise<Annotation> =>
+  unwrap(await client.PATCH("/v1/annotations/{id}", { params: { path: { id } }, body }));
+
+export const deleteAnnotation = async (client: ApiClient, id: string): Promise<void> => {
+  unwrap(await client.DELETE("/v1/annotations/{id}", { params: { path: { id } } }));
+};

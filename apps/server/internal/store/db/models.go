@@ -62,6 +62,36 @@ type AgentRun struct {
 	UpdatedAt         time.Time
 }
 
+type Annotation struct {
+	ID                 ids.AnnotationID
+	WorkspaceID        ids.WorkspaceID
+	TargetType         string
+	TargetID           uuid.UUID
+	ProjectID          ids.ProjectID
+	TimelineVersion    *int32
+	StartMs            int64
+	EndMs              int64
+	Pin                []byte
+	Kind               string
+	Body               string
+	Status             string
+	ParentID           ids.AnnotationID
+	AuthorKind         string
+	AuthorID           string
+	AppliedInRunID     pgtype.UUID
+	AddressedInVersion *int32
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          *time.Time
+}
+
+type AnnotationHandoff struct {
+	WorkspaceID  ids.WorkspaceID
+	RunID        uuid.UUID
+	AnnotationID uuid.UUID
+	CreatedAt    time.Time
+}
+
 type Asset struct {
 	ID              ids.AssetID
 	WorkspaceID     ids.WorkspaceID

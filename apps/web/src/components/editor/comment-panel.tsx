@@ -1,8 +1,10 @@
-import { CornerDownRight, MapPin, MessageSquare } from "lucide-react";
+import { CornerDownRight, MapPin, MessageSquare, X } from "lucide-react";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
+import { isLocalCommentId } from "@/components/project/annotations";
 import { cn, hue, initials } from "@/lib/utils";
 import { type CommentFilter, type CommentStatus, countOpen, filterComments, type ResolvedComment, statusLabel } from "./lib/comments";
+import type { ReviewAnnotation } from "./types";
 import { formatRange } from "./lib/time";
 
 export interface CommentPanelProps {
@@ -15,10 +17,19 @@ export interface CommentPanelProps {
   onOpenVersion: (version: number, commentId: string) => void;
   /** A line under the header, e.g. that the comments are not saved. */
   note?: string;
+  /** Why the last change could not be saved. */
+  error?: string;
+  onDismissError?: () => void;
+  /** Resolve (`true`) or reopen (`false`) a comment. Without it the panel has no such button. */
+  onResolve?: (id: string, resolved: boolean) => void;
+  /** Edit the text of a comment the signed-in user wrote. */
+  onEdit?: (id: string, body: string) => void;
+  /** Delete a comment the signed-in user wrote. */
+  onDelete?: (id: string) => void;
   className?: string;
 }
 
-function CommentPanelView({ items, selectedId, hoveredId, onSelect, onHover, onOpenVersion, note, className }: CommentPanelProps) {
+function CommentPanelView({ items, selectedId, hoveredId, onSelect, onHover, onOpenVersion, note, error, onDismissError, onResolve, onEdit, onDelete, className }: CommentPanelProps) {
   const [filter, setFilter] = React.useState<CommentFilter>("all");
   const visible = React.useMemo(() => filterComments(items, filter), [items, filter]);
   const open = countOpen(items);
@@ -67,6 +78,17 @@ function CommentPanelView({ items, selectedId, hoveredId, onSelect, onHover, onO
         </p>
       ) : null}
 
+      {error ? (
+        <p role="alert" className="flex items-start gap-2 border-b border-hairline bg-del-wash px-3 py-2 text-[12.5px] text-destructive">
+          <span className="min-w-0 flex-1 text-pretty">{error}</span>
+          {onDismissError ? (
+            <button type="button" aria-label="Dismiss" onClick={onDismissError} className="cursor-pointer rounded-[4px] p-0.5 outline-none focus-visible:ring-2 focus-visible:ring-brand">
+              <X className="size-3.5" aria-hidden />
+            </button>
+          ) : null}
+        </p>
+      ) : null}
+
       {visible.length === 0 ? (
         <p className="px-4 py-8 text-center text-[13px] text-muted-foreground text-pretty">
           {filter === "open" ? "No open comments on this version." : "No comments yet. Drag across the timeline or pin the frame to add one."}
@@ -82,6 +104,9 @@ function CommentPanelView({ items, selectedId, hoveredId, onSelect, onHover, onO
               onSelect={onSelect}
               onHover={onHover}
               onOpenVersion={onOpenVersion}
+              onResolve={onResolve}
+              onEdit={onEdit}
+              onDelete={onDelete}
             />
           ))}
         </ul>
@@ -97,6 +122,9 @@ const CommentItem = React.memo(function CommentItem({
   onSelect,
   onHover,
   onOpenVersion,
+  onResolve,
+  onEdit,
+  onDelete,
 }: {
   item: ResolvedComment;
   selected: boolean;
@@ -104,8 +132,15 @@ const CommentItem = React.memo(function CommentItem({
   onSelect: (item: ResolvedComment) => void;
   onHover: (id: string | null) => void;
   onOpenVersion: (version: number, commentId: string) => void;
+  onResolve?: (id: string, resolved: boolean) => void;
+  onEdit?: (id: string, body: string) => void;
+  onDelete?: (id: string) => void;
 }) {
   const { comment, mapped, status } = item;
+  const saved = !isLocalCommentId(comment.id);
+  const canEdit = saved && comment.author.own === true && onEdit !== undefined && !item.isReply;
+  const canDelete = saved && comment.author.own === true && onDelete !== undefined && !item.isReply;
+  const canResolve = saved && onResolve !== undefined && !item.isReply;
   const shown = mapped ?? comment;
   const moved = mapped !== null && (mapped.start_ms !== comment.start_ms || mapped.end_ms !== comment.end_ms);
   const isAgent = comment.author.kind === "agent";
@@ -151,6 +186,18 @@ const CommentItem = React.memo(function CommentItem({
           <span>made on v{comment.version}</span>
         </span>
       </button>
+
+      {(canResolve || canEdit || canDelete) && (
+        <CommentActions
+          comment={comment}
+          canEdit={canEdit}
+          canDelete={canDelete}
+          canResolve={canResolve}
+          onResolve={onResolve}
+          onEdit={onEdit}
+          onDelete={onDelete}
+        />
+      )}
 
       {(moved || item.addressedIn !== undefined || status.kind === "unmapped" || status.kind === "newer") && !item.isReply && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2.5 pb-2 text-[11.5px] text-muted-foreground">
@@ -199,5 +246,107 @@ function Avatar({ name }: { name: string }) {
     >
       {initials(name)}
     </span>
+  );
+}
+
+/** Resolve or reopen, and for the author edit and delete. Deleting asks twice; editing replaces the text in place. */
+function CommentActions({
+  comment,
+  canEdit,
+  canDelete,
+  canResolve,
+  onResolve,
+  onEdit,
+  onDelete,
+}: {
+  comment: ReviewAnnotation;
+  canEdit: boolean;
+  canDelete: boolean;
+  canResolve: boolean;
+  onResolve?: (id: string, resolved: boolean) => void;
+  onEdit?: (id: string, body: string) => void;
+  onDelete?: (id: string) => void;
+}) {
+  const [editing, setEditing] = React.useState(false);
+  const [confirming, setConfirming] = React.useState(false);
+  const [draft, setDraft] = React.useState(comment.body);
+  const open = comment.status === "open";
+
+  if (editing) {
+    const trimmed = draft.trim();
+    return (
+      <form
+        aria-label="Edit comment"
+        className="space-y-1.5 px-2.5 pb-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (trimmed === "") return;
+          if (trimmed !== comment.body) onEdit?.(comment.id, trimmed);
+          setEditing(false);
+        }}
+      >
+        <textarea
+          aria-label="Edit comment text"
+          value={draft}
+          maxLength={2000}
+          rows={3}
+          onChange={(event) => setDraft(event.target.value)}
+          className="block w-full resize-y rounded-[8px] bg-surface px-2 py-1.5 text-[13px] leading-snug shadow-[inset_0_0_0_1px_var(--border)] outline-none focus-visible:ring-2 focus-visible:ring-brand"
+        />
+        <div className="flex gap-1.5">
+          <Button type="submit" size="sm" disabled={trimmed === ""}>
+            Save
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setDraft(comment.body);
+              setEditing(false);
+            }}
+          >
+            Cancel
+          </Button>
+        </div>
+      </form>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-1 gap-y-1 px-2 pb-1.5">
+      {canResolve && (
+        <Button variant="ghost" size="sm" onClick={() => onResolve?.(comment.id, open)}>
+          {open ? "Resolve" : "Reopen"}
+        </Button>
+      )}
+      {canEdit && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setDraft(comment.body);
+            setEditing(true);
+          }}
+        >
+          Edit
+        </Button>
+      )}
+      {canDelete &&
+        (confirming ? (
+          <>
+            <Button variant="ghost" size="sm" className="text-destructive" onClick={() => onDelete?.(comment.id)}>
+              Delete for good
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>
+              Keep
+            </Button>
+          </>
+        ) : (
+          <Button variant="ghost" size="sm" onClick={() => setConfirming(true)}>
+            Delete
+          </Button>
+        ))}
+    </div>
   );
 }

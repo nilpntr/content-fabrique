@@ -1,6 +1,6 @@
 # Editor system prompt: changelog
 
-The editor agent's system prompt is `editor.v1.3.md`, embedded in the Go binary. The text the model receives is the runtime's
+The editor agent's system prompt is `editor.v1.4.md`, embedded in the Go binary. The text the model receives is the runtime's
 preamble (`runtime.SystemPreamble`, the untrusted-data rule) followed by this file. The prompt version (`PromptVersion` in
 `prompt.go`) is stored in every run's input, so a run can always be tied to the text it was given.
 
@@ -14,6 +14,18 @@ Rules for changing it:
 - The cache hit rate of a run is visible: `cfctl agent show <run>` prints the cache write and read tokens of every model call and
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
+
+## editor.v1.4 (2026-10-17)
+
+P1-08 (the creator's comments reach the editor). The file is now `editor.v1.4.md`; the get_comments tool is new, so every request's
+tool list changed too.
+
+- Step 6 (new): when the context says the creator left comments, read them with get_comments (50 at a time), change exactly what
+  each points at, and say in finish what could not be done. A comment the run did not read is not one it dealt with.
+- The creator's comments (kind "comment") join the brief and the instructions as direction for the edit; include, exclude and prefer
+  are constraints on a range that hold for every revision. Finishing is now step 7.
+- The comments the run was shown (in the context or by get_comments) are marked applied when the run ends well, by the worker, not
+  by finish.
 
 ## editor.v1.3 (2026-10-17)
 

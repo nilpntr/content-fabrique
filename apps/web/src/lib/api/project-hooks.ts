@@ -30,7 +30,7 @@ import { useApiClient } from "@/lib/api/provider";
 import { parseTimeMap } from "@/components/project/review-data";
 import type { TimeMapEntry } from "@/components/editor/types";
 import { URL_REFRESH_MIN_MS, useRefreshThrottle } from "@/lib/refresh-throttle";
-import { PROJECT_QUERY_KEY, PROJECTS_QUERY_KEY, RENDER_QUERY_KEY, RENDERS_QUERY_KEY, RUN_QUERY_KEY, TIMELINES_QUERY_KEY } from "@/lib/query-client";
+import { ANNOTATIONS_QUERY_KEY, PROJECT_QUERY_KEY, PROJECTS_QUERY_KEY, RENDER_QUERY_KEY, RENDERS_QUERY_KEY, RUN_QUERY_KEY, TIMELINES_QUERY_KEY } from "@/lib/query-client";
 
 /**
  * The hooks of projects, runs and renders. Keys are `[prefix, userId, orgId, ...ids]`, like the library's, so a workspace
@@ -105,6 +105,8 @@ export function invalidateProject(queryClient: QueryClient) {
   // Only the lists of versions (`[TIMELINES_QUERY_KEY, user, org, projectId]`): a version's own spec, one key longer, never changes.
   void queryClient.invalidateQueries({ queryKey: [TIMELINES_QUERY_KEY], predicate: (query) => query.queryKey.length === 4 });
   void queryClient.invalidateQueries({ queryKey: [PROJECTS_QUERY_KEY] });
+  // A finished run marks the comments it dealt with as applied, and answers under them.
+  void queryClient.invalidateQueries({ queryKey: [ANNOTATIONS_QUERY_KEY] });
 }
 
 export function useCreateProject() {

@@ -58,6 +58,8 @@ type Deps struct {
 	Frames   FrameSource
 	// Preview renders previews; nil means UnavailablePreviews.
 	Preview PreviewRenderer
+	// Comments is where the creator's open comments come from (and where the end of a run reports to); nil means a run has none.
+	Comments CommentSource
 
 	// previews records which versions a run has previewed (the gate on finish, gate.go). withState sets it.
 	previews *previewLog
@@ -109,6 +111,7 @@ func Tools(d Deps) ([]runtime.Tool, error) {
 		{ToolListFootage, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.listFootage) }},
 		{ToolViewClip, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.viewClip) }},
 		{ToolGetTimeline, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getTimeline) }},
+		{ToolGetComments, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getComments) }},
 		{ToolEditTimeline, true, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.editTimeline) }},
 		{ToolRenderPreview, true, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.renderPreview) }},
 		{ToolFinish, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.finish) }},

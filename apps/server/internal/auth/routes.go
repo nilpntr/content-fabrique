@@ -9,6 +9,7 @@ import (
 	"github.com/clerk/clerk-sdk-go/v2/jwks"
 	"github.com/nilpntr/content-fabrique/internal/agents/runapi"
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
+	"github.com/nilpntr/content-fabrique/internal/annotations"
 	"github.com/nilpntr/content-fabrique/internal/assets"
 	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/projects"
@@ -119,6 +120,11 @@ func Mount(mux *http.ServeMux, d Deps) (*V1, error) {
 	srv.API = projects.NewAPI(projectsSvc, callerOf, logger)
 	srv.Runs = runapi.New(d.Runs, callerOf, d.RunOptions, logger)
 	srv.RenderAPI = renderjobs.NewAPI(d.Renders, callerOf, logger)
+	annotationsSvc, err := annotations.NewService(d.Store, logger)
+	if err != nil {
+		return nil, err
+	}
+	srv.CommentAPI = annotations.NewAPI(annotationsSvc, callerOf, logger)
 	for pattern, h := range apiRoutes(srv, logger) {
 		if open[pattern] {
 			mux.Handle(pattern, mw(h))

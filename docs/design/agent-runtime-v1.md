@@ -114,6 +114,7 @@ This is enough for a first edit of a few short clips. It is not the product's fi
 | `list_footage()` | The project's clips: id, title, description, duration, orientation, has_audio |
 | `view_clip(asset_id, at_ms[≤8])` | Those frames as images (384 px), with timestamps |
 | `get_timeline()` | The current spec and its validation warnings |
+| `get_comments()` | The creator's open comments (P1-08): kind, version and range, pin, text (untrusted data) and the timeline items that played there, resolved through the `time_map` of the render they were made on and marked as still in the current timeline or not. The run context carries the first few. `finish` marks the requests the run was handed as applied by it |
 | `edit_timeline(ops[])` | Applies the P3-02 ops atomically → the new version number, a summary and the issues |
 | `render_preview()` | Renders the current version with the `preview` profile (P3-06) → a contact sheet image and the duration. Calls `renderjobs.RenderAndWait(ctx, svc, renderjobs.AgentCaller(ws, runID), project, version, "preview", timeout)`: an identical render that exists is reused, a timeout (`ErrWaitTimeout`) leaves the render running and asking again returns it, and `Service.ContactSheetJPEG` reads the picture; its tiles' layout (output time and item per tile) is in the render's `contact_sheet` |
 | `finish(summary)` | Ends the run |

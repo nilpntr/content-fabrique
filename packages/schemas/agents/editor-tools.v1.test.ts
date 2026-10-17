@@ -38,6 +38,7 @@ describe("editor tools contract", () => {
       "list_footage",
       "view_clip",
       "get_timeline",
+      "get_comments",
       "edit_timeline",
       "render_preview",
       "finish",

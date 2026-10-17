@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/store"
@@ -42,7 +43,10 @@ func NewAgent(d Deps) (runtime.Agent, error) {
 		Opening: opening,
 		Context: d.runContext,
 		EndTurn: d.endTurn,
-		OnEnd:   d.previews.forget,
+		OnEnd: func(run uuid.UUID) {
+			d.previews.forget(run) // what the run kept in memory
+			d.endRun(run)          // and its comments, now that its result is stored
+		},
 		Budgets: DefaultBudgets,
 	}, nil
 }
@@ -69,13 +73,18 @@ func opening(raw json.RawMessage) ([]llm.Block, error) {
 const maxContextBytes = 40 * 1024
 
 // contextCaps are one step of that: how much of the brief, and of the first few clips' titles and descriptions, is kept.
-type contextCaps struct{ briefChars, titleChars, descChars, detailed int }
+type contextCaps struct {
+	briefChars, titleChars, descChars, detailed int
+	// comments is how many open comments are written out in full, and commentChars how much of each one's text is kept; the
+	// count and the guidance are always there, and get_comments has all of them.
+	comments, commentChars int
+}
 
 var contextSteps = []contextCaps{
-	{briefChars: 1500, titleChars: 60, descChars: 160, detailed: 20},
-	{briefChars: 800, titleChars: 40, descChars: 80, detailed: 10},
-	{briefChars: 400, titleChars: 30, descChars: 0, detailed: 5},
-	{briefChars: 200, titleChars: 0, descChars: 0, detailed: 0},
+	{briefChars: 1500, titleChars: 60, descChars: 160, detailed: 20, comments: 10, commentChars: 300},
+	{briefChars: 800, titleChars: 40, descChars: 80, detailed: 10, comments: 5, commentChars: 150},
+	{briefChars: 400, titleChars: 30, descChars: 0, detailed: 5, comments: 3, commentChars: 60},
+	{briefChars: 200, titleChars: 0, descChars: 0, detailed: 0, comments: 0},
 }
 
 // runContext is the run context: the project's format and brief, the footage and the timeline as they are when the run starts.
@@ -94,6 +103,7 @@ func (d Deps) runContext(ctx context.Context, rc runtime.RunContext) ([]llm.Bloc
 		return nil, fmt.Errorf("list footage: %w", err)
 	}
 	status := "Timeline: none yet (version 0)."
+	now := timelineItems{ids: map[string]bool{}}
 	if det.Project.CurrentTimelineVersion != nil {
 		v := int(*det.Project.CurrentTimelineVersion)
 		vd, perr := d.Projects.Version(ctx, actor(ws), pid, v)
@@ -105,10 +115,23 @@ func (d Deps) runContext(ctx context.Context, rc runtime.RunContext) ([]llm.Bloc
 			return nil, fmt.Errorf("parse stored spec: %w", err)
 		}
 		status = "Timeline: " + timelineLine(v, spec) + ". Call get_timeline to read it."
+		now = itemsOf(v, spec)
+	}
+	// The creator's open comments on earlier versions, when there are any (a first run has none, and its context is unchanged).
+	comments, total, err := d.openComments(ctx, ws, pid, 0)
+	if err != nil {
+		return nil, err
 	}
 	for _, caps := range contextSteps {
 		blocks := contextBlocks(det.Project.Format, det.Project.Brief, rows, status, caps)
+		blocks = append(blocks, commentsIntro(comments, total, now, caps.comments, caps.commentChars)...)
 		if encodedSize(blocks) <= maxContextBytes {
+			// Only the comments this context shows (the rest are for get_comments to list) are the run's to deal with.
+			if shown := min(caps.comments, len(comments)); shown > 0 {
+				if err := d.Comments.RecordHandoff(ctx, ws, pid, rc.RunID, comments[:shown]); err != nil {
+					return nil, err
+				}
+			}
 			return blocks, nil
 		}
 	}

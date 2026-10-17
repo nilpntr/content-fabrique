@@ -11,7 +11,7 @@ import (
 )
 
 // appTables are the tables the migrations create, besides goose's own bookkeeping table.
-var appTables = []string{"agent_events", "agent_runs", "asset_derivatives", "assets", "creator_profiles", "project_assets", "projects", "renders", "timeline_versions", "uploads", "usage_ledger", "users", "webhook_events", "workspace_members", "workspace_plans", "workspaces"}
+var appTables = []string{"agent_events", "agent_runs", "annotation_handoffs", "annotations", "asset_derivatives", "assets", "creator_profiles", "project_assets", "projects", "renders", "timeline_versions", "uploads", "usage_ledger", "users", "webhook_events", "workspace_members", "workspace_plans", "workspaces"}
 
 func publicTables(t *testing.T, dsn string) []string {
 	t.Helper()
