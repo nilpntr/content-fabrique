@@ -1,6 +1,7 @@
 import { useAuth } from "@clerk/tanstack-react-start";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, fetchMe } from "@/lib/api";
+import { ME_QUERY_KEY } from "@/lib/query-client";
 
 /**
  * The signed-in user and active workspace, from GET /v1/me. The key holds the Clerk user and organization, so switching
@@ -10,7 +11,7 @@ import { ApiError, fetchMe } from "@/lib/api";
 export function useMe() {
   const { isLoaded, isSignedIn, userId, orgId, getToken } = useAuth();
   return useQuery({
-    queryKey: ["me", userId, orgId],
+    queryKey: [ME_QUERY_KEY, userId, orgId],
     queryFn: ({ signal }) => fetchMe({ getToken: () => getToken(), signal }),
     enabled: isLoaded && Boolean(isSignedIn) && Boolean(orgId),
     // A 4xx is an answer (no workspace, deleted account), so asking again will not change it; a 5xx or a lost
