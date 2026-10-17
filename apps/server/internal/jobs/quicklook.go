@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -59,17 +60,34 @@ var (
 	ErrQuickLookNotReady = errors.New("jobs: the asset is not ready")
 )
 
+// The codes a quick look is marked failed with when the job gives up without the quick look having failed itself
+// (assets.quick_look, "error"). The quick look's own codes are in package quicklook.
+const (
+	// QuickLookFailInternal: the last attempt failed with an error.
+	QuickLookFailInternal = "internal"
+	// QuickLookFailModelUnavailable: for QuickLookMaxAge no worker had model access, object storage or a sandbox for it.
+	QuickLookFailModelUnavailable = "model_unavailable"
+	// QuickLookFailAssetNotReady: for QuickLookMaxAge the asset was not ready (it kept being ingested again).
+	QuickLookFailAssetNotReady = "asset_not_ready"
+)
+
+// QuickLookMaxAge is how long a quick look job may wait, snoozed, for a worker that can run it or an asset that is ready:
+// after this long since the job was enqueued it gives up and the quick look is marked failed with a clear code, so an asset
+// does not stay `pending` for ever. `cfctl assets quicklook` runs it again once the cause is fixed.
+const QuickLookMaxAge = 24 * time.Hour
+
 // QuickLooker is the quick look (package quicklook) as the worker sees it.
 type QuickLooker interface {
 	// RunJob does the quick look. gone says the asset is not a ready video of the workspace any more (the job is cancelled);
 	// output is what the job records. ErrModelUnavailable and ErrQuickLookNotReady snooze the job; other errors are retried.
 	RunJob(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (output any, gone bool, err error)
-	// GiveUp marks the quick look failed, for a job that has used its last attempt.
-	GiveUp(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) error
 }
 
 // noQuickLookSnooze is how long a quick look waits when the worker cannot run it (no object storage, sandbox or model access).
 const noQuickLookSnooze = 5 * time.Minute
+
+// notReadySnooze is how long a quick look waits for an asset that is being ingested again.
+const notReadySnooze = time.Minute
 
 // QuickLookWorker works QuickLookArgs. It is always registered, so the ingest can enqueue the job on a worker that cannot
 // run it (River refuses to insert a kind its bundle does not know): such a worker snoozes the job, and one that can picks it up.
@@ -82,31 +100,51 @@ type QuickLookWorker struct {
 func (w *QuickLookWorker) Timeout(*river.Job[QuickLookArgs]) time.Duration { return QuickLookTimeout }
 
 // Work runs one attempt. An asset that is gone ends the job; a worker without model access or an asset that is being ingested
-// again snoozes it (no attempt is used); any other error is retried by River, and the last attempt marks the quick look failed
-// so the asset does not stay `pending` for ever.
+// again snoozes it (no attempt is used) for at most QuickLookMaxAge, then the quick look is marked failed; any other error is
+// retried by River, and the last attempt marks the quick look failed too, so the asset does not stay `pending` for ever.
 func (w *QuickLookWorker) Work(ctx context.Context, job *river.Job[QuickLookArgs]) error {
-	if w.deps.QuickLook == nil {
-		return river.JobSnooze(noQuickLookSnooze)
-	}
 	ws, id := job.Args.WorkspaceID, job.Args.AssetID
+	if w.deps.QuickLook == nil {
+		return w.snooze(ctx, job, QuickLookFailModelUnavailable, noQuickLookSnooze, "this worker cannot run quick looks (no object storage, sandbox or model access)")
+	}
 	out, gone, err := w.deps.QuickLook.RunJob(ctx, ws, id)
 	switch {
 	case errors.Is(err, ErrModelUnavailable):
-		return river.JobSnooze(noQuickLookSnooze)
+		return w.snooze(ctx, job, QuickLookFailModelUnavailable, noQuickLookSnooze, err.Error())
 	case errors.Is(err, ErrQuickLookNotReady):
-		return river.JobSnooze(time.Minute)
+		return w.snooze(ctx, job, QuickLookFailAssetNotReady, notReadySnooze, err.Error())
 	case err != nil:
 		w.deps.logger().WarnContext(ctx, "quick look attempt failed", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "attempt", job.Attempt, "error", err)
 		if job.Attempt >= job.MaxAttempts {
-			fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-			defer cancel()
-			if ferr := w.deps.QuickLook.GiveUp(fctx, ws, id); ferr != nil {
-				w.deps.logger().ErrorContext(ctx, "could not mark a quick look that gave up as failed", "asset_id", id.String(), "error", ferr)
-			}
+			w.giveUp(ctx, ws, id, QuickLookFailInternal)
 		}
 		return err
 	case gone:
 		return river.JobCancel(fmt.Errorf("asset %s is not a ready video of workspace %s", id, ws))
 	}
 	return river.RecordOutput(ctx, out)
+}
+
+// snooze puts the job back for later and says so in the log, unless it has waited QuickLookMaxAge: then the quick look is
+// marked failed with reason and the job is cancelled.
+func (w *QuickLookWorker) snooze(ctx context.Context, job *river.Job[QuickLookArgs], reason string, d time.Duration, why string) error {
+	ws, id := job.Args.WorkspaceID, job.Args.AssetID
+	age := w.deps.now().Sub(job.CreatedAt)
+	if age >= QuickLookMaxAge {
+		w.deps.logger().ErrorContext(ctx, "quick look gives up after waiting", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "reason", reason, "age", age.Round(time.Minute), "detail", why)
+		w.giveUp(ctx, ws, id, reason)
+		return river.JobCancel(fmt.Errorf("quick look gave up after %s: %s", age.Round(time.Minute), reason))
+	}
+	w.deps.logger().WarnContext(ctx, "quick look waits", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "reason", reason, "retry_in", d, "age", age.Round(time.Minute), "detail", why)
+	return river.JobSnooze(d)
+}
+
+// giveUp marks the quick look failed with a code, with a fresh context for the write: it may be the job's own that ended.
+func (w *QuickLookWorker) giveUp(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, reason string) {
+	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	detail, _ := json.Marshal(map[string]string{"error": reason})
+	if _, err := w.deps.Store.FailQuickLook(fctx, ws, id, detail); err != nil && !errors.Is(err, store.ErrNotFound) {
+		w.deps.logger().ErrorContext(ctx, "could not mark a quick look that gave up as failed", "asset_id", id.String(), "reason", reason, "error", err)
+	}
 }

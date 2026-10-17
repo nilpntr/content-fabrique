@@ -7,16 +7,23 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/nilpntr/content-fabrique/internal/textclean"
 )
 
 // What the model returns goes into the database and, later, into the editor agent's prompt and the library's search, so it is
-// untrusted input however strict the schema was: it is parsed strictly, cleaned like an asset title (package textclean) and
-// held to the limits, and anything that does not fit is rejected as a whole, not repaired. A rejected answer leaves the
-// asset's title, description and tags alone and marks the quick look failed.
+// untrusted input however strict the schema was: it is parsed strictly, cleaned as model text (package textclean) and held to
+// the limits. The rules differ in what a fault costs:
+//
+//   - a title or description that is empty, too long or not the right shape rejects the whole answer;
+//   - anything that looks like a link, an address, an @handle or words aimed at a reader rejects the whole answer, wherever it
+//     is, because it means the model repeated something from the footage that was meant for someone else;
+//   - a single tag that does not fit the tag format is dropped and the rest are kept.
+//
+// A rejected answer leaves the asset's title, description and tags alone and marks the quick look failed.
 
 // ErrInvalidOutput is wrapped by every rejection of Validate.
 var ErrInvalidOutput = errors.New("quicklook: the model's answer is not acceptable")
@@ -32,24 +39,37 @@ type Output struct {
 	Tags        []string
 }
 
-// A link, an address, or a sentence that tries to steer whatever reads the text later. Footage can carry such words (a
-// caption, a watermark, a sign) and a model may copy them; none of it is a label.
-var suspicious = regexp.MustCompile(`(?i)(https?:|ftp:|www\.|\.(com|net|org|io|ly|me)\b|[a-z0-9._%+-]+@[a-z0-9-]+\.|` +
+// suspicious matches, on text that has been folded (foldForChecks), a link, an e-mail address, an @handle, a bare domain, or
+// a sentence that tries to steer whatever reads the text later. Footage can carry such words (a caption, a watermark, a sign)
+// and a model may copy them; none of it is a label.
+var suspicious = regexp.MustCompile(`(?i)(` +
+	`\b(https?|ftp|javascript)\s*:|\bwww\s*\.|` +
+	`\b[a-z0-9-]+\.(com|net|org|io|ly|me|co|app|dev|xyz|link|gl|be|tv|info|biz)\b|` +
+	`\b[a-z0-9-]+\s+dot\s+(com|net|org|io|ly|me|co|app|dev|xyz|link|gl|be|tv|info|biz)\b|` +
+	`[a-z0-9._%+-]+@[a-z0-9-]+\.[a-z]{2,}|` +
+	`(^|[^\p{L}\p{N}_])@[\p{L}\p{N}_.]{2,}|` +
 	`\b(ignore|disregard|forget|override)\b.{0,40}\b(instruction|prompt|rule|above|previous)s?\b|` +
 	`\b(system|developer)\s+(prompt|message)\b|\bas an ai\b|\bassistant\s*:|\bsystem\s*:)`)
 
-// tagPattern is one tag: one to three words of letters and digits, optionally joined by hyphens, apostrophes or "&".
+// foldForChecks folds text the way a reader would see it before the suspicious-content checks run: compatibility forms
+// become plain ones (full-width "ｈｔｔｐ：／／" is "http://", "ﬁ" is "fi"), then lower case. Look-alike letters from other
+// scripts are not folded; the checks look at what the text says to a person typing it, not at every possible disguise.
+func foldForChecks(s string) string { return strings.ToLower(norm.NFKC.String(s)) }
+
+// tagWord is one word of a tag: letters and digits, optionally joined by hyphens, apostrophes or "&".
 var tagWord = regexp.MustCompile(`^[\p{L}\p{N}]+(?:['&-][\p{L}\p{N}]+)*$`)
 
 // Validate parses the arguments of the describe_clip call and returns the cleaned answer, or an error that wraps
 // ErrInvalidOutput. The rules:
 //
 //   - the JSON is an object with exactly title, description and tags (no unknown field, no trailing data);
-//   - title and description are cleaned (textclean) and then must be non-empty and within 60 and 160 characters; they are
+//   - title and description are cleaned (textclean.Model) and must be non-empty and within 60 and 160 characters; they are
 //     rejected, not cut, when they are too long;
-//   - tags number at most 8 and are lower-cased and cleaned; each is one to three words of letters, digits and "-", "'" or "&"
-//     in between, at most 32 characters; duplicates are dropped; an empty list is allowed;
-//   - nothing contains a link, an e-mail address or words that address a reader (see suspicious).
+//   - tags are lower-cased and cleaned; a tag that is empty, longer than 32 characters, more than three words, or has any
+//     character other than letters, digits and "-", "'" or "&" inside a word is dropped; duplicates are dropped; at most 8 are
+//     kept (the first 8 that fit); an empty list is allowed;
+//   - nothing contains a link, an e-mail address, an @handle or words that address a reader (see suspicious), after folding
+//     compatibility forms: that rejects the whole answer.
 func Validate(raw json.RawMessage) (Output, error) {
 	var in struct {
 		Title       *string   `json:"title"`
@@ -67,9 +87,6 @@ func Validate(raw json.RawMessage) (Output, error) {
 	if in.Title == nil || in.Description == nil || in.Tags == nil {
 		return Output{}, reject("title, description and tags are all required")
 	}
-	if len(*in.Tags) > MaxTags {
-		return Output{}, reject("%d tags, at most %d", len(*in.Tags), MaxTags)
-	}
 
 	title, err := cleanLine("title", *in.Title, MaxTitleChars)
 	if err != nil {
@@ -80,57 +97,57 @@ func Validate(raw json.RawMessage) (Output, error) {
 		return Output{}, err
 	}
 	seen := map[string]bool{}
-	tags := make([]string, 0, len(*in.Tags))
+	tags := make([]string, 0, MaxTags)
 	for _, t := range *in.Tags {
-		tag, err := cleanTag(t)
+		tag, ok, err := cleanTag(t)
 		if err != nil {
 			return Output{}, err
 		}
-		if !seen[tag] {
-			seen[tag] = true
-			tags = append(tags, tag)
+		if !ok || seen[tag] || len(tags) == MaxTags {
+			continue
 		}
+		seen[tag] = true
+		tags = append(tags, tag)
 	}
 	return Output{Title: title, Description: desc, Tags: tags}, nil
 }
 
 func cleanLine(field, s string, limit int) (string, error) {
 	// textclean's own cut is a safety net far above the limit: a too-long answer is rejected, not shortened.
-	clean, ok := textclean.Clean(s, 4*limit)
+	clean, ok := textclean.Model(s, 4*limit)
 	if !ok {
 		return "", reject("%s is empty or not text", field)
 	}
 	if n := utf8.RuneCountInString(clean); n > limit {
 		return "", reject("%s is %d characters, at most %d", field, n, limit)
 	}
-	if suspicious.MatchString(clean) {
-		return "", reject("%s holds a link, an address or an instruction", field)
+	if suspicious.MatchString(foldForChecks(s)) || suspicious.MatchString(foldForChecks(clean)) {
+		return "", reject("%s holds a link, an address, a handle or an instruction", field)
 	}
 	return clean, nil
 }
 
-func cleanTag(s string) (string, error) {
-	clean, ok := textclean.Clean(strings.ToLower(s), 4*maxTagChars)
-	if !ok {
-		return "", reject("a tag is empty or not text")
+// cleanTag returns the tag cleaned, ok false when it does not fit the tag format (the caller drops it), and an error when it
+// holds something that rejects the whole answer.
+func cleanTag(s string) (tag string, ok bool, err error) {
+	if suspicious.MatchString(foldForChecks(s)) {
+		return "", false, reject("a tag holds a link, an address, a handle or an instruction")
 	}
-	if utf8.RuneCountInString(clean) > maxTagChars {
-		return "", reject("tag %q is longer than %d characters", clean, maxTagChars)
+	clean, ok := textclean.Model(strings.ToLower(s), 4*maxTagChars)
+	if !ok || utf8.RuneCountInString(clean) > maxTagChars {
+		return "", false, nil
 	}
 	words := strings.Fields(clean)
 	if len(words) < 1 || len(words) > MaxTagWords {
-		return "", reject("tag %q is not one to %d words", clean, MaxTagWords)
+		return "", false, nil
 	}
 	for _, w := range words {
 		if !tagWord.MatchString(w) {
-			return "", reject("tag %q holds characters other than letters, digits and - ' &", clean)
+			return "", false, nil
 		}
 	}
-	if clean != strings.ToLower(clean) || strings.ContainsFunc(clean, unicode.IsUpper) {
-		return "", reject("tag %q is not lowercase", clean)
+	if suspicious.MatchString(foldForChecks(clean)) {
+		return "", false, reject("a tag holds a link, an address, a handle or an instruction")
 	}
-	if suspicious.MatchString(clean) {
-		return "", reject("tag %q holds a link, an address or an instruction", clean)
-	}
-	return clean, nil
+	return clean, true, nil
 }

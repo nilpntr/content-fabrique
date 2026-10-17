@@ -237,7 +237,7 @@ func (q *Queries) FailAssetIngest(ctx context.Context, arg FailAssetIngestParams
 
 const failQuickLook = `-- name: FailQuickLook :one
 UPDATE assets SET quick_look_status = 'failed', quick_look = $1::jsonb, quick_look_at = now()
-WHERE workspace_id = $2 AND id = $3 AND status = 'ready' AND deleted_at IS NULL
+WHERE workspace_id = $2 AND id = $3 AND deleted_at IS NULL
 RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search
 `
 
@@ -247,7 +247,8 @@ type FailQuickLookParams struct {
 	ID          ids.AssetID
 }
 
-// The quick look failed: nothing but the status and the detail (an error code, the frames if they were cut) is written.
+// The quick look failed: nothing but the status and the detail (an error code, the frames if they were cut) is written. Any
+// state of the asset: a job that gave up waiting for an asset that never became ready marks it too.
 func (q *Queries) FailQuickLook(ctx context.Context, arg FailQuickLookParams) (Asset, error) {
 	row := q.db.QueryRow(ctx, failQuickLook, arg.Detail, arg.WorkspaceID, arg.ID)
 	var i Asset
@@ -569,6 +570,62 @@ func (q *Queries) SetIngestProgress(ctx context.Context, arg SetIngestProgressPa
 	var id ids.AssetID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const skipQuickLook = `-- name: SkipQuickLook :one
+UPDATE assets SET quick_look_status = 'skipped'
+WHERE workspace_id = $1 AND id = $2 AND quick_look_status = 'pending' AND deleted_at IS NULL
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search
+`
+
+type SkipQuickLookParams struct {
+	WorkspaceID ids.WorkspaceID
+	ID          ids.AssetID
+}
+
+// The asset failed its ingest (or the job could not run for a day) while its quick look was owed: nothing is owed any more.
+// No row: the quick look was not pending.
+func (q *Queries) SkipQuickLook(ctx context.Context, arg SkipQuickLookParams) (Asset, error) {
+	row := q.db.QueryRow(ctx, skipQuickLook, arg.WorkspaceID, arg.ID)
+	var i Asset
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Kind,
+		&i.Status,
+		&i.Filename,
+		&i.ContentType,
+		&i.SizeBytes,
+		&i.Sha256,
+		&i.Title,
+		&i.Description,
+		&i.Tags,
+		&i.R2Key,
+		&i.FailureReason,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DurationMs,
+		&i.Width,
+		&i.Height,
+		&i.Fps,
+		&i.Rotation,
+		&i.VideoCodec,
+		&i.AudioCodec,
+		&i.HasAudio,
+		&i.Hdr,
+		&i.Probe,
+		&i.IngestProgress,
+		&i.IngestStage,
+		&i.IngestedAt,
+		&i.TitleSource,
+		&i.QuickLookStatus,
+		&i.QuickLook,
+		&i.QuickLookAt,
+		&i.Search,
+	)
+	return i, err
 }
 
 const updateAssetTitle = `-- name: UpdateAssetTitle :one

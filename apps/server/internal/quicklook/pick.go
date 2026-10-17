@@ -25,9 +25,9 @@ const (
 )
 
 // CandidateTimes returns the times, in milliseconds, at which to cut candidates for a clip of the given length:
-// Frames * CandidatesPerFrame times, evenly spaced and centred in equal slices, so the first and last are never the very
-// first or last frame (usually a fade or a black frame). A clip too short for that many distinct times gets fewer, but
-// always at least Frames when it has any length at all.
+// Frames * CandidatesPerFrame times, one in the middle of each of that many equal slices of the clip, so the first and last
+// are never the very first or last frame (usually a fade or a black frame). No time is later than 40 ms before the end. A clip
+// so short that two slices give the same millisecond gets fewer candidates; none for a clip without a length.
 func CandidateTimes(durationMs int64) []int64 {
 	if durationMs <= 0 {
 		return nil
@@ -92,8 +92,9 @@ func bestOf(window []Candidate) Candidate {
 }
 
 // Sharpness decodes a JPEG and returns the variance of its Laplacian: the usual cheap measure of focus, high for a picture
-// with crisp edges and low for a blurred or flat one. It works on the luma of the picture as it is (the quick look's pictures
-// are already small), so it is a few milliseconds of Go per picture.
+// with crisp edges and low for a blurred or flat one. It reads the luma of the picture: a JPEG decodes to a Y plane (plus
+// chroma planes for a colour picture), and that plane is used as it is, with no conversion of every pixel; any other kind of
+// image is converted pixel by pixel. For the quick look's 512 px pictures it is a few milliseconds.
 func Sharpness(jpegBytes []byte) (float64, error) {
 	img, err := jpeg.Decode(bytes.NewReader(jpegBytes))
 	if err != nil {
@@ -104,27 +105,23 @@ func Sharpness(jpegBytes []byte) (float64, error) {
 	if w < 3 || h < 3 {
 		return -1, errors.New("picture too small to measure")
 	}
-	luma := make([]float64, w*h)
-	switch g := img.(type) {
+	var luma func(x, y int) float64
+	switch m := img.(type) {
+	case *image.YCbCr:
+		luma = func(x, y int) float64 { return float64(m.Y[m.YOffset(b.Min.X+x, b.Min.Y+y)]) }
 	case *image.Gray:
-		for y := range h {
-			for x := range w {
-				luma[y*w+x] = float64(g.GrayAt(b.Min.X+x, b.Min.Y+y).Y)
-			}
-		}
+		luma = func(x, y int) float64 { return float64(m.Pix[m.PixOffset(b.Min.X+x, b.Min.Y+y)]) }
 	default:
-		for y := range h {
-			for x := range w {
-				r, gr, bl, _ := img.At(b.Min.X+x, b.Min.Y+y).RGBA()
-				luma[y*w+x] = (0.299*float64(r) + 0.587*float64(gr) + 0.114*float64(bl)) / 257
-			}
+		luma = func(x, y int) float64 {
+			r, g, bl, _ := img.At(b.Min.X+x, b.Min.Y+y).RGBA()
+			return (0.299*float64(r) + 0.587*float64(g) + 0.114*float64(bl)) / 257
 		}
 	}
 	var sum, sumSq float64
 	n := 0
 	for y := 1; y < h-1; y++ {
 		for x := 1; x < w-1; x++ {
-			l := luma[(y-1)*w+x] + luma[(y+1)*w+x] + luma[y*w+x-1] + luma[y*w+x+1] - 4*luma[y*w+x]
+			l := luma(x, y-1) + luma(x, y+1) + luma(x-1, y) + luma(x+1, y) - 4*luma(x, y)
 			sum += l
 			sumSq += l * l
 			n++

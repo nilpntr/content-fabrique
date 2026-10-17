@@ -603,10 +603,11 @@ export interface components {
         TitleSource: "filename" | "quicklook" | "user";
         /**
          * @description `pending` (the clip is ready and its quick look has not finished), `succeeded` (title, description and tags were
-         *     written) or `failed` (the clip is usable but has no description or tags; the title is still the file name).
+         *     written), `failed` (the clip is usable but has no description or tags; the title is still the file name) or
+         *     `skipped` (nothing is owed: the asset failed its ingest, or the job could not run for a day).
          * @enum {string}
          */
-        QuickLookStatus: "pending" | "succeeded" | "failed";
+        QuickLookStatus: "pending" | "succeeded" | "failed" | "skipped";
         UpdateAssetRequest: {
             /** @description The new title. Cleaned by the server; 1 to 255 characters must remain. */
             title: string;

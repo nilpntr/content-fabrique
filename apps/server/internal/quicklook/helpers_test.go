@@ -38,6 +38,7 @@ type memObjects struct {
 	mu   sync.Mutex
 	objs map[string][]byte
 	puts []string
+	gets int
 }
 
 func newMemObjects() *memObjects { return &memObjects{objs: map[string][]byte{}} }
@@ -45,6 +46,7 @@ func newMemObjects() *memObjects { return &memObjects{objs: map[string][]byte{}}
 func (m *memObjects) Get(_ context.Context, key string) (storage.Object, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.gets++
 	b, ok := m.objs[key]
 	if !ok {
 		return storage.Object{}, storage.ErrNotFound
@@ -75,6 +77,12 @@ func (m *memObjects) Put(_ context.Context, key string, body io.ReadSeeker, size
 	m.objs[key] = b
 	m.puts = append(m.puts, key)
 	return nil
+}
+
+func (m *memObjects) getCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.gets
 }
 
 func (m *memObjects) keys() []string {
@@ -184,6 +192,17 @@ func (f *fakeStore) ApplyQuickLook(_ context.Context, ws ids.WorkspaceID, id ids
 	f.asset.Description, f.asset.Tags = r.Description, r.Tags
 	st := store.QuickLookSucceeded
 	f.asset.QuickLookStatus, f.asset.QuickLook = &st, r.Detail
+	return f.asset, nil
+}
+
+func (f *fakeStore) SkipQuickLook(_ context.Context, ws ids.WorkspaceID, id ids.AssetID) (store.Asset, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if ws != f.asset.WorkspaceID || id != f.asset.ID || f.asset.QuickLookStatus == nil || *f.asset.QuickLookStatus != store.QuickLookPending {
+		return store.Asset{}, store.ErrNotFound
+	}
+	st := store.QuickLookSkipped
+	f.asset.QuickLookStatus = &st
 	return f.asset, nil
 }
 

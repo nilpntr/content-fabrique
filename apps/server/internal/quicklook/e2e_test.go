@@ -216,11 +216,11 @@ func TestReplayEndToEndFromIngestReadyToSearch(t *testing.T) {
 	}
 
 	// Searching "row" finds it, in its own workspace only.
-	found, err := st.SearchAssets(ctx, ws.ID, store.SearchQuery("row"), nil, 10)
+	found, err := st.SearchAssets(ctx, ws.ID, store.SearchWords("row"), nil, 10)
 	if err != nil || len(found) != 1 || found[0].ID != id {
 		t.Fatalf("search for row = %d assets, %v", len(found), err)
 	}
-	if found, _ := st.SearchAssets(ctx, other.ID, store.SearchQuery("row"), nil, 10); len(found) != 0 {
+	if found, _ := st.SearchAssets(ctx, other.ID, store.SearchWords("row"), nil, 10); len(found) != 0 {
 		t.Fatalf("another workspace found the clip: %v", found)
 	}
 

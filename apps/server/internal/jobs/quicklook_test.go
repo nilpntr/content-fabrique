@@ -2,6 +2,7 @@ package jobs_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -19,7 +20,6 @@ import (
 type fakeQuickLook struct {
 	mu      sync.Mutex
 	runs    int
-	gaveUp  int
 	outcome func(run int) (any, bool, error)
 }
 
@@ -31,17 +31,10 @@ func (f *fakeQuickLook) RunJob(context.Context, ids.WorkspaceID, ids.AssetID) (a
 	return f.outcome(n)
 }
 
-func (f *fakeQuickLook) GiveUp(context.Context, ids.WorkspaceID, ids.AssetID) error {
+func (f *fakeQuickLook) count() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.gaveUp++
-	return nil
-}
-
-func (f *fakeQuickLook) counts() (runs, gaveUp int) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.runs, f.gaveUp
+	return f.runs
 }
 
 // finishedVideo takes a video through the ingest's transaction the way the pipeline does, with the worker's hook in place
@@ -143,17 +136,15 @@ func TestQuickLookJobOutcomes(t *testing.T) {
 
 	t.Run("an error is retried, and only the last attempt gives up", func(t *testing.T) {
 		ql.outcome = func(int) (any, bool, error) { return nil, false, errors.New("sandbox down") }
-		_, gaveBefore := ql.counts()
 		a := e.finishedVideo(t, w, "retry.mp4")
 		eventually(t, "the first attempt to fail", func() bool { s, _, _, _ := e.quickLookJob(t, a); return s == "retryable" })
-		if _, gave := ql.counts(); gave != gaveBefore {
-			t.Errorf("GiveUp was called after the first attempt")
+		if got := e.quickLookState(t, w, a); got.status != store.QuickLookPending {
+			t.Errorf("the quick look is %s after the first attempt, want it still pending", got.status)
 		}
 	})
 
 	t.Run("the last attempt marks the quick look failed", func(t *testing.T) {
 		ql.outcome = func(int) (any, bool, error) { return nil, false, errors.New("sandbox down") }
-		_, gaveBefore := ql.counts()
 		a := e.newUploadedAsset(t, w, store.AssetKindVideo, "last.mp4", []byte("data"))
 		// The same job with a single attempt, as the last attempt of a longer one would be.
 		err := e.api.InTx(context.Background(), func(tx *store.Store) error {
@@ -164,10 +155,65 @@ func TestQuickLookJobOutcomes(t *testing.T) {
 			t.Fatal(err)
 		}
 		eventually(t, "the job to be discarded", func() bool { s, _, _, _ := e.quickLookJob(t, a); return s == "discarded" })
-		if _, gave := ql.counts(); gave != gaveBefore+1 {
-			t.Errorf("GiveUp calls = %d, want %d", gave, gaveBefore+1)
+		if got := e.quickLookState(t, w, a); got.status != store.QuickLookFailed || got.detail != jobs.QuickLookFailInternal {
+			t.Errorf("after the last attempt: %+v, want failed with %q", got, jobs.QuickLookFailInternal)
 		}
 	})
+}
+
+type quickLookState struct{ status, detail string }
+
+// quickLookState reads the asset's quick look status and the error code in its detail.
+func (e *assetsEnv) quickLookState(t *testing.T, w store.Workspace, a store.Asset) quickLookState {
+	t.Helper()
+	got, err := e.api.GetAsset(context.Background(), w.ID, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out quickLookState
+	if got.QuickLookStatus != nil {
+		out.status = *got.QuickLookStatus
+	}
+	var d struct {
+		Error string `json:"error"`
+	}
+	_ = json.Unmarshal(got.QuickLook, &d)
+	out.detail = d.Error
+	return out
+}
+
+// A job that waits for a worker that can run it, or an asset that is ready, gives up after a day: the quick look is marked
+// failed with a code that says why, and the job is cancelled.
+func TestQuickLookGivesUpAfterWaitingADay(t *testing.T) {
+	for name, tc := range map[string]struct {
+		looker jobs.QuickLooker
+		reason string
+	}{
+		"no worker can run it": {nil, jobs.QuickLookFailModelUnavailable},
+		"no model access":      {&fakeQuickLook{outcome: func(int) (any, bool, error) { return nil, false, jobs.ErrModelUnavailable }}, jobs.QuickLookFailModelUnavailable},
+		"never ready":          {&fakeQuickLook{outcome: func(int) (any, bool, error) { return nil, false, jobs.ErrQuickLookNotReady }}, jobs.QuickLookFailAssetNotReady},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newAssetsEnv(t)
+			w := e.newWorkspace(t, "org_ql_age_"+strings.ReplaceAll(name, " ", "_"))
+			e.startWorker(t, jobs.WorkerOptions{QuickLook: tc.looker})
+			a := e.finishedVideo(t, w, "old.mp4")
+			eventually(t, "the job to be snoozed", func() bool { s, _, _, _ := e.quickLookJob(t, a); return s == "scheduled" })
+			if got := e.quickLookState(t, w, a); got.status != store.QuickLookPending {
+				t.Fatalf("a snoozed quick look is %s, want pending", got.status)
+			}
+			// Make the job a day old and due now.
+			_, err := e.super.Exec(context.Background(),
+				`UPDATE river_job SET created_at = now() - interval '25 hours', scheduled_at = now() WHERE kind = 'quick_look' AND args->>'asset_id' = $1`, a.ID.String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			eventually(t, "the job to be cancelled", func() bool { s, _, _, _ := e.quickLookJob(t, a); return s == "cancelled" })
+			if got := e.quickLookState(t, w, a); got.status != store.QuickLookFailed || got.detail != tc.reason {
+				t.Errorf("after a day: %+v, want failed with %q", got, tc.reason)
+			}
+		})
+	}
 }
 
 // One job per asset, however often the ingest finishes: a second ingest of an asset whose quick look is still pending does not

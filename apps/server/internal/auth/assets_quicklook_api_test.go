@@ -153,12 +153,13 @@ func TestAssetsRenameTitle(t *testing.T) {
 	path := "/v1/assets/" + a.Id
 
 	var got api.Asset
-	e.call(http.MethodPatch, path, "ada", api.UpdateAssetRequest{Title: "  Gino's   <b>heavy</b> rows  "}, http.StatusOK, &got)
-	if got.Title != "Gino's bheavy/b rows" || deref(got.TitleSource) != api.TitleSource(store.TitleFromUser) || got.Id != a.Id || got.Description != "Rows in a gym." {
+	e.call(http.MethodPatch, path, "ada", api.UpdateAssetRequest{Title: "  Gino's   $100 <b>heavy</b>\t[rows] \xe2\x80\xae\x00 "}, http.StatusOK, &got)
+	if got.Title != "Gino's $100 <b>heavy</b> [rows]" || deref(got.TitleSource) != api.TitleSource(store.TitleFromUser) || got.Id != a.Id || got.Description != "Rows in a gym." {
 		t.Fatalf("after the edit: %+v", got)
 	}
-	if strings.ContainsAny(got.Title, "<>") {
-		t.Errorf("markup characters survived in %q", got.Title)
+	// A title is the user's text: typed punctuation stays, invisible and control characters go.
+	if strings.ContainsAny(got.Title, "\t\x00\u202e") {
+		t.Errorf("control or format characters survived in %q", got.Title)
 	}
 	var fetched api.Asset
 	e.call(http.MethodGet, path, "ada", nil, http.StatusOK, &fetched)
@@ -181,13 +182,13 @@ func TestAssetsRenameTitle(t *testing.T) {
 
 	// Bad titles: nothing left after cleaning, too long, wrong shape.
 	for name, body := range map[string]any{
-		"blank":       api.UpdateAssetRequest{Title: "   "},
-		"only markup": api.UpdateAssetRequest{Title: "<>`{}"},
-		"too long":    api.UpdateAssetRequest{Title: strings.Repeat("t", 256)},
-		"no body":     nil,
-		"no title":    "{}",
-		"wrong type":  `{"title": 5}`,
-		"not JSON":    "title=x",
+		"blank":          api.UpdateAssetRequest{Title: "   "},
+		"only invisible": api.UpdateAssetRequest{Title: "\u200b\x00 \t"},
+		"too long":       api.UpdateAssetRequest{Title: strings.Repeat("t", 256)},
+		"no body":        nil,
+		"no title":       "{}",
+		"wrong type":     `{"title": 5}`,
+		"not JSON":       "title=x",
 	} {
 		rec := e.do(http.MethodPatch, path, "ada", body)
 		if rec.Code != http.StatusBadRequest {
@@ -207,7 +208,7 @@ func TestAssetsRenameTitle(t *testing.T) {
 	e.fail(http.MethodPatch, path, "", api.UpdateAssetRequest{Title: "anon"}, http.StatusUnauthorized, api.ErrorCodeUnauthenticated)
 	e.call(http.MethodGet, path, "ada", nil, http.StatusOK, &fetched)
 	e.call(http.MethodGet, "/v1/assets/"+b.Id, "bob", nil, http.StatusOK, &got)
-	if fetched.Title != "Gino's bheavy/b rows" || got.Title != "bobs" || deref(got.TitleSource) != api.TitleSource(store.TitleFromFilename) {
+	if fetched.Title != "Gino's $100 <b>heavy</b> [rows]" || got.Title != "bobs" || deref(got.TitleSource) != api.TitleSource(store.TitleFromFilename) {
 		t.Errorf("a refused edit changed something: ada's %q, bob's %q (%v)", fetched.Title, got.Title, got.TitleSource)
 	}
 

@@ -29,6 +29,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/nilpntr/content-fabrique/internal/agents/editor"
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
@@ -50,7 +51,6 @@ const (
 	FailSpendCap      = "spend_cap"        // a spend cap or the $0.003 budget refused the call
 	FailModelRejected = "model_rejected"   // the API refused the request (a 4xx that is ours to fix)
 	FailReplayMiss    = "replay_miss"      // LLM_MODE=replay and no cassette holds the request
-	FailInternal      = "internal"         // the last attempt of the job failed
 )
 
 // ErrModelUnavailable is returned when the model client cannot be built because no key is configured: not a failure of the
@@ -64,6 +64,7 @@ var ErrNotReady = jobs.ErrQuickLookNotReady
 type Store interface {
 	GetAsset(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (store.Asset, error)
 	ApplyQuickLook(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, r store.QuickLookResult) (store.Asset, error)
+	SkipQuickLook(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (store.Asset, error)
 	FailQuickLook(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, detail json.RawMessage) (store.Asset, error)
 }
 
@@ -184,7 +185,13 @@ func (s *Service) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, o
 	}
 	log := s.cfg.Logger.With("workspace_id", ws.String(), "asset_id", id.String())
 	switch {
-	case a.Kind != store.AssetKindVideo, a.Status == store.AssetFailed:
+	case a.Status == store.AssetFailed:
+		// The ingest failed after the quick look was owed: nothing is owed any more, and the library should not show it pending.
+		if _, err := s.cfg.Store.SkipQuickLook(ctx, ws, id); err != nil && !errors.Is(err, store.ErrNotFound) {
+			return Result{}, fmt.Errorf("skip the quick look of a failed asset: %w", err)
+		}
+		return Result{Outcome: OutcomeGone}, nil
+	case a.Kind != store.AssetKindVideo:
 		return Result{Outcome: OutcomeGone}, nil
 	case a.Status != store.AssetReady:
 		return Result{}, fmt.Errorf("%w (status %s)", ErrNotReady, a.Status)
@@ -231,21 +238,6 @@ func (s *Service) RunJob(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID
 		return nil, false, err
 	}
 	return res, res.Outcome == OutcomeGone, nil
-}
-
-// GiveUp marks the quick look failed (FailInternal), for a job that has used its last attempt.
-func (s *Service) GiveUp(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) error {
-	return s.Fail(ctx, ws, id, FailInternal)
-}
-
-// Fail marks the quick look of an asset failed with a code: for a job that has used its last attempt. A deleted asset is not
-// an error.
-func (s *Service) Fail(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, reason string) error {
-	d := detail{PromptVersion: PromptVersion, Error: reason}
-	if _, err := s.cfg.Store.FailQuickLook(ctx, ws, id, d.json()); err != nil && !errors.Is(err, store.ErrNotFound) {
-		return err
-	}
-	return nil
 }
 
 // fail records the failure and returns the result. res, when given, carries what the model call used.
@@ -397,19 +389,22 @@ func (s *Service) frames(ctx context.Context, a store.Asset, log *slog.Logger) (
 		if !strings.HasPrefix(f.Ref, prefix) {
 			return frameSet{}, "", fmt.Errorf("the frame service returned %q, which is not a frame of the asset", f.Ref)
 		}
-		b, err := s.read(ctx, f.Ref)
-		if err != nil {
-			return frameSet{}, "", err
-		}
 		seen[f.AtMs] = true
-		sharp, err := Sharpness(b)
-		if err != nil {
-			sharp = -1
-		}
-		cands = append(cands, Candidate{AtMs: f.AtMs, Ref: f.Ref, JPEG: b, Sharpness: sharp})
+		cands = append(cands, Candidate{AtMs: f.AtMs, Ref: f.Ref, JPEG: f.JPEG})
 	}
 	if len(cands) == 0 {
 		return frameSet{}, FailFrames, nil
+	}
+	// The pictures the frame service has just cut come with their bytes; the cached ones are read from storage, a few at a time.
+	if err := s.fill(ctx, cands); err != nil {
+		return frameSet{}, "", err
+	}
+	for i := range cands {
+		sharp, err := Sharpness(cands[i].JPEG)
+		if err != nil {
+			sharp = -1
+		}
+		cands[i].Sharpness = sharp
 	}
 	var fr frameSet
 	for _, c := range Pick(cands) {
@@ -420,6 +415,39 @@ func (s *Service) frames(ctx context.Context, a store.Asset, log *slog.Logger) (
 }
 
 func roundSharp(v float64) float64 { return float64(int64(v*10)) / 10 }
+
+// readParallel is how many cached pictures are read from storage at once.
+const readParallel = 6
+
+// fill reads the bytes of the candidates that have none, in parallel; the first failure ends the rest.
+func (s *Service) fill(ctx context.Context, cands []Candidate) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var (
+		wg       sync.WaitGroup
+		once     sync.Once
+		firstErr error
+		sem      = make(chan struct{}, readParallel)
+	)
+	for i := range cands {
+		if len(cands[i].JPEG) > 0 {
+			continue
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer func() { <-sem; wg.Done() }()
+			b, err := s.read(ctx, cands[i].Ref)
+			if err != nil {
+				once.Do(func() { firstErr = err; cancel() })
+				return
+			}
+			cands[i].JPEG = b
+		}()
+	}
+	wg.Wait()
+	return firstErr
+}
 
 // read reads one cached picture: not too big, and a JPEG (what storage holds is ours, but it is cheap to check).
 func (s *Service) read(ctx context.Context, key string) ([]byte, error) {

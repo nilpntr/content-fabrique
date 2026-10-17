@@ -343,7 +343,7 @@ SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha25
 WHERE workspace_id = $1
   AND deleted_at IS NULL
   AND ($2::uuid IS NULL OR id < $2::uuid)
-  AND ($3::text IS NULL OR search @@ to_tsquery('english', $3::text))
+  AND ($3::text[] IS NULL OR search @@ cf_search_query($3::text[]))
 ORDER BY id DESC
 LIMIT $4
 `
@@ -351,18 +351,17 @@ LIMIT $4
 type ListAssetsParams struct {
 	WorkspaceID ids.WorkspaceID
 	Before      pgtype.UUID
-	Search      *string
+	Words       []string
 	RowLimit    int32
 }
 
-// The library page: newest first (UUIDv7 ids sort by creation time), after the cursor when there is one. With a search
-// query (a tsquery the caller built from plain words, see store.SearchQuery) only the assets whose title, description, tags
-// or file name match it.
+// The library page: newest first (UUIDv7 ids sort by creation time), after the cursor when there is one. With search words
+// (store.SearchWords) only the assets whose title, description, tags or file name match all of them (cf_search_query).
 func (q *Queries) ListAssets(ctx context.Context, arg ListAssetsParams) ([]Asset, error) {
 	rows, err := q.db.Query(ctx, listAssets,
 		arg.WorkspaceID,
 		arg.Before,
-		arg.Search,
+		arg.Words,
 		arg.RowLimit,
 	)
 	if err != nil {

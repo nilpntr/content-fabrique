@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -644,7 +645,7 @@ func assetsSuite(t *testing.T, st *store.Store, suffix string) {
 		// Search: title, tag, description and file name words; prefixes; stemming; AND of words; workspace scoped.
 		search := func(w store.Workspace, text string) []store.Asset {
 			t.Helper()
-			rows, err := st.SearchAssets(ctx, w.ID, store.SearchQuery(text), nil, 50)
+			rows, err := st.SearchAssets(ctx, w.ID, store.SearchWords(text), nil, 50)
 			if err != nil {
 				t.Fatalf("search %q: %v", text, err)
 			}
@@ -719,21 +720,119 @@ func assetsSuite(t *testing.T, st *store.Store, suffix string) {
 		}
 	})
 
-	t.Run("search query words", func(t *testing.T) {
-		for in, want := range map[string]string{
-			"row":                  "'row':*",
-			"  Barbell   ROW ":     "'barbell':* & 'row':*",
-			"o'brien & (x) | !y:*": "'o':* & 'brien':* & 'x':* & 'y':*",
-			"<>":                   "",
-			"":                     "",
-			"naïve crème 123":      "'naïve':* & 'crème':* & '123':*",
+	t.Run("quick look: skipped when the ingest failed", func(t *testing.T) {
+		a := func() store.Asset {
+			t.Helper()
+			a, _ := newAsset(wa, ua, "skipme", future)
+			if err := st.InTx(ctx, func(tx *store.Store) error { _, err := tx.CompleteUpload(ctx, wa.ID, a.ID); return err }); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.ClaimAssetForIngest(ctx, wa.ID, a.ID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.FinishAssetIngest(ctx, wa.ID, a.ID, store.IngestResult{DurationMs: 1000, Width: 2, Height: 2}); err != nil {
+				t.Fatal(err)
+			}
+			// Ingested again, and this time the file is bad.
+			if _, err := st.ClaimAssetForIngest(ctx, wa.ID, a.ID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.FailAssetIngest(ctx, wa.ID, a.ID, store.FailureCorruptMedia); err != nil {
+				t.Fatal(err)
+			}
+			return a
+		}()
+		if _, err := st.SkipQuickLook(ctx, wb.ID, a.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("workspace B skipped A's quick look: %v", err)
+		}
+		got, err := st.SkipQuickLook(ctx, wa.ID, a.ID)
+		if err != nil || got.QuickLookStatus == nil || *got.QuickLookStatus != store.QuickLookSkipped {
+			t.Fatalf("skip = %+v %v", got, err)
+		}
+		if _, err := st.SkipQuickLook(ctx, wa.ID, a.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("a second skip: %v (only a pending quick look is skipped)", err)
+		}
+		// A failure can be recorded on an asset in any state (a job that gave up waiting for it to be ready).
+		if _, err := st.FailQuickLook(ctx, wa.ID, a.ID, []byte(`{"error":"asset_not_ready"}`)); err != nil {
+			t.Fatalf("fail on a failed asset: %v", err)
+		}
+	})
+
+	t.Run("search words", func(t *testing.T) {
+		for in, want := range map[string][]string{
+			"row":                       {"row"},
+			"  Barbell   ROW ":          {"barbell", "row"},
+			"o'brien & (x) | !y:*":      {"o", "brien", "x", "y"},
+			"<>":                        {},
+			"":                          {},
+			"na\u00efve cr\u00e8me 123": {"na\u00efve", "cr\u00e8me", "123"},
+			// A combining accent stays in its word and is composed: the same word as the precomposed letter.
+			"cafe\u0301":  {"caf\u00e9"},
+			"CAFE\u0301s": {"caf\u00e9s"},
 		} {
-			if got := store.SearchQuery(in); got != want {
-				t.Errorf("SearchQuery(%q) = %q, want %q", in, got, want)
+			if got := store.SearchWords(in); !slices.Equal(got, want) {
+				t.Errorf("SearchWords(%q) = %q, want %q", in, got, want)
 			}
 		}
-		if got := store.SearchQuery("a b c d e f g h i j k"); strings.Count(got, "&") != 7 {
+		if got := store.SearchWords("a b c d e f g h i j k"); len(got) != 8 {
 			t.Errorf("more than 8 words kept: %q", got)
+		}
+	})
+
+	t.Run("search: stop words, half-typed words, accents", func(t *testing.T) {
+		w, u := newWorkspace("search")
+		mk := func(filename, title, desc string, tags ...string) store.Asset {
+			t.Helper()
+			a, _ := newAsset(w, u, strings.TrimSuffix(filename, ".mp4"), future)
+			if err := st.InTx(ctx, func(tx *store.Store) error { _, err := tx.CompleteUpload(ctx, w.ID, a.ID); return err }); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.ClaimAssetForIngest(ctx, w.ID, a.ID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.FinishAssetIngest(ctx, w.ID, a.ID, store.IngestResult{DurationMs: 1000, Width: 2, Height: 2}); err != nil {
+				t.Fatal(err)
+			}
+			a, err := st.ApplyQuickLook(ctx, w.ID, a.ID, store.QuickLookResult{Title: title, Description: desc, Tags: tags})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return a
+		}
+		press := mk("a1.mp4", "The overhead press", "Standing overhead pressing in a gym.", "shoulders")
+		cafe := mk("a2.mp4", "Caf\u00e9 stop", "A coffee break between sets.", "rest")
+		found := func(q string) []string {
+			t.Helper()
+			rows, err := st.SearchAssets(ctx, w.ID, store.SearchWords(q), nil, 50)
+			if err != nil {
+				t.Fatalf("search %q: %v", q, err)
+			}
+			var out []string
+			for _, r := range rows {
+				out = append(out, r.ID.String())
+			}
+			slices.Sort(out)
+			return out
+		}
+		onlyPress, onlyCafe := []string{press.ID.String()}, []string{cafe.ID.String()}
+		for q, want := range map[string][]string{
+			"the":                  onlyPress, // a stop word is a word like any other
+			"The":                  onlyPress,
+			"pressi":               onlyPress, // half-typed: a prefix of "pressing"
+			"press":                onlyPress,
+			"overhead pressi":      onlyPress,
+			"over the":             onlyPress,
+			"standing shoul":       onlyPress,
+			"the squat":            nil,
+			"caf\u00e9":            onlyCafe, // precomposed
+			"cafe\u0301":           onlyCafe, // decomposed: e plus a combining accent
+			"CAFE\u0301 sto":       onlyCafe,
+			"sets":                 onlyCafe, // stemmed: "sets" and "set"
+			"coffee break between": onlyCafe,
+		} {
+			if got := found(q); !slices.Equal(got, want) {
+				t.Errorf("search %q found %v, want %v", q, got, want)
+			}
 		}
 	})
 }

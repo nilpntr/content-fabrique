@@ -583,7 +583,7 @@ func (s *Service) Get(ctx context.Context, who Actor, id ids.AssetID) (View, *Er
 // Rename sets the asset's title to what a person typed (PATCH /v1/assets/{id}). The text is cleaned like every title and
 // must leave 1 to MaxTitleChars characters; the title is then the user's, and the quick look never overwrites it.
 func (s *Service) Rename(ctx context.Context, who Actor, id ids.AssetID, title string) (View, *Error) {
-	clean, ok := textclean.Clean(title, 4*MaxTitleChars)
+	clean, ok := textclean.User(title, 4*MaxTitleChars)
 	if !ok {
 		return View{}, invalid("title must contain some text")
 	}
@@ -612,7 +612,7 @@ const (
 
 // List returns a page of the workspace's assets, newest first, and the cursor of the next page ("" on the last one). The
 // cursor is the id of the last asset of the page. With a non-empty query only the assets that match the search words are
-// listed (store.SearchQuery says how the text becomes words).
+// listed (store.SearchWords says how the text becomes words).
 func (s *Service) List(ctx context.Context, who Actor, query string, limit int, cursor string) ([]View, string, *Error) {
 	if limit == 0 {
 		limit = DefaultPageSize
@@ -634,7 +634,7 @@ func (s *Service) List(ctx context.Context, who Actor, query string, limit int, 
 		}
 		before = &id
 	}
-	rows, err := s.store.SearchAssets(ctx, who.Workspace, store.SearchQuery(query), before, limit+1)
+	rows, err := s.store.SearchAssets(ctx, who.Workspace, store.SearchWords(query), before, limit+1)
 	if err != nil {
 		return nil, "", s.internal(ctx, "list assets", err)
 	}

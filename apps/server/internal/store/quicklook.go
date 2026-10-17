@@ -8,12 +8,14 @@ import (
 	"strings"
 	"unicode"
 
+	"golang.org/x/text/unicode/norm"
+
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store/db"
 )
 
 // The quick look (P1-04b): a title, a one-line description and tags the first minute after a video is ready. The columns and
-// their meaning are in migration 00011.
+// their meaning are in the quick look migration (the one that adds assets.quick_look_status).
 
 // The values of assets.title_source.
 const (
@@ -27,6 +29,7 @@ const (
 	QuickLookPending   = "pending"
 	QuickLookSucceeded = "succeeded"
 	QuickLookFailed    = "failed"
+	QuickLookSkipped   = "skipped"
 )
 
 // SetQuickLookHook registers fn to run, in the transaction that marks a video ready (FinishAssetIngest), when the quick look
@@ -66,6 +69,13 @@ type QuickLookResult struct {
 	Tags        []string
 	// Detail is the jsonb detail: the cached frames, the model, the prompt version.
 	Detail json.RawMessage
+}
+
+// SkipQuickLook marks a pending quick look skipped: its asset failed its ingest, or its job could not run for a day, so
+// nothing is owed. ErrNotFound when the asset is not in this workspace or its quick look was not pending.
+func (s *Store) SkipQuickLook(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (Asset, error) {
+	a, err := s.q.SkipQuickLook(ctx, db.SkipQuickLookParams{WorkspaceID: ws, ID: id})
+	return a, mapErr(err)
 }
 
 // ApplyQuickLook stores the result on a ready asset: the description and tags always, the title only while its source is not
@@ -120,20 +130,23 @@ const (
 	MaxSearchQueryChars = 100
 )
 
-// SearchQuery turns what a person typed in the search box into a tsquery for ListAssets: every word (letters and digits, in
-// any script) must match, as a prefix, so "ro" finds "row". Everything else in the text is ignored, which is also what makes
-// it safe to hand to to_tsquery: the output holds only quoted words, ":*" and "&". It returns "" when no word is left.
-func SearchQuery(text string) string {
-	words := strings.FieldsFunc(text, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
-	var terms []string
+// SearchWords turns what a person typed in the search box into the words of a search: the text in NFC form (so "cafe" typed
+// with a combining accent is the same word as the precomposed one), split at every character that is not a letter, a digit or
+// a combining mark, lower-cased, at most 8 words of at most 40 characters. Everything else only separates words, which is also
+// what makes the result safe to hand to cf_search_query. Each word must then match as a prefix of a stored word or as a stem.
+func SearchWords(text string) []string {
+	words := strings.FieldsFunc(norm.NFC.String(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !unicode.IsMark(r)
+	})
+	out := make([]string, 0, min(len(words), maxSearchWords))
 	for _, w := range words {
-		if len([]rune(w)) > maxSearchWordRunes {
-			w = string([]rune(w)[:maxSearchWordRunes])
+		if r := []rune(w); len(r) > maxSearchWordRunes {
+			w = string(r[:maxSearchWordRunes])
 		}
-		terms = append(terms, "'"+strings.ToLower(w)+"':*")
-		if len(terms) == maxSearchWords {
+		out = append(out, strings.ToLower(w))
+		if len(out) == maxSearchWords {
 			break
 		}
 	}
-	return strings.Join(terms, " & ")
+	return out
 }

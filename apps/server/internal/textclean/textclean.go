@@ -1,11 +1,18 @@
 // Package textclean cleans a short piece of text before it is stored and shown as a label: an asset's title, a model's
-// description or tag. It is the one definition of "clean" for those, so a title a person types, a title a model writes and
-// a file name turned into a title all end up in the same safe shape.
+// description or tag. There are two policies, and the difference is who wrote the text.
 //
-// Clean text is valid UTF-8 in NFC form, has no control or invisible formatting characters (the right-to-left override that
-// makes "exe.mp4" read backwards, among them), no markup or template syntax characters (< > ` { } and the like), one space
-// between words, and a bounded length. The result is safe to store and to render as text; it is not an escape for HTML, which
-// the client does by rendering it as text.
+// User text (User) is what a person typed or a file name they chose: "Gino's $100 rows [take 2] | ^heavy~". It keeps every
+// ordinary typed character, markup characters included (the client renders a title as text, never as HTML). It removes only
+// what cannot be typed on purpose or is invisible: control and format characters (the right-to-left override that makes
+// "exe.mp4" read backwards, among them), private-use and surrogate code points, invalid UTF-8; and it turns every run of
+// white space into one space.
+//
+// Model text (Model) is what a model wrote about footage it was shown, which may carry words copied from the picture. It gets
+// everything User does and, in addition, loses the characters that only matter in markup, templates and shells (< > ` { } \ | ^
+// ~ [ ] $), so nothing in it can be taken for a tag, a template action, a link or a command whatever reads it later.
+//
+// Both return valid UTF-8 in NFC form, on one line, cut to a bounded length. The cut is at a word boundary when that keeps more
+// than half of the text.
 package textclean
 
 import (
@@ -16,12 +23,27 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-// markup are the characters dropped from a label because they only matter in markup, templates and shells.
-const markup = "<>`{}\\|^~[]$"
+// modelMarkup are the characters Model drops on top of what User drops.
+const modelMarkup = "<>`{}\\|^~[]$"
 
-// Clean returns s cleaned and cut to at most maxRunes characters (at a word boundary when it can). ok is false when the text
-// is not valid UTF-8 or nothing is left after cleaning. A maxRunes below 1 means no limit beyond 4096 characters.
-func Clean(s string, maxRunes int) (string, bool) {
+// Invisible reports whether r is a character no label should hold: a control or format character (this includes the
+// bidirectional overrides and the zero-width characters), a line or paragraph separator, a private-use or surrogate code point
+// or the replacement character. White space is not in it: User and Model turn it into spaces, and file names drop it.
+func Invisible(r rune) bool {
+	return r == utf8.RuneError || unicode.IsControl(r) ||
+		unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r) ||
+		unicode.Is(unicode.Co, r) || unicode.Is(unicode.Cs, r)
+}
+
+// User cleans text a person wrote. See the package comment. ok is false when the text is not valid UTF-8 or nothing is left.
+// A maxRunes below 1 means no limit beyond 4096 characters.
+func User(s string, maxRunes int) (string, bool) { return clean(s, maxRunes, false) }
+
+// Model cleans text a model wrote. See the package comment. ok is as for User; a leading or trailing ". , ; : - _" is also
+// trimmed.
+func Model(s string, maxRunes int) (string, bool) { return clean(s, maxRunes, true) }
+
+func clean(s string, maxRunes int, model bool) (string, bool) {
 	if !utf8.ValidString(s) {
 		return "", false
 	}
@@ -31,13 +53,11 @@ func Clean(s string, maxRunes int) (string, bool) {
 	s = norm.NFC.String(s)
 	s = strings.Map(func(r rune) rune {
 		switch {
-		case r == utf8.RuneError:
-			return -1
-		case unicode.IsSpace(r), unicode.Is(unicode.Zs, r), unicode.Is(unicode.Zl, r), unicode.Is(unicode.Zp, r):
+		case unicode.IsSpace(r), unicode.Is(unicode.Zs, r):
 			return ' ' // tabs and newlines become spaces: a label is one line
-		case unicode.IsControl(r), unicode.Is(unicode.Cf, r), unicode.Is(unicode.Co, r), unicode.Is(unicode.Cs, r):
+		case Invisible(r):
 			return -1
-		case strings.ContainsRune(markup, r):
+		case model && strings.ContainsRune(modelMarkup, r):
 			return -1
 		}
 		return r
@@ -46,7 +66,9 @@ func Clean(s string, maxRunes int) (string, bool) {
 	if utf8.RuneCountInString(s) > maxRunes {
 		s = cut(s, maxRunes)
 	}
-	s = strings.Trim(s, " .,;:-_")
+	if model {
+		s = strings.Trim(s, " .,;:-_")
+	}
 	return s, s != ""
 }
 

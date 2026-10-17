@@ -77,10 +77,18 @@ SET title = CASE WHEN title_source = 'user' THEN title ELSE @title::text END,
 WHERE workspace_id = @workspace_id AND id = @id AND status = 'ready' AND deleted_at IS NULL
 RETURNING *;
 
--- The quick look failed: nothing but the status and the detail (an error code, the frames if they were cut) is written.
+-- The quick look failed: nothing but the status and the detail (an error code, the frames if they were cut) is written. Any
+-- state of the asset: a job that gave up waiting for an asset that never became ready marks it too.
 -- name: FailQuickLook :one
 UPDATE assets SET quick_look_status = 'failed', quick_look = @detail::jsonb, quick_look_at = now()
-WHERE workspace_id = @workspace_id AND id = @id AND status = 'ready' AND deleted_at IS NULL
+WHERE workspace_id = @workspace_id AND id = @id AND deleted_at IS NULL
+RETURNING *;
+
+-- The asset failed its ingest (or the job could not run for a day) while its quick look was owed: nothing is owed any more.
+-- No row: the quick look was not pending.
+-- name: SkipQuickLook :one
+UPDATE assets SET quick_look_status = 'skipped'
+WHERE workspace_id = @workspace_id AND id = @id AND quick_look_status = 'pending' AND deleted_at IS NULL
 RETURNING *;
 
 -- PATCH /v1/assets/{id}: a person edited the title, which the quick look never overwrites after this.

@@ -1415,8 +1415,9 @@ components:
       type: string
       description: |
         `pending` (the clip is ready and its quick look has not finished), `succeeded` (title, description and tags were
-        written) or `failed` (the clip is usable but has no description or tags; the title is still the file name).
-      enum: [pending, succeeded, failed]
+        written), `failed` (the clip is usable but has no description or tags; the title is still the file name) or
+        `skipped` (nothing is owed: the asset failed its ingest, or the job could not run for a day).
+      enum: [pending, succeeded, failed, skipped]
 
     UpdateAssetRequest:
       type: object

@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,7 +10,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -51,6 +51,9 @@ type Frame struct {
 	Ref string
 	// Err says, for the model, why there is no picture at this moment.
 	Err string
+	// JPEG holds the picture's bytes when this call has just made it (so a caller that wants the bytes need not read them
+	// back); nil for a frame that was already cached.
+	JPEG []byte
 }
 
 // FrameSource makes the frames of a clip. *FrameService is the real one.
@@ -239,7 +242,8 @@ func (s *FrameService) extract(ctx context.Context, asset ids.AssetID, proxyKey 
 		cause = &media.ToolError{Tool: "ffmpeg", ExitCode: res.ExitCode, Stderr: media.StderrSnippet(res.Stderr)}
 	}
 	for n, i := range missing {
-		serr := s.store(ctx, filepath.Join(outDir, fmt.Sprintf("f%d.jpg", n)), out[i].Ref)
+		data, serr := s.store(ctx, filepath.Join(outDir, fmt.Sprintf("f%d.jpg", n)), out[i].Ref)
+		out[i].JPEG = data
 		switch {
 		case serr == nil:
 		case errors.Is(serr, errBadFrame):
@@ -295,32 +299,27 @@ var jpegMagic = []byte{0xFF, 0xD8, 0xFF}
 // errBadFrame marks a frame the tool did not produce, or produced as something else than a small JPEG.
 var errBadFrame = errors.New("editor: no usable frame")
 
-// store checks what the sandbox wrote (output of a tool is untrusted: a regular file, small, a JPEG) and uploads it. A file that
-// is missing or wrong is errBadFrame; a failure of storage is returned as it is.
-func (s *FrameService) store(ctx context.Context, path, key string) error {
+// store checks what the sandbox wrote (output of a tool is untrusted: a regular file, small, a JPEG) and uploads it, returning
+// the bytes it uploaded. A file that is missing or wrong is errBadFrame; a failure of storage is returned as it is.
+func (s *FrameService) store(ctx context.Context, path, key string) ([]byte, error) {
 	fi, err := os.Lstat(path)
 	if err != nil {
-		return fmt.Errorf("%w: ffmpeg wrote no frame", errBadFrame)
+		return nil, fmt.Errorf("%w: ffmpeg wrote no frame", errBadFrame)
 	}
 	if !fi.Mode().IsRegular() || fi.Size() < 100 || fi.Size() > maxFrameFileBytes {
-		return fmt.Errorf("%w: ffmpeg wrote a frame that is not a regular file of a plausible size (%d bytes)", errBadFrame, fi.Size())
+		return nil, fmt.Errorf("%w: ffmpeg wrote a frame that is not a regular file of a plausible size (%d bytes)", errBadFrame, fi.Size())
 	}
-	f, err := os.Open(path) // #nosec G304 -- a file this process just checked, in its job dir
+	data, err := os.ReadFile(path) // #nosec G304 -- a file this process just checked, in its job dir; at most maxFrameFileBytes
 	if err != nil {
-		return fmt.Errorf("%w: %w", errBadFrame, err)
+		return nil, fmt.Errorf("%w: %w", errBadFrame, err)
 	}
-	defer func() { _ = f.Close() }()
-	head := make([]byte, len(jpegMagic))
-	if _, err := io.ReadFull(f, head); err != nil || !slices.Equal(head, jpegMagic) {
-		return fmt.Errorf("%w: ffmpeg wrote a frame that is not a JPEG", errBadFrame)
+	if !bytes.HasPrefix(data, jpegMagic) {
+		return nil, fmt.Errorf("%w: ffmpeg wrote a frame that is not a JPEG", errBadFrame)
 	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return err
+	if err := s.Objects.Put(ctx, key, bytes.NewReader(data), int64(len(data)), "image/jpeg"); err != nil {
+		return nil, fmt.Errorf("editor: store a frame: %w", err)
 	}
-	if err := s.Objects.Put(ctx, key, f, fi.Size(), "image/jpeg"); err != nil {
-		return fmt.Errorf("editor: store a frame: %w", err)
-	}
-	return nil
+	return data, nil
 }
 
 // OverviewTimes are the times of the overview of a clip: a frame every OverviewStepMs, starting at 0, and at most
