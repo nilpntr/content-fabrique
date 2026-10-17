@@ -34,6 +34,7 @@ type Backend interface {
 	SettleSpend(ctx context.Context, p store.SettleSpendParams) (int, []store.SpendAlert, error)
 	ReleaseSpend(ctx context.Context, ws ids.WorkspaceID, key string) error
 	ExtendSpend(ctx context.Context, ws ids.WorkspaceID, key string, expiresAt time.Time) error
+	RetainSpend(ctx context.Context, ws ids.WorkspaceID, key string, now time.Time) error
 }
 
 var _ Backend = (*store.Store)(nil)
@@ -188,15 +189,15 @@ func (h *Hold) KeepAlive(ctx context.Context) (stop func()) {
 	return func() { cancel(); <-done }
 }
 
-// Retain keeps a hold whose ledger row could not be written (the cost is paid and not recorded) until the end of the UTC day, so the
-// caps stay conservative until someone reconciles the row from the log line. The heartbeat must be stopped first.
+// Retain keeps a hold whose ledger row could not be written (the cost is paid and not recorded) until the end of the UTC day it is
+// retained on, so the caps stay conservative until someone reconciles the row from the log line. The hold moves onto that day: a call
+// that reserved on day D and failed to write after midnight is counted on D+1, where its cost belongs and where the cap checks look.
+// The heartbeat must be stopped first.
 func (h *Hold) Retain(ctx context.Context) error {
 	if h.h.ID == uuid.Nil {
 		return nil
 	}
-	now := h.g.now().UTC()
-	endOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).Add(24 * time.Hour)
-	if err := h.g.b.ExtendSpend(ctx, h.h.Workspace, h.h.Key, endOfDay); err != nil {
+	if err := h.g.b.RetainSpend(ctx, h.h.Workspace, h.h.Key, h.g.now()); err != nil {
 		return fmt.Errorf("spend: retaining: %w", err)
 	}
 	return nil

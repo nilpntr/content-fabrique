@@ -844,3 +844,62 @@ func TestCheckSpendCapsClassifiesRefusals(t *testing.T) {
 		t.Error("the small call must be clamped to a tenth of the cap")
 	}
 }
+
+// A call that reserved on day D and could not write its ledger row after midnight is counted on D+1: its retained hold moves onto the
+// new day, where the cap checks read, and lasts to the end of it. (Real Postgres, two pools.)
+func TestSpendRetainedHoldMovesOntoTheDayItIsRetainedOn(t *testing.T) {
+	rig := newSpendRig(t)
+	ctx := context.Background()
+	w := rig.workspace(t, "retain")
+	caps := store.SpendCaps{WorkspaceDailyMicros: 5_000, PlatformDailyMicros: 1 << 40}
+	dayD := time.Date(2026, 10, 17, 23, 59, 0, 0, time.UTC)
+	nextDay := dayD.Add(2 * time.Minute) // 00:01 on D+1
+	p := reserve("retained", w, store.BilledToPlatform, 5_000, caps, dayD)
+	p.TTL = 5 * time.Minute
+	if _, _, err := rig.a.ReserveSpend(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	probe := func(key string, at time.Time) error {
+		_, _, err := rig.b.ReserveSpend(ctx, reserve(key, w, store.BilledToPlatform, 1, caps, at))
+		return err
+	}
+	// The call finishes after midnight and its ledger write fails. Without a move, the hold is on day D and D+1's checks do not see it.
+	if err := probe("seen-by-d1-before", nextDay); err != nil {
+		t.Fatalf("(the premise) the hold of day D was visible on D+1: %v", err)
+	}
+	if err := rig.b.ReleaseSpend(ctx, w.ID, "seen-by-d1-before"); err != nil {
+		t.Fatal(err)
+	}
+	if err := rig.a.RetainSpend(ctx, w.ID, "retained", nextDay); err != nil {
+		t.Fatal(err)
+	}
+	// Now it counts on D+1 (its cost belongs there) ...
+	if err := probe("d1-after", nextDay.Add(time.Hour)); !errors.Is(err, store.ErrSpendCapExceeded) {
+		t.Fatalf("the retained hold does not count on the day it was retained on: %v", err)
+	}
+	// ... for the whole of D+1, with no heartbeat ...
+	if err := probe("d1-late", time.Date(2026, 10, 18, 23, 58, 0, 0, time.UTC)); !errors.Is(err, store.ErrSpendCapExceeded) {
+		t.Fatalf("the retained hold lapsed before the end of the day: %v", err)
+	}
+	// ... and not on D+2, nor again on D.
+	if err := probe("d2", time.Date(2026, 10, 19, 0, 1, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("the retained hold outlived its day: %v", err)
+	}
+	// Retaining a hold that is gone does not bring it back, and another workspace's retain does not move it.
+	other := rig.workspace(t, "retain2")
+	if err := rig.a.RetainSpend(ctx, other.ID, "retained", nextDay.Add(24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := probe("d1-still", nextDay.Add(2*time.Hour)); !errors.Is(err, store.ErrSpendCapExceeded) {
+		t.Fatalf("another workspace's retain moved the hold: %v", err)
+	}
+	if err := rig.a.ReleaseSpend(ctx, w.ID, "retained"); err != nil {
+		t.Fatal(err)
+	}
+	if err := rig.a.RetainSpend(ctx, w.ID, "retained", nextDay); err != nil {
+		t.Fatal(err)
+	}
+	if err := probe("d1-gone", nextDay.Add(3*time.Hour)); err != nil {
+		t.Fatalf("a released hold was revived by a retain: %v", err)
+	}
+}

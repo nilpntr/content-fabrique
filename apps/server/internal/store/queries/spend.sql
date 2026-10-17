@@ -48,6 +48,12 @@ SELECT * FROM spend_holds WHERE idempotency_key = @idempotency_key;
 UPDATE spend_holds SET expires_at = GREATEST(expires_at, @expires_at)
 WHERE idempotency_key = @idempotency_key AND scope = 'workspace' AND workspace_id = @workspace_id;
 
+-- A hold kept for an unrecorded cost moves to the day it is kept on (the cost belongs to that day's counters, which the caps read) and
+-- lasts to the end of it.
+-- name: RetainSpendHold :execrows
+UPDATE spend_holds SET period = @period, expires_at = GREATEST(expires_at, @expires_at)
+WHERE idempotency_key = @idempotency_key AND scope = 'workspace' AND workspace_id = @workspace_id;
+
 -- Deletes the hold of a workspace. A key that belongs to another workspace's hold is not touched.
 -- name: DeleteWorkspaceSpendHold :execrows
 DELETE FROM spend_holds WHERE idempotency_key = @idempotency_key AND scope = 'workspace' AND workspace_id = @workspace_id;

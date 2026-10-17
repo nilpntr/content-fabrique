@@ -383,6 +383,33 @@ func (q *Queries) MarkPlatformTripped(ctx context.Context, arg MarkPlatformTripp
 	return result.RowsAffected(), nil
 }
 
+const retainSpendHold = `-- name: RetainSpendHold :execrows
+UPDATE spend_holds SET period = $1, expires_at = GREATEST(expires_at, $2)
+WHERE idempotency_key = $3 AND scope = 'workspace' AND workspace_id = $4
+`
+
+type RetainSpendHoldParams struct {
+	Period         string
+	ExpiresAt      time.Time
+	IdempotencyKey string
+	WorkspaceID    pgtype.UUID
+}
+
+// A hold kept for an unrecorded cost moves to the day it is kept on (the cost belongs to that day's counters, which the caps read) and
+// lasts to the end of it.
+func (q *Queries) RetainSpendHold(ctx context.Context, arg RetainSpendHoldParams) (int64, error) {
+	result, err := q.db.Exec(ctx, retainSpendHold,
+		arg.Period,
+		arg.ExpiresAt,
+		arg.IdempotencyKey,
+		arg.WorkspaceID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const sumPlatformSpendHolds = `-- name: SumPlatformSpendHolds :one
 SELECT COALESCE(sum(micros), 0)::bigint AS micros
 FROM spend_holds

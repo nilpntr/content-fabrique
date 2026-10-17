@@ -256,6 +256,21 @@ func (m *Memory) SettleSpend(_ context.Context, p store.SettleSpendParams) (int,
 	return inserted, alerts, nil
 }
 
+// RetainSpend implements spend.Backend: a live hold moves onto the day of now and lasts to the end of it.
+func (m *Memory) RetainSpend(_ context.Context, ws ids.WorkspaceID, key string, now time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if h, ok := m.holds[key]; ok && h.Workspace == ws {
+		now = now.UTC()
+		h.Period = store.DayPeriod(now)
+		if end := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).Add(24 * time.Hour); end.After(h.ExpiresAt) {
+			h.ExpiresAt = end
+		}
+		m.holds[key] = h
+	}
+	return nil
+}
+
 // ReleaseAll drops every hold, as if their callers had all settled or released.
 func (m *Memory) ReleaseAll() {
 	m.mu.Lock()

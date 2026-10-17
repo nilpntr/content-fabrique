@@ -291,3 +291,28 @@ type syncBuf struct {
 
 func (s *syncBuf) Write(p []byte) (int, error) { s.mu.Lock(); defer s.mu.Unlock(); return s.b.Write(p) }
 func (s *syncBuf) String() string              { s.mu.Lock(); defer s.mu.Unlock(); return s.b.String() }
+
+// Crossing midnight with the fake clock: a hold made on day D and retained after midnight counts on D+1.
+func TestRetainAcrossMidnightCountsOnTheNewDay(t *testing.T) {
+	clk := &spendtest.Clock{T: time.Date(2026, 10, 17, 23, 59, 0, 0, time.UTC)}
+	mem := &spendtest.Memory{}
+	g := spend.NewGate(mem, spend.Options{Caps: store.SpendCaps{WorkspaceDailyMicros: 1_000, PlatformDailyMicros: 1_000}, Now: clk.Now})
+	ctx := context.Background()
+	w := ws()
+	h, err := g.Reserve(ctx, spend.Request{Workspace: w, BilledTo: store.BilledToPlatform, Kind: store.KindLLM, Micros: 1_000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clk.Advance(2 * time.Minute) // 00:01 on the 18th; the call's ledger write fails now
+	if err := h.Retain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	clk.Advance(time.Hour)
+	if _, err := g.Reserve(ctx, spend.Request{Workspace: w, BilledTo: store.BilledToPlatform, Kind: store.KindLLM, Micros: 1}); !errors.Is(err, spend.ErrCapExceeded) {
+		t.Fatalf("the unrecorded cost is not counted on the day it was found: %v", err)
+	}
+	clk.Advance(23 * time.Hour) // the 19th
+	if _, err := g.Reserve(ctx, spend.Request{Workspace: w, BilledTo: store.BilledToPlatform, Kind: store.KindLLM, Micros: 1}); err != nil {
+		t.Fatalf("the retained hold outlived its day: %v", err)
+	}
+}

@@ -290,6 +290,10 @@ func pricedWord(p *llm.PriceTable, model string) string {
 	return "model UNPRICED: live calls are refused unless LLM_ALLOW_UNPRICED=1"
 }
 
+func (noLedger) RetainSpend(context.Context, ids.WorkspaceID, string, time.Time) error {
+	return errNoLedger
+}
+
 func (noLedger) ExtendSpend(context.Context, ids.WorkspaceID, string, time.Time) error {
 	return errNoLedger
 }

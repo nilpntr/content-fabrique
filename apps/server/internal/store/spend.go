@@ -520,6 +520,20 @@ func (s *Store) ExtendSpend(ctx context.Context, ws ids.WorkspaceID, key string,
 	return mapErr(err)
 }
 
+// RetainSpend keeps a hold whose call is paid and not recorded (its ledger write failed) to the end of the UTC day of now, and moves it
+// onto that day: the cap checks read the holds of the current day only, and the unrecorded cost belongs to the day it is found on, not
+// to the day the hold was made on (a call that reserved before midnight and failed to write after it). A hold that is gone is not
+// brought back.
+func (s *Store) RetainSpend(ctx context.Context, ws ids.WorkspaceID, key string, now time.Time) error {
+	if !validKey(key) {
+		return fmt.Errorf("%w: a spend hold needs a key", ErrInvalid)
+	}
+	now = now.UTC()
+	endOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).Add(24 * time.Hour)
+	_, err := s.q.RetainSpendHold(ctx, db.RetainSpendHoldParams{Period: DayPeriod(now), ExpiresAt: endOfDay, IdempotencyKey: key, WorkspaceID: nullableWorkspace(ws)})
+	return mapErr(err)
+}
+
 // ReleaseSpend gives a reservation back without charging anything (the call never went out, or failed with nothing billed). A hold
 // that is already gone is not an error.
 func (s *Store) ReleaseSpend(ctx context.Context, ws ids.WorkspaceID, key string) error {
