@@ -41,13 +41,6 @@ func (v *V1) Handle(pattern string, h http.Handler) {
 	v.mux.Handle(pattern, h)
 }
 
-// openWithoutPlan is the allowlist: the operations of the OpenAPI contract that are behind the authentication middleware
-// alone, so a workspace without a plan can call them. Every other operation of the spec is paid-only (see entitlements.go).
-var openWithoutPlan = map[string]bool{
-	"GET /v1/me":             true, // the web app needs it to learn that the workspace has no plan
-	"GET /v1/workspace/plan": true,
-}
-
 // Mount registers the routes of the API contract (packages/schemas/openapi.yaml) and the webhook on mux:
 //
 //	GET  /v1/me                the signed-in user, workspace and entitlements (authenticated; open without a plan)
@@ -73,7 +66,7 @@ func Mount(mux *http.ServeMux, d Deps) (*V1, error) {
 
 	var mw func(http.Handler) http.Handler
 	if cfg.ClerkSecretKey == "" && d.JWKSClient == nil {
-		logger.Warn("CLERK_SECRET_KEY is not set: authenticated endpoints answer 503 " + CodeNotConfigured)
+		logger.Warn("CLERK_SECRET_KEY is not set: authenticated endpoints answer 503 " + string(CodeNotConfigured))
 		mw = NotConfigured()
 	} else {
 		var err error
@@ -94,11 +87,15 @@ func Mount(mux *http.ServeMux, d Deps) (*V1, error) {
 	}
 
 	// The routes of the OpenAPI contract, built by the generated code (see api.go). Which middleware each sits behind is
-	// decided here and nowhere else: the allowlist below is open to a workspace without a plan (authentication alone), and
-	// every other operation of the spec, including one added later, goes to the paid-only router.
+	// decided here and nowhere else: the operations the spec marks x-open-without-plan are open to a workspace without a plan
+	// (authentication alone), and every other operation of the spec, including one added later, goes to the paid-only router.
+	open, err := openOperations()
+	if err != nil {
+		return nil, err
+	}
 	v1 := &V1{mux: http.NewServeMux()}
-	for pattern, h := range apiRoutes(newAPIServer(d.Store, logger)) {
-		if openWithoutPlan[pattern] {
+	for pattern, h := range apiRoutes(newAPIServer(d.Store, logger), logger) {
+		if open[pattern] {
 			mux.Handle(pattern, mw(h))
 		} else {
 			v1.Handle(pattern, h)

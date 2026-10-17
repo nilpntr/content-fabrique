@@ -8,7 +8,7 @@
     "gen": "bun scripts/gen.ts",
     "gen:api": "bun scripts/gen-api.ts",
     "gen:check": "sh scripts/gen-check.sh",
-    "lint:api": "redocly lint openapi.yaml --max-problems 0",
+    "lint:api": "redocly lint openapi.yaml",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

@@ -10,24 +10,26 @@ import (
 	"github.com/clerk/clerk-sdk-go/v2"
 	clerkhttp "github.com/clerk/clerk-sdk-go/v2/http"
 	"github.com/clerk/clerk-sdk-go/v2/jwks"
+	"github.com/nilpntr/content-fabrique/internal/api"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
-// Error codes of the authentication middleware. They are part of the API: the web client branches on them.
+// Error codes of the authentication middleware. They are part of the API: the web client branches on them. They are the
+// generated api.ErrorCode constants, so a code that packages/schemas/openapi.yaml does not list does not compile.
 const (
-	CodeUnauthenticated      = "unauthenticated"        // 401: no token
-	CodeInvalidToken         = "invalid_token"          // 401: the token failed verification (signature, expiry, issuer, azp)
-	CodeNoActiveWorkspace    = "no_active_workspace"    // 403: signed in, but no organization is active
-	CodeUserDeleted          = "user_deleted"           // 403
-	CodeWorkspaceDeleted     = "workspace_deleted"      // 403
-	CodeNotMember            = "not_a_member"           // 403: removed from the workspace
-	CodeIdentityProvider     = "identity_unavailable"   // 503: Clerk's Backend API did not answer
-	CodeNotConfigured        = "auth_not_configured"    // 503: no CLERK_SECRET_KEY
-	CodeQueueNotMigrated     = "queue_not_migrated"     // 503: River's tables are missing, so a new workspace cannot be created
-	CodeInternal             = "internal_error"         // 500
-	CodeWebhookNotConfigured = "webhook_not_configured" // 503: no CLERK_WEBHOOK_SECRET
-	CodeInvalidRequest       = "invalid_request"        // 400: the generated server could not bind the request (a malformed parameter)
+	CodeUnauthenticated      = api.ErrorCodeUnauthenticated      // 401: no token
+	CodeInvalidToken         = api.ErrorCodeInvalidToken         // 401: the token failed verification (signature, expiry, issuer, azp)
+	CodeNoActiveWorkspace    = api.ErrorCodeNoActiveWorkspace    // 403: signed in, but no organization is active
+	CodeUserDeleted          = api.ErrorCodeUserDeleted          // 403
+	CodeWorkspaceDeleted     = api.ErrorCodeWorkspaceDeleted     // 403
+	CodeNotMember            = api.ErrorCodeNotAMember           // 403: removed from the workspace
+	CodeIdentityProvider     = api.ErrorCodeIdentityUnavailable  // 503: Clerk's Backend API did not answer
+	CodeNotConfigured        = api.ErrorCodeAuthNotConfigured    // 503: no CLERK_SECRET_KEY
+	CodeQueueNotMigrated     = api.ErrorCodeQueueNotMigrated     // 503: River's tables are missing, so a new workspace cannot be created
+	CodeInternal             = api.ErrorCodeInternalError        // 500
+	CodeWebhookNotConfigured = api.ErrorCodeWebhookNotConfigured // 503: no CLERK_WEBHOOK_SECRET
+	CodeInvalidRequest       = api.ErrorCodeInvalidRequest       // 400: the generated server could not bind the request (a malformed parameter)
 )
 
 // DefaultLeeway is how long after its expiry a token is still accepted: just enough for clock skew between Clerk and us.
@@ -169,7 +171,7 @@ func writeResolveError(w http.ResponseWriter, r *http.Request, logger *slog.Logg
 	}
 }
 
-func unauthorized(w http.ResponseWriter, code, message string) {
+func unauthorized(w http.ResponseWriter, code api.ErrorCode, message string) {
 	w.Header().Set("WWW-Authenticate", "Bearer")
 	httpapi.WriteError(w, http.StatusUnauthorized, code, message)
 }

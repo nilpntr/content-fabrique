@@ -4,9 +4,11 @@ openapi: 3.1.0
 # (apps/server/internal/api) and the TypeScript types (packages/schemas/api/schema.ts) are generated from it with
 # `task gen:api`, and CI fails when they are out of date. See docs/03-architecture.md section 9 for how to add an endpoint.
 #
-# Paid by default: every /v1 operation is behind the paywall (402 plan_required without an active plan) unless
-# apps/server/internal/auth/routes.go lists it on the allowlist. Only GET /v1/me and GET /v1/workspace/plan are (and the
-# webhook, which has no session at all). An operation added here is paid-only until someone opens it on purpose.
+# Paid by default: every /v1 operation is behind the paywall (402 plan_required without an active plan), and must document
+# that 402 response ($ref PlanRequired). An operation opts out with `x-open-without-plan: true`, which the Go server reads
+# from this spec (embedded in the generated code) to put it behind authentication alone; apps/server/internal/auth tests
+# that the two always agree. Only GET /v1/me and GET /v1/workspace/plan are open (and the webhook, which has no session at
+# all). An operation added here is paid-only until someone opens it on purpose.
 
 info:
   title: Content Fabrique API
@@ -46,6 +48,7 @@ paths:
   /v1/me:
     get:
       operationId: getMe
+      x-open-without-plan: true
       tags: [account]
       summary: The signed-in user, the active workspace and its plan
       description: |
@@ -70,6 +73,7 @@ paths:
   /v1/workspace/plan:
     get:
       operationId: getWorkspacePlan
+      x-open-without-plan: true
       tags: [workspace]
       summary: The plan of the active workspace and what it includes
       description: "Open to a workspace without a plan (it answers `active: false` and zero limits)."

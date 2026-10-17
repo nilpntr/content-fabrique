@@ -1,31 +1,15 @@
 import { useAuth } from "@clerk/tanstack-react-start";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useRef } from "react";
-import { type ApiClient, ApiError, createApiClient, fetchLibrarySummary, fetchMe, fetchWorkspacePlan } from "@/lib/api/client";
+import { type ApiClient, ApiError, fetchLibrarySummary, fetchMe, fetchWorkspacePlan } from "@/lib/api/client";
+import { useApiClient } from "@/lib/api/provider";
 import { LIBRARY_SUMMARY_QUERY_KEY, ME_QUERY_KEY, PLAN_QUERY_KEY } from "@/lib/query-client";
 
 /**
- * The TanStack Query hooks over the typed client. Every key holds the Clerk user and organization, so switching workspace
- * fetches again and never shows the previous workspace's data. They run in the browser only (the token comes from Clerk's
- * browser session), so server rendering shows the loading state. A 402 `plan_required` from any of them fetches `me` again
- * (see query-client.ts), which is how the paywall appears without a reload.
+ * The TanStack Query hooks over the typed client (the one that ApiClientProvider provides). Every key holds the Clerk user
+ * and organization, so switching workspace fetches again and never shows the previous workspace's data. They run in the
+ * browser only (the token comes from Clerk's browser session), so server rendering shows the loading state. A 402
+ * `plan_required` from any of them fetches `me` again (see query-client.ts), which is how the paywall appears without a reload.
  */
-
-/**
- * A function that returns the client of the signed-in session. The client is made on first use, inside a query, so a
- * missing VITE_API_BASE_URL is that query's error and not a crash of the render, and it reads the Clerk token through a ref,
- * so it is the same client for the life of the component.
- */
-function useApiClient(): () => ApiClient {
-  const { getToken } = useAuth();
-  const tokenSource = useRef(getToken);
-  tokenSource.current = getToken;
-  const client = useRef<ApiClient | undefined>(undefined);
-  return useCallback(() => {
-    client.current ??= createApiClient({ getToken: () => tokenSource.current() });
-    return client.current;
-  }, []);
-}
 
 /** A 4xx is an answer (no workspace, deleted account, no plan), so asking again will not change it; a 5xx or a lost connection is worth a couple more tries. */
 function retryUnlessClientError(failureCount: number, error: unknown): boolean {

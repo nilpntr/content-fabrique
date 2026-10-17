@@ -8,7 +8,10 @@ import (
 // The generated routes one at a time, for tests that put a handler behind their own middleware.
 
 func routeOf(pattern string, ents EntitlementReader, logger *slog.Logger) http.Handler {
-	return apiRoutes(newAPIServer(ents, logger))[pattern]
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return apiRoutes(newAPIServer(ents, logger), logger)[pattern]
 }
 
 // MeHandler is GET /v1/me.

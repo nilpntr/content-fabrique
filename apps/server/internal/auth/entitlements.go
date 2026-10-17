@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -16,7 +17,7 @@ import (
 // authentication middleware and then RequireActivePlan in front of the router returned as *V1, so a route registered
 // with V1.Handle (Mount does this for every operation of the OpenAPI spec that is not on the allowlist) is refused with 401 without a valid token and with 402 plan_required when
 // the workspace has no active plan, and so is a path that no route has. Nothing else can register under /v1/ in
-// this process but Mount itself, and it opens exactly this allowlist (openWithoutPlan in routes.go), with authentication alone or none at all:
+// this process but Mount itself, and it opens exactly this allowlist (the operations marked x-open-without-plan in packages/schemas/openapi.yaml), with authentication alone or none at all:
 //
 //	GET  /v1/me                the web app needs it to learn that the workspace has no plan (it carries the entitlements)
 //	GET  /v1/workspace/plan    the plan, its status and what it includes
@@ -29,7 +30,7 @@ import (
 // do not do that. The test TestV1CatchAll covers the shape; code review covers the rest.
 
 // CodePlanRequired is the stable error code of the 402 answer. The web client branches on it.
-const CodePlanRequired = "plan_required"
+const CodePlanRequired = api.ErrorCodePlanRequired
 
 // EntitlementReader reads the entitlements of a workspace. *store.Store is the real one.
 type EntitlementReader interface {
@@ -66,8 +67,9 @@ func readEntitlements(ctx context.Context, ents EntitlementReader, p Principal) 
 
 // failure is an error answer in the making: the status, the stable code and the message of WriteError.
 type failure struct {
-	status        int
-	code, message string
+	status  int
+	code    api.ErrorCode
+	message string
 }
 
 // loadEntitlementsFor is the one way a handler or the guard gets the plan, or the failure to answer with: 401 without a
@@ -123,10 +125,16 @@ func RequireActivePlan(ents EntitlementReader, logger *slog.Logger) func(http.Ha
 func (s *apiServer) GetWorkspacePlan(ctx context.Context, _ api.GetWorkspacePlanRequestObject) (api.GetWorkspacePlanResponseObject, error) {
 	e, f := loadEntitlementsFor(ctx, s.ents, s.logger)
 	if f != nil {
-		if f.status == http.StatusUnauthorized {
-			return api.GetWorkspacePlan401JSONResponse{UnauthenticatedJSONResponse: api.UnauthenticatedJSONResponse(errorBody(f.code, f.message))}, nil
+		switch f.status {
+		case http.StatusUnauthorized:
+			return api.GetWorkspacePlan401JSONResponse{UnauthenticatedJSONResponse: api.UnauthenticatedJSONResponse(httpapi.ErrorBody(f.code, f.message))}, nil
+		case http.StatusInternalServerError:
+			return api.GetWorkspacePlan500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(httpapi.ErrorBody(f.code, f.message))}, nil
+		default:
+			// A status this operation does not document (the spec lists 401 and 500 here): the generated error handler
+			// answers 500 internal_error and logs it, so a new kind of failure is never reported as another one.
+			return nil, fmt.Errorf("loading the plan failed with undocumented status %d", f.status)
 		}
-		return api.GetWorkspacePlan500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(errorBody(f.code, f.message))}, nil
 	}
 	limits := plans.Limits{}
 	if e.Active {

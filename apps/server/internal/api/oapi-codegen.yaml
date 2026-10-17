@@ -7,6 +7,12 @@ generate:
   # net/http with Go 1.22+ ServeMux patterns ("GET /v1/me"), and a strict interface: typed request and response objects.
   std-http-server: true
   strict-server: true
+  # The spec travels in the binary: internal/auth reads which operations are open without a plan (x-open-without-plan) from it.
+  embedded-spec: true
+compatibility:
+  # Every enum constant is prefixed with its type (PlanNameNone, PlanSourceNone), so adding a value to one enum never renames
+  # the constants of another.
+  always-prefix-enum-values: true
 output-options:
   # The webhook is called by Clerk, not by the web app. It reads the raw body and the Svix headers itself, so it stays a
   # hand-written http.Handler (internal/auth/webhook.go); the spec only documents it.

@@ -1,7 +1,7 @@
-# Redocly CLI configuration for `bun run lint:api` (CI runs it in the contract job): the recommended rules, with the few
-# that do not fit this API relaxed on purpose. `lint:api` also fails on warnings.
+# Redocly CLI configuration for `bun run lint:api` (CI runs it in the contract job). recommended-strict is the recommended
+# ruleset with every warning raised to an error, so any finding makes the lint exit non-zero.
 extends:
-  - recommended
+  - recommended-strict
 rules:
   # No public contact page yet.
   info-contact: off

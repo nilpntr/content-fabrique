@@ -92,7 +92,7 @@ tasks:
       - bun run --filter @cf/schemas gen:api
 
   lint:api:
-    desc: Lint the OpenAPI spec (Redocly; warnings fail)
+    desc: Lint the OpenAPI spec (Redocly recommended-strict ruleset, so any finding fails)
     cmds:
       - bun run --filter @cf/schemas lint:api
 

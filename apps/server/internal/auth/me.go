@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/nilpntr/content-fabrique/internal/api"
+	"github.com/nilpntr/content-fabrique/internal/httpapi"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
@@ -14,7 +15,7 @@ func (s *apiServer) GetMe(ctx context.Context, _ api.GetMeRequestObject) (api.Ge
 	p, ok := PrincipalFromContext(ctx)
 	if !ok {
 		// Wired without the middleware: a programming error, and it must not answer as if signed in.
-		return api.GetMe401JSONResponse{UnauthenticatedJSONResponse: api.UnauthenticatedJSONResponse(errorBody(CodeUnauthenticated, "sign in to use the API"))}, nil
+		return api.GetMe401JSONResponse{UnauthenticatedJSONResponse: api.UnauthenticatedJSONResponse(httpapi.ErrorBody(CodeUnauthenticated, "sign in to use the API"))}, nil
 	}
 	// Who the caller is does not depend on the plan, so a plan that cannot be read is not a failure of /v1/me: it is
 	// reported as unknown (never active), and the web app says it could not check, rather than showing the paywall.
