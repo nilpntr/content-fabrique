@@ -1,12 +1,16 @@
 # @cf/schemas
 
-JSON Schemas shared by the Go server and the web app. Today that is the timeline spec v1 (P3-01); `openapi.yaml` (P0-08) and the edit-op schemas (`ops.v1.schema.json`, P3-02) land here later.
+JSON Schemas shared by the Go server and the web app. Today that is the OpenAPI 3.1 contract of the Go API (`openapi.yaml`, P0-08) and the timeline spec v1 (P3-01); the edit-op schemas (`ops.v1.schema.json`, P3-02) land here later.
 
 The rules of the spec are in the [timeline design note](../../docs/design/timeline-v1.md). The schema is the source of truth for structure; read its `title` and `description` fields, because the editor agent will use them as tool documentation.
 
 ## Layout
 
 ```
+openapi.yaml            OpenAPI 3.1: the source of truth of the Go API (servers, bearerAuth, Error + codes, TypeID patterns, the endpoints)
+redocly.yaml            lint rules for the spec
+api/
+  schema.ts             generated TypeScript types of the spec (committed, do not edit); imported as @cf/schemas/api
 timeline/
   v1.schema.json        JSON Schema draft 2020-12, $id https://contentfabrique.app/schemas/timeline/v1.json
   v1.ts                 generated TypeScript types (committed, do not edit)
@@ -19,6 +23,7 @@ timeline/
     assets.json         the asset catalog the semantic fixtures assume (asset_id -> duration_ms)
 scripts/
   gen.ts                writes timeline/v1.ts
+  gen-api.ts            writes api/schema.ts from openapi.yaml (operations tagged webhooks are left out)
   gen-check.sh          the CI drift check
 ```
 
@@ -34,6 +39,10 @@ Run from the repo root (or `cd packages/schemas`).
 | `bun run --filter @cf/schemas gen:check` | Regenerates, then fails if `timeline/v1.ts` differs from what is committed (CI runs this) |
 
 After you change `v1.schema.json`, run `gen` and commit `v1.ts` with it.
+
+## The API contract
+
+`openapi.yaml` is the source of truth for the Go API ([architecture section 9](../../docs/03-architecture.md#9-api) says how to add an endpoint). `task gen:api` (from the repo root) regenerates both generated sides: `apps/server/internal/api/api.gen.go` (oapi-codegen) and `api/schema.ts` (openapi-typescript). `task lint:api` or `bun run --filter @cf/schemas lint:api` lints the spec with Redocly. Commit the generated files with the spec: the `contract` job of CI regenerates them and fails on any difference.
 
 ## Structure here, semantics in Go
 

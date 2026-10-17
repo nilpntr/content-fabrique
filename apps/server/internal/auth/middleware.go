@@ -27,6 +27,7 @@ const (
 	CodeQueueNotMigrated     = "queue_not_migrated"     // 503: River's tables are missing, so a new workspace cannot be created
 	CodeInternal             = "internal_error"         // 500
 	CodeWebhookNotConfigured = "webhook_not_configured" // 503: no CLERK_WEBHOOK_SECRET
+	CodeInvalidRequest       = "invalid_request"        // 400: the generated server could not bind the request (a malformed parameter)
 )
 
 // DefaultLeeway is how long after its expiry a token is still accepted: just enough for clock skew between Clerk and us.

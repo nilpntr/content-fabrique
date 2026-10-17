@@ -210,7 +210,7 @@ Grant exactly this and nothing more. The same instruction sits above each token 
 
 ## 5. Tools to install
 
-Go 1.24 or newer (the Anthropic Go SDK needs it ◐), Node 22 LTS and bun 1.4 or newer (the JS package manager), Docker with compose, `wrangler` 4.141 or newer (the Sandbox base image needs it locally ◐), `cloudflared`, `oapi-codegen`, `task` and `openssl` (only for making the generated secrets by hand: `task env:init` doesn't use it). `sqlc` and `goose` need no install: they are pinned as `tool` dependencies in `apps/server/go.mod` and run as `go tool sqlc generate` (or `task gen:sql`) and `go tool goose`. ffmpeg 8 lives in the `media-tools` image. gVisor (`runsc`) is needed only on the Linux servers ([D-08](05-decisions.md#d-08-sandbox-pluggable-interface-default-provider)).
+Go 1.24 or newer (the Anthropic Go SDK needs it ◐), Node 22 LTS and bun 1.4 or newer (the JS package manager), Docker with compose, `wrangler` 4.141 or newer (the Sandbox base image needs it locally ◐), `cloudflared`, `task` and `openssl` (only for making the generated secrets by hand: `task env:init` doesn't use it). `sqlc`, `goose` and `oapi-codegen` need no install: they are pinned as `tool` dependencies in `apps/server/go.mod` and run as `go tool sqlc generate` (or `task gen:sql`), `go tool goose` and, for the API contract, `task gen:api` (which also runs `openapi-typescript` from the bun workspace). ffmpeg 8 lives in the `media-tools` image. gVisor (`runsc`) is needed only on the Linux servers ([D-08](05-decisions.md#d-08-sandbox-pluggable-interface-default-provider)).
 
 ### Running it locally (P0-02)
 
@@ -237,7 +237,7 @@ task down                # stop Postgres and MinIO (the data stays); `task reset
 - Compose publishes the ports on `127.0.0.1` only, since the default credentials are `cf:cf` and `minioadmin`. A Postgres already running on your machine's port 5432 has to be stopped first, because `DATABASE_URL` in `.env.example` points there.
 - `/readyz` of the api and the worker has a `postgres` check (a pool ping with `DATABASE_URL`): `{"status":"ok","checks":{"postgres":"ok"}}`, and 503 while Postgres is down. Both processes need `DATABASE_URL` to start.
 - With the services up, `task doctor` reports Postgres and object storage as ok; Anthropic and Clerk stay missing until you fill the `[YOU-now]` lines.
-- Other tasks: `task build`, `task test` (the database tests start Postgres in Docker and skip without it), `task lint`, `task install`, `task up`, `task migrate`, `task plan` (grant a plan by hand, [§3.4](#34-postgres)), `task gen:sql`. `task` alone lists them. `task lint` runs the same pinned `golangci-lint` as CI (through `go run`, so nothing to install) and Biome for the web app.
+- Other tasks: `task build`, `task test` (the database tests start Postgres in Docker and skip without it), `task lint`, `task install`, `task up`, `task migrate`, `task plan` (grant a plan by hand, [§3.4](#34-postgres)), `task gen:sql`, `task gen:api` (regenerate the Go interface and the TypeScript types from `packages/schemas/openapi.yaml`; `task gen` runs every generator), `task lint:api` (lint the spec). `task` alone lists them. `task lint` runs the same pinned `golangci-lint` as CI (through `go run`, so nothing to install) and Biome for the web app.
 
 ## 6. Checking it
 

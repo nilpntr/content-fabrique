@@ -3,18 +3,27 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "JSON Schemas shared by the Go server and the web app: the timeline spec v1, its fixtures and the generated TypeScript types.",
+  "description": "JSON Schemas and the API contract shared by the Go server and the web app: the timeline spec v1, its fixtures, the OpenAPI 3.1 spec and the generated TypeScript types.",
   "scripts": {
     "gen": "bun scripts/gen.ts",
+    "gen:api": "bun scripts/gen-api.ts",
     "gen:check": "sh scripts/gen-check.sh",
+    "lint:api": "redocly lint openapi.yaml --max-problems 0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "devDependencies": {
+    "@redocly/cli": "2.64.1",
     "@types/node": "26.6.2",
     "ajv": "8.20.0",
     "json-schema-to-typescript": "16.0.0",
+    "openapi-typescript": "7.13.0",
     "typescript": "5.9.3",
-    "vitest": "5.0.1"
+    "vitest": "5.0.1",
+    "yaml": "2.9.1"
+  },
+  "exports": {
+    "./api": "./api/schema.ts",
+    "./timeline/v1": "./timeline/v1.ts"
   }
 }

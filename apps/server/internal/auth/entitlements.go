@@ -4,8 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"time"
 
+	"github.com/nilpntr/content-fabrique/internal/api"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/plans"
@@ -14,9 +14,9 @@ import (
 
 // The paywall (P0-16). Every /v1 route is PAID-ONLY BY DEFAULT. Mount puts a catch-all on "/v1/" that runs the
 // authentication middleware and then RequireActivePlan in front of the router returned as *V1, so a route registered
-// with V1.Handle (the only way to add one) is refused with 401 without a valid token and with 402 plan_required when
+// with V1.Handle (Mount does this for every operation of the OpenAPI spec that is not on the allowlist) is refused with 401 without a valid token and with 402 plan_required when
 // the workspace has no active plan, and so is a path that no route has. Nothing else can register under /v1/ in
-// this process but Mount itself, and it opens exactly this allowlist, with authentication alone or none at all:
+// this process but Mount itself, and it opens exactly this allowlist (openWithoutPlan in routes.go), with authentication alone or none at all:
 //
 //	GET  /v1/me                the web app needs it to learn that the workspace has no plan (it carries the entitlements)
 //	GET  /v1/workspace/plan    the plan, its status and what it includes
@@ -36,16 +36,9 @@ type EntitlementReader interface {
 	GetEntitlements(ctx context.Context, ws ids.WorkspaceID) (store.Entitlements, error)
 }
 
-// Entitlements is the plan of the workspace as the API shows it. The /v1/me body carries it as `entitlements`.
-type Entitlements struct {
-	Plan   plans.Plan       `json:"plan"`               // none, trial, studio, creator or pro
-	Status store.PlanStatus `json:"status"`             // active, past_due, canceled, none (never had a plan) or unknown (could not be read)
-	Active bool             `json:"active"`             // the paywall looks at this and nothing else
-	End    *time.Time       `json:"current_period_end"` // null: the plan does not end (or there is none)
-}
-
-func entitlementsOf(e store.Entitlements) Entitlements {
-	return Entitlements{Plan: e.Plan, Status: e.Status, Active: e.Active, End: e.CurrentPeriodEnd}
+// entitlementsOf is the plan of the workspace as the API shows it (api.Entitlements, which /v1/me carries as `entitlements`).
+func entitlementsOf(e store.Entitlements) api.Entitlements {
+	return api.Entitlements{Plan: api.PlanName(e.Plan), Status: api.PlanStatus(e.Status), Active: e.Active, CurrentPeriodEnd: e.CurrentPeriodEnd}
 }
 
 type entitlementsKey struct{}
@@ -71,18 +64,32 @@ func readEntitlements(ctx context.Context, ents EntitlementReader, p Principal) 
 	return ents.GetEntitlements(ctx, p.WorkspaceID)
 }
 
-// loadEntitlements is the one way a handler or the guard gets the plan, or the error answer: 401 without a Principal, 500
-// (logged, nothing leaked) when the plan cannot be read. ok is false when the answer was written.
-func loadEntitlements(w http.ResponseWriter, r *http.Request, ents EntitlementReader, logger *slog.Logger) (store.Entitlements, bool) {
-	p, ok := PrincipalFromContext(r.Context())
+// failure is an error answer in the making: the status, the stable code and the message of WriteError.
+type failure struct {
+	status        int
+	code, message string
+}
+
+// loadEntitlementsFor is the one way a handler or the guard gets the plan, or the failure to answer with: 401 without a
+// Principal, 500 (logged, nothing leaked) when the plan cannot be read.
+func loadEntitlementsFor(ctx context.Context, ents EntitlementReader, logger *slog.Logger) (store.Entitlements, *failure) {
+	p, ok := PrincipalFromContext(ctx)
 	if !ok {
-		httpapi.WriteError(w, http.StatusUnauthorized, CodeUnauthenticated, "sign in to use the API")
-		return store.Entitlements{}, false
+		return store.Entitlements{}, &failure{http.StatusUnauthorized, CodeUnauthenticated, "sign in to use the API"}
 	}
-	e, err := readEntitlements(r.Context(), ents, p)
+	e, err := readEntitlements(ctx, ents, p)
 	if err != nil {
-		logger.ErrorContext(r.Context(), "reading the workspace plan failed", "error", err)
-		httpapi.WriteError(w, http.StatusInternalServerError, CodeInternal, "something went wrong")
+		logger.ErrorContext(ctx, "reading the workspace plan failed", "error", err)
+		return store.Entitlements{}, &failure{http.StatusInternalServerError, CodeInternal, "something went wrong"}
+	}
+	return e, nil
+}
+
+// loadEntitlements is loadEntitlementsFor for middleware: it writes the failure. ok is false when the answer was written.
+func loadEntitlements(w http.ResponseWriter, r *http.Request, ents EntitlementReader, logger *slog.Logger) (store.Entitlements, bool) {
+	e, f := loadEntitlementsFor(r.Context(), ents, logger)
+	if f != nil {
+		httpapi.WriteError(w, f.status, f.code, f.message)
 		return store.Entitlements{}, false
 	}
 	return e, true
@@ -111,43 +118,34 @@ func RequireActivePlan(ents EntitlementReader, logger *slog.Logger) func(http.Ha
 	}
 }
 
-// WorkspacePlanResponse is the body of GET /v1/workspace/plan.
-type WorkspacePlanResponse struct {
-	Entitlements
-	Source store.PlanSource `json:"source"` // manual, merchant, or none when the workspace never had a plan
-	Limits plans.Limits     `json:"limits"` // what the plan includes; all zero without an active plan
-}
-
-// WorkspacePlanHandler is GET /v1/workspace/plan: the plan of the caller's workspace and its limits. It is on the
+// GetWorkspacePlan is GET /v1/workspace/plan: the plan of the caller's workspace and its limits. It is on the
 // allowlist (it answers for a workspace without a plan too). Behind the authentication middleware.
-func WorkspacePlanHandler(ents EntitlementReader, logger *slog.Logger) http.Handler {
-	if logger == nil {
-		logger = slog.Default()
+func (s *apiServer) GetWorkspacePlan(ctx context.Context, _ api.GetWorkspacePlanRequestObject) (api.GetWorkspacePlanResponseObject, error) {
+	e, f := loadEntitlementsFor(ctx, s.ents, s.logger)
+	if f != nil {
+		if f.status == http.StatusUnauthorized {
+			return api.GetWorkspacePlan401JSONResponse{UnauthenticatedJSONResponse: api.UnauthenticatedJSONResponse(errorBody(f.code, f.message))}, nil
+		}
+		return api.GetWorkspacePlan500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(errorBody(f.code, f.message))}, nil
 	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		e, ok := loadEntitlements(w, r, ents, logger)
-		if !ok {
-			return
-		}
-		limits := plans.Limits{}
-		if e.Active {
-			limits = plans.LimitsOf(e.Plan)
-		}
-		httpapi.WriteJSON(w, http.StatusOK, WorkspacePlanResponse{Entitlements: entitlementsOf(e), Source: e.Source, Limits: limits})
-	})
+	limits := plans.Limits{}
+	if e.Active {
+		limits = plans.LimitsOf(e.Plan)
+	}
+	en := entitlementsOf(e)
+	return api.GetWorkspacePlan200JSONResponse{
+		Plan:             en.Plan,
+		Status:           en.Status,
+		Active:           en.Active,
+		CurrentPeriodEnd: en.CurrentPeriodEnd,
+		Source:           api.PlanSource(e.Source),
+		Limits:           api.PlanLimits{Exports: limits.Exports, StorageGb: limits.StorageGB, AiBilling: api.AiBilling(limits.AIBilling)},
+	}, nil
 }
 
-// LibrarySummaryResponse is the body of GET /v1/library/summary.
-type LibrarySummaryResponse struct {
-	Assets   int `json:"assets"`
-	Projects int `json:"projects"`
-}
-
-// LibrarySummaryHandler is GET /v1/library/summary, the first paid-only endpoint. There is no library yet (P1), so the
-// counts are zero; it exists to prove the paywall on the API. Register it with V1.Handle, which puts the
-// authentication middleware and RequireActivePlan in front of it.
-func LibrarySummaryHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		httpapi.WriteJSON(w, http.StatusOK, LibrarySummaryResponse{})
-	})
+// GetLibrarySummary is GET /v1/library/summary, the first paid-only endpoint. There is no library yet (P1), so the
+// counts are zero; it exists to prove the paywall on the API. It is not on the allowlist, so Mount puts the authentication
+// middleware and RequireActivePlan in front of it.
+func (s *apiServer) GetLibrarySummary(context.Context, api.GetLibrarySummaryRequestObject) (api.GetLibrarySummaryResponseObject, error) {
+	return api.GetLibrarySummary200JSONResponse{}, nil
 }

@@ -87,9 +87,11 @@ test("Settings shows what GET /v1/me returned, fetched with the session token", 
 
   const calls = vi.mocked(fetch).mock.calls;
   expect(calls.length).toBeGreaterThan(0);
-  for (const [url, init] of calls) {
-    expect(url).toBe("http://api.test/v1/me");
-    expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer test-token");
+  for (const [request] of calls) {
+    // The typed client calls fetch with one Request.
+    expect(request).toBeInstanceOf(Request);
+    expect((request as Request).url).toBe("http://api.test/v1/me");
+    expect((request as Request).headers.get("Authorization")).toBe("Bearer test-token");
   }
 });
 

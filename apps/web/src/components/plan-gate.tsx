@@ -4,7 +4,7 @@ import { Paywall, PaywallPending } from "@/components/paywall";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import { decidePlanGate } from "@/lib/paywall";
-import { useMe } from "@/lib/use-me";
+import { useMe } from "@/lib/api/hooks";
 
 /**
  * Wraps the page area of the shell: the page for a workspace with an active plan, the Paywall for one without, on every

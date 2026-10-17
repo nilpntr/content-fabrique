@@ -1,0 +1,14 @@
+# oapi-codegen configuration for the Go side of the contract (P0-08). Run `task gen:api` (or `go generate ./internal/api`);
+# the output, api.gen.go, is committed and CI fails when it differs from a fresh run.
+package: api
+output: api.gen.go
+generate:
+  models: true
+  # net/http with Go 1.22+ ServeMux patterns ("GET /v1/me"), and a strict interface: typed request and response objects.
+  std-http-server: true
+  strict-server: true
+output-options:
+  # The webhook is called by Clerk, not by the web app. It reads the raw body and the Svix headers itself, so it stays a
+  # hand-written http.Handler (internal/auth/webhook.go); the spec only documents it.
+  exclude-tags:
+    - webhooks
