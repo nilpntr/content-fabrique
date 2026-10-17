@@ -7,68 +7,129 @@
     "docker:pinDigests"
   ],
   "timezone": "Europe/Amsterdam",
-  "schedule": ["before 6am on monday"],
+  "schedule": [
+    "before 6am on monday"
+  ],
   "automerge": false,
-  "postUpdateOptions": ["gomodTidy"],
+  "postUpdateOptions": [
+    "gomodTidy"
+  ],
   "prConcurrentLimit": 10,
-  "labels": ["dependencies"],
+  "labels": [
+    "dependencies"
+  ],
   "customManagers": [
     {
       "description": "The golangci-lint version pinned in the CI workflow, marked with a `# renovate:` comment.",
       "customType": "regex",
-      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/"
+      ],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)\\n\\s*version: (?<currentValue>v?[0-9][^\\s]*)"
       ]
+    },
+    {
+      "description": "The golangci-lint version that `task lint` runs through `go run`.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Taskfile\\.yml$/"
+      ],
+      "matchStrings": [
+        "golangci-lint/v2/cmd/golangci-lint@(?<currentValue>v[0-9][^\\s]*)"
+      ],
+      "depNameTemplate": "golangci/golangci-lint",
+      "datasourceTemplate": "github-releases"
     }
   ],
   "packageRules": [
     {
       "description": "One weekly PR per ecosystem for minor and patch updates (and digest refreshes).",
-      "matchManagers": ["gomod"],
-      "matchUpdateTypes": ["minor", "patch"],
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
       "groupName": "go modules (minor and patch)"
     },
     {
-      "matchManagers": ["bun", "npm"],
-      "matchUpdateTypes": ["minor", "patch"],
+      "matchManagers": [
+        "bun",
+        "npm"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
       "groupName": "bun packages (minor and patch)"
     },
     {
-      "matchManagers": ["github-actions"],
-      "matchUpdateTypes": ["minor", "patch", "pin", "pinDigest", "digest"],
-      "matchDepTypes": ["action"],
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "pinDigest",
+        "digest"
+      ],
+      "matchDepTypes": [
+        "action"
+      ],
       "groupName": "github actions (minor and patch)"
     },
     {
-      "matchDatasources": ["docker"],
-      "matchUpdateTypes": ["minor", "patch", "pin", "pinDigest", "digest"],
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "pinDigest",
+        "digest"
+      ],
       "groupName": "docker images (minor and patch)"
     },
     {
-      "description": "Major updates are never grouped: one PR each, so each one is reviewed alone.",
-      "matchUpdateTypes": ["major"],
-      "groupName": null
-    },
-    {
       "description": "The Go toolchain (the `go` directive) is its own PR, never part of the Go module group.",
-      "matchManagers": ["gomod"],
-      "matchDepTypes": ["golang"],
-      "groupName": null,
-      "addLabels": ["go-toolchain"]
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepTypes": [
+        "golang"
+      ],
+      "groupName": "go toolchain",
+      "addLabels": [
+        "go-toolchain"
+      ]
     },
     {
       "description": "The bun version in package.json `packageManager` is its own PR, never part of the bun package group.",
-      "matchManagers": ["npm", "bun"],
-      "matchDepTypes": ["packageManager"],
-      "groupName": null,
-      "addLabels": ["bun-version"]
+      "matchManagers": [
+        "npm",
+        "bun"
+      ],
+      "matchDepTypes": [
+        "packageManager"
+      ],
+      "groupName": "bun version",
+      "addLabels": [
+        "bun-version"
+      ]
     },
     {
-      "description": "golangci-lint changes what the linter reports, so it is not grouped with other actions.",
-      "matchDepNames": ["golangci/golangci-lint"],
-      "groupName": null,
-      "addLabels": ["linter"]
+      "description": "golangci-lint changes what the linter reports and is pinned in ci.yml and the Taskfile, so those two move together in a PR of their own.",
+      "matchDepNames": [
+        "golangci/golangci-lint"
+      ],
+      "groupName": "golangci-lint",
+      "addLabels": [
+        "linter"
+      ]
     }
   ]
 }

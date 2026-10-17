@@ -6,9 +6,10 @@
 name: content-fabrique
 
 services:
-  # System of record and, from P0-06, the River job queue. The same image the CI doctor job uses (.github/workflows/ci.yml).
+  # System of record and, from P0-06, the River job queue. The same image, by the same digest, as the CI doctor job
+  # (.github/workflows/ci.yml; what `pg17` pointed to on 2026-10-17). Change both together.
   postgres:
-    image: pgvector/pgvector:pg17
+    image: pgvector/pgvector:pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is not set, run task env:init}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set, run task env:init}

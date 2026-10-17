@@ -195,7 +195,7 @@ task down                # stop Postgres and MinIO (the data stays); `task reset
 - **Which value wins.** Compose lets a variable exported in your shell override `.env`, while `scripts/dev.sh` lets a non-empty `.env` value win (the same rule as `cfctl doctor`). So do not export `POSTGRES_*`, `R2_*` or the other names from `.env.example` in your shell: the services and the processes would disagree. `DATABASE_URL` and the two other database URLs repeat the `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` values, so change them together.
 - Compose publishes the ports on `127.0.0.1` only, since the default credentials are `cf:cf` and `minioadmin`. A Postgres already running on your machine's port 5432 has to be stopped first, because `DATABASE_URL` in `.env.example` points there.
 - With the services up, `task doctor` reports Postgres and object storage as ok; Anthropic and Clerk stay missing until you fill the `[YOU-now]` lines.
-- Other tasks: `task build`, `task test`, `task lint`, `task install`, `task up`. `task` alone lists them. `task lint` runs `golangci-lint` (skipped with a message when it isn't installed: `brew install golangci-lint`, CI runs v2) and Biome for the web app.
+- Other tasks: `task build`, `task test`, `task lint`, `task install`, `task up`. `task` alone lists them. `task lint` runs the same pinned `golangci-lint` as CI (through `go run`, so nothing to install) and Biome for the web app.
 
 ## 6. Checking it
 
@@ -243,17 +243,18 @@ All of CI is one workflow, `.github/workflows/ci.yml`. It runs on every pull req
 | Job | Runs | When |
 |---|---|---|
 | `changes` | decides which of the jobs below have work (`dorny/paths-filter`) | always |
-| `go-lint` | `go vet ./...` and `golangci-lint` v2 with `apps/server/.golangci.yml` (errcheck, govet, staticcheck, unused, ineffassign, gosec, revive, bodyclose, errorlint, misspell) | `apps/server`, `go.work` changed |
+| `go-lint` | `go vet ./...` and `golangci-lint` v2 with `apps/server/.golangci.yml` (errcheck, govet, staticcheck, unused, ineffassign, gosec, revive, bodyclose, errorlint, misspell) | `apps/server`, `go.work`, `.env.example` changed |
 | `go-test` | `go test -race ./...` (Docker is on the runner, so testcontainers tests run) | same |
 | `web` | `bun install --frozen-lockfile`, then `@cf/web` typecheck, lint (Biome, `apps/web/biome.jsonc`), test, build, and a check that `routeTree.gen.ts` is up to date | `apps/web`, `packages`, `package.json`, `bun.lock` changed |
-| `env-lint`, `doctor` | `cfctl env lint`, and `cfctl doctor --env ci` against Postgres and MinIO | `apps`, `packages`, `.env.example` changed |
+| `env-lint` | `cfctl env lint` (scans the Go and web code) | `apps`, `packages`, `.env.example` changed |
+| `doctor` | `cfctl doctor --env ci` against Postgres and MinIO | `apps/server`, `.env.example`, `compose.yaml` changed |
 | `required` | passes when every job above succeeded or was skipped, fails on any failure or cancellation | always |
 
 - **Mark only `required` as a required check on `main`.** A required job that a path filter skips stays "pending" and blocks the pull request for good. `required` always runs, so a docs-only pull request skips the rest and still goes green. A new job must be added to `required`'s `needs:` list, or its failure won't block merging.
 - **On `main` and manual runs every job runs.** Path filtering applies to pull requests only.
-- **Speed.** The jobs run in parallel, Go modules and the build cache are cached on `go.sum` and bun's download cache on `bun.lock`, and a newer push to the same pull request cancels the older run. The target is under 10 minutes on a cold cache.
-- **Actions and images are pinned by digest**, with the version in a trailing comment. Renovate keeps them current. The `golangci-lint` version is pinned in `ci.yml`; use the same major locally.
-- **Renovate** (`renovate.json`): runs Monday before 06:00 Europe/Amsterdam, opens one pull request per ecosystem for minor and patch updates (Go modules, bun packages, GitHub Actions, Docker images), one pull request per major update, and separate pull requests for the Go toolchain (`go` directive) and the bun version (`packageManager`). It runs `go mod tidy` after Go updates, never automerges, and keeps a Dependency Dashboard issue. Install the app first ([§3.5](#35-servers-ci-and-github)).
+- **Speed.** The jobs run in parallel, Go modules and the `-race` build cache are cached on `go.sum` (only `go-test` saves it, `golangci-lint` has its own cache) and bun's download cache on `bun.lock`. A newer push to the same pull request cancels the older run; runs on `main` are never cancelled. The target is under 10 minutes on a cold cache.
+- **Actions and images are pinned by digest**, with the version in a trailing comment (`pgvector/pgvector` and MinIO are pinned the same way in `compose.yaml` and `ci.yml`: change both together). Renovate keeps them current. The `golangci-lint` version is pinned in `ci.yml`; use the same major locally.
+- **Renovate** (`renovate.json`): runs Monday before 06:00 Europe/Amsterdam, opens one pull request per ecosystem for minor and patch updates (Go modules, bun packages, GitHub Actions, Docker images), and separate pull requests for the Go toolchain (`go` directive), the bun version (`packageManager`) and `golangci-lint`. It runs `go mod tidy` after Go updates, never automerges, and keeps a Dependency Dashboard issue. Install the app first ([§3.5](#35-servers-ci-and-github)).
 
 ## 7. Prompt for the implementing agent
 

@@ -17,9 +17,10 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same PR cancels the older run. Runs on main are never cancelled.
+# A newer push to the same PR cancels the older run. Other events get a group per commit, so runs on main are never
+# cancelled or replaced in the queue by a later push.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -36,6 +37,7 @@ jobs:
       go: ${{ steps.filter.outputs.go || 'true' }}
       web: ${{ steps.filter.outputs.web || 'true' }}
       env: ${{ steps.filter.outputs.env || 'true' }}
+      doctor: ${{ steps.filter.outputs.doctor || 'true' }}
     steps:
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
@@ -44,6 +46,7 @@ jobs:
           filters: |
             go:
               - 'apps/server/**'
+              - '.env.example'
               - 'go.work'
               - 'go.work.sum'
               - '.github/workflows/ci.yml'
@@ -59,8 +62,17 @@ jobs:
               - '.env.example'
               - 'go.work'
               - '.github/workflows/ci.yml'
+            # doctor starts Postgres and MinIO, so web-only changes skip it. env-lint also scans the web code.
+            doctor:
+              - 'apps/server/**'
+              - '.env.example'
+              - 'go.work'
+              - 'compose.yaml'
+              - '.github/workflows/ci.yml'
 
   # go vet and golangci-lint (apps/server/.golangci.yml).
+  # Only go-test saves setup-go's cache (modules and the -race build cache); all jobs share one key and the first to
+  # finish would otherwise win it. The other Go jobs run with `cache: false`; golangci-lint-action has its own cache.
   go-lint:
     needs: changes
     if: needs.changes.outputs.go == 'true'
@@ -76,7 +88,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: apps/server/go.mod
-          cache-dependency-path: apps/server/go.sum
+          cache: false
       - run: go vet ./...
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
@@ -143,7 +155,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: apps/server/go.mod
-          cache-dependency-path: apps/server/go.sum
+          cache: false
       - name: cfctl env lint
         working-directory: apps/server
         run: go run ./cmd/cfctl env lint
@@ -152,12 +164,13 @@ jobs:
   # defaults. CI holds no secrets: Anthropic and Clerk are not used in ci (replay mode, D-22), so doctor skips them.
   doctor:
     needs: changes
-    if: needs.changes.outputs.env == 'true'
+    if: needs.changes.outputs.doctor == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        # Pinned by digest (what `pg17` pointed to on 2026-10-17), the same one as compose.yaml. Change both together.
+        image: pgvector/pgvector:pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
         env:
           POSTGRES_USER: cf
           POSTGRES_PASSWORD: cf
@@ -176,7 +189,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: apps/server/go.mod
-          cache-dependency-path: apps/server/go.sum
+          cache: false
 
       # MinIO is started here, not as a service container, because a service container cannot pass `server /data`.
       # The root user and password and the bucket are the R2_* defaults in .env.example. MinIO no longer publishes
