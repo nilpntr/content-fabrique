@@ -67,7 +67,8 @@ filter_complex:
   [v0][v1]xfade=transition=slideleft:duration=0.233333:offset=1.766667[w1];
   [w1]gblur=sigma=6:enable='gte(t,1.766667)*lt(t,2.000000)'[j1];
   [j1][v2]xfade=transition=slideleft:duration=0.266667:offset=3.500000[w2];
-  [w2]gblur=sigma=6:enable='gte(t,3.500000)*lt(t,3.766667)'[vout];
+  [w2]gblur=sigma=6:enable='gte(t,3.500000)*lt(t,3.766667)'[vj];
+  [vj]ass=filename=subs.ass:fontsdir=fonts[vout];
   anullsrc=r=48000:cl=stereo:d=5.500[abed];
   [abed]anull[aout]
 
@@ -153,8 +154,21 @@ time_map:
 sound_cues:
 []
 
-pending_text:
-[]
+subtitles: subs.ass in fonts/ (fonts Inter-Bold.ttf), 0 text events, 0 caption events, watermark true
 
-pending_captions: false
-pending_watermark: true
+ass:
+  [Script Info]
+  ScriptType: v4.00+
+  PlayResX: 1080
+  PlayResY: 1920
+  WrapStyle: 2
+  ScaledBorderAndShadow: yes
+  YCbCr Matrix: None
+  
+  [V4+ Styles]
+  Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+  Style: watermark,Inter,33,&H55FFFFFF,&H55FFFFFF,&H87000000,&HFF000000,-1,0,0,0,100,100,0,0,1,2,0,5,0,0,0,1
+  
+  [Events]
+  Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+  Dialogue: 2,0:00:00.00,0:00:05.48,watermark,,0,0,0,,{\an5\pos(186,259.5)}PREVIEW

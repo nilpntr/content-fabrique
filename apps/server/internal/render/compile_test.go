@@ -179,7 +179,7 @@ func TestXfadeOffsetsComeFromTheCutList(t *testing.T) {
 
 // A mix of cuts and transitions joins with concat for the cuts and xfade for the transitions; all cuts is one concat.
 func TestJoinStrategies(t *testing.T) {
-	cuts := mustCompile(t, specOf(30, []timeline.VideoItem{clipAt("c1", assetA, 0, 1000, 0), clipAt("c2", assetA, 0, 1000, 1000), clipAt("c3", assetA, 0, 1000, 2000)}), Preview)
+	cuts := mustCompile(t, specOf(30, []timeline.VideoItem{clipAt("c1", assetA, 0, 1000, 0), clipAt("c2", assetA, 0, 1000, 1000), clipAt("c3", assetA, 0, 1000, 2000)}), Final)
 	if !strings.Contains(cuts.FilterComplex, "[v0][v1][v2]concat=n=3:v=1:a=0[vout]") || strings.Contains(cuts.FilterComplex, "xfade") {
 		t.Errorf("all cuts: %s", PrettyFilter(cuts.FilterComplex))
 	}
@@ -187,11 +187,11 @@ func TestJoinStrategies(t *testing.T) {
 		clipAt("c1", assetA, 0, 1000, 0),
 		clipAt("c2", assetA, 0, 1000, 1000),
 		clipAt("c3", assetA, 0, 1000, 1700, withTransition(timeline.TransitionCrossfade, 300)),
-	}), Preview)
+	}), Final)
 	if !strings.Contains(mixed.FilterComplex, "[v0][v1]concat=n=2:v=1:a=0[j1]") || !strings.Contains(mixed.FilterComplex, "[j1][v2]xfade=") {
 		t.Errorf("mixed: %s", PrettyFilter(mixed.FilterComplex))
 	}
-	single := mustCompile(t, specOf(30, []timeline.VideoItem{clipAt("c1", assetA, 0, 1000, 0)}), Preview)
+	single := mustCompile(t, specOf(30, []timeline.VideoItem{clipAt("c1", assetA, 0, 1000, 0)}), Final)
 	if !strings.Contains(single.FilterComplex, "[v0]null[vout]") {
 		t.Errorf("single: %s", PrettyFilter(single.FilterComplex))
 	}
@@ -224,16 +224,20 @@ func TestProfiles(t *testing.T) {
 			t.Errorf("final args lack %q", want)
 		}
 	}
-	if !pre.PendingWatermark || fin.PendingWatermark {
-		t.Error("only the preview profile wants a watermark (not drawn until P3-04)")
+	if pre.Subtitles == nil || !pre.Subtitles.Watermark || fin.Subtitles != nil {
+		t.Error("only the preview profile draws a watermark (and a spec without text has no other subtitles)")
+	}
+	if !strings.Contains(pre.FilterComplex, "ass=filename=subs.ass:fontsdir=fonts") || strings.Contains(fin.FilterComplex, "ass=") {
+		t.Error("the ass filter belongs in the preview graph only")
 	}
 	if _, err := ParseProfile("draft"); err == nil {
 		t.Error("an unknown profile name must be an error")
 	}
 }
 
-// Text and captions are P3-04: for now they compile to nothing, and the plan lists them as pending.
-func TestTextIsPendingAndNothingIsDrawn(t *testing.T) {
+// Text and captions compile to one ASS script burned in by the ass filter after the clips are joined; the rest of the graph is
+// the same with and without them.
+func TestTextBecomesOneScript(t *testing.T) {
 	base := []timeline.VideoItem{clipAt("c1", assetA, 0, 4000, 0)}
 	plain := mustCompile(t, specOf(30, base), Final)
 
@@ -245,22 +249,29 @@ func TestTextIsPendingAndNothingIsDrawn(t *testing.T) {
 	)
 	got := mustCompile(t, withText, Final)
 
-	if got.FilterComplex != plain.FilterComplex || !reflect.DeepEqual(got.Args, plain.Args) {
-		t.Error("text and captions changed the ffmpeg command: nothing may be drawn before P3-04")
+	if plain.Subtitles != nil {
+		t.Error("a spec without text, captions or watermark has no subtitles")
 	}
-	for _, banned := range []string{"drawtext", "subtitles", "ass=", "Hello"} {
+	if got.Subtitles == nil || got.Subtitles.TextEvents != 1 || !strings.Contains(got.Subtitles.ASS, "Hello") {
+		t.Fatalf("subtitles %+v", got.Subtitles)
+	}
+	// Without a transcript an enabled captions track draws nothing.
+	if got.Subtitles.CaptionEvents != 0 {
+		t.Errorf("%d caption events without a transcript", got.Subtitles.CaptionEvents)
+	}
+	// The ass filter follows the join and nothing else changed: with it taken out, the graph is the plain one.
+	const assStmt = ";[vj]ass=filename=subs.ass:fontsdir=fonts[vout]"
+	if !strings.Contains(got.FilterComplex, assStmt) {
+		t.Fatalf("no ass filter in %s", got.FilterComplex)
+	}
+	stripped := strings.NewReplacer(assStmt, "", "[vj]", "[vout]").Replace(got.FilterComplex)
+	if stripped != plain.FilterComplex {
+		t.Errorf("text changed the video or audio graph:\n%s\nvs\n%s", stripped, plain.FilterComplex)
+	}
+	for _, banned := range []string{"drawtext", "Hello"} {
 		if strings.Contains(got.FilterComplex, banned) || strings.Contains(strings.Join(got.Args, " "), banned) {
-			t.Errorf("the plan contains %q", banned)
+			t.Errorf("the command contains %q: user text goes in the script, never in a filter argument", banned)
 		}
-	}
-	if len(got.PendingText) != 1 || got.PendingText[0] != (PendingText{ItemID: "t1", AtMs: 500, DurationMs: 1500, Style: "title_bold"}) {
-		t.Errorf("pending text %+v", got.PendingText)
-	}
-	if !got.PendingCaptions {
-		t.Error("an enabled captions track is pending")
-	}
-	if plain.PendingCaptions || len(plain.PendingText) != 0 {
-		t.Error("a spec without text has nothing pending")
 	}
 	// Text items are in the time map, without asset, source or speed.
 	last := got.TimeMap[len(got.TimeMap)-1]

@@ -266,8 +266,4 @@ time_map:
 sound_cues:
 []
 
-pending_text:
-[]
-
-pending_captions: false
-pending_watermark: false
+subtitles: none

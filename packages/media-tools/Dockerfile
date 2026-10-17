@@ -2,8 +2,8 @@
 #
 # media-tools: ffmpeg 8 and ffprobe for the sandbox layer (architecture section 8, D-08, P1-03).
 #
-# What is in the image: ffmpeg, ffprobe, the exact shared libraries they load, fontconfig's config, an empty fonts directory,
-# and the licence texts and inventory of all of it. There is no shell, no coreutils and no package manager, and the user is
+# What is in the image: ffmpeg, ffprobe, the exact shared libraries they load, fontconfig's config, the OFL-licensed title and
+# caption fonts of fonts/manifest.tsv (P3-04), and the licence texts and inventory of all of it. There is no shell, no coreutils and no package manager, and the user is
 # not root. The root filesystem is meant to run read-only: /work (the job's output mount) and /tmp (a tmpfs) are the only
 # places a job writes.
 #
@@ -78,7 +78,6 @@ COPY fonts/ /rootfs-src/fonts/
 RUN set -eux; \
     /usr/local/sbin/assemble-rootfs.sh "${FFMPEG_VERSION}" "${FFMPEG_SHA256}" /src/ffmpeg; \
     cp /rootfs-src/fonts.conf /rootfs/etc/fonts/fonts.conf; \
-    cp -r /rootfs-src/fonts/. /rootfs/usr/share/fonts/cf/; \
     chmod 1777 /rootfs/tmp; \
     # Smoke tests inside the build: the binaries must start with only what is in /rootfs, and subtitle text in legacy
     # encodings must convert (this needs the gconv modules).

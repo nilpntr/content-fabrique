@@ -59,6 +59,10 @@ type ExecuteOptions struct {
 	WorkDir string
 	// Progress, if set, is called for every progress block ffmpeg prints (about twice a second).
 	Progress func(Progress)
+	// FontsDir is the host directory that holds the font files the plan's subtitles name (packages/media-tools/fonts). Empty
+	// means: packages/media-tools/fonts found above the working directory, else /usr/share/fonts/cf (the image's own copy).
+	// A plan without text, captions or watermark needs no fonts.
+	FontsDir string
 }
 
 const (
@@ -90,8 +94,12 @@ func Execute(ctx context.Context, plan Plan, runner media.Runner, opts ExecuteOp
 		defer func() { _ = os.RemoveAll(work) }()
 	}
 	// Only a clean slate: a left-over output must never be taken for this run's.
-	for _, n := range []string{outName, "progress-render.txt", "progress-measure.txt"} {
+	for _, n := range []string{outName, "progress-render.txt", "progress-measure.txt", subtitleFile} {
 		_ = os.Remove(filepath.Join(work, n))
+	}
+	_ = os.RemoveAll(filepath.Join(work, fontsDirName))
+	if err := stageSubtitles(plan, work, opts.FontsDir); err != nil {
+		return err
 	}
 
 	args := plan.Args

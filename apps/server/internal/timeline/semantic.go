@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/nilpntr/content-fabrique/internal/timeline/style"
 )
 
 // checker runs layer 2: what the schema cannot express. All arithmetic is int64 milliseconds. Each check raises its
@@ -277,7 +279,7 @@ func (c *checker) hasTimeline() bool { return len(c.clips) > 0 }
 // ---- text -------------------------------------------------------------------------------------------------------
 
 func (c *checker) checkText() {
-	zone, zoneOK := SafeZoneFor(c.spec.Output.Format)
+	_, zoneOK := SafeZoneFor(c.spec.Output.Format)
 	for ti, t := range c.spec.Tracks {
 		tt, ok := t.(*TextTrack)
 		if !ok {
@@ -285,12 +287,11 @@ func (c *checker) checkText() {
 		}
 		for i, it := range tt.Items {
 			path := fmt.Sprintf("/tracks/%d/items/%d", ti, i)
-			style, styleOK := LookupStyle(it.Style)
+			_, styleOK := style.Lookup(it.Style)
 			if !styleOK {
-				// A warning until P3-04 adds the real registry; P3-04 makes it an error.
-				c.addSeverity(SeverityWarning, CodeUnknownStyle, path+"/style",
+				c.add(CodeUnknownStyle, path+"/style",
 					"text item %s uses style %q, which is not in the style registry; use one of: %s",
-					it.ID, it.Style, strings.Join(StyleIDs(), ", "))
+					it.ID, it.Style, strings.Join(style.IDs(), ", "))
 			}
 			if c.hasTimeline() {
 				if end := it.AtMs + it.DurationMs; end > c.total {
@@ -299,18 +300,34 @@ func (c *checker) checkText() {
 						it.ID, it.AtMs, end, c.total, end-c.total)
 				}
 			}
-			if it.Position != nil && styleOK && zoneOK {
-				c.checkTextBox(it, style, zone, path)
+			if styleOK && zoneOK {
+				c.checkTextBox(it, path)
 			}
 		}
 	}
 }
 
-func (c *checker) checkTextBox(it TextItem, style Style, zone SafeZone, path string) {
+// checkTextBox lays the item out with the renderer's own layout (real font advance widths, word wrap at the safe column,
+// outline and shadow included) and requires the box to be inside the safe zone and clear of the blocked areas.
+func (c *checker) checkTextBox(it TextItem, path string) {
 	out := c.spec.Output
-	box := EstimateTextBox(it.Text, style, *it.Position, out.Width, out.Height, zone)
+	pl, err := PlaceText(out, it)
+	if err != nil {
+		return // unknown style and format are reported by their own checks
+	}
+	box, zone := pl.Box, pl.Zone
+	field, what := "/position", ""
+	if it.Position != nil {
+		what = fmt.Sprintf("at position (%s, %s)", num(it.Position.X), num(it.Position.Y))
+	} else {
+		field, what = "/anchor", "at anchor "+it.Anchor
+	}
+	fix := "Move the position inward, or use an anchor (upper_third, center, lower_third)"
+	if it.Position == nil {
+		fix = "Shorten the text, split it over two items or use a smaller style"
+	}
 	in := zone.Inner
-	if !in.contains(box) {
+	if !in.Contains(box) {
 		var over []string
 		if box.Left < in.Left {
 			over = append(over, fmt.Sprintf("its left edge is at x %d, left of the zone (x %d)", box.Left, in.Left))
@@ -324,18 +341,17 @@ func (c *checker) checkTextBox(it TextItem, style Style, zone SafeZone, path str
 		if box.Bottom > in.Bottom {
 			over = append(over, fmt.Sprintf("its bottom edge is at y %d, below the zone (y %d)", box.Bottom, in.Bottom))
 		}
-		c.add(CodeUnsafeText, path+"/position",
-			"text item %s at position (%s, %s) is estimated to be outside the %s safe zone (x %d to %d, y %d to %d px): %s. Move the position inward, or use an anchor (upper_third, center, lower_third), which always fits",
-			it.ID, num(it.Position.X), num(it.Position.Y), out.Format, in.Left, in.Right, in.Top, in.Bottom,
-			strings.Join(over, "; "))
+		c.add(CodeUnsafeText, path+field,
+			"text item %s %s takes a %d x %d px box in style %s (%d lines, laid out with the font's real widths) and that is outside the %s safe zone (x %d to %d, y %d to %d px): %s. %s",
+			it.ID, what, box.Width(), box.Height(), it.Style, len(pl.Layout.Lines), out.Format, in.Left, in.Right, in.Top, in.Bottom,
+			strings.Join(over, "; "), fix)
 		return
 	}
 	for _, b := range zone.Blocked {
-		if b.overlaps(box) {
-			c.add(CodeUnsafeText, path+"/position",
-				"text item %s at position (%s, %s) is estimated to cover x %d to %d and y %d to %d px, which runs into the %s action column (x above %d where y is below %d px); move it left or up, or use an anchor",
-				it.ID, num(it.Position.X), num(it.Position.Y), box.Left, box.Right, box.Top, box.Bottom,
-				out.Format, b.Left, b.Top)
+		if b.Overlaps(box) {
+			c.add(CodeUnsafeText, path+field,
+				"text item %s %s covers x %d to %d and y %d to %d px, which runs into the %s action column (x above %d where y is below %d px); move it left or up, or use an anchor",
+				it.ID, what, box.Left, box.Right, box.Top, box.Bottom, out.Format, b.Left, b.Top)
 			return
 		}
 	}

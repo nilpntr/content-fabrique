@@ -102,9 +102,6 @@ func cmdRender(args []string, stdout, stderr io.Writer) int {
 	for _, c := range plan.SoundCues {
 		_, _ = fmt.Fprintf(stderr, "sound cue (not mixed in): %s trend %s at %d ms, offset %d ms\n", c.ItemID, c.TrendID, c.AtMs, c.SourceOffsetMs)
 	}
-	if len(plan.PendingText) > 0 || plan.PendingCaptions {
-		_, _ = fmt.Fprintf(stderr, "note: text and captions are not drawn yet (%d text items pending)\n", len(plan.PendingText))
-	}
 
 	if *dryRun {
 		out := *outArg

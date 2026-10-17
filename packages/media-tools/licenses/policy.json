@@ -1,5 +1,5 @@
 {
-  "_comment": "Allowlist for the media-tools image (D-16 as amended). Every component in the image must be listed. 'permissive' needs binaryLicence on check.py's permissive list; 'copyleft-exception' needs a reason and is the only way GPL/LGPL gets in: ffmpeg, x264 and their runtime libraries, as separate processes in our own containers, never linked into our code or distributed. AGPL, SSPL, non-commercial and non-free are banned in check.py and cannot be allowlisted. copyrightSha256 pins the copyright file a human reviewed: when it changes, the check fails until someone re-reads it. Regenerate with: python3 packages/media-tools/licenses/check.py --image media-tools:dev --print-shas",
+  "_comment": "Allowlist for the media-tools image (D-16 as amended). Every component in the image must be listed. 'permissive' needs binaryLicence on check.py's permissive list; 'copyleft-exception' needs a reason and is the only way GPL/LGPL gets in: ffmpeg, x264 and their runtime libraries, as separate processes in our own containers, never linked into our code or distributed. AGPL, SSPL, non-commercial and non-free are banned in check.py and cannot be allowlisted. copyrightSha256 pins the copyright file a human reviewed: when it changes, the check fails until someone re-reads it. Regenerate with: python3 packages/media-tools/licenses/check.py --image media-tools:dev --print-shas. Fonts (kind 'font' in the inventory, P3-04) must be SIL OFL 1.1 ('permissive' with binaryLicence OFL-1.1); sourceSha256 pins the font file and copyrightSha256 its licence text (line endings normalised, as check.py reads it).",
   "ffmpegConfigure": {
     "requiredEnable": [
       "--enable-gpl",
@@ -25,6 +25,24 @@
       "copyrightSha256": "75179de85cf1aec6fe4d0871797269d1f54d116f46e7b78cfc0eca6e4ecc735b",
       "reason": "Built --enable-gpl because libx264 is GPL. Runs as a separate process in our containers; never linked into our code and never distributed (D-16 amendment). Source: ffmpeg.org release tarball checked against sourceSha256.",
       "sourceSha256": "7138d28c96d9d3e3af4ee3d8cad72741f8ffb40da90c1112235dea3ecd3178a3"
+    },
+    "font-anton": {
+      "category": "permissive",
+      "binaryLicence": "OFL-1.1",
+      "copyrightSha256": "eee1d24ff8f553eb732237c7dd9b945a78313ed49ad6de02872a47277741b44a",
+      "sourceSha256": "a4ba3a92350ebb031da0cb47630ac49eb265082ca1bc0450442f4a83ab947cab"
+    },
+    "font-inter": {
+      "category": "permissive",
+      "binaryLicence": "OFL-1.1",
+      "copyrightSha256": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a",
+      "sourceSha256": "288316099b1e0a47a4716d159098005eef7c0066921f34e3200393dbdb01947f"
+    },
+    "font-montserrat": {
+      "category": "permissive",
+      "binaryLicence": "OFL-1.1",
+      "copyrightSha256": "41f82bb4d24b304f30f7136bc47abdd083782e4265c984160f5649d1e78ea49c",
+      "sourceSha256": "1b364c3400bf7b1cc2c47a25dd0d3edd8331da451412aa5539080f78f8f70b63"
     },
     "libass9": {
       "category": "permissive",

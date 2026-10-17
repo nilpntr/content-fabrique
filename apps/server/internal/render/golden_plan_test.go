@@ -24,7 +24,7 @@ func fakeResolver(cat timeline.MemoryCatalog) AssetResolver {
 		if a.Kind == timeline.AssetAudio {
 			ext = ".m4a"
 		}
-		return ResolvedAsset{Location: "/assets/" + string(v) + "/" + assetID + ext, HasAudio: true}, nil
+		return ResolvedAsset{Location: "/assets/" + string(v) + "/" + assetID + ext, HasAudio: true, Transcript: fixtureTranscript(assetID, a.DurationMs)}, nil
 	})
 }
 
@@ -73,8 +73,15 @@ func snapshot(name string, p Plan) string {
 	section("cut_list", p.CutList)
 	section("time_map", p.TimeMap)
 	section("sound_cues", p.SoundCues)
-	section("pending_text", p.PendingText)
-	fmt.Fprintf(&b, "\npending_captions: %v\npending_watermark: %v\n", p.PendingCaptions, p.PendingWatermark)
+	if s := p.Subtitles; s != nil {
+		fmt.Fprintf(&b, "\nsubtitles: %s in %s/ (fonts %s), %d text events, %d caption events, watermark %v\n", s.File, s.FontsDir, strings.Join(s.Fonts, ", "), s.TextEvents, s.CaptionEvents, s.Watermark)
+		b.WriteString("\nass:\n")
+		for _, l := range strings.Split(strings.TrimRight(s.ASS, "\n"), "\n") {
+			b.WriteString("  " + l + "\n")
+		}
+	} else {
+		b.WriteString("\nsubtitles: none\n")
+	}
 	return b.String()
 }
 

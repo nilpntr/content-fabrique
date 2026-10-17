@@ -42,9 +42,7 @@ const (
 	CodeUnlicensedAudio Code = "unlicensed_audio"
 	// CodeFadeTooLong is a fade in plus fade out that is longer than the sound.
 	CodeFadeTooLong Code = "fade_too_long"
-	// CodeUnknownStyle is a text style the style registry does not know. Until P3-04 adds the real registry it is a
-	// warning, not an error: the stub registry may lag behind the styles the agent was told about. P3-04 makes it an
-	// error.
+	// CodeUnknownStyle is a text style the style registry (package style) does not know.
 	CodeUnknownStyle Code = "unknown_style"
 	// CodeWrongAssetKind is a video clip on an audio asset, or a licensed_track or creator_audio item on an asset that
 	// is not audio.
