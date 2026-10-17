@@ -1,5 +1,5 @@
 import { useLocation, useMatches } from "@tanstack/react-router";
-import { BarChart3Icon, LayoutDashboardIcon, type LucideIcon, SettingsIcon } from "lucide-react";
+import { BarChart3Icon, LayoutDashboardIcon, type LucideIcon, PlusIcon, SettingsIcon } from "lucide-react";
 import type { FileRouteTypes } from "@/routeTree.gen";
 
 export interface NavItem {
@@ -11,6 +11,7 @@ export interface NavItem {
 
 export const NAV_ITEMS: readonly NavItem[] = [
   { title: "Overview", to: "/", icon: LayoutDashboardIcon },
+  { title: "New project", to: "/projects/new", icon: PlusIcon },
   { title: "Reports", to: "/reports", icon: BarChart3Icon },
   { title: "Settings", to: "/settings", icon: SettingsIcon },
 ];

@@ -35,7 +35,7 @@ const options = () => screen.queryAllByRole("option").map((option) => option.tex
 
 test("the list keeps its filter while the palette fades out, and is reset once it is gone", async () => {
   const input = await openPalette();
-  expect(options()).toHaveLength(4);
+  expect(options()).toHaveLength(5);
 
   fireEvent.change(input, { target: { value: "settings" } });
   await waitFor(() => expect(options()).toEqual(["Go to Settings"]));
@@ -51,7 +51,7 @@ test("the list keeps its filter while the palette fades out, and is reset once i
   fireEvent.keyDown(window, { key: "k", ctrlKey: true });
   const reopened = (await screen.findByPlaceholderText("Search pages and actions…")) as HTMLInputElement;
   expect(reopened.value).toBe("");
-  expect(within(document.body).queryAllByRole("option")).toHaveLength(4);
+  expect(within(document.body).queryAllByRole("option")).toHaveLength(5);
 });
 
 test("reopening during the exit animation starts with an empty query", async () => {
@@ -63,6 +63,6 @@ test("reopening during the exit animation starts with an empty query", async () 
   await waitFor(() => expect(document.querySelector("[data-ending-style]")).toBeTruthy());
   fireEvent.keyDown(window, { key: "k", ctrlKey: true });
 
-  await waitFor(() => expect(options()).toHaveLength(4));
+  await waitFor(() => expect(options()).toHaveLength(5));
   expect((screen.getByPlaceholderText("Search pages and actions…") as HTMLInputElement).value).toBe("");
 });
