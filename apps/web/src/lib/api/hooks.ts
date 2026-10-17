@@ -1,7 +1,7 @@
 import { useAuth } from "@clerk/tanstack-react-start";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
-import { type ApiAsset, type ApiClient, ApiError, deleteAsset, fetchAssets, fetchLibrarySummary, fetchMe, fetchWorkspacePlan } from "@/lib/api/client";
+import { type ApiAsset, type ApiClient, ApiError, deleteAsset, fetchAssets, fetchLibrarySummary, fetchMe, fetchWorkspacePlan, updateAsset } from "@/lib/api/client";
 import { useApiClient } from "@/lib/api/provider";
 import { ASSETS_QUERY_KEY, LIBRARY_SUMMARY_QUERY_KEY, ME_QUERY_KEY, PLAN_QUERY_KEY } from "@/lib/query-client";
 
@@ -95,6 +95,16 @@ export function useAssets({ enabled = true, isOwned = () => false }: { enabled?:
       polls.current = { signature, unchanged: signature === polls.current.signature ? polls.current.unchanged + 1 : 0 };
       return pollDelay(polls.current.unchanged);
     },
+  });
+}
+
+/** PATCH /v1/assets/{id}: a new title. The list is fetched again, which also carries what the quick look wrote meanwhile. */
+export function useRenameAsset() {
+  const getClient = useApiClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, title }: { id: string; title: string }) => updateAsset(getClient(), id, title),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: [ASSETS_QUERY_KEY] }),
   });
 }
 
