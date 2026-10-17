@@ -165,9 +165,9 @@ erDiagram
 | `workspaces` | `id`, `clerk_org_id`, `name`, `plan`, `region`, `billing_mode` (managed, byok) |
 | `users`, `workspace_members` | `clerk_user_id`, `email`; `role` (owner, editor, viewer) |
 | `creator_profiles` | `niche` (jsonb: sub-niches), `audience_regions`, `tone`, `language`, `brand` (fonts, colours, logo asset), `defaults` (caption style, fps) |
-| `assets` | `kind` (video, audio, image), `status` (uploading → uploaded → processing → ready / failed), `r2_key`, `size_bytes`, `sha256`, `duration_ms`, `width`, `height`, `fps`, `rotation`, `codecs`, `has_audio` |
+| `assets` | `kind` (video, audio, image), `title`, `description`, `tags[]` (from the quick look, P1-04b; the title is editable), `status` (uploading → uploaded → processing → ready / failed), `r2_key`, `size_bytes`, `sha256`, `duration_ms`, `width`, `height`, `fps`, `rotation`, `codecs`, `has_audio` |
 | `uploads` | `asset_id`, `r2_upload_id`, `part_size`, `expires_at` (multipart state for resume) |
-| `asset_derivatives` | `kind` (proxy_720, proxy_360, poster, sprite, sprite_vtt, waveform, audio_16k, keyframe), `r2_key`, `meta` |
+| `asset_derivatives` | `kind` (proxy_720, proxy_360, poster, sprite, sprite_vtt, waveform, audio_16k, keyframe, hover_preview), `r2_key`, `meta` |
 | `shots` | `asset_id`, `idx`, `start_ms`, `end_ms`, `keyframe_key`, `signals` (blur, exposure, motion) |
 | `moments` | `asset_id`, `start_ms`, `end_ms`, `source` (analysis, user, agent), `labels[]`, `attrs` (exercise, muscle_group, pose, rep_index, framing, quality), `description`, `search` (tsvector), `embedding` (optional, [D-10](05-decisions.md#d-10-video-understanding)) |
 | `transcripts` | `asset_id`, `language`, `words` (jsonb: word, start_ms, end_ms, confidence) |
