@@ -13,19 +13,20 @@ tasks:
     desc: "Start everything locally: Postgres + MinIO (Docker), then web (:3000), api (:8080) and worker (:8081). Ctrl-C stops the three processes"
     cmds:
       - task: install
-      - task: env:ensure
+      - task: env:sync
       - task: up
       - task: migrate:dev
       # Loads .env, builds the api and worker, runs the three processes and stops them together (see the script).
       - ./scripts/dev.sh
 
-  # `task dev` creates .env only when it is missing; run `task env:init` yourself to fill secrets in an existing file.
-  env:ensure:
+  # Runs on every `task dev`: creates .env if it is missing, fills the empty generated secrets and adds the [AUTO] defaults
+  # an older .env lacks (DATABASE_MIGRATE_URL, say). Silent when nothing changes; it lists variable names when it does.
+  env:sync:
     internal: true
-    status:
-      - test -f .env
+    silent: true
+    dir: apps/server
     cmds:
-      - task: env:init
+      - go run ./cmd/cfctl env init --quiet
 
   up:
     desc: Start Postgres and MinIO with Docker Compose, wait until they are healthy, and create the bucket
@@ -102,7 +103,7 @@ tasks:
   # ── Environment ─────────────────────────────────────────────────────────────
 
   env:init:
-    desc: Create .env from .env.example if missing and generate the empty [AUTO] secrets (never prints values)
+    desc: Create .env from .env.example if missing, generate the empty [AUTO] secrets and add the [AUTO] defaults it lacks (prints names, never values)
     dir: apps/server
     cmds:
       - go run ./cmd/cfctl env init
