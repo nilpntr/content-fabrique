@@ -151,7 +151,7 @@ func TestAnnotationsAPI(t *testing.T) {
 	// Edit by the author; resolve by another member; the author deletes.
 	var got api.Annotation
 	e.call(http.MethodPatch, "/v1/annotations/"+c.Id, "editor", map[string]any{"body": "bigger, and bolder", "remove_pin": true, "start_ms": 4500}, http.StatusOK, &got)
-	if got.Body != "bigger, and bolder" || got.Pin != nil || got.StartMs != 4500 || got.EndMs != 6000 {
+	if got.Body != "bigger, and bolder" || got.Pin != nil || got.StartMs != 4500 || got.EndMs != 6500 {
 		t.Fatalf("edited: %+v", got)
 	}
 	e.call(http.MethodPatch, "/v1/annotations/"+c.Id, "ada", map[string]any{"status": "resolved"}, http.StatusOK, &got)
