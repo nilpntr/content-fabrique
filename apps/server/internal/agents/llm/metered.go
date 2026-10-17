@@ -193,8 +193,9 @@ func (m *metered) writeLedger(ctx context.Context, e store.UsageEntry) error {
 const (
 	// upperBytesPerToken: no real text costs more than one token per two bytes of canonical JSON.
 	upperBytesPerToken = 2
-	// upperImageTokens is above the most an image costs (images are scaled to about 1,600 tokens).
-	upperImageTokens = 2000
+	// upperImageTokens only matters to EstimateTokens' sibling uses of the bound; a request with an image is always
+	// counted (see reserveCaps), because an image can cost several thousand tokens depending on its size.
+	upperImageTokens = 5000
 	// upperOverheadTokens covers the tokens the API adds for tools and the system.
 	upperOverheadTokens = 2000
 )
@@ -228,6 +229,13 @@ func (m *metered) reserveCaps(ctx context.Context, req Request) (*reservation, e
 	}
 	estimate := func() (int64, error) { return m.prices.EstimateMax(req.Model, tokens, int64(req.MaxTokens), marks) }
 
+	// The local bound is for text. What an image costs depends on its size (up to about 4,800 tokens at the largest
+	// size the models accept, and we send images at full size), so any request with an image is always counted.
+	if hasImage(req) {
+		if err := count(); err != nil {
+			return nil, err
+		}
+	}
 	est, err := estimate()
 	if err != nil {
 		return nil, err
@@ -329,6 +337,28 @@ func (r *reservations) release(ws ids.WorkspaceID, est int64) {
 	} else {
 		delete(r.m, ws)
 	}
+}
+
+// hasImage reports whether any block of the request, at any depth, is an image.
+func hasImage(req Request) bool {
+	var walk func(blocks []Block) bool
+	walk = func(blocks []Block) bool {
+		for _, b := range blocks {
+			if b.Type == BlockImage || walk(b.Content) {
+				return true
+			}
+		}
+		return false
+	}
+	if walk(req.System) {
+		return true
+	}
+	for _, m := range req.Messages {
+		if walk(m.Content) {
+			return true
+		}
+	}
+	return false
 }
 
 func cacheMarks(req Request) CacheMarks {

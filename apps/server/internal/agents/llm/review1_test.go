@@ -187,6 +187,49 @@ func TestMissingCacheSplitIsPricedAtTheOneHourRateWhenRequested(t *testing.T) {
 	}
 }
 
+// Images cost a size-dependent number of tokens (thousands at full size), so a request with an image is always counted,
+// even when a local bound would clear every cap, and the caps see the real count.
+func TestRequestsWithImagesAreAlwaysCounted(t *testing.T) {
+	withImage := func() Request {
+		r := simpleRequest()
+		r.Messages[0].Content = append(r.Messages[0].Content, Block{Type: BlockImage, Image: &Image{MediaType: "image/png", Data: []byte("not-really-a-png")}})
+		return r
+	}
+	// Text only: no count (the bound clears the generous default caps).
+	rg := newRig(t, nil)
+	c, _ := rg.client(t, newWorkspaceID(), "editor")
+	if _, err := c.Messages(context.Background(), simpleRequest()); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(rg.api.callsTo("/count_tokens")); n != 0 {
+		t.Fatalf("a text request was counted %d times", n)
+	}
+	// With an image, in the user turn or inside a tool result: counted, once, before sending.
+	nested := simpleRequest()
+	nested.Messages = append(nested.Messages, Message{Role: RoleUser, Content: []Block{{Type: BlockToolResult, ToolUseID: "t", Content: []Block{{Type: BlockImage, Image: &Image{MediaType: "image/png", Data: []byte("x")}}}}}})
+	for name, req := range map[string]Request{"user image": withImage(), "image in a tool result": nested} {
+		rg = newRig(t, nil)
+		c, _ = rg.client(t, newWorkspaceID(), "editor")
+		if _, err := c.Messages(context.Background(), req); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if n := len(rg.api.callsTo("/count_tokens")); n != 1 {
+			t.Errorf("%s: %d count_tokens calls, want 1", name, n)
+		}
+	}
+	// The count decides the caps: 4,800 tokens for one full-size image would pass a bound of 2,000, but the API's real
+	// count (here 400,000) is over the per-request cap, so the call is refused before it is sent.
+	rg = newRig(t, map[string]string{"LLM_MAX_REQUEST_MICROS": "100000"})
+	rg.api.countTokens = func(int, recordedCall) fakeReply { return fakeReply{Status: 200, Body: `{"input_tokens": 400000}`} }
+	c, _ = rg.client(t, newWorkspaceID(), "editor")
+	req := withImage()
+	req.Model = "claude-opus-5-5"
+	var ce *CapError
+	if _, err := c.Messages(context.Background(), req); !errors.As(err, &ce) || ce.Kind != CapRequest || len(rg.api.messageCalls()) != 0 {
+		t.Fatalf("err = %v, message calls = %d", err, len(rg.api.messageCalls()))
+	}
+}
+
 // ---- the daily cap against a stale ledger -----------------------------------------------------------------------
 
 // The ledger always says "nothing spent" (a replica that lags, say): the in-flight reservations alone must hold the

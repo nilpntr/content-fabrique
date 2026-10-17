@@ -117,8 +117,8 @@ func TestRecordThenReplayRoundTrip(t *testing.T) {
 	if len(b.settled) != 1 || b.settled[0] != 5650 || b.Spent() != 5650 {
 		t.Errorf("replay settled %v, spent %d", b.settled, b.Spent())
 	}
-	// This cassette was recorded without a count (the request was far under every cap, so none was needed): CountTokens
-	// in replay falls back to a local estimate, and is not an API call.
+	// The request has images, so it was counted when recorded and the count is served back (see TestReplayServesTheRecordedTokenCount for the text case): CountTokens
+	// in replay is the recorded count, not an API call.
 	if n, err := rc.CountTokens(context.Background(), cassetteRequest()); err != nil || n < 100 {
 		t.Errorf("replay CountTokens = %d, %v", n, err)
 	}
