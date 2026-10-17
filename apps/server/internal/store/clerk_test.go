@@ -288,4 +288,39 @@ func clerkSyncSuite(t *testing.T, st *store.Store) {
 			t.Error("another organization's delete counted")
 		}
 	})
+
+	t.Run("SyncMember refuses what a membership delete already removed", func(t *testing.T) {
+		w, u := newWorkspace(t, "tomb-ws", 1), newUser(t, "tomb-user", 1)
+		subject := "org_tomb-ws" + suffix + "/user_tomb-user" + suffix
+		if _, _, err := st.SyncMember(ctx, w.ID, u.ID, store.RoleEditor, 100); err != nil {
+			t.Fatal(err)
+		}
+		// The delete webhook, at 500.
+		if err := st.DeleteMember(ctx, w.ID, u.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.RecordWebhookEvent(ctx, store.WebhookEvent{SvixID: "msg_tomb" + suffix, Type: "organizationMembership.deleted", Subject: subject, ClerkEventAt: 500}); err != nil {
+			t.Fatal(err)
+		}
+		// A write from a token issued at 400, or at the very moment, is stale; one issued at 501 is a new membership.
+		for _, at := range []int64{400, 500} {
+			if _, applied, err := st.SyncMember(ctx, w.ID, u.ID, store.RoleOwner, at); !errors.Is(err, store.ErrMembershipRemoved) || applied {
+				t.Fatalf("at %d: applied=%v, err=%v, want ErrMembershipRemoved", at, applied, err)
+			}
+		}
+		if members, _ := st.ListMembers(ctx, w.ID); len(members) != 0 {
+			t.Fatalf("a refused write left a row: %v", members)
+		}
+		if m, applied, err := st.SyncMember(ctx, w.ID, u.ID, store.RoleViewer, 501); err != nil || !applied || m.Role != "viewer" {
+			t.Fatalf("at 501: %+v, %v, %v", m, applied, err)
+		}
+		// A delete that failed to apply (status failed) is no tombstone.
+		other := newUser(t, "tomb-other", 1)
+		if _, err := st.RecordWebhookEvent(ctx, store.WebhookEvent{SvixID: "msg_tomb_failed" + suffix, Type: "organizationMembership.deleted", Subject: "org_tomb-ws" + suffix + "/user_tomb-other" + suffix, ClerkEventAt: 900, Failed: true, Detail: "x"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, applied, err := st.SyncMember(ctx, w.ID, other.ID, store.RoleViewer, 100); err != nil || !applied {
+			t.Fatalf("after a failed delete record: %v, %v", applied, err)
+		}
+	})
 }

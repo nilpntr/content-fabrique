@@ -18,6 +18,8 @@ export default defineConfig(({ command, mode }) => {
   const env = loadEnv(mode, ENV_DIR, "");
   const devVars: Record<string, string> = {};
   if (command === "serve" && env.CLERK_SECRET_KEY) devVars.CLERK_SECRET_KEY = env.CLERK_SECRET_KEY;
+  // Not a secret, but the Worker needs it too: the web app's own origin, the one site a session token is accepted for.
+  if (command === "serve" && env.APP_BASE_URL) devVars.APP_BASE_URL = env.APP_BASE_URL;
 
   return mergeConfig(
     { plugins: [cloudflare({ viteEnvironment: { name: "ssr" }, config: { vars: devVars } }), tanstackStart()] },
@@ -26,7 +28,10 @@ export default defineConfig(({ command, mode }) => {
       envDir: ENV_DIR,
       // Matches APP_BASE_URL in .env.example. strictPort fails loudly instead of moving to another port.
       server: { port: 3000, strictPort: true },
-      build: { sourcemap: true },
+      // No source maps in the build. wrangler uploads everything in dist/client as public static assets, and a "hidden" map
+      // (no sourceMappingURL comment) is still a public file at a guessable address. Error tracking (Sentry, later) can
+      // switch them on for its own upload and delete them from dist/ afterwards.
+      build: { sourcemap: false },
       environments: {
         client: {
           build: {

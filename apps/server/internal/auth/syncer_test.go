@@ -319,3 +319,43 @@ func TestMountWithoutSecretsFailsClosed(t *testing.T) {
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/webhooks/clerk", strings.NewReader("{}")))
 	wantError(t, rec, http.StatusServiceUnavailable, "webhook_not_configured")
 }
+
+// A membership that a Clerk webhook removed is not brought back by a token that was issued before the removal.
+func TestSyncerRespectsMembershipTombstones(t *testing.T) {
+	ctx := context.Background()
+	st, dir := newStore(t), newFakeDir()
+	dir.users["user_ada"] = ClerkUser{ID: "user_ada", Email: "ada@example.com", UpdatedAt: 1}
+	dir.orgs["org_fit"] = ClerkOrg{ID: "org_fit", Name: "Fit", UpdatedAt: 1}
+	s := NewSyncer(st, dir)
+
+	if _, err := s.Resolve(ctx, identity("user_ada", "org_fit", "org:admin", 1000)); err != nil {
+		t.Fatal(err)
+	}
+	// The delete webhook, at T = 5000.
+	rig := &webhookRig{t: t, st: st, dir: dir}
+	h, err := NewWebhookHandler(st, dir, testWebhookSecret, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rig.h = h
+	rig.signer = mustSigner(t)
+	rig.wantStatus(rig.event(EventMembershipDeleted, 5000, membershipPayload("org_fit", "Fit", "user_ada", "org:admin", 5000)), "applied")
+
+	// A token issued before T (still valid for its minute) is refused, and writes no membership.
+	if _, err := s.Resolve(ctx, identity("user_ada", "org_fit", "org:admin", 4000)); !errors.Is(err, ErrNotMember) {
+		t.Fatalf("token issued before the removal: err = %v, want ErrNotMember", err)
+	}
+	w := mustWorkspace(t, st, "org_fit")
+	if members, _ := st.ListMembers(ctx, w.ID); len(members) != 0 {
+		t.Fatalf("the membership came back: %+v", members)
+	}
+	// A token issued after it means Clerk has the user in the organization again.
+	if p, err := s.Resolve(ctx, identity("user_ada", "org_fit", "org:member", 6000)); err != nil || p.Role != store.RoleEditor {
+		t.Fatalf("token issued after the removal: %+v, %v", p, err)
+	}
+}
+
+func TestMiddlewareAnswers403WhenNotAMember(t *testing.T) {
+	f := newFixture(t)
+	wantError(t, get(f.handler(t, &fakeResolver{err: ErrNotMember}), "Bearer "+f.token(t, nil)), http.StatusForbidden, "not_a_member")
+}

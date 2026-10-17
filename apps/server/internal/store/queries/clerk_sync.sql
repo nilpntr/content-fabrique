@@ -66,13 +66,24 @@ LEFT JOIN workspace_members m ON m.user_id = u.id AND m.workspace_id = w.id
 WHERE u.clerk_user_id = @clerk_user_id AND w.clerk_org_id = @clerk_org_id;
 
 -- name: RecordWebhookEvent :execrows
-INSERT INTO webhook_events (svix_id, event_type, subject, clerk_event_at)
-VALUES (@svix_id, @event_type, @subject, @clerk_event_at)
+INSERT INTO webhook_events (svix_id, event_type, subject, clerk_event_at, status, detail)
+VALUES (@svix_id, @event_type, @subject, @clerk_event_at, @status, @detail)
 ON CONFLICT (svix_id) DO NOTHING;
 
 -- Was the membership of this pair deleted at or after the given time?
 -- name: MembershipDeletedSince :one
 SELECT EXISTS (
     SELECT 1 FROM webhook_events
-    WHERE event_type = 'organizationMembership.deleted' AND subject = @subject AND clerk_event_at >= @clerk_event_at
+    WHERE event_type = 'organizationMembership.deleted' AND status = 'applied' AND subject = @subject AND clerk_event_at >= @clerk_event_at
 );
+
+-- "<clerk org id>/<clerk user id>" of a membership, the key of its tombstones.
+-- name: GetMembershipSubject :one
+SELECT (w.clerk_org_id || '/' || u.clerk_user_id)::text AS subject
+FROM workspaces w, users u
+WHERE w.id = @workspace_id AND u.id = @user_id;
+
+-- Serialises everything that creates or removes the membership of one pair until the transaction ends, so a delete
+-- webhook and a just-in-time sync cannot interleave between the tombstone check and the insert.
+-- name: LockMembership :exec
+SELECT pg_advisory_xact_lock(hashtextextended(@subject::text, 0));

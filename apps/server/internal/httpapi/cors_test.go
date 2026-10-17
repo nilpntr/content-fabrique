@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,7 +18,7 @@ func corsHandler(t *testing.T) (http.Handler, *int) {
 		*calls++
 		WriteJSON(w, http.StatusOK, map[string]string{"ok": "yes"})
 	})
-	return CORS(testAppOrigin)(next), calls
+	return CORS(testAppOrigin, nil)(next), calls
 }
 
 func do(h http.Handler, method, target string, headers map[string]string) *httptest.ResponseRecorder {
@@ -143,8 +145,36 @@ func TestCORSPreflightOfUnknownMethodIsRefused(t *testing.T) {
 	assertNoCORS(t, rec)
 }
 
+func TestCORSPreflightRefusesUnlistedRequestHeaders(t *testing.T) {
+	for _, requested := range []string{"x-custom", "authorization, x-custom", "content-type,idempotency-key", "Authorization,Content-Type,Cookie"} {
+		var logs bytes.Buffer
+		next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+		h := CORS(testAppOrigin, slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))(next)
+		rec := do(h, http.MethodOptions, "/v1/me", map[string]string{
+			"Origin": testAppOrigin, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": requested,
+		})
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%q: status = %d, want 403", requested, rec.Code)
+		}
+		assertNoCORS(t, rec)
+		if !strings.Contains(logs.String(), "header not allowed") {
+			t.Errorf("%q: the refusal was not logged at debug: %q", requested, logs.String())
+		}
+	}
+	// Listed headers, in any case and spacing, pass.
+	h, _ := corsHandler(t)
+	for _, requested := range []string{"authorization", "Authorization, Content-Type", "CONTENT-TYPE,authorization", ""} {
+		rec := do(h, http.MethodOptions, "/v1/me", map[string]string{
+			"Origin": testAppOrigin, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": requested,
+		})
+		if rec.Code != http.StatusNoContent || rec.Header().Get("Access-Control-Allow-Origin") != testAppOrigin {
+			t.Errorf("%q: status = %d", requested, rec.Code)
+		}
+	}
+}
+
 func TestCORSWithoutConfiguredOriginAllowsNobody(t *testing.T) {
-	h := CORS("")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	h := CORS("", nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 	assertNoCORS(t, do(h, http.MethodGet, "/", map[string]string{"Origin": ""}))
 	rec := do(h, http.MethodOptions, "/", map[string]string{"Access-Control-Request-Method": "GET"})
 	if rec.Code != http.StatusForbidden {
@@ -155,7 +185,7 @@ func TestCORSWithoutConfiguredOriginAllowsNobody(t *testing.T) {
 
 func TestCORSErrorsAreReadableByTheAllowedOrigin(t *testing.T) {
 	// A 401 or 403 from behind the middleware must carry the header too, or the web app could not read the code.
-	h := CORS(testAppOrigin)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	h := CORS(testAppOrigin, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		WriteError(w, http.StatusUnauthorized, "unauthenticated", "sign in")
 	}))
 	rec := do(h, http.MethodGet, "/v1/me", map[string]string{"Origin": testAppOrigin})

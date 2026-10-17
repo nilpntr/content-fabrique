@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, vi } from "vitest";
-import { clerkMock, ME } from "./test-clerk";
+import { clerkMock, installWindowClerk, ME } from "./test-clerk";
 
 // jsdom has no matchMedia; the theme and mobile hooks read it.
 window.matchMedia ??= (query: string) =>
@@ -10,8 +10,15 @@ vi.mock("@clerk/tanstack-react-start", async () => await import("./test-clerk"))
 // The route guard asks the server for the session; there is no Start server here, so the same answer comes from the mock.
 vi.mock("@/lib/session", async () => {
   const { clerkMock } = await import("./test-clerk");
-  return { fetchSession: async () => ({ ...clerkMock.session }) };
+  return {
+    fetchSession: async () => {
+      clerkMock.serverSessionCalls++;
+      return { ...(clerkMock.serverSession ?? clerkMock.session) };
+    },
+  };
 });
+
+installWindowClerk();
 
 // No network either: the API answers /v1/me, and a test that wants something else stubs fetch itself.
 beforeEach(() => {

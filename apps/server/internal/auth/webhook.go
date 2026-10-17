@@ -34,12 +34,13 @@ const (
 // Error codes and statuses of the webhook endpoint.
 const (
 	CodeInvalidSignature = "invalid_signature" // 400
-	CodeInvalidEvent     = "invalid_event"     // 400
+	CodeInvalidEvent     = "invalid_event"     // 400: the body could not be read
 	CodePayloadTooLarge  = "payload_too_large" // 413
 
 	webhookStatusApplied   = "applied"
 	webhookStatusDuplicate = "duplicate"
 	webhookStatusIgnored   = "ignored"
+	webhookStatusRejected  = "rejected"
 )
 
 // WebhookHandler is POST /v1/webhooks/clerk: it verifies the Svix signature and mirrors the event into Postgres.
@@ -115,8 +116,9 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	evt, err := parseEvent(body)
 	if err != nil {
-		h.logger.WarnContext(ctx, "clerk webhook rejected: payload", "svix_id", svixID, "error", err)
-		httpapi.WriteError(w, http.StatusBadRequest, CodeInvalidEvent, "the payload is not a Clerk event this server understands")
+		// Signed by Clerk, but not something this server can use. A retry would fail the same way, and Svix disables an
+		// endpoint that keeps failing, so the delivery is recorded as failed and acknowledged. Only IDs are logged.
+		h.rejectUnusable(w, r, svixID, evt, err)
 		return
 	}
 	if !handledEvent(evt.Type) {
@@ -125,8 +127,23 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Clerk's Backend API is called here, before the transaction: a database transaction is never held open over a network
+	// call to another service.
+	pf, err := h.prefetch(ctx, evt)
+	if err != nil {
+		h.logger.WarnContext(ctx, "clerk webhook not applied: clerk backend api unavailable; Svix will retry", "svix_id", svixID, "type", evt.Type, "error", err)
+		httpapi.WriteError(w, http.StatusServiceUnavailable, CodeIdentityProvider, "try again")
+		return
+	}
+
 	applied := false
 	err = h.store.InTx(ctx, func(tx *store.Store) error {
+		// A membership event takes the lock of its membership first, so it cannot interleave with a just-in-time sync.
+		if subject := evt.subject(); subject != "" {
+			if err := tx.LockMembership(ctx, subject); err != nil {
+				return err
+			}
+		}
 		first, err := tx.RecordWebhookEvent(ctx, store.WebhookEvent{SvixID: svixID, Type: evt.Type, Subject: evt.subject(), ClerkEventAt: evt.recordedAt()})
 		if err != nil {
 			return err
@@ -135,7 +152,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return nil // a replay: already applied by an earlier delivery
 		}
 		applied = true
-		return h.apply(ctx, tx, evt)
+		return h.apply(ctx, tx, evt, pf)
 	})
 	switch {
 	case errors.Is(err, ErrDirectoryUnavailable):
@@ -151,6 +168,25 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.logger.InfoContext(ctx, "clerk webhook applied", "svix_id", svixID, "type", evt.Type)
 		httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": webhookStatusApplied})
 	}
+}
+
+// rejectUnusable records a signed delivery that cannot be used and acknowledges it with 200.
+func (h *WebhookHandler) rejectUnusable(w http.ResponseWriter, r *http.Request, svixID string, evt *event, cause error) {
+	ctx := r.Context()
+	typ := "unknown"
+	if evt != nil && evt.Type != "" {
+		typ = evt.Type
+	}
+	detail := cause.Error() // fixed wording from parseEvent, never a value of the payload
+	_, err := h.store.RecordWebhookEvent(ctx, store.WebhookEvent{SvixID: svixID, Type: typ, Failed: true, Detail: detail})
+	if err != nil {
+		// Could not even record it: let Svix retry.
+		h.logger.ErrorContext(ctx, "clerk webhook: recording an unusable delivery failed; Svix will retry", "svix_id", svixID, "error", err)
+		httpapi.WriteError(w, http.StatusInternalServerError, CodeInternal, "something went wrong")
+		return
+	}
+	h.logger.WarnContext(ctx, "clerk webhook acknowledged but not applied: unusable payload", "svix_id", svixID, "type", typ, "reason", detail)
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": webhookStatusRejected})
 }
 
 func handledEvent(t string) bool {
@@ -202,38 +238,44 @@ type clerkMembershipData struct {
 	} `json:"public_user_data"`
 }
 
+// parseEvent decodes the envelope and the data of a handled type. On an error it still returns the event (with its Type
+// when it was readable). The error text is fixed wording: it is logged and stored, so it must not carry payload values.
 func parseEvent(body []byte) (*event, error) {
 	var e event
 	if err := json.Unmarshal(body, &e); err != nil {
-		return nil, fmt.Errorf("%w: not JSON", errInvalidEvent)
+		return nil, fmt.Errorf("%w: not a JSON event", errInvalidEvent)
 	}
 	if e.Type == "" {
-		return nil, fmt.Errorf("%w: no type", errInvalidEvent)
+		return &e, fmt.Errorf("%w: no type", errInvalidEvent)
 	}
 	if !handledEvent(e.Type) {
 		return &e, nil
 	}
 	var err error
+	missing := ""
 	switch e.Type {
 	case EventUserCreated, EventUserUpdated, EventUserDeleted:
 		if err = json.Unmarshal(e.Data, &e.user); err == nil && e.user.ID == "" {
-			err = errors.New("no user id")
+			missing = "user id"
 		}
 	case EventOrganizationCreated, EventOrganizationUpdated, EventOrganizationDeleted:
 		if err = json.Unmarshal(e.Data, &e.org); err == nil && e.org.ID == "" {
-			err = errors.New("no organization id")
+			missing = "organization id"
 		}
 	default:
 		if err = json.Unmarshal(e.Data, &e.membership); err == nil && (e.membership.Organization.ID == "" || e.membership.UserData.UserID == "") {
-			err = errors.New("no organization or user id")
+			missing = "organization or user id"
 		}
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s data: %w", errInvalidEvent, e.Type, err)
+		return &e, fmt.Errorf("%w: %s data is malformed", errInvalidEvent, e.Type)
+	}
+	if missing != "" {
+		return &e, fmt.Errorf("%w: %s has no %s", errInvalidEvent, e.Type, missing)
 	}
 	// A create or update without a version cannot be ordered, so it cannot be applied safely.
 	if !isDelete(e.Type) && e.version() == 0 {
-		return nil, fmt.Errorf("%w: %s has no updated_at or timestamp", errInvalidEvent, e.Type)
+		return &e, fmt.Errorf("%w: %s has no updated_at or timestamp", errInvalidEvent, e.Type)
 	}
 	return &e, nil
 }
@@ -281,7 +323,7 @@ func (e *event) subject() string {
 func membershipSubject(clerkOrgID, clerkUserID string) string { return clerkOrgID + "/" + clerkUserID }
 
 // apply runs inside the transaction that recorded the delivery.
-func (h *WebhookHandler) apply(ctx context.Context, tx *store.Store, e *event) error {
+func (h *WebhookHandler) apply(ctx context.Context, tx *store.Store, e *event, pf *prefetched) error {
 	switch e.Type {
 	case EventUserCreated, EventUserUpdated:
 		var addrs []emailAddress
@@ -304,7 +346,7 @@ func (h *WebhookHandler) apply(ctx context.Context, tx *store.Store, e *event) e
 		return err
 
 	case EventMembershipCreated, EventMembershipUpdated:
-		return h.applyMembership(ctx, tx, e)
+		return h.applyMembership(ctx, tx, e, pf)
 
 	case EventMembershipDeleted:
 		w, err := tx.GetWorkspaceByClerkOrgID(ctx, e.membership.Organization.ID)
@@ -326,21 +368,90 @@ func (h *WebhookHandler) apply(ctx context.Context, tx *store.Store, e *event) e
 	return nil
 }
 
-func (h *WebhookHandler) applyMembership(ctx context.Context, tx *store.Store, e *event) error {
+// prefetched holds what Clerk's Backend API said about the user and the organization of a membership event, fetched before
+// the transaction. It is a Directory that answers from that and makes no call.
+type prefetched struct {
+	user     *ClerkUser
+	userGone bool
+	org      *ClerkOrg
+	orgGone  bool
+}
+
+var _ Directory = (*prefetched)(nil)
+
+var errNotPrefetched = fmt.Errorf("%w: not fetched before the transaction", ErrDirectoryUnavailable)
+
+func (p *prefetched) User(_ context.Context, id string) (ClerkUser, error) {
+	switch {
+	case p.user != nil && p.user.ID == id:
+		return *p.user, nil
+	case p.userGone:
+		return ClerkUser{}, ErrDirectoryNotFound
+	}
+	return ClerkUser{}, errNotPrefetched
+}
+
+func (p *prefetched) Organization(_ context.Context, id string) (ClerkOrg, error) {
+	switch {
+	case p.org != nil && p.org.ID == id:
+		return *p.org, nil
+	case p.orgGone:
+		return ClerkOrg{}, ErrDirectoryNotFound
+	}
+	return ClerkOrg{}, errNotPrefetched
+}
+
+// prefetch asks Clerk for what a membership create or update needs and Postgres does not have yet: the user (the payload
+// has no email) and, when the payload carries no organization name, the organization. Everything else needs no call.
+func (h *WebhookHandler) prefetch(ctx context.Context, e *event) (*prefetched, error) {
+	pf := &prefetched{}
+	if (e.Type != EventMembershipCreated && e.Type != EventMembershipUpdated) || h.dir == nil {
+		return pf, nil
+	}
+	userID, orgID := e.membership.UserData.UserID, e.membership.Organization.ID
+
+	if _, err := h.store.GetUserByClerkID(ctx, userID); errors.Is(err, store.ErrNotFound) {
+		cu, err := h.dir.User(ctx, userID)
+		switch {
+		case errors.Is(err, ErrDirectoryNotFound):
+			pf.userGone = true
+		case err != nil:
+			return nil, err
+		default:
+			pf.user = &cu
+		}
+	} else if err != nil {
+		return nil, err
+	}
+
+	if e.membership.Organization.Name == "" {
+		if _, err := h.store.GetWorkspaceByClerkOrgID(ctx, orgID); errors.Is(err, store.ErrNotFound) {
+			co, err := h.dir.Organization(ctx, orgID)
+			switch {
+			case errors.Is(err, ErrDirectoryNotFound):
+				pf.orgGone = true
+			case err != nil:
+				return nil, err
+			default:
+				pf.org = &co
+			}
+		} else if err != nil {
+			return nil, err
+		}
+	}
+	return pf, nil
+}
+
+func (h *WebhookHandler) applyMembership(ctx context.Context, tx *store.Store, e *event, pf *prefetched) error {
 	orgID, userID := e.membership.Organization.ID, e.membership.UserData.UserID
 
-	// A membership that was deleted at or after this event's time is gone: this event is the stale one.
-	stale, err := tx.MembershipDeletedSince(ctx, e.subject(), e.version())
-	if err != nil {
-		return err
-	}
-	if stale {
-		return nil
-	}
-
 	// The membership event may come before the user's or the organization's own event (Svix does not order across
-	// event types). The payload names the organization; the user's email is not in it, so a missing user is fetched.
-	var w store.Workspace
+	// event types). The payload names the organization; the user's email is not in it, so a missing user was fetched
+	// (prefetch) and is stored here.
+	var (
+		w   store.Workspace
+		err error
+	)
 	if o := e.membership.Organization; o.Name != "" {
 		ov := o.UpdatedAt
 		if ov == 0 {
@@ -349,17 +460,21 @@ func (h *WebhookHandler) applyMembership(ctx context.Context, tx *store.Store, e
 		if w, _, err = tx.SyncWorkspace(ctx, store.SyncWorkspaceInput{ClerkOrgID: orgID, Name: o.Name, ClerkUpdatedAt: ov}); err != nil {
 			return err
 		}
-	} else if w, err = ensureWorkspace(ctx, tx, h.dir, orgID); err != nil {
+	} else if w, err = ensureWorkspace(ctx, tx, pf, orgID); err != nil {
 		return ignoreDeleted(err)
 	}
-	u, err := ensureUser(ctx, tx, h.dir, userID)
+	u, err := ensureUser(ctx, tx, pf, userID)
 	if err != nil {
 		return ignoreDeleted(err)
 	}
 	if u.DeletedAt != nil || w.DeletedAt != nil {
 		return nil // a deleted user or workspace has no memberships
 	}
+	// The store ignores a write that is older than the membership's last delete in Clerk (ErrMembershipRemoved).
 	_, _, err = tx.SyncMember(ctx, w.ID, u.ID, MapRole(e.membership.Role), e.version())
+	if errors.Is(err, store.ErrMembershipRemoved) {
+		return nil
+	}
 	return err
 }
 

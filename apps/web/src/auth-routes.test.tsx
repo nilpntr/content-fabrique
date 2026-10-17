@@ -108,3 +108,43 @@ test("Settings says so when the API refuses", async () => {
   const alert = await screen.findByRole("alert");
   await waitFor(() => expect(alert.textContent).toContain("this workspace was deleted (workspace_deleted)"));
 });
+
+test("navigating in the browser uses Clerk's in-memory state and does not ask the server again", async () => {
+  const router = renderAt("/reports");
+  await screen.findByRole("heading", { name: "Reports" });
+  await act(() => router.navigate({ to: "/settings" }));
+  expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
+  expect(clerkMock.serverSessionCalls).toBe(0);
+});
+
+test("a stale session cookie on the server does not bounce a user Clerk knows is signed in", async () => {
+  // The server only sees the 60-second __session cookie, which can be out of date while Clerk's own state is current.
+  clerkMock.serverSession = { isAuthenticated: false, userId: null, orgId: null };
+  const router = renderAt("/reports");
+  await screen.findByRole("heading", { name: "Reports" });
+  await act(() => router.navigate({ to: "/settings" }));
+  expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
+  expect(router.state.location.pathname).toBe("/settings");
+});
+
+test("signing out in the browser sends the next navigation to sign-in", async () => {
+  const router = renderAt("/reports");
+  await screen.findByRole("heading", { name: "Reports" });
+  clerkMock.session = { isAuthenticated: false, userId: null, orgId: null };
+  await act(() => router.navigate({ to: "/settings" }));
+  expect(await screen.findByTestId("clerk-sign-in")).toBeTruthy();
+  expect(router.state.location.pathname).toBe("/sign-in");
+});
+
+test("Settings keeps retrying while the API answers 503, and then shows the data", async () => {
+  const ok = new Response(JSON.stringify({ user: { id: "usr_1", email: "ada@example.com" }, workspace: { id: "wks_1", name: "Fit", role: "owner" } }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+  const unavailable = () =>
+    new Response(JSON.stringify({ error: { code: "identity_unavailable", message: "try again" } }), { status: 503 });
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(unavailable()).mockResolvedValue(ok));
+  renderAt("/settings");
+  expect(await screen.findByText("ada@example.com", { selector: "dd" }, { timeout: 5000 })).toBeTruthy();
+  expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThanOrEqual(2);
+});

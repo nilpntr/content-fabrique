@@ -39,6 +39,8 @@ type WebhookEvent struct {
 	Subject      string
 	ClerkEventAt int64
 	ReceivedAt   time.Time
+	Status       string
+	Detail       string
 }
 
 type Workspace struct {

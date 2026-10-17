@@ -102,17 +102,55 @@ func (s *Store) DeleteWorkspace(ctx context.Context, clerkOrgID string) (Workspa
 	return w, mapErr(err)
 }
 
+// ErrMembershipRemoved is returned by SyncMember when a membership delete from Clerk at or after the version being written
+// was already applied: the membership is gone, and the write that would bring it back is the stale one.
+var ErrMembershipRemoved = errors.New("store: membership was removed in Clerk")
+
 // SyncMember makes the user a member of the workspace with the role, or changes the role, when this version is newer.
+// It refuses with ErrMembershipRemoved when the membership was deleted in Clerk at or after this version: a webhook
+// that arrives late and a token issued before the removal cannot bring it back. The check and the write run under one
+// advisory lock per membership (also taken by the delete webhook, see LockMembership), so they cannot interleave.
 func (s *Store) SyncMember(ctx context.Context, ws ids.WorkspaceID, user ids.UserID, role Role, clerkUpdatedAt int64) (Member, bool, error) {
 	if !role.valid() {
 		return Member{}, false, fmt.Errorf("%w: role %q", ErrInvalid, role)
 	}
-	m, err := s.q.SyncWorkspaceMember(ctx, db.SyncWorkspaceMemberParams{WorkspaceID: ws, UserID: user, Role: string(role), ClerkUpdatedAt: clerkUpdatedAt})
-	if errors.Is(err, pgx.ErrNoRows) {
-		m, err = s.q.GetWorkspaceMember(ctx, db.GetWorkspaceMemberParams{WorkspaceID: ws, UserID: user})
-		return m, false, mapErr(err)
+	var (
+		m       Member
+		applied bool
+	)
+	err := s.inTx(ctx, func(tx *Store) error {
+		subject, err := tx.q.GetMembershipSubject(ctx, db.GetMembershipSubjectParams{WorkspaceID: ws, UserID: user})
+		if err != nil {
+			return err
+		}
+		if err := tx.q.LockMembership(ctx, subject); err != nil {
+			return err
+		}
+		removed, err := tx.q.MembershipDeletedSince(ctx, db.MembershipDeletedSinceParams{Subject: subject, ClerkEventAt: clerkUpdatedAt})
+		if err != nil {
+			return err
+		}
+		if removed {
+			return ErrMembershipRemoved
+		}
+		m, err = tx.q.SyncWorkspaceMember(ctx, db.SyncWorkspaceMemberParams{WorkspaceID: ws, UserID: user, Role: string(role), ClerkUpdatedAt: clerkUpdatedAt})
+		if errors.Is(err, pgx.ErrNoRows) { // not newer than the row
+			m, err = tx.q.GetWorkspaceMember(ctx, db.GetWorkspaceMemberParams{WorkspaceID: ws, UserID: user})
+			return err
+		}
+		applied = err == nil
+		return err
+	})
+	if errors.Is(err, ErrMembershipRemoved) {
+		return Member{}, false, err
 	}
-	return m, true, mapErr(err)
+	return m, applied, mapErr(err)
+}
+
+// LockMembership takes the transaction-scoped advisory lock of one membership ("<clerk org id>/<clerk user id>"). The
+// delete webhook calls it before it records the delete, and holds it until it commits.
+func (s *Store) LockMembership(ctx context.Context, subject string) error {
+	return mapErr(s.q.LockMembership(ctx, subject))
 }
 
 // DeleteMember removes the membership. Removing one that does not exist is fine.
@@ -168,6 +206,10 @@ type WebhookEvent struct {
 	Subject string
 	// ClerkEventAt is the event's time in Unix milliseconds.
 	ClerkEventAt int64
+	// Failed marks a signed delivery that could not be used. It is recorded so Svix gets a 2xx and does not retry it.
+	Failed bool
+	// Detail is a short reason for a failed delivery. It must never contain a value from the payload.
+	Detail string
 }
 
 // RecordWebhookEvent notes that this delivery is being applied. It returns false when the delivery was recorded before:
@@ -177,11 +219,15 @@ func (s *Store) RecordWebhookEvent(ctx context.Context, e WebhookEvent) (bool, e
 	if e.SvixID == "" || e.Type == "" {
 		return false, fmt.Errorf("%w: svix id and event type are required", ErrInvalid)
 	}
-	n, err := s.q.RecordWebhookEvent(ctx, db.RecordWebhookEventParams{SvixID: e.SvixID, EventType: e.Type, Subject: e.Subject, ClerkEventAt: e.ClerkEventAt})
+	status := "applied"
+	if e.Failed {
+		status = "failed"
+	}
+	n, err := s.q.RecordWebhookEvent(ctx, db.RecordWebhookEventParams{SvixID: e.SvixID, EventType: e.Type, Subject: e.Subject, ClerkEventAt: e.ClerkEventAt, Status: status, Detail: e.Detail})
 	return n == 1, mapErr(err)
 }
 
-// MembershipDeletedSince reports whether a membership delete for this "<clerk org id>/<clerk user id>" pair was applied
+// MembershipDeletedSince reports whether a (successfully applied) membership delete for this "<clerk org id>/<clerk user id>" pair was applied
 // with an event time at or after atMillis. A membership create or update that is not newer than that delete is stale.
 func (s *Store) MembershipDeletedSince(ctx context.Context, subject string, atMillis int64) (bool, error) {
 	deleted, err := s.q.MembershipDeletedSince(ctx, db.MembershipDeletedSinceParams{Subject: subject, ClerkEventAt: atMillis})

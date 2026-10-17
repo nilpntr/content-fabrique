@@ -39,7 +39,7 @@ func TestMigrateCLI(t *testing.T) {
 		t.Fatalf("version before up = %d %q", code, out)
 	}
 
-	if code, out, errOut := migrateCLI(t, url, "up"); code != 0 || !strings.Contains(out, "00003_clerk_sync.sql") {
+	if code, out, errOut := migrateCLI(t, url, "up"); code != 0 || !strings.Contains(out, "00004_webhook_event_status.sql") {
 		t.Fatalf("up = %d\n%s\n%s", code, out, errOut)
 	}
 	if code, out, _ := migrateCLI(t, url, "up"); code != 0 || !strings.Contains(out, "nothing to do") {
@@ -62,7 +62,7 @@ func TestMigrateCLI(t *testing.T) {
 	if code, out, errOut := migrateCLI(t, url, "redo", "--yes"); code != 0 || !strings.Contains(out, "down") || !strings.Contains(out, "up") {
 		t.Fatalf("redo = %d\n%s\n%s", code, out, errOut)
 	}
-	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00003_clerk_sync.sql") {
+	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00004_webhook_event_status.sql") {
 		t.Fatalf("down one = %d %s", code, out)
 	}
 }

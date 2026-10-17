@@ -387,6 +387,33 @@ func TestWebhookMembershipFetchesAnUnknownUser(t *testing.T) {
 	}
 }
 
+// The Backend API is called before the transaction opens, never inside one.
+func TestWebhookDoesNotCallClerkInsideATransaction(t *testing.T) {
+	r := newWebhookRig(t)
+	r.dir.users["user_bob"] = ClerkUser{ID: "user_bob", Email: "bob@example.com", UpdatedAt: 1500}
+	r.dir.orgs["org_fit"] = ClerkOrg{ID: "org_fit", Name: "Fit", UpdatedAt: 1500}
+	var open int
+	r.dir.onCall = func() {
+		if err := r.st.Pool().QueryRow(context.Background(),
+			`SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND state LIKE 'idle in transaction%'`).Scan(&open); err != nil {
+			t.Error(err)
+		}
+	}
+	// The payload has no organization name either, so both the user and the organization are fetched.
+	payload := membershipPayload("org_fit", "", "user_bob", "org:member", 2000)
+	r.wantStatus(r.event(EventMembershipCreated, 2000, payload), "applied")
+	if got := r.dir.called(); len(got) != 2 {
+		t.Fatalf("directory calls = %v, want the user and the organization", got)
+	}
+	if open != 0 {
+		t.Fatalf("%d transactions were open while Clerk was called", open)
+	}
+	s, err := r.st.ResolveSession(context.Background(), "user_bob", "org_fit")
+	if err != nil || s.Role == nil || s.Email != "bob@example.com" || s.WorkspaceName != "Fit" {
+		t.Fatalf("session = %+v, %v", s, err)
+	}
+}
+
 func TestWebhookDeletes(t *testing.T) {
 	r := newWebhookRig(t)
 	ctx := context.Background()
@@ -470,13 +497,46 @@ func TestWebhookRejectsUnusablePayloads(t *testing.T) {
 		"membership role wrong shape": []byte(`{"type":"organizationMembership.created","timestamp":1,"data":{"role":5,"organization":{"id":"org_1"},"public_user_data":{"user_id":"user_1"}}}`),
 	}
 	for name, body := range bodies {
-		t.Run(name, func(t *testing.T) {
+		t.Run(name, func(_ *testing.T) {
+			// Signed but unusable: acknowledged with 2xx, so Svix does not retry it for days or disable the endpoint.
 			d := delivery{id: "msg_bad_" + strings.ReplaceAll(name, " ", "_"), body: body, ts: time.Now()}
-			wantError(t, r.post(d), http.StatusBadRequest, "invalid_event")
+			r.wantStatus(d, "rejected")
+			r.wantStatus(d, "rejected") // and a retry gets the same answer
 		})
 	}
-	if n := r.countEvents(); n != 0 {
-		t.Fatalf("%d deliveries recorded for unusable payloads", n)
+	// Each was recorded once, as failed, with a reason that has no payload values in it.
+	rows, err := r.st.Pool().Query(context.Background(), `SELECT svix_id, status, detail FROM webhook_events`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var id, status, detail string
+		if err := rows.Scan(&id, &status, &detail); err != nil {
+			t.Fatal(err)
+		}
+		n++
+		if status != "failed" || detail == "" || strings.Contains(detail, "nope") || strings.Contains(detail, "user_ada") {
+			t.Errorf("%s: status %q, detail %q", id, status, detail)
+		}
+	}
+	if n != len(bodies) {
+		t.Fatalf("%d deliveries recorded, want %d", n, len(bodies))
+	}
+	// Nothing was applied.
+	if _, err := r.st.GetUserByClerkID(context.Background(), "user_ada"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("an unusable event changed the database: %v", err)
+	}
+}
+
+// A failed delivery is not a membership tombstone, whatever type it claims.
+func TestWebhookFailedDeliveriesAreNotTombstones(t *testing.T) {
+	r := newWebhookRig(t)
+	body := []byte(`{"type":"organizationMembership.deleted","timestamp":99999,"data":{"role":"org:member","updated_at":99999}}`)
+	r.wantStatus(delivery{id: "msg_bad_delete", body: body, ts: time.Now()}, "rejected")
+	if gone, err := r.st.MembershipDeletedSince(context.Background(), "/", 1); err != nil || gone {
+		t.Fatalf("MembershipDeletedSince = %v, %v", gone, err)
 	}
 }
 
@@ -484,9 +544,9 @@ func TestWebhookBodyIsLimited(t *testing.T) {
 	r := newWebhookRig(t)
 	d := delivery{id: "msg_big", body: bytes.Repeat([]byte("x"), MaxWebhookBody+1), ts: time.Now()}
 	wantError(t, r.post(d), http.StatusRequestEntityTooLarge, "payload_too_large")
-	// Just under the limit is read (and then fails the content check, not the size check).
+	// Just under the limit is read (and then is not a usable event, which is acknowledged, not a size error).
 	d = delivery{id: "msg_edge", body: bytes.Repeat([]byte("x"), MaxWebhookBody), ts: time.Now()}
-	wantError(t, r.post(d), http.StatusBadRequest, "invalid_event")
+	r.wantStatus(d, "rejected")
 }
 
 func TestWebhookLogsIDsButNoPersonalData(t *testing.T) {
@@ -495,7 +555,7 @@ func TestWebhookLogsIDsButNoPersonalData(t *testing.T) {
 	r.wantStatus(r.event(EventOrganizationCreated, 1000, orgPayload("org_fit", "Ada's Secret Studio", 1000)), "applied")
 	r.wantStatus(r.event("session.created", 1000, map[string]any{"id": "sess_1"}), "ignored")
 	bad := delivery{id: "msg_leak", body: []byte(`{"type":"user.created","data":{"email_addresses":[{"email_address":"leak@example.com"}]}}`), ts: time.Now()}
-	wantError(t, r.post(bad), http.StatusBadRequest, "invalid_event")
+	r.wantStatus(bad, "rejected")
 	wantError(t, r.postWith(bad, http.Header{}), http.StatusBadRequest, "invalid_signature")
 
 	out := r.logs.String()
@@ -522,4 +582,13 @@ func TestWebhookRouteAcceptsOnlyPost(t *testing.T) {
 			t.Errorf("%s: status = %d", method, rec.Code)
 		}
 	}
+}
+
+func mustSigner(t *testing.T) *svix.Webhook {
+	t.Helper()
+	signer, err := svix.NewWebhook(testWebhookSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signer
 }

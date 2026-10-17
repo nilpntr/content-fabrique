@@ -20,6 +20,7 @@ const (
 	CodeNoActiveWorkspace    = "no_active_workspace"    // 403: signed in, but no organization is active
 	CodeUserDeleted          = "user_deleted"           // 403
 	CodeWorkspaceDeleted     = "workspace_deleted"      // 403
+	CodeNotMember            = "not_a_member"           // 403: removed from the workspace
 	CodeIdentityProvider     = "identity_unavailable"   // 503: Clerk's Backend API did not answer
 	CodeNotConfigured        = "auth_not_configured"    // 503: no CLERK_SECRET_KEY
 	CodeInternal             = "internal_error"         // 500
@@ -71,11 +72,15 @@ func NewMiddleware(cfg MiddlewareConfig, resolver Resolver) (func(http.Handler) 
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-	jwksClient := cfg.JWKSClient
-	if jwksClient == nil {
+	// Whatever fetches the key set, a wrapper limits how often it is asked (see keySetBackend).
+	var keys clerk.Backend
+	if cfg.JWKSClient != nil {
+		keys = cfg.JWKSClient.Backend
+	} else {
 		key := cfg.SecretKey
-		jwksClient = jwks.NewClient(&clerk.ClientConfig{BackendConfig: clerk.BackendConfig{Key: &key, HTTPClient: backendHTTPClient()}})
+		keys = clerk.NewBackend(&clerk.BackendConfig{Key: &key, HTTPClient: backendHTTPClient()})
 	}
+	jwksClient := &jwks.Client{Backend: newKeySetBackend(keys)}
 
 	appOrigin := cfg.AppOrigin
 	verify := clerkhttp.WithHeaderAuthorization(
@@ -83,13 +88,19 @@ func NewMiddleware(cfg MiddlewareConfig, resolver Resolver) (func(http.Handler) 
 		clerkhttp.Leeway(cfg.Leeway),
 		clerkhttp.AuthorizedParty(func(azp string) bool { return azp == appOrigin }),
 		clerkhttp.AuthorizationJWTExtractor(bearerToken),
-		clerkhttp.AuthorizationFailureHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		clerkhttp.AuthorizationFailureHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Failing to fetch the key set is Clerk's outage, not a bad token: the client should retry, not sign in again.
+			if f := jwksFailureFrom(r.Context()); f != nil && f.failed.Load() {
+				cfg.Logger.WarnContext(r.Context(), "clerk key set unavailable")
+				httpapi.WriteError(w, http.StatusServiceUnavailable, CodeIdentityProvider, "the sign-in service is unavailable; try again")
+				return
+			}
 			unauthorized(w, CodeInvalidToken, "the session token is not valid; sign in again")
 		})),
 	)
 
 	return func(next http.Handler) http.Handler {
-		return verify(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		guarded := verify(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Only the verifier above puts claims on the context, and only after verification.
 			claims, ok := clerk.SessionClaimsFromContext(r.Context())
 			if !ok || claims == nil || claims.Subject == "" {
@@ -128,6 +139,10 @@ func NewMiddleware(cfg MiddlewareConfig, resolver Resolver) (func(http.Handler) 
 			}
 			next.ServeHTTP(w, r.WithContext(ContextWithPrincipal(r.Context(), p)))
 		}))
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx, _ := withJWKSFailure(r.Context())
+			guarded.ServeHTTP(w, r.WithContext(ctx))
+		})
 	}, nil
 }
 
@@ -137,6 +152,8 @@ func writeResolveError(w http.ResponseWriter, r *http.Request, logger *slog.Logg
 		httpapi.WriteError(w, http.StatusForbidden, CodeUserDeleted, "this account was deleted")
 	case errors.Is(err, ErrWorkspaceDeleted):
 		httpapi.WriteError(w, http.StatusForbidden, CodeWorkspaceDeleted, "this workspace was deleted")
+	case errors.Is(err, ErrNotMember):
+		httpapi.WriteError(w, http.StatusForbidden, CodeNotMember, "you are not a member of this workspace")
 	case errors.Is(err, ErrDirectoryUnavailable):
 		logger.WarnContext(r.Context(), "clerk backend api unavailable", "error", err)
 		httpapi.WriteError(w, http.StatusServiceUnavailable, CodeIdentityProvider, "the sign-in service is unavailable; try again")

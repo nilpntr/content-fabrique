@@ -51,6 +51,8 @@ type fakeDir struct {
 	orgs  map[string]ClerkOrg
 	err   error // returned for every call when set
 	calls []string
+	// onCall, when set, runs at the start of every call (outside the lock).
+	onCall func()
 }
 
 func newFakeDir() *fakeDir {
@@ -58,6 +60,9 @@ func newFakeDir() *fakeDir {
 }
 
 func (d *fakeDir) User(_ context.Context, id string) (ClerkUser, error) {
+	if d.onCall != nil {
+		d.onCall()
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.calls = append(d.calls, "user:"+id)
@@ -72,6 +77,9 @@ func (d *fakeDir) User(_ context.Context, id string) (ClerkUser, error) {
 }
 
 func (d *fakeDir) Organization(_ context.Context, id string) (ClerkOrg, error) {
+	if d.onCall != nil {
+		d.onCall()
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.calls = append(d.calls, "org:"+id)

@@ -7,7 +7,8 @@ import { ToastProvider } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { THEME_SCRIPT } from "@/hooks/use-theme";
 import { decideAccess, isBarePath, SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/auth-guard";
-import { fetchSession } from "@/lib/session";
+import { getAppOrigin } from "@/lib/app-origin";
+import { resolveSession } from "@/lib/client-session";
 import { getSidebarOpen } from "@/lib/sidebar-open";
 import { NotFound } from "@/pages/not-found";
 import appCss from "../index.css?url";
@@ -31,18 +32,18 @@ export const Route = createRootRoute({
     scripts: [{ children: THEME_SCRIPT }],
   }),
   // The route guard. Every route needs a signed-in user with an active workspace except the sign-in and sign-up pages
-  // (src/lib/auth-guard.ts). It runs on the server for the first request, before anything renders, and again on
-  // navigations in the browser, so a signed-out visitor is redirected and never receives app content. The session
-  // comes from Clerk's middleware (src/start.ts) through a server function.
+  // (src/lib/auth-guard.ts). On the server, for the first request, it runs before anything renders and reads the session
+  // Clerk's middleware verified (src/start.ts), so a signed-out visitor is redirected and never receives app content.
+  // In the browser, a navigation reads Clerk's in-memory state instead (src/lib/client-session.ts).
   beforeLoad: async ({ location }) => {
-    const session = await fetchSession();
+    const session = await resolveSession();
     const decision = decideAccess(location.pathname, session, location.searchStr);
     if (decision.kind === "redirect") throw redirect({ href: decision.to });
     return { session };
   },
   // The sidebar's state lives in a cookie, so the server can render it collapsed on the first paint.
   // Only the first render needs it (it is the sidebar's initial state), so it never reloads on navigation or preload.
-  loader: async () => ({ sidebarOpen: await getSidebarOpen() }),
+  loader: async () => ({ sidebarOpen: await getSidebarOpen(), appOrigin: await getAppOrigin() }),
   staleTime: Number.POSITIVE_INFINITY,
   shouldReload: false,
   shellComponent: RootDocument,
@@ -58,9 +59,7 @@ function RootDocument({ children }: { children: ReactNode }) {
         <HeadContent />
       </head>
       <body>
-        <ClerkProvider signInUrl={SIGN_IN_PATH} signUpUrl={SIGN_UP_PATH} afterSignOutUrl={SIGN_IN_PATH}>
-          {children}
-        </ClerkProvider>
+        {children}
         <Scripts />
       </body>
     </html>
@@ -68,14 +67,22 @@ function RootDocument({ children }: { children: ReactNode }) {
 }
 
 function RootComponent() {
-  const { sidebarOpen } = Route.useLoaderData();
+  const { sidebarOpen, appOrigin } = Route.useLoaderData();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   return (
-    <TooltipProvider>
-      <ToastProvider>
-        {isBarePath(pathname) ? <BareLayout /> : <AppShell defaultSidebarOpen={sidebarOpen} />}
-      </ToastProvider>
-    </TooltipProvider>
+    // Clerk may send the browser only to this app's own origin (a redirect_url that names another site is ignored).
+    <ClerkProvider
+      signInUrl={SIGN_IN_PATH}
+      signUpUrl={SIGN_UP_PATH}
+      afterSignOutUrl={SIGN_IN_PATH}
+      allowedRedirectOrigins={[appOrigin]}
+    >
+      <TooltipProvider>
+        <ToastProvider>
+          {isBarePath(pathname) ? <BareLayout /> : <AppShell defaultSidebarOpen={sidebarOpen} />}
+        </ToastProvider>
+      </TooltipProvider>
+    </ClerkProvider>
   );
 }
 

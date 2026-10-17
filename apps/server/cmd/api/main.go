@@ -26,7 +26,7 @@ func main() {
 			return err
 		},
 		// The CORS allowlist is the web app's origin, APP_BASE_URL, and nothing else.
-		Middleware: func(cfg config.Config) func(http.Handler) http.Handler { return httpapi.CORS(cfg.AppOrigin) },
+		Middleware: func(cfg config.Config) func(http.Handler) http.Handler { return httpapi.CORS(cfg.AppOrigin, nil) },
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "api:", err)

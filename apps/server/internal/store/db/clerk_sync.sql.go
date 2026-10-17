@@ -94,6 +94,25 @@ func (q *Queries) DeleteWorkspaceMember(ctx context.Context, arg DeleteWorkspace
 	return err
 }
 
+const getMembershipSubject = `-- name: GetMembershipSubject :one
+SELECT (w.clerk_org_id || '/' || u.clerk_user_id)::text AS subject
+FROM workspaces w, users u
+WHERE w.id = $1 AND u.id = $2
+`
+
+type GetMembershipSubjectParams struct {
+	WorkspaceID ids.WorkspaceID
+	UserID      ids.UserID
+}
+
+// "<clerk org id>/<clerk user id>" of a membership, the key of its tombstones.
+func (q *Queries) GetMembershipSubject(ctx context.Context, arg GetMembershipSubjectParams) (string, error) {
+	row := q.db.QueryRow(ctx, getMembershipSubject, arg.WorkspaceID, arg.UserID)
+	var subject string
+	err := row.Scan(&subject)
+	return subject, err
+}
+
 const getUserByClerkID = `-- name: GetUserByClerkID :one
 SELECT id, clerk_user_id, email, created_at, updated_at, deleted_at, clerk_updated_at FROM users WHERE clerk_user_id = $1
 `
@@ -136,10 +155,21 @@ func (q *Queries) GetWorkspaceMember(ctx context.Context, arg GetWorkspaceMember
 	return i, err
 }
 
+const lockMembership = `-- name: LockMembership :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
+`
+
+// Serialises everything that creates or removes the membership of one pair until the transaction ends, so a delete
+// webhook and a just-in-time sync cannot interleave between the tombstone check and the insert.
+func (q *Queries) LockMembership(ctx context.Context, subject string) error {
+	_, err := q.db.Exec(ctx, lockMembership, subject)
+	return err
+}
+
 const membershipDeletedSince = `-- name: MembershipDeletedSince :one
 SELECT EXISTS (
     SELECT 1 FROM webhook_events
-    WHERE event_type = 'organizationMembership.deleted' AND subject = $1 AND clerk_event_at >= $2
+    WHERE event_type = 'organizationMembership.deleted' AND status = 'applied' AND subject = $1 AND clerk_event_at >= $2
 )
 `
 
@@ -157,8 +187,8 @@ func (q *Queries) MembershipDeletedSince(ctx context.Context, arg MembershipDele
 }
 
 const recordWebhookEvent = `-- name: RecordWebhookEvent :execrows
-INSERT INTO webhook_events (svix_id, event_type, subject, clerk_event_at)
-VALUES ($1, $2, $3, $4)
+INSERT INTO webhook_events (svix_id, event_type, subject, clerk_event_at, status, detail)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (svix_id) DO NOTHING
 `
 
@@ -167,6 +197,8 @@ type RecordWebhookEventParams struct {
 	EventType    string
 	Subject      string
 	ClerkEventAt int64
+	Status       string
+	Detail       string
 }
 
 func (q *Queries) RecordWebhookEvent(ctx context.Context, arg RecordWebhookEventParams) (int64, error) {
@@ -175,6 +207,8 @@ func (q *Queries) RecordWebhookEvent(ctx context.Context, arg RecordWebhookEvent
 		arg.EventType,
 		arg.Subject,
 		arg.ClerkEventAt,
+		arg.Status,
+		arg.Detail,
 	)
 	if err != nil {
 		return 0, err

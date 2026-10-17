@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -29,9 +30,14 @@ const (
 //   - A preflight (OPTIONS with Access-Control-Request-Method) from the allowed origin is answered 204 with the methods
 //     and headers, and does not reach the handler. From any other origin, or with no Origin, it is answered 403 with no
 //     CORS headers, which a browser reads as a refusal.
+//   - A preflight that asks (Access-Control-Request-Headers) for a header other than Authorization and Content-Type is
+//     refused the same way; the refused header's name is logged at debug level.
 //   - A request from any other origin is passed on without CORS headers: the browser then hides the answer from the
 //     page.
-func CORS(allowedOrigin string) func(http.Handler) http.Handler {
+func CORS(allowedOrigin string, logger *slog.Logger) func(http.Handler) http.Handler {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			h := w.Header()
@@ -44,6 +50,13 @@ func CORS(allowedOrigin string) func(http.Handler) http.Handler {
 			if preflight {
 				h.Add("Vary", "Access-Control-Request-Method")
 				h.Add("Vary", "Access-Control-Request-Headers")
+				if allowed {
+					// A preflight that asks for a header we do not allow is refused as a whole, like one from another site.
+					if bad := disallowedRequestHeader(r.Header.Get("Access-Control-Request-Headers")); bad != "" {
+						logger.DebugContext(r.Context(), "cors preflight refused: header not allowed", "header", bad)
+						allowed = false
+					}
+				}
 				if !allowed || !corsMethodAllowed(r.Header.Get("Access-Control-Request-Method")) {
 					WriteError(w, http.StatusForbidden, "origin_not_allowed", "this origin may not call the API")
 					return
@@ -71,4 +84,26 @@ func corsMethodAllowed(method string) bool {
 		}
 	}
 	return false
+}
+
+// disallowedRequestHeader returns the first header named in an Access-Control-Request-Headers value that is not in the
+// allowlist ("" when all are). Header names are case-insensitive.
+func disallowedRequestHeader(requested string) string {
+	for _, name := range strings.Split(requested, ",") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		listed := false
+		for _, ok := range strings.Split(corsAllowHeaders, ", ") {
+			if strings.EqualFold(name, ok) {
+				listed = true
+				break
+			}
+		}
+		if !listed {
+			return name
+		}
+	}
+	return ""
 }

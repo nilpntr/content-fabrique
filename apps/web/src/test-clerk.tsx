@@ -17,11 +17,36 @@ export const clerkMock = {
   /** What the server-side session (`fetchSession`) answers, and what `useAuth()` reports. Tests replace it to sign out, drop the org... */
   session: { ...SIGNED_IN } as Session,
   token: "test-token" as string | null,
+  /** What the server's `auth()` says, when it differs from the browser's (a stale `__session` cookie). Null: the same. */
+  serverSession: null as Session | null,
+  /** Whether clerk-js has loaded in the browser (`window.Clerk.loaded`). */
+  loaded: true,
+  /** How many times the route guard asked the server for the session. */
+  serverSessionCalls: 0,
   reset() {
     this.session = { ...SIGNED_IN };
     this.token = "test-token";
+    this.serverSession = null;
+    this.loaded = true;
+    this.serverSessionCalls = 0;
   },
 };
+
+/** `window.Clerk`, as the route guard reads it in the browser. */
+export function installWindowClerk() {
+  Object.defineProperty(window, "Clerk", {
+    configurable: true,
+    get() {
+      const { isAuthenticated, userId, orgId } = clerkMock.session;
+      return {
+        loaded: clerkMock.loaded,
+        user: isAuthenticated ? { id: userId } : null,
+        session: isAuthenticated ? { status: "active" } : null,
+        organization: orgId ? { id: orgId } : null,
+      };
+    },
+  });
+}
 
 export function useAuth() {
   const { isAuthenticated, userId, orgId } = clerkMock.session;

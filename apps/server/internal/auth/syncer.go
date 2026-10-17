@@ -56,11 +56,11 @@ func (s *Syncer) Resolve(ctx context.Context, id Identity) (Principal, error) {
 		return Principal{}, fmt.Errorf("resolve session: %w", err)
 	}
 
-	u, err := s.ensureUser(ctx, id.ClerkUserID)
+	u, err := ensureUser(ctx, s.store, s.dir, id.ClerkUserID)
 	if err != nil {
 		return Principal{}, err
 	}
-	w, err := s.ensureWorkspace(ctx, id.ClerkOrgID)
+	w, err := ensureWorkspace(ctx, s.store, s.dir, id.ClerkOrgID)
 	if err != nil {
 		return Principal{}, err
 	}
@@ -70,39 +70,21 @@ func (s *Syncer) Resolve(ctx context.Context, id Identity) (Principal, error) {
 	if w.DeletedAt != nil {
 		return Principal{}, ErrWorkspaceDeleted
 	}
-	if _, _, err := s.store.SyncMember(ctx, w.ID, u.ID, role, issuedAt); err != nil {
+	// The store refuses to bring back a membership that a Clerk webhook removed after this token was issued, and keeps a
+	// newer role over an older token's. What comes back is the row as it stands.
+	m, _, err := s.store.SyncMember(ctx, w.ID, u.ID, role, issuedAt)
+	if errors.Is(err, store.ErrMembershipRemoved) || errors.Is(err, store.ErrNotFound) {
+		// Removed from the workspace, whatever the token still says; or removed between the lookups above and now.
+		return Principal{}, ErrNotMember
+	}
+	if err != nil {
 		return Principal{}, fmt.Errorf("sync member: %w", err)
 	}
-
-	// Postgres has the last word, so a newer webhook is not undone by an older token.
-	sess, err = s.store.ResolveSession(ctx, id.ClerkUserID, id.ClerkOrgID)
-	if err != nil {
-		return Principal{}, fmt.Errorf("resolve session after sync: %w", err)
-	}
-	if sess.UserDeleted {
-		return Principal{}, ErrUserDeleted
-	}
-	if sess.WorkspaceDeleted {
-		return Principal{}, ErrWorkspaceDeleted
-	}
-	if sess.Role == nil {
-		// The membership was removed between the write and the read, by a webhook for the same user.
-		return Principal{}, fmt.Errorf("resolve session after sync: %w", store.ErrNotFound)
-	}
-	return principalOf(sess), nil
+	return Principal{UserID: u.ID, Email: u.Email, WorkspaceID: w.ID, WorkspaceName: w.Name, Role: store.Role(m.Role)}, nil
 }
 
 func principalOf(sess store.Session) Principal {
 	return Principal{UserID: sess.UserID, Email: sess.Email, WorkspaceID: sess.WorkspaceID, WorkspaceName: sess.WorkspaceName, Role: *sess.Role}
-}
-
-// ensureUser returns the user's row, creating it from Clerk when it is missing.
-func (s *Syncer) ensureUser(ctx context.Context, clerkUserID string) (store.User, error) {
-	return ensureUser(ctx, s.store, s.dir, clerkUserID)
-}
-
-func (s *Syncer) ensureWorkspace(ctx context.Context, clerkOrgID string) (store.Workspace, error) {
-	return ensureWorkspace(ctx, s.store, s.dir, clerkOrgID)
 }
 
 // ensureUser returns the row of the user, fetching the user from Clerk and storing it when there is none. A user Clerk

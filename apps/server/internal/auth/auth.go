@@ -65,6 +65,8 @@ var (
 	ErrUserDeleted = errors.New("auth: user deleted")
 	// ErrWorkspaceDeleted: the organization was deleted in Clerk.
 	ErrWorkspaceDeleted = errors.New("auth: workspace deleted")
+	// ErrNotMember: the token names a workspace the user was removed from.
+	ErrNotMember = errors.New("auth: not a member of the workspace")
 	// ErrDirectoryUnavailable: Clerk's Backend API could not be reached or answered with an error.
 	ErrDirectoryUnavailable = errors.New("auth: clerk backend api unavailable")
 )
