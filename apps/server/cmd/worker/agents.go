@@ -10,9 +10,6 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
-// agentDefinitions are the agents this worker runs. Later tasks add theirs (the editor, research, ...).
-func agentDefinitions() []runtime.Agent { return []runtime.Agent{runtime.NewEchoAgent(nil)} }
-
 // newAgentRunner builds the agent loop of the worker from the environment: LLM_MODE, ROUTING_PROFILE and the rest of the
 // model-access settings, the price table, and the usage ledger of the store. It returns nil, with a warning, when that
 // cannot be done (a bad setting): agent_run jobs then wait, snoozed, until a worker that has model access picks them up,
@@ -33,7 +30,7 @@ func newAgentRunner(st *store.Store, logger *slog.Logger) *runtime.Runner {
 		logger.Warn("agent runs are off", "error", err)
 		return nil
 	}
-	agents, err := runtime.NewAgents(agentDefinitions()...)
+	agents, err := runtime.NewAgents(runtime.DefaultAgents()...)
 	if err != nil {
 		logger.Warn("agent runs are off: an agent definition is invalid", "error", err)
 		return nil

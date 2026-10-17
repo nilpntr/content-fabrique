@@ -35,11 +35,11 @@ func TestToolLoop(t *testing.T) {
 	if r.Status != store.AgentSucceeded || r.FailureReason != nil || r.FinishedAt == nil || outputOf(t, r)["summary"] != "noted hello" {
 		t.Fatalf("run = %+v output %s", r, r.Output)
 	}
-	want := []string{"status:running", "assistant_message", "tool_call", "tool_result", "assistant_message", "tool_call", "tool_result", "status:succeeded"}
+	want := []string{"status:running", "status:model_call", "assistant_message", "tool_call", "tool_result", "status:model_call", "assistant_message", "tool_call", "tool_result", "status:succeeded"}
 	if got := kinds(e.events(run)); !equalStrings(got, want) {
 		t.Fatalf("events = %v\nwant     %v", got, want)
 	}
-	if r.ToolCalls != 2 || r.CostMicros != 200 || r.InputTokens != 200 || r.OutputTokens != 40 || r.LastSeq != 8 || r.Epoch != 1 {
+	if r.ToolCalls != 2 || r.CostMicros != 200 || r.InputTokens != 200 || r.OutputTokens != 40 || r.LastSeq != 10 || r.Epoch != 1 {
 		t.Fatalf("totals: tool_calls %d cost %d in %d out %d seq %d epoch %d", r.ToolCalls, r.CostMicros, r.InputTokens, r.OutputTokens, r.LastSeq, r.Epoch)
 	}
 	if e.sink.effects() != 1 {
@@ -648,13 +648,20 @@ func TestHeartbeatKeepsTheRunFresh(t *testing.T) {
 	e.runner.deps.Heartbeat = 20 * time.Millisecond
 	run := e.create("echo", "hello", Budgets{})
 	var before, after time.Time
+	var activeBefore, activeAfter int64
 	e.sink.onRecord = func() {
-		before = *e.get(run).HeartbeatAt
+		r := e.get(run)
+		before, activeBefore = *r.HeartbeatAt, r.ActiveMs
 		time.Sleep(120 * time.Millisecond)
-		after = *e.get(run).HeartbeatAt
+		r = e.get(run)
+		after, activeAfter = *r.HeartbeatAt, r.ActiveMs
 	}
 	e.execute(run)
 	if !after.After(before) {
 		t.Fatalf("heartbeat did not move during a slow tool: %v -> %v", before, after)
+	}
+	// The running time is written by the heartbeat too, not only by events: a step that dies mid-way still counted.
+	if activeAfter-activeBefore < 60 {
+		t.Fatalf("active time moved by %dms during a 120ms step", activeAfter-activeBefore)
 	}
 }

@@ -119,3 +119,7 @@ func NewEchoAgent(sink NoteSink) Agent {
 		Budgets: Budgets{Micros: 100_000, Tokens: 100_000, ToolCalls: 10, WallClock: 5 * time.Minute},
 	}
 }
+
+// DefaultAgents are the agents every process that runs them (the worker, cfctl) knows. Later tasks add theirs here, once, so
+// the processes cannot disagree about what a run's agent name means.
+func DefaultAgents() []Agent { return []Agent{NewEchoAgent(nil)} }

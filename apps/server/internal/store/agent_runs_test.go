@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -68,21 +69,34 @@ func agentRunsSuite(t *testing.T, st *store.Store, suffix string) {
 		if _, err := st.AppendAgentEvent(ctx, wa.ID, r.ID, 1, store.EventStatus, json.RawMessage(`{}`), store.EventDelta{}); !errors.Is(err, store.ErrRunFenced) {
 			t.Fatalf("append under the old epoch = %v, want ErrRunFenced", err)
 		}
-		if err := st.TouchAgentRun(ctx, wa.ID, r.ID, 1); !errors.Is(err, store.ErrRunFenced) {
+		if err := st.TouchAgentRun(ctx, wa.ID, r.ID, 1, 0); !errors.Is(err, store.ErrRunFenced) {
 			t.Fatalf("touch under the old epoch = %v", err)
 		}
 		if _, err := st.EndAgentRun(ctx, wa.ID, r.ID, 1, store.RunEnd{Status: store.AgentSucceeded}); !errors.Is(err, store.ErrRunFenced) {
 			t.Fatalf("end under the old epoch = %v", err)
 		}
-		if err := st.TouchAgentRun(ctx, wa.ID, r.ID, 2); err != nil {
+		if err := st.TouchAgentRun(ctx, wa.ID, r.ID, 2, 250); err != nil {
 			t.Fatal(err)
 		}
-		// A worker that releases the run puts it back for the next job.
-		if err := st.ReleaseAgentRun(ctx, wa.ID, r.ID, 2); err != nil {
+		// The heartbeat added its running time, and a takeover counts as a resume.
+		if got, _ := st.GetAgentRun(ctx, wa.ID, r.ID); got.ActiveMs != 250 || got.Resumes != 1 {
+			t.Fatalf("active %dms, resumes %d", got.ActiveMs, got.Resumes)
+		}
+		// A worker that releases the run puts it back for the next job; only a release for a failure counts as a resume.
+		if err := st.ReleaseAgentRun(ctx, wa.ID, r.ID, 2, false); err != nil {
 			t.Fatal(err)
 		}
-		if got, _ := st.GetAgentRun(ctx, wa.ID, r.ID); got.Status != store.AgentQueued {
-			t.Fatalf("released run is %s", got.Status)
+		if got, _ := st.GetAgentRun(ctx, wa.ID, r.ID); got.Status != store.AgentQueued || got.Resumes != 1 {
+			t.Fatalf("released run is %s with %d resumes", got.Status, got.Resumes)
+		}
+		if c3, err := st.ClaimAgentRun(ctx, wa.ID, r.ID, stale); err != nil || c3.Resumes != 1 || c3.Epoch != 3 {
+			t.Fatalf("claim of a queued run = %+v, %v", c3, err)
+		}
+		if err := st.ReleaseAgentRun(ctx, wa.ID, r.ID, 3, true); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := st.GetAgentRun(ctx, wa.ID, r.ID); got.Resumes != 2 {
+			t.Fatalf("a release for a failure left %d resumes", got.Resumes)
 		}
 	})
 
@@ -147,6 +161,43 @@ func agentRunsSuite(t *testing.T, st *store.Store, suffix string) {
 		}
 		if after, _ := st.GetAgentRun(ctx, wa.ID, r.ID); after.LastSeq != 22 || after.CostMicros != 720 {
 			t.Fatalf("a refused append changed the run: last_seq %d, cost %d", after.LastSeq, after.CostMicros)
+		}
+	})
+
+	t.Run("a tool call and its result exist once", func(t *testing.T) {
+		r := newRun(wa.ID)
+		_, _ = st.ClaimAgentRun(ctx, wa.ID, r.ID, stale)
+		for _, typ := range []string{store.EventToolCall, store.EventToolResult} {
+			payload := json.RawMessage(`{"tool_use_id":"toolu_1"}`)
+			if _, err := st.AppendAgentEvent(ctx, wa.ID, r.ID, 1, typ, payload, store.EventDelta{}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.AppendAgentEvent(ctx, wa.ID, r.ID, 1, typ, payload, store.EventDelta{ToolCalls: 1}); !errors.Is(err, store.ErrConflict) {
+				t.Fatalf("second %s for the same tool_use_id = %v, want ErrConflict", typ, err)
+			}
+			// Another id, and the same id in the other event type, are fine.
+			if _, err := st.AppendAgentEvent(ctx, wa.ID, r.ID, 1, typ, json.RawMessage(`{"tool_use_id":"toolu_2"}`), store.EventDelta{}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// The refused append changed nothing, not even the sequence or the totals.
+		if got, _ := st.GetAgentRun(ctx, wa.ID, r.ID); got.LastSeq != 4 || got.ToolCalls != 0 {
+			t.Fatalf("last_seq %d, tool calls %d", got.LastSeq, got.ToolCalls)
+		}
+	})
+
+	t.Run("a cancel wins over parking", func(t *testing.T) {
+		r := newRun(wa.ID)
+		_, _ = st.ClaimAgentRun(ctx, wa.ID, r.ID, stale)
+		if _, err := st.RequestAgentRunCancel(ctx, wa.ID, r.ID, json.RawMessage(`{}`), json.RawMessage(`{}`)); err != nil {
+			t.Fatal(err)
+		}
+		got, err := st.EndAgentRun(ctx, wa.ID, r.ID, 1, store.RunEnd{Status: store.AgentWaitingInput, Event: json.RawMessage(`{"state":"waiting_input"}`)})
+		if err != nil || got.Status != store.AgentCancelled || got.FinishedAt == nil || got.FailureReason != nil || !strings.Contains(string(got.Output), "cancelled") {
+			t.Fatalf("park after a cancel = %+v, %v", got, err)
+		}
+		if last, _ := st.LastAgentEvent(ctx, wa.ID, r.ID); !strings.Contains(string(last.Payload), "cancelled") {
+			t.Fatalf("last event = %s", last.Payload)
 		}
 	})
 
@@ -269,6 +320,27 @@ func agentRunsSuite(t *testing.T, st *store.Store, suffix string) {
 			BudgetMicros: 1, BudgetTokens: 1, BudgetToolCalls: 1, BudgetWallClockMs: 1, BilledTo: store.BilledToTest,
 		}); err == nil {
 			t.Fatal("a run took a project that does not exist")
+		}
+
+		// The sweeper marks a stale run once; a second sweeper, or the next pass, finds it marked.
+		if ok, err := st.MarkAgentRunForResume(ctx, wa.ID, r.ID, time.Hour); err != nil || ok {
+			t.Fatalf("a fresh run was marked: %v, %v", ok, err)
+		}
+		if ok, err := st.MarkAgentRunForResume(ctx, wb.ID, r.ID, 0); err != nil || ok {
+			t.Fatalf("workspace B marked A's run: %v, %v", ok, err)
+		}
+		if ok, err := st.MarkAgentRunForResume(ctx, wa.ID, r.ID, 0); err != nil || !ok {
+			t.Fatalf("first mark = %v, %v", ok, err)
+		}
+		if ok, err := st.MarkAgentRunForResume(ctx, wa.ID, r.ID, 0); err != nil || ok {
+			t.Fatalf("second mark = %v, %v", ok, err)
+		}
+		if listed, _ := st.StaleAgentRuns(ctx, 0, 1000); slices.ContainsFunc(listed, func(s store.StaleAgentRun) bool { return s.ID == r.ID }) {
+			t.Fatal("a marked run is listed again")
+		}
+		// A claim clears the mark.
+		if c, err := st.ClaimAgentRun(ctx, wa.ID, r.ID, 0); err != nil || c.ResumeEnqueuedAt != nil {
+			t.Fatalf("claim = %+v, %v", c, err)
 		}
 
 		// A fresh heartbeat is not stale; a zero threshold lists every running run, ours included.

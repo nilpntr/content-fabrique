@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/uuid"
 
+	configfiles "github.com/nilpntr/content-fabrique/config"
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/config"
@@ -64,9 +65,6 @@ func defaultAgentDeps() agentDeps {
 		stdin: os.Stdin,
 	}
 }
-
-// agentDefinitions are the agents cfctl can run. Later tasks add theirs here.
-func agentDefinitions() []runtime.Agent { return []runtime.Agent{runtime.NewEchoAgent(nil)} }
 
 func cmdAgent(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps agentDeps) int {
 	if len(args) == 0 {
@@ -212,18 +210,17 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 		return 2
 	}
 
-	routingFS := os.DirFS(filepath.Join(env.root, "apps", "server", "config", "routing"))
-	router, err := llm.NewRouter(routingFS, cmp.Or(settings.RoutingProfile, *profile, "dev-cheap"))
+	router, err := llm.NewRouter(configfiles.Routing(), cmp.Or(settings.RoutingProfile, *profile, "dev-cheap"))
 	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "cfctl agent run: routing: %v\n", err)
 		return 2
 	}
-	prices, err := llm.LoadPriceTable(os.DirFS(filepath.Join(env.root, "apps", "server", "config", "pricing")), llm.PriceFile)
+	prices, err := llm.LoadPriceTable(configfiles.Pricing(), llm.PriceFile)
 	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "cfctl agent run: %v\n", err)
 		return 2
 	}
-	agents, err := runtime.NewAgents(agentDefinitions()...)
+	agents, err := runtime.NewAgents(runtime.DefaultAgents()...)
 	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "cfctl agent run: %v\n", err)
 		return 1

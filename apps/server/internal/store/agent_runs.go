@@ -103,10 +103,11 @@ func (s *Store) ClaimAgentRun(ctx context.Context, ws ids.WorkspaceID, id uuid.U
 	return r, mapErr(err)
 }
 
-// ReleaseAgentRun puts a running run back to queued, for a worker that stops without finishing it. It returns ErrRunFenced
-// when the worker has lost the run already.
-func (s *Store) ReleaseAgentRun(ctx context.Context, ws ids.WorkspaceID, run uuid.UUID, epoch int64) error {
-	n, err := s.q.ReleaseAgentRun(ctx, db.ReleaseAgentRunParams{WorkspaceID: ws, ID: run, Epoch: epoch})
+// ReleaseAgentRun puts a running run back to queued, for a worker that stops without finishing it. countResume says it
+// stopped because something went wrong, so the retry counts toward the cap on resumes (a worker that was only told to
+// stop does not count). It returns ErrRunFenced when the worker has lost the run already.
+func (s *Store) ReleaseAgentRun(ctx context.Context, ws ids.WorkspaceID, run uuid.UUID, epoch int64, countResume bool) error {
+	n, err := s.q.ReleaseAgentRun(ctx, db.ReleaseAgentRunParams{WorkspaceID: ws, ID: run, Epoch: epoch, CountResume: countResume})
 	if err != nil {
 		return mapErr(err)
 	}
@@ -210,7 +211,14 @@ func (s *Store) EndAgentRun(ctx context.Context, ws ids.WorkspaceID, run uuid.UU
 			return ErrRunFenced
 		}
 		out = r
-		return mapErr(err)
+		if err != nil {
+			return mapErr(err)
+		}
+		if end.Status == AgentWaitingInput && r.Status == AgentCancelled {
+			// A cancel was requested while the run was asking: the cancel wins (the query did it).
+			_, err = tx.AppendAgentEventUnfenced(ctx, ws, run, EventStatus, json.RawMessage(`{"state":"cancelled"}`))
+		}
+		return err
 	})
 	return out, err
 }
@@ -287,9 +295,10 @@ func (s *Store) AgentRunLedgerCostMicros(ctx context.Context, ws ids.WorkspaceID
 	return n, mapErr(err)
 }
 
-// TouchAgentRun is the running worker's heartbeat. It returns ErrRunFenced when the worker has lost the run.
-func (s *Store) TouchAgentRun(ctx context.Context, ws ids.WorkspaceID, run uuid.UUID, epoch int64) error {
-	n, err := s.q.TouchAgentRun(ctx, db.TouchAgentRunParams{WorkspaceID: ws, ID: run, Epoch: epoch})
+// TouchAgentRun is the running worker's heartbeat; activeMs is the running time since its last write, added to the run's
+// total. It returns ErrRunFenced when the worker has lost the run.
+func (s *Store) TouchAgentRun(ctx context.Context, ws ids.WorkspaceID, run uuid.UUID, epoch, activeMs int64) error {
+	n, err := s.q.TouchAgentRun(ctx, db.TouchAgentRunParams{WorkspaceID: ws, ID: run, Epoch: epoch, DActiveMs: activeMs})
 	if err != nil {
 		return mapErr(err)
 	}
@@ -297,6 +306,13 @@ func (s *Store) TouchAgentRun(ctx context.Context, ws ids.WorkspaceID, run uuid.
 		return ErrRunFenced
 	}
 	return nil
+}
+
+// MarkAgentRunForResume is the sweeper's claim on a stale run: true means this call marked it (so the caller enqueues the
+// job, in the same transaction), false that it is not stale any more or a job was enqueued for it lately.
+func (s *Store) MarkAgentRunForResume(ctx context.Context, ws ids.WorkspaceID, run uuid.UUID, staleAfter time.Duration) (bool, error) {
+	n, err := s.q.MarkAgentRunForResume(ctx, db.MarkAgentRunForResumeParams{WorkspaceID: ws, ID: run, StaleSeconds: int32(staleAfter.Seconds())}) //nolint:gosec // seconds
+	return n > 0, mapErr(err)
 }
 
 // StaleAgentRun names a running run whose worker stopped touching it.

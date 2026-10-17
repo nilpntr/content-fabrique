@@ -53,6 +53,8 @@ type AgentRun struct {
 	CancelRequestedAt *time.Time
 	HeartbeatAt       *time.Time
 	Epoch             int64
+	Resumes           int32
+	ResumeEnqueuedAt  *time.Time
 	LastSeq           int32
 	StartedAt         *time.Time
 	FinishedAt        *time.Time

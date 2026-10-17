@@ -20,16 +20,19 @@ SELECT * FROM agent_runs WHERE workspace_id = @workspace_id AND id = @id;
 -- this workspace's.
 -- name: ClaimAgentRun :one
 UPDATE agent_runs
-SET status = 'running', epoch = epoch + 1, started_at = COALESCE(started_at, now()), heartbeat_at = now()
+SET status = 'running', epoch = epoch + 1, started_at = COALESCE(started_at, now()), heartbeat_at = now(),
+    resume_enqueued_at = NULL,
+    resumes = resumes + CASE WHEN status = 'running' THEN 1 ELSE 0 END
 WHERE workspace_id = @workspace_id AND id = @id
   AND (status = 'queued'
        OR (status = 'running' AND COALESCE(heartbeat_at, '-infinity'::timestamptz) < now() - make_interval(secs => @stale_seconds::int)))
 RETURNING *;
 
 -- A worker that stops without finishing the run (it returns an error to be retried) puts the run back, so the retry can
--- take it at once instead of waiting for the heartbeat to go stale. Fenced by the epoch.
+-- take it at once instead of waiting for the heartbeat to go stale. Fenced by the epoch. count_resume says the retry is
+-- because something went wrong (it counts toward the cap on resumes); a worker that was only told to stop does not count.
 -- name: ReleaseAgentRun :execrows
-UPDATE agent_runs SET status = 'queued'
+UPDATE agent_runs SET status = 'queued', resumes = resumes + CASE WHEN @count_resume::boolean THEN 1 ELSE 0 END
 WHERE workspace_id = @workspace_id AND id = @id AND epoch = @epoch AND status = 'running';
 
 -- Appends the next event of a run and adds the deltas to the run's totals, in one statement (so the bump of last_seq,
@@ -55,13 +58,17 @@ INSERT INTO agent_events (workspace_id, run_id, seq, type, payload)
 SELECT @workspace_id, @run_id, bump.last_seq, @type, @payload FROM bump
 RETURNING *;
 
--- The running worker ends the run (succeeded, failed) or parks it (waiting_input). Fenced by the epoch.
+-- The running worker ends the run (succeeded, failed) or parks it (waiting_input). Fenced by the epoch. A run that is
+-- parked after a cancel was requested is cancelled instead: the cancel wins over the question.
 -- name: SetAgentRunState :one
 UPDATE agent_runs
-SET status = @status::text,
-    output = COALESCE(sqlc.narg('output')::jsonb, output),
+SET status = CASE WHEN @status::text = 'waiting_input' AND cancel_requested_at IS NOT NULL THEN 'cancelled' ELSE @status::text END,
+    output = CASE WHEN @status::text = 'waiting_input' AND cancel_requested_at IS NOT NULL
+                  THEN '{"stopped": "cancelled", "summary": "Cancelled before finishing."}'::jsonb
+                  ELSE COALESCE(sqlc.narg('output')::jsonb, output) END,
     failure_reason = sqlc.narg('failure_reason')::text,
-    finished_at = CASE WHEN @status::text IN ('succeeded', 'failed', 'cancelled') THEN now() ELSE finished_at END
+    finished_at = CASE WHEN @status::text IN ('succeeded', 'failed', 'cancelled')
+                         OR (@status::text = 'waiting_input' AND cancel_requested_at IS NOT NULL) THEN now() ELSE finished_at END
 WHERE workspace_id = @workspace_id AND id = @id AND epoch = @epoch AND status = 'running'
 RETURNING *;
 
@@ -101,15 +108,25 @@ SELECT COALESCE(sum(list_cost_micros), 0)::bigint AS cost_micros
 FROM usage_ledger
 WHERE workspace_id = @workspace_id AND run_id = @run_id;
 
--- The running worker shows it is alive. No row: it lost the run.
+-- The running worker shows it is alive, and adds the time it has run since its last write (so a long model call counts
+-- against the wall-clock budget even if the worker dies before it writes an event). No row: it lost the run.
 -- name: TouchAgentRun :execrows
-UPDATE agent_runs SET heartbeat_at = now()
+UPDATE agent_runs SET heartbeat_at = now(), active_ms = active_ms + @d_active_ms::bigint
 WHERE workspace_id = @workspace_id AND id = @id AND epoch = @epoch AND status = 'running';
 
 -- SYSTEM (the resume sweeper, across workspaces, then acts per row with the row's own workspace_id): running runs whose
--- worker has not touched them for stale_seconds.
+-- worker has not touched them for stale_seconds and that no job was enqueued for in the last five minutes.
 -- name: ListStaleAgentRuns :many
 SELECT workspace_id, id FROM agent_runs
 WHERE status = 'running' AND heartbeat_at < now() - make_interval(secs => @stale_seconds::int)
+  AND (resume_enqueued_at IS NULL OR resume_enqueued_at < now() - interval '5 minutes')
 ORDER BY heartbeat_at
 LIMIT @row_limit;
+
+-- The sweeper marks a stale run before it enqueues the job, in the same transaction, so concurrent sweepers enqueue one.
+-- No row: the run is not stale any more, or a job was enqueued lately.
+-- name: MarkAgentRunForResume :execrows
+UPDATE agent_runs SET resume_enqueued_at = now()
+WHERE workspace_id = @workspace_id AND id = @id AND status = 'running'
+  AND heartbeat_at < now() - make_interval(secs => @stale_seconds::int)
+  AND (resume_enqueued_at IS NULL OR resume_enqueued_at < now() - interval '5 minutes');

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +37,9 @@ const (
 	FailContext             = "context_failed"
 	FailCorruptLog          = "corrupt_log"
 	FailInternal            = "internal_error"
+	FailTooManyResumes      = "too_many_resumes"
+	FailContextWindow       = "context_window_exceeded"
+	FailStopReason          = "unexpected_stop_reason"
 )
 
 // The limits a budget failure names (the "limit" of the failed status event).
@@ -131,33 +135,68 @@ func (r *Runner) Execute(ctx context.Context, ws ids.WorkspaceID, id uuid.UUID) 
 		return "", fmt.Errorf("claim run: %w", err)
 	}
 
-	l := &loop{r: r, st: st, ws: ws, run: run, log: r.deps.Logger.With("run_id", run.ID.String(), "workspace_id", ws.String(), "agent", run.Agent, "epoch", run.Epoch)}
+	l := r.newLoop(ws, run)
 	loopCtx, cancel := context.WithCancelCause(ctx)
-	out, err := func() (Outcome, error) {
+	out, err := func() (out Outcome, err error) {
 		// The heartbeat stops however the loop ends, a panic included: a worker that dies must not keep its run fresh.
 		var wg sync.WaitGroup
 		wg.Add(1)
 		go func() { defer wg.Done(); l.heartbeat(loopCtx, cancel) }()
 		defer func() { cancel(nil); wg.Wait() }()
+		defer func() {
+			p := recover()
+			if p == nil {
+				return
+			}
+			if _, isCrash := p.(crashSignal); isCrash {
+				panic(p) // a test's simulated kill: nothing is cleaned up
+			}
+			// A bug in the loop must not kill the worker or loop for ever: record it, and let the job retry. The retry counts
+			// toward the cap on resumes, so a run that always panics is failed.
+			l.log.Error("the agent loop panicked", "panic", fmt.Sprint(p), "stack", string(debug.Stack()))
+			rec, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer stop()
+			_, _ = l.append(rec, store.EventError, mustJSON(errorPayload{Code: "panic", Message: "the agent loop hit an internal error"}), store.EventDelta{})
+			out, err = "", fmt.Errorf("agent loop panicked: %v", p)
+		}()
 		return l.work(loopCtx)
 	}()
 
 	switch {
+	case err == nil:
+		// The run ended or parked, whatever the heartbeat saw after the final write.
+		return out, nil
 	case errors.Is(err, store.ErrRunFenced), errors.Is(context.Cause(loopCtx), store.ErrRunFenced):
 		l.log.Warn("the run was taken over by another worker; this worker stops")
 		return OutcomeLost, nil
-	case err != nil:
-		rel, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		defer stop()
-		if rerr := st.ReleaseAgentRun(rel, ws, id, run.Epoch); rerr != nil && !errors.Is(rerr, store.ErrRunFenced) {
-			l.log.Error("could not put the run back to queued; it resumes when its heartbeat goes stale", "error", rerr)
-		}
-		return "", err
 	}
-	return out, nil
+	// Retry. A worker that was only told to stop does not count against the run; anything else does.
+	rel, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer stop()
+	if rerr := st.ReleaseAgentRun(rel, ws, id, run.Epoch, ctx.Err() == nil); rerr != nil && !errors.Is(rerr, store.ErrRunFenced) {
+		l.log.Error("could not put the run back to queued; it resumes when its heartbeat goes stale", "error", rerr)
+	}
+	return "", err
 }
 
-// GiveUp fails a run whose job has used its last attempt, so it does not stay queued for ever.
+// MaxResumes is how many times a run may be taken over after a worker stopped without finishing it (a dead heartbeat, or an
+// error that sent the job to a retry) before it is failed as a poison run.
+const MaxResumes = 5
+
+// newLoop is a claim of the run with its totals loaded from the row.
+func (r *Runner) newLoop(ws ids.WorkspaceID, run store.AgentRun) *loop {
+	now := r.deps.Now()
+	return &loop{
+		r: r, st: r.deps.Store, ws: ws, run: run,
+		log:      r.deps.Logger.With("run_id", run.ID.String(), "workspace_id", ws.String(), "agent", run.Agent, "epoch", run.Epoch),
+		segStart: now, flushedAt: now, baseMs: run.ActiveMs,
+		tokens:    run.InputTokens + run.CacheWriteTokens + run.CacheReadTokens + run.OutputTokens,
+		toolCalls: int(run.ToolCalls), costMicro: run.CostMicros,
+	}
+}
+
+// GiveUp fails a run whose job has used its last attempt, so it does not stay queued for ever. Its summary carries the
+// run's real totals and last message.
 func (r *Runner) GiveUp(ctx context.Context, ws ids.WorkspaceID, id uuid.UUID, cause error) {
 	ctx, stop := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer stop()
@@ -165,8 +204,10 @@ func (r *Runner) GiveUp(ctx context.Context, ws ids.WorkspaceID, id uuid.UUID, c
 	if err != nil {
 		return // finished, waiting, held by a live worker, or gone
 	}
-	now := r.deps.Now()
-	l := &loop{r: r, st: r.deps.Store, ws: ws, run: run, log: r.deps.Logger, segStart: now, flushedAt: now, baseMs: run.ActiveMs}
+	l := r.newLoop(ws, run)
+	if events, err := r.deps.Store.AgentEvents(ctx, ws, id, 0, 0); err == nil {
+		l.cv, _ = rebuild(events)
+	}
 	if _, err := l.fail(ctx, FailInternal, "the run could not be completed: "+cause.Error(), nil); err != nil {
 		r.deps.Logger.Error("could not fail a run whose job gave up", "run_id", id.String(), "error", err)
 	}
@@ -192,7 +233,9 @@ type loop struct {
 	toolCalls int
 	costMicro int64
 
-	// segStart is when this claim began; flushedAt is when the active time was last written.
+	// segStart is when this claim began; flushedAt is when the active time was last written (by an event or the
+	// heartbeat, which share it under mu).
+	mu        sync.Mutex
 	segStart  time.Time
 	flushedAt time.Time
 	baseMs    int64
@@ -215,13 +258,19 @@ func (l *loop) heartbeat(ctx context.Context, cancel context.CancelCauseFunc) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			err := l.st.TouchAgentRun(ctx, l.ws, l.run.ID, l.run.Epoch)
+			// The heartbeat also writes the running time, so a long model call counts against the wall clock even if the
+			// worker dies before it writes an event.
+			active := l.takeActive()
+			err := l.st.TouchAgentRun(ctx, l.ws, l.run.ID, l.run.Epoch, active)
 			switch {
 			case errors.Is(err, store.ErrRunFenced):
 				cancel(store.ErrRunFenced)
 				return
-			case err != nil && ctx.Err() == nil:
-				l.log.Warn("agent run heartbeat failed", "error", err)
+			case err != nil:
+				l.giveBackActive(active)
+				if ctx.Err() == nil {
+					l.log.Warn("agent run heartbeat failed", "error", err)
+				}
 			}
 		}
 	}
@@ -229,10 +278,18 @@ func (l *loop) heartbeat(ctx context.Context, cancel context.CancelCauseFunc) {
 
 // takeActive returns the running time since the last write, in milliseconds, and starts the next interval.
 func (l *loop) takeActive() int64 {
-	now := l.now()
-	d := now.Sub(l.flushedAt).Milliseconds()
-	l.flushedAt = now
-	return max(d, 0)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	d := max(l.now().Sub(l.flushedAt).Milliseconds(), 0)
+	l.flushedAt = l.flushedAt.Add(time.Duration(d) * time.Millisecond) // keep the sub-millisecond remainder
+	return d
+}
+
+// giveBackActive undoes a takeActive whose write failed.
+func (l *loop) giveBackActive(ms int64) {
+	l.mu.Lock()
+	l.flushedAt = l.flushedAt.Add(-time.Duration(ms) * time.Millisecond)
+	l.mu.Unlock()
 }
 
 // elapsed is the time the run has been running, this claim included.
@@ -256,12 +313,9 @@ func (l *loop) append(ctx context.Context, typ string, payload json.RawMessage, 
 // work is the body of Execute after the claim.
 func (l *loop) work(ctx context.Context) (Outcome, error) {
 	run := l.run
-	l.segStart = l.now()
-	l.flushedAt = l.segStart
-	l.baseMs = run.ActiveMs
-	l.tokens = run.InputTokens + run.CacheWriteTokens + run.CacheReadTokens + run.OutputTokens
-	l.toolCalls = int(run.ToolCalls)
-	l.costMicro = run.CostMicros
+	if run.Resumes > MaxResumes {
+		return l.fail(ctx, FailTooManyResumes, fmt.Sprintf("the run was taken over %d times after a worker stopped without finishing it; it is failed instead of resumed again", run.Resumes), nil)
+	}
 
 	agent, ok := l.r.deps.Agents.Get(run.Agent)
 	if !ok {
@@ -288,19 +342,22 @@ func (l *loop) work(ctx context.Context) (Outcome, error) {
 	}
 	l.client = client
 
-	// The dollar budget is what the run row says, less anything the ledger holds for the run that the row does not: a model
-	// call that was paid for and then lost to a crash before its event was written still counts.
+	// The dollar budget is what the run row says, plus what a previous worker left unaccounted: the worst case reserved for a
+	// model call that was in flight when it died (the call may have been billed, and its outcome is unknown, so it is
+	// charged as the llm layer charges an unknown outcome), or anything else the ledger holds for the run that the row does
+	// not. The larger of the two is used, so a call that did finish and wrote its ledger row is not counted twice.
 	ledger, err := l.st.AgentRunLedgerCostMicros(ctx, l.ws, run.ID)
 	if err != nil {
 		return "", fmt.Errorf("read the ledger: %w", err)
 	}
 	spent := l.costMicro
-	if ledger > spent {
-		if _, err := l.append(ctx, store.EventStatus, mustJSON(statusPayload{State: stateCostFixed, AddedCostMicros: ledger - spent}), store.EventDelta{CostMicros: ledger - spent}); err != nil {
+	if want := max(ledger, spent+l.cv.inflight); want > spent {
+		if _, err := l.append(ctx, store.EventStatus, mustJSON(statusPayload{State: stateCostFixed, AddedCostMicros: want - spent}), store.EventDelta{CostMicros: want - spent}); err != nil {
 			return "", err
 		}
-		spent = ledger
+		spent = want
 	}
+	l.cv.inflight = 0
 	l.budget = newBudgetTracker(run.BudgetMicros - spent)
 
 	if _, err := l.append(ctx, store.EventStatus, mustJSON(statusPayload{State: stateRunning, Epoch: run.Epoch, Resumed: l.cv.started}), store.EventDelta{}); err != nil {
@@ -455,11 +512,20 @@ func (l *loop) request() llm.Request {
 func (l *loop) modelStep(ctx context.Context) (Outcome, bool, error) {
 	req := l.request()
 	callCtx, cancel := context.WithDeadline(ctx, l.wallDeadline())
+	// The llm client reserves the call's worst-case cost just before it sends the request; the loop writes that reservation
+	// down first, so a worker that dies during the call leaves a record the next one charges to the run's budget.
+	l.budget.onReserve = func(micros int64) error {
+		_, err := l.append(callCtx, store.EventStatus, mustJSON(statusPayload{State: stateModelCall, ReservedMicros: micros}), store.EventDelta{})
+		return err
+	}
 	l.hook("before_model_call")
 	resp, err := l.client.Messages(callCtx, req)
 	wallExpired := callCtx.Err() != nil && ctx.Err() == nil
 	cancel()
 	cost := l.budget.takeSettled()
+	if herr := l.budget.takeHookErr(); herr != nil {
+		return "", true, fmt.Errorf("record the model call: %w", herr) // the call was never sent; retry
+	}
 
 	if err != nil && (!errors.Is(err, llm.ErrLedger) || len(resp.Content) == 0) {
 		out, ferr := l.modelFailed(ctx, err, wallExpired, resp.Usage, cost)
@@ -470,7 +536,14 @@ func (l *loop) modelStep(ctx context.Context) (Outcome, bool, error) {
 		StopReason: resp.StopReason, Model: cmpOr(resp.Model, l.run.Model), RequestID: resp.RequestID, CostMicros: cost,
 		Usage: usagePayload{InputTokens: resp.Usage.InputTokens, CacheWriteTokens: resp.Usage.CacheWriteTokens, CacheReadTokens: resp.Usage.CacheReadTokens, OutputTokens: resp.Usage.OutputTokens},
 	}
-	wire, werr := toWire(resp.Content)
+	content := make([]llm.Block, 0, len(resp.Content))
+	for _, b := range resp.Content {
+		if b.Type == llm.BlockText && b.Text == "" {
+			continue // the API refuses an empty text block when the message is sent back
+		}
+		content = append(content, b)
+	}
+	wire, werr := toWire(content)
 	if werr != nil {
 		out, ferr := l.failWithUsage(ctx, FailModelError, "the model's answer could not be stored: "+werr.Error(), resp.Usage, cost)
 		return out, true, ferr
@@ -498,19 +571,25 @@ func (l *loop) modelStep(ctx context.Context) (Outcome, bool, error) {
 		return out, true, ferr
 	}
 
-	switch {
-	case resp.StopReason == "max_tokens":
+	switch reason := resp.StopReason; {
+	case reason == "max_tokens":
 		out, ferr := l.fail(ctx, FailMaxTokens, "the model's answer was cut off at max_tokens", nil)
 		return out, true, ferr
-	case resp.StopReason == "refusal":
+	case reason == "refusal":
 		out, ferr := l.fail(ctx, FailRefusal, "the model declined to continue", nil)
 		return out, true, ferr
-	case len(resp.ToolUses()) > 0, resp.StopReason == "pause_turn":
+	case reason == "model_context_window_exceeded":
+		out, ferr := l.fail(ctx, FailContextWindow, "the conversation no longer fits the model's context window", nil)
+		return out, true, ferr
+	case reason == "pause_turn", reason == "tool_use" && len(resp.ToolUses()) > 0, reason == "end_turn" && len(resp.ToolUses()) > 0:
 		return "", false, nil
+	case reason == "end_turn" || reason == "stop_sequence":
+		out, ferr := l.succeed(ctx, mustJSON(map[string]any{"summary": resp.Text(), "stop_reason": reason}))
+		return out, true, ferr
+	default:
+		out, ferr := l.fail(ctx, FailStopReason, fmt.Sprintf("the model stopped with %q, which the runtime does not handle", reason), nil)
+		return out, true, ferr
 	}
-	text := resp.Text()
-	out, ferr := l.succeed(ctx, mustJSON(map[string]any{"summary": text, "stop_reason": resp.StopReason}))
-	return out, true, ferr
 }
 
 func cmpOr(a, b string) string {
@@ -677,14 +756,53 @@ func (l *loop) invoke(ctx context.Context, tool Tool, use llm.Block, resumed boo
 	return Errorf("The tool failed with an internal error."), nil
 }
 
-// resultPayload checks a tool's result and shapes it for storage: text and image references only, the text cut to fit.
+// Limits of a tool result's event.
+const (
+	// maxResultBlocks is the most blocks a result keeps.
+	maxResultBlocks = 32
+	// eventHeadroom is what the event keeps free below the payload limit for its other fields.
+	eventHeadroom = 2 * 1024
+)
+
+// resultPayload checks a tool's result and shapes it for storage: text and image references only, no empty text, the text
+// cut so that the encoded event fits the payload limit (measured after encoding, because control characters and quotes
+// grow when escaped).
 func (l *loop) resultPayload(use llm.Block, res Result) (toolResultPayload, error) {
-	blocks := make([]llm.Block, 0, len(res.Content))
 	room := maxResultTextBytes
+	for range 8 {
+		p, err := buildResult(use, res, room)
+		if err != nil {
+			return toolResultPayload{}, err
+		}
+		size := len(mustJSON(p))
+		if size <= store.MaxEventPayloadBytes-eventHeadroom {
+			return p, nil
+		}
+		// Too big once encoded: scale the text room down by how far over it was, with a margin.
+		room = max(room*(store.MaxEventPayloadBytes-eventHeadroom)/size*9/10, 0)
+	}
+	return toolResultPayload{}, errors.New("the result does not fit an event even with its text cut")
+}
+
+func buildResult(use llm.Block, res Result, room int) (toolResultPayload, error) {
+	blocks := make([]llm.Block, 0, len(res.Content)+1)
+	truncated := false
 	for _, b := range res.Content {
+		if len(blocks) >= maxResultBlocks {
+			truncated = true
+			break
+		}
 		switch b.Type {
 		case llm.BlockText:
-			text := capText(b.Text, max(room, 0))
+			text := strings.ReplaceAll(b.Text, "\x00", "") // jsonb cannot hold a NUL
+			if text == "" {
+				continue
+			}
+			if room <= 0 {
+				truncated = true
+				continue
+			}
+			text = capText(text, room)
 			room -= len(text)
 			blocks = append(blocks, llm.TextBlock(text))
 		case llm.BlockImage:
@@ -692,6 +810,9 @@ func (l *loop) resultPayload(use llm.Block, res Result) (toolResultPayload, erro
 		default:
 			return toolResultPayload{}, fmt.Errorf("a tool result holds text and image blocks, not %q", b.Type)
 		}
+	}
+	if truncated {
+		blocks = append(blocks, llm.TextBlock("[further output omitted]"))
 	}
 	wire, err := toWire(blocks)
 	if err != nil {
@@ -714,13 +835,21 @@ func textOf(blocks []wireBlock) string {
 func (l *loop) park(ctx context.Context, use llm.Block, res Result) (Outcome, bool, error) {
 	q, _ := l.resultPayload(use, res)
 	question := capText(textOf(q.Content), 8*1024)
-	_, err := l.st.EndAgentRun(ctx, l.ws, l.run.ID, l.run.Epoch, store.RunEnd{
+	// A cancel that arrived while the tool was asking wins over the question.
+	if cur, err := l.st.GetAgentRun(ctx, l.ws, l.run.ID); err == nil && cur.CancelRequestedAt != nil {
+		out, cerr := l.cancelled(ctx)
+		return out, true, cerr
+	}
+	r, err := l.st.EndAgentRun(ctx, l.ws, l.run.ID, l.run.Epoch, store.RunEnd{
 		Status:   store.AgentWaitingInput,
 		Event:    mustJSON(statusPayload{State: stateWaitingInput, ToolUseID: use.ID, Tool: use.Name, Question: question}),
 		ActiveMs: l.takeActive(),
 	})
 	if err != nil {
 		return "", true, err
+	}
+	if r.Status == store.AgentCancelled { // the cancel came in between the check and the write; the query cancelled the run
+		return OutcomeFinished, true, nil
 	}
 	return OutcomeWaiting, true, nil
 }
@@ -839,9 +968,13 @@ type crashSignal struct{ point string }
 // which also remembers what each call settled at, so the loop can add the call's cost to the run row.
 type budgetTracker struct {
 	inner *llm.RunBudget
+	// onReserve, when set, is called with each successful reservation before the client sends the request. If it fails the
+	// reservation is given back and the call is refused; takeHookErr then says why (it is not a budget problem).
+	onReserve func(micros int64) error
 
 	mu      sync.Mutex
 	settled int64
+	hookErr error
 }
 
 func newBudgetTracker(limit int64) *budgetTracker {
@@ -854,6 +987,15 @@ func (b *budgetTracker) Reserve(micros int64) (func(actual int64), error) {
 	if err != nil {
 		return nil, err
 	}
+	if b.onReserve != nil {
+		if herr := b.onReserve(micros); herr != nil {
+			release(0)
+			b.mu.Lock()
+			b.hookErr = herr
+			b.mu.Unlock()
+			return nil, herr
+		}
+	}
 	var once sync.Once
 	return func(actual int64) {
 		once.Do(func() {
@@ -863,6 +1005,15 @@ func (b *budgetTracker) Reserve(micros int64) (func(actual int64), error) {
 			release(actual)
 		})
 	}, nil
+}
+
+// takeHookErr returns the failure of the last onReserve, and clears it.
+func (b *budgetTracker) takeHookErr() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	err := b.hookErr
+	b.hookErr = nil
+	return err
 }
 
 func (b *budgetTracker) remaining() int64 { return b.inner.Remaining() }

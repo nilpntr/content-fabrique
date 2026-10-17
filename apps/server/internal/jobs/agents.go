@@ -10,6 +10,7 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
 // The jobs of the agent runtime (P4-01, docs/design/agent-runtime-v1.md section 3). The agent_run worker itself lives in
@@ -83,11 +84,30 @@ func (w *AgentRunsResumeWorker) Work(ctx context.Context, _ *river.Job[AgentRuns
 		return fmt.Errorf("list stale agent runs: %w", err)
 	}
 	client := river.ClientFromContext[pgx.Tx](ctx)
+	resumed := 0
 	for _, r := range stale {
-		if _, err := client.Insert(ctx, AgentRunArgs{WorkspaceID: r.WorkspaceID, RunID: r.ID}, nil); err != nil {
+		// Mark the run and enqueue the job in one transaction: a run gets one job however many sweepers look, and no job
+		// is enqueued again for it until the first had five minutes.
+		var marked bool
+		err := w.deps.Store.InTx(ctx, func(tx *store.Store) error {
+			var err error
+			if marked, err = tx.MarkAgentRunForResume(ctx, r.WorkspaceID, r.ID, AgentRunStaleAfter); err != nil || !marked {
+				return err
+			}
+			pgxTx, err := tx.Tx()
+			if err != nil {
+				return err
+			}
+			_, err = client.InsertTx(ctx, pgxTx, AgentRunArgs{WorkspaceID: r.WorkspaceID, RunID: r.ID}, nil)
+			return err
+		})
+		if err != nil {
 			return fmt.Errorf("enqueue agent run %s: %w", r.ID, err)
 		}
-		w.deps.logger().WarnContext(ctx, "resuming an agent run whose worker stopped", "workspace_id", r.WorkspaceID.String(), "run_id", r.ID.String())
+		if marked {
+			resumed++
+			w.deps.logger().WarnContext(ctx, "resuming an agent run whose worker stopped", "workspace_id", r.WorkspaceID.String(), "run_id", r.ID.String())
+		}
 	}
-	return river.RecordOutput(ctx, map[string]int{"resumed": len(stale)})
+	return river.RecordOutput(ctx, map[string]int{"resumed": resumed})
 }

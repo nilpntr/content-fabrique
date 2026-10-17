@@ -133,7 +133,7 @@ func (s *Service) Get(ctx context.Context, ws ids.WorkspaceID, id uuid.UUID, aft
 // untrusted-data block), the run goes back to queued, and its job is enqueued again, all in one transaction. It returns
 // store.ErrNotWaiting when the run is not waiting for input.
 func (s *Service) Reply(ctx context.Context, ws ids.WorkspaceID, id uuid.UUID, text string) error {
-	text = strings.TrimSpace(text)
+	text = strings.TrimSpace(strings.ReplaceAll(text, "\x00", ""))
 	switch {
 	case text == "":
 		return ErrEmptyReply
@@ -157,7 +157,11 @@ func (s *Service) Reply(ctx context.Context, ws ids.WorkspaceID, id uuid.UUID, t
 			ToolUseID: wait.ToolUseID, Name: wait.Tool,
 			Content: []wireBlock{{Type: "text", Text: Untrusted("user_reply", text)}},
 		}
-		if _, err := tx.AppendAgentEventUnfenced(ctx, ws, id, store.EventToolResult, mustJSON(answer)); err != nil {
+		encoded := mustJSON(answer)
+		if len(encoded) > store.MaxEventPayloadBytes { // escaped control characters can grow a short reply
+			return ErrReplyTooLong
+		}
+		if _, err := tx.AppendAgentEventUnfenced(ctx, ws, id, store.EventToolResult, encoded); err != nil {
 			return err
 		}
 		return s.enqueue(ctx, tx, run)

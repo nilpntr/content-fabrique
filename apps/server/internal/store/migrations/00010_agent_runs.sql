@@ -15,6 +15,9 @@
 --               worker that lost the run (River rescued its job as stuck, and another worker took over) can no longer write.
 --   last_seq:   the sequence number of the latest event; the next event takes last_seq + 1 under the row lock.
 --   project_id: null for a run without a project; the foreign key keeps it inside the workspace.
+--   resumes:    how many times a worker took the run over after another stopped without finishing it (a dead heartbeat, or an
+--               error that sent the job to a retry). A run that is resumed too often is a poison run and is failed.
+--   resume_enqueued_at: when the sweeper last enqueued a job for a stale run, so it does not enqueue another every pass.
 --   cancel_requested_at: set by a cancel request; the loop looks at it between steps.
 --   heartbeat_at: touched every few seconds while a worker holds the run. A running run whose heartbeat is stale lost its
 --               worker; a periodic job enqueues it again and the new worker resumes it from the events.
@@ -64,6 +67,8 @@ CREATE TABLE agent_runs (
     cancel_requested_at  timestamptz,
     heartbeat_at         timestamptz,
     epoch                bigint      NOT NULL DEFAULT 0,
+    resumes              integer     NOT NULL DEFAULT 0,
+    resume_enqueued_at   timestamptz,
     last_seq             integer     NOT NULL DEFAULT 0,
     started_at           timestamptz,
     finished_at          timestamptz,
@@ -79,7 +84,7 @@ CREATE TABLE agent_runs (
     CONSTRAINT agent_runs_max_tokens_check CHECK (max_tokens > 0),
     CONSTRAINT agent_runs_totals_check CHECK (
         input_tokens >= 0 AND cache_write_tokens >= 0 AND cache_read_tokens >= 0 AND output_tokens >= 0
-        AND tool_calls >= 0 AND cost_micros >= 0 AND active_ms >= 0),
+        AND tool_calls >= 0 AND cost_micros >= 0 AND active_ms >= 0 AND resumes >= 0),
     CONSTRAINT agent_runs_budget_check CHECK (
         budget_micros >= 0 AND budget_tokens > 0 AND budget_tool_calls > 0 AND budget_wall_clock_ms > 0),
     CONSTRAINT agent_runs_failure_reason_check CHECK (
@@ -116,6 +121,11 @@ CREATE TABLE agent_events (
 );
 
 SELECT cf_grant_app_dml('agent_events');
+
+-- A tool call and its result exist once per tool_use id, whoever writes them (a worker that lost its run is fenced out,
+-- and this is the second line of defence).
+CREATE UNIQUE INDEX agent_events_tool_call_key ON agent_events (run_id, (payload ->> 'tool_use_id')) WHERE type = 'tool_call';
+CREATE UNIQUE INDEX agent_events_tool_result_key ON agent_events (run_id, (payload ->> 'tool_use_id')) WHERE type = 'tool_result';
 
 -- +goose Down
 

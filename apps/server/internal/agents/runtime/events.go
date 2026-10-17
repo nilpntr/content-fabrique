@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -124,6 +125,7 @@ const (
 	stateFailed       = "failed"
 	stateCancelled    = "cancelled"
 	stateCostFixed    = "cost_reconciled"
+	stateModelCall    = "model_call"
 )
 
 // statusPayload is a status event.
@@ -142,8 +144,11 @@ type statusPayload struct {
 	Reason string `json:"reason,omitempty"`
 	// failed with reason budget: which limit.
 	Limit string `json:"limit,omitempty"`
-	// cost_reconciled: what the ledger had that the run's totals did not.
+	// cost_reconciled: what a takeover charged that the run's totals did not have (a call that was in flight, or that the
+	// ledger holds and the events do not).
 	AddedCostMicros int64 `json:"added_cost_micros,omitempty"`
+	// model_call: written before a request is sent, with the worst-case cost reserved for it.
+	ReservedMicros int64 `json:"reserved_micros,omitempty"`
 }
 
 // assistantPayload is an assistant_message event.
@@ -179,12 +184,16 @@ type errorPayload struct {
 	Message string `json:"message"`
 }
 
+// mustJSON encodes an event payload. HTML escaping is off: it would turn every < > & into a six-byte escape, and the
+// untrusted-data blocks are full of them.
 func mustJSON(v any) json.RawMessage {
-	b, err := json.Marshal(v)
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
 		panic(fmt.Sprintf("runtime: marshal event payload: %v", err)) // the payload types above always marshal
 	}
-	return b
+	return bytes.TrimRight(buf.Bytes(), "\n")
 }
 
 // turn is one model turn of the conversation: the assistant's message and the answers to its tool calls.
@@ -227,6 +236,9 @@ type convo struct {
 	turns      []*turn
 	// started says the run has a status event of state running already: this start is a resume.
 	started bool
+	// inflight is the worst-case cost reserved for a model call that was sent and has no answer on record: the worker died
+	// (or was stopped) during it. A takeover charges it to the run, because the call may have been billed.
+	inflight int64
 }
 
 // rebuild reads the events in order. It returns an error for a log that cannot be a run of this runtime (a tool result for
@@ -254,12 +266,22 @@ func (c *convo) apply(e store.AgentEvent) error {
 			c.context, c.hasContext = fromWire(p.Blocks), true
 		case stateRunning:
 			c.started = true
+		case stateModelCall:
+			c.inflight = p.ReservedMicros
+		case stateCostFixed:
+			c.inflight = 0
+		}
+	case store.EventError:
+		var p errorPayload
+		if err := json.Unmarshal(e.Payload, &p); err == nil && p.Code != "panic" {
+			c.inflight = 0 // the failed call was recorded, with what it cost
 		}
 	case store.EventAssistantMessage:
 		var p assistantPayload
 		if err := json.Unmarshal(e.Payload, &p); err != nil {
 			return fmt.Errorf("event %d: assistant payload: %w", e.Seq, err)
 		}
+		c.inflight = 0
 		if cur := c.last(); cur != nil && !cur.complete() {
 			return fmt.Errorf("event %d: a new assistant message while %d tool calls of the last one are unanswered", e.Seq, len(cur.pending()))
 		}
