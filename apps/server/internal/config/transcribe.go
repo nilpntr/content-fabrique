@@ -100,12 +100,38 @@ func (c *Config) loadTranscribe(getenv Getenv) []error {
 	if (c.WorkersAIAccountID == "") != (c.WorkersAIAPIToken == "") {
 		errs = append(errs, errors.New("WORKERS_AI_ACCOUNT_ID and WORKERS_AI_API_TOKEN: set both or neither"))
 	}
-	// A hosted provider that is switched on must have a price (D-27): without one the ledger records every call at 0, the daily
-	// spend cap could never trip, and a flood of uploads would cost money nobody sees. Not having an account yet is fine (staging
-	// today): the transcribe jobs wait.
-	if c.TranscribeProvider == TranscribeWorkersAI && (c.Env == EnvStaging || c.Env == EnvProduction) &&
-		(c.WorkersAIAccountID != "" || c.WorkersAIAPIToken != "") && c.WorkersAIPriceMicrosPerMinute == 0 {
-		errs = append(errs, errors.New("WORKERS_AI_PRICE_MICROS_PER_MINUTE: required in staging and production once Workers AI has an account (the spend cap needs a price; D-27)"))
+	// A hosted provider needs a price in staging and production (D-27, D-31), but the price now lives in config/pricing
+	// (transcription.workers_ai.per_minute); WORKERS_AI_PRICE_MICROS_PER_MINUTE only overrides it. The check that an unpriced paid
+	// provider never runs is made where the provider is built (transcribe/setup: RequirePrice), against the table that is loaded.
+	return errs
+}
+
+// loadSpend checks the spend-control settings that belong to the environment (D-31). The caps themselves are read by the model-access
+// settings (internal/agents/llm.LoadSettings); what config.Load adds is the rules that decide whether the process may start.
+//
+// LLM_ALLOW_UNPRICED=1 lets a paid provider without a price run, with its cost recorded as 0 and no cap able to see it. It is a
+// development convenience: only local and ci honour it, and every other environment (staging, production, bench) refuses to start.
+func (c *Config) loadSpend(getenv Getenv) []error {
+	var errs []error
+	switch v := strings.TrimSpace(getenv("LLM_ALLOW_UNPRICED")); v {
+	case "", "0":
+	case "1":
+		if !UnpricedAllowedIn(c.Env) {
+			errs = append(errs, errors.New("LLM_ALLOW_UNPRICED: honoured only in local and ci; in "+c.Env+" a paid provider without a price is refused (add the price to config/pricing)"))
+		}
+	default:
+		errs = append(errs, errors.New("LLM_ALLOW_UNPRICED: must be 1 or empty"))
+	}
+	for _, name := range []string{"DAILY_SPEND_CAP_MICROS", "PLATFORM_DAILY_SPEND_CAP_MICROS", "LLM_MAX_REQUEST_MICROS"} {
+		if raw := strings.TrimSpace(getenv(name)); raw != "" {
+			if n, err := strconv.ParseInt(raw, 10, 64); err != nil || n < 1 {
+				errs = append(errs, errors.New(name+": must be a positive whole number of millionths of a dollar"))
+			}
+		}
 	}
 	return errs
 }
+
+// UnpricedAllowedIn reports whether LLM_ALLOW_UNPRICED is honoured in the environment: development and ci only (D-31). It is the one
+// predicate behind the refusals of config.Load, the model settings, the client factory and cfctl doctor.
+func UnpricedAllowedIn(env string) bool { return env == EnvLocal || env == EnvCI }

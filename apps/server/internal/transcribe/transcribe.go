@@ -47,6 +47,10 @@ type Transcript struct {
 type Call struct {
 	// AudioMs is the length of the audio the request carried.
 	AudioMs int64
+	// Estimated says the request was sent and its outcome is unknown (a timeout, a body that could not be read, a 200 that could not be
+	// parsed): it may have been billed, so it is recorded at the price reserved for its audio and marked estimated in the ledger, the
+	// way the model client records a lost call.
+	Estimated bool
 }
 
 // Audio is the input of a provider: a 16 kHz mono signed 16-bit PCM WAV file on the host (the audio_16k.wav derivative).

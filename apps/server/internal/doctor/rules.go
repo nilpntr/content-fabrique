@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/envfile"
 )
 
@@ -127,6 +128,14 @@ func minLen(n int) validator {
 	}
 }
 
+// positiveMicros checks a spend cap: a positive whole number of millionths of a dollar.
+func positiveMicros(_ *run, val string) string {
+	if n, err := strconv.ParseInt(val, 10, 64); err != nil || n < 1 {
+		return "bad format (expected a positive whole number of millionths of a dollar)"
+	}
+	return ""
+}
+
 var validators = map[string]validator{
 	"ANTHROPIC_API_KEY":          prefixed("sk-ant-"),
 	"VITE_CLERK_PUBLISHABLE_KEY": prefixed("pk_test_", "pk_live_"),
@@ -177,17 +186,27 @@ var validators = map[string]validator{
 		}
 		return ""
 	},
-	// Hosted transcription is capped by price (D-27): an unpriced Workers AI call would be recorded at 0 and the daily spend cap
-	// could never trip, so a price of 0 is refused in staging and production, where Workers AI is the provider unless
-	// TRANSCRIBE_PROVIDER says otherwise.
-	"WORKERS_AI_PRICE_MICROS_PER_MINUTE": func(r *run, val string) string {
-		n, err := strconv.Atoi(val)
-		if err != nil || n < 0 || n > 1000000 {
+	// The price of hosted transcription lives in config/pricing (D-31); this variable only overrides it, so it is checked for form.
+	// Whether the provider has a price at all is checked where it is built: staging and production never run it unpriced.
+	"WORKERS_AI_PRICE_MICROS_PER_MINUTE": func(_ *run, val string) string {
+		if n, err := strconv.Atoi(val); err != nil || n < 1 || n > 1000000 {
 			return "bad format (expected millionths of a dollar per minute, 1 to 1000000)"
 		}
-		hosted := (r.opts.Env == "staging" || r.opts.Env == "production") && r.getenv("TRANSCRIBE_PROVIDER") != "whispercpp"
-		if n == 0 && hosted {
-			return "must be a verified price above 0 in " + r.opts.Env + ": the daily spend cap cannot count unpriced transcription (D-27)"
+		return ""
+	},
+
+	// Spend control (D-31). Money is in micro-dollars. The breaker over all platform-billed cost must be set on purpose in staging
+	// and production (the variable is tagged [YOU-staging], so an empty one is reported missing there).
+	"DAILY_SPEND_CAP_MICROS":          positiveMicros,
+	"PLATFORM_DAILY_SPEND_CAP_MICROS": positiveMicros,
+	"LLM_MAX_REQUEST_MICROS":          positiveMicros,
+	// An unpriced paid provider is never allowed outside development and ci: it would be recorded at 0 and no cap could see it.
+	"LLM_ALLOW_UNPRICED": func(r *run, val string) string {
+		if val != "1" && val != "0" {
+			return "bad format (expected 1 or empty)"
+		}
+		if val == "1" && !config.UnpricedAllowedIn(r.opts.Env) {
+			return "honoured only in local and ci: " + r.opts.Env + " refuses an unpriced paid provider (add the price to config/pricing)"
 		}
 		return ""
 	},

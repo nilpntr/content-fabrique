@@ -28,6 +28,8 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/media"
 	"github.com/nilpntr/content-fabrique/internal/render"
 	"github.com/nilpntr/content-fabrique/internal/sandbox"
+	"github.com/nilpntr/content-fabrique/internal/spend"
+	"github.com/nilpntr/content-fabrique/internal/spend/spendtest"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/storage/storagetest"
 	"github.com/nilpntr/content-fabrique/internal/store"
@@ -145,6 +147,8 @@ type env struct {
 	tempDir string
 	user    ids.UserID
 	runner  media.Runner
+	// mem is the in-memory spend backend the pipeline's meter writes to.
+	mem *spendtest.Memory
 }
 
 // runnerOf is the sandbox the pipeline renders in: the local provider, or the docker provider and the image of -docker-image.
@@ -192,7 +196,7 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := &env{dsn: dsn, super: superPool, st: st, cfg: cfg, objs: objs, enq: enq, svc: svc, tempDir: filepath.Join(root, "render"), runner: runnerOf(root)}
+	e := &env{mem: &spendtest.Memory{}, dsn: dsn, super: superPool, st: st, cfg: cfg, objs: objs, enq: enq, svc: svc, tempDir: filepath.Join(root, "render"), runner: runnerOf(root)}
 	e.pipe = e.newPipeline(t, objs, e.runner)
 	u, err := st.UpsertUserByClerkID(ctx, "user_renderjobs", "renderjobs@example.com")
 	if err != nil {
@@ -204,7 +208,11 @@ func newEnv(t *testing.T) *env {
 
 func (e *env) newPipeline(t *testing.T, objs PipelineObjects, runner media.Runner) *Pipeline {
 	t.Helper()
-	p, err := New(Config{Store: e.st, Objects: objs, Runner: runner, TempDir: e.tempDir, Logger: quiet})
+	meter := &spend.ComputeMeter{
+		Gate: spend.NewGate(e.mem, spend.Options{Caps: store.SpendCaps{WorkspaceDailyMicros: 1 << 40, PlatformDailyMicros: 1 << 40}}),
+		Cost: func(ms int64) (int64, error) { return (ms*20 + 999) / 1000, nil }, PriceVersion: "test-prices", BilledTo: store.BilledToTest,
+	}
+	p, err := New(Config{Store: e.st, Objects: objs, Runner: runner, TempDir: e.tempDir, Meter: meter, Logger: quiet})
 	if err != nil {
 		t.Fatal(err)
 	}

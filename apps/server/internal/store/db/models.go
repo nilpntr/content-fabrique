@@ -60,6 +60,7 @@ type AgentRun struct {
 	FinishedAt        *time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+	StartedBy         pgtype.UUID
 }
 
 type Annotation struct {
@@ -256,6 +257,33 @@ type Shot struct {
 	CreatedAt   time.Time
 }
 
+type SpendCounter struct {
+	ID             uuid.UUID
+	Scope          string
+	WorkspaceID    pgtype.UUID
+	Period         string
+	PlatformMicros int64
+	TestMicros     int64
+	AudioMs        int64
+	Alerted80At    *time.Time
+	TrippedAt      *time.Time
+	UpdatedAt      time.Time
+}
+
+type SpendHold struct {
+	ID             uuid.UUID
+	Scope          string
+	WorkspaceID    pgtype.UUID
+	BilledTo       string
+	Kind           string
+	Period         string
+	Micros         int64
+	AudioMs        *int64
+	ExpiresAt      time.Time
+	IdempotencyKey string
+	CreatedAt      time.Time
+}
+
 type TimelineVersion struct {
 	ID             ids.TimelineID
 	WorkspaceID    ids.WorkspaceID
@@ -324,6 +352,12 @@ type UsageLedger struct {
 	CreatedAt          time.Time
 	Provider           string
 	AudioMs            int64
+	Quantity           int64
+	Unit               string
+	ProjectID          pgtype.UUID
+	MemberUserID       pgtype.UUID
+	ActionID           pgtype.UUID
+	IdempotencyKey     string
 }
 
 type User struct {

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -53,9 +54,13 @@ type Config struct {
 	Client *http.Client
 	// ChunkSeconds overrides DefaultChunkSeconds.
 	ChunkSeconds int
-	// PriceMicrosPerMinute is the list price of a minute of audio in millionths of a US dollar. Zero means the price has not been
-	// verified: the ledger records the call as unpriced (D-27, "never guess a price").
+	// PriceMicrosPerMinute is the list price of a minute of audio in millionths of a US dollar: transcription.workers_ai.per_minute of
+	// the price table, or the operator's WORKERS_AI_PRICE_MICROS_PER_MINUTE override. Zero means no verified price: the ledger would
+	// record the call as unpriced (D-27, "never guess a price"), and with RequirePrice the provider does not run.
 	PriceMicrosPerMinute int64
+	// PriceVersion names where the price came from (the price table's version, or that and "+env" for the override); it is the ledger's
+	// price_table_version. Empty means "workers-ai-config".
+	PriceVersion string
 	// RequirePrice makes an unset price fatal: the provider reports transcribe.ErrNotConfigured and sends nothing. Staging and
 	// production set it (D-27): without a price the ledger would record every call at 0, the daily spend cap could never trip and
 	// the cost of a flood of uploads would be invisible until the Cloudflare invoice.
@@ -103,12 +108,24 @@ const (
 	priceUnpriced   = "unpriced"
 )
 
+// MaxDuration is the longest transcribing audioMs of audio can take: one request per chunk, each up to the client's timeout. The
+// reservation in the database lives that long (plus a margin) so a crashed worker's hold stops blocking the caps afterwards.
+func (p *Provider) MaxDuration(audioMs int64) time.Duration {
+	chunkMs := int64(p.cfg.ChunkSeconds) * 1000
+	chunks := max((audioMs+chunkMs-1)/chunkMs, 1)
+	return time.Duration(chunks) * max(p.cfg.Client.Timeout, time.Minute)
+}
+
 // CostMicros implements transcribe.Provider.
 func (p *Provider) CostMicros(audioMs int64) (int64, string) {
 	if p.cfg.PriceMicrosPerMinute <= 0 {
 		return 0, priceUnpriced
 	}
-	return int64(math.Ceil(float64(audioMs) / 60000 * float64(p.cfg.PriceMicrosPerMinute))), priceConfigured
+	version := p.cfg.PriceVersion
+	if version == "" {
+		version = priceConfigured
+	}
+	return (audioMs*p.cfg.PriceMicrosPerMinute + 59_999) / 60_000, version
 }
 
 type request struct {
@@ -153,9 +170,14 @@ func (p *Provider) Transcribe(ctx context.Context, audio transcribe.Audio, opts 
 	for from := 0; from < len(pcm); from += chunk {
 		part := pcm[from:min(from+chunk, len(pcm))]
 		offset := transcribe.DurationMsOf(from)
-		res, err := p.call(ctx, part, lang)
+		res, unknown, err := p.call(ctx, part, lang)
 		if err != nil {
-			// The chunks before this one were answered, so they were billed: report them with the error.
+			// The chunks before this one were answered, so they were billed: report them with the error. This one may have been billed
+			// too when its request went out and no answer came back (a timeout, a body that could not be read, a 200 that could not be
+			// parsed): it is reported as an estimated call, recorded at its reserved price.
+			if unknown {
+				out.Calls = append(out.Calls, transcribe.Call{AudioMs: transcribe.DurationMsOf(len(part)), Estimated: true})
+			}
 			return out, err
 		}
 		out.Calls = append(out.Calls, transcribe.Call{AudioMs: transcribe.DurationMsOf(len(part))})
@@ -180,43 +202,55 @@ func (p *Provider) Transcribe(ctx context.Context, audio transcribe.Audio, opts 
 	return out, nil
 }
 
-// call sends one chunk.
-func (p *Provider) call(ctx context.Context, pcm []int16, lang string) (response, error) {
+// call sends one chunk. unknown says the request went out (or may have) and no usable answer came back, so the chunk may have been
+// billed. A definite refusal (an error status, a dial failure) is not.
+func (p *Provider) call(ctx context.Context, pcm []int16, lang string) (out response, unknown bool, err error) {
 	body, err := json.Marshal(request{Audio: base64.StdEncoding.EncodeToString(transcribe.EncodeWAV(pcm)), Task: "transcribe", Language: lang})
 	if err != nil {
-		return response{}, err
+		return response{}, false, err
 	}
 	endpoint := strings.TrimRight(p.cfg.BaseURL, "/") + "/accounts/" + url.PathEscape(p.cfg.AccountID) + "/ai/run/" + ModelID
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return response{}, err
+		return response{}, false, err
 	}
 	req.Header.Set("Authorization", "Bearer "+p.cfg.APIToken)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := p.cfg.Client.Do(req)
 	if err != nil {
-		return response{}, fmt.Errorf("workers ai: %w", scrub(err, p.cfg.APIToken))
+		return response{}, !neverSent(err), fmt.Errorf("workers ai: %w", scrub(err, p.cfg.APIToken))
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
-		return response{}, fmt.Errorf("workers ai: read response: %w", err)
+		return response{}, true, fmt.Errorf("workers ai: read response: %w", err)
 	}
-	var out response
 	jerr := json.Unmarshal(raw, &out)
 	switch {
 	case resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusRequestEntityTooLarge:
-		return response{}, fmt.Errorf("%w: workers ai rejected the audio: %s", transcribe.ErrUnusableAudio, firstError(out, resp.Status))
+		return response{}, false, fmt.Errorf("%w: workers ai rejected the audio: %s", transcribe.ErrUnusableAudio, firstError(out, resp.Status))
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		return response{}, fmt.Errorf("workers ai: the API token was refused (%s)", resp.Status)
+		return response{}, false, fmt.Errorf("workers ai: the API token was refused (%s)", resp.Status)
 	case resp.StatusCode != http.StatusOK:
-		return response{}, fmt.Errorf("workers ai: %s", firstError(out, resp.Status)) // 429 and 5xx: the job retries
+		return response{}, false, fmt.Errorf("workers ai: %s", firstError(out, resp.Status)) // 429 and 5xx: the job retries
 	case jerr != nil:
-		return response{}, fmt.Errorf("workers ai: response: %w", jerr)
+		// A 200 whose body is not the answer: the work may have been done and billed.
+		return response{}, true, fmt.Errorf("workers ai: response: %w", jerr)
 	case !out.Success:
-		return response{}, fmt.Errorf("workers ai: %s", firstError(out, "the request did not succeed"))
+		return response{}, false, fmt.Errorf("workers ai: %s", firstError(out, "the request did not succeed"))
 	}
-	return out, nil
+	return out, false, nil
+}
+
+// neverSent reports a transport failure that happened before the request could have reached the server: the connection was never
+// made (a dial or DNS failure). Anything else (a reset, a timeout, a cancelled context, a TLS failure half way) may have sent it.
+func neverSent(err error) bool {
+	var op *net.OpError
+	if errors.As(err, &op) && op.Op == "dial" {
+		return true
+	}
+	var dns *net.DNSError
+	return errors.As(err, &dns)
 }
 
 func firstError(r response, fallback string) string {

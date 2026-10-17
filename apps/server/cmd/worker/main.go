@@ -51,6 +51,7 @@ func run(args []string) error {
 				transcr  jobs.Transcriber   // nil without storage: transcribe jobs then wait (snoozed)
 				analyzer jobs.Analyzer      // nil without storage: analyze jobs then wait (snoozed)
 			)
+			meter := newComputeMeter(cfg, st, logger)
 			if cfg.ObjectStorageConfigured() {
 				client, err := storage.New(cfg.Storage())
 				if err != nil {
@@ -66,7 +67,7 @@ func run(args []string) error {
 				if analyzer, err = newAnalysis(cfg, st, client, logger); err != nil {
 					return nil, err
 				}
-				rp, err := newRenderPipeline(cfg, st, client, logger)
+				rp, err := newRenderPipeline(cfg, st, client, meter, logger)
 				if err != nil {
 					return nil, err
 				}
@@ -109,6 +110,7 @@ func run(args []string) error {
 				Ingest:     ingester,
 				Render:     renderer,
 				Transcribe: transcr,
+				Meter:      meter,
 				Analysis:   analyzer,
 				Register:   runtime.Register(runner),
 				QuickLook:  quickLooker,

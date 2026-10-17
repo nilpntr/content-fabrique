@@ -48,6 +48,11 @@ type Provider struct {
 	TempDir string
 	// Threads is whisper's thread count (the sandbox's CPU limit); zero means 4.
 	Threads int
+	// WallSecondsPerAudioSecond and ComputeCost price a run as compute (price table: transcription.whisper_cpp_local and compute): the
+	// wall time is estimated as this many seconds per second of audio on Threads vCPUs, and ComputeCost turns vCPU milliseconds into
+	// micro-dollars and names the price table version. Both unset keeps the old behaviour: free, version "local".
+	WallSecondsPerAudioSecond float64
+	ComputeCost               func(vcpuMs int64) (micros int64, version string)
 }
 
 var (
@@ -61,8 +66,34 @@ func (p *Provider) Name() string { return Name }
 // Model implements transcribe.Provider. The name is the model's file stem, as the ledger records it.
 func (p *Provider) Model() string { return strings.TrimSuffix(p.Spec.File, ".bin") }
 
-// CostMicros implements transcribe.Provider: local transcription is free.
-func (p *Provider) CostMicros(int64) (int64, string) { return 0, "local" }
+// CostMicros implements transcribe.Provider. Local transcription costs compute: the estimated vCPU time at the price table's compute
+// price. Without a compute price it is free (version "local").
+func (p *Provider) CostMicros(audioMs int64) (int64, string) {
+	if p.ComputeCost == nil || p.WallSecondsPerAudioSecond <= 0 {
+		return 0, "local"
+	}
+	_, vcpuMs := p.Quantity(audioMs)
+	return p.ComputeCost(vcpuMs)
+}
+
+// Quantity says how the ledger row of audioMs of audio is measured: the estimated vCPU milliseconds when the run is priced as
+// compute, audio milliseconds otherwise.
+func (p *Provider) Quantity(audioMs int64) (unit string, quantity int64) {
+	if p.ComputeCost == nil || p.WallSecondsPerAudioSecond <= 0 {
+		return "audio_ms", audioMs
+	}
+	threads := int64(p.Threads)
+	if threads <= 0 {
+		threads = 4
+	}
+	return "vcpu_ms", int64(float64(audioMs)*p.WallSecondsPerAudioSecond+0.5) * threads
+}
+
+// MaxDuration is the longest a transcription of audioMs of audio can take (the limit whisper-cli runs under), for the lifetime of the
+// reservation in the database.
+func (p *Provider) MaxDuration(audioMs int64) time.Duration {
+	return Timeout(time.Duration(audioMs)*time.Millisecond) + VADTimeout(time.Duration(audioMs)*time.Millisecond)
+}
 
 func (p *Provider) threads() string {
 	if p.Threads > 0 {

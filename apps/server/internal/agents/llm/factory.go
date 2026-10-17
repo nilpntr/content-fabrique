@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/spend"
 )
 
 // ClientFactory hands out the Client for a workspace and a stage, with the label of who pays for its calls. Agents
@@ -46,8 +48,9 @@ type FactoryOptions struct {
 	// Getenv reads ANTHROPIC_API_KEY and CF_AIG_TOKEN when a client is built (pass os.Getenv). Nothing else holds them.
 	Getenv func(string) string
 	Prices *PriceTable
-	// Ledger receives one row per live or recorded call. Required unless Settings.Mode is replay.
-	Ledger Ledger
+	// Ledger is where the spend holds, the counters and the usage_ledger rows live (*store.Store): every live or recorded call
+	// reserves its worst case there and settles into one row. Required unless Settings.Mode is replay.
+	Ledger spend.Backend
 	// Images resolves Image.Ref before a request is sent. Optional.
 	Images ImageResolver
 	// Keys replaces the managed key resolver (P4-00b). Optional.
@@ -65,7 +68,7 @@ type Factory struct {
 	opts     FactoryOptions
 	keys     KeyResolver
 	limiters limiterRegistry
-	reserve  reservations
+	gate     *spend.Gate
 }
 
 var _ ClientFactory = (*Factory)(nil)
@@ -85,6 +88,10 @@ func NewFactory(opts FactoryOptions) (*Factory, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Fail closed (D-31): an unpriced paid provider is never allowed to run in staging or production, whatever the settings say.
+	if opts.Settings.AllowUnpriced && !config.UnpricedAllowedIn(opts.Settings.Env) {
+		return nil, errors.New("llm: LLM_ALLOW_UNPRICED is honoured only in local and ci")
+	}
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
@@ -95,7 +102,11 @@ func NewFactory(opts FactoryOptions) (*Factory, error) {
 	if keys == nil {
 		keys = managedKeys{getenv: opts.Getenv, billing: billing}
 	}
-	return &Factory{opts: opts, keys: keys}, nil
+	f := &Factory{opts: opts, keys: keys}
+	if opts.Ledger != nil {
+		f.gate = spend.NewGate(opts.Ledger, spend.Options{Caps: opts.Settings.SpendCaps(), Now: opts.now, Logger: opts.Logger})
+	}
+	return f, nil
 }
 
 // For returns the Client for the workspace and stage, and who pays for its calls. It returns a *NoKeyError (errors.Is
@@ -141,8 +152,8 @@ func (f *Factory) For(ctx context.Context, workspace ids.WorkspaceID, stage stri
 	}
 	return &metered{
 		inner: inner, ws: workspace, stage: stage, billing: billing, mode: s.Mode,
-		prices: f.opts.Prices, ledger: f.opts.Ledger, images: f.opts.Images,
-		maxRequest: s.MaxRequestMicros, dailyCap: s.DailySpendCapMicros, allowUnpriced: s.AllowUnpriced,
-		reserve: &f.reserve, now: f.opts.now, log: f.opts.Logger,
+		prices: f.opts.Prices, gate: f.gate, images: f.opts.Images,
+		maxRequest: s.MaxRequestMicros, allowUnpriced: s.AllowUnpriced,
+		now: f.opts.now, log: f.opts.Logger,
 	}, billing, nil
 }

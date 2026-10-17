@@ -91,7 +91,9 @@ func (w *AnalyzeWorker) Work(ctx context.Context, job *river.Job[AnalyzeArgs]) e
 	if w.deps.Analysis == nil {
 		return w.snooze(ctx, job, noAnalysisSnooze, "this worker cannot run analyses (no object storage or sandbox)")
 	}
+	began := w.deps.now()
 	out, gone, err := w.deps.Analysis.RunJob(ctx, ws, id)
+	w.deps.meterMedia(ctx, ws, id, "analysis", job.ID, job.Attempt, began)
 	switch {
 	case errors.Is(err, ErrAnalysisNotReady):
 		return w.snooze(ctx, job, notReadySnooze, err.Error())

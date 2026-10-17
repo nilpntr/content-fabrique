@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/spend/spendtest"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
@@ -107,9 +108,14 @@ func TestEveryCallWritesOneLedgerRow(t *testing.T) {
 	want := store.UsageEntry{
 		WorkspaceID: ws, RunID: run, Stage: "editor", Kind: "llm", Model: "claude-opus-5-5",
 		InputTokens: 1000, CacheWriteTokens: 2500, CacheWrite1hTokens: 500, CacheReadTokens: 10000, OutputTokens: 500,
-		ListCostMicros: 30000, PriceTableVersion: "2026-10", BilledTo: "test", RequestID: resp.RequestID,
+		ListCostMicros: 30000, PriceTableVersion: "2026-10b", BilledTo: "test", RequestID: resp.RequestID,
 	}
 	r.CreatedAt = time.Time{}
+	// The run is the action; the idempotency key is "llm:" and the call's own id, unique per call.
+	if !strings.HasPrefix(r.IdempotencyKey, "llm:") || len(r.IdempotencyKey) < 20 {
+		t.Errorf("idempotency key = %q", r.IdempotencyKey)
+	}
+	want.ActionID, want.IdempotencyKey = run, r.IdempotencyKey
 	if r != want {
 		t.Errorf("row =\n %+v\nwant\n %+v", r, want)
 	}
@@ -319,11 +325,11 @@ func TestDailyCapUsesTodaysLedger(t *testing.T) {
 	rg := newRig(t, map[string]string{"DAILY_SPEND_CAP_MICROS": "10000"})
 	ws, other := newWorkspaceID(), newWorkspaceID()
 	now := *rg.now
-	rg.ledger.rows = append(rg.ledger.rows,
-		store.UsageEntry{WorkspaceID: ws, ListCostMicros: 4_000, CreatedAt: now.Add(-time.Hour)},                     // today
-		store.UsageEntry{WorkspaceID: ws, ListCostMicros: 4_000, CreatedAt: now.Add(-13 * time.Hour)},                // yesterday (UTC): not counted
-		store.UsageEntry{WorkspaceID: other, ListCostMicros: 9_999_999, CreatedAt: now.Add(-time.Hour)},              // another workspace: not counted
-		store.UsageEntry{WorkspaceID: ws, ListCostMicros: 3_500, CreatedAt: now.Add(-time.Minute), BilledTo: "test"}, // today
+	rg.ledger.Seed(
+		store.UsageEntry{WorkspaceID: ws, ListCostMicros: 4_000, CreatedAt: now.Add(-time.Hour), BilledTo: "test"},        // today
+		store.UsageEntry{WorkspaceID: ws, ListCostMicros: 4_000, CreatedAt: now.Add(-13 * time.Hour), BilledTo: "test"},   // yesterday (UTC): not counted
+		store.UsageEntry{WorkspaceID: other, ListCostMicros: 9_999_999, CreatedAt: now.Add(-time.Hour), BilledTo: "test"}, // another workspace: not counted
+		store.UsageEntry{WorkspaceID: ws, ListCostMicros: 3_500, CreatedAt: now.Add(-time.Minute), BilledTo: "test"},      // today
 	)
 	c, _ := rg.client(t, ws, "editor")
 	req := simpleRequest() // worst case 600 micros (its local bound a little more); 7500 spent today, so 2500 left
@@ -378,14 +384,14 @@ func TestDailyCapCountsCallsInFlight(t *testing.T) {
 	if _, err := c.Messages(context.Background(), simpleRequest()); err != nil {
 		t.Fatalf("after the first finished: %v", err)
 	}
-	if got := len(rg.factory.reserve.m); got != 0 {
-		t.Errorf("%d reservations leaked", got)
+	if got := len(rg.ledger.Holds()); got != 0 {
+		t.Errorf("%d holds leaked", got)
 	}
 }
 
 func TestDailyCapFailsClosedWhenTheLedgerCannotBeRead(t *testing.T) {
 	rg := newRig(t, nil)
-	rg.ledger.failSum = true
+	rg.ledger.FailReserve = spendtest.ErrDown
 	c, _ := rg.client(t, newWorkspaceID(), "editor")
 	if _, err := c.Messages(context.Background(), simpleRequest()); err == nil {
 		t.Fatal("a call was sent without knowing today's spend")
@@ -403,7 +409,7 @@ func TestUnpricedModelsAreRefusedUnlessAllowed(t *testing.T) {
 	c, _ := rg.client(t, newWorkspaceID(), "editor")
 	_, err := c.Messages(context.Background(), req)
 	var ue *UnpricedError
-	if !errors.Is(err, ErrUnpriced) || !errors.As(err, &ue) || ue.Model != "claude-mystery-9" || ue.TableVersion != "2026-10" {
+	if !errors.Is(err, ErrUnpriced) || !errors.As(err, &ue) || ue.Model != "claude-mystery-9" || ue.TableVersion != "2026-10b" {
 		t.Fatalf("err = %#v", err)
 	}
 	if rg.api.totalCalls() != 0 {
@@ -427,7 +433,7 @@ func TestUnpricedModelsAreRefusedUnlessAllowed(t *testing.T) {
 
 func TestLedgerFailureReturnsThePaidResponse(t *testing.T) {
 	rg := newRig(t, nil)
-	rg.ledger.failInserts = 100
+	rg.ledger.FailSettle = 100
 	c, _ := rg.client(t, newWorkspaceID(), "editor")
 	resp, err := c.Messages(context.Background(), simpleRequest())
 	var le *LedgerError
@@ -437,8 +443,8 @@ func TestLedgerFailureReturnsThePaidResponse(t *testing.T) {
 	if resp.Text() != "hello" || resp.Usage.OutputTokens != 200 {
 		t.Errorf("the paid response was dropped: %+v", resp)
 	}
-	if rg.ledger.inserts != ledgerAttempts {
-		t.Errorf("insert attempts = %d, want %d", rg.ledger.inserts, ledgerAttempts)
+	if rg.ledger.Settles != ledgerAttempts {
+		t.Errorf("insert attempts = %d, want %d", rg.ledger.Settles, ledgerAttempts)
 	}
 	logs := rg.logs.String()
 	if !strings.Contains(logs, "usage ledger write failed") || !strings.Contains(logs, "list_cost_micros=200") {
@@ -448,7 +454,7 @@ func TestLedgerFailureReturnsThePaidResponse(t *testing.T) {
 
 	// A flaky ledger that recovers loses nothing.
 	rg = newRig(t, nil)
-	rg.ledger.failInserts = 2
+	rg.ledger.FailSettle = 2
 	c, _ = rg.client(t, newWorkspaceID(), "editor")
 	if _, err := c.Messages(context.Background(), simpleRequest()); err != nil {
 		t.Fatalf("recovering ledger: %v", err)

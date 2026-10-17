@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
 // ---- a call that was sent and lost: recorded at its worst case --------------------------------------------------
@@ -39,7 +41,7 @@ func TestSentButUnansweredCallIsRecordedAtItsWorstCase(t *testing.T) {
 	}
 	r := rows[0]
 	if !r.Estimated || r.ListCostMicros != ub || r.InputTokens < 1 || r.OutputTokens != 1000 || r.RunID != run || r.Stage != "editor" ||
-		r.BilledTo != "test" || r.PriceTableVersion != "2026-10" || r.RequestID != "" {
+		r.BilledTo != "test" || r.PriceTableVersion != "2026-10b" || r.RequestID != "" {
 		t.Errorf("row = %+v (worst case %d)", r, ub)
 	}
 	// The run's budget was charged the worst case, not nothing.
@@ -47,12 +49,12 @@ func TestSentButUnansweredCallIsRecordedAtItsWorstCase(t *testing.T) {
 		t.Errorf("budget settled %v, spent %d; want %d", b.settled, b.Spent(), ub)
 	}
 	// And the daily cap sees it: the row is part of today's sum.
-	sum, _ := rg.ledger.UsageCostMicros(context.Background(), ws, rg.now.Truncate(24*time.Hour), rg.now.Add(24*time.Hour).Truncate(24*time.Hour))
+	sum := rg.ledger.Counter(ws, store.DayPeriod(*rg.now)).TestMicros
 	if sum != ub {
 		t.Errorf("today's sum = %d, want %d", sum, ub)
 	}
-	if len(rg.factory.reserve.m) != 0 {
-		t.Error("a reservation leaked")
+	if len(rg.ledger.Holds()) != 0 {
+		t.Error("a hold leaked")
 	}
 	mustNotContain(t, "error", err.Error(), testKey)
 }

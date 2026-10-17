@@ -60,7 +60,7 @@ func TestFactoryWithTheRealLedger(t *testing.T) {
 	}
 	r := rows[0]
 	if r.Stage != "editor" || r.Model != "claude-haiku-5-5" || r.InputTokens != 1000 || r.OutputTokens != 200 || r.ListCostMicros != 200 ||
-		r.PriceTableVersion != "2026-10" || r.BilledTo != "test" || r.RequestID != "req_fake_1" || r.Kind != "llm" {
+		r.PriceTableVersion != "2026-10b" || r.BilledTo != "test" || r.RequestID != "req_fake_1" || r.Kind != "llm" {
 		t.Fatalf("row = %+v", r)
 	}
 
