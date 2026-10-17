@@ -85,7 +85,9 @@ jobs:
               - 'apps/server/internal/media/**'
               - 'apps/server/internal/ingest/**'
               - 'apps/server/internal/renderjobs/**'
+              - 'apps/server/internal/transcribe/**'
               - 'apps/server/cmd/cfctl/media*.go'
+              - 'apps/server/cmd/cfctl/transcribe*.go'
               - '.github/workflows/ci.yml'
             # The renderer and what it compiles: the Go timeline package and the fixtures (the 20 render fixtures and the
             # asset catalog) that the golden tests read, the sandbox and media packages it runs ffmpeg through, and the Go
@@ -126,7 +128,9 @@ jobs:
               - 'apps/server/internal/media/**'
               - 'apps/server/internal/ingest/**'
               - 'apps/server/internal/renderjobs/**'
+              - 'apps/server/internal/transcribe/**'
               - 'apps/server/cmd/cfctl/media*.go'
+              - 'apps/server/cmd/cfctl/transcribe*.go'
               - '.github/workflows/ci.yml'
 
   # go vet and golangci-lint (apps/server/.golangci.yml).
@@ -556,6 +560,16 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends ffmpeg
           go test ./internal/ingest -docker-image media-tools:ci -v
+
+      # P2-05: whisper.cpp in the image, for real: the voice-activity check finds speech in a synthesised sentence and none in
+      # silence, and the tiny English model recognises most of the words, in order, with times inside the clip. The models are
+      # downloaded by the code under test and checked against their pinned SHA-256 (78 MB and 1 MB). The < 100 ms timing
+      # acceptance is measured locally with large-v3-turbo on clips with known word timings (scripts/transcribe-eval).
+      - name: Transcription against the image
+        working-directory: apps/server
+        run: |
+          sudo apt-get install -y --no-install-recommends espeak-ng
+          go test ./internal/transcribe/whispercpp -run Integration -docker-image media-tools:ci -model tiny.en -count=1 -v
 
       # P3-06: the render job end to end with ffmpeg running in the image: a 30 s edit rendered as preview and final through the
       # service, the queue row, the pipeline and storage (Postgres and MinIO in Docker), with the time map, the contact sheet,

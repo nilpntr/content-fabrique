@@ -1,0 +1,7 @@
+{
+  "op": "add_sfx",
+  "id": "s5",
+  "sfx": "impact",
+  "at_ms": 500,
+  "gain_db": -3
+}

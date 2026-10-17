@@ -7,17 +7,21 @@ set -euo pipefail
 FFMPEG_VERSION=$1
 FFMPEG_SHA256=$2
 SRC=$3 # the unpacked ffmpeg source tree
+WHISPER_VERSION=$4
+WHISPER_SHA256=$5
+WSRC=$6 # the unpacked whisper.cpp source tree
 R=/rootfs
 
-mkdir -p "$R/usr/local/bin" "$R/usr/share/media-tools" "$R/usr/share/doc/ffmpeg" "$R/etc/fonts" \
+mkdir -p "$R/usr/local/bin" "$R/usr/share/media-tools" "$R/usr/share/doc/ffmpeg" "$R/usr/share/doc/whisper.cpp" "$R/etc/fonts" \
   "$R/usr/share/fonts/cf" "$R/tmp" "$R/work" "$R/in"
 cp /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe "$R/usr/local/bin/"
+cp /opt/whisper/bin/whisper-cli /opt/whisper/bin/whisper-vad-speech-segments "$R/usr/local/bin/"
 
 # Every library the binaries need, plus the ELF interpreter (the dynamic loader), by the name the loader asks for.
 # (ldd is run per binary: with two arguments it prints a "path:" header line for each.)
 : >/tmp/libs.raw
-for bin in ffmpeg ffprobe; do
-  out=$(ldd "/opt/ffmpeg/bin/$bin")
+for bin in /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /opt/whisper/bin/whisper-cli /opt/whisper/bin/whisper-vad-speech-segments; do
+  out=$(ldd "$bin")
   if echo "$out" | grep -q 'not found'; then
     echo "unresolved shared library for $bin" >&2
     exit 1
@@ -80,6 +84,11 @@ while read -r pkg; do
   cp -L "/usr/share/doc/$pkg/copyright" "$R/usr/share/doc/$pkg/copyright"
   printf 'deb\t%s\t%s\t%s\t\n' "$pkg" "$version" "$src" >>"$inv"
 done </tmp/pkgs.txt
+
+# whisper.cpp (MIT), built from the checksummed tarball; ggml is linked statically, so its licence is the one text.
+cp "$WSRC/LICENSE" "$R/usr/share/doc/whisper.cpp/copyright"
+printf 'source\twhisper.cpp\t%s\thttps://github.com/ggml-org/whisper.cpp/archive/refs/tags/v%s.tar.gz\t%s\n' \
+  "$WHISPER_VERSION" "$WHISPER_VERSION" "$WHISPER_SHA256" >>"$inv"
 
 # ffmpeg itself, built from the checksummed tarball with --enable-gpl, so the combined work is GPL-2-or-later (D-16).
 cat "$SRC/COPYING.GPLv2" "$SRC/COPYING.LGPLv2.1" >"$R/usr/share/doc/ffmpeg/copyright"

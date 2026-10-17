@@ -198,6 +198,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/assets/{id}/transcript": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The asset's TypeID. */
+                id: components["parameters"]["AssetIdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The words spoken in an asset, with timings and speech structure
+         * @description The transcript of an asset whose `transcript_status` is `ready` or `no_speech`. The transcription job runs after the
+         *     ingest, on clips with speech only (a voice-activity check comes first), so a clip without speech has a transcript with
+         *     `speech: false` and no words. Word times are milliseconds from the start of the asset. `structure` is derived from the
+         *     words: sentence boundaries, filler words (um, uh, "you know" ...) and pauses longer than 400 ms, with indexes into `words`,
+         *     for jump cuts and captions. `404 not_found` when the asset does not exist in the workspace or has no transcript yet
+         *     (`transcript_status` is `none`, `pending` or `failed`: read it from the asset).
+         */
+        get: operations["getAssetTranscript"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/assets/{id}/parts": {
         parameters: {
             query?: never;
@@ -776,6 +804,13 @@ export interface components {
             ingest_progress: number;
             /** @description What the ingest is doing while `status` is `processing` (`starting`, `downloading`, `probing`, `proxy`, `derivatives`, `uploading`). Null otherwise. */
             ingest_stage: string | null;
+            transcript_status: components["schemas"]["TranscriptStatus"];
+            /**
+             * @description Why the transcript is `failed`, as a code that is safe to show: `spend_cap` (the workspace's daily spend cap could not
+             *     cover the transcription), `minutes_cap` (the workspace had its daily minutes of transcription already),
+             *     `unusable_audio`, `gave_up` (every attempt failed). Null otherwise. Absent on older responses.
+             */
+            transcript_failure_reason?: string | null;
             media?: components["schemas"]["MediaInfo"];
             derivatives?: components["schemas"]["AssetDerivatives"];
             /**
@@ -787,6 +822,108 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /**
+         * @description Where the transcript of the asset stands. `none`: there is none and none is coming (a picture, a clip without an audio
+         *     track, or the ingest has not finished). `pending`: the transcription job is queued or running. `no_speech`: the clip was
+         *     checked and has no speech. `ready`: the words are available at `GET /v1/assets/{id}/transcript`. `failed`: the job gave up.
+         * @enum {string}
+         */
+        TranscriptStatus: "none" | "pending" | "no_speech" | "ready" | "failed";
+        Transcript: {
+            asset_id: components["schemas"]["AssetId"];
+            status: components["schemas"]["TranscriptStatus"];
+            /** @description False when the voice-activity check found no speech; `words` is then empty. */
+            speech: boolean;
+            /** @description The spoken language as an ISO 639-1 code (`en`, `nl`); empty without speech. */
+            language: string;
+            words: components["schemas"]["TranscriptWord"][];
+            structure: components["schemas"]["SpeechStructure"];
+            /** @description Who transcribed it (`whispercpp`, `workersai`). The words have the same shape whichever it was. */
+            provider: string;
+            model: string;
+            /**
+             * Format: int64
+             * @description The length of the audio that was checked.
+             */
+            audio_ms: number;
+            /**
+             * Format: int64
+             * @description How much speech the voice-activity check found.
+             */
+            speech_ms: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        TranscriptWord: {
+            /** @description The word as written, with its punctuation (`Hello,`). */
+            text: string;
+            /**
+             * Format: int64
+             * @description Milliseconds from the start of the asset. Placed on the audio itself, not only on the model's estimate.
+             */
+            start_ms: number;
+            /** Format: int64 */
+            end_ms: number;
+            /**
+             * Format: double
+             * @description The model's probability for the word, 0 to 1; 0 when the provider does not report one.
+             */
+            confidence: number;
+        };
+        /**
+         * @description Derived from the words (so it is the same for every provider): where sentences end, which words are fillers, where the
+         *     speaker pauses. Word indexes are positions in `words`.
+         */
+        SpeechStructure: {
+            sentences: components["schemas"]["SpeechSentence"][];
+            fillers: components["schemas"]["SpeechFiller"][];
+            /** @description Silences between two words that last longer than 400 ms. */
+            pauses: components["schemas"]["SpeechPause"][];
+        };
+        SpeechSentence: {
+            first_word: number;
+            /** @description Included. */
+            last_word: number;
+            /** Format: int64 */
+            start_ms: number;
+            /** Format: int64 */
+            end_ms: number;
+            text: string;
+        };
+        SpeechFiller: {
+            first_word: number;
+            /** @description Included; a phrase such as "you know" spans two words. */
+            last_word: number;
+            /** Format: int64 */
+            start_ms: number;
+            /** Format: int64 */
+            end_ms: number;
+            text: string;
+            /**
+             * @description `hesitation` is a sound without meaning (um, uh, eh); `discourse` is a word or phrase that is empty here but a word elsewhere (like, you know, zeg maar).
+             * @enum {string}
+             */
+            kind: "hesitation" | "discourse";
+            /**
+             * @description `strong` fillers are nearly always safe to cut; `weak` ones depend on context.
+             * @enum {string}
+             */
+            strength: "strong" | "weak";
+        };
+        SpeechPause: {
+            /** @description The index of the word before the pause. */
+            after_word: number;
+            /** Format: int64 */
+            start_ms: number;
+            /** Format: int64 */
+            end_ms: number;
+            /** Format: int64 */
+            duration_ms: number;
+            /** @description True when the pause falls between two sentences, false when the speaker stopped mid-sentence. */
+            sentence_break: boolean;
         };
         /** @description What the ingest probe found in the original. Present once the asset is `ready`. */
         MediaInfo: {
@@ -1855,6 +1992,36 @@ export interface operations {
                 };
                 content: {
                     "text/vtt": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getAssetTranscript: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The asset's TypeID. */
+                id: components["parameters"]["AssetIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The transcript. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Transcript"];
                 };
             };
             400: components["responses"]["BadRequest"];

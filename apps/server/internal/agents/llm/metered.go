@@ -288,27 +288,36 @@ func (m *metered) take(ctx context.Context, req Request, est, tokens int64) (*re
 	if m.mode == ModeReplay {
 		return rsv, nil
 	}
-	// Daily cap. Reserve first and remember what was reserved at that moment, then read the ledger, then check. A call
-	// that reserved earlier is either still in `before` or already a row in `spent` (its reservation is released only
-	// after its row is written), and a call that reserves later counts this one the same way, so no pair of concurrent
-	// calls can both miss each other. Counting both for an instant only over-reserves, which is the safe side. Other
-	// processes' in-flight calls are not seen; the overshoot is bounded by their concurrency and the per-request cap.
-	before := m.reserve.add(m.ws, est)
-	now := m.now().UTC()
-	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	spent, err := m.ledger.UsageCostMicros(ctx, m.ws, day, day.Add(24*time.Hour))
+	release, err := reserveDaily(ctx, m.reserve, m.ledger, m.ws, m.now(), m.dailyCap, est)
 	if err != nil {
-		m.reserve.release(m.ws, est)
 		rsv.done()
+		return nil, err
+	}
+	rsv.daily = release
+	return rsv, nil
+}
+
+// reserveDaily sets est aside against the workspace's daily cap, or refuses with a *CapError of kind daily. Reserve first and
+// remember what was reserved at that moment, then read the ledger, then check. A call that reserved earlier is either still in
+// `before` or already a row in `spent` (its reservation is released only after its row is written), and a call that reserves
+// later counts this one the same way, so no pair of concurrent calls can both miss each other. Counting both for an instant only
+// over-reserves, which is the safe side. Other processes' in-flight calls are not seen; the overshoot is bounded by their
+// concurrency and the per-request cap. The ledger sums every kind (model calls and transcription), so one cap covers all spend.
+// The caller calls the returned function once the call's ledger row exists.
+func reserveDaily(ctx context.Context, res *reservations, ledger Ledger, ws ids.WorkspaceID, now time.Time, dailyCap, est int64) (release func(), err error) {
+	before := res.add(ws, est)
+	now = now.UTC()
+	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	spent, err := ledger.UsageCostMicros(ctx, ws, day, day.Add(24*time.Hour))
+	if err != nil {
+		res.release(ws, est)
 		return nil, fmt.Errorf("llm: reading today's spend before sending: %w", err) // fail closed
 	}
-	if spent+before+est > m.dailyCap {
-		m.reserve.release(m.ws, est)
-		rsv.done()
-		return nil, &CapError{Kind: CapDaily, EstimateMicros: est, LimitMicros: max(m.dailyCap-spent-before, 0)}
+	if spent+before+est > dailyCap {
+		res.release(ws, est)
+		return nil, &CapError{Kind: CapDaily, EstimateMicros: est, LimitMicros: max(dailyCap-spent-before, 0)}
 	}
-	rsv.daily = func() { m.reserve.release(m.ws, est) }
-	return rsv, nil
+	return func() { res.release(ws, est) }, nil
 }
 
 // reservations is the worst-case cost of the calls in flight, per workspace, shared by every client of a factory.

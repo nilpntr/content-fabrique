@@ -272,6 +272,8 @@ func (a *applier) dispatch(op Op) bool {
 		return a.setMotion(o)
 	case *SetSpeedRamp:
 		return a.setSpeedRamp(o)
+	case *AddSFX:
+		return a.addSFX(o)
 	}
 	return a.errf(CodeUnknownOp, "unsupported op type %T", op)
 }
@@ -454,7 +456,8 @@ func (a *applier) soundIndex(id string) (int, bool) {
 	return 0, a.wrongKind(id, kindSound)
 }
 
-// commonOf gives write access to the shared fields of an audio item.
+// commonOf gives write access to the shared fields of an audio item. A sound effect is not built on them and gives nil: use
+// setSoundAt for its start.
 func commonOf(item timeline.AudioItem) *timeline.AudioCommon {
 	switch v := item.(type) {
 	case *timeline.TrendSound:
@@ -465,6 +468,15 @@ func commonOf(item timeline.AudioItem) *timeline.AudioCommon {
 		return &v.AudioCommon
 	}
 	return nil
+}
+
+// setSoundAt moves a sound to a new start.
+func setSoundAt(item timeline.AudioItem, at int64) {
+	if sfx, ok := item.(*timeline.SFX); ok {
+		sfx.AtMs = at
+		return
+	}
+	commonOf(item).AtMs = at
 }
 
 // freeTrackID returns base, or base_2, base_3, ... whichever is not in use and is not avoid (the id of an item that is

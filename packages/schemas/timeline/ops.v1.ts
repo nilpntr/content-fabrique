@@ -26,7 +26,8 @@ export type EditOp =
   | SetCaptions
   | SetClipAudio
   | SetMotion
-  | SetSpeedRamp;
+  | SetSpeedRamp
+  | AddSfx;
 /**
  * "add_clip".
  */
@@ -673,9 +674,17 @@ export type At = number;
  */
 export type Strength = number;
 /**
- * A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white) or matte (lifted blacks).
+ * A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white), matte (lifted blacks), auto (a mild contrast curve that keeps blacks and whites where they are, plus the clip's exposure_ev nudge, so shots from different angles meet at one exposure without washing out low-key footage) or gym_moody (deep blacks, warm skin, a slight vignette).
  */
-export type Preset1 = "none" | "punchy" | "warm" | "cool" | "bw" | "matte";
+export type Preset1 = "none" | "punchy" | "warm" | "cool" | "bw" | "matte" | "auto" | "gym_moody";
+/**
+ * True to correct the clip's exposure by its exposure_ev hint (from the analysis; a nudge of at most 0.7 stops, black point kept) before the preset, so shots from different angles meet at one exposure. The preset auto always does this, whatever match says. Default false. Without an exposure_ev on the clip it changes nothing.
+ */
+export type MatchExposure = boolean;
+/**
+ * A small nudge, -1 to 1 stops (EV): how much brighter this clip is than the exposure the edit should have (positive: too bright, to be darkened; negative: too dark, to be lifted). It must come from highlight or midtone percentiles of the clip, never from its mean brightness, because a low-key clip (black wall, lit subject) has a low mean and is correctly exposed. The renderer applies the opposite, limited to 0.7 stops and ignoring hints under 0.15, with a highlight-preserving curve that keeps the black point, when look.match is true or the preset is auto. Without it, nothing is corrected.
+ */
+export type ExposureHint = number;
 /**
  * How the clip begins. A cut is instant. The other types blend with the previous clip over duration_ms, and the clip then starts that long before the previous one ends. The first clip must have a cut.
  */
@@ -1126,9 +1135,13 @@ export type Op16 = "set_look";
  */
 export type ClipId6 = string;
 /**
- * A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white) or matte (lifted blacks).
+ * A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white), matte (lifted blacks), auto (a mild contrast curve that keeps blacks and whites where they are, plus the clip's exposure_ev nudge, so shots from different angles meet at one exposure without washing out low-key footage) or gym_moody (deep blacks, warm skin, a slight vignette).
  */
-export type Preset2 = "none" | "punchy" | "warm" | "cool" | "bw" | "matte";
+export type Preset2 = "none" | "punchy" | "warm" | "cool" | "bw" | "matte" | "auto" | "gym_moody";
+/**
+ * True to correct the clip's exposure by its exposure_ev hint (from the analysis; a nudge of at most 0.7 stops, black point kept) before the preset, so shots from different angles meet at one exposure. The preset auto always does this, whatever match says. Default false. Without an exposure_ev on the clip it changes nothing.
+ */
+export type MatchExposure1 = boolean;
 /**
  * Create or change the captions track (burned-in captions from the transcript). The fields you leave out stay as they are; on a new captions track style defaults to word_highlight and enabled to true. Give at least one field.
  */
@@ -1221,6 +1234,26 @@ export type Op20 = "set_speed_ramp";
  * The id of the main-track clip.
  */
 export type ClipId9 = string;
+/**
+ * "add_sfx".
+ */
+export type Op21 = "add_sfx";
+/**
+ * Optional id for the new effect. Without it the next free "s<n>" is used. It must not be in use anywhere in the timeline.
+ */
+export type SoundId5 = string;
+/**
+ * whoosh, impact, riser or swish.
+ */
+export type Effect = "whoosh" | "impact" | "riser" | "swish";
+/**
+ * When the effect starts in the output, in ms.
+ */
+export type Start6 = number;
+/**
+ * Volume change in decibels, from -30 to +6. 0 leaves the level as it is.
+ */
+export type GainInDB2 = number;
 
 /**
  * Add a clip from a source asset to the main track. Give the part of the asset to use as source.in_ms and source.out_ms (in the asset's own time; in_ms below out_ms, out_ms within the asset's duration). Say where it goes with index (the position it will have, 0 is the start) or after_id (right after that clip); without either it goes at the end. The clips after it move later (ripple) and their at_ms is recomputed. Without id, the clip gets the next free id such as "c7"; the result reports it. speed (or speed_ramp), reframe, motion, look, transition_in and audio are optional and default as in the timeline spec. A transition_in on a clip that ends up first is an error.
@@ -1237,6 +1270,7 @@ export interface AddClip {
   reframe?: Reframe;
   motion?: Motion;
   look?: Look;
+  exposure_ev?: ExposureHint;
   transition_in?: TransitionIn;
   audio?: ClipAudio;
   moment_id?: MomentId;
@@ -1277,6 +1311,7 @@ export interface Motion {
  */
 export interface Look {
   preset: Preset1;
+  match?: MatchExposure;
 }
 /**
  * Whether the clip's own sound is in the mix. Without it, the clip is silent.
@@ -1473,12 +1508,14 @@ export interface SnapOptions {
   write_markers?: WriteMarkers;
 }
 /**
- * Set the colour look of a clip. Without id it applies to every clip on the main track.
+ * Set the colour look of a clip. Without id it applies to every clip on the main track. Presets: none, punchy, warm, cool, bw, matte, auto (a mild contrast curve that keeps blacks and whites, plus each clip's exposure_ev nudge, so shots from different angles meet at one exposure) and gym_moody (deep blacks, warm skin, a slight vignette: the grade for gym footage). match true also corrects each clip's exposure by its exposure_ev hint (a nudge of at most 0.7 stops, black point kept; auto always does) before the preset (left out, match keeps what the clip had). exposure_ev sets that hint on one clip (it needs id; 0 clears it, and replace_source clears it too); the analysis writes it, so only give it when you know the clip's exposure; it is -1 to 1 and must not come from a clip's mean brightness (low-key footage is dark and correct).
  */
 export interface SetLook {
   op: Op16;
   id?: ClipId6;
   preset: Preset2;
+  match?: MatchExposure1;
+  exposure_ev?: ExposureHint;
 }
 export interface SetCaptions2 {
   op: Op17;
@@ -1510,4 +1547,14 @@ export interface SetSpeedRamp {
   op: Op20;
   id: ClipId9;
   points: SpeedRamp;
+}
+/**
+ * Add a generated sound effect to the audio track (created when there is none): whoosh (0.6 s pass-by, for a whip or a cut), impact (0.8 s low hit, for a punch-in or the drop), riser (1.5 s rising build that peaks at its end, so start it 1.5 s before the moment it leads to) or swish (0.3 s quick air pass). The effect is synthesised by us, needs no asset or licence and is always in the render and the export. It starts at at_ms (inside the timeline; it is cut at the end) and is mixed after the loudness normalisation at a fixed level plus gain_db, so it stays an accent. Without id it gets the next free "s<n>". Move it with move_item (at_ms) and remove it with remove_sound.
+ */
+export interface AddSfx {
+  op: Op21;
+  id?: SoundId5;
+  sfx: Effect;
+  at_ms: Start6;
+  gain_db?: GainInDB2;
 }

@@ -42,11 +42,18 @@ To review a version bump, `--print-shas` prints each component's current copyrig
 | Base image | `debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f` |
 | Debian packages | snapshot.debian.org archive `20261016T000000Z` (`DEBIAN_SNAPSHOT` in the Dockerfile) |
 | ffmpeg | 8.1.3 release tarball, SHA-256 `7138d28c96d9d3e3af4ee3d8cad72741f8ffb40da90c1112235dea3ecd3178a3` |
+| whisper.cpp | v1.9.5 source tarball (GitHub), SHA-256 `ff1a9053feb509ff9d7729703355541ae9690073a6b1c40eb692c962e0dc1720` (`WHISPER_VERSION`, `WHISPER_SHA256` in the Dockerfile) |
 
 ## Notes for reviewers
 
 - The final image is `FROM scratch`: ffmpeg, ffprobe, the shared libraries they load, fontconfig's config and the title and
   caption fonts (below). No shell, no coreutils, no package manager.
+- whisper.cpp (P2-05, MIT) provides `whisper-cli` and `whisper-vad-speech-segments`, built for CPU from the checksummed tarball with
+  ggml linked statically, so the only shared libraries they add are the C and C++ runtimes already listed. Its licence text is in the
+  image (`/usr/share/doc/whisper.cpp/copyright`). The model files are not in the image: the worker downloads them on first use into
+  a cache directory and checks a pinned SHA-256 (`apps/server/internal/transcribe/models.go`): Whisper large-v3-turbo quantised
+  and tiny.en (OpenAI Whisper weights as converted by the whisper.cpp project, MIT) and the Silero VAD v6.2.0 voice-activity model
+  (MIT). A model is added with its licence named here.
 - libzimg (WTFPL) is included for HDR to SDR tone mapping in P1-04. WTFPL is permissive but is not one of the four names in
   D-16, so it is listed explicitly.
 - Fonts (P3-04): `/usr/share/fonts/cf` holds three OFL-1.1 fonts, Anton, Inter and Montserrat, each with its licence text in the
@@ -91,6 +98,7 @@ To review a version bump, `--print-shas` prints each component's current copyrig
 | libunibreak6 | 6.1-3 | Zlib | permissive | unicode-data, Zlib |
 | libx264-164 | 2:0.164.3108+git31e19f9-2+b1 | GPL-2.0-or-later | named exception | BSD-3-clause, Expat, GPL-2+, ISC, LGPL-2.1+, other exception, public-domain |
 | libzimg2 | 3.0.5+ds1-1+b2 | WTFPL | permissive | AutoConf exception, GPL-3+, WTFPL-2 |
+| whisper.cpp | 1.9.5 | MIT | permissive | prose only |
 | zlib1g | 1:1.3.dfsg+really1.3.1-1+b1 | Zlib | permissive | Zlib |
 
 ### Named copyleft exceptions

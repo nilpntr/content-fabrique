@@ -1,0 +1,6 @@
+{
+  "op": "add_sfx",
+  "sfx": "impact",
+  "at_ms": 10,
+  "gain_db": 9
+}

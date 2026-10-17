@@ -20,6 +20,8 @@ var allowedEmpty = map[string]bool{
 	"R2_JURISDICTION":        true,
 	"MEDIA_SANDBOX_PROVIDER": true,
 	"MEDIA_TEMP_DIR":         true,
+	"TRANSCRIBE_LANGUAGE":    true,
+	"WHISPER_MODELS_DIR":     true,
 }
 
 const (
@@ -64,6 +66,8 @@ var enums = map[string][]string{
 	"BILLING_PROVIDER":       {"paddle", "stripe"},
 	"PADDLE_ENVIRONMENT":     {"sandbox", "production"},
 	"R2_JURISDICTION":        {"", "eu"},
+	"TRANSCRIBE_PROVIDER":    {"whispercpp", "workersai"},
+	"TRANSCRIBE_MODEL":       {"large-v3-turbo-q5_0", "tiny.en"},
 }
 
 // A validator returns "" when the value is well formed, else a short reason. Reasons never contain the value.
@@ -158,6 +162,41 @@ var validators = map[string]validator{
 	"BILLING_PROVIDER":   oneOf("BILLING_PROVIDER"),
 	"PADDLE_ENVIRONMENT": oneOf("PADDLE_ENVIRONMENT"),
 	"R2_JURISDICTION":    oneOf("R2_JURISDICTION"),
+
+	"TRANSCRIBE_PROVIDER": oneOf("TRANSCRIBE_PROVIDER"),
+	"TRANSCRIBE_MODEL":    oneOf("TRANSCRIBE_MODEL"),
+	"TRANSCRIBE_CONCURRENCY": func(_ *run, val string) string {
+		if n, err := strconv.Atoi(val); err != nil || n < 1 || n > 8 {
+			return "bad format (expected a whole number from 1 to 8)"
+		}
+		return ""
+	},
+	"TRANSCRIBE_DAILY_MINUTES": func(_ *run, val string) string {
+		if n, err := strconv.Atoi(val); err != nil || n < 1 || n > 100000 {
+			return "bad format (expected a whole number from 1 to 100000)"
+		}
+		return ""
+	},
+	// Hosted transcription is capped by price (D-27): an unpriced Workers AI call would be recorded at 0 and the daily spend cap
+	// could never trip, so a price of 0 is refused in staging and production, where Workers AI is the provider unless
+	// TRANSCRIBE_PROVIDER says otherwise.
+	"WORKERS_AI_PRICE_MICROS_PER_MINUTE": func(r *run, val string) string {
+		n, err := strconv.Atoi(val)
+		if err != nil || n < 0 || n > 1000000 {
+			return "bad format (expected millionths of a dollar per minute, 1 to 1000000)"
+		}
+		hosted := (r.opts.Env == "staging" || r.opts.Env == "production") && r.getenv("TRANSCRIBE_PROVIDER") != "whispercpp"
+		if n == 0 && hosted {
+			return "must be a verified price above 0 in " + r.opts.Env + ": the daily spend cap cannot count unpriced transcription (D-27)"
+		}
+		return ""
+	},
+	"WHISPER_MODELS_DIR": func(_ *run, val string) string {
+		if !strings.HasPrefix(val, "/") {
+			return "bad format (expected an absolute path)"
+		}
+		return ""
+	},
 
 	// The local sandbox provider isolates nothing: staging and production refuse it (the worker and config.Load do too).
 	"MEDIA_SANDBOX_PROVIDER": func(r *run, val string) string {

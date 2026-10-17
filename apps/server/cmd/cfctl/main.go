@@ -24,6 +24,7 @@ Commands:
   assets     import local media files into a workspace's library, development only (cfctl assets help)
   project    create a project for the editor, show a project's versions, development only (cfctl project help)
   render     render a timeline spec with ffmpeg, for local manual runs (cfctl render --help)
+  transcribe transcribe a 16 kHz WAV file with whisper.cpp, fetch the models (cfctl transcribe help)
   media      probe a file's metadata, benchmark the sandbox providers (cfctl media help)
   agent      run an agent in this process and show a run's events and costs, development only (cfctl agent help)
   llm        check model access for a routing stage: count tokens, or send one tiny message (cfctl llm help)
@@ -62,6 +63,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdRender(args[1:], stdout, stderr)
 	case "media":
 		return cmdMedia(args[1:], stdout, stderr, defaultMediaDeps())
+	case "transcribe":
+		return cmdTranscribe(args[1:], stdout, stderr, os.LookupEnv)
 	case "agent":
 		return cmdAgent(args[1:], stdout, stderr, os.LookupEnv, defaultAgentDeps())
 	case "llm":

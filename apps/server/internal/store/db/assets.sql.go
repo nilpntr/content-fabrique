@@ -34,7 +34,7 @@ func (q *Queries) CountActiveUploads(ctx context.Context, workspaceID ids.Worksp
 const createAsset = `-- name: CreateAsset :one
 INSERT INTO assets (id, workspace_id, kind, filename, content_type, size_bytes, sha256, title, r2_key, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason
 `
 
 type CreateAssetParams struct {
@@ -100,6 +100,8 @@ func (q *Queries) CreateAsset(ctx context.Context, arg CreateAssetParams) (Asset
 		&i.QuickLook,
 		&i.QuickLookAt,
 		&i.Search,
+		&i.TranscriptStatus,
+		&i.TranscriptFailureReason,
 	)
 	return i, err
 }
@@ -146,7 +148,7 @@ func (q *Queries) CreateUpload(ctx context.Context, arg CreateUploadParams) (Upl
 }
 
 const getAsset = `-- name: GetAsset :one
-SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search FROM assets
+SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason FROM assets
 WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL
 `
 
@@ -195,12 +197,14 @@ func (q *Queries) GetAsset(ctx context.Context, arg GetAssetParams) (Asset, erro
 		&i.QuickLook,
 		&i.QuickLookAt,
 		&i.Search,
+		&i.TranscriptStatus,
+		&i.TranscriptFailureReason,
 	)
 	return i, err
 }
 
 const getAssetAnyState = `-- name: GetAssetAnyState :one
-SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search FROM assets
+SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason FROM assets
 WHERE workspace_id = $1 AND id = $2
 `
 
@@ -250,12 +254,14 @@ func (q *Queries) GetAssetAnyState(ctx context.Context, arg GetAssetAnyStatePara
 		&i.QuickLook,
 		&i.QuickLookAt,
 		&i.Search,
+		&i.TranscriptStatus,
+		&i.TranscriptFailureReason,
 	)
 	return i, err
 }
 
 const getAssetForObjectDeletion = `-- name: GetAssetForObjectDeletion :one
-SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search FROM assets
+SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason FROM assets
 WHERE workspace_id = $1 AND id = $2 AND (deleted_at IS NOT NULL OR status = 'failed')
 `
 
@@ -305,6 +311,8 @@ func (q *Queries) GetAssetForObjectDeletion(ctx context.Context, arg GetAssetFor
 		&i.QuickLook,
 		&i.QuickLookAt,
 		&i.Search,
+		&i.TranscriptStatus,
+		&i.TranscriptFailureReason,
 	)
 	return i, err
 }
@@ -339,7 +347,7 @@ func (q *Queries) GetUploadByAsset(ctx context.Context, arg GetUploadByAssetPara
 }
 
 const listAssets = `-- name: ListAssets :many
-SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search FROM assets
+SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason FROM assets
 WHERE workspace_id = $1
   AND deleted_at IS NULL
   AND ($2::uuid IS NULL OR id < $2::uuid)
@@ -407,6 +415,8 @@ func (q *Queries) ListAssets(ctx context.Context, arg ListAssetsParams) ([]Asset
 			&i.QuickLook,
 			&i.QuickLookAt,
 			&i.Search,
+			&i.TranscriptStatus,
+			&i.TranscriptFailureReason,
 		); err != nil {
 			return nil, err
 		}
@@ -493,7 +503,7 @@ SET status = 'failed',
     failure_reason = $1,
     deleted_at = CASE WHEN $2::boolean THEN COALESCE(deleted_at, now()) ELSE deleted_at END
 WHERE workspace_id = $3 AND id = $4 AND status = 'uploading' AND deleted_at IS NULL
-RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason
 `
 
 type MarkAssetFailedParams struct {
@@ -548,6 +558,8 @@ func (q *Queries) MarkAssetFailed(ctx context.Context, arg MarkAssetFailedParams
 		&i.QuickLook,
 		&i.QuickLookAt,
 		&i.Search,
+		&i.TranscriptStatus,
+		&i.TranscriptFailureReason,
 	)
 	return i, err
 }
@@ -555,7 +567,7 @@ func (q *Queries) MarkAssetFailed(ctx context.Context, arg MarkAssetFailedParams
 const markAssetUploaded = `-- name: MarkAssetUploaded :one
 UPDATE assets SET status = 'uploaded'
 WHERE workspace_id = $1 AND id = $2 AND status = 'uploading' AND deleted_at IS NULL
-RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason
 `
 
 type MarkAssetUploadedParams struct {
@@ -603,6 +615,8 @@ func (q *Queries) MarkAssetUploaded(ctx context.Context, arg MarkAssetUploadedPa
 		&i.QuickLook,
 		&i.QuickLookAt,
 		&i.Search,
+		&i.TranscriptStatus,
+		&i.TranscriptFailureReason,
 	)
 	return i, err
 }
@@ -673,7 +687,7 @@ func (q *Queries) MarkUploadCompleted(ctx context.Context, arg MarkUploadComplet
 const softDeleteAsset = `-- name: SoftDeleteAsset :one
 UPDATE assets SET deleted_at = now()
 WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason
 `
 
 type SoftDeleteAssetParams struct {
@@ -720,6 +734,8 @@ func (q *Queries) SoftDeleteAsset(ctx context.Context, arg SoftDeleteAssetParams
 		&i.QuickLook,
 		&i.QuickLookAt,
 		&i.Search,
+		&i.TranscriptStatus,
+		&i.TranscriptFailureReason,
 	)
 	return i, err
 }

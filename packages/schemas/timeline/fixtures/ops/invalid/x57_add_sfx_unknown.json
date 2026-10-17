@@ -1,0 +1,5 @@
+{
+  "op": "add_sfx",
+  "sfx": "boom",
+  "at_ms": 100
+}

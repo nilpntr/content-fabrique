@@ -118,7 +118,8 @@ func (g *generator) source(asset string) timeline.Source {
 
 var (
 	speeds     = []float64{0.25, 0.5, 0.75, 1, 1, 1, 1.25, 1.5, 2, 3, 4, 1.3333, 0.3, 3.7}
-	looks      = []string{"none", "punchy", "warm", "cool", "bw", "matte"}
+	looks      = []string{"none", "punchy", "warm", "cool", "bw", "matte", "auto", "gym_moody"}
+	sfxNames   = []string{"whoosh", "impact", "riser", "swish", "boom"}
 	modes      = []string{"cover", "contain", "blur_fill"}
 	texts      = []string{"Back day", "Rows. Then rows.", "Two\nlines", "Three\nshort\nlines", "No pain, no gain", "!"}
 	styles     = []string{"title_bold", "title_bold", "caption_plain", "mystery"}
@@ -183,6 +184,14 @@ func (g *generator) op(k *known) Op {
 			if g.chance(80) {
 				o.ID = g.id(k.clips)
 			}
+			if g.chance(30) {
+				m := g.chance(50)
+				o.Match = &m
+			}
+			if g.chance(20) {
+				ev := float64(g.r.IntN(7)-3) / 3
+				o.ExposureEv = &ev
+			}
 			return o
 		}},
 		{3, func() Op {
@@ -205,6 +214,17 @@ func (g *generator) op(k *known) Op {
 			return o
 		}},
 		{5, func() Op { return g.setMotion(k) }},
+		{4, func() Op {
+			o := &AddSFX{Sfx: pick(g, sfxNames), AtMs: int64(g.r.IntN(12000))}
+			if g.chance(30) {
+				o.ID = g.newID("fx", &k.sounds)
+			}
+			if g.chance(30) {
+				gain := float64(g.r.IntN(20) - 10)
+				o.GainDB = &gain
+			}
+			return o
+		}},
 		{5, func() Op { return g.setSpeedRamp(k) }},
 		{4, func() Op {
 			o := &SetClipAudio{ID: g.id(k.clips)}
