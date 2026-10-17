@@ -112,14 +112,14 @@ ass:
   
   [V4+ Styles]
   Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-  Style: label_box,Inter,36,&H00FFFFFF,&H00FFFFFF,&H32000000,&HFF000000,-1,0,0,0,100,100,0,0,3,9,0,5,0,0,0,1
-  Style: stat_big,Anton,128,&H000AD6FF,&H000AD6FF,&H00000000,&H73000000,0,0,0,0,100,100,0,0,1,8,4,5,0,0,0,1
-  Style: title_outline,Anton,70,&H00FFFFFF,&H00FFFFFF,&H00000000,&HFF000000,0,0,0,0,100,100,0,0,1,7,0,5,0,0,0,1
-  Style: watermark,Inter,23,&H55FFFFFF,&H55FFFFFF,&H87000000,&HFF000000,-1,0,0,0,100,100,0,0,1,1,0,5,0,0,0,1
+  Style: label_box,Inter,70,&H00FFFFFF,&H00FFFFFF,&H32000000,&HFF000000,-1,0,0,0,100,100,0,0,3,17,0,5,0,0,0,1
+  Style: stat_big,Anton,366,&H000AD6FF,&H000AD6FF,&H00000000,&H73000000,0,0,0,0,100,100,0,0,1,22,11,5,0,0,0,1
+  Style: title_outline,Anton,183,&H00FFFFFF,&H00FFFFFF,&H00000000,&HFF000000,0,0,0,0,100,100,0,0,1,18,0,5,0,0,0,1
+  Style: watermark,Inter,37,&H55FFFFFF,&H55FFFFFF,&H87000000,&HFF000000,-1,0,0,0,100,100,0,0,1,2,0,5,0,0,0,1
   
   [Events]
   Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-  Dialogue: 1,0:00:00.00,0:00:01.98,title_outline,,0,0,0,,{\an5\pos(540.5,270)}{\1a&HFF&\3a&HFF&\4a&HFF&\t(0,1,\1a&H00&\3a&H00&\4a&HFF&)}H{\1a&HFF&\3a&HFF&\4a&HFF&\t(45,46,\1a&H00&\3a&H00&\4a&HFF&)}E{\1a&HFF&\3a&HFF&\4a&HFF&\t(90,91,\1a&H00&\3a&H00&\4a&HFF&)}A{\1a&HFF&\3a&HFF&\4a&HFF&\t(135,136,\1a&H00&\3a&H00&\4a&HFF&)}V{\1a&HFF&\3a&HFF&\4a&HFF&\t(180,181,\1a&H00&\3a&H00&\4a&HFF&)}Y {\1a&HFF&\3a&HFF&\4a&HFF&\t(225,226,\1a&H00&\3a&H00&\4a&HFF&)}D{\1a&HFF&\3a&HFF&\4a&HFF&\t(270,271,\1a&H00&\3a&H00&\4a&HFF&)}A{\1a&HFF&\3a&HFF&\4a&HFF&\t(315,316,\1a&H00&\3a&H00&\4a&HFF&)}Y
-  Dialogue: 2,0:00:00.00,0:00:05.98,watermark,,0,0,0,,{\an5\pos(100,81.5)}PREVIEW
+  Dialogue: 1,0:00:00.00,0:00:01.98,title_outline,,0,0,0,,{\an5\pos(540,270.5)}{\1a&HFF&\3a&HFF&\4a&HFF&\t(0,1,\1a&H00&\3a&H00&\4a&HFF&)}H{\1a&HFF&\3a&HFF&\4a&HFF&\t(45,46,\1a&H00&\3a&H00&\4a&HFF&)}E{\1a&HFF&\3a&HFF&\4a&HFF&\t(90,91,\1a&H00&\3a&H00&\4a&HFF&)}A{\1a&HFF&\3a&HFF&\4a&HFF&\t(135,136,\1a&H00&\3a&H00&\4a&HFF&)}V{\1a&HFF&\3a&HFF&\4a&HFF&\t(180,181,\1a&H00&\3a&H00&\4a&HFF&)}Y {\1a&HFF&\3a&HFF&\4a&HFF&\t(225,226,\1a&H00&\3a&H00&\4a&HFF&)}D{\1a&HFF&\3a&HFF&\4a&HFF&\t(270,271,\1a&H00&\3a&H00&\4a&HFF&)}A{\1a&HFF&\3a&HFF&\4a&HFF&\t(315,316,\1a&H00&\3a&H00&\4a&HFF&)}Y
+  Dialogue: 2,0:00:00.00,0:00:05.98,watermark,,0,0,0,,{\an5\pos(952.5,89.5)}PREVIEW
   Dialogue: 1,0:00:01.98,0:00:03.98,label_box,,0,0,0,,{\an5\move(540.5,702,540.5,675,0,250)\fad(120,0)}Row 100 lb
   Dialogue: 1,0:00:03.98,0:00:05.98,stat_big,,0,0,0,,{\an5\pos(756.5,608)\fscx60\fscy60\t(0,180,0.6,\fscx100\fscy100)\fad(100,0)}8

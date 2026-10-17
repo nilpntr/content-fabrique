@@ -44,6 +44,11 @@ const (
 	CodeFadeTooLong Code = "fade_too_long"
 	// CodeUnknownStyle is a text style the style registry (package style) does not know.
 	CodeUnknownStyle Code = "unknown_style"
+	// CodeUnsupportedCharacter is a text with a character that the font of its style has no glyph for: it could not be drawn
+	// or measured, so the safe-zone check could not hold.
+	CodeUnsupportedCharacter Code = "unsupported_character"
+	// CodeTextOverlapsCaptions is a text item whose box covers the band where an enabled captions track draws its captions.
+	CodeTextOverlapsCaptions Code = "text_overlaps_captions"
 	// CodeWrongAssetKind is a video clip on an audio asset, or a licensed_track or creator_audio item on an asset that
 	// is not audio.
 	CodeWrongAssetKind Code = "wrong_asset_kind"

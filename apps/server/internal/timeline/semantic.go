@@ -279,7 +279,7 @@ func (c *checker) hasTimeline() bool { return len(c.clips) > 0 }
 // ---- text -------------------------------------------------------------------------------------------------------
 
 func (c *checker) checkText() {
-	_, zoneOK := SafeZoneFor(c.spec.Output.Format)
+	band, captionsOn := c.captionBand()
 	for ti, t := range c.spec.Tracks {
 		tt, ok := t.(*TextTrack)
 		if !ok {
@@ -287,7 +287,7 @@ func (c *checker) checkText() {
 		}
 		for i, it := range tt.Items {
 			path := fmt.Sprintf("/tracks/%d/items/%d", ti, i)
-			_, styleOK := style.Lookup(it.Style)
+			st, styleOK := style.Lookup(it.Style)
 			if !styleOK {
 				c.add(CodeUnknownStyle, path+"/style",
 					"text item %s uses style %q, which is not in the style registry; use one of: %s",
@@ -300,8 +300,14 @@ func (c *checker) checkText() {
 						it.ID, it.AtMs, end, c.total, end-c.total)
 				}
 			}
-			if styleOK && zoneOK {
-				c.checkTextBox(it, path)
+			if styleOK {
+				if bad := st.Unsupported(it.Text); len(bad) > 0 {
+					c.add(CodeUnsupportedCharacter, path+"/text",
+						"text item %s has characters the font of style %s has no glyph for (%s), so they cannot be drawn or measured; use plain Latin or Cyrillic letters, digits and common punctuation",
+						it.ID, it.Style, quoteRunes(bad))
+				} else {
+					c.checkTextBox(it, path, band, captionsOn)
+				}
 			}
 		}
 	}
@@ -309,7 +315,7 @@ func (c *checker) checkText() {
 
 // checkTextBox lays the item out with the renderer's own layout (real font advance widths, word wrap at the safe column,
 // outline and shadow included) and requires the box to be inside the safe zone and clear of the blocked areas.
-func (c *checker) checkTextBox(it TextItem, path string) {
+func (c *checker) checkTextBox(it TextItem, path string, band style.Rect, captionsOn bool) {
 	out := c.spec.Output
 	pl, err := PlaceText(out, it)
 	if err != nil {
@@ -354,6 +360,11 @@ func (c *checker) checkTextBox(it TextItem, path string) {
 				it.ID, what, box.Left, box.Right, box.Top, box.Bottom, out.Format, b.Left, b.Top)
 			return
 		}
+	}
+	if captionsOn && band.Overlaps(box) {
+		c.add(CodeTextOverlapsCaptions, path+field,
+			"text item %s %s covers y %d to %d px, where the captions are drawn (y %d to %d px, the band of the enabled captions track); move it above or below the band, or use upper_third or lower_third, or turn the captions off",
+			it.ID, what, box.Top, box.Bottom, band.Top, band.Bottom)
 	}
 }
 

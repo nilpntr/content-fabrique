@@ -50,13 +50,13 @@ func TestIntegrationTextInDocker(t *testing.T) {
 			if err := os.Mkdir(work, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			if err := stageSubtitles(plan, work, ""); err != nil {
+			if err := stageSubtitles(plan, work, "", true); err != nil {
 				t.Fatal(err)
 			}
 			w, h := plan.OutputSize.Width, plan.OutputSize.Height
 			res, err := runner.Run(context.Background(), media.Invocation{OutputDir: work, Args: []string{"ffmpeg", "-nostdin", "-v", "error", "-y",
 				"-f", "lavfi", "-i", fmt.Sprintf("color=c=0x%02X%02X%02X:s=%dx%d:r=30:d=5", inkBackground, inkBackground, inkBackground, w, h),
-				"-vf", plan.Subtitles.filter(), "-ss", "1.0", "-frames:v", "1", media.OutputPath("out.png")}})
+				"-vf", useImageFonts([]string{plan.Subtitles.filter()}, plan.Subtitles)[0], "-ss", "1.0", "-frames:v", "1", media.OutputPath("out.png")}})
 			if err != nil || res.ExitCode != 0 {
 				t.Fatalf("ffmpeg in the image: %+v %v", res, err)
 			}

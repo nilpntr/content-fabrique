@@ -58,6 +58,11 @@ type builder struct {
 	events    []event
 	counts    struct{ text, caption int }
 	watermark bool
+	warnings  []Warning
+}
+
+func (b *builder) warn(code, format string, args ...any) {
+	b.warnings = append(b.warnings, Warning{Code: code, Message: fmt.Sprintf(format, args...)})
 }
 
 func newBuilder(w, h, fps int, total int64) *builder {
@@ -78,15 +83,6 @@ func (b *builder) add(layer int, start, end int64, st style.Style, text string) 
 	}
 	b.used[st.ID] = st
 	b.events = append(b.events, event{layer: layer, start: start, end: end, style: st.ID, text: text, seq: len(b.events)})
-}
-
-// textBox gives the centre of the box the renderer draws: the validator's box, clamped into the safe zone the shortest way.
-// The clamp is a safety net: Validate reports a position that needs it, and a spec that passed validation is never moved.
-func textBox(zone style.Zone, box style.Rect) (style.Rect, bool) {
-	if fit, ok := zone.Fit(box); ok {
-		return fit, true
-	}
-	return box, false
 }
 
 // centre returns the centre of a box as the ASS tags write it.
@@ -137,8 +133,9 @@ func fadeMs(durMs int64) int { return int(max(0, min(150, durMs/4))) }
 func frameMs(frame int64, fps int) int64 { return (2*frame*1000 + int64(fps)) / (2 * int64(fps)) }
 
 // typewriter reveals the characters one after the other: every character starts fully transparent and a \t switches it on at
-// its time. The characters keep their places the whole time, so the block does not move while it types. Typing takes at most
-// 60 % of the event and at most 45 ms a character.
+// its time. The characters keep their places the whole time, so the block does not move while it types. A character takes at
+// most 45 ms, and the last one starts within 60 % of the event whatever the length: a long text on a short event is typed
+// faster than a millisecond a character, several characters switching on in the same millisecond.
 func typewriter(lay style.Layout, durMs int64) string {
 	st := lay.Style
 	n := 0
@@ -152,7 +149,7 @@ func typewriter(lay style.Layout, durMs int64) string {
 	if n == 0 {
 		return escapeLines(lay.Lines)
 	}
-	step := max(20, min(45, int(float64(durMs)*0.6)/n))
+	step := math.Min(45, float64(durMs)*0.6/float64(n)) // ms between two characters, below 1 for a long text on a short event
 	hide := `\1a&HFF&\3a&HFF&\4a&HFF&`
 	show := fmt.Sprintf(`\1a%s\3a%s\4a%s`, alpha(st.Fill), alpha(st.Outline), alpha(st.Shadow))
 	var sb strings.Builder
@@ -166,7 +163,7 @@ func typewriter(lay style.Layout, durMs int64) string {
 				sb.WriteRune(' ')
 				continue
 			}
-			t := i * step
+			t := int(math.Floor(float64(i) * step))
 			fmt.Fprintf(&sb, `{%s\t(%d,%d,%s)}%s`, hide, t, t+1, show, escape(r))
 			i++
 		}
@@ -314,7 +311,7 @@ func (b *builder) render() string {
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		sb.WriteString(styleLine(b.used[id], b.h))
+		sb.WriteString(styleLine(b.used[id], min(b.w, b.h)))
 		sb.WriteString("\n")
 	}
 	sb.WriteString("\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
@@ -334,9 +331,9 @@ func (b *builder) render() string {
 	return sb.String()
 }
 
-// styleLine writes the ASS Style line of a registry style at an output height.
-func styleLine(st style.Style, outH int) string {
-	size := st.FontSizePx(outH)
+// styleLine writes the ASS Style line of a registry style for an output with the given shorter side.
+func styleLine(st style.Style, shortSide int) string {
+	size := st.FontSizePx(shortSide)
 	f := st.FontOf()
 	bold := 0
 	if f.Bold {

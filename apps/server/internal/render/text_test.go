@@ -103,7 +103,7 @@ func expectedWordFrames(spec *timeline.Spec, plan Plan, cat timeline.MemoryCatal
 		}
 		it := items[e.ItemID]
 		in, srcOut, speed := it.Source.InMs, it.Source.OutMs, *e.Speed
-		first, limit := timeline.Frame(e.OutStartMs, plan.FPS), timeline.Frame(e.OutEndMs, plan.FPS)
+		first, limit := timeline.Frame(e.OutStartMs, plan.FPS), timeline.Frame(timeline.EndMs(it), plan.FPS) // a clip words last as long as its own audio, through a transition
 		for _, w := range fixtureTranscript(e.AssetID, cat[e.AssetID].DurationMs) {
 			if w.EndMs <= in || w.StartMs >= srcOut {
 				continue
@@ -149,6 +149,9 @@ func TestCaptionSync(t *testing.T) {
 				}
 				gotStart := firstFrameAt(t, e.start, plan.FPS)
 				gotEnd := firstFrameAt(t, e.end, plan.FPS)
+				if inTransition(plan, gotStart) || inTransition(plan, gotEnd) {
+					continue // both clips speak there; TestCaptionsDuringACrossfade covers it
+				}
 				if gotEnd <= gotStart {
 					t.Errorf("event %q is empty: frames %d to %d", e.text, gotStart, gotEnd)
 				}
@@ -189,6 +192,9 @@ func TestCaptionSync(t *testing.T) {
 				}
 				for _, e := range evs {
 					if e.layer != layerCaption {
+						continue
+					}
+					if inTransition(plan, firstFrameAt(t, e.start, plan.FPS)) || inTransition(plan, firstFrameAt(t, e.end, plan.FPS)) {
 						continue
 					}
 					if s := firstFrameAt(t, e.start, plan.FPS); !starts[s] {

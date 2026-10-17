@@ -60,8 +60,9 @@ type ExecuteOptions struct {
 	// Progress, if set, is called for every progress block ffmpeg prints (about twice a second).
 	Progress func(Progress)
 	// FontsDir is the host directory that holds the font files the plan's subtitles name (packages/media-tools/fonts). Empty
-	// means: packages/media-tools/fonts found above the working directory, else /usr/share/fonts/cf (the image's own copy).
-	// A plan without text, captions or watermark needs no fonts.
+	// means packages/media-tools/fonts found above the working directory. It is only used when the runner runs the host's ffmpeg (the
+	// local provider): in the media-tools image (docker, hardened) the render reads the image's own fonts, ImageFontsDir, and
+	// nothing is staged. A plan without text, captions or watermark needs no fonts.
 	FontsDir string
 }
 
@@ -98,7 +99,8 @@ func Execute(ctx context.Context, plan Plan, runner media.Runner, opts ExecuteOp
 		_ = os.Remove(filepath.Join(work, n))
 	}
 	_ = os.RemoveAll(filepath.Join(work, fontsDirName))
-	if err := stageSubtitles(plan, work, opts.FontsDir); err != nil {
+	inImage := runsInImage(runner)
+	if err := stageSubtitles(plan, work, opts.FontsDir, inImage); err != nil {
 		return err
 	}
 
@@ -116,6 +118,9 @@ func Execute(ctx context.Context, plan Plan, runner media.Runner, opts ExecuteOp
 		}
 	}
 
+	if inImage {
+		args = useImageFonts(args, plan.Subtitles)
+	}
 	full := append(ffmpegPrefix("error", "progress-render.txt"), containerArgs(args, inputs)...)
 	full = append(full, "-y", media.OutputPath(outName))
 	if _, err := runFFmpeg(ctx, runner, full, inputs, work, plan, "render", "progress-render.txt", opts.Progress); err != nil {

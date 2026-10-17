@@ -117,12 +117,7 @@ func (z Zone) Fit(box Rect) (Rect, bool) {
 			return box, false
 		}
 	}
-	for _, b := range z.Blocked {
-		if b.Overlaps(box) {
-			return box, false
-		}
-	}
-	return box, in.Contains(box)
+	return box, z.Safe(box)
 }
 
 // Safe reports whether box is inside the zone and clear of the blocked rectangles.

@@ -26,7 +26,7 @@ const inkBackground = 0x80
 func renderScript(t *testing.T, ffmpeg string, plan Plan, w, h int, ts float64) image.Image {
 	t.Helper()
 	dir := t.TempDir()
-	if err := stageSubtitles(plan, dir, ""); err != nil {
+	if err := stageSubtitles(plan, dir, "", false); err != nil {
 		t.Fatal(err)
 	}
 	out := filepath.Join(dir, "out.png")
@@ -185,7 +185,7 @@ func TestInjectedTagsAreDrawnLiterally(t *testing.T) {
 	ffmpeg, _ := ffmpegTools(t)
 	for _, text := range []string{`{\pos(0,0)}hi`, `{\fs200\an9}hi`, `a\Nb`, `x\{\pos(0,0)\}`, `}{\an7}`} {
 		for _, anim := range []string{"none", "typewriter"} {
-			it := timeline.TextItem{ID: "t1", AtMs: 0, DurationMs: 3000, Text: text, Style: "caption_plain", Anchor: "center", Animation: anim}
+			it := timeline.TextItem{ID: "t1", AtMs: 0, DurationMs: 3000, Text: text, Style: "subtitle_clean", Anchor: "center", Animation: anim}
 			plan, pl := textPlan(t, timeline.Format9x16, it)
 			ink, ok := inkBox(renderScript(t, ffmpeg, plan, 1080, 1920, 2.5))
 			if !ok {

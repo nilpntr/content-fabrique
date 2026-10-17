@@ -84,14 +84,16 @@ const (
 	AnimSlideUp    = "slide_up"
 )
 
-// Style is one entry of the style registry. Sizes are relative to the output height, so one style looks the same on every
-// format: SizePct is a percentage of the height, and OutlinePct and ShadowPct are percentages of the font size.
+// Style is one entry of the style registry. EmPct is the size of the font's em (the width of one unit-per-em square, so
+// fonts of different design sizes look equally big) as a percentage of a 1920 px tall 9:16 canvas; it scales with the shorter side
+// of the output, which is 1080 px on all four formats, so a style is the same size in pixels everywhere. OutlinePct and
+// ShadowPct are percentages of the ASS font size.
 type Style struct {
 	ID string
 	// Description says what the style is for, in the words the editor agent reads.
 	Description string
 	Font        string // id of a Font
-	SizePct     float64
+	EmPct       float64
 	Fill        Colour
 	// Highlight is the colour of the spoken word in word-highlight captions; the zero Colour means the style has none.
 	Highlight  Colour
@@ -101,10 +103,8 @@ type Style struct {
 	ShadowPct  float64
 	// Box draws the Outline colour as an opaque box behind each line (ASS border style 3) instead of an outline; OutlinePct is
 	// then the box's padding.
-	Box bool
-	// Animation is the default animation of a text item that does not name one.
-	Animation string
-	Role      Role
+	Box  bool
+	Role Role
 }
 
 var white = Opaque(255, 255, 255)
@@ -114,46 +114,46 @@ var yellow = Opaque(0xFF, 0xD6, 0x0A)
 var registry = []Style{
 	{
 		ID: "caption_highlight", Description: "Captions that light up the word being spoken in yellow (the word_highlight caption style); bold white with a black outline.",
-		Font: "montserrat-extrabold", SizePct: 3.4, Fill: white, Highlight: yellow, Outline: Opaque(0, 0, 0), Shadow: Colour{0, 0, 0, 140},
-		OutlinePct: 8, ShadowPct: 2, Animation: AnimNone, Role: RoleCaption,
+		Font: "montserrat-extrabold", EmPct: 5.0, Fill: white, Highlight: yellow, Outline: Opaque(0, 0, 0), Shadow: Colour{0, 0, 0, 140},
+		OutlinePct: 8, ShadowPct: 2, Role: RoleCaption,
 	},
 	{
 		ID: "caption_plain", Description: "Plain captions: bold white with a black outline, no highlight (the chunk caption style); also fine for short on-screen text.",
-		Font: "montserrat-extrabold", SizePct: 3.4, Fill: white, Outline: Opaque(0, 0, 0), Shadow: Colour{0, 0, 0, 140},
-		OutlinePct: 8, ShadowPct: 2, Animation: AnimNone, Role: RoleCaption,
+		Font: "montserrat-extrabold", EmPct: 5.0, Fill: white, Outline: Opaque(0, 0, 0), Shadow: Colour{0, 0, 0, 140},
+		OutlinePct: 8, ShadowPct: 2, Role: RoleCaption,
 	},
 	{
 		ID: "label_box", Description: "A small label on a dark box, for names, exercise names and tags.",
-		Font: "inter-bold", SizePct: 2.7, Fill: white, Outline: Colour{0, 0, 0, 205},
-		OutlinePct: 24, Box: true, Animation: AnimFade, Role: RoleText,
+		Font: "inter-bold", EmPct: 3.0, Fill: white, Outline: Colour{0, 0, 0, 205},
+		OutlinePct: 24, Box: true, Role: RoleText,
 	},
 	{
 		ID: "stat_big", Description: "A huge yellow number or short word, for a stat or a rep count; keep it to a few characters.",
-		Font: "anton", SizePct: 9.5, Fill: yellow, Outline: Opaque(0, 0, 0), Shadow: Colour{0, 0, 0, 140},
-		OutlinePct: 6, ShadowPct: 3, Animation: AnimPopIn, Role: RoleText,
+		Font: "anton", EmPct: 11, Fill: yellow, Outline: Opaque(0, 0, 0), Shadow: Colour{0, 0, 0, 140},
+		OutlinePct: 6, ShadowPct: 3, Role: RoleText,
 	},
 	{
 		ID: "subtitle_clean", Description: "Small clean text with a soft shadow, for a second line of explanation under a title.",
-		Font: "inter-bold", SizePct: 2.4, Fill: white, Outline: Colour{0, 0, 0, 160}, Shadow: Colour{0, 0, 0, 120},
-		OutlinePct: 4, ShadowPct: 5, Animation: AnimFade, Role: RoleText,
+		Font: "inter-bold", EmPct: 2.8, Fill: white, Outline: Colour{0, 0, 0, 160}, Shadow: Colour{0, 0, 0, 120},
+		OutlinePct: 4, ShadowPct: 5, Role: RoleText,
 	},
 	{
 		ID: "title_bold", Description: "The default title: bold white with a black outline; for hooks and headlines.",
-		Font: "montserrat-extrabold", SizePct: 3.75, Fill: white, Outline: Opaque(0, 0, 0), Shadow: Colour{0, 0, 0, 140},
-		OutlinePct: 7, ShadowPct: 3, Animation: AnimPopIn, Role: RoleText,
+		Font: "montserrat-extrabold", EmPct: 4.6, Fill: white, Outline: Opaque(0, 0, 0), Shadow: Colour{0, 0, 0, 140},
+		OutlinePct: 7, ShadowPct: 3, Role: RoleText,
 	},
 	{
 		ID: "title_outline", Description: "A tall condensed title with a thick black outline; for punchy one-line hooks.",
-		Font: "anton", SizePct: 5.2, Fill: white, Outline: Opaque(0, 0, 0),
-		OutlinePct: 10, Animation: AnimFade, Role: RoleText,
+		Font: "anton", EmPct: 5.5, Fill: white, Outline: Opaque(0, 0, 0),
+		OutlinePct: 10, Role: RoleText,
 	},
 }
 
 // watermark is the renderer's own style for the PREVIEW mark.
 var watermark = Style{
 	ID: "watermark", Description: "The preview watermark.",
-	Font: "inter-bold", SizePct: 1.7, Fill: Colour{255, 255, 255, 170}, Outline: Colour{0, 0, 0, 120},
-	OutlinePct: 6, Animation: AnimNone, Role: RoleWatermark,
+	Font: "inter-bold", EmPct: 1.6, Fill: Colour{255, 255, 255, 170}, Outline: Colour{0, 0, 0, 120},
+	OutlinePct: 6, Role: RoleWatermark,
 }
 
 // Lookup returns the style with the given id. The preview watermark is not a style the spec can use.
@@ -207,9 +207,17 @@ func (s Style) FontOf() Font {
 	return f
 }
 
-// FontSizePx is the font size in pixels at an output height: the percentage of the height, rounded half up, at least 8.
-func (s Style) FontSizePx(outH int) int {
-	return max(8, int(math.Floor(s.SizePct/100*float64(outH)+0.5)))
+// EmPx is the em in pixels for an output whose shorter side is shortSide px: EmPct of 1920, scaled by shortSide / 1080.
+func (s Style) EmPx(shortSide int) float64 {
+	return s.EmPct / 100 * 1920 * float64(shortSide) / 1080
+}
+
+// FontSizePx is the ASS font size in pixels for an output whose shorter side is shortSide px. libass makes a font size the
+// height of a line, which is usWinAscent + usWinDescent font units, so the size is the em times that over the units per em:
+// the em, not the line height, is what looks the same across fonts. Rounded half up, at least 8.
+func (s Style) FontSizePx(shortSide int) int {
+	t := tableOf(s.FontOf())
+	return max(8, int(math.Floor(s.EmPx(shortSide)*float64(t.WinAscent+t.WinDescent)/float64(t.UnitsPerEm)+0.5)))
 }
 
 // OutlinePx is the outline thickness (or the box padding) in pixels for a font size.

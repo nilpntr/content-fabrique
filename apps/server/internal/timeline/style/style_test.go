@@ -92,10 +92,10 @@ func TestRegistryIsConsistent(t *testing.T) {
 		if _, ok := LookupFont(s.Font); !ok {
 			t.Errorf("style %s names the unknown font %s", s.ID, s.Font)
 		}
-		if s.SizePct <= 0 || s.Description == "" || s.Role == RoleWatermark {
+		if s.EmPct <= 0 || s.Description == "" || s.Role == RoleWatermark {
 			t.Errorf("style %s is incomplete: %+v", s.ID, s)
 		}
-		if s.Pad(s.FontSizePx(1920)) < 1 {
+		if s.Pad(s.FontSizePx(1080)) < 1 {
 			t.Errorf("style %s has no padding", s.ID)
 		}
 		got, ok := Lookup(s.ID)
@@ -126,36 +126,36 @@ func TestColourASS(t *testing.T) {
 // uses, which the ink tests in package render verify against real renders.
 func TestMeasureUsesRealAdvanceWidths(t *testing.T) {
 	st, _ := Lookup("title_bold")
-	lay := Measure(st, 1920, "Hi", 10000)
+	lay := Measure(st, 1080, "Hi", 10000)
 	tab := generatedTables["Montserrat-ExtraBold.ttf"]
 	hAdv, _ := tab.advance('H')
 	iAdv, _ := tab.advance('i')
-	want := float64(hAdv+iAdv) * 72 / float64(tab.WinAscent+tab.WinDescent)
+	want := widthSlack * float64(hAdv+iAdv) * float64(lay.FontSize) / float64(tab.WinAscent+tab.WinDescent)
 	if got := lay.Widths[0]; got < int(want) || got > int(want)+1 {
 		t.Errorf("Hi is %d px wide, the advances give %.2f", got, want)
 	}
-	if lay.FontSize != 72 || lay.LineHeight != 72 {
+	if lay.FontSize != st.FontSizePx(1080) || lay.LineHeight != lay.FontSize {
 		t.Errorf("size %d, line %d", lay.FontSize, lay.LineHeight)
 	}
 	w, h := lay.Box()
-	if w != lay.Widths[0]+2*lay.Pad || h != 72+2*lay.Pad {
+	if w != lay.Widths[0]+2*lay.Pad || h != lay.FontSize+2*lay.Pad {
 		t.Errorf("box %dx%d", w, h)
 	}
 	// Zero-width characters take no room; an unmapped character takes a full em (an upper bound).
-	zw := Measure(st, 1920, "H\u2060\u200BH", 10000).Widths[0]
-	hh := Measure(st, 1920, "HH", 10000).Widths[0]
+	zw := Measure(st, 1080, "H\u2060\u200BH", 10000).Widths[0]
+	hh := Measure(st, 1080, "HH", 10000).Widths[0]
 	if zw != hh {
 		t.Errorf("zero-width characters add width: %d vs %d", zw, hh)
 	}
-	if em := Measure(st, 1920, "\U0001F600", 10000).Widths[0]; em < 51 || em > 53 {
-		t.Errorf("an unmapped character is %d px wide, want one em (1000 of 1379 units of 72 px = 52 px)", em)
+	if em := Measure(st, 1080, "\U0001F600", 10000).Widths[0]; em < int(st.EmPx(1080)) || em > int(st.EmPx(1080))+1 {
+		t.Errorf("an unmapped character is %d px wide, want one em (%.1f px)", em, st.EmPx(1080))
 	}
 }
 
 func TestWrap(t *testing.T) {
 	st, _ := Lookup("title_bold")
-	maxW := 400
-	lay := Measure(st, 1920, "Never skip leg day and drive through your heels", maxW)
+	maxW := 800
+	lay := Measure(st, 1080, "Never skip leg day and drive through your heels", maxW)
 	if len(lay.Lines) < 3 {
 		t.Fatalf("lines %q", lay.Lines)
 	}
@@ -171,7 +171,7 @@ func TestWrap(t *testing.T) {
 		t.Errorf("words were lost or reordered: %q", lay.Lines)
 	}
 	// A word wider than a line is broken between characters; the rest goes on.
-	long := Measure(st, 1920, "supercalifragilisticexpialidocious ok", maxW)
+	long := Measure(st, 1080, "supercalifragilisticexpialidocious ok", maxW)
 	if len(long.Lines) < 3 || strings.ReplaceAll(strings.Join(long.Lines, ""), " ", "") != "supercalifragilisticexpialidociousok" {
 		t.Errorf("long word: %q", long.Lines)
 	}
@@ -181,8 +181,36 @@ func TestWrap(t *testing.T) {
 		}
 	}
 	// Explicit lines stay, empty ones too.
-	if got := Measure(st, 1920, "a\n\nb", maxW).Lines; !reflect.DeepEqual(got, []string{"a", "", "b"}) {
+	if got := Measure(st, 1080, "a\n\nb", maxW).Lines; !reflect.DeepEqual(got, []string{"a", "", "b"}) {
 		t.Errorf("explicit lines: %q", got)
+	}
+}
+
+func TestSupports(t *testing.T) {
+	anton, _ := Lookup("title_outline")
+	bold, _ := Lookup("title_bold")
+	for _, r := range "Aa5 ,.!?-é€\n\u2060" {
+		if !bold.Supports(r) || !anton.Supports(r) {
+			t.Errorf("%q should be supported", r)
+		}
+	}
+	if !bold.Supports('Ж') || anton.Supports('Ж') {
+		t.Error("Montserrat has Cyrillic, Anton does not")
+	}
+	if got := bold.Unsupported("ok \U0001F600 日 \U0001F600"); string(got) != "\U0001F600日" {
+		t.Errorf("unsupported: %q", string(got))
+	}
+}
+
+func TestCaptionBand(t *testing.T) {
+	z, _ := ZoneFor(Format9x16, 1080, 1920)
+	st, _ := Lookup("caption_plain")
+	band := CaptionBand(z, 1080, 1080, st)
+	if !z.Safe(band) || band.Left != 180 || band.Right != 900 {
+		t.Errorf("band %+v", band)
+	}
+	if h := band.Height(); h != CaptionLines*st.FontSizePx(1080)+2*st.Pad(st.FontSizePx(1080)) {
+		t.Errorf("band height %d", h)
 	}
 }
 

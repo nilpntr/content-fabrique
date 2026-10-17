@@ -27,12 +27,12 @@ func (l Layout) Box() (w, h int) {
 	return widest + 2*l.Pad, len(l.Lines)*l.LineHeight + 2*l.Pad
 }
 
-// Measure lays text out in a style at an output height: it wraps each explicit line (the text's "\n") at maxBoxWidth, the
+// Measure lays text out in a style on an output whose shorter side is shortSide px: it wraps each explicit line (the text's "\n") at maxBoxWidth, the
 // widest box the text may take, padding included, and measures what is left. A word wider than a line is broken between
 // characters, the rest continuing on the same line as the next word. A text is never wider than maxBoxWidth unless a single
 // character is.
-func Measure(st Style, outH int, text string, maxBoxWidth int) Layout {
-	size := st.FontSizePx(outH)
+func Measure(st Style, shortSide int, text string, maxBoxWidth int) Layout {
+	size := st.FontSizePx(shortSide)
 	l := Layout{Style: st, FontSize: size, LineHeight: size, Pad: st.Pad(size)}
 	maxW := float64(max(maxBoxWidth-2*l.Pad, 1))
 	m := measurer{table: tableOf(st.FontOf()), size: size}
@@ -44,6 +44,11 @@ func Measure(st Style, outH int, text string, maxBoxWidth int) Layout {
 	}
 	return l
 }
+
+// widthSlack widens every measured width by half a percent: libass positions glyphs with hinted and rounded advances, which the
+// plain advance widths do not model, and a long line of wide capitals ends up a pixel or two wider than the sum. The ink tests
+// fail if the slack is too small.
+const widthSlack = 1.005
 
 // measurer measures strings in one font at one size.
 type measurer struct {
@@ -62,9 +67,9 @@ func tableOf(f Font) *FontTable {
 
 // px is the width in pixels of r.
 func (m measurer) px(r rune) float64 {
-	perUnit := float64(m.size) / float64(m.table.WinAscent+m.table.WinDescent)
+	perUnit := widthSlack * float64(m.size) / float64(m.table.WinAscent+m.table.WinDescent)
 	switch {
-	case r < 0x20, r == 0x200B, r == 0x200C, r == 0x200D, r == 0x2060, r == 0xFEFF, r >= 0xFE00 && r <= 0xFE0F:
+	case r < 0x20, measurable(r):
 		return 0
 	}
 	if adv, ok := m.table.advance(r); ok {
@@ -169,9 +174,10 @@ func PlaceCaption(z Zone, outW, w, h int) Rect {
 	return Rect{Left: left, Top: top, Right: left + w, Bottom: top + h}
 }
 
-// PlaceWatermark returns the box of a w x h watermark: in the top left corner of the safe zone.
+// PlaceWatermark returns the box of a w x h watermark: in the top right corner of the safe zone, clear of the centred titles and
+// of the action column (which starts lower).
 func PlaceWatermark(z Zone, w, h int) Rect {
-	return Rect{Left: z.Inner.Left, Top: z.Inner.Top, Right: z.Inner.Left + w, Bottom: z.Inner.Top + h}
+	return Rect{Left: z.Inner.Right - w, Top: z.Inner.Top, Right: z.Inner.Right, Bottom: z.Inner.Top + h}
 }
 
 // MaxBoxWidth is the widest box a text may take in a zone: the width of the zone's centre column.

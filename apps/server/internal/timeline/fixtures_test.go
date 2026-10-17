@@ -122,11 +122,11 @@ func TestInvalidFixtures(t *testing.T) {
 			}
 		})
 	}
-	// Every code of the closed list except unknown_style is exercised by a fixture (unknown_style is unit-tested).
+	// Every code of the closed list is exercised by a fixture.
 	for _, code := range []Code{
 		CodeSchema, CodeDuplicateID, CodeGap, CodeOverlap, CodeSourceOutOfRange, CodeShotTooShort,
 		CodeDurationOutOfRange, CodeOutsideTimeline, CodeUnsafeText, CodeUnknownAsset, CodeTransitionTooLong,
-		CodeUnlicensedAudio, CodeFadeTooLong,
+		CodeUnlicensedAudio, CodeFadeTooLong, CodeUnknownStyle, CodeUnsupportedCharacter, CodeTextOverlapsCaptions,
 	} {
 		if !codes[string(code)] {
 			t.Errorf("no invalid fixture expects %q", code)

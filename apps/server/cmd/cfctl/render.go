@@ -35,6 +35,8 @@ so run it through the validator first if it did not come from one.
                docker or hardened (the media-tools image)
   --image      the media-tools image for docker and hardened (default media-tools:dev)
   --docker     the docker CLI (default docker)
+  --fonts-dir  the directory with the font files (packages/media-tools/fonts), for --provider local outside a repository checkout;
+               docker and hardened use the fonts in the image (default: found above the working directory)
   --ffmpeg     the ffmpeg binary used by --dry-run's printout, and ffprobe's directory (default: from PATH)
   --dry-run    print the ffmpeg command line and the filter graph, and do not run it
 
@@ -52,6 +54,7 @@ func cmdRender(args []string, stdout, stderr io.Writer) int {
 	providerArg := flags.String("provider", "local", "local, docker or hardened")
 	imageArg := flags.String("image", "media-tools:dev", "media-tools image")
 	dockerArg := flags.String("docker", "docker", "docker CLI")
+	fontsArg := flags.String("fonts-dir", "", "directory with the font files, for the local provider")
 	dryRun := flags.Bool("dry-run", false, "print the command and do not run it")
 
 	// The spec path may come before or after the flags.
@@ -102,6 +105,9 @@ func cmdRender(args []string, stdout, stderr io.Writer) int {
 	for _, c := range plan.SoundCues {
 		_, _ = fmt.Fprintf(stderr, "sound cue (not mixed in): %s trend %s at %d ms, offset %d ms\n", c.ItemID, c.TrendID, c.AtMs, c.SourceOffsetMs)
 	}
+	for _, w := range plan.Warnings {
+		_, _ = fmt.Fprintf(stderr, "warning: %s: %s\n", w.Code, w.Message)
+	}
 
 	if *dryRun {
 		out := *outArg
@@ -133,8 +139,9 @@ func cmdRender(args []string, stdout, stderr io.Writer) int {
 	defer stop()
 	lastTenth := -1
 	err = render.Execute(ctx, plan, runner, render.ExecuteOptions{
-		Output:  *outArg,
-		WorkDir: workDir,
+		Output:   *outArg,
+		WorkDir:  workDir,
+		FontsDir: *fontsArg,
 		Progress: func(p render.Progress) {
 			if tenth := int(p.Fraction * 10); tenth != lastTenth || p.Done {
 				lastTenth = tenth

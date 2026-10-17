@@ -95,8 +95,8 @@ ass:
   
   [V4+ Styles]
   Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-  Style: watermark,Inter,18,&H55FFFFFF,&H55FFFFFF,&H87000000,&HFF000000,-1,0,0,0,100,100,0,0,1,1,0,5,0,0,0,1
+  Style: watermark,Inter,37,&H55FFFFFF,&H55FFFFFF,&H87000000,&HFF000000,-1,0,0,0,100,100,0,0,1,2,0,5,0,0,0,1
   
   [Events]
   Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-  Dialogue: 2,0:00:00.00,0:00:02.98,watermark,,0,0,0,,{\an5\pos(228.5,119)}PREVIEW
+  Dialogue: 2,0:00:00.00,0:00:02.98,watermark,,0,0,0,,{\an5\pos(1654.5,129.5)}PREVIEW

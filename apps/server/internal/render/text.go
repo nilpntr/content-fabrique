@@ -22,8 +22,17 @@ type mappedWord struct {
 	clip int
 }
 
+// Warning is something the renderer left out of the picture because it could not be drawn safely. Compile does not fail for it:
+// the rest of the render is fine, and the caller shows the warning (the editor agent reads it).
+type Warning struct {
+	// Code is text_dropped or caption_dropped.
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
 // subtitles builds the script of the plan: the text items, the captions of an enabled captions track and, in a watermarked
-// profile, the watermark. It returns nil when there is nothing to draw.
+// profile, the watermark. It returns nil when there is nothing to draw. Nothing is ever drawn outside the safe zone: a box
+// that cannot be put inside it is left out, with a warning.
 func (c *compiler) subtitles() (*Subtitles, error) {
 	b := newBuilder(c.spec.Output.Width, c.spec.Output.Height, c.fps, c.total)
 	out := c.spec.Output
@@ -35,12 +44,19 @@ func (c *compiler) subtitles() (*Subtitles, error) {
 				if err != nil {
 					return nil, fmt.Errorf("%w: text item %s: %w", ErrInvalidSpec, it.ID, err)
 				}
-				box, _ := textBox(pl.Zone, pl.Box)
-				anim := it.Animation
-				if anim == "" {
-					anim = pl.Style.Animation
+				// A character the font cannot draw is left out of the text, as the layout never measured it.
+				if bad := pl.Style.Unsupported(it.Text); len(bad) > 0 {
+					it.Text = dropUnsupported(pl.Style, it.Text)
+					if pl, err = timeline.PlaceText(out, it); err != nil {
+						return nil, fmt.Errorf("%w: text item %s: %w", ErrInvalidSpec, it.ID, err)
+					}
 				}
-				b.addText(layerText, timeline.Frame(it.AtMs, c.fps), timeline.Frame(it.AtMs+it.DurationMs, c.fps), pl.Layout, pl.Zone, box, anim)
+				box, ok := pl.Zone.Fit(pl.Box)
+				if !ok {
+					b.warn("text_dropped", "text item %s is left out: its %d x %d px box cannot be put inside the %s safe zone", it.ID, pl.Box.Width(), pl.Box.Height(), out.Format)
+					continue
+				}
+				b.addText(layerText, timeline.Frame(it.AtMs, c.fps), timeline.Frame(it.AtMs+it.DurationMs, c.fps), pl.Layout, pl.Zone, box, it.AnimationOrDefault())
 			}
 		case *timeline.CaptionsTrack:
 			if tr.Enabled {
@@ -51,54 +67,109 @@ func (c *compiler) subtitles() (*Subtitles, error) {
 		}
 	}
 	if c.profile.Watermark {
-		zone, ok := style.ZoneFor(string(out.Format), out.Width, out.Height)
+		zone, ok := out.Zone()
 		if !ok {
 			return nil, fmt.Errorf("%w: unknown format %q", ErrInvalidSpec, out.Format)
 		}
 		st := style.Watermark()
-		lay := style.Measure(st, out.Height, "PREVIEW", style.MaxBoxWidth(zone, out.Width))
+		lay := style.Measure(st, out.ShortSide(), "PREVIEW", style.MaxBoxWidth(zone, out.Width))
 		w, h := lay.Box()
-		box, _ := textBox(zone, style.PlaceWatermark(zone, w, h))
-		b.addText(layerWatermark, 0, c.total, lay, zone, box, style.AnimNone)
+		if box, ok := zone.Fit(style.PlaceWatermark(zone, w, h)); ok {
+			b.addText(layerWatermark, 0, c.total, lay, zone, box, style.AnimNone)
+		}
 	}
+	c.plan.Warnings = b.warnings
 	return b.subtitles(), nil
 }
+
+// dropUnsupported removes the characters the style's font has no glyph for.
+func dropUnsupported(st style.Style, s string) string {
+	return strings.Map(func(r rune) rune {
+		if st.Supports(r) {
+			return r
+		}
+		return -1
+	}, s)
+}
+
+// captionFloor is how small a caption may be shrunk to fit its band: 70 % of the style's size.
+const captionFloor = 0.7
 
 // captions adds the captions of a captions track. Each clip contributes the words of its asset's transcript that it plays,
 // mapped through the time map: a word at source time s of a clip that starts at output time t0 with source in point in and
 // speed v is spoken at t0 + (s - in) / v, and both ends of the word are snapped to frames like every other boundary.
+//
+// A chunk is laid out in the caption style and must fit the caption band (style.CaptionBand: the centre column, three lines).
+// One that does not is split in two and each half tried again; a single word that is still too big is shrunk down to
+// captionFloor of the size, and left out with a warning if even that does not fit. So a caption is never drawn outside the zone.
 func (c *compiler) captions(b *builder, tr *timeline.CaptionsTrack) error {
-	kind := tr.Style
-	st, ok := style.CaptionStyle(kind)
+	st, ok := style.CaptionStyle(tr.Style)
 	if !ok {
-		return fmt.Errorf("%w: captions style %q", ErrInvalidSpec, kind)
+		return fmt.Errorf("%w: captions style %q", ErrInvalidSpec, tr.Style)
 	}
 	out := c.spec.Output
-	zone, ok := style.ZoneFor(string(out.Format), out.Width, out.Height)
+	zone, ok := out.Zone()
 	if !ok {
 		return fmt.Errorf("%w: unknown format %q", ErrInvalidSpec, out.Format)
 	}
 	upper, maxWords := tr.UppercaseOrDefault(), tr.MaxWordsOrDefault()
-	for _, chunk := range chunks(c.mapWords(), maxWords, c.fps) {
-		words := make([]string, len(chunk))
-		for i, w := range chunk {
-			words[i] = w.text
+	band := style.CaptionBand(zone, out.Width, out.ShortSide(), st)
+	var place func(chunk []mappedWord)
+	place = func(chunk []mappedWord) {
+		words := make([]string, 0, len(chunk))
+		kept := make([]capWord, 0, len(chunk))
+		for _, w := range chunk {
+			text := w.text
 			if upper {
-				words[i] = strings.ToUpper(w.text)
+				text = strings.ToUpper(text)
+			}
+			if text = dropUnsupported(st, text); text != "" {
+				words = append(words, text)
+				kept = append(kept, capWord{text: text, startF: w.startF, endF: w.endF})
 			}
 		}
-		text := strings.Join(words, " ")
-		lay := style.Measure(st, out.Height, text, style.MaxBoxWidth(zone, out.Width))
-		w, h := lay.Box()
-		box, _ := textBox(zone, style.PlaceCaption(zone, out.Width, w, h))
-		caps := make([]capWord, len(chunk))
-		for i, w := range chunk {
-			caps[i] = w.capWord
-			caps[i].text = words[i]
+		if len(kept) == 0 {
+			return
 		}
-		b.addCaption(lay, box, caps, text)
+		text := strings.Join(words, " ")
+		if lay, box, ok := fitCaption(st, zone, band, out, text, 1); ok {
+			b.addCaption(lay, box, kept, text)
+			return
+		}
+		if len(chunk) > 1 {
+			place(chunk[:len(chunk)/2])
+			place(chunk[len(chunk)/2:])
+			return
+		}
+		for _, scale := range []float64{0.9, 0.8, captionFloor} {
+			if lay, box, ok := fitCaption(st, zone, band, out, text, scale); ok {
+				b.addCaption(lay, box, kept, text)
+				return
+			}
+		}
+		b.warn("caption_dropped", "the caption %q at %d ms is left out: it does not fit the caption band even at %d %% of the size", text, timeline.FrameStartMs(kept[0].startF, c.fps), int(captionFloor*100))
+	}
+	for _, chunk := range chunks(c.mapWords(), maxWords, c.fps) {
+		place(chunk)
 	}
 	return nil
+}
+
+// fitCaption lays text out in the caption style scaled by scale, and puts it in the zone at the caption position. ok is false
+// when it takes more lines than the band holds or does not fit the zone. A scaled style has its own id (the script needs a Style
+// line for it).
+func fitCaption(st style.Style, zone style.Zone, band style.Rect, out timeline.Output, text string, scale float64) (style.Layout, style.Rect, bool) {
+	if scale != 1 {
+		st.ID = fmt.Sprintf("%s_%d", st.ID, int(scale*100))
+		st.EmPct *= scale
+	}
+	lay := style.Measure(st, out.ShortSide(), text, style.MaxBoxWidth(zone, out.Width))
+	w, h := lay.Box()
+	if h > band.Height() {
+		return lay, style.Rect{}, false
+	}
+	box, ok := zone.Fit(style.PlaceCaption(zone, out.Width, w, h))
+	return lay, box, ok
 }
 
 // mapWords places the transcript words of every clip on the output, in output order. Words are cut to the part of the clip
@@ -111,7 +182,7 @@ func (c *compiler) mapWords() []mappedWord {
 		in, out := cl.item.Source.InMs, cl.item.Source.OutMs
 		speed := cl.item.SpeedOrDefault()
 		t0 := timeline.FrameStartMs(cl.startFrame, c.fps)
-		limit := min(cl.ownedEnd, c.total) // the incoming clip owns a transition, like the time map
+		limit := min(cl.endFrame, c.total) // the clip's own audio plays to its end, also through a transition
 		for _, w := range cl.asset.Transcript {
 			text := cleanWord(w.Text)
 			if text == "" || w.EndMs <= in || w.StartMs >= out {

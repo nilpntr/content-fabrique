@@ -39,6 +39,9 @@ type Plan struct {
 	// by the ass filter that ends the video graph; nil when there is nothing to draw. Execute writes the script and the
 	// fonts it names into the work directory before ffmpeg runs.
 	Subtitles *Subtitles `json:"subtitles,omitempty"`
+	// Warnings lists what was left out because it could not be drawn safely: a text item or a caption whose box did not fit the
+	// safe zone (text_dropped, caption_dropped).
+	Warnings []Warning `json:"warnings,omitempty"`
 }
 
 // Size is a width and height in pixels.

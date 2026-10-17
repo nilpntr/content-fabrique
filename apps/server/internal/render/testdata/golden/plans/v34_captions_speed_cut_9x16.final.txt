@@ -165,7 +165,7 @@ time_map:
 sound_cues:
 []
 
-subtitles: subs.ass in fonts/ (fonts Inter-Bold.ttf, Montserrat-ExtraBold.ttf), 1 text events, 9 caption events, watermark false
+subtitles: subs.ass in fonts/ (fonts Inter-Bold.ttf, Montserrat-ExtraBold.ttf), 1 text events, 11 caption events, watermark false
 
 ass:
   [Script Info]
@@ -178,18 +178,20 @@ ass:
   
   [V4+ Styles]
   Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-  Style: caption_plain,Montserrat ExtraBold,65,&H00FFFFFF,&H00FFFFFF,&H00000000,&H73000000,0,0,0,0,100,100,0,0,1,5,1,5,0,0,0,1
-  Style: label_box,Inter,52,&H00FFFFFF,&H00FFFFFF,&H32000000,&HFF000000,-1,0,0,0,100,100,0,0,3,12,0,5,0,0,0,1
+  Style: caption_plain,Montserrat ExtraBold,132,&H00FFFFFF,&H00FFFFFF,&H00000000,&H73000000,0,0,0,0,100,100,0,0,1,11,3,5,0,0,0,1
+  Style: label_box,Inter,70,&H00FFFFFF,&H00FFFFFF,&H32000000,&HFF000000,-1,0,0,0,100,100,0,0,3,17,0,5,0,0,0,1
   
   [Events]
   Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-  Dialogue: 0,0:00:00.00,0:00:01.18,caption_plain,,0,0,0,,{\an5\pos(539.5,872.5)}SQUAT DEEP AND
-  Dialogue: 1,0:00:00.00,0:00:01.48,label_box,,0,0,0,,{\an5\pos(540,279)\fad(150,150)}Leg day
-  Dialogue: 0,0:00:01.25,0:00:02.45,caption_plain,,0,0,0,,{\an5\pos(540,872.5)}STAY TIGHT DRIVE
-  Dialogue: 0,0:00:02.52,0:00:02.68,caption_plain,,0,0,0,,{\an5\pos(540,872.5)}THROUGH.
-  Dialogue: 0,0:00:02.72,0:00:03.08,caption_plain,,0,0,0,,{\an5\pos(539.5,872.5)}DAY SQUAT.
-  Dialogue: 0,0:00:03.12,0:00:03.72,caption_plain,,0,0,0,,{\an5\pos(539.5,872.5)}DEEP AND STAY
-  Dialogue: 0,0:00:03.75,0:00:04.15,caption_plain,,0,0,0,,{\an5\pos(540,872.5)}TIGHT DRIVE
-  Dialogue: 0,0:00:04.18,0:00:05.22,caption_plain,,0,0,0,,{\an5\pos(539.5,872.5)}DAY SQUAT.
-  Dialogue: 0,0:00:05.35,0:00:07.75,caption_plain,,0,0,0,,{\an5\pos(539.5,872.5)}DEEP AND STAY
-  Dialogue: 0,0:00:07.85,0:00:08.18,caption_plain,,0,0,0,,{\an5\pos(539.5,872.5)}TIGHT
+  Dialogue: 0,0:00:00.00,0:00:01.18,caption_plain,,0,0,0,,{\an5\pos(540,872)}SQUAT DEEP\NAND
+  Dialogue: 1,0:00:00.00,0:00:01.48,label_box,,0,0,0,,{\an5\pos(540,293)\fad(150,150)}Leg day
+  Dialogue: 0,0:00:01.25,0:00:02.45,caption_plain,,0,0,0,,{\an5\pos(539.5,872)}STAY TIGHT\NDRIVE
+  Dialogue: 0,0:00:02.52,0:00:02.72,caption_plain,,0,0,0,,{\an5\pos(540,872)}THROUGH.
+  Dialogue: 0,0:00:02.72,0:00:02.88,caption_plain,,0,0,0,,{\an5\pos(540,872)}DAY
+  Dialogue: 0,0:00:02.92,0:00:02.95,caption_plain,,0,0,0,,{\an5\pos(539.5,872)}YOUR
+  Dialogue: 0,0:00:02.95,0:00:03.08,caption_plain,,0,0,0,,{\an5\pos(540,872)}SQUAT.
+  Dialogue: 0,0:00:03.12,0:00:03.72,caption_plain,,0,0,0,,{\an5\pos(539.5,872)}DEEP AND\NSTAY
+  Dialogue: 0,0:00:03.75,0:00:04.15,caption_plain,,0,0,0,,{\an5\pos(540,872)}TIGHT DRIVE
+  Dialogue: 0,0:00:04.18,0:00:05.22,caption_plain,,0,0,0,,{\an5\pos(539.5,872)}DAY SQUAT.
+  Dialogue: 0,0:00:05.35,0:00:07.75,caption_plain,,0,0,0,,{\an5\pos(539.5,872)}DEEP AND\NSTAY
+  Dialogue: 0,0:00:07.85,0:00:08.18,caption_plain,,0,0,0,,{\an5\pos(539.5,872)}TIGHT
