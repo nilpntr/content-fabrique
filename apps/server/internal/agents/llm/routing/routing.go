@@ -157,6 +157,9 @@ type Entry struct {
 	MaxTokens int
 	// Batch says the stage runs through the Batch API where it can (backfills).
 	Batch bool
+	// MinOutputTokens is the smallest max_tokens a call of the stage may be shortened to when its run's budget cannot pay for a full-size
+	// call; 0 means the client's default (llm.DefaultMinOutputTokens).
+	MinOutputTokens int
 }
 
 // Efforts are the values the Messages API accepts for output_config.effort.
@@ -199,6 +202,16 @@ func (p Profile) Entry(stage string) (Entry, error) {
 			return Entry{}, fmt.Errorf("routing: stage %q of profile %q: max_tokens must be a positive integer", stage, p.Name)
 		}
 		e.MaxTokens = mt
+	}
+	if v := scalar(n, "min_output_tokens"); v != "" {
+		mt, err := strconv.Atoi(v)
+		if err != nil || mt < 1 {
+			return Entry{}, fmt.Errorf("routing: stage %q of profile %q: min_output_tokens must be a positive integer", stage, p.Name)
+		}
+		if e.MaxTokens > 0 && mt > e.MaxTokens {
+			return Entry{}, fmt.Errorf("routing: stage %q of profile %q: min_output_tokens %d is above max_tokens %d", stage, p.Name, mt, e.MaxTokens)
+		}
+		e.MinOutputTokens = mt
 	}
 	return e, nil
 }

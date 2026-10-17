@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -156,5 +157,58 @@ func TestCutOffRecoveryIsResumeSafe(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("%d cut-off messages stored, want 1", n)
+	}
+}
+
+// shortCut answers with a call that stopped at max_tokens after the client had shortened it to fit the run's budget.
+func shortCut(id string) scriptStep {
+	return func(int, llm.Request) (llm.Response, error) {
+		return llm.Response{
+			ID: "msg_x", RequestID: "req_x", Model: "claude-haiku-5-5", StopReason: "max_tokens", Usage: stdUsage, Shortened: true,
+			Content: []llm.Block{toolUse(id, "note", `{"text":"a"}`)},
+		}, nil
+	}
+}
+
+// An answer that stopped at a max_tokens the client had cut to fit the budget stopped at the budget. After the recoveries the run ends at
+// its budget limit: gracefully when the agent's work is usable (OnLimit), and failed with reason budget, not max_tokens, when it is not.
+func TestShortenedCutOffEndsAtTheBudgetNotAtMaxTokens(t *testing.T) {
+	graceful := NewEchoAgent(&memSink{})
+	graceful.Name = "graceful"
+	var limit string
+	graceful.OnLimit = func(_ context.Context, _ RunContext, l string) (json.RawMessage, bool) {
+		limit = l
+		return json.RawMessage(`{"summary":"stopped at the budget, the work is usable","implicit_finish":true}`), true
+	}
+	script := func() *scripted {
+		return newScripted(shortCut("toolu_a"), shortCut("toolu_b"), shortCut("toolu_c"), use(toolUse("toolu_f", "finish", `{"summary":"never"}`)))
+	}
+
+	e := newEnv(t, script(), func(c *envConfig) { c.extra = []Agent{graceful} })
+	run := e.create("graceful", "hello", Budgets{})
+	e.execute(run)
+	r := e.get(run)
+	if r.Status != store.AgentSucceeded || r.FailureReason != nil || limit != LimitDollars {
+		t.Fatalf("graceful agent: run = %s %v, limit %q", r.Status, r.FailureReason, limit)
+	}
+	if out := outputOf(t, r); out["implicit_finish"] != true {
+		t.Errorf("output %v", out)
+	}
+
+	// An agent with no OnLimit: the budget fails the run, as a run that ran out of money always did.
+	e = newEnv(t, script())
+	run = e.create("echo", "hello", Budgets{})
+	e.execute(run)
+	r = e.get(run)
+	if r.Status != store.AgentFailed || r.FailureReason == nil || *r.FailureReason != FailBudget {
+		t.Fatalf("plain agent: run = %s %v, want failed with %q", r.Status, r.FailureReason, FailBudget)
+	}
+
+	// A cut-off that was not shortened is still a max_tokens failure.
+	e = newEnv(t, newScripted(say("max_tokens", toolUse("toolu_a", "note", `{"text":"a"}`)), say("max_tokens", toolUse("toolu_b", "note", `{"text":"a"}`)), say("max_tokens", toolUse("toolu_c", "note", `{"text":"a"}`))))
+	run = e.create("echo", "hello", Budgets{})
+	e.execute(run)
+	if r := e.get(run); r.FailureReason == nil || *r.FailureReason != FailMaxTokens {
+		t.Fatalf("a full-size cut-off: %v", r.FailureReason)
 	}
 }

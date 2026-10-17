@@ -68,3 +68,22 @@ func TestLoadCatalogErrors(t *testing.T) {
 		t.Error("entry without a cloudflare name accepted")
 	}
 }
+
+func TestEntryMinOutputTokens(t *testing.T) {
+	fsys := fstest.MapFS{"p.yaml": {Data: []byte("profile: p\neditor: { model: claude-opus-5-5, max_tokens: 24000, min_output_tokens: 4096 }\nrevision: { model: claude-opus-5-5, max_tokens: 12000 }\nbad: { model: claude-opus-5-5, max_tokens: 1000, min_output_tokens: 2000 }\nzero: { model: claude-opus-5-5, min_output_tokens: 0 }\n")}}
+	p, err := LoadProfile(fsys, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e, err := p.Entry("editor"); err != nil || e.MinOutputTokens != 4096 || e.MaxTokens != 24000 {
+		t.Fatalf("editor = %+v, %v", e, err)
+	}
+	if e, err := p.Entry("revision"); err != nil || e.MinOutputTokens != 0 {
+		t.Fatalf("revision = %+v, %v", e, err)
+	}
+	for _, stage := range []string{"bad", "zero"} {
+		if _, err := p.Entry(stage); err == nil {
+			t.Errorf("stage %s: an invalid min_output_tokens was accepted", stage)
+		}
+	}
+}

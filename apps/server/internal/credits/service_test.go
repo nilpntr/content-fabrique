@@ -428,3 +428,39 @@ func TestCancelIsChargedAfterAVersionAndReleasedBeforeOne(t *testing.T) {
 		t.Fatalf("the version of a charged revision: %v", err)
 	}
 }
+
+// A run that says "nothing to change" but did make a version is charged: the version is in the project. One that made none is released.
+func TestNoEditNeededIsReleasedOnlyWhenNothingWasMade(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	ws := r.workspace("noedit")
+	creditstest.Fund(t, r.st, ws.ID, plans.Creator, 100)
+	project := r.project(ws)
+	end := func(run store.AgentRun) {
+		t.Helper()
+		c, err := r.st.ClaimAgentRun(ctx, ws.ID, run.ID, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.st.EndAgentRun(ctx, ws.ID, run.ID, c.Epoch, store.RunEnd{Status: store.AgentSucceeded, Output: json.RawMessage(`{"summary":"x","no_edit_needed":true}`), Event: json.RawMessage(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	nothing, _, err := r.run(ws, project, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	end(nothing)
+	if ok, _ := r.st.ProjectHasChargedEdit(ctx, ws.ID, project); ok {
+		t.Fatal("a run that made nothing was charged")
+	}
+	made, q, err := r.run(ws, project, false)
+	if err != nil || q.Action != credits.EditFirst { // still the first edit: nothing was charged
+		t.Fatalf("%+v %v", q, err)
+	}
+	r.addVersion(ws, project, 1, &made)
+	end(made)
+	if ok, _ := r.st.ProjectHasChargedEdit(ctx, ws.ID, project); !ok {
+		t.Fatal("a run that made a version was not charged")
+	}
+}

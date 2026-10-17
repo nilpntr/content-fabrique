@@ -1644,3 +1644,44 @@ func TestCreditsMerchantPeriodEndShiftIsNotARenewal(t *testing.T) {
 		t.Fatalf("a reason of 1001 bytes: %v", err)
 	}
 }
+
+// A run that succeeds by saying there was nothing to change made nothing: its credits are released, not charged. A run that succeeds with
+// an edit is charged as always, and so is one whose output says nothing about it.
+func TestCreditsNoEditNeededIsReleased(t *testing.T) {
+	r := newRunRig(t, "noedit", 30)
+	ctx := context.Background()
+	endWith := func(run store.AgentRun, output string) {
+		t.Helper()
+		c, err := r.st.ClaimAgentRun(ctx, r.ws.ID, run.ID, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.st.EndAgentRun(ctx, r.ws.ID, run.ID, c.Epoch, store.RunEnd{Status: store.AgentSucceeded, Output: json.RawMessage(output), Event: json.RawMessage(`{"state":"succeeded"}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	project := ids.ProjectID{UUID: newUUID()}
+	nothing := r.start(2, store.ActionEditRevision, project)
+	endWith(nothing, `{"summary":"The timeline already does that.","timeline_version":null,"no_edit_needed":true}`)
+	if r.held(nothing) || r.charged(nothing) != 0 {
+		t.Fatalf("nothing to change: held %v charged %d", r.held(nothing), r.charged(nothing))
+	}
+	if ok, _ := r.st.ProjectHasChargedEdit(ctx, r.ws.ID, project); ok {
+		t.Fatal("a run that changed nothing is a charged edit")
+	}
+	if got := available(t, r.st, r.ws, time.Now()); got != 30 {
+		t.Fatalf("available = %d, want 30", got)
+	}
+
+	// A normal success is charged.
+	edited := r.start(2, store.ActionEditRevision, project)
+	endWith(edited, `{"summary":"I made it shorter.","timeline_version":3,"no_edit_needed":false}`)
+	if r.charged(edited) != 2 {
+		t.Fatalf("an edit was charged %d, want 2", r.charged(edited))
+	}
+	plain := r.start(2, store.ActionEditRevision, project)
+	endWith(plain, `{"summary":"done"}`)
+	if r.charged(plain) != 2 {
+		t.Fatalf("a success with no marker was charged %d, want 2", r.charged(plain))
+	}
+}

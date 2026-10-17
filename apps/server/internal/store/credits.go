@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -1048,6 +1049,18 @@ func (s *Store) settleRunCredits(ctx context.Context, ws ids.WorkspaceID, run Ag
 	switch run.Status {
 	case AgentSucceeded:
 		charge = true
+		// A run that ended by saying there was nothing to change (the editor's finish with no_edit_needed) made no version: the creator
+		// gets nothing for the credits, so the hold is released, not charged.
+		var out struct {
+			NoEditNeeded bool `json:"no_edit_needed"`
+		}
+		if len(run.Output) > 0 && json.Unmarshal(run.Output, &out) == nil && out.NoEditNeeded {
+			v, err := s.q.AgentRunTimelineVersion(ctx, db.AgentRunTimelineVersionParams{WorkspaceID: ws, AuthorID: ids.Encode(ids.PrefixRun, run.ID)})
+			if err != nil {
+				return err
+			}
+			charge = v > 0
+		}
 	case AgentFailed:
 		charge = false
 	case AgentCancelled:

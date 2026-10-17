@@ -22,7 +22,7 @@ import (
 // withBilledAgent registers an agent named like the editor (the one that costs credits) over the echo agent's definition.
 func withBilledAgent(cfg *envConfig) {
 	a := NewEchoAgent(&memSink{})
-	a.Name = credits.EditorAgent
+	a.Name, a.Stage = credits.EditorAgent, "editor"
 	cfg.extra = append(cfg.extra, a)
 }
 
@@ -179,5 +179,42 @@ func TestARunThatFailsReleasesAndOneThatSucceedsCharges(t *testing.T) {
 	}
 	if avail() != 14 {
 		t.Fatalf("a cancelled revision with no preview left %d, want 14", avail())
+	}
+}
+
+// A revision runs on the profile's `revision` entry (a smaller max_tokens on the production profile), under the agent's own stage; a first
+// edit on the `editor` entry. The routing entry can set the smallest max_tokens a call may be shortened to.
+func TestARevisionRunsOnTheRevisionEntry(t *testing.T) {
+	e := newEnv(t, newScripted(), withBilledAgent)
+	e.svc.Credits = creditstest.Service(t, e.st)
+	creditstest.Fund(t, e.st, e.ws.ID, plans.Creator, 50)
+	project := e.project()
+	ctx := context.Background()
+	start := func() store.AgentRun {
+		t.Helper()
+		input, _ := json.Marshal(Input{Message: "edit"})
+		run, err := e.svc.Start(ctx, StartParams{Agent: credits.EditorAgent, WorkspaceID: e.ws.ID, ProjectID: project.UUID, Input: input, Profile: "v1-start"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return run
+	}
+	first := start()
+	if first.MaxTokens != 24_000 || first.Model != "claude-opus-5-5" || first.BudgetMicros != 960_000 {
+		t.Fatalf("first edit: max_tokens %d, model %s, budget %d", first.MaxTokens, first.Model, first.BudgetMicros)
+	}
+	c, err := e.st.ClaimAgentRun(ctx, e.ws.ID, first.ID, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.EndAgentRun(ctx, e.ws.ID, first.ID, c.Epoch, store.RunEnd{Status: store.AgentSucceeded, Event: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	rev := start()
+	if rev.MaxTokens != 12_000 || rev.Model != "claude-opus-5-5" || rev.BudgetMicros != 320_000 || rev.Stage != first.Stage {
+		t.Fatalf("revision: max_tokens %d, model %s, budget %d, stage %s (first edit's stage %s)", rev.MaxTokens, rev.Model, rev.BudgetMicros, rev.Stage, first.Stage)
+	}
+	if rev.MinOutputTokens != 0 {
+		t.Errorf("min_output_tokens = %d for an entry that does not set one", rev.MinOutputTokens)
 	}
 }

@@ -65,6 +65,9 @@ var (
 	ErrReplyTooLong = errors.New("runtime: the reply is too long")
 )
 
+// RevisionStage is the routing stage that a revision of an editor run resolves its model and limits from (config/routing).
+const RevisionStage = "revision"
+
 // MaxReplyBytes is the longest reply to an ask_user.
 const MaxReplyBytes = 16 * 1024
 
@@ -106,6 +109,14 @@ func (s *Service) Create(ctx context.Context, tx *store.Store, p StartParams) (s
 	if err != nil {
 		return store.AgentRun{}, err
 	}
+	// A revision is cheaper than a first edit, so it runs on the profile's `revision` entry (a smaller max_tokens: its budget is a third of
+	// a first edit's). The run keeps the agent's stage for the ledger and the cassettes; only the model, effort and limits come from the
+	// revision entry. A profile without one keeps the editor's.
+	if quote != nil && quote.Action == credits.EditRevision {
+		if rev, err := s.Router.Resolve(p.Profile, RevisionStage); err == nil {
+			route = rev
+		}
+	}
 	// Asking the factory now fails fast when there is no key for the workspace (a missing key would otherwise show up
 	// in the worker), and says who pays.
 	_, billing, err := s.Factory.For(ctx, p.WorkspaceID, agent.Stage)
@@ -120,7 +131,7 @@ func (s *Service) Create(ctx context.Context, tx *store.Store, p StartParams) (s
 		Agent: agent.Name, Stage: agent.Stage, ParentRunID: p.ParentRunID, ProjectID: p.ProjectID, Input: input,
 		RoutingProfile: route.Profile, Model: route.Model,
 		// Effort is always set explicitly: a stage whose profile says nothing runs at medium.
-		Effort: cmp.Or(route.Effort, "medium"), MaxTokens: route.MaxTokens,
+		Effort: cmp.Or(route.Effort, "medium"), MaxTokens: route.MaxTokens, MinOutputTokens: route.MinOutputTokens,
 		BudgetMicros: budgets.Micros, BudgetTokens: budgets.Tokens, BudgetToolCalls: budgets.ToolCalls,
 		BudgetWallClockMs: budgets.WallClock.Milliseconds(), BilledTo: string(billing), StartedBy: p.StartedBy,
 	})

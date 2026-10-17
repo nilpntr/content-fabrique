@@ -61,6 +61,7 @@ type AgentRun struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	StartedBy         pgtype.UUID
+	MinOutputTokens   int32
 }
 
 type Annotation struct {

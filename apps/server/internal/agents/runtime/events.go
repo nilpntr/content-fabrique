@@ -162,6 +162,9 @@ type assistantPayload struct {
 	RequestID  string       `json:"request_id,omitempty"`
 	Usage      usagePayload `json:"usage"`
 	CostMicros int64        `json:"cost_micros"`
+	// Shortened says the call's max_tokens was cut to what the run's budget could pay for: an answer that stopped at max_tokens stopped
+	// at the budget.
+	Shortened bool `json:"shortened,omitempty"`
 }
 
 // toolCallPayload is a tool_call event: written before the tool runs.
@@ -273,6 +276,8 @@ type convo struct {
 	// cutOffs counts the model answers that stopped at max_tokens: the loop recovers from the first few (see recoverCutOff) and fails the
 	// run for the next one. It is rebuilt from the assistant events, so a resumed run counts the same.
 	cutOffs int
+	// lastCutOffShortened says the newest answer that stopped at max_tokens had its max_tokens shortened to fit the budget.
+	lastCutOffShortened bool
 	// nudges counts the nudge events: how often the agent asked the model to go on after a turn that ended without a tool call.
 	nudges int
 	// inflight is the worst-case cost reserved for a model call that was sent and has no answer on record: the worker died
@@ -347,6 +352,7 @@ func (c *convo) apply(e store.AgentEvent) error {
 		c.turns = append(c.turns, t)
 		if p.StopReason == "max_tokens" {
 			c.cutOffs++
+			c.lastCutOffShortened = p.Shortened
 		}
 	case store.EventToolCall:
 		var p toolCallPayload

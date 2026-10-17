@@ -206,6 +206,10 @@ func budgetLow(l runtime.BudgetLeft, worst int64) bool {
 	return l.Known && (l.ToolCalls <= 7 || l.Wall < 3*time.Minute || (worst > 0 && l.Micros < 2*worst))
 }
 
+// budgetShortNote is the line added to the budget note when the run can no longer pay for a full-size call: the next answer will be cut
+// to what is left, so a long plan or a long thought would be cut off.
+const budgetShortNote = "Your budget is nearly used: keep this turn short and finish soon."
+
 // budgetNote is what the run has left, for the end of a tool's answer ("" when it is not known): the model that sees its limits
 // coming skips the revision and finishes.
 func budgetNote(l runtime.BudgetLeft, worst int64) string {
@@ -219,6 +223,10 @@ func budgetNote(l runtime.BudgetLeft, worst int64) string {
 	s := fmt.Sprintf("\n\nLeft of your budget: %s, %d tool calls and %s.", dollars, max(l.ToolCalls, 0), approxDuration(l.Wall))
 	if budgetLow(l, worst) {
 		s += " That is not much: finish soon, and do not start work you cannot complete."
+	}
+	if worst > 0 && l.Micros < worst {
+		// The metered client cuts the next call's max_tokens to what the budget can pay for, and the answer may stop short.
+		s += " " + budgetShortNote
 	}
 	return s
 }

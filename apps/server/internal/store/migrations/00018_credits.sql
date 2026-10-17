@@ -33,7 +33,12 @@
 --     A hold's expiry follows its run: a heartbeat moves it forward, and a run that waits for its creator keeps it for days.
 --     credits may be 0 (a --no-credits run still has a hold, so that no editor run is ever without one).
 
+-- agent_runs.min_output_tokens: the routing entry's min_output_tokens, resolved with the rest of the entry when the run is created: the
+-- smallest max_tokens a call of the run may be shortened to when the run's budget cannot pay for a full-size call. 0: the client's default.
+
 -- +goose Up
+
+ALTER TABLE agent_runs ADD COLUMN min_output_tokens integer NOT NULL DEFAULT 0 CONSTRAINT agent_runs_min_output_tokens_check CHECK (min_output_tokens >= 0);
 
 CREATE TABLE credit_accounts (
     workspace_id    uuid        PRIMARY KEY REFERENCES workspaces (id) ON DELETE RESTRICT,
@@ -157,6 +162,8 @@ CREATE INDEX credit_holds_expires_idx ON credit_holds (expires_at);
 SELECT cf_grant_app_dml('credit_holds');
 
 -- +goose Down
+
+ALTER TABLE agent_runs DROP COLUMN min_output_tokens;
 
 DROP TABLE credit_holds;
 DROP TABLE credit_ledger;
