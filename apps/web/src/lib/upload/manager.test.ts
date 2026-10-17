@@ -232,6 +232,17 @@ describe("retries", () => {
     expect(snapshot.items[0]).toMatchObject({ status: "failed", error: { code: "part_failed" } });
   });
 
+  test("the grace for a lost connection counts from the part's last progress, not from its first failure", async () => {
+    const { manager, transport, clock } = setup({ options: { networkGraceMs: 60_000, maxPartAttempts: 2 } });
+    transport.progressBeforeFailing = true; // every attempt sends a few bytes before the connection drops
+    transport.script = ({ attempt }) => (attempt < 12 ? new PutError(0, "The connection to object storage failed.") : undefined);
+    await manager.init();
+    await manager.add([fakeFile("a.mp4", 20 * MiB)].slice(0, 1));
+    await until(manager, doneCount(1));
+    // Far more than 60 s of virtual time and more than maxPartAttempts failures passed, but each attempt made progress.
+    expect(clock.sleeps.reduce((a, b) => a + b, 0)).toBeGreaterThan(60_000);
+  });
+
   test("API calls that hit a gateway error are tried again", async () => {
     const { manager, server } = setup();
     server.failNext("create", new ApiError(502, "unknown_error", "bad gateway"));
@@ -434,6 +445,9 @@ describe("resume after a reload", () => {
     await until(second.manager, doneCount(1));
     expect(second.server.get("ast_0002").status).toBe("completed");
     expect(second.transport.puts.map((p) => p.assetId)).toEqual(["ast_0002", "ast_0002"]);
+    // The old upload was aborted on the server before the new one was created, so it does not count towards the cap.
+    expect(second.server.get("ast_0001").status).toBe("aborted");
+    expect(second.server.calls.indexOf("abort:ast_0001")).toBeLessThan(second.server.calls.indexOf("create", 1));
   });
 
   test("a create call whose answer was lost is found again instead of making a second upload", async () => {
@@ -450,7 +464,7 @@ describe("resume after a reload", () => {
     first.manager.dispose();
     first.server.create = real;
     const stored = [...first.store.records.values()][0];
-    expect(stored?.createStarted).toBe(true);
+    expect(stored?.createStartedAt).not.toBeNull();
 
     const second = setup({ server: first.server, store: first.store });
     await second.manager.init();
@@ -466,7 +480,7 @@ describe("resume after a reload", () => {
       id: "x",
       workspace: "user_1:org_OTHER",
       assetId: "ast_9",
-      createStarted: false,
+      createStartedAt: null,
       name: "other.mp4",
       size: 10,
       lastModified: 1,
@@ -489,7 +503,7 @@ describe("resume after a reload", () => {
       id: "h",
       workspace: "user_1:org_1",
       assetId: null,
-      createStarted: false,
+      createStartedAt: null,
       name: "h.mp4",
       size: 20 * MiB,
       lastModified: file.lastModified,
@@ -603,5 +617,127 @@ describe("a store that fails", () => {
     await manager.add([fakeFile("a.mp4", 20 * MiB)]);
     await until(manager, doneCount(1));
     warn.mockRestore();
+  });
+});
+
+const NOW = Date.parse("2026-10-17T11:00:00Z");
+const recordOf = (over: Partial<import("./store").UploadRecord> = {}): import("./store").UploadRecord => ({
+  id: "r1",
+  workspace: "user_1:org_1",
+  assetId: null,
+  createStartedAt: NOW,
+  name: "a.mp4",
+  size: 20 * MiB,
+  lastModified: 1_700_000_000_000,
+  type: "video/mp4",
+  partSize: null,
+  partCount: null,
+  bytesDone: 0,
+  error: null,
+  createdAt: NOW,
+  ...over,
+});
+
+/** Makes an asset on the server the way a create call whose answer was lost would have. */
+async function lostCreate(server: FakeServer, over: { name?: string; size?: number } = {}) {
+  await server.create({ filename: over.name ?? "a.mp4", size_bytes: over.size ?? 20 * MiB, content_type: "video/mp4" });
+}
+
+describe("a create call whose answer was lost", () => {
+  test("an asset made after the call, matching name and size, and the only one, is adopted", async () => {
+    const server = new FakeServer();
+    server.createdAt = "2026-10-17T11:00:05Z";
+    await lostCreate(server);
+    const store = createMemoryStore();
+    await store.put(recordOf());
+    const { manager } = setup({ server, store, clock: virtualClock(NOW) });
+    await manager.init();
+    await manager.add([fakeFile("a.mp4", 20 * MiB)]);
+    await until(manager, doneCount(1));
+    expect(server.assets.size).toBe(1);
+  });
+
+  test("two candidates are ambiguous: a new upload is made, nothing is guessed", async () => {
+    const server = new FakeServer();
+    server.createdAt = "2026-10-17T11:00:05Z";
+    await lostCreate(server);
+    await lostCreate(server);
+    const store = createMemoryStore();
+    await store.put(recordOf());
+    const { manager } = setup({ server, store, clock: virtualClock(NOW) });
+    await manager.init();
+    await manager.add([fakeFile("a.mp4", 20 * MiB)]);
+    await until(manager, doneCount(1));
+    expect(server.assets.size).toBe(3);
+    expect(server.get("ast_0003").status).toBe("completed");
+  });
+
+  test("an asset made before the call was sent is someone else's", async () => {
+    const server = new FakeServer();
+    server.createdAt = "2026-10-17T10:00:00Z"; // an hour before the call
+    await lostCreate(server);
+    const store = createMemoryStore();
+    await store.put(recordOf());
+    const { manager } = setup({ server, store, clock: virtualClock(NOW) });
+    await manager.init();
+    await manager.add([fakeFile("a.mp4", 20 * MiB)]);
+    await until(manager, doneCount(1));
+    expect(server.assets.size).toBe(2);
+    expect(server.get("ast_0001").status).toBe("active");
+  });
+
+  test("no look-up at all after a definite refusal, and the doubt is cleared", async () => {
+    const { manager, server, store } = setup({ options: { maxApiAttempts: 1 } });
+    server.failNext("create", new ApiError(400, "invalid_request", "bad"));
+    await manager.init();
+    await manager.add([fakeFile("a.mp4", 20 * MiB)]);
+    const snapshot = await until(manager, settled);
+    expect(snapshot.items[0]).toMatchObject({ status: "failed", error: { code: "invalid_request" } });
+    expect([...store.records.values()][0]?.createStartedAt).toBeNull();
+    expect(server.count("recent")).toBe(0);
+  });
+
+  test("a look-up that fails does not lead to a second upload", async () => {
+    const server = new FakeServer();
+    server.createdAt = "2026-10-17T11:00:05Z";
+    await lostCreate(server);
+    server.failNext("recent", new ApiError(0, "network_error", "no"));
+    const store = createMemoryStore();
+    await store.put(recordOf());
+    const { manager } = setup({ server, store, clock: virtualClock(NOW) });
+    await manager.init();
+    await manager.add([fakeFile("a.mp4", 20 * MiB)]);
+    await until(manager, doneCount(1));
+    expect(server.assets.size).toBe(1);
+  });
+
+  test("cancelling while the create call is in doubt finds the asset and aborts it", async () => {
+    const first = setup({ clock: virtualClock(NOW) });
+    first.server.createdAt = "2026-10-17T11:00:05Z";
+    const real = first.server.create.bind(first.server);
+    first.server.create = async (request) => {
+      await real(request);
+      return new Promise<never>(() => {}); // the answer never arrives
+    };
+    await first.manager.init();
+    await first.manager.add([fakeFile("a.mp4", 20 * MiB)]);
+    await vi.waitFor(() => expect(first.server.assets.size).toBe(1));
+    first.manager.cancel(first.manager.getSnapshot().items[0]?.id as string);
+    await vi.waitFor(() => expect(first.server.get("ast_0001").status).toBe("aborted"));
+  });
+});
+
+describe("adding a file again", () => {
+  test("the file of a failed upload restarts it instead of being ignored as a duplicate", async () => {
+    const { manager, transport, server } = setup({ options: { maxFiles: 1 } });
+    transport.script = () => new PutError(400, "Object storage answered 400 (EntityTooLarge)", "EntityTooLarge");
+    await manager.init();
+    const file = fakeFile("a.mp4", 20 * MiB);
+    await manager.add([file]);
+    await until(manager, (s) => s.summary.failed === 1);
+    transport.script = undefined;
+    expect(await manager.add([fakeFile("a.mp4", 20 * MiB)])).toMatchObject({ added: 0, resumed: 1, duplicates: 0 });
+    await until(manager, doneCount(1));
+    expect(server.count("create")).toBe(1); // the same upload continued
   });
 });

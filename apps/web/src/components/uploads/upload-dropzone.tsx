@@ -1,7 +1,7 @@
 import { CloudUpload } from "lucide-react";
 import * as React from "react";
 import { filesFromDrop } from "@/lib/upload/files";
-import { useUploads } from "@/lib/upload/provider";
+import { useUploadCommands } from "@/lib/upload/provider";
 import { cn } from "@/lib/utils";
 import { UploadButton } from "./upload-button";
 
@@ -14,7 +14,7 @@ function hasFiles(event: React.DragEvent): boolean {
  * readers; the zone only adds a bigger target and a highlight while files are over it.
  */
 export function UploadDropzone({ className }: { className?: string }) {
-  const { addFiles, available } = useUploads();
+  const { addFiles, available } = useUploadCommands();
   const [over, setOver] = React.useState(false);
   // dragenter/dragleave also fire for the children, so the zone counts them.
   const depth = React.useRef(0);

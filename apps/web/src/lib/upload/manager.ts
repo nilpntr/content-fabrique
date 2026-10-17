@@ -200,6 +200,9 @@ interface Job {
   presigning: Promise<void> | null;
 }
 
+/** The browser's and the server's clocks may differ by this much when the time of a create call is compared with a created_at. */
+const CLOCK_SKEW_MS = 2 * 60_000;
+
 const WARN = (message: string, error: unknown) => console.warn(`[uploads] ${message}`, error);
 
 export class UploadManager {
@@ -258,11 +261,6 @@ export class UploadManager {
     return () => this.eventListeners.delete(listener);
   }
 
-  /** Whether closing the page now would interrupt something. */
-  hasUnfinishedWork(): boolean {
-    return this.items.some((item) => item.status === "queued" || item.status === "starting" || item.status === "uploading" || item.status === "completing");
-  }
-
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
   /** Reads the interrupted uploads of this workspace back from storage. They wait for their files. */
@@ -315,12 +313,13 @@ export class UploadManager {
       const { file, handle } = "file" in entry ? entry : { file: entry, handle: undefined };
       const existing = this.items.find((item) => fileKey(item.rec) === fileKey(file) && item.status !== "done");
       if (existing) {
-        if (existing.file === null) {
-          if (handle !== undefined) {
-            existing.rec.handle = handle;
-            this.persistNow(existing);
-          }
-          this.attach(existing, file);
+        if (existing.file === null || existing.status === "failed") {
+          // The file of an interrupted upload, or of one that failed: it continues (a failed one is tried again).
+          if (handle !== undefined) existing.rec.handle = handle;
+          existing.file = file;
+          if (existing.status === "failed") this.retry(existing.id);
+          else this.attach(existing, file);
+          this.persistNow(existing);
           result.resumed++;
         } else {
           result.duplicates++;
@@ -337,7 +336,7 @@ export class UploadManager {
         id: this.newId(),
         workspace: this.workspace,
         assetId: null,
-        createStarted: false,
+        createStartedAt: null,
         name: file.name,
         size: file.size,
         lastModified: file.lastModified,
@@ -359,8 +358,11 @@ export class UploadManager {
     return result;
   }
 
-  /** Stops an upload and removes it, on the server too (so that it stops counting towards the 25). A finished one is just dismissed. */
-  cancel(id: string): void {
+  /**
+   * Stops an upload and removes it, on the server too (so that it stops counting towards the 25), unless
+   * `abortOnServer` is false because the caller deletes the asset itself. A finished one is just dismissed.
+   */
+  cancel(id: string, { abortOnServer = true }: { abortOnServer?: boolean } = {}): void {
     const item = this.items.find((candidate) => candidate.id === id);
     if (!item) return;
     const wasDone = item.status === "done";
@@ -371,9 +373,12 @@ export class UploadManager {
     this.persistTimers.delete(id);
     void this.store.delete(id).catch((error) => WARN("could not delete a stored upload", error));
     const assetId = item.rec.assetId;
-    if (assetId && !wasDone) {
-      void this.abortOnServer(assetId).then(() => this.emitEvent({ type: "removed", assetId }));
+    if (abortOnServer && !wasDone) {
+      if (assetId) void this.abortOnServer(assetId).then(() => this.emitEvent({ type: "removed", assetId }));
+      // A create call that may have made an asset without our knowing: find it and abort it too.
+      else if (item.rec.createStartedAt !== null) void this.abortCreated(item.rec);
     }
+    if (assetId && !abortOnServer) this.emitEvent({ type: "removed", assetId });
     this.dirty();
     this.pump();
   }
@@ -505,7 +510,7 @@ export class UploadManager {
       } catch (error) {
         if (error instanceof RestartError && item.restarts < this.opts.maxRestarts) {
           item.restarts++;
-          this.forget(item);
+          await this.restart(item);
           continue;
         }
         if (error instanceof RestartError) throw new UploadFailure("upload_gone", "The upload no longer exists on the server. Try again.");
@@ -532,7 +537,7 @@ export class UploadManager {
         return null;
       }
       if (state?.upload.status === "active") return this.jobFromState(item, state, new Map());
-      this.forget(item);
+      await this.restart(item);
     }
     return this.createUpload(item, signal);
   }
@@ -542,12 +547,12 @@ export class UploadManager {
     let since = -1;
     for (let attempt = 0; ; attempt++) {
       throwIfAborted(signal);
-      if (rec.createStarted) {
-        // A create call may have gone through without our hearing back (a reload, a dropped connection): use its asset.
+      if (rec.createStartedAt !== null) {
+        // A create call may have gone through without our hearing back (a reload, a dropped connection, a 5xx): use its asset.
         const adopted = await this.adopt(item, signal);
         if (adopted) return adopted;
       }
-      rec.createStarted = true;
+      rec.createStartedAt ??= this.clock.now();
       await this.store.put(rec).catch((error) => WARN("could not store an upload", error));
       throwIfAborted(signal);
       try {
@@ -562,7 +567,7 @@ export class UploadManager {
         const response = await raceAbort(created, signal);
         const received = this.clock.now();
         rec.assetId = response.asset.id;
-        rec.createStarted = false;
+        rec.createStartedAt = null;
         rec.partSize = response.upload.part_size;
         rec.partCount = response.upload.part_count;
         await this.store.put(rec).catch((error) => WARN("could not store an upload", error));
@@ -570,6 +575,11 @@ export class UploadManager {
         const urls = new Map(response.parts.map((part) => [part.part_number, { url: part.url, expiresAt: received + this.opts.urlTtlMs }]));
         return this.jobFromState(item, { upload: response.upload, completed_parts: [] }, urls);
       } catch (error) {
+        // A definite refusal (429, 4xx) means no asset was made: nothing to look for later.
+        if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
+          rec.createStartedAt = null;
+          await this.store.put(rec).catch((e) => WARN("could not store an upload", e));
+        }
         if (error instanceof ApiError && error.code === "too_many_uploads") {
           // The workspace has its 25 uploads in progress (other devices, leftovers): wait, and let the others wait too.
           const delay = backoffMs(item.createAttempts++, this.clock.random(), 2_000, 30_000);
@@ -587,29 +597,51 @@ export class UploadManager {
     }
   }
 
-  /** Finds the active upload of this file among the newest assets (the create call that made it was lost). */
+  /**
+   * The assets that a create call whose answer was lost may have made: still uploading, this file's name and size, made
+   * after the call was sent (with room for the clocks of the browser and the server to differ), and not another
+   * upload's. Only exactly one candidate is trusted; with none or several a new upload is made instead.
+   */
+  private createdCandidates(rec: UploadRecord, recent: readonly ApiAsset[]): ApiAsset[] {
+    const claimed = new Set(this.items.map((other) => other.rec.assetId));
+    const since = (rec.createStartedAt ?? 0) - CLOCK_SKEW_MS;
+    return recent.filter(
+      (asset) =>
+        asset.status === "uploading" && asset.size_bytes === rec.size && asset.filename === storedName(rec.name) && !claimed.has(asset.id) && Date.parse(asset.created_at) >= since,
+    );
+  }
+
+  /** Finds the active upload of this file after a create call whose answer was lost. A failed look-up is an error, not a reason to create a second upload. */
   private async adopt(item: Item, signal: AbortSignal): Promise<Job | null> {
     const { rec } = item;
-    let recent: ApiAsset[];
-    try {
-      recent = await this.call(item, signal, () => this.api.recent(100, signal));
-    } catch (error) {
-      if (signal.aborted) throw error;
+    const recent = await this.call(item, signal, () => this.api.recent(100, signal));
+    const candidates = this.createdCandidates(rec, recent);
+    const stored = candidates.length === 1 ? candidates[0] : undefined;
+    if (!stored) {
+      rec.createStartedAt = null; // nothing of ours is there (or it is ambiguous): the next create starts clean
       return null;
     }
-    const claimed = new Set(this.items.map((other) => other.rec.assetId));
-    const stored = recent.find((asset) => asset.status === "uploading" && asset.size_bytes === rec.size && asset.filename === storedName(rec.name) && !claimed.has(asset.id));
-    if (!stored) return null;
     rec.assetId = stored.id;
+    rec.createStartedAt = null;
     await this.store.put(rec).catch((error) => WARN("could not store an upload", error));
-    try {
-      const state = await this.call(item, signal, () => this.api.state(stored.id, signal));
-      if (state.upload.status === "active") return this.jobFromState(item, state, new Map());
-    } catch (error) {
-      if (signal.aborted) throw error;
-    }
+    const state = await this.call(item, signal, () => this.api.state(stored.id, signal));
+    if (state.upload.status === "active") return this.jobFromState(item, state, new Map());
     rec.assetId = null;
     return null;
+  }
+
+  /** A cancelled upload whose create call may have made an asset: look for it and abort it. */
+  private async abortCreated(rec: UploadRecord): Promise<void> {
+    try {
+      const found = this.createdCandidates(rec, await this.api.recent(100));
+      const only = found.length === 1 ? found[0] : undefined;
+      if (only) {
+        await this.abortOnServer(only.id);
+        this.emitEvent({ type: "removed", assetId: only.id });
+      }
+    } catch (error) {
+      WARN("could not look for the asset of a cancelled upload", error);
+    }
   }
 
   private jobFromState(item: Item, state: UploadStateResponse, urls: Map<number, { url: string; expiresAt: number }>): Job {
@@ -714,15 +746,20 @@ export class UploadManager {
 
   private async uploadPart(item: Item, job: Job, file: File, n: number, signal: AbortSignal): Promise<void> {
     const { start, end } = partRange(job.size, job.partSize, job.partCount, n);
-    let since = -1; // when this part first failed
+    let lastProgress = this.clock.now(); // the grace for a lost connection counts from the last byte this part sent
     for (let attempt = 0; ; attempt++) {
       throwIfAborted(signal);
       await this.net.waitOnline(signal);
       let failed: PutError | ApiError | null = null;
       try {
-        const target = await this.urlFor(item, job, n, signal);
-        if (target.sizeBytes !== end - start) throw new UploadFailure("bad_plan", "The server's upload plan does not fit this file.");
-        await this.transport.put(target.url, file.slice(start, end), { signal, onProgress: (loaded) => this.progress(item, n, loaded) });
+        const url = await this.urlFor(item, job, n, signal);
+        await this.transport.put(url, file.slice(start, end), {
+          signal,
+          onProgress: (loaded) => {
+            lastProgress = this.clock.now();
+            this.progress(item, n, loaded);
+          },
+        });
         item.inflight.delete(n);
         job.done.add(n);
         item.partsDone = job.done.size;
@@ -748,10 +785,9 @@ export class UploadManager {
           throw error;
         }
       }
-      if (since < 0) since = this.clock.now();
       // No answer at all is waited out (the connection is down, not the part); other failures get maxPartAttempts tries.
       const noAnswer = (failed instanceof PutError || failed instanceof ApiError) && failed.status === 0;
-      const exhausted = noAnswer ? this.clock.now() - since >= this.opts.networkGraceMs : attempt + 1 >= this.opts.maxPartAttempts;
+      const exhausted = noAnswer ? this.clock.now() - lastProgress >= this.opts.networkGraceMs : attempt + 1 >= this.opts.maxPartAttempts;
       if (exhausted) {
         if (failed instanceof PutError && failed.status === 0 && !(await readable(file, start))) {
           throw new UploadFailure("file_unreadable", "The file can no longer be read. Was it moved, deleted or changed?");
@@ -763,12 +799,12 @@ export class UploadManager {
   }
 
   /** The URL for part `n`: the one in hand, or a new batch (this part and the next ones) when it is missing or about to expire. */
-  private async urlFor(item: Item, job: Job, n: number, signal: AbortSignal): Promise<{ url: string; sizeBytes: number }> {
+  private async urlFor(item: Item, job: Job, n: number, signal: AbortSignal): Promise<string> {
     const size = partSizeOf(job.size, job.partSize, job.partCount, n);
     for (;;) {
       throwIfAborted(signal);
       const have = job.urls.get(n);
-      if (have && have.expiresAt - this.clock.now() > this.opts.urlSkewMs) return { url: have.url, sizeBytes: size };
+      if (have && have.expiresAt - this.clock.now() > this.opts.urlSkewMs) return have.url;
       if (job.presigning) {
         // Another part is already asking: its answer may cover this part too.
         await job.presigning.catch(() => {});
@@ -829,10 +865,16 @@ export class UploadManager {
     this.dirty();
   }
 
-  /** The upload on the server is gone: the next try creates a new one. */
+  /** The upload on the server is no use any more: it is aborted there (so that it does not count towards the 25), and the next try creates a new one. */
+  private async restart(item: Item): Promise<void> {
+    const old = item.rec.assetId;
+    this.forget(item);
+    if (old) await this.abortOnServer(old);
+  }
+
   private forget(item: Item): void {
     item.rec.assetId = null;
-    item.rec.createStarted = false;
+    item.rec.createStartedAt = null;
     item.rec.partSize = null;
     item.rec.partCount = null;
     item.rec.bytesDone = 0;

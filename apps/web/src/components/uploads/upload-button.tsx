@@ -2,7 +2,7 @@ import { Upload } from "lucide-react";
 import * as React from "react";
 import { Button, type ButtonProps } from "@/components/ui/button";
 import { ACCEPT, pickWithHandles } from "@/lib/upload/files";
-import { useUploads } from "@/lib/upload/provider";
+import { useUploadCommands } from "@/lib/upload/provider";
 
 /**
  * Opens the file picker and adds the chosen files to the upload queue. Where the browser has the File System Access API
@@ -10,7 +10,7 @@ import { useUploads } from "@/lib/upload/provider";
  * elsewhere a plain file input does the job.
  */
 export function UploadButton({ children = "Upload clips", ...props }: Omit<ButtonProps, "onClick" | "type">) {
-  const { addFiles, available } = useUploads();
+  const { addFiles, available } = useUploadCommands();
   const input = React.useRef<HTMLInputElement>(null);
 
   async function open() {

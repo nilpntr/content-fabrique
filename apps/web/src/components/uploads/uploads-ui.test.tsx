@@ -6,7 +6,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { getRouter } from "@/router";
 import { ME } from "@/test-clerk";
 import type { UploadItem, UploadSnapshot } from "@/lib/upload/manager";
-import { UploadsContext, type UploadsApi } from "@/lib/upload/provider";
+import { type UploadCommands, UploadCommandsContext, UploadStateContext, useUploadSelector } from "@/lib/upload/provider";
 import { ResumePrompt, summaryText, UploadsTray } from "./uploads-tray";
 import { UploadButton } from "./upload-button";
 import { UploadDropzone } from "./upload-dropzone";
@@ -37,7 +37,9 @@ function snapshot(items: UploadItem[]): UploadSnapshot {
   };
 }
 
-function api(items: UploadItem[], over: Partial<UploadsApi> = {}): UploadsApi {
+type Fake = UploadCommands & { snapshot: UploadSnapshot };
+
+function api(items: UploadItem[], over: Partial<UploadCommands> = {}): Fake {
   return {
     snapshot: snapshot(items),
     available: true,
@@ -50,7 +52,11 @@ function api(items: UploadItem[], over: Partial<UploadsApi> = {}): UploadsApi {
   };
 }
 
-const withApi = (value: UploadsApi, children: ReactNode) => <UploadsContext.Provider value={value}>{children}</UploadsContext.Provider>;
+const withApi = (value: Fake, children: ReactNode) => (
+  <UploadCommandsContext.Provider value={value}>
+    <UploadStateContext.Provider value={{ subscribe: () => () => {}, getSnapshot: () => value.snapshot }}>{children}</UploadStateContext.Provider>
+  </UploadCommandsContext.Provider>
+);
 
 afterEach(cleanup);
 
@@ -211,4 +217,38 @@ test("when the API cannot list assets the samples are shown", async () => {
   renderLibrary("/library");
   expect(await screen.findByText("Back double biceps pose")).toBeTruthy();
   expect((await screen.findByRole("note")).textContent).toBe("Sample clips until you upload your own");
+});
+
+test("a component that selects part of the queue renders when that part changes, not on every progress tick", () => {
+  let listener: (() => void) | undefined;
+  let current = snapshot([item({ progress: 0.1, bytesDone: 10 * MiB })]);
+  const store = {
+    subscribe: (l: () => void) => {
+      listener = l;
+      return () => {};
+    },
+    getSnapshot: () => current,
+  };
+  let renders = 0;
+  function Probe() {
+    renders++;
+    const status = useUploadSelector((s) => s.items[0]?.status);
+    return <p>{status}</p>;
+  }
+  render(
+    <UploadCommandsContext.Provider value={api([])}>
+      <UploadStateContext.Provider value={store}>
+        <Probe />
+      </UploadStateContext.Provider>
+    </UploadCommandsContext.Provider>,
+  );
+  const before = renders;
+  for (let i = 2; i < 8; i++) {
+    current = snapshot([item({ progress: i / 10, bytesDone: i * 10 * MiB })]);
+    act(() => listener?.());
+  }
+  expect(renders).toBe(before); // six progress ticks, no render
+  current = snapshot([item({ status: "failed" })]);
+  act(() => listener?.());
+  expect(screen.getByText("failed")).toBeTruthy();
 });

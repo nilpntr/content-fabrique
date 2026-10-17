@@ -29,7 +29,7 @@ export interface PartTransport {
 }
 
 export interface XhrTransportOptions {
-  /** A request is given up (and retried) after this long without any upload progress anywhere. Default 60 s. */
+  /** A request is given up (and retried) after this long without upload progress of its own. Default 60 s. */
   stallMs?: number;
   /** For tests. */
   XHR?: typeof XMLHttpRequest;
@@ -37,13 +37,13 @@ export interface XhrTransportOptions {
 }
 
 /**
- * Stall detection looks at the activity of all requests together, not only the request's own. Over HTTP/1.1 a browser
- * sends six requests per host at a time and keeps the others waiting without a single event, which is not a stall.
+ * Every request watches its own progress: one with no progress event for `stallMs` is aborted and rejected as a
+ * network failure (status 0), whatever the other requests do, so a connection that died silently does not hold a part
+ * for ever. The clock starts when the browser starts sending (`loadstart`), not when the request was handed over.
  */
 export function createXhrTransport(options: XhrTransportOptions = {}): PartTransport {
   const stallMs = options.stallMs ?? 60_000;
   const now = options.now ?? (() => Date.now());
-  let lastActivity = now();
   return {
     put(url, body, { signal, onProgress }) {
       const XHR = options.XHR ?? XMLHttpRequest;
@@ -52,7 +52,6 @@ export function createXhrTransport(options: XhrTransportOptions = {}): PartTrans
         const xhr = new XHR();
         let watchdog: ReturnType<typeof setInterval> | undefined;
         let own = now();
-        lastActivity = own;
         const finish = () => {
           clearInterval(watchdog);
           signal.removeEventListener("abort", onAbort);
@@ -66,8 +65,11 @@ export function createXhrTransport(options: XhrTransportOptions = {}): PartTrans
 
         xhr.open("PUT", url);
         xhr.withCredentials = false;
+        xhr.upload.onloadstart = () => {
+          own = now();
+        };
         xhr.upload.onprogress = (event) => {
-          own = lastActivity = now();
+          own = now();
           onProgress(event.loaded);
         };
         xhr.onload = () => {
@@ -91,7 +93,7 @@ export function createXhrTransport(options: XhrTransportOptions = {}): PartTrans
         };
         watchdog = setInterval(
           () => {
-            if (now() - Math.max(own, lastActivity) > stallMs) {
+            if (now() - own > stallMs) {
               finish();
               reject(new PutError(0, "The upload stalled.")); // before abort(), whose onabort would reject first
               xhr.abort();

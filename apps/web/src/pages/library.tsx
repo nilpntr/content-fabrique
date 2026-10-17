@@ -4,6 +4,7 @@ import { RealLibrary } from "@/components/library/real-library";
 import { ResumePrompt } from "@/components/uploads/uploads-tray";
 import { UploadDropzone } from "@/components/uploads/upload-dropzone";
 import { useAssets } from "@/lib/api/hooks";
+import { useUploadSelector } from "@/lib/upload/provider";
 
 /**
  * The library: the workspace's real assets from the API, with the upload zone above them. Until the workspace has any
@@ -12,7 +13,9 @@ import { useAssets } from "@/lib/api/hooks";
  */
 export function LibraryPage({ state, localSamples }: { state?: DemoState; localSamples?: boolean }) {
   const forceSamples = state !== undefined || Boolean(localSamples);
-  const assets = useAssets({ enabled: !forceSamples });
+  // Assets that this browser is uploading report their own progress: the list does not poll for them.
+  const owned = useUploadSelector((snapshot) => snapshot.items.flatMap((item) => (item.assetId && item.status !== "done" ? [item.assetId] : [])).join(","));
+  const assets = useAssets({ enabled: !forceSamples, isOwned: (id) => owned.split(",").includes(id) });
   const real = !forceSamples && (assets.data?.length ?? 0) > 0;
   const loading = !forceSamples && assets.isPending && assets.fetchStatus !== "idle";
 

@@ -1,12 +1,12 @@
 import { useAuth } from "@clerk/tanstack-react-start";
 import { useQueryClient } from "@tanstack/react-query";
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { notify } from "@/components/ui/toast";
 import { useApiClient } from "@/lib/api/provider";
 import { ASSETS_QUERY_KEY, ME_QUERY_KEY, isPlanRequired } from "@/lib/query-client";
 import { createUploadApi } from "./api";
 import type { PickedFile } from "./files";
-import { type AddResult, type UploadSnapshot, UploadManager } from "./manager";
+import { type AddResult, UploadManager, type UploadSnapshot } from "./manager";
 import { createUploadStore } from "./store";
 import { createXhrTransport } from "./transport";
 
@@ -16,27 +16,47 @@ const EMPTY: UploadSnapshot = {
   ready: false,
 };
 
-export interface UploadsApi {
-  snapshot: UploadSnapshot;
+/** The commands of the upload queue. The object is stable for the life of a manager: it does not change as progress comes in. */
+export interface UploadCommands {
   /** False outside a signed-in workspace: there is nothing to upload to. */
   available: boolean;
   /** Adds files to the queue and tells the user about those that were left out. */
   addFiles(files: readonly (File | PickedFile)[]): Promise<AddResult | null>;
-  cancel(id: string): void;
+  /** `abortOnServer: false` when the caller deletes the asset itself. */
+  cancel(id: string, options?: { abortOnServer?: boolean }): void;
   retry(id: string): void;
   retryAllFailed(): void;
   clearDone(): void;
 }
 
-/** Exported for tests, which render the tray and the buttons over a hand-made {@link UploadsApi}. */
-export const UploadsContext = createContext<UploadsApi | null>(null);
+/** What the queue looks like, as an external store: read it with {@link useUploadSelector}, or {@link useUploadSnapshot} for all of it. */
+export interface UploadStateStore {
+  subscribe(listener: () => void): () => void;
+  getSnapshot(): UploadSnapshot;
+}
+
+const NO_COMMANDS: UploadCommands = { available: false, addFiles: async () => null, cancel: () => {}, retry: () => {}, retryAllFailed: () => {}, clearDone: () => {} };
+const EMPTY_STORE: UploadStateStore = { subscribe: () => () => {}, getSnapshot: () => EMPTY };
+
+/**
+ * Two contexts, so that something that only adds files or cancels does not render again on every progress tick (and a
+ * grid of clips renders when a percent changes, not 6 times a second). Exported for tests.
+ */
+export const UploadCommandsContext = createContext<UploadCommands | null>(null);
+export const UploadStateContext = createContext<UploadStateStore | null>(null);
 
 function describeLeftOut(result: AddResult): { title: string; description: string } | null {
   if (result.rejected.length === 0) return null;
   const first = result.rejected[0];
   return {
     title: result.rejected.length === 1 ? `“${first?.name}” was not added` : `${result.rejected.length} files were not added`,
-    description: result.rejected.length === 1 ? (first?.reason ?? "") : result.rejected.slice(0, 3).map((r) => `${r.name}: ${r.reason}`).join(" "),
+    description:
+      result.rejected.length === 1
+        ? (first?.reason ?? "")
+        : result.rejected
+            .slice(0, 3)
+            .map((r) => `${r.name}: ${r.reason}`)
+            .join(" "),
   };
 }
 
@@ -79,14 +99,19 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     };
   }, [workspace, getClient, queryClient]);
 
-  const subscribe = useCallback((listener: () => void) => (manager ? manager.subscribe(listener) : () => {}), [manager]);
-  const getSnapshot = useCallback(() => manager?.getSnapshot() ?? EMPTY, [manager]);
-  const snapshot = useSyncExternalStore(subscribe, getSnapshot, () => EMPTY);
+  const state = useMemo<UploadStateStore>(() => (manager ? { subscribe: manager.subscribe, getSnapshot: manager.getSnapshot } : EMPTY_STORE), [manager]);
 
   // Leaving the page now would interrupt an upload (it could be resumed, but only after the files are picked again).
-  const busy = snapshot.summary.active + snapshot.summary.queued > 0;
-  const busyRef = useRef(busy);
-  busyRef.current = busy;
+  const busyRef = useRef(false);
+  useEffect(() => {
+    if (!manager) return;
+    const update = () => {
+      const { summary } = manager.getSnapshot();
+      busyRef.current = summary.active + summary.queued > 0;
+    };
+    update();
+    return manager.subscribe(update);
+  }, [manager]);
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
       if (!busyRef.current) return;
@@ -97,29 +122,60 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, []);
 
-  const api = useMemo<UploadsApi>(
-    () => ({
-      snapshot,
-      available: manager !== null,
-      async addFiles(files) {
-        if (!manager) return null;
-        const result = await manager.add(files);
-        const leftOut = describeLeftOut(result);
-        if (leftOut) notify(leftOut.title, { description: leftOut.description, type: "error" });
-        return result;
-      },
-      cancel: (id) => manager?.cancel(id),
-      retry: (id) => manager?.retry(id),
-      retryAllFailed: () => manager?.retryAllFailed(),
-      clearDone: () => manager?.clearDone(),
-    }),
-    [manager, snapshot],
+  const commands = useMemo<UploadCommands>(
+    () =>
+      manager
+        ? {
+            available: true,
+            async addFiles(files) {
+              const result = await manager.add(files);
+              const leftOut = describeLeftOut(result);
+              if (leftOut) notify(leftOut.title, { description: leftOut.description, type: "error" });
+              return result;
+            },
+            cancel: (id, options) => manager.cancel(id, options),
+            retry: (id) => manager.retry(id),
+            retryAllFailed: () => manager.retryAllFailed(),
+            clearDone: () => manager.clearDone(),
+          }
+        : NO_COMMANDS,
+    [manager],
   );
-  return <UploadsContext.Provider value={api}>{children}</UploadsContext.Provider>;
+  return (
+    <UploadCommandsContext.Provider value={commands}>
+      <UploadStateContext.Provider value={state}>{children}</UploadStateContext.Provider>
+    </UploadCommandsContext.Provider>
+  );
 }
 
-export function useUploads(): UploadsApi {
-  const api = useContext(UploadsContext);
-  if (!api) throw new Error("useUploads needs an <UploadProvider> above it (the root route has one).");
-  return api;
+/** The stable commands (add, cancel, retry...). Does not cause a render when progress changes. */
+export function useUploadCommands(): UploadCommands {
+  const commands = useContext(UploadCommandsContext);
+  if (!commands) throw new Error("useUploadCommands needs an <UploadProvider> above it (the root route has one).");
+  return commands;
+}
+
+/**
+ * A part of the queue's state. The component renders again only when the selected value changes, as `isEqual` sees it
+ * (`Object.is` by default), not on every progress tick.
+ */
+export function useUploadSelector<T>(select: (snapshot: UploadSnapshot) => T, isEqual: (a: T, b: T) => boolean = Object.is): T {
+  const store = useContext(UploadStateContext);
+  if (!store) throw new Error("useUploadSelector needs an <UploadProvider> above it (the root route has one).");
+  const cache = useRef<{ snapshot: UploadSnapshot; value: T } | null>(null);
+  const read = () => {
+    const snapshot = store.getSnapshot();
+    const last = cache.current;
+    if (last && last.snapshot === snapshot) return last.value;
+    const value = select(snapshot);
+    const kept = last && isEqual(last.value, value) ? last.value : value;
+    cache.current = { snapshot, value: kept };
+    return kept;
+  };
+  return useSyncExternalStore(store.subscribe, read, read);
+}
+
+/** The whole queue; renders on every change. For the tray, which shows every file. */
+export function useUploadSnapshot(): UploadSnapshot {
+  return useUploadSelector((snapshot) => snapshot);
 }

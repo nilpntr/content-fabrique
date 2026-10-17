@@ -11,7 +11,7 @@ class FakeXhr {
   status = 0;
   responseText = "";
   headers: Record<string, string> = {};
-  upload: { onprogress: ((event: { loaded: number }) => void) | null } = { onprogress: null };
+  upload: { onprogress: ((event: { loaded: number }) => void) | null; onloadstart: (() => void) | null } = { onprogress: null, onloadstart: null };
   onload: (() => void) | null = null;
   onerror: (() => void) | null = null;
   ontimeout: (() => void) | null = null;
@@ -95,20 +95,37 @@ describe("the XHR transport", () => {
     expect(FakeXhr.last.aborted).toBe(true);
   });
 
-  test("progress anywhere keeps the others from counting as stalled (a browser queues requests per host)", async () => {
+  test("each request is judged by its own progress: traffic on another request does not save a stalled one", async () => {
     vi.useFakeTimers();
     const transport = createXhrTransport({ XHR, stallMs: 1000, now: () => Date.now() });
-    const queued = transport.put("queued", blob, { signal: new AbortController().signal, onProgress: () => {} });
-    const queuedXhr = FakeXhr.last;
+    const stalled = transport.put("stalled", blob, { signal: new AbortController().signal, onProgress: () => {} });
+    const caught = stalled.catch((e) => e);
+    const stalledXhr = FakeXhr.last;
     const sending = transport.put("sending", blob, { signal: new AbortController().signal, onProgress: () => {} });
     const sendingXhr = FakeXhr.last;
     for (let i = 0; i < 6; i++) {
       await vi.advanceTimersByTimeAsync(500);
       sendingXhr.upload.onprogress?.({ loaded: i });
     }
-    expect(queuedXhr.aborted).toBe(false);
-    queuedXhr.answer(200);
+    expect(await caught).toMatchObject({ status: 0, message: "The upload stalled." });
+    expect(stalledXhr.aborted).toBe(true);
+    expect(sendingXhr.aborted).toBe(false);
     sendingXhr.answer(200);
-    await Promise.all([queued, sending]);
+    await sending;
+  });
+
+  test("a request that keeps making progress is never given up, however slow", async () => {
+    vi.useFakeTimers();
+    const transport = createXhrTransport({ XHR, stallMs: 1000, now: () => Date.now() });
+    const done = transport.put("slow", blob, { signal: new AbortController().signal, onProgress: () => {} });
+    const xhr = FakeXhr.last;
+    xhr.upload.onloadstart?.();
+    for (let i = 0; i < 10; i++) {
+      await vi.advanceTimersByTimeAsync(800);
+      xhr.upload.onprogress?.({ loaded: i });
+    }
+    expect(xhr.aborted).toBe(false);
+    xhr.answer(200);
+    await done;
   });
 });

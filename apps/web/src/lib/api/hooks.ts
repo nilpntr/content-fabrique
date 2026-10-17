@@ -1,5 +1,6 @@
 import { useAuth } from "@clerk/tanstack-react-start";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRef } from "react";
 import { type ApiAsset, type ApiClient, ApiError, deleteAsset, fetchAssets, fetchLibrarySummary, fetchMe, fetchWorkspacePlan } from "@/lib/api/client";
 import { useApiClient } from "@/lib/api/provider";
 import { ASSETS_QUERY_KEY, LIBRARY_SUMMARY_QUERY_KEY, ME_QUERY_KEY, PLAN_QUERY_KEY } from "@/lib/query-client";
@@ -42,18 +43,40 @@ export function useLibrarySummary() {
   return useWorkspaceQuery(LIBRARY_SUMMARY_QUERY_KEY, fetchLibrarySummary);
 }
 
-/** Assets that the server is still working on: the list is fetched again every few seconds while there are any. */
-const BUSY_STATUSES: ReadonlySet<string> = new Set(["uploading", "uploaded", "processing"]);
-const POLL_MS = 4_000;
+/**
+ * The list is fetched again while the server works on assets that this browser is not telling about itself: `uploaded`
+ * (ingest queued) and `processing`. An asset that this browser is uploading is skipped (the upload manager reports its
+ * progress and tells the list when it starts and finishes), and so is an `uploading` one of another device. The interval
+ * starts at 3 s and doubles, up to 30 s, for as long as a poll finds nothing new.
+ */
+const POLLED_STATUSES: ReadonlySet<string> = new Set(["uploaded", "processing"]);
+const POLL_MIN_MS = 3_000;
+const POLL_MAX_MS = 30_000;
+
+/** The assets worth polling for, as a string that changes when one of them does. */
+export function pollSignature(assets: readonly ApiAsset[], isOwned: (id: string) => boolean): string {
+  return assets
+    .filter((asset) => POLLED_STATUSES.has(asset.status) && !isOwned(asset.id))
+    .map((asset) => `${asset.id}:${asset.status}:${asset.updated_at}`)
+    .join(",");
+}
+
+/** How long to wait before the next poll: `unchanged` is how many polls in a row found nothing new. */
+export function pollDelay(unchanged: number): number {
+  return Math.min(POLL_MAX_MS, POLL_MIN_MS * 2 ** Math.min(unchanged, 10));
+}
 
 /**
  * The workspace's assets from GET /v1/assets, newest first, all pages fetched on demand (`fetchNextPage`). Each page's
- * `items` is read defensively: an answer that is not a page counts as no assets. While any asset is uploading or
- * processing the list refreshes itself, so a clip turns `ready` without a reload.
+ * `items` is read defensively: an answer that is not a page counts as no assets. A clip that is being processed turns
+ * `ready` without a reload (see {@link pollDelay}).
  */
-export function useAssets({ enabled = true }: { enabled?: boolean } = {}) {
+export function useAssets({ enabled = true, isOwned = () => false }: { enabled?: boolean; isOwned?: (id: string) => boolean } = {}) {
   const { isLoaded, isSignedIn, userId, orgId } = useAuth();
   const getClient = useApiClient();
+  const owned = useRef(isOwned);
+  owned.current = isOwned;
+  const polls = useRef({ signature: "", unchanged: 0 });
   return useInfiniteQuery({
     queryKey: [ASSETS_QUERY_KEY, userId, orgId],
     queryFn: ({ pageParam, signal }) => fetchAssets(getClient(), pageParam, signal),
@@ -62,7 +85,16 @@ export function useAssets({ enabled = true }: { enabled?: boolean } = {}) {
     select: (data): ApiAsset[] => data.pages.flatMap((page) => (Array.isArray(page.items) ? page.items : [])),
     enabled: enabled && isLoaded && Boolean(isSignedIn) && Boolean(orgId),
     retry: retryUnlessClientError,
-    refetchInterval: (query) => (query.state.data?.pages.some((page) => Array.isArray(page.items) && page.items.some((asset) => BUSY_STATUSES.has(asset.status))) ? POLL_MS : false),
+    refetchInterval: (query) => {
+      const items = (query.state.data?.pages ?? []).flatMap((page) => (Array.isArray(page.items) ? page.items : []));
+      const signature = pollSignature(items, owned.current);
+      if (signature === "") {
+        polls.current = { signature: "", unchanged: 0 };
+        return false;
+      }
+      polls.current = { signature, unchanged: signature === polls.current.signature ? polls.current.unchanged + 1 : 0 };
+      return pollDelay(polls.current.unchanged);
+    },
   });
 }
 

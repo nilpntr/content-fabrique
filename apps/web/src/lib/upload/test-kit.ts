@@ -59,6 +59,8 @@ interface ServerAsset {
 export class FakeServer implements UploadApi {
   partSize = 16 * MiB;
   maxActive = 25;
+  /** The created_at of the assets made from now on. */
+  createdAt = "2026-10-17T10:00:00Z";
   assets = new Map<string, ServerAsset>();
   /** Every call, "method:detail". */
   calls: string[] = [];
@@ -117,8 +119,8 @@ export class FakeServer implements UploadApi {
       description: "",
       tags: [],
       failure_reason: null,
-      created_at: "2026-10-17T10:00:00Z",
-      updated_at: "2026-10-17T10:00:00Z",
+      created_at: this.createdAt,
+      updated_at: this.createdAt,
     };
     const entry: ServerAsset = { asset, uploadId: `upl_${this.seq}`, status: "active", partSize: this.partSize, partCount, parts: new Map() };
     this.assets.set(id, entry);
@@ -199,6 +201,8 @@ export class FakeTransport implements PartTransport {
   script?: PutScript;
   /** Holds a PUT until released (or aborted). */
   hold?: (context: { assetId: string; part: number }) => Promise<void> | undefined;
+  /** A failing PUT first reports some bytes sent (a connection that dropped part way). */
+  progressBeforeFailing = false;
   private attempts = new Map<string, number>();
   private etag = 0;
 
@@ -216,6 +220,9 @@ export class FakeTransport implements PartTransport {
     this.maxInflight = Math.max(this.maxInflight, this.inflight);
     try {
       if (signal.aborted) throw signal.reason;
+      const scripted = await this.script?.({ url, assetId, part, size: body.size, attempt });
+      if (scripted && this.progressBeforeFailing) onProgress(Math.floor(body.size / 3));
+      if (scripted) throw scripted;
       onProgress(Math.floor(body.size / 2));
       const wait = this.hold?.({ assetId, part });
       if (wait) {
@@ -226,8 +233,6 @@ export class FakeTransport implements PartTransport {
       }
       await Promise.resolve();
       if (signal.aborted) throw signal.reason;
-      const scripted = await this.script?.({ url, assetId, part, size: body.size, attempt });
-      if (scripted) throw scripted;
       if (!this.server.validUrls.has(url)) throw new PutError(403, "Object storage answered 403 (AccessDenied)", "AccessDenied");
       const entry = this.server.get(assetId);
       const expected = partSizeOf(entry.asset.size_bytes, entry.partSize, entry.partCount, part);

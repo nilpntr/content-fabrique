@@ -12,8 +12,8 @@ export interface UploadRecord {
   workspace: string;
   /** The server's asset id, once the upload was created. */
   assetId: string | null;
-  /** Whether a create call may have reached the server without us hearing back: look for its asset before creating again. */
-  createStarted: boolean;
+  /** When a create call was sent that may have reached the server without us hearing back (a lost answer, a 5xx); null when none is in doubt. A definite refusal clears it. */
+  createStartedAt: number | null;
   name: string;
   size: number;
   lastModified: number;

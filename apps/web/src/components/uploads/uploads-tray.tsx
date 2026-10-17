@@ -3,7 +3,7 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { formatBytes, formatEta, formatRate } from "@/lib/upload/format";
 import type { UploadItem, UploadSummary } from "@/lib/upload/manager";
-import { useUploads } from "@/lib/upload/provider";
+import { useUploadCommands, useUploadSelector, useUploadSnapshot } from "@/lib/upload/provider";
 import { cn } from "@/lib/utils";
 import { UploadButton } from "./upload-button";
 
@@ -51,8 +51,7 @@ export function summaryText(summary: UploadSummary): string {
 
 /** Asks for the files of the uploads that a reload interrupted. */
 export function ResumePrompt({ className }: { className?: string }) {
-  const { snapshot } = useUploads();
-  const count = snapshot.summary.needsFile;
+  const count = useUploadSelector((snapshot) => snapshot.summary.needsFile);
   if (count === 0) return null;
   return (
     <div role="alert" data-slot="resume-prompt" className={cn("flex flex-wrap items-center justify-between gap-3 rounded-xl bg-brand-wash px-3 py-2.5 text-[13px]", className)}>
@@ -112,7 +111,8 @@ function Row({ item, onCancel, onRetry }: { item: UploadItem; onCancel: () => vo
  * not every percent.
  */
 export function UploadsTray() {
-  const { snapshot, cancel, retry, retryAllFailed, clearDone } = useUploads();
+  const snapshot = useUploadSnapshot();
+  const { cancel, retry, retryAllFailed, clearDone } = useUploadCommands();
   const [open, setOpen] = React.useState(true);
   const listId = React.useId();
   const { items, summary } = snapshot;

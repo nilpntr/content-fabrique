@@ -1,8 +1,8 @@
 import type { components } from "@cf/schemas/api";
-import { type ApiClient, ApiError, unwrap } from "@/lib/api/client";
+import { type ApiAsset, type ApiClient, ApiError, unwrap } from "@/lib/api/client";
 
 type S = components["schemas"];
-export type ApiAsset = S["Asset"];
+export type { ApiAsset };
 export type CreateAssetRequest = S["CreateAssetRequest"];
 export type CreateAssetResponse = S["CreateAssetResponse"];
 export type PartUrl = S["PartUrl"];
