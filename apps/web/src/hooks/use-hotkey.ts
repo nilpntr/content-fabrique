@@ -16,15 +16,19 @@ export interface HotkeyOptions {
   shift?: boolean;
   /** Fire while a text field has focus. Defaults to `mod`: bare keys are typing, shortcuts such as Cmd+K are not. */
   allowWhileTyping?: boolean;
+  /** Return true to leave the key alone: no handler, and no preventDefault (a button keeps its Space). Runs before both. */
+  skip?: (event: KeyboardEvent) => boolean;
 }
 
 export function useHotkey(
   key: string,
   handler: (event: KeyboardEvent) => void,
-  { mod = false, shift = false, allowWhileTyping = mod }: HotkeyOptions = {},
+  { mod = false, shift = false, allowWhileTyping = mod, skip }: HotkeyOptions = {},
 ) {
   const latest = useRef(handler);
   latest.current = handler;
+  const skipRef = useRef(skip);
+  skipRef.current = skip;
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -32,6 +36,7 @@ export function useHotkey(
       const withMod = event.metaKey || event.ctrlKey;
       if (mod !== withMod || shift !== event.shiftKey || event.altKey) return;
       if (!allowWhileTyping && typing(event.target)) return;
+      if (skipRef.current?.(event)) return;
       event.preventDefault();
       latest.current(event);
     };
