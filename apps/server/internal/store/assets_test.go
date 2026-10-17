@@ -41,7 +41,7 @@ func assetsSuite(t *testing.T, st *store.Store, suffix string) {
 			ID: id, Kind: store.AssetKindVideo, Filename: name + ".mp4", ContentType: "video/mp4", SizeBytes: 40 << 20,
 			Title: name, R2Key: "ws/" + w.ID.String() + "/assets/" + id.String() + "/original", CreatedBy: user,
 			R2UploadID: "r2-" + id.String(), PartSize: 16 << 20, PartCount: 3, ExpiresAt: expires,
-		})
+		}, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -86,7 +86,7 @@ func assetsSuite(t *testing.T, st *store.Store, suffix string) {
 		} {
 			in := base
 			mutate(&in)
-			if _, _, err := st.CreateAssetWithUpload(ctx, wa.ID, in); !errors.Is(err, store.ErrInvalid) {
+			if _, _, err := st.CreateAssetWithUpload(ctx, wa.ID, in, 0); !errors.Is(err, store.ErrInvalid) {
 				t.Errorf("%s: err = %v, want ErrInvalid", name, err)
 			}
 		}
@@ -127,25 +127,25 @@ func assetsSuite(t *testing.T, st *store.Store, suffix string) {
 		if _, _, err := st.CreateAssetWithUpload(ctx, wb.ID, store.NewAsset{
 			ID: a.ID, Kind: store.AssetKindVideo, Filename: "x.mp4", ContentType: "video/mp4", SizeBytes: 1, Title: "x",
 			R2Key: "other", CreatedBy: ub, R2UploadID: "r", PartSize: 1, PartCount: 1, ExpiresAt: future,
-		}); err == nil {
+		}, 0); err == nil {
 			t.Error("B created an asset with A's id")
 		}
 	})
 
-	t.Run("the deletion job reads only deleted assets of its own workspace", func(t *testing.T) {
+	t.Run("the deletion job reads only deleted or failed assets of its own workspace", func(t *testing.T) {
 		a, _ := newAsset(wa, ua, "to-delete", future)
-		if _, err := st.GetDeletedAsset(ctx, wa.ID, a.ID); !errors.Is(err, store.ErrNotFound) {
+		if _, err := st.GetAssetForObjectDeletion(ctx, wa.ID, a.ID); !errors.Is(err, store.ErrNotFound) {
 			t.Errorf("a live asset was returned to the deletion job: %v", err)
 		}
 		if _, err := st.SoftDeleteAsset(ctx, wa.ID, a.ID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := st.GetDeletedAsset(ctx, wb.ID, a.ID); !errors.Is(err, store.ErrNotFound) {
+		if _, err := st.GetAssetForObjectDeletion(ctx, wb.ID, a.ID); !errors.Is(err, store.ErrNotFound) {
 			t.Errorf("workspace B read A's deleted asset: %v", err)
 		}
-		got, err := st.GetDeletedAsset(ctx, wa.ID, a.ID)
+		got, err := st.GetAssetForObjectDeletion(ctx, wa.ID, a.ID)
 		if err != nil || got.R2Key == "" {
-			t.Errorf("GetDeletedAsset = %+v, %v", got, err)
+			t.Errorf("GetAssetForObjectDeletion = %+v, %v", got, err)
 		}
 		if _, err := st.GetAsset(ctx, wa.ID, a.ID); !errors.Is(err, store.ErrNotFound) {
 			t.Errorf("GetAsset of a deleted asset: %v, want ErrNotFound", err)
@@ -348,9 +348,95 @@ func assetsSuite(t *testing.T, st *store.Store, suffix string) {
 		_, _, err := st.CreateAssetWithUpload(ctx, ids.WorkspaceID{UUID: uuid.New()}, store.NewAsset{
 			ID: id, Kind: store.AssetKindImage, Filename: "x.png", ContentType: "image/png", SizeBytes: 1, Title: "x",
 			R2Key: "nope/" + id.String(), CreatedBy: ua, R2UploadID: "r", PartSize: 1, PartCount: 1, ExpiresAt: future,
-		})
+		}, 0)
 		if !errors.Is(err, store.ErrNotFound) {
 			t.Errorf("asset in a workspace that does not exist: %v, want ErrNotFound", err)
 		}
+	})
+
+	t.Run("a failed upload's objects may be deleted, a live one's may not", func(t *testing.T) {
+		w, u := newWorkspace("objdel")
+		a, _ := newAsset(w, u, "live", future)
+		if _, err := st.GetAssetForObjectDeletion(ctx, w.ID, a.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("an uploading asset: %v, want ErrNotFound", err)
+		}
+		if _, err := st.AbortUpload(ctx, w.ID, a.ID, store.FailureUploadExpired, false); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := st.GetAssetForObjectDeletion(ctx, w.ID, a.ID); err != nil || got.Status != store.AssetFailed {
+			t.Errorf("a failed asset: %+v, %v", got, err)
+		}
+		done, _ := newAsset(w, u, "done", future)
+		if _, err := st.CompleteUpload(ctx, w.ID, done.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.GetAssetForObjectDeletion(ctx, w.ID, done.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("an uploaded asset: %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("hidden assets are found only by the any-state lookup", func(t *testing.T) {
+		w, u := newWorkspace("anystate")
+		other, _ := newWorkspace("anystate-other")
+		a, _ := newAsset(w, u, "hidden", future)
+		if _, err := st.AbortUpload(ctx, w.ID, a.ID, store.FailureUploadAborted, true); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := st.GetAssetUpload(ctx, w.ID, a.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("GetAssetUpload of a hidden asset: %v", err)
+		}
+		got, up, err := st.GetAssetUploadAnyState(ctx, w.ID, a.ID)
+		if err != nil || got.DeletedAt == nil || up.AbortedAt == nil {
+			t.Errorf("GetAssetUploadAnyState = %+v %+v %v", got, up, err)
+		}
+		if _, _, err := st.GetAssetUploadAnyState(ctx, other.ID, a.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("another workspace read a hidden asset: %v", err)
+		}
+	})
+
+	t.Run("the cap on uploads in progress holds under concurrent creates", func(t *testing.T) {
+		const limit = 25
+		w, u := newWorkspace("cap")
+		for i := range limit - 1 {
+			newAsset(w, u, "pre"+string(rune('a'+i)), future)
+		}
+		create := func() error {
+			id, err := st.NewAssetID(ctx)
+			if err != nil {
+				return err
+			}
+			_, _, err = st.CreateAssetWithUpload(ctx, w.ID, store.NewAsset{
+				ID: id, Kind: store.AssetKindVideo, Filename: "c.mp4", ContentType: "video/mp4", SizeBytes: 1, Title: "c",
+				R2Key: "cap/" + id.String(), CreatedBy: u, R2UploadID: "r", PartSize: 1, PartCount: 1, ExpiresAt: future,
+			}, limit)
+			return err
+		}
+		const racers = 10
+		errs := make(chan error, racers)
+		start := make(chan struct{})
+		for range racers {
+			go func() { <-start; errs <- create() }()
+		}
+		close(start)
+		ok, refused := 0, 0
+		for range racers {
+			switch err := <-errs; {
+			case err == nil:
+				ok++
+			case errors.Is(err, store.ErrTooManyUploads):
+				refused++
+			default:
+				t.Errorf("unexpected error: %v", err)
+			}
+		}
+		if ok != 1 || refused != racers-1 {
+			t.Errorf("%d created and %d refused with 24 in progress and a cap of 25, want 1 and %d", ok, refused, racers-1)
+		}
+		if n, _ := st.CountActiveUploads(ctx, w.ID); n != limit {
+			t.Errorf("uploads in progress = %d, want %d", n, limit)
+		}
+		// Another workspace is not held up by this one's cap.
+		other, ou := newWorkspace("cap-other")
+		newAsset(other, ou, "free", future)
 	})
 }

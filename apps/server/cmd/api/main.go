@@ -41,7 +41,7 @@ func main() {
 			// starts and the assets operations answer 503 storage_not_configured.
 			var assetsSvc *assets.Service
 			if cfg.ObjectStorageConfigured() {
-				objects, err := storage.New(storage.FromConfig(cfg))
+				objects, err := storage.New(cfg.Storage())
 				if err != nil {
 					return err
 				}

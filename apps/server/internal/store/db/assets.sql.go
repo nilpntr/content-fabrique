@@ -9,7 +9,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 )
@@ -164,19 +163,57 @@ func (q *Queries) GetAsset(ctx context.Context, arg GetAssetParams) (Asset, erro
 	return i, err
 }
 
-const getDeletedAsset = `-- name: GetDeletedAsset :one
+const getAssetAnyState = `-- name: GetAssetAnyState :one
 SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at FROM assets
-WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NOT NULL
+WHERE workspace_id = $1 AND id = $2
 `
 
-type GetDeletedAssetParams struct {
+type GetAssetAnyStateParams struct {
 	WorkspaceID ids.WorkspaceID
 	ID          ids.AssetID
 }
 
-// The asset a deletion job is about: it must be deleted already, so a job can never remove the objects of a live asset.
-func (q *Queries) GetDeletedAsset(ctx context.Context, arg GetDeletedAssetParams) (Asset, error) {
-	row := q.db.QueryRow(ctx, getDeletedAsset, arg.WorkspaceID, arg.ID)
+// The asset whatever its state, deleted ones included. For a request that lost a race with an abort or a delete and has
+// to say so (409) instead of "no such asset" (404).
+func (q *Queries) GetAssetAnyState(ctx context.Context, arg GetAssetAnyStateParams) (Asset, error) {
+	row := q.db.QueryRow(ctx, getAssetAnyState, arg.WorkspaceID, arg.ID)
+	var i Asset
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Kind,
+		&i.Status,
+		&i.Filename,
+		&i.ContentType,
+		&i.SizeBytes,
+		&i.Sha256,
+		&i.Title,
+		&i.Description,
+		&i.Tags,
+		&i.R2Key,
+		&i.FailureReason,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const getAssetForObjectDeletion = `-- name: GetAssetForObjectDeletion :one
+SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at FROM assets
+WHERE workspace_id = $1 AND id = $2 AND (deleted_at IS NOT NULL OR status = 'failed')
+`
+
+type GetAssetForObjectDeletionParams struct {
+	WorkspaceID ids.WorkspaceID
+	ID          ids.AssetID
+}
+
+// The asset an object deletion job is about: it must be deleted, or failed (a failed asset has no object that anyone
+// may use: an expired, aborted or wrong-sized upload), so a job can never remove the objects of a live asset.
+func (q *Queries) GetAssetForObjectDeletion(ctx context.Context, arg GetAssetForObjectDeletionParams) (Asset, error) {
+	row := q.db.QueryRow(ctx, getAssetForObjectDeletion, arg.WorkspaceID, arg.ID)
 	var i Asset
 	err := row.Scan(
 		&i.ID,
@@ -335,6 +372,23 @@ func (q *Queries) ListExpiredUploads(ctx context.Context, arg ListExpiredUploads
 	return items, nil
 }
 
+const lockWorkspaceUploads = `-- name: LockWorkspaceUploads :exec
+
+SELECT pg_advisory_xact_lock(hashtextextended('asset-uploads:' || $1::text, 0))
+`
+
+// Assets and their multipart uploads (P1-01). EVERY query below filters by workspace_id: a row of another workspace is
+// never returned or changed (the repository turns "no rows" into ErrNotFound, so it is a 404 and not a 403). The two
+// exceptions, marked SYSTEM, are for the clean-up job, which works across workspaces and then acts per row with the
+// row's own workspace_id.
+// Serialises the creators of uploads in one workspace until the end of the transaction, so counting the uploads in
+// progress and inserting a new one cannot interleave with another creator (the cap is exact). A transaction-level lock
+// works behind a transaction pooler.
+func (q *Queries) LockWorkspaceUploads(ctx context.Context, workspaceID string) error {
+	_, err := q.db.Exec(ctx, lockWorkspaceUploads, workspaceID)
+	return err
+}
+
 const markAssetFailed = `-- name: MarkAssetFailed :one
 UPDATE assets
 SET status = 'failed',
@@ -480,24 +534,6 @@ func (q *Queries) MarkUploadCompleted(ctx context.Context, arg MarkUploadComplet
 		&i.UpdatedAt,
 	)
 	return i, err
-}
-
-const newAssetID = `-- name: NewAssetID :one
-
-SELECT uuidv7()::uuid AS id
-`
-
-// Assets and their multipart uploads (P1-01). EVERY query below filters by workspace_id: a row of another workspace is
-// never returned or changed (the repository turns "no rows" into ErrNotFound, so it is a 404 and not a 403). The two
-// exceptions, marked SYSTEM, are for the clean-up job, which works across workspaces and then acts per row with the
-// row's own workspace_id.
-// The next asset id, so the object key (which contains it) is known before anything is written. The database makes the id,
-// as for every table (uuidv7()).
-func (q *Queries) NewAssetID(ctx context.Context) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, newAssetID)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
 }
 
 const softDeleteAsset = `-- name: SoftDeleteAsset :one

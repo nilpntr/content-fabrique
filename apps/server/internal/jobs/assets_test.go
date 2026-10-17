@@ -3,6 +3,7 @@ package jobs_test
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -56,7 +57,7 @@ func (e *assetsEnv) newAsset(t *testing.T, w store.Workspace, name string, expir
 	a, u, err := e.api.CreateAssetWithUpload(ctx, w.ID, store.NewAsset{
 		ID: id, Kind: store.AssetKindVideo, Filename: name + ".mp4", ContentType: "video/mp4", SizeBytes: 100, Title: name, R2Key: key,
 		CreatedBy: e.user, R2UploadID: r2Upload, PartSize: 16 << 20, PartCount: 1, ExpiresAt: expires,
-	})
+	}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,8 +252,9 @@ func mustUploadID(t *testing.T, e *assetsEnv, id ids.AssetID) string {
 	return r2
 }
 
-// Without object storage the jobs that need it fail (and are retried) instead of pretending to succeed.
-func TestAssetJobsWithoutObjectStorageFail(t *testing.T) {
+// Without object storage the jobs that need it snooze: they neither pretend to succeed nor burn attempts (a deletion job
+// that ran out of attempts for a missing setting would leave the objects behind for good).
+func TestAssetJobsWithoutObjectStorageSnooze(t *testing.T) {
 	e := newAssetsEnv(t)
 	ctx := context.Background()
 	w := e.newWorkspace(t, "org_nostorage")
@@ -266,12 +268,68 @@ func TestAssetJobsWithoutObjectStorageFail(t *testing.T) {
 	if _, err := client.Insert(ctx, jobs.UploadsExpireArgs{}, nil); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "the expire job to fail its first attempt", func() bool {
-		var n int
-		err := e.super.QueryRow(ctx, `SELECT count(*) FROM river_job WHERE kind = 'uploads_expire' AND attempt >= 1 AND state <> 'completed' AND cardinality(errors) >= 1`).Scan(&n)
-		return err == nil && n == 1
-	})
-	if got, _, _ := e.api.GetAssetUpload(ctx, w.ID, a.ID); got.Status != store.AssetUploading {
+	// A deleted asset's object deletion is waiting too.
+	if _, err := e.api.SoftDeleteAsset(ctx, w.ID, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Insert(ctx, jobs.AssetObjectDeleteArgs{WorkspaceID: w.ID, AssetID: a.ID}, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"uploads_expire", "asset_object_delete"} {
+		eventually(t, "the "+kind+" job to be snoozed", func() bool {
+			var n int
+			err := e.super.QueryRow(ctx, `SELECT count(*) FROM river_job WHERE kind = $1 AND state = 'scheduled' AND scheduled_at > now() + interval '4 minutes' AND COALESCE(cardinality(errors), 0) = 0 AND attempt = 0`, kind).Scan(&n)
+			return err == nil && n == 1
+		})
+	}
+	if got, _, _ := e.api.GetAssetUploadAnyState(ctx, w.ID, a.ID); got.Status != store.AssetUploading {
 		t.Errorf("the asset changed although storage was unavailable: %+v", got)
+	}
+}
+
+// An upload whose multipart upload was completed in storage while the database never heard of it (the request died between
+// the two) leaves an object behind. The clean-up marks the upload expired and the object is deleted.
+func TestUploadsExpireJobDeletesAnOrphanedObject(t *testing.T) {
+	e := newAssetsEnv(t)
+	ctx := context.Background()
+	w := e.newWorkspace(t, "org_orphan")
+	a, up := e.newAsset(t, w, "orphan", time.Now().Add(-time.Hour))
+	// One part, completed in storage only.
+	url, err := e.objs.PresignPart(ctx, a.R2Key, up.R2UploadID, 1, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodPut, url, strings.NewReader("data"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT part: %v %v", resp, err)
+	}
+	_ = resp.Body.Close()
+	parts, err := e.objs.ListParts(ctx, a.R2Key, up.R2UploadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.objs.Complete(ctx, a.R2Key, up.R2UploadID, parts); err != nil {
+		t.Fatal(err)
+	}
+	if !e.exists(t, a.R2Key) {
+		t.Fatal("the object is not there")
+	}
+	e.startWorker(t, jobs.WorkerOptions{Objects: e.objs})
+	client, err := jobs.NewInsertClient(e.api.Pool(), quiet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Insert(ctx, jobs.UploadsExpireArgs{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the orphaned object to be deleted", func() bool { return !e.exists(t, a.R2Key) })
+	got, upload, err := e.api.GetAssetUpload(ctx, w.ID, a.ID)
+	if err != nil || got.Status != store.AssetFailed || upload.AbortedAt == nil {
+		t.Errorf("asset after the clean-up: %+v %+v %v", got, upload, err)
+	}
+	var out string
+	if err := e.super.QueryRow(ctx, `SELECT (metadata->'output')::text FROM river_job WHERE kind = 'uploads_expire'`).Scan(&out); err != nil || !strings.Contains(out, `"orphans": 1`) {
+		t.Errorf("output = %s, %v, want 1 orphan", out, err)
 	}
 }

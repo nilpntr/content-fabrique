@@ -4,15 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/clerk/clerk-sdk-go/v2/jwks"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -669,7 +673,23 @@ func TestAssetsCompleteChecksTheParts(t *testing.T) {
 // objectsWrap lets a test change what the service sees of object storage.
 type objectsWrap struct {
 	assets.Objects
-	head func(context.Context, string, assets.Objects) (storage.ObjectInfo, error)
+	head     func(context.Context, string, assets.Objects) (storage.ObjectInfo, error)
+	complete func(ctx context.Context, key, uploadID string, parts []storage.Part, inner assets.Objects) error
+	presign  func(ctx context.Context, key, uploadID string, n int, size int64, inner assets.Objects) (string, error)
+}
+
+func (w objectsWrap) Complete(ctx context.Context, key, uploadID string, parts []storage.Part) error {
+	if w.complete != nil {
+		return w.complete(ctx, key, uploadID, parts, w.Objects)
+	}
+	return w.Objects.Complete(ctx, key, uploadID, parts)
+}
+
+func (w objectsWrap) PresignPart(ctx context.Context, key, uploadID string, n int, size int64) (string, error) {
+	if w.presign != nil {
+		return w.presign(ctx, key, uploadID, n, size, w.Objects)
+	}
+	return w.Objects.PresignPart(ctx, key, uploadID, n, size)
 }
 
 func (w objectsWrap) Head(ctx context.Context, key string) (storage.ObjectInfo, error) {
@@ -881,5 +901,135 @@ func TestAssetsListPaginates(t *testing.T) {
 	e.call(http.MethodGet, "/v1/assets", "ada", nil, http.StatusOK, &all)
 	if len(all.Items) != 5 || all.NextCursor != nil {
 		t.Errorf("default page: %d items, cursor %v", len(all.Items), all.NextCursor)
+	}
+}
+
+// ---- Races ----------------------------------------------------------------------------------------------------------
+
+// A completion that wins in object storage but loses in the database, to an abort that landed in between (the expiry job,
+// the client's own abort or a delete), says the upload is not in progress any more (409, not 404) and leaves no object.
+func TestAssetsCompleteLosesARace(t *testing.T) {
+	for name, lose := range map[string]func(t *testing.T, e *assetsEnv, ws ids.WorkspaceID, id ids.AssetID){
+		"the expiry job": func(t *testing.T, e *assetsEnv, ws ids.WorkspaceID, id ids.AssetID) {
+			if _, err := e.st.AbortUpload(context.Background(), ws, id, store.FailureUploadExpired, false); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"an abort": func(t *testing.T, e *assetsEnv, ws ids.WorkspaceID, id ids.AssetID) {
+			if _, err := e.st.AbortUpload(context.Background(), ws, id, store.FailureUploadAborted, true); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"a delete": func(t *testing.T, e *assetsEnv, ws ids.WorkspaceID, id ids.AssetID) {
+			ctx := context.Background()
+			if _, err := e.st.AbortUpload(ctx, ws, id, store.FailureUploadAborted, true); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := e.st.SoftDeleteAsset(ctx, ws, id); err != nil && !errors.Is(err, store.ErrNotFound) {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var e *assetsEnv
+			var onComplete func(key string)
+			e = newAssetsEnv(t, func(o *assetsEnvOptions) {
+				o.wrapObjects = func(inner assets.Objects) assets.Objects {
+					return objectsWrap{Objects: inner, complete: func(ctx context.Context, key, uploadID string, parts []storage.Part, in assets.Objects) error {
+						if err := in.Complete(ctx, key, uploadID, parts); err != nil {
+							return err
+						}
+						onComplete(key) // the other request commits now, after storage finished and before this one's transaction
+						return nil
+					}}
+				}
+			})
+			c := e.create("ada", "race.mp4", 16*mib+9)
+			parts := e.uploadAll("ada", c)
+			aid, _ := ids.ParseAssetID(c.Asset.Id)
+			onComplete = func(string) { lose(t, e, e.ws["ada"], aid) }
+
+			e.fail(http.MethodPost, "/v1/assets/"+c.Asset.Id+"/complete", "ada", api.CompleteAssetRequest{Parts: parts}, http.StatusConflict, api.ErrorCodeUploadNotActive)
+			if _, err := e.objs.Head(context.Background(), storage.OriginalKey(e.ws["ada"], aid)); !errors.Is(err, storage.ErrNotFound) {
+				t.Errorf("the object of the lost completion is still there: %v", err)
+			}
+			if n := e.jobCount("asset_ingest", c.Asset.Id); n != 0 {
+				t.Errorf("a lost completion enqueued %d ingest jobs", n)
+			}
+		})
+	}
+}
+
+// If the part URLs of a new upload cannot be made, the upload is taken back: no multipart upload lingers in storage and
+// nothing counts against the cap.
+func TestAssetsCreateCleansUpWhenPresigningFails(t *testing.T) {
+	var fail atomic.Bool
+	e := newAssetsEnv(t, func(o *assetsEnvOptions) {
+		o.wrapObjects = func(inner assets.Objects) assets.Objects {
+			return objectsWrap{Objects: inner, presign: func(ctx context.Context, key, uploadID string, n int, size int64, in assets.Objects) (string, error) {
+				if fail.Load() {
+					return "", errors.New("signing failed")
+				}
+				return in.PresignPart(ctx, key, uploadID, n, size)
+			}}
+		}
+	})
+	fail.Store(true)
+	body := api.CreateAssetRequest{Filename: "x.mp4", SizeBytes: 100, ContentType: "video/mp4"}
+	e.fail(http.MethodPost, "/v1/assets", "ada", body, http.StatusInternalServerError, api.ErrorCodeInternalError)
+
+	var r2upload, key, status string
+	if err := e.pool.QueryRow(context.Background(), `SELECT u.r2_upload_id, a.r2_key, a.status FROM uploads u JOIN assets a ON a.id = u.asset_id`).Scan(&r2upload, &key, &status); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.objs.ListParts(context.Background(), key, r2upload); !errors.Is(err, storage.ErrNoSuchUpload) {
+		t.Errorf("the multipart upload still exists in storage: %v", err)
+	}
+	if n, _ := e.st.CountActiveUploads(context.Background(), e.ws["ada"]); n != 0 || status != "failed" {
+		t.Errorf("active uploads = %d, asset status %s, want 0 and failed", n, status)
+	}
+	var list api.ListAssetsResponse
+	e.call(http.MethodGet, "/v1/assets", "ada", nil, http.StatusOK, &list)
+	if len(list.Items) != 0 {
+		t.Errorf("the failed create is listed: %+v", list.Items)
+	}
+	fail.Store(false)
+	e.create("ada", "works-now.mp4", 100)
+}
+
+// Ten creates at once with 24 uploads in progress and a cap of 25: exactly one gets in.
+func TestAssetsCapHoldsUnderConcurrentCreates(t *testing.T) {
+	e := newAssetsEnv(t)
+	for i := range assets.MaxActiveUploads - 1 {
+		e.create("ada", fmt.Sprintf("u%d.mp4", i), 10)
+	}
+	const racers = 10
+	codes := make(chan int, racers)
+	start := make(chan struct{})
+	body := api.CreateAssetRequest{Filename: "race.mp4", SizeBytes: 10, ContentType: "video/mp4"}
+	for range racers {
+		go func() {
+			<-start
+			codes <- e.do(http.MethodPost, "/v1/assets", "ada", body).Code
+		}()
+	}
+	close(start)
+	got := map[int]int{}
+	for range racers {
+		got[<-codes]++
+	}
+	if got[http.StatusCreated] != 1 || got[http.StatusTooManyRequests] != racers-1 {
+		t.Errorf("answers = %v, want one 201 and %d 429", got, racers-1)
+	}
+	if n, _ := e.st.CountActiveUploads(context.Background(), e.ws["ada"]); n != assets.MaxActiveUploads {
+		t.Errorf("uploads in progress = %d, want %d", n, assets.MaxActiveUploads)
+	}
+	// The multipart uploads of the refused creates were aborted: storage holds one per upload in progress.
+	out, err := storagetest.S3(e.cfg).ListMultipartUploads(context.Background(), &s3.ListMultipartUploadsInput{Bucket: aws.String(e.cfg.Bucket)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Uploads) != assets.MaxActiveUploads {
+		t.Errorf("multipart uploads in storage = %d, want %d", len(out.Uploads), assets.MaxActiveUploads)
 	}
 }

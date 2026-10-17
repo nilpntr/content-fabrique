@@ -11,7 +11,7 @@ import (
 )
 
 func TestPartPlan(t *testing.T) {
-	for _, size := range []int64{1, 1 << 20, DefaultPartSize - 1, DefaultPartSize, DefaultPartSize + 1, 3 << 30, MaxFileSize, MaxFileSize * 9, 1 << 40} {
+	for _, size := range []int64{1, 1 << 20, DefaultPartSize - 1, DefaultPartSize, DefaultPartSize + 1, 3 << 30, MaxFileSize} {
 		ps, n := PartPlan(size)
 		if ps < MinPartSize || ps > storage.MaxPartSize {
 			t.Errorf("size %d: part size %d is outside [%d, %d]", size, ps, MinPartSize, storage.MaxPartSize)
@@ -37,10 +37,6 @@ func TestPartPlan(t *testing.T) {
 	}
 	if ps, n := PartPlan(MaxFileSize); ps != 16<<20 || n != 1280 {
 		t.Errorf("20 GiB = %d parts of %d, want 1280 of 16 MiB", n, ps)
-	}
-	// Only a file no one may upload (beyond 160 GiB) makes the parts bigger.
-	if ps, _ := PartPlan(200 << 30); ps <= DefaultPartSize {
-		t.Errorf("200 GiB kept the default part size")
 	}
 }
 

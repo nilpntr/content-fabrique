@@ -44,14 +44,14 @@ func run(args []string) error {
 			// Object storage for the jobs that remove objects. Without the R2_* settings those jobs fail and are retried.
 			var objects jobs.ObjectStore
 			if cfg.ObjectStorageConfigured() {
-				client, err := storage.New(storage.FromConfig(cfg))
+				client, err := storage.New(cfg.Storage())
 				if err != nil {
 					return nil, err
 				}
 				objects = client
 				health.AddCheck(httpapi.Check{Name: "object-storage", Fn: client.Ready})
 			} else {
-				logger.Warn("R2_* is not set: jobs that delete objects will fail until it is")
+				logger.Warn("R2_* is not set: the jobs that delete objects or clean up uploads wait (snoozed, no attempt used) until a worker has it")
 			}
 			w, err := jobs.StartWorker(ctx, jobs.WorkerOptions{
 				DirectURL:  cfg.DatabaseDirectURL,

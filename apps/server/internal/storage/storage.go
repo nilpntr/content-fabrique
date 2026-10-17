@@ -24,7 +24,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
 
-	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 )
 
@@ -33,7 +32,6 @@ const PartURLExpiry = 15 * time.Minute
 
 // Limits of S3 multipart uploads (R2 has the same): parts of 5 MiB to 5 GiB (the last may be smaller), up to 10,000 parts.
 const (
-	MinPartSize = 5 << 20
 	MaxPartSize = 5 << 30
 	MaxParts    = 10000
 )
@@ -63,12 +61,8 @@ type Config struct {
 	Jurisdiction string
 }
 
-// FromConfig takes the storage settings of the service configuration.
-func FromConfig(c config.Config) Config {
-	return Config{Endpoint: c.R2Endpoint, Bucket: c.R2Bucket, AccessKeyID: c.R2AccessKeyID, SecretAccessKey: c.R2SecretAccessKey, Jurisdiction: c.R2Jurisdiction}
-}
-
-// Configured reports whether every setting a client needs is present (the jurisdiction may be empty).
+// Configured reports whether every setting a client needs is present (the jurisdiction may be empty). It is the one
+// definition of "object storage is configured": config.Config.ObjectStorageConfigured asks it.
 func (c Config) Configured() bool {
 	return c.Endpoint != "" && c.Bucket != "" && c.AccessKeyID != "" && c.SecretAccessKey != ""
 }
@@ -112,6 +106,24 @@ func New(cfg Config) (*Client, error) {
 		ResponseChecksumValidation: aws.ResponseChecksumValidationWhenRequired,
 	})
 	return &Client{s3: client, presign: s3.NewPresignClient(client), bucket: cfg.Bucket}, nil
+}
+
+// ParseAssetPrefix reads a prefix of the exact form AssetPrefix builds, ws/{workspace}/assets/{asset}/, with a valid
+// workspace and asset id, and nothing else: a workspace-level prefix, an empty asset segment or an extra segment is not one.
+func ParseAssetPrefix(prefix string) (ids.WorkspaceID, ids.AssetID, bool) {
+	parts := strings.Split(prefix, "/")
+	if len(parts) != 5 || parts[0] != "ws" || parts[2] != "assets" || parts[4] != "" {
+		return ids.WorkspaceID{}, ids.AssetID{}, false
+	}
+	ws, err := ids.ParseWorkspaceID(parts[1])
+	if err != nil {
+		return ids.WorkspaceID{}, ids.AssetID{}, false
+	}
+	asset, err := ids.ParseAssetID(parts[3])
+	if err != nil {
+		return ids.WorkspaceID{}, ids.AssetID{}, false
+	}
+	return ws, asset, true
 }
 
 // AssetPrefix is the prefix of every object of one asset: ws/{workspace}/assets/{asset}/.
@@ -239,11 +251,12 @@ func (c *Client) Head(ctx context.Context, key string) (ObjectInfo, error) {
 	return ObjectInfo{Size: aws.ToInt64(out.ContentLength), ETag: aws.ToString(out.ETag), ContentType: aws.ToString(out.ContentType)}, nil
 }
 
-// DeletePrefix deletes every object whose key starts with prefix and returns how many it deleted. The prefix must end in
-// "/" and be longer than one path segment, so a bug can never empty a whole bucket or a whole workspace by accident.
+// DeletePrefix deletes every object of one asset and returns how many it deleted. The prefix must be exactly
+// ws/{workspace}/assets/{asset}/ with valid ids (ParseAssetPrefix), so a bug can never empty a bucket, a workspace or a
+// path that merely starts like one.
 func (c *Client) DeletePrefix(ctx context.Context, prefix string) (int, error) {
-	if !strings.HasSuffix(prefix, "/") || strings.Count(prefix, "/") < 3 {
-		return 0, fmt.Errorf("delete prefix: %q is too broad", prefix)
+	if _, _, ok := ParseAssetPrefix(prefix); !ok {
+		return 0, fmt.Errorf("delete prefix: %q is not the prefix of one asset", prefix)
 	}
 	deleted := 0
 	pager := s3.NewListObjectsV2Paginator(c.s3, &s3.ListObjectsV2Input{Bucket: aws.String(c.bucket), Prefix: aws.String(prefix)})

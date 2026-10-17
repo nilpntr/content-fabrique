@@ -54,6 +54,7 @@ func invalid(msg string) *Error {
 var (
 	errNotFound       = &Error{Status: 404, Code: api.ErrorCodeNotFound, Message: "no such asset"}
 	errNotActive      = &Error{Status: 409, Code: api.ErrorCodeUploadNotActive, Message: "this upload is not in progress any more"}
+	errTooMany        = &Error{Status: 429, Code: api.ErrorCodeTooManyUploads, Message: "too many uploads are in progress; finish or abort one first"}
 	errExpired        = &Error{Status: 409, Code: api.ErrorCodeUploadExpired, Message: "this upload expired; start a new one"}
 	errStorageDown    = &Error{Status: 503, Code: api.ErrorCodeStorageUnavailable, Message: "object storage did not answer; try again"}
 	errQueueMigration = &Error{Status: 503, Code: api.ErrorCodeQueueNotMigrated, Message: "the job queue is not ready; try again later"}
@@ -67,6 +68,7 @@ type Objects interface {
 	Complete(ctx context.Context, key, uploadID string, parts []storage.Part) error
 	Abort(ctx context.Context, key, uploadID string) error
 	Head(ctx context.Context, key string) (storage.ObjectInfo, error)
+	DeletePrefix(ctx context.Context, prefix string) (int, error)
 }
 
 // Enqueuer inserts a job in the transaction behind tx. *jobs.Enqueuer is the real one.
@@ -129,8 +131,8 @@ func (s *Service) Create(ctx context.Context, who Actor, req api.CreateAssetRequ
 	if err != nil {
 		return Created{}, s.internal(ctx, "count active uploads", err)
 	}
-	if active >= MaxActiveUploads {
-		return Created{}, &Error{Status: 429, Code: api.ErrorCodeTooManyUploads, Message: "too many uploads are in progress; finish or abort one first"}
+	if active >= MaxActiveUploads { // the quick no; the exact check is in CreateAssetWithUpload
+		return Created{}, errTooMany
 	}
 
 	assetID, err := s.store.NewAssetID(ctx)
@@ -143,17 +145,17 @@ func (s *Service) Create(ctx context.Context, who Actor, req api.CreateAssetRequ
 		return Created{}, s.storageErr(ctx, "create multipart upload", err)
 	}
 	partSize, partCount := PartPlan(sp.Size)
+	// The count and the insert happen under the workspace's upload lock, so the cap is exact however many creates race.
 	asset, upload, err := s.store.CreateAssetWithUpload(ctx, who.Workspace, store.NewAsset{
 		ID: assetID, Kind: sp.Kind, Filename: sp.Filename, ContentType: sp.ContentType, SizeBytes: sp.Size,
 		SHA256: sp.SHA256, Title: sp.Title, R2Key: key, CreatedBy: who.User,
 		R2UploadID: r2UploadID, PartSize: partSize, PartCount: partCount, ExpiresAt: s.now().Add(UploadTTL),
-	})
+	}, MaxActiveUploads)
 	if err != nil {
 		// Nothing was stored: discard the multipart upload, best effort (the bucket's lifecycle rule is the backstop).
-		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		defer cancel()
-		if aerr := s.objects.Abort(cctx, key, r2UploadID); aerr != nil {
-			s.logger.WarnContext(ctx, "could not abort the multipart upload of an asset that was not stored", "error", aerr)
+		s.discardMultipart(ctx, key, r2UploadID)
+		if errors.Is(err, store.ErrTooManyUploads) {
+			return Created{}, errTooMany
 		}
 		return Created{}, s.internal(ctx, "store asset", err)
 	}
@@ -164,9 +166,26 @@ func (s *Service) Create(ctx context.Context, who Actor, req api.CreateAssetRequ
 	}
 	urls, expires, err := s.presign(ctx, asset, upload, numbers)
 	if err != nil {
+		// The client gets no asset id with this error, so nothing could resume the upload: take it back, so it neither
+		// lingers for 24 hours nor counts against the cap.
+		s.discardMultipart(ctx, key, r2UploadID)
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		if _, aerr := s.abortRows(cctx, who.Workspace, asset.ID, store.FailureUploadAborted, true); aerr != nil {
+			s.logger.ErrorContext(ctx, "could not remove an upload whose first part URLs failed", "asset_id", asset.ID.String(), "error", aerr)
+		}
 		return Created{}, s.internal(ctx, "presign first parts", err)
 	}
 	return Created{Asset: asset, Upload: upload, Parts: urls, URLsExpires: expires}, nil
+}
+
+// discardMultipart aborts a multipart upload nobody can use, best effort (the bucket's lifecycle rule is the backstop).
+func (s *Service) discardMultipart(ctx context.Context, key, r2UploadID string) {
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := s.objects.Abort(cctx, key, r2UploadID); err != nil {
+		s.logger.WarnContext(ctx, "could not abort a multipart upload that is not used", "error", err)
+	}
 }
 
 // presign builds the part URLs of the upload of asset for the part numbers (already validated).
@@ -281,6 +300,19 @@ func (s *Service) loadUpload(ctx context.Context, who Actor, id ids.AssetID) (st
 	return a, u, nil
 }
 
+// loadUploadAnyState is loadUpload for a request that lost a race: an asset that was hidden meanwhile (aborted or deleted)
+// is still found, so the answer can be "this upload is not in progress any more" (409) and not "no such asset" (404).
+func (s *Service) loadUploadAnyState(ctx context.Context, who Actor, id ids.AssetID) (store.Asset, store.Upload, *Error) {
+	a, u, err := s.store.GetAssetUploadAnyState(ctx, who.Workspace, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return store.Asset{}, store.Upload{}, errNotFound
+	}
+	if err != nil {
+		return store.Asset{}, store.Upload{}, s.internal(ctx, "get asset upload", err)
+	}
+	return a, u, nil
+}
+
 // ---- Complete --------------------------------------------------------------------------------------------------
 
 // Complete finishes the upload of the asset from the parts the client lists. It compares them with what object storage
@@ -358,16 +390,20 @@ func (s *Service) finishCompleted(ctx context.Context, who Actor, a store.Asset)
 		return done, nil
 	case errors.Is(err, store.ErrNotActive):
 		// Another request moved the upload while this one was in storage. If it completed, this is its asset too.
-		cur, cu, e := s.loadUpload(ctx, who, a.ID)
+		cur, cu, e := s.loadUploadAnyState(ctx, who, a.ID)
 		if e != nil {
 			return store.Asset{}, e
 		}
-		if cu.CompletedAt != nil {
+		if cu.CompletedAt != nil && cur.DeletedAt == nil {
 			return cur, nil
 		}
-		// Aborted: the object just completed is not wanted. Its deletion job is queued by the abort and again here.
-		if derr := s.enqueueDelete(ctx, who.Workspace, a.ID); derr != nil {
-			s.logger.ErrorContext(ctx, "could not enqueue the deletion of an object of an aborted upload", "asset_id", a.ID.String(), "error", derr)
+		if cu.CompletedAt == nil {
+			// Aborted (by the client, a delete or the expiry job) after storage completed it: the object just made belongs
+			// to no asset that can use it. Delete it now, here, so the answer is not "done" while a file lingers; a failure
+			// says 503 and the retry finds the object again and deletes it again.
+			if _, derr := s.objects.DeletePrefix(ctx, storage.AssetPrefix(who.Workspace, a.ID)); derr != nil {
+				return store.Asset{}, s.storageErr(ctx, "delete the object of an aborted upload", derr)
+			}
 		}
 		return store.Asset{}, errNotActive
 	case errors.Is(err, store.ErrQueueNotMigrated):
@@ -399,13 +435,6 @@ func (s *Service) abortRows(ctx context.Context, ws ids.WorkspaceID, id ids.Asse
 		return err
 	})
 	return a, err
-}
-
-func (s *Service) enqueueDelete(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) error {
-	return s.store.InTx(ctx, func(tx *store.Store) error {
-		_, err := s.jobs.InsertInStore(ctx, tx, jobs.AssetObjectDeleteArgs{WorkspaceID: ws, AssetID: id}, nil)
-		return err
-	})
 }
 
 // checkClaim checks the shape of the parts a client lists: every part number 1..count exactly once, each with an ETag.
@@ -491,7 +520,7 @@ func (s *Service) abort(ctx context.Context, who Actor, a store.Asset, u store.U
 		return nil
 	case errors.Is(err, store.ErrNotActive):
 		// Completed or aborted by someone else meanwhile. Say which.
-		if _, cu, e := s.loadUpload(ctx, who, a.ID); e == nil && cu.CompletedAt != nil {
+		if _, cu, e := s.loadUploadAnyState(ctx, who, a.ID); e == nil && cu.CompletedAt != nil {
 			return errNotActive
 		}
 		return nil

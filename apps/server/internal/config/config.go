@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/nilpntr/content-fabrique/internal/storage"
 )
 
 // Environment names, the values CF_ENV can take.
@@ -71,10 +73,13 @@ type Config struct {
 	R2Jurisdiction string
 }
 
-// ObjectStorageConfigured reports whether the R2_* settings are present.
-func (c Config) ObjectStorageConfigured() bool {
-	return c.R2Endpoint != "" && c.R2Bucket != "" && c.R2AccessKeyID != "" && c.R2SecretAccessKey != ""
+// Storage is the connection to the bucket, from the R2_* settings.
+func (c Config) Storage() storage.Config {
+	return storage.Config{Endpoint: c.R2Endpoint, Bucket: c.R2Bucket, AccessKeyID: c.R2AccessKeyID, SecretAccessKey: c.R2SecretAccessKey, Jurisdiction: c.R2Jurisdiction}
 }
+
+// ObjectStorageConfigured reports whether the R2_* settings are present (storage.Config.Configured is the one definition).
+func (c Config) ObjectStorageConfigured() bool { return c.Storage().Configured() }
 
 // Getenv looks up an environment variable, like os.Getenv.
 type Getenv func(key string) string

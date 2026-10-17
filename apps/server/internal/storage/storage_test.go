@@ -286,12 +286,56 @@ func TestAbortDiscardsTheUpload(t *testing.T) {
 	}
 }
 
-func TestDeletePrefixRefusesBroadPrefixes(t *testing.T) {
-	c, _ := newClient(t)
-	for _, prefix := range []string{"", "ws/", "ws/wks_x/", "ws/wks_x/assets", "ws/wks_x/assets/ast_y"} {
-		if _, err := c.DeletePrefix(context.Background(), prefix); err == nil {
+// DeletePrefix takes exactly the prefix of one asset, with valid ids, and nothing broader or odder.
+func TestDeletePrefixRefusesAnythingButOneAssetsPrefix(t *testing.T) {
+	ctx := context.Background()
+	c, cfg := newClient(t)
+	ws, asset := newIDs()
+	good := storage.AssetPrefix(ws, asset)
+	wsPart, assetPart := ws.String(), asset.String()
+	for _, prefix := range []string{
+		"", "/", "ws/", "ws/" + wsPart, "ws/" + wsPart + "/", "ws/" + wsPart + "/assets", "ws/" + wsPart + "/assets/",
+		"ws/" + wsPart + "/assets//",                                                      // an empty asset segment
+		"ws/" + wsPart + "/assets/" + assetPart,                                           // no trailing slash
+		"ws/" + wsPart + "/assets/" + assetPart + "/original",                             // an object, not a prefix
+		"ws/" + wsPart + "/assets/" + assetPart + "/x/",                                   // an extra segment
+		"ws/" + wsPart + "/assets/ast_short/", "ws/" + wsPart + "/assets/" + wsPart + "/", // wrong or malformed asset id
+		"ws/wks_short/assets/" + assetPart + "/", "ws/" + assetPart + "/assets/" + assetPart + "/", // wrong or malformed workspace id
+		"ws/" + wsPart + "/other/" + assetPart + "/", "wx/" + wsPart + "/assets/" + assetPart + "/",
+		"ws/" + wsPart + "/assets/ast_00000000000000000000000000/", // the nil id
+		"ws/" + wsPart + "/assets/" + strings.ToUpper(assetPart) + "/",
+		"../" + good, good + "../",
+	} {
+		if _, err := c.DeletePrefix(ctx, prefix); err == nil {
 			t.Errorf("DeletePrefix(%q) was accepted", prefix)
 		}
+	}
+	// A workspace's other assets survive a refused call, and the exact prefix works.
+	_, other := newIDs()
+	for _, key := range []string{storage.OriginalKey(ws, other), good + "original"} {
+		if _, err := storagetest.S3(cfg).PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(cfg.Bucket), Key: aws.String(key), Body: strings.NewReader("x")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := c.DeletePrefix(ctx, "ws/"+wsPart+"/"); err == nil {
+		t.Fatal("a workspace-level prefix was accepted")
+	}
+	if n, err := c.DeletePrefix(ctx, good); err != nil || n != 1 {
+		t.Fatalf("DeletePrefix(%q) = %d, %v", good, n, err)
+	}
+	if _, err := c.Head(ctx, storage.OriginalKey(ws, other)); err != nil {
+		t.Errorf("another asset of the workspace was touched: %v", err)
+	}
+}
+
+func TestParseAssetPrefix(t *testing.T) {
+	ws, asset := newIDs()
+	gotWS, gotAsset, ok := storage.ParseAssetPrefix(storage.AssetPrefix(ws, asset))
+	if !ok || gotWS != ws || gotAsset != asset {
+		t.Fatalf("ParseAssetPrefix = %v %v %v", gotWS, gotAsset, ok)
+	}
+	if _, _, ok := storage.ParseAssetPrefix(storage.OriginalKey(ws, asset)); ok {
+		t.Error("an object key was accepted as a prefix")
 	}
 }
 

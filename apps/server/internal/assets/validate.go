@@ -31,16 +31,20 @@ const (
 	MaxTitleChars = 255
 )
 
-// PartPlan cuts a file of size bytes into parts: the part size (every part but the last has it) and the part count. The
-// size is at least MinPartSize and the count at most storage.MaxParts. size must be positive.
+// PartPlan cuts a file of size bytes (at least 1, at most MaxFileSize) into parts of DefaultPartSize: the part size (every
+// part but the last has it) and the part count.
 func PartPlan(size int64) (partSize int64, partCount int) {
-	partSize = DefaultPartSize
-	if ceilDiv(size, partSize) > storage.MaxParts {
-		const mib = 1 << 20
-		partSize = ceilDiv(ceilDiv(size, storage.MaxParts), mib) * mib
-	}
-	return partSize, int(ceilDiv(size, partSize))
+	return DefaultPartSize, int(ceilDiv(size, DefaultPartSize))
 }
+
+// Compile-time checks of the limits above: the biggest allowed file fits in the parts S3 allows, and the part size is
+// within what S3 and the API's own floor allow. A constant that breaks one of them fails the build (a negative constant
+// does not convert to uint).
+const (
+	_ = uint(storage.MaxParts - (MaxFileSize+DefaultPartSize-1)/DefaultPartSize)
+	_ = uint(DefaultPartSize - MinPartSize)
+	_ = uint(storage.MaxPartSize - DefaultPartSize)
+)
 
 // PartSizeOf is the exact size of part number n (1-based) of an upload cut by PartPlan.
 func PartSizeOf(size, partSize int64, partCount, n int) int64 {
@@ -85,6 +89,10 @@ func classify(contentType string) (mediaType, kind string, ok bool) {
 // in NFC, without any directory part, control or invisible formatting characters (the right-to-left override that makes
 // "exe.mp4" read backwards, among them), without leading or trailing dots and spaces, and at most MaxFilenameBytes long (a
 // short extension survives the cut). ok is false when nothing is left.
+//
+// The result is safe to store and to show, but it can still hold quotes, semicolons and non-ASCII letters. The first code
+// that puts it in a Content-Disposition header (P1-04's download and proxy URLs) must encode it as RFC 6266 and RFC 5987
+// require: a quoted ASCII fallback `filename=` plus `filename*=UTF-8”<percent-encoded>`, never the raw string.
 func sanitizeFilename(raw string) (string, bool) {
 	if !utf8.ValidString(raw) {
 		return "", false

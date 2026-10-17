@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store/db"
@@ -38,15 +39,21 @@ const (
 	FailureSizeMismatch  = "size_mismatch"
 )
 
+// ErrTooManyUploads is returned by CreateAssetWithUpload when the workspace already has the most uploads in progress.
+var ErrTooManyUploads = errors.New("store: too many uploads in progress")
+
 // ErrNotActive is returned when an upload cannot change state because it is not active any more: it was completed or
 // aborted already (by a concurrent request, or the clean-up job). The asset exists.
 var ErrNotActive = errors.New("store: upload is not active")
 
-// NewAssetID returns an unused asset id, made by the database (uuidv7()), so the object key can be built before the rows
-// are written.
-func (s *Store) NewAssetID(ctx context.Context) (ids.AssetID, error) {
-	id, err := s.q.NewAssetID(ctx)
-	return ids.AssetID{UUID: id}, mapErr(err)
+// NewAssetID returns an unused asset id, a UUIDv7 made here so the object key (which contains it) is known before
+// anything is written. Other tables let the database make their ids (uuidv7()); this one cannot wait for the insert.
+func (s *Store) NewAssetID(context.Context) (ids.AssetID, error) {
+	id, err := uuid.NewV7()
+	if err != nil {
+		return ids.AssetID{}, fmt.Errorf("new asset id: %w", err)
+	}
+	return ids.AssetID{UUID: id}, nil
 }
 
 // NewAsset is the input of CreateAssetWithUpload. The caller has validated and normalised it (package assets); the
@@ -68,13 +75,27 @@ type NewAsset struct {
 	ExpiresAt  time.Time
 }
 
-// CreateAssetWithUpload inserts the asset (status uploading) and its upload row in one transaction.
-func (s *Store) CreateAssetWithUpload(ctx context.Context, ws ids.WorkspaceID, in NewAsset) (Asset, Upload, error) {
+// CreateAssetWithUpload inserts the asset (status uploading) and its upload row in one transaction. With maxActive above
+// zero it first takes the workspace's upload lock, counts the uploads in progress and returns ErrTooManyUploads when
+// there are maxActive already: creators in one workspace queue on the lock, so the cap holds however many race.
+func (s *Store) CreateAssetWithUpload(ctx context.Context, ws ids.WorkspaceID, in NewAsset, maxActive int) (Asset, Upload, error) {
 	var (
 		a Asset
 		u Upload
 	)
 	err := s.inTx(ctx, func(tx *Store) error {
+		if maxActive > 0 {
+			if err := tx.q.LockWorkspaceUploads(ctx, ws.UUID.String()); err != nil {
+				return mapErr(err)
+			}
+			n, err := tx.q.CountActiveUploads(ctx, ws)
+			if err != nil {
+				return mapErr(err)
+			}
+			if int(n) >= maxActive {
+				return ErrTooManyUploads
+			}
+		}
 		var sha *string
 		if in.SHA256 != "" {
 			sha = &in.SHA256
@@ -103,6 +124,20 @@ func (s *Store) CreateAssetWithUpload(ctx context.Context, ws ids.WorkspaceID, i
 func (s *Store) GetAsset(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (Asset, error) {
 	a, err := s.q.GetAsset(ctx, db.GetAssetParams{WorkspaceID: ws, ID: id})
 	return a, mapErr(err)
+}
+
+// GetAssetUploadAnyState is GetAssetUpload without the filter on deleted assets, for a request that lost a race with an
+// abort or a delete and must tell that from "no such asset". Use it for nothing else: a deleted asset is gone to the API.
+func (s *Store) GetAssetUploadAnyState(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (Asset, Upload, error) {
+	a, err := s.q.GetAssetAnyState(ctx, db.GetAssetAnyStateParams{WorkspaceID: ws, ID: id})
+	if err != nil {
+		return Asset{}, Upload{}, mapErr(err)
+	}
+	u, err := s.q.GetUploadByAsset(ctx, db.GetUploadByAssetParams{WorkspaceID: ws, AssetID: id})
+	if err != nil {
+		return Asset{}, Upload{}, mapErr(err)
+	}
+	return a, u, nil
 }
 
 // GetAssetUpload returns the asset and its upload row. ErrNotFound when the asset is not in this workspace or is deleted.
@@ -176,10 +211,11 @@ func (s *Store) SoftDeleteAsset(ctx context.Context, ws ids.WorkspaceID, id ids.
 	return a, mapErr(err)
 }
 
-// GetDeletedAsset returns the asset only if it is deleted: the deletion job reads the object key through it, so it can
-// never be made to remove the objects of a live asset. ErrNotFound otherwise.
-func (s *Store) GetDeletedAsset(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (Asset, error) {
-	a, err := s.q.GetDeletedAsset(ctx, db.GetDeletedAssetParams{WorkspaceID: ws, ID: id})
+// GetAssetForObjectDeletion returns the asset only if it is deleted or failed: the object deletion job goes through it, so
+// it can never be made to remove the objects of a live asset (an upload that failed has no object anyone may use).
+// ErrNotFound otherwise.
+func (s *Store) GetAssetForObjectDeletion(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (Asset, error) {
+	a, err := s.q.GetAssetForObjectDeletion(ctx, db.GetAssetForObjectDeletionParams{WorkspaceID: ws, ID: id})
 	return a, mapErr(err)
 }
 

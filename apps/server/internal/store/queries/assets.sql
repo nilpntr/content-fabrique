@@ -3,10 +3,11 @@
 -- exceptions, marked SYSTEM, are for the clean-up job, which works across workspaces and then acts per row with the
 -- row's own workspace_id.
 
--- The next asset id, so the object key (which contains it) is known before anything is written. The database makes the id,
--- as for every table (uuidv7()).
--- name: NewAssetID :one
-SELECT uuidv7()::uuid AS id;
+-- Serialises the creators of uploads in one workspace until the end of the transaction, so counting the uploads in
+-- progress and inserting a new one cannot interleave with another creator (the cap is exact). A transaction-level lock
+-- works behind a transaction pooler.
+-- name: LockWorkspaceUploads :exec
+SELECT pg_advisory_xact_lock(hashtextextended('asset-uploads:' || @workspace_id::text, 0));
 
 -- name: CreateAsset :one
 INSERT INTO assets (id, workspace_id, kind, filename, content_type, size_bytes, sha256, title, r2_key, created_by)
@@ -22,6 +23,12 @@ RETURNING *;
 -- name: GetAsset :one
 SELECT * FROM assets
 WHERE workspace_id = @workspace_id AND id = @id AND deleted_at IS NULL;
+
+-- The asset whatever its state, deleted ones included. For a request that lost a race with an abort or a delete and has
+-- to say so (409) instead of "no such asset" (404).
+-- name: GetAssetAnyState :one
+SELECT * FROM assets
+WHERE workspace_id = @workspace_id AND id = @id;
 
 -- name: GetUploadByAsset :one
 SELECT * FROM uploads
@@ -79,10 +86,11 @@ UPDATE assets SET deleted_at = now()
 WHERE workspace_id = @workspace_id AND id = @id AND deleted_at IS NULL
 RETURNING *;
 
--- The asset a deletion job is about: it must be deleted already, so a job can never remove the objects of a live asset.
--- name: GetDeletedAsset :one
+-- The asset an object deletion job is about: it must be deleted, or failed (a failed asset has no object that anyone
+-- may use: an expired, aborted or wrong-sized upload), so a job can never remove the objects of a live asset.
+-- name: GetAssetForObjectDeletion :one
 SELECT * FROM assets
-WHERE workspace_id = @workspace_id AND id = @id AND deleted_at IS NOT NULL;
+WHERE workspace_id = @workspace_id AND id = @id AND (deleted_at IS NOT NULL OR status = 'failed');
 
 -- SYSTEM: active uploads past their expiry, in every workspace, after the cursor (id order), for the clean-up job.
 -- name: ListExpiredUploads :many
