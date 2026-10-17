@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "fa718db8d792e000986fb112a78e7ffe38abb5a7efd804152a7fda2a00015c49",
-  "recorded_at": "2026-10-17T15:36:56Z",
+  "key": "ad55afc73f0279fe53d2a847089643b2e332f5f153b9004baeadd3297b9b9f57",
+  "recorded_at": "2026-10-17T15:55:15Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 16000,
@@ -20,42 +20,6 @@
           "text",
           "text",
           "text"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
         ]
       },
       {
@@ -124,11 +88,6 @@
         "sha256": "c1a2c1dd9e9b679be49eb3856f237cf0984ba86e667f45e56d1a9934a461dcba",
         "media_type": "image/jpeg",
         "bytes": 4825
-      },
-      {
-        "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
-        "media_type": "image/jpeg",
-        "bytes": 9284
       }
     ]
   },
@@ -139,19 +98,57 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_6",
-        "name": "finish",
+        "id": "toolu_ed_3",
+        "name": "edit_timeline",
         "input": {
-          "summary": "I cut a 17 second video from your three clips. It opens on the heaviest lat pulldown rep with the words HEAVY LAT DAY, then the cable row, then the wide gym shot. Check the wide shot: I framed it with a blurred fill so nobody is cropped out."
+          "base_version": 0,
+          "ops": [
+            {
+              "op": "add_clip",
+              "asset_id": "ast_01jc000000e00800000000000a",
+              "source": {
+                "in_ms": 2000,
+                "out_ms": 8000
+              },
+              "why": "The heaviest set of the lat pulldown, so it opens the video."
+            },
+            {
+              "op": "add_clip",
+              "asset_id": "ast_01jc000000e00800000000000b",
+              "source": {
+                "in_ms": 1000,
+                "out_ms": 6000
+              }
+            },
+            {
+              "op": "add_clip",
+              "asset_id": "ast_01jc000000e00800000000000c",
+              "source": {
+                "in_ms": 3000,
+                "out_ms": 9000
+              },
+              "reframe": {
+                "mode": "blur_fill"
+              }
+            },
+            {
+              "op": "add_text",
+              "text": "HEAVY LAT DAY",
+              "style": "title_bold",
+              "at_ms": 0,
+              "duration_ms": 2000,
+              "anchor": "upper_third"
+            }
+          ]
         }
       }
     ],
     "usage": {
-      "input_tokens": 400,
-      "cache_write_tokens": 650,
+      "input_tokens": 450,
+      "cache_write_tokens": 2100,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 14100,
-      "output_tokens": 92
+      "cache_read_tokens": 10100,
+      "output_tokens": 301
     }
   },
   "count_tokens": 9000
