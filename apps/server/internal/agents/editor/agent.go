@@ -12,6 +12,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
+	"github.com/nilpntr/content-fabrique/internal/analysis"
+	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
@@ -102,6 +104,10 @@ func (d Deps) runContext(ctx context.Context, rc runtime.RunContext) ([]llm.Bloc
 	if err != nil {
 		return nil, fmt.Errorf("list footage: %w", err)
 	}
+	sums, err := d.analysisSummaries(ctx, ws, rows)
+	if err != nil {
+		return nil, err
+	}
 	status := "Timeline: none yet (version 0)."
 	now := timelineItems{ids: map[string]bool{}}
 	if det.Project.CurrentTimelineVersion != nil {
@@ -123,7 +129,7 @@ func (d Deps) runContext(ctx context.Context, rc runtime.RunContext) ([]llm.Bloc
 		return nil, err
 	}
 	for _, caps := range contextSteps {
-		blocks := contextBlocks(det.Project.Format, det.Project.Brief, rows, status, caps)
+		blocks := contextBlocks(det.Project.Format, det.Project.Brief, rows, sums, status, caps)
 		blocks = append(blocks, commentsIntro(comments, total, now, caps.comments, caps.commentChars)...)
 		if encodedSize(blocks) <= maxContextBytes {
 			// Only the comments this context shows (the rest are for get_comments to list) are the run's to deal with.
@@ -138,7 +144,7 @@ func (d Deps) runContext(ctx context.Context, rc runtime.RunContext) ([]llm.Bloc
 	return nil, runtime.UserErrorf("the project's text is too large for the run context even when cut hard")
 }
 
-func contextBlocks(format, brief string, rows []store.ProjectFootageRow, status string, caps contextCaps) []llm.Block {
+func contextBlocks(format, brief string, rows []store.ProjectFootageRow, sums map[ids.AssetID]analysis.Summary, status string, caps contextCaps) []llm.Block {
 	f := timeline.Format(format)
 	w, h, _ := f.Size()
 	blocks := []llm.Block{llm.TextBlock(fmt.Sprintf("Project context, as it was when the run started. Output format: %s (%dx%d).", f, w, h))}
@@ -152,7 +158,7 @@ func contextBlocks(format, brief string, rows []store.ProjectFootageRow, status 
 		}
 		blocks = append(blocks, llm.TextBlock(intro), runtime.UntrustedBlock("brief", excerpt))
 	}
-	blocks = append(blocks, llm.TextBlock(footageText(rows, footageOpts{Detailed: caps.detailed, TitleChars: caps.titleChars, DescChars: caps.descChars})))
+	blocks = append(blocks, llm.TextBlock(footageText(rows, footageOpts{Detailed: caps.detailed, TitleChars: caps.titleChars, DescChars: caps.descChars, Analysis: sums})))
 	return append(blocks, llm.TextBlock(status))
 }
 

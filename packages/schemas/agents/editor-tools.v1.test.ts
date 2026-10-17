@@ -37,6 +37,7 @@ describe("editor tools contract", () => {
       "get_brief",
       "list_footage",
       "view_clip",
+      "find_moments",
       "get_timeline",
       "get_comments",
       "edit_timeline",
@@ -114,6 +115,17 @@ describe("tool arguments", () => {
     expect(check("view_clip", { asset_id: ASSET, at_ms: ["1"] })).toBe(false);
     expect(check("view_clip", { asset_id: ASSET, at_ms: [1.5] })).toBe(false);
     expect(check("view_clip", { asset_id: ASSET, other: true })).toBe(false);
+  });
+
+  it("find_moments takes optional filters and nothing else", () => {
+    expect(check("find_moments", {})).toBe(true);
+    expect(check("find_moments", { asset_id: ASSET, kind: "rep", min_score: 0.7, limit: 5 })).toBe(true);
+    expect(check("find_moments", { kind: "hold" })).toBe(true);
+    expect(check("find_moments", { kind: "any" })).toBe(true);
+    expect(check("find_moments", { kind: "pose" })).toBe(false);
+    expect(check("find_moments", { limit: 1.5 })).toBe(false);
+    expect(check("find_moments", { min_score: "high" })).toBe(false);
+    expect(check("find_moments", { query: "row" })).toBe(false);
   });
 
   it("finish takes a summary", () => {
