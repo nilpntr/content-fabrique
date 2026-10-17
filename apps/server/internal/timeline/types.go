@@ -47,6 +47,30 @@ const (
 	DefaultLook       = LookNone
 	DefaultAnimation  = AnimationNone
 	DefaultTransition = TransitionCut
+	DefaultMotion     = MotionNone
+)
+
+// Limits of the motion presets and speed ramps (P3-10).
+const (
+	// MinMotionShotMs is the shortest clip that may carry a motion preset other than none: a preset needs time to play.
+	MinMotionShotMs int64 = 400
+	// MinMotionStrength and MaxMotionStrength bound motion.strength: the peak scale increase (0.05 is 5 % bigger).
+	MinMotionStrength = 0.05
+	MaxMotionStrength = 0.35
+	// MinSpeed and MaxSpeed bound a clip's speed, and every point of a speed ramp.
+	MinSpeed = 0.25
+	MaxSpeed = 4.0
+	// MinRampPoints and MaxRampPoints bound the length of speed_ramp.
+	MinRampPoints = 2
+	MaxRampPoints = 16
+)
+
+// The default strength of each motion preset.
+const (
+	DefaultPunchInStrength  = 0.15
+	DefaultPushInStrength   = 0.10
+	DefaultPullBackStrength = 0.15
+	DefaultShakeStrength    = 0.08
 )
 
 // Format is an output format (D-25).
@@ -88,7 +112,18 @@ const (
 	TransitionCut        = "cut"
 	TransitionCrossfade  = "crossfade"
 	TransitionDipToBlack = "dip_to_black"
-	TransitionWhip       = "whip"
+	// TransitionWhip is the original whip, a slide to the left; it is an alias of TransitionWhipLeft.
+	TransitionWhip        = "whip"
+	TransitionWhipLeft    = "whip_left"
+	TransitionWhipRight   = "whip_right"
+	TransitionZoomThrough = "zoom_through"
+	TransitionFlash       = "flash"
+
+	MotionNone     = "none"
+	MotionPunchIn  = "punch_in"
+	MotionPushIn   = "push_in"
+	MotionPullBack = "pull_back"
+	MotionShake    = "shake"
 
 	AnchorUpperThird = "upper_third"
 	AnchorCenter     = "center"
@@ -234,16 +269,19 @@ func (t CaptionsTrack) MaxWordsOrDefault() int {
 
 // VideoItem is one clip on the main track.
 type VideoItem struct {
-	ID           string      `json:"id"`
-	AssetID      string      `json:"asset_id"`
-	MomentID     string      `json:"moment_id,omitempty"`
-	Source       Source      `json:"source"`
-	AtMs         int64       `json:"at_ms"`
-	Speed        *float64    `json:"speed,omitempty"`
-	Reframe      *Reframe    `json:"reframe,omitempty"`
-	Look         *Look       `json:"look,omitempty"`
-	TransitionIn *Transition `json:"transition_in,omitempty"`
-	Audio        *VideoAudio `json:"audio,omitempty"`
+	ID       string   `json:"id"`
+	AssetID  string   `json:"asset_id"`
+	MomentID string   `json:"moment_id,omitempty"`
+	Source   Source   `json:"source"`
+	AtMs     int64    `json:"at_ms"`
+	Speed    *float64 `json:"speed,omitempty"`
+	// SpeedRamp replaces Speed when present: source-relative points between which the speed changes linearly.
+	SpeedRamp    []SpeedPoint `json:"speed_ramp,omitempty"`
+	Reframe      *Reframe     `json:"reframe,omitempty"`
+	Motion       *Motion      `json:"motion,omitempty"`
+	Look         *Look        `json:"look,omitempty"`
+	TransitionIn *Transition  `json:"transition_in,omitempty"`
+	Audio        *VideoAudio  `json:"audio,omitempty"`
 	// Why is the agent's one-line reason for the clip. It is never rendered. A pointer, because the empty string is
 	// valid and must survive a round trip.
 	Why *string `json:"why,omitempty"`
@@ -298,6 +336,42 @@ func (r Reframe) ZoomOrDefault() float64 {
 		return DefaultZoom
 	}
 	return *r.Zoom
+}
+
+// Motion is a camera move on a clip: a digital zoom or a shake on the already-reframed frame (P3-10). AtMs is relative to
+// the start of the clip's output (not the timeline) and only punch_in and shake read it.
+type Motion struct {
+	Preset   string   `json:"preset"`
+	AtMs     *int64   `json:"at_ms,omitempty"`
+	Strength *float64 `json:"strength,omitempty"`
+}
+
+// StrengthOrDefault is the motion's strength, or the default of its preset when the spec leaves it out.
+func (m Motion) StrengthOrDefault() float64 {
+	if m.Strength != nil {
+		return *m.Strength
+	}
+	switch m.Preset {
+	case MotionPunchIn:
+		return DefaultPunchInStrength
+	case MotionPushIn:
+		return DefaultPushInStrength
+	case MotionPullBack:
+		return DefaultPullBackStrength
+	case MotionShake:
+		return DefaultShakeStrength
+	}
+	return 0
+}
+
+// Active reports whether the motion changes the picture at all: a preset other than none.
+func (m *Motion) Active() bool { return m != nil && m.Preset != "" && m.Preset != MotionNone }
+
+// SpeedPoint is one point of a speed ramp: the speed the clip plays at AtMs milliseconds into its source range (the
+// offset from source.in_ms, in source time).
+type SpeedPoint struct {
+	AtMs  int64   `json:"at_ms"`
+	Speed float64 `json:"speed"`
 }
 
 // Look is a colour preset.

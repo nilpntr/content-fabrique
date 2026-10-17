@@ -2,10 +2,14 @@
 // `time_map` (§6) and the `annotations` table (docs/03 §5). P3-06 and the annotations API will fill them for real;
 // until then the screen runs on `sample-data.ts`.
 
+import type { SpeedPoint } from "./lib/speed-ramp";
+
 export type OutputFormat = "9:16" | "1:1" | "4:5" | "16:9";
 
 /** A cut or transition between two main-track items. */
-export type TransitionIn = { type: "cut" } | { type: "crossfade" | "dip_to_black" | "whip"; duration_ms: number };
+export type TransitionIn =
+  | { type: "cut" }
+  | { type: "crossfade" | "dip_to_black" | "whip" | "whip_left" | "whip_right" | "zoom_through" | "flash"; duration_ms: number };
 
 /** An item on the `main` video track (the subset of the spec the review screen needs). */
 export interface VideoItem {
@@ -15,8 +19,10 @@ export interface VideoItem {
   /** Output start. Redundant with the durations on purpose (spec §2). */
   at_ms: number;
   source: { in_ms: number; out_ms: number };
-  /** 0.25 to 4.0. */
+  /** 0.25 to 4.0. For a clip with a `speed_ramp`, its average speed (source span over output duration). */
   speed: number;
+  /** A speed that changes along the clip (P3-10); replaces `speed`. `at_ms` counts from `source.in_ms`. */
+  speed_ramp?: SpeedPoint[];
   transition_in?: TransitionIn;
 }
 
@@ -27,7 +33,9 @@ export interface MainTimeMapEntry {
   item_id: string;
   asset_id: string;
   source_in_ms: number;
+  /** The clip's speed, or its average speed when it has a `speed_ramp`. */
   speed: number;
+  speed_ramp?: SpeedPoint[];
 }
 
 /** `time_map` entry for a text item. Comments are mapped through main entries only. */

@@ -1,0 +1,309 @@
+fixture: v40_motion_16x9
+profile: preview
+output: 960x540 at 60 fps, 399 frames, 6650 ms
+
+args:
+  -protocol_whitelist
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
+  -ss
+  2.000
+  -t
+  2.400
+  -i
+  /assets/proxy/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4
+  -protocol_whitelist
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
+  -ss
+  1.000
+  -t
+  2.400
+  -i
+  /assets/proxy/ast_01jex6xx15ayjx8epfhfjj9s11.mp4
+  -protocol_whitelist
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
+  -ss
+  5.000
+  -t
+  2.400
+  -i
+  /assets/proxy/ast_01jdsx72atvnb7ssgbc57zbxj9.mp4
+  -protocol_whitelist
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
+  -ss
+  8.000
+  -t
+  2.000
+  -i
+  /assets/proxy/ast_01jfbemsc6way7dnfebdf8tf3g.mp4
+  -protocol_whitelist
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
+  -ss
+  20.000
+  -t
+  2.400
+  -i
+  /assets/proxy/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4
+  -protocol_whitelist
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
+  -ss
+  30.000
+  -t
+  2.000
+  -i
+  /assets/proxy/ast_01jex6xx15ayjx8epfhfjj9s11.mp4
+  -filter_complex
+  <filter_complex>
+  -map
+  [vout]
+  -map
+  [aout]
+  -c:v
+  libx264
+  -preset
+  veryfast
+  -crf
+  28
+  -pix_fmt
+  yuv420p
+  -c:a
+  aac
+  -b:a
+  128k
+  -ar
+  48000
+  -ac
+  2
+  -map_metadata
+  -1
+  -map_chapters
+  -1
+  -fflags
+  +bitexact
+  -flags:v
+  +bitexact
+  -flags:a
+  +bitexact
+
+filter_complex:
+  [0:v]trim=end=2.400,setpts=PTS-STARTPTS,setpts=PTS/2,fps=60,tpad=stop=-1:stop_mode=clone,trim=end_frame=72,setpts=PTS-STARTPTS,scale=960:540:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=960:540:x='clip(0.5*iw-480,0,iw-960)':y='clip(0.5*ih-270,0,ih-540)',setsar=1,format=yuv420p,perspective=eval=frame:sense=source:interpolation=cubic:x0='W*(1-1/((1+0.15*(1-pow(1-clip((in-24)/(6),0,1),3)))))/2':y0='H*(1-1/((1+0.15*(1-pow(1-clip((in-24)/(6),0,1),3)))))/2':x1='W-W*(1-1/((1+0.15*(1-pow(1-clip((in-24)/(6),0,1),3)))))/2':y1='H*(1-1/((1+0.15*(1-pow(1-clip((in-24)/(6),0,1),3)))))/2':x2='W*(1-1/((1+0.15*(1-pow(1-clip((in-24)/(6),0,1),3)))))/2':y2='H-H*(1-1/((1+0.15*(1-pow(1-clip((in-24)/(6),0,1),3)))))/2':x3='W-W*(1-1/((1+0.15*(1-pow(1-clip((in-24)/(6),0,1),3)))))/2':y3='H-H*(1-1/((1+0.15*(1-pow(1-clip((in-24)/(6),0,1),3)))))/2',format=yuv420p,setsar=1,fps=60,settb=AVTB[v0];
+  [1:v]trim=end=2.400,setpts=PTS-STARTPTS,setpts=PTS/2,fps=60,tpad=stop=-1:stop_mode=clone,trim=end_frame=72,setpts=PTS-STARTPTS,scale=960:540:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=960:540:x='clip(0.5*iw-480,0,iw-960)':y='clip(0.5*ih-270,0,ih-540)',setsar=1,format=yuv420p,perspective=eval=frame:sense=source:interpolation=cubic:x0='W*(1-1/((1+0.2*(clip((in)/(71),0,1))*(clip((in)/(71),0,1))*(3-2*(clip((in)/(71),0,1))))*(1+0.45*pow(clip((in-54)/(9),0,1),3))))/2':y0='H*(1-1/((1+0.2*(clip((in)/(71),0,1))*(clip((in)/(71),0,1))*(3-2*(clip((in)/(71),0,1))))*(1+0.45*pow(clip((in-54)/(9),0,1),3))))/2':x1='W-W*(1-1/((1+0.2*(clip((in)/(71),0,1))*(clip((in)/(71),0,1))*(3-2*(clip((in)/(71),0,1))))*(1+0.45*pow(clip((in-54)/(9),0,1),3))))/2':y1='H*(1-1/((1+0.2*(clip((in)/(71),0,1))*(clip((in)/(71),0,1))*(3-2*(clip((in)/(71),0,1))))*(1+0.45*pow(clip((in-54)/(9),0,1),3))))/2':x2='W*(1-1/((1+0.2*(clip((in)/(71),0,1))*(clip((in)/(71),0,1))*(3-2*(clip((in)/(71),0,1))))*(1+0.45*pow(clip((in-54)/(9),0,1),3))))/2':y2='H-H*(1-1/((1+0.2*(clip((in)/(71),0,1))*(clip((in)/(71),0,1))*(3-2*(clip((in)/(71),0,1))))*(1+0.45*pow(clip((in-54)/(9),0,1),3))))/2':x3='W-W*(1-1/((1+0.2*(clip((in)/(71),0,1))*(clip((in)/(71),0,1))*(3-2*(clip((in)/(71),0,1))))*(1+0.45*pow(clip((in-54)/(9),0,1),3))))/2':y3='H-H*(1-1/((1+0.2*(clip((in)/(71),0,1))*(clip((in)/(71),0,1))*(3-2*(clip((in)/(71),0,1))))*(1+0.45*pow(clip((in-54)/(9),0,1),3))))/2',format=yuv420p,setsar=1,fps=60,settb=AVTB[v1];
+  [2:v]trim=end=2.400,setpts=PTS-STARTPTS,setpts=PTS/2,fps=60,tpad=stop=-1:stop_mode=clone,trim=end_frame=72,setpts=PTS-STARTPTS,setsar=1,split=2[b2a][b2b];
+  [b2b]scale=960:540:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=960:540,scale=80:44:flags=bicubic,gblur=sigma=2,scale=960:540:flags=bicubic[b2bg];
+  [b2a]scale=960:540:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=bicubic[b2fg];
+  [b2bg][b2fg]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2,format=yuv420p,perspective=eval=frame:sense=source:interpolation=cubic:x0='W*(1-1/((1+0.12*if(between((in-24),0,24),min((in-24)/2,1)*pow(1-(in-24)/24,2),0))*(1+0.45*pow(1-clip((in-9)/(9),0,1),3))))/2+0.9*W*(1-1/(1+0.12*if(between((in-24),0,24),min((in-24)/2,1)*pow(1-(in-24)/24,2),0)))/2*((sin(1.216182*(in-24)+2.237886)+sin(1.996195*(in-24)+3.266037))/2)':y0='H*(1-1/((1+0.12*if(between((in-24),0,24),min((in-24)/2,1)*pow(1-(in-24)/24,2),0))*(1+0.45*pow(1-clip((in-9)/(9),0,1),3))))/2+0.9*H*(1-1/(1+0.12*if(between((in-24),0,24),min((in-24)/2,1)*pow(1-(in-24)/24,2),0)))/2*((sin(1.212011*(in-24)+2.213343)+sin(1.996195*(in-24)+3.266037))/2)':x1='W-W*(1-1/((1+0.12*if(between((in-24),0,24),min((in-24)/2,1)*pow(1-(in-24)/24,2),0))*(1+0.45*pow(1-clip((in-9)/(9),0,1),3))))/2+0.9*W*(1-1/(1+0.12*if(between((in-24),0,24),min((in-24)/2,1)*pow(1-(in-24)/24,2),0)))/2*((sin(1.216182*(in-24)+2.237886)+sin(1.996195*(in-24)+3.266037))/2)':y1='H*(1-1/((1+0.12*if(between((in-24),0,24),min((in-24)/2,1)*pow(1-(in-24)/24,2),0))*(1+0.45*pow(1-clip((in-9)/(9),0,1),3))))/2+0.9*H*(1-1/(1+0.12*if(between((in-24),0,24),min((in-24)/2,1)*pow(1-(in-24)/24,2),0)))/2*((sin(1.212011*(in-24)+2.213343)+sin(1.996195*(in-24)+3.266037))/2)':x2='W*(1-1/((1+0.12*if(between((in-24),0,24),min((in-24)/2,1)*pow(1-(in-24)/24,2),0))*(1+0.45*pow(1-clip((in-9)/(9),0,1),3))))/2+0.9*W*(1-1/(1+0.12*if(between((in-24),0,24),min((in-24)/2,1)*pow(1-(in-24)/24,2),0)))/2*((sin(1.216182*(in-24)+2.237886)+sin(1.996195*(in-24)+3.266037))/2)':y2='H-H*(1-1/((1+0.12*if(between((in-24),0,24),min((in-24)/2,1)*pow(1-(in-24)/24,2),0))*(1+0.45*pow(1-clip((in-9)/(9),0,1),3))))/2+0.9*H*(1-1/(1+0.12*if(between((in-24),0,24),min((in-24)/2,1)*pow(1-(in-24)/24,2),0)))/2*((sin(1.212011*(in-24)+2.213343)+sin(1.996195*(in-24)+3.266037))/2)':x3='W-W*(1-1/((1+0.12*if(between((in-24),0,24),min((in-24)/2,1)*pow(1-(in-24)/24,2),0))*(1+0.45*pow(1-clip((in-9)/(9),0,1),3))))/2+0.9*W*(1-1/(1+0.12*if(between((in-24),0,24),min((in-24)/2,1)*pow(1-(in-24)/24,2),0)))/2*((sin(1.216182*(in-24)+2.237886)+sin(1.996195*(in-24)+3.266037))/2)':y3='H-H*(1-1/((1+0.12*if(between((in-24),0,24),min((in-24)/2,1)*pow(1-(in-24)/24,2),0))*(1+0.45*pow(1-clip((in-9)/(9),0,1),3))))/2+0.9*H*(1-1/(1+0.12*if(between((in-24),0,24),min((in-24)/2,1)*pow(1-(in-24)/24,2),0)))/2*((sin(1.212011*(in-24)+2.213343)+sin(1.996195*(in-24)+3.266037))/2)',format=yuv420p,setsar=1,fps=60,settb=AVTB[v2];
+  [3:v]trim=end=2.000,setpts=PTS-STARTPTS,setpts='(if(lt(((PTS-STARTPTS)*TB),1),0+(((PTS-STARTPTS)*TB)-0)/2,if(lt(((PTS-STARTPTS)*TB),1.6),0.5+log(1+(-2.5)*(((PTS-STARTPTS)*TB)-1)/2)/(-2.5),1.054517744+(((PTS-STARTPTS)*TB)-1.6)/0.5)))/TB',fps=60,tpad=stop=-1:stop_mode=clone,trim=end_frame=111,setpts=PTS-STARTPTS,scale=960:540:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=960:540:x='clip(0.5*iw-480,0,iw-960)':y='clip(0.5*ih-270,0,ih-540)',setsar=1,format=yuv420p,perspective=eval=frame:sense=source:interpolation=cubic:x0='W*(1-1/((1+0.25*(1-(clip((in)/(110),0,1))*(clip((in)/(110),0,1))*(3-2*(clip((in)/(110),0,1)))))))/2':y0='H*(1-1/((1+0.25*(1-(clip((in)/(110),0,1))*(clip((in)/(110),0,1))*(3-2*(clip((in)/(110),0,1)))))))/2':x1='W-W*(1-1/((1+0.25*(1-(clip((in)/(110),0,1))*(clip((in)/(110),0,1))*(3-2*(clip((in)/(110),0,1)))))))/2':y1='H*(1-1/((1+0.25*(1-(clip((in)/(110),0,1))*(clip((in)/(110),0,1))*(3-2*(clip((in)/(110),0,1)))))))/2':x2='W*(1-1/((1+0.25*(1-(clip((in)/(110),0,1))*(clip((in)/(110),0,1))*(3-2*(clip((in)/(110),0,1)))))))/2':y2='H-H*(1-1/((1+0.25*(1-(clip((in)/(110),0,1))*(clip((in)/(110),0,1))*(3-2*(clip((in)/(110),0,1)))))))/2':x3='W-W*(1-1/((1+0.25*(1-(clip((in)/(110),0,1))*(clip((in)/(110),0,1))*(3-2*(clip((in)/(110),0,1)))))))/2':y3='H-H*(1-1/((1+0.25*(1-(clip((in)/(110),0,1))*(clip((in)/(110),0,1))*(3-2*(clip((in)/(110),0,1)))))))/2',format=yuv420p,setsar=1,fps=60,settb=AVTB[v3];
+  [4:v]trim=end=2.400,setpts=PTS-STARTPTS,setpts=PTS/2,fps=60,tpad=stop=-1:stop_mode=clone,trim=end_frame=72,setpts=PTS-STARTPTS,scale=960:540:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=960:540:x='clip(0.5*iw-480,0,iw-960)':y='clip(0.5*ih-270,0,ih-540)',setsar=1,format=yuv420p,setsar=1,fps=60,settb=AVTB[v4];
+  [5:v]trim=end=2.000,setpts=PTS-STARTPTS,setpts=PTS/2,fps=60,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS,scale=960:540:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=960:540:x='clip(0.5*iw-480,0,iw-960)':y='clip(0.5*ih-270,0,ih-540)',setsar=1,format=yuv420p,perspective=eval=frame:sense=source:interpolation=cubic:x0='W*(1-1/((1+0.3*(1-pow(1-clip((in-0)/(6),0,1),3)))))/2':y0='H*(1-1/((1+0.3*(1-pow(1-clip((in-0)/(6),0,1),3)))))/2':x1='W-W*(1-1/((1+0.3*(1-pow(1-clip((in-0)/(6),0,1),3)))))/2':y1='H*(1-1/((1+0.3*(1-pow(1-clip((in-0)/(6),0,1),3)))))/2':x2='W*(1-1/((1+0.3*(1-pow(1-clip((in-0)/(6),0,1),3)))))/2':y2='H-H*(1-1/((1+0.3*(1-pow(1-clip((in-0)/(6),0,1),3)))))/2':x3='W-W*(1-1/((1+0.3*(1-pow(1-clip((in-0)/(6),0,1),3)))))/2':y3='H-H*(1-1/((1+0.3*(1-pow(1-clip((in-0)/(6),0,1),3)))))/2',format=yuv420p,setsar=1,fps=60,settb=AVTB[v5];
+  [v0][v1]xfade=transition=slideright:duration=0.250000:offset=0.950000[w1];
+  [w1]gblur=sigma=6:enable='gte(t,0.950000)*lt(t,1.200000)'[j1];
+  [j1][v2]xfade=transition=fade:duration=0.300000:offset=1.850000[w2];
+  [w2]gblur=sigma=6:enable='gte(t,1.850000)*lt(t,2.150000)'[j2];
+  [j2][v3]xfade=transition=fadewhite:duration=0.200000:offset=2.850000[j3];
+  [j3][v4]xfade=transition=slideleft:duration=0.250000:offset=4.450000[w4];
+  [w4]gblur=sigma=6:enable='gte(t,4.450000)*lt(t,4.700000)'[j4];
+  [j4][v5]concat=n=2:v=1:a=0[vj];
+  [vj]ass=filename=subs.ass:fontsdir=fonts[vout];
+  anullsrc=r=48000:cl=stereo:d=6.650[abed];
+  [abed]anull[aout]
+
+inputs:
+[
+  {
+    "index": 0,
+    "role": "clip",
+    "item_id": "c1",
+    "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+    "location": "/assets/proxy/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4",
+    "seek_ms": 2000,
+    "duration_ms": 2400
+  },
+  {
+    "index": 1,
+    "role": "clip",
+    "item_id": "c2",
+    "asset_id": "ast_01jex6xx15ayjx8epfhfjj9s11",
+    "location": "/assets/proxy/ast_01jex6xx15ayjx8epfhfjj9s11.mp4",
+    "seek_ms": 1000,
+    "duration_ms": 2400
+  },
+  {
+    "index": 2,
+    "role": "clip",
+    "item_id": "c3",
+    "asset_id": "ast_01jdsx72atvnb7ssgbc57zbxj9",
+    "location": "/assets/proxy/ast_01jdsx72atvnb7ssgbc57zbxj9.mp4",
+    "seek_ms": 5000,
+    "duration_ms": 2400
+  },
+  {
+    "index": 3,
+    "role": "clip",
+    "item_id": "c4",
+    "asset_id": "ast_01jfbemsc6way7dnfebdf8tf3g",
+    "location": "/assets/proxy/ast_01jfbemsc6way7dnfebdf8tf3g.mp4",
+    "seek_ms": 8000,
+    "duration_ms": 2000
+  },
+  {
+    "index": 4,
+    "role": "clip",
+    "item_id": "c5",
+    "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+    "location": "/assets/proxy/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4",
+    "seek_ms": 20000,
+    "duration_ms": 2400
+  },
+  {
+    "index": 5,
+    "role": "clip",
+    "item_id": "c6",
+    "asset_id": "ast_01jex6xx15ayjx8epfhfjj9s11",
+    "location": "/assets/proxy/ast_01jex6xx15ayjx8epfhfjj9s11.mp4",
+    "seek_ms": 30000,
+    "duration_ms": 2000
+  }
+]
+
+cut_list:
+[
+  {
+    "index": 1,
+    "item_id": "c2",
+    "frame": 57,
+    "at_ms": 950,
+    "transition": "whip_right",
+    "transition_frames": 15
+  },
+  {
+    "index": 2,
+    "item_id": "c3",
+    "frame": 111,
+    "at_ms": 1850,
+    "transition": "zoom_through",
+    "transition_frames": 18
+  },
+  {
+    "index": 3,
+    "item_id": "c4",
+    "frame": 171,
+    "at_ms": 2850,
+    "transition": "flash",
+    "transition_frames": 12
+  },
+  {
+    "index": 4,
+    "item_id": "c5",
+    "frame": 267,
+    "at_ms": 4450,
+    "transition": "whip_left",
+    "transition_frames": 15
+  },
+  {
+    "index": 5,
+    "item_id": "c6",
+    "frame": 339,
+    "at_ms": 5650,
+    "transition": "cut",
+    "transition_frames": 0
+  }
+]
+
+time_map:
+[
+  {
+    "out_start_ms": 0,
+    "out_end_ms": 950,
+    "item_id": "c1",
+    "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+    "source_in_ms": 2000,
+    "speed": 2
+  },
+  {
+    "out_start_ms": 950,
+    "out_end_ms": 1850,
+    "item_id": "c2",
+    "asset_id": "ast_01jex6xx15ayjx8epfhfjj9s11",
+    "source_in_ms": 1000,
+    "speed": 2
+  },
+  {
+    "out_start_ms": 1850,
+    "out_end_ms": 2850,
+    "item_id": "c3",
+    "asset_id": "ast_01jdsx72atvnb7ssgbc57zbxj9",
+    "source_in_ms": 5000,
+    "speed": 2
+  },
+  {
+    "out_start_ms": 2850,
+    "out_end_ms": 4450,
+    "item_id": "c4",
+    "asset_id": "ast_01jfbemsc6way7dnfebdf8tf3g",
+    "source_in_ms": 8000,
+    "speed": 1.0781671159029649,
+    "speed_ramp": [
+      {
+        "at_ms": 0,
+        "speed": 2
+      },
+      {
+        "at_ms": 1000,
+        "speed": 2
+      },
+      {
+        "at_ms": 1600,
+        "speed": 0.5
+      }
+    ]
+  },
+  {
+    "out_start_ms": 4450,
+    "out_end_ms": 5650,
+    "item_id": "c5",
+    "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+    "source_in_ms": 20000,
+    "speed": 2
+  },
+  {
+    "out_start_ms": 5650,
+    "out_end_ms": 6650,
+    "item_id": "c6",
+    "asset_id": "ast_01jex6xx15ayjx8epfhfjj9s11",
+    "source_in_ms": 30000,
+    "speed": 2
+  }
+]
+
+sound_cues:
+[]
+
+subtitles: subs.ass in fonts/ (fonts Inter-Bold.ttf), 0 text events, 0 caption events, watermark true
+
+ass:
+  [Script Info]
+  ScriptType: v4.00+
+  PlayResX: 1920
+  PlayResY: 1080
+  WrapStyle: 2
+  ScaledBorderAndShadow: yes
+  YCbCr Matrix: None
+  
+  [V4+ Styles]
+  Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+  Style: watermark,Inter,37,&H55FFFFFF,&H55FFFFFF,&H87000000,&HFF000000,-1,0,0,0,100,100,0,0,1,2,0,5,0,0,0,1
+  
+  [Events]
+  Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+  Dialogue: 2,0:00:00.00,0:00:06.64,watermark,,0,0,0,,{\an5\pos(1654.5,129.5)}PREVIEW

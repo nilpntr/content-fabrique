@@ -72,7 +72,7 @@ var hints = map[string]string{
 	NameTrimItem + "|":      "give in_ms and/or out_ms (for a clip) or duration_ms (for a text item or sound)",
 	NameAddText + "|":       "give exactly one of anchor and position",
 	NameUpdateText + "|":    "give at least one field to change, and not both anchor and position",
-	NameSetTransition + "|": "cut takes no duration_ms; crossfade, dip_to_black and whip need a duration_ms from 100 to 1000",
+	NameSetTransition + "|": "cut takes no duration_ms; every other type (crossfade, dip_to_black, whip, whip_left, whip_right, zoom_through, flash) needs a duration_ms from 100 to 1000",
 	NameSetCaptions + "|":   "give at least one of enabled, style, uppercase and max_words",
 	NameSetClipAudio + "|":  "give at least one of use_source and gain_db",
 }

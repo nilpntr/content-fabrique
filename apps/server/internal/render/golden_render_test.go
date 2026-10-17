@@ -41,7 +41,7 @@ func goldenWidthFor(p Plan) int {
 
 // finalFixtures are the render fixtures that are also rendered with the final profile: one per kind of work (a cover
 // with a focus point, a transition with a blur, blur_fill, an audio mix and the full edit).
-var finalFixtures = []string{"v01_minimal_9x16", "v10_transition_whip", "v14_reframe_blur_fill", "v26_audio_licensed_track", "v30_full_edit"}
+var finalFixtures = []string{"v01_minimal_9x16", "v10_transition_whip", "v14_reframe_blur_fill", "v26_audio_licensed_track", "v30_full_edit", "v37_motion_9x16"}
 
 // sample is a frame of the output that the golden test looks at.
 type sample struct {
@@ -57,7 +57,7 @@ type sample struct {
 
 // sampleFrames picks the frames to compare: the first and last frame, the frames around every cut (the last frame before it and
 // the first of the next item: a cut that is one frame early shows in the first, one that is late in the second), the middle of every transition, the first frame after a whip and the middle of every item.
-func sampleFrames(t testing.TB, p Plan) []sample {
+func sampleFrames(t testing.TB, p Plan, spec *timeline.Spec) []sample {
 	byFrame := map[int64]sample{}
 	add := func(f int64, kind string, sensitive bool) {
 		if f < 0 || f >= p.TotalFrames {
@@ -78,9 +78,9 @@ func sampleFrames(t testing.TB, p Plan) []sample {
 		add(c.Frame, "cut", false)
 		if c.TransitionFrames > 0 {
 			add(c.Frame+c.TransitionFrames/2, "transition", false)
-			// The first frame after a whip is the incoming clip alone: a blur window that runs one frame too long shows
-			// here. (Only for the whip: the effect that has a window of its own to get wrong.)
-			if c.Transition == timeline.TransitionWhip {
+			// The first frame after a whip (or a zoom_through) is the incoming clip alone: a blur window that runs one frame too
+			// long shows here. (Only for the transitions that have a window of their own to get wrong.)
+			if blurred(c.Transition) {
 				add(c.Frame+c.TransitionFrames, "after-transition", false)
 			}
 		}
@@ -95,7 +95,11 @@ func sampleFrames(t testing.TB, p Plan) []sample {
 		}
 		startF := timeline.Frame(e.OutStartMs, p.FPS)
 		endF := timeline.Frame(e.OutEndMs, p.FPS)
-		add((startF+endF)/2, "mid", *e.Speed >= 1 && endF-startF > 4 && (startF+endF)/2+1 < p.TotalFrames)
+		// A clip with a speed ramp may play slowly somewhere, where the next frame can be a copy of this one.
+		add((startF+endF)/2, "mid", slowest(e) >= 1 && endF-startF > 4 && (startF+endF)/2+1 < p.TotalFrames)
+	}
+	for _, f := range motionFrames(spec, p.FPS) {
+		add(f, "motion", false)
 	}
 	if p.Subtitles != nil && p.Subtitles.CaptionEvents > 0 {
 		var mids []int64
@@ -122,6 +126,49 @@ func sampleFrames(t testing.TB, p Plan) []sample {
 		out = append(out, s)
 	}
 	slices.SortFunc(out, func(a, b sample) int { return int(a.frame - b.frame) })
+	return out
+}
+
+// slowest is the lowest speed a time map entry plays at: its speed, or the lowest point of its ramp.
+func slowest(e TimeMapEntry) float64 {
+	lo := *e.Speed
+	for _, pt := range e.SpeedRamp {
+		lo = math.Min(lo, pt.Speed)
+	}
+	return lo
+}
+
+// motionFrames picks frames inside the clips that have a motion preset, where the preset shows: a punch_in half way through and at
+// the end of its zoom, a push_in or pull_back a quarter and three quarters in, a shake at its peak and as it dies out.
+func motionFrames(spec *timeline.Spec, fps int) []int64 {
+	main, _, ok := timeline.MainTrack(spec)
+	if !ok {
+		return nil
+	}
+	var out []int64
+	for _, it := range main.Items {
+		if !it.Motion.Active() {
+			continue
+		}
+		start, end := timeline.Frame(it.AtMs, fps), timeline.Frame(timeline.EndMs(it), fps)
+		n := end - start
+		at := int64(0)
+		if it.Motion.AtMs != nil {
+			at = timeline.Frame(*it.Motion.AtMs, fps)
+		}
+		switch it.Motion.Preset {
+		case timeline.MotionPunchIn:
+			land := at
+			if it.Motion.AtMs == nil {
+				land = punchRampFrames(fps) // the default: the zoom starts with the clip and lands one ramp later
+			}
+			out = append(out, start+land/2, start+land+3)
+		case timeline.MotionPushIn, timeline.MotionPullBack:
+			out = append(out, start+n/4, start+n*3/4)
+		case timeline.MotionShake:
+			out = append(out, start+at+4, start+at+9)
+		}
+	}
 	return out
 }
 
@@ -189,7 +236,7 @@ func goldenRender(t *testing.T, ffmpeg, ffprobe, name string, spec *timeline.Spe
 		t.Errorf("audio is %.3f s long, video %d ms", info.audioSec, plan.DurationMs)
 	}
 
-	samples := sampleFrames(t, plan)
+	samples := sampleFrames(t, plan, spec)
 	// The frame after each sensitive sample is extracted as well, to prove the test could see an off-by-one.
 	want := map[int64]bool{}
 	for _, s := range samples {

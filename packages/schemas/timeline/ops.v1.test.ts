@@ -29,6 +29,8 @@ const OPS = [
   "set_look",
   "set_captions",
   "set_clip_audio",
+  "set_motion",
+  "set_speed_ramp",
 ];
 
 type Json = Record<string, any>;
@@ -91,6 +93,8 @@ describe("op schema", () => {
       "trendId",
       "licenseId",
       "reframe",
+      "motion",
+      "speedRamp",
       "look",
       "transition",
       "videoAudio",

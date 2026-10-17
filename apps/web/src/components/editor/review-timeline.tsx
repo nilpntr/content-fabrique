@@ -370,7 +370,11 @@ const Filmstrip = React.memo(function Filmstrip({ version, scale, assetNames }: 
           >
             <span className="absolute inset-x-1.5 top-1/2 -translate-y-1/2 truncate text-[10.5px] leading-none font-medium drop-shadow-[0_1px_1px_rgba(0,0,0,0.5)]">
               <span className="font-mono opacity-80">{item.id}</span> {assetNames?.[item.asset_id] ?? item.asset_id}
-              {item.speed !== 1 && <span className="ml-1 font-mono opacity-80">{item.speed}×</span>}
+              {item.speed_ramp ? (
+                <span className="ml-1 font-mono opacity-80">ramp</span>
+              ) : (
+                item.speed !== 1 && <span className="ml-1 font-mono opacity-80">{item.speed}×</span>
+              )}
             </span>
           </div>
         );

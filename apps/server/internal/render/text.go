@@ -180,7 +180,7 @@ func (c *compiler) mapWords() []mappedWord {
 	var all []mappedWord
 	for ci, cl := range c.clips {
 		in, out := cl.item.Source.InMs, cl.item.Source.OutMs
-		speed := cl.item.SpeedOrDefault()
+		it := cl.item
 		t0 := timeline.FrameStartMs(cl.startFrame, c.fps)
 		limit := min(cl.endFrame, c.total) // the clip's own audio plays to its end, also through a transition
 		for _, w := range cl.asset.Transcript {
@@ -189,8 +189,8 @@ func (c *compiler) mapWords() []mappedWord {
 				continue
 			}
 			s, e := max(w.StartMs, in), min(w.EndMs, out)
-			startF := timeline.Frame(t0+roundDiv(float64(s-in), speed), c.fps)
-			endF := timeline.Frame(t0+roundDiv(float64(e-in), speed), c.fps)
+			startF := timeline.Frame(t0+int64(math.Floor(it.OutOffsetMs(float64(s-in))+0.5)), c.fps)
+			endF := timeline.Frame(t0+int64(math.Floor(it.OutOffsetMs(float64(e-in))+0.5)), c.fps)
 			startF = max(startF, cl.startFrame)
 			if startF >= limit {
 				continue
@@ -221,9 +221,6 @@ func (c *compiler) mapWords() []mappedWord {
 	}
 	return all
 }
-
-// roundDiv is x / v rounded half up, in milliseconds.
-func roundDiv(x, v float64) int64 { return int64(math.Floor(x/v + 0.5)) }
 
 // cleanWord makes a transcript word safe to put in a script: control characters and line separators become spaces, runs of
 // spaces collapse, the ends are trimmed. (Escape still guards the script syntax; this keeps odd transcripts from adding

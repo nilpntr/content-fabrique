@@ -23,6 +23,13 @@ func cloneReframe(r *timeline.Reframe) *timeline.Reframe {
 	return &timeline.Reframe{Mode: r.Mode, Focus: copyPtr(r.Focus), Zoom: copyPtr(r.Zoom)}
 }
 
+func cloneMotion(m *timeline.Motion) *timeline.Motion {
+	if m == nil {
+		return nil
+	}
+	return &timeline.Motion{Preset: m.Preset, AtMs: copyPtr(m.AtMs), Strength: copyPtr(m.Strength)}
+}
+
 func cloneVideoAudio(v *timeline.VideoAudio) *timeline.VideoAudio {
 	if v == nil {
 		return nil
@@ -59,7 +66,7 @@ func (a *applier) addClip(o *AddClip) bool {
 	}
 	it := timeline.VideoItem{
 		ID: id, AssetID: o.AssetID, MomentID: o.MomentID, Source: o.Source,
-		Speed: copyPtr(o.Speed), Reframe: cloneReframe(o.Reframe), Look: copyPtr(o.Look),
+		Speed: copyPtr(o.Speed), SpeedRamp: slices.Clone(o.SpeedRamp), Reframe: cloneReframe(o.Reframe), Motion: cloneMotion(o.Motion), Look: copyPtr(o.Look),
 		TransitionIn: copyPtr(o.TransitionIn), Audio: cloneVideoAudio(o.Audio), Why: copyPtr(o.Why),
 	}
 	a.main.Items = slices.Insert(a.main.Items, pos, it)
@@ -171,6 +178,10 @@ func (a *applier) trimItem(o *TrimItem) bool {
 		i, _ := a.clip(o.ID)
 		it := &a.main.Items[i]
 		if o.InMs != nil {
+			if it.HasRamp() {
+				// The ramp's points count from the in point: move them with it, so the ramp stays on the same footage.
+				shiftRamp(it, *o.InMs-it.Source.InMs)
+			}
 			it.Source.InMs = *o.InMs
 		}
 		if o.OutMs != nil {
@@ -198,6 +209,54 @@ func (a *applier) trimItem(o *TrimItem) bool {
 	return true
 }
 
+// shiftRamp moves the speed ramp of a clip whose in point moves by delta ms (positive: later), so that every point stays on
+// the footage it was set for. The points are offsets from the in point, so each moves by -delta. A point that falls before the
+// new in point is dropped and the ramp starts there at the speed it had (linear between the points on either side of it); if
+// every point is gone the clip plays at the speed the ramp ended with, as a plain speed. Moving the in point earlier needs
+// nothing: the clip plays at the first point's speed before it.
+func shiftRamp(it *timeline.VideoItem, delta int64) {
+	if delta <= 0 {
+		for i := range it.SpeedRamp {
+			it.SpeedRamp[i].AtMs -= delta
+		}
+		return
+	}
+	pts := it.SpeedRamp
+	first := 0 // the index of the first point that stays (at or after the new in point)
+	for first < len(pts) && pts[first].AtMs-delta < 0 {
+		first++
+	}
+	if first == 0 {
+		for i := range pts {
+			pts[i].AtMs -= delta
+		}
+		return
+	}
+	if first == len(pts) { // all of the ramp is behind the new in point
+		v := pts[len(pts)-1].Speed
+		it.SpeedRamp, it.Speed = nil, &v
+		return
+	}
+	prev, next := pts[first-1], pts[first]
+	speedAt0 := prev.Speed
+	if span := float64(next.AtMs - prev.AtMs); span > 0 {
+		speedAt0 = prev.Speed + (next.Speed-prev.Speed)*float64(delta-prev.AtMs)/span
+	}
+	out := make([]timeline.SpeedPoint, 0, len(pts)-first+1)
+	if next.AtMs-delta > 0 {
+		out = append(out, timeline.SpeedPoint{AtMs: 0, Speed: speedAt0})
+	}
+	for _, p := range pts[first:] {
+		out = append(out, timeline.SpeedPoint{AtMs: p.AtMs - delta, Speed: p.Speed})
+	}
+	if len(out) < timeline.MinRampPoints { // the tail of the ramp is one point: a constant speed
+		v := out[0].Speed
+		it.SpeedRamp, it.Speed = nil, &v
+		return
+	}
+	it.SpeedRamp = out
+}
+
 func (a *applier) replaceSource(o *ReplaceSource) bool {
 	a.ensureSorted()
 	i, ok := a.clip(o.ID)
@@ -219,7 +278,39 @@ func (a *applier) setSpeed(o *SetSpeed) bool {
 	}
 	v := o.Speed
 	a.main.Items[i].Speed = &v
+	a.main.Items[i].SpeedRamp = nil // a ramp replaces the speed, and so does a speed the ramp
 	a.ripple()
+	a.touch(o.ID)
+	return true
+}
+
+func (a *applier) setSpeedRamp(o *SetSpeedRamp) bool {
+	a.ensureSorted()
+	i, ok := a.clip(o.ID)
+	if !ok {
+		return false
+	}
+	it := &a.main.Items[i]
+	it.SpeedRamp = slices.Clone(o.Points)
+	it.Speed = nil // the ramp replaces the speed
+	a.ripple()
+	a.touch(o.ID)
+	return true
+}
+
+func (a *applier) setMotion(o *SetMotion) bool {
+	i, ok := a.clip(o.ID)
+	if !ok {
+		return false
+	}
+	if o.Preset == timeline.MotionNone {
+		if o.AtMs != nil || o.Strength != nil {
+			return a.errf(CodeBadArgument, "the preset none takes no at_ms or strength; leave them out, or choose punch_in, push_in, pull_back or shake")
+		}
+		a.main.Items[i].Motion = nil
+	} else {
+		a.main.Items[i].Motion = &timeline.Motion{Preset: o.Preset, AtMs: copyPtr(o.AtMs), Strength: copyPtr(o.Strength)}
+	}
 	a.touch(o.ID)
 	return true
 }
@@ -243,7 +334,7 @@ func (a *applier) setTransition(o *SetTransition) bool {
 	t := &timeline.Transition{Type: o.Type, DurationMs: o.DurationMs}
 	if o.Type == timeline.TransitionCut {
 		if o.DurationMs != 0 {
-			return a.errf(CodeBadArgument, "a cut has no duration; leave duration_ms out, or choose crossfade, dip_to_black or whip")
+			return a.errf(CodeBadArgument, "a cut has no duration; leave duration_ms out, or choose crossfade, dip_to_black, whip_left, whip_right, zoom_through or flash")
 		}
 		t.DurationMs = 0
 	}

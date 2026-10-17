@@ -55,6 +55,15 @@ const (
 	// CodeFirstTransition is a transition_in on the first clip in time order. The schema only checks the first clip of
 	// the array; an array that is out of order but contiguous by time can put another clip first.
 	CodeFirstTransition Code = "first_transition"
+	// CodeInvalidMotion is a motion preset on a clip that is too short for it (under 400 ms), an at_ms that is not inside the
+	// clip, an at_ms on a preset that has none, or parameters on the preset none (P3-10).
+	CodeInvalidMotion Code = "invalid_motion"
+	// CodeInvalidSpeedRamp is a speed_ramp together with speed, points that are not sorted, or a point outside the clip's
+	// source range (P3-10).
+	CodeInvalidSpeedRamp Code = "invalid_speed_ramp"
+	// CodeRampAudioMuted is a warning: a clip with a speed ramp and use_source on. Its own audio cannot follow the ramp and
+	// is left out of the mix (P3-10).
+	CodeRampAudioMuted Code = "ramp_audio_muted"
 )
 
 // Severity says whether an issue blocks a version.

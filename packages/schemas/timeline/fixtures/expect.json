@@ -188,5 +188,48 @@
   },
   "i50_text_overlaps_captions.json": {
     "code": "text_overlaps_captions"
+  },
+  "i51_invalid_motion_clip_too_short.json": {
+    "code": "invalid_motion"
+  },
+  "i52_invalid_motion_at_past_end_of_clip.json": {
+    "code": "invalid_motion"
+  },
+  "i53_invalid_motion_at_on_push_in.json": {
+    "code": "invalid_motion"
+  },
+  "i54_invalid_speed_ramp_with_speed.json": {
+    "code": "invalid_speed_ramp"
+  },
+  "i55_invalid_speed_ramp_not_sorted.json": {
+    "code": "invalid_speed_ramp"
+  },
+  "i56_invalid_speed_ramp_point_past_source.json": {
+    "code": "invalid_speed_ramp"
+  },
+  "i57_schema_motion_strength_too_big.json": {
+    "code": "schema",
+    "path": "/tracks/0/items/0/motion/strength",
+    "keyword": "maximum"
+  },
+  "i58_schema_speed_ramp_one_point.json": {
+    "code": "schema",
+    "path": "/tracks/0/items/0/speed_ramp",
+    "keyword": "minItems"
+  },
+  "i59_schema_transition_unknown_type.json": {
+    "code": "schema",
+    "path": "/tracks/0/items/1/transition_in",
+    "keyword": "oneOf"
+  },
+  "i60_schema_speed_ramp_speed_too_fast.json": {
+    "code": "schema",
+    "path": "/tracks/0/items/0/speed_ramp/1/speed",
+    "keyword": "maximum"
+  },
+  "i61_schema_motion_preset_hostile.json": {
+    "code": "schema",
+    "path": "/tracks/0/items/0/motion/preset",
+    "keyword": "enum"
   }
 }

@@ -1,0 +1,7 @@
+{
+  "op": "set_motion",
+  "id": "c2",
+  "preset": "punch_in",
+  "at_ms": 500,
+  "strength": 0.2
+}

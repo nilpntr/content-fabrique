@@ -1,3 +1,4 @@
+import { rampOutMs, rampSourceMs } from "./speed-ramp";
 import type { MainTimeMapEntry, MsRange, TimeMapEntry, VideoItem } from "../types";
 
 export function isMainEntry(entry: TimeMapEntry): entry is MainTimeMapEntry {
@@ -6,7 +7,9 @@ export function isMainEntry(entry: TimeMapEntry): entry is MainTimeMapEntry {
 
 /** `round((out − in) / speed)`, the output duration of a main-track item (spec §2). */
 export function itemOutputDurationMs(item: VideoItem): number {
-  return Math.round((item.source.out_ms - item.source.in_ms) / item.speed);
+  const span = item.source.out_ms - item.source.in_ms;
+  if (item.speed_ramp?.length) return Math.round(rampOutMs(item.speed_ramp, span));
+  return Math.round(span / item.speed);
 }
 
 /** The `time_map` the renderer would write for these items. Used by the sample data and the tests. */
@@ -18,6 +21,7 @@ export function buildTimeMap(items: VideoItem[]): MainTimeMapEntry[] {
     asset_id: item.asset_id,
     source_in_ms: item.source.in_ms,
     speed: item.speed,
+    ...(item.speed_ramp?.length ? { speed_ramp: item.speed_ramp } : {}),
   }));
 }
 
@@ -47,6 +51,7 @@ function locate(entries: MainTimeMapEntry[], t: number, edge: "start" | "end"): 
 
 /** Where `t` falls in the item's source: `source_in_ms + (t − out_start_ms) × speed` (spec §6). */
 export function sourceTimeAt(entry: MainTimeMapEntry, t: number): number {
+  if (entry.speed_ramp?.length) return entry.source_in_ms + rampSourceMs(entry.speed_ramp, t - entry.out_start_ms);
   return entry.source_in_ms + (t - entry.out_start_ms) * entry.speed;
 }
 
@@ -94,7 +99,9 @@ function place(from: MainTimeMapEntry[], to: MainTimeMapEntry[], t: number, edge
 
 /** The output time of source time `source` inside `entry`, or null when that part of the source was trimmed away. */
 function outputTimeOf(entry: MainTimeMapEntry, source: number): number | null {
-  const out = entry.out_start_ms + (source - entry.source_in_ms) / entry.speed;
+  const out = entry.speed_ramp?.length
+    ? entry.out_start_ms + rampOutMs(entry.speed_ramp, source - entry.source_in_ms)
+    : entry.out_start_ms + (source - entry.source_in_ms) / entry.speed;
   // One millisecond of slack for the rounding in the output durations.
   if (out < entry.out_start_ms - 1 || out > entry.out_end_ms + 1) return null;
   return Math.round(Math.min(Math.max(out, entry.out_start_ms), entry.out_end_ms));

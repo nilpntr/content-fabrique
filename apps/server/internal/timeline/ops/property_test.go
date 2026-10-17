@@ -124,7 +124,8 @@ var (
 	styles     = []string{"title_bold", "title_bold", "caption_plain", "mystery"}
 	anchors    = []string{"upper_third", "center", "lower_third"}
 	animations = []string{"none", "pop_in", "fade", "typewriter", "slide_up"}
-	transTypes = []string{"cut", "crossfade", "dip_to_black", "whip"}
+	transTypes = []string{"cut", "crossfade", "dip_to_black", "whip", "whip_left", "whip_right", "zoom_through", "flash"}
+	presets    = []string{"none", "punch_in", "push_in", "pull_back", "shake"}
 )
 
 func (g *generator) point() *timeline.Point {
@@ -203,6 +204,8 @@ func (g *generator) op(k *known) Op {
 			}
 			return o
 		}},
+		{5, func() Op { return g.setMotion(k) }},
+		{5, func() Op { return g.setSpeedRamp(k) }},
 		{4, func() Op {
 			o := &SetClipAudio{ID: g.id(k.clips)}
 			if g.chance(60) {
@@ -230,6 +233,35 @@ func (g *generator) op(k *known) Op {
 	return nil
 }
 
+// setMotion makes a set_motion with every kind of mistake the validator catches: a clip that is too short, an at_ms
+// outside it or on a preset that has none.
+func (g *generator) setMotion(k *known) Op {
+	o := &SetMotion{ID: g.id(k.clips), Preset: pick(g, presets)}
+	if g.chance(40) {
+		v := int64(g.r.IntN(3000))
+		o.AtMs = &v
+	}
+	if g.chance(40) {
+		v := 0.05 + float64(g.r.IntN(31))/100
+		o.Strength = &v
+	}
+	return o
+}
+
+// setSpeedRamp makes a set_speed_ramp with sorted points, mostly: some are out of order or past the clip.
+func (g *generator) setSpeedRamp(k *known) Op {
+	o := &SetSpeedRamp{ID: g.id(k.clips)}
+	at := int64(0)
+	for range 2 + g.r.IntN(3) {
+		o.Points = append(o.Points, timeline.SpeedPoint{AtMs: at, Speed: pick(g, speeds)})
+		at += int64(100 + g.r.IntN(1500))
+		if g.chance(5) {
+			at = max(0, at-2000) // out of order
+		}
+	}
+	return o
+}
+
 func (g *generator) addClip(k *known) Op {
 	asset := pick(g, g.video)
 	o := &AddClip{AssetID: asset, Source: g.source(asset)}
@@ -244,6 +276,11 @@ func (g *generator) addClip(k *known) Op {
 	if g.chance(30) {
 		s := g.speed()
 		o.Speed = &s
+	} else if g.chance(10) {
+		o.SpeedRamp = []timeline.SpeedPoint{{AtMs: 0, Speed: 1}, {AtMs: int64(300 + g.r.IntN(1500)), Speed: pick(g, speeds)}}
+	}
+	if g.chance(10) {
+		o.Motion = &timeline.Motion{Preset: pick(g, presets)}
 	}
 	if g.chance(20) {
 		o.Reframe = &timeline.Reframe{Mode: pick(g, modes)}

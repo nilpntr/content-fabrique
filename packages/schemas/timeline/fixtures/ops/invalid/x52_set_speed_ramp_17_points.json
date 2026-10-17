@@ -1,0 +1,74 @@
+{
+  "op": "set_speed_ramp",
+  "id": "c1",
+  "points": [
+    {
+      "at_ms": 0,
+      "speed": 1
+    },
+    {
+      "at_ms": 100,
+      "speed": 1
+    },
+    {
+      "at_ms": 200,
+      "speed": 1
+    },
+    {
+      "at_ms": 300,
+      "speed": 1
+    },
+    {
+      "at_ms": 400,
+      "speed": 1
+    },
+    {
+      "at_ms": 500,
+      "speed": 1
+    },
+    {
+      "at_ms": 600,
+      "speed": 1
+    },
+    {
+      "at_ms": 700,
+      "speed": 1
+    },
+    {
+      "at_ms": 800,
+      "speed": 1
+    },
+    {
+      "at_ms": 900,
+      "speed": 1
+    },
+    {
+      "at_ms": 1000,
+      "speed": 1
+    },
+    {
+      "at_ms": 1100,
+      "speed": 1
+    },
+    {
+      "at_ms": 1200,
+      "speed": 1
+    },
+    {
+      "at_ms": 1300,
+      "speed": 1
+    },
+    {
+      "at_ms": 1400,
+      "speed": 1
+    },
+    {
+      "at_ms": 1500,
+      "speed": 1
+    },
+    {
+      "at_ms": 1600,
+      "speed": 1
+    }
+  ]
+}

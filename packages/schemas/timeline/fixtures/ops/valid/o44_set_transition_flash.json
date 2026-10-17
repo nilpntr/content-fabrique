@@ -1,0 +1,6 @@
+{
+  "op": "set_transition",
+  "id": "c3",
+  "type": "flash",
+  "duration_ms": 120
+}
