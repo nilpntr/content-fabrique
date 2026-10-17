@@ -1,0 +1,8 @@
+{
+  "op": "add_text",
+  "at_ms": 0,
+  "duration_ms": 1000,
+  "text": "a\nb\nc\nd",
+  "style": "title_bold",
+  "anchor": "center"
+}

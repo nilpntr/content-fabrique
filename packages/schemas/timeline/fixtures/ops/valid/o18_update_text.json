@@ -1,0 +1,6 @@
+{
+  "op": "update_text",
+  "id": "t1",
+  "text": "New words",
+  "animation": "fade"
+}

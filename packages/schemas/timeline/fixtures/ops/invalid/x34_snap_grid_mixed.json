@@ -1,0 +1,11 @@
+{
+  "op": "snap_cuts_to_beats",
+  "grid": {
+    "bpm": 120,
+    "first_beat_ms": 0,
+    "beats_ms": [
+      0,
+      500
+    ]
+  }
+}

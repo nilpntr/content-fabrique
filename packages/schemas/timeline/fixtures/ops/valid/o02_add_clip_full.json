@@ -1,0 +1,32 @@
+{
+  "op": "add_clip",
+  "id": "c7",
+  "asset_id": "ast_01jex6xx15ayjx8epfhfjj9s11",
+  "source": {
+    "in_ms": 1000,
+    "out_ms": 4000
+  },
+  "index": 1,
+  "speed": 1.5,
+  "reframe": {
+    "mode": "cover",
+    "focus": {
+      "x": 0.4,
+      "y": 0.6
+    },
+    "zoom": 1.2
+  },
+  "look": {
+    "preset": "punchy"
+  },
+  "transition_in": {
+    "type": "crossfade",
+    "duration_ms": 300
+  },
+  "audio": {
+    "use_source": true,
+    "gain_db": -3
+  },
+  "moment_id": "mom_01js9afva5j9pt8dqesz1r8s0p",
+  "why": "Best moment"
+}

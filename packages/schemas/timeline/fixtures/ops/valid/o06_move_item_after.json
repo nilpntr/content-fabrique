@@ -1,0 +1,5 @@
+{
+  "op": "move_item",
+  "id": "c3",
+  "after_id": "c1"
+}
