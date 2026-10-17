@@ -45,7 +45,7 @@ func TestMigrateCLI(t *testing.T) {
 	if code, out, _ := migrateCLI(t, url, "up"); code != 0 || !strings.Contains(out, "nothing to do") {
 		t.Fatalf("second up = %d %s", code, out)
 	}
-	if n := countTables(t, url); n != 10 {
+	if n := countTables(t, url); n != 12 {
 		t.Fatalf("tables after up = %d", n)
 	}
 	if n := countRiverTables(t, url); n == 0 {
@@ -83,6 +83,12 @@ func TestMigrateCLI(t *testing.T) {
 	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || countRiverTables(t, url) == 0 || strings.Contains(out, "river/") {
 		t.Fatalf("down one removed River too: %d %s", code, out)
 	}
+	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00009_") {
+		t.Fatalf("down one (00009) = %d %s", code, out)
+	}
+	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00008_usage_ledger.sql") {
+		t.Fatalf("down one (00008) = %d %s", code, out)
+	}
 	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00007_asset_ingest.sql") {
 		t.Fatalf("down one (00007) = %d %s", code, out)
 	}
@@ -104,7 +110,7 @@ func TestMigrateCLI(t *testing.T) {
 	if code, _, _ := migrateCLI(t, url, "up"); code != 0 {
 		t.Fatal("up")
 	}
-	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00008_usage_ledger.sql") {
+	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00010_agent_runs.sql") {
 		t.Fatalf("down one = %d %s", code, out)
 	}
 }
