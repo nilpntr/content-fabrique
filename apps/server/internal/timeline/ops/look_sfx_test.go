@@ -109,9 +109,9 @@ func TestSetLookMatchAndExposure(t *testing.T) {
 		}
 	})
 	t.Run("exposure_ev is the hint of one clip", func(t *testing.T) {
-		out := mustApply(t, base, `[{"op":"set_look","id":"c2","preset":"auto","match":true,"exposure_ev":-1.5}]`)
+		out := mustApply(t, base, `[{"op":"set_look","id":"c2","preset":"auto","match":true,"exposure_ev":-0.8}]`)
 		c := clips(t, out)
-		if c[1].ExposureEv == nil || *c[1].ExposureEv != -1.5 || c[0].ExposureEv != nil {
+		if c[1].ExposureEv == nil || *c[1].ExposureEv != -0.8 || c[0].ExposureEv != nil {
 			t.Fatalf("hints: %v %v", c[0].ExposureEv, c[1].ExposureEv)
 		}
 		// Left out, the hint stays.
@@ -139,7 +139,7 @@ func TestSetLookMatchAndExposure(t *testing.T) {
 		}
 	})
 	t.Run("a hint outside -3 to 3 is refused by the validator of the result", func(t *testing.T) {
-		ev := 3.5
+		ev := 1.5
 		_, res := Apply(base, []Op{&SetLook{ID: "c1", Preset: "auto", ExposureEv: &ev}}, fixtureCatalog(t))
 		if res.OK() || !slices.Contains(errorCodes(res), "schema") {
 			t.Fatalf("%+v", res.Issues)
