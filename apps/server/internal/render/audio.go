@@ -117,6 +117,9 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 			continue
 		}
 		for _, item := range tr.Items {
+			if _, isSFX := item.(*timeline.SFX); isSFX {
+				continue // generated: sfxGraph, mixed in after the programme
+			}
 			com := item.Common()
 			trend, isTrend := item.(*timeline.TrendSound)
 			if isTrend || com.Export == timeline.ExportCueOnly {
@@ -177,6 +180,15 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 	// preview aid, not part of the programme: it is mixed in after loudnorm, so that clicks on an otherwise silent
 	// timeline are not boosted to -14 LUFS.
 	guide := c.beatGuide()
+	// The sound effects are the same kind of thing: an accent mixed in after the normalisation, at a fixed level.
+	sfxStmts, sfxPads, err := c.sfxGraph()
+	if err != nil {
+		return audioResult{}, err
+	}
+	post := slices.Clone(sfxPads)
+	if len(guide) > 0 {
+		post = append(post, "abeat")
+	}
 
 	// The bed is silence of exactly the output's length: the mix always has an audio stream, and amix runs for exactly
 	// as long as the video.
@@ -184,7 +196,7 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 	stmts = append([]string{bed}, stmts...)
 
 	progOut := "aout"
-	if len(guide) > 0 {
+	if len(post) > 0 {
 		progOut = "aprog"
 	}
 	var res audioResult
@@ -207,9 +219,22 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 		}
 	}
 	switch {
-	case len(guide) > 0:
+	case len(post) > 0:
 		stmts = append(stmts, guide...)
-		stmts = append(stmts, fmt.Sprintf("[%s][abeat]amix=inputs=2:duration=first:normalize=0:dropout_transition=0[aout]", prog))
+		stmts = append(stmts, sfxStmts...)
+		in := "[" + prog + "]"
+		for _, p := range post {
+			in += "[" + p + "]"
+		}
+		mix := fmt.Sprintf("%samix=inputs=%d:duration=first:normalize=0:dropout_transition=0", in, len(post)+1)
+		if len(sfxPads) > 0 {
+			// A limiter at -1 dBFS, so the effects cannot push the mix past the true-peak target (auto level off: it would
+			// normalise the mix).
+			// The limiter delays its output by sfxLimiterDelay samples and does not say so: the input gets that much silence at the
+			// end, and the same number of samples are cut at the start, so that the sound stays where it was and keeps its length.
+			mix += fmt.Sprintf(",apad=pad_len=%d,alimiter=limit=%s:level=false,atrim=start_sample=%d,asetpts=PTS-STARTPTS", sfxLimiterDelay, sfxLimitLin, sfxLimiterDelay)
+		}
+		stmts = append(stmts, mix+"[aout]")
 	case prog == "abed":
 		stmts = append(stmts, "[abed]anull[aout]")
 	}

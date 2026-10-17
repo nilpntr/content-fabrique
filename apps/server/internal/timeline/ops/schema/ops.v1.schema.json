@@ -195,13 +195,13 @@
             "gym_moody"
           ],
           "title": "Preset",
-          "description": "A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white), matte (lifted blacks), auto (evens out the clip's exposure and contrast, the same way for every clip, so cuts between angles do not jump) or gym_moody (deep blacks, warm skin, a slight vignette)."
+          "description": "A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white), matte (lifted blacks), auto (a mild contrast curve that keeps blacks and whites where they are, plus the clip's exposure_ev nudge, so shots from different angles meet at one exposure without washing out low-key footage) or gym_moody (deep blacks, warm skin, a slight vignette)."
         },
         "match": {
           "type": "boolean",
           "default": false,
           "title": "Match exposure",
-          "description": "True to correct the clip's exposure by its exposure_ev hint (from the analysis) before the preset, so shots from different angles meet at one exposure. Default false. Without an exposure_ev on the clip it changes nothing."
+          "description": "True to correct the clip's exposure by its exposure_ev hint (from the analysis; a nudge of at most 0.7 stops, black point kept) before the preset, so shots from different angles meet at one exposure. The preset auto always does this, whatever match says. Default false. Without an exposure_ev on the clip it changes nothing."
         }
       }
     },
@@ -1387,7 +1387,7 @@
     "set_look": {
       "type": "object",
       "title": "set_look",
-      "description": "Set the colour look of a clip. Without id it applies to every clip on the main track. Presets: none, punchy, warm, cool, bw, matte, auto (evens out each clip's exposure and contrast, so shots from different angles do not jump) and gym_moody (deep blacks, warm skin, a slight vignette: the grade for gym footage). match true also corrects each clip's exposure by its exposure_ev hint before the preset (left out, match keeps what the clip had). exposure_ev sets that hint on one clip (it needs id); the analysis writes it, so only give it when you know the clip's exposure.",
+      "description": "Set the colour look of a clip. Without id it applies to every clip on the main track. Presets: none, punchy, warm, cool, bw, matte, auto (a mild contrast curve that keeps blacks and whites, plus each clip's exposure_ev nudge, so shots from different angles meet at one exposure) and gym_moody (deep blacks, warm skin, a slight vignette: the grade for gym footage). match true also corrects each clip's exposure by its exposure_ev hint (a nudge of at most 0.7 stops, black point kept; auto always does) before the preset (left out, match keeps what the clip had). exposure_ev sets that hint on one clip (it needs id); the analysis writes it, so only give it when you know the clip's exposure; it is -1 to 1 and must not come from a clip's mean brightness (low-key footage is dark and correct).",
       "additionalProperties": false,
       "required": [
         "op",
@@ -1416,13 +1416,13 @@
             "gym_moody"
           ],
           "title": "Preset",
-          "description": "A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white), matte (lifted blacks), auto (evens out the clip's exposure and contrast, the same way for every clip, so cuts between angles do not jump) or gym_moody (deep blacks, warm skin, a slight vignette)."
+          "description": "A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white), matte (lifted blacks), auto (a mild contrast curve that keeps blacks and whites where they are, plus the clip's exposure_ev nudge, so shots from different angles meet at one exposure without washing out low-key footage) or gym_moody (deep blacks, warm skin, a slight vignette)."
         },
         "match": {
           "type": "boolean",
           "default": false,
           "title": "Match exposure",
-          "description": "True to correct the clip's exposure by its exposure_ev hint (from the analysis) before the preset, so shots from different angles meet at one exposure. Default false. Without an exposure_ev on the clip it changes nothing."
+          "description": "True to correct the clip's exposure by its exposure_ev hint (from the analysis; a nudge of at most 0.7 stops, black point kept) before the preset, so shots from different angles meet at one exposure. The preset auto always does this, whatever match says. Default false. Without an exposure_ev on the clip it changes nothing."
         },
         "exposure_ev": {
           "$ref": "#/$defs/exposureEv"
@@ -1695,10 +1695,10 @@
     },
     "exposureEv": {
       "type": "number",
-      "minimum": -3,
-      "maximum": 3,
+      "minimum": -1,
+      "maximum": 1,
       "title": "Exposure hint",
-      "description": "How many stops (EV) this clip is brighter than the exposure the edit should have, as measured by the analysis; the renderer applies the opposite when look.match is true. Positive means the clip is too bright and is darkened. -3 to 3. Without it, look.match changes nothing."
+      "description": "A small nudge, -1 to 1 stops (EV): how much brighter this clip is than the exposure the edit should have (positive: too bright, to be darkened; negative: too dark, to be lifted). It must come from highlight or midtone percentiles of the clip, never from its mean brightness, because a low-key clip (black wall, lit subject) has a low mean and is correctly exposed. The renderer applies the opposite, limited to 0.7 stops and ignoring hints under 0.15, with a highlight-preserving curve that keeps the black point, when look.match is true or the preset is auto. Without it, nothing is corrected."
     },
     "sfxName": {
       "enum": [
