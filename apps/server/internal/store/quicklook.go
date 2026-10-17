@@ -159,3 +159,16 @@ func SearchWords(text string) []string {
 	}
 	return out
 }
+
+// AssetSubjectsRow is the subject boxes stored with the quick look of one asset (the JSON of the quick look's "subjects" member).
+type AssetSubjectsRow = db.ListAssetSubjectsRow
+
+// ListAssetSubjects reads the subject boxes of several assets in one query. Assets without any are not in the result; the caller
+// validates what it reads (package subject).
+func (s *Store) ListAssetSubjects(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]AssetSubjectsRow, error) {
+	if len(assets) == 0 {
+		return nil, nil
+	}
+	rows, err := s.q.ListAssetSubjects(ctx, db.ListAssetSubjectsParams{WorkspaceID: ws, AssetIds: assetUUIDs(assets)})
+	return rows, mapErr(err)
+}

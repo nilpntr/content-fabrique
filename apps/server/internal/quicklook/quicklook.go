@@ -22,10 +22,12 @@
 package quicklook
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image/jpeg"
 	"io"
 	"log/slog"
 	"strings"
@@ -38,6 +40,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/media"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
+	"github.com/nilpntr/content-fabrique/internal/subject"
 )
 
 // The codes a failed quick look records in assets.quick_look (the "error" field). Safe to show.
@@ -117,6 +120,9 @@ type Options struct {
 	// Force runs the quick look again for an asset whose quick look succeeded, and replaces its title (unless a person
 	// edited it), description and tags.
 	Force bool
+	// KeepLabels stores only what is new (the subject boxes, the frames) and leaves the asset's title, description and tags as they are:
+	// for assets whose quick look is older than the subject boxes.
+	KeepLabels bool
 }
 
 // Outcome says how a run ended.
@@ -147,6 +153,8 @@ type Result struct {
 	Usage llm.Usage `json:"usage"`
 	// Model is the model that answered.
 	Model string `json:"model,omitempty"`
+	// Subjects is how many frames got a subject box.
+	Subjects int `json:"subjects,omitempty"`
 }
 
 // frameInfo is a frame the model saw, as the asset's quick_look detail lists it: the time in the clip, the object key it is
@@ -163,7 +171,21 @@ type detail struct {
 	Model         string      `json:"model,omitempty"`
 	Profile       string      `json:"profile,omitempty"`
 	Frames        []frameInfo `json:"frames,omitempty"`
-	Error         string      `json:"error,omitempty"`
+	// Subjects is where the person is in the sampled frames (package subject), for the title placement; nil when the model saw nobody
+	// or the quick look is older than the field.
+	Subjects *subject.Track `json:"subjects,omitempty"`
+	// SubjectsRead says the model was asked for the subject boxes (a v2 answer), whether or not anybody was in the frames: a clip with
+	// nobody in it has no boxes and must not be asked again.
+	SubjectsRead bool   `json:"subjects_read,omitempty"`
+	Error        string `json:"error,omitempty"`
+}
+
+// SubjectsRead says the quick look detail records that the subject boxes were asked for (with an answer or none).
+func SubjectsRead(detail json.RawMessage) bool {
+	var d struct {
+		Read bool `json:"subjects_read"`
+	}
+	return json.Unmarshal(detail, &d) == nil && d.Read
 }
 
 func (d detail) json() json.RawMessage {
@@ -205,7 +227,12 @@ func (s *Service) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, o
 	if err != nil {
 		return Result{}, err
 	}
+	// A run that only adds the subject boxes to a good quick look leaves it as it is when it fails: the labels are still good.
+	keep := opts.KeepLabels && a.QuickLookStatus != nil && *a.QuickLookStatus == store.QuickLookSucceeded
 	if fails != "" {
+		if keep {
+			return Result{Outcome: OutcomeFailed, Reason: fails}, nil
+		}
 		return s.fail(ctx, a, d, fails, log)
 	}
 
@@ -215,9 +242,16 @@ func (s *Service) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, o
 	}
 	if reason != "" {
 		res.Outcome, res.Reason = OutcomeFailed, reason
+		if keep {
+			return res, nil
+		}
 		return s.fail(ctx, a, d, reason, log, res)
 	}
 	out := store.QuickLookResult{Title: res.Title, Description: res.Description, Tags: res.Tags, Detail: d.json()}
+	if keep {
+		out.Title, out.Description, out.Tags = a.Title, a.Description, a.Tags
+		res.Title, res.Description, res.Tags = a.Title, a.Description, a.Tags
+	}
 	if _, err := s.cfg.Store.ApplyQuickLook(ctx, ws, id, out); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return Result{Outcome: OutcomeGone}, nil
@@ -339,7 +373,38 @@ func (s *Service) ask(ctx context.Context, a store.Asset, fr frameSet, d *detail
 		return res, FailInvalidOutput, nil
 	}
 	res.Title, res.Description, res.Tags = out.Title, out.Description, out.Tags
+	d.Subjects, d.SubjectsRead = subjectTrack(out.Subjects, fr), true
+	if d.Subjects != nil {
+		res.Subjects = len(d.Subjects.Samples)
+	}
 	return res, "", nil
+}
+
+// subjectTrack turns what the model said about each frame into the clip's subject track: the frame numbers become the times the frames
+// were taken at, the aspect is that of the pictures the model saw, and every box is checked against the bounds (an entry that fails is
+// dropped). nil when no usable box is left.
+func subjectTrack(reads []SubjectRead, fr frameSet) *subject.Track {
+	if len(fr.jpegs) == 0 {
+		return nil
+	}
+	cfg, err := jpeg.DecodeConfig(bytes.NewReader(fr.jpegs[0]))
+	if err != nil || cfg.Height == 0 {
+		return nil
+	}
+	t := subject.Track{Aspect: float64(cfg.Width) / float64(cfg.Height)}
+	seen := map[int]bool{}
+	for _, r := range reads {
+		if !r.Present || r.Frame < 1 || r.Frame > len(fr.at) || seen[r.Frame] {
+			continue
+		}
+		seen[r.Frame] = true
+		t.Samples = append(t.Samples, subject.Sample{AtMs: fr.at[r.Frame-1], X: r.X, Y: r.Y, W: r.W, H: r.H, HeadTopY: r.HeadTopY})
+	}
+	clean, ok := subject.Clean(t)
+	if !ok {
+		return nil
+	}
+	return &clean
 }
 
 func derefInt64(p *int64) int64 {

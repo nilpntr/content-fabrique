@@ -104,3 +104,10 @@ WHERE workspace_id = @workspace_id AND kind = 'video' AND status = 'ready' AND d
   AND (@include_done::boolean OR quick_look_status IS DISTINCT FROM 'succeeded')
 ORDER BY id
 LIMIT @row_limit;
+
+-- Where the person is in the sampled frames of several videos (the quick look's "subjects" member), for the editor's checks and the
+-- compiler's title placement. A video with none is not in the result.
+-- name: ListAssetSubjects :many
+SELECT id AS asset_id, (quick_look -> 'subjects')::jsonb AS subjects FROM assets
+WHERE workspace_id = @workspace_id AND id = ANY(@asset_ids::uuid[]) AND status = 'ready' AND deleted_at IS NULL
+  AND quick_look_status = 'succeeded' AND (quick_look -> 'subjects') IS NOT NULL;

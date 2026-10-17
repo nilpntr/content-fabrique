@@ -1,11 +1,11 @@
 {
   "version": 1,
   "stage": "quicklook",
-  "key": "a58c37656647558e2864ae83b8571c5b383eba7b28d6c91e6acf07a88cdc29a7",
-  "recorded_at": "2026-10-17T12:35:37Z",
+  "key": "f6b3ea1ab6dd9620076a520c791ed39d0c6f5112cc7ce1cc5af461ef0903594d",
+  "recorded_at": "2026-10-17T22:45:56Z",
   "request": {
     "model": "claude-haiku-5-5",
-    "max_tokens": 400,
+    "max_tokens": 700,
     "thinking": "disabled",
     "system_blocks": 1,
     "messages": [
@@ -68,6 +68,44 @@
             "gym",
             "side view",
             "lats"
+          ],
+          "subjects": [
+            {
+              "frame": 1,
+              "present": true,
+              "x": 0.22,
+              "y": 0.2,
+              "w": 0.56,
+              "h": 0.7,
+              "head_top_y": 0.22
+            },
+            {
+              "frame": 2,
+              "present": true,
+              "x": 0.2,
+              "y": 0.24,
+              "w": 0.6,
+              "h": 0.66,
+              "head_top_y": 0.26
+            },
+            {
+              "frame": 3,
+              "present": true,
+              "x": 0.2,
+              "y": 0.22,
+              "w": 0.6,
+              "h": 0.68,
+              "head_top_y": 0.25
+            },
+            {
+              "frame": 4,
+              "present": false,
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "head_top_y": 0
+            }
           ]
         }
       }

@@ -426,6 +426,44 @@ func (q *Queries) ListAssetDerivatives(ctx context.Context, arg ListAssetDerivat
 	return items, nil
 }
 
+const listAssetSubjects = `-- name: ListAssetSubjects :many
+SELECT id AS asset_id, (quick_look -> 'subjects')::jsonb AS subjects FROM assets
+WHERE workspace_id = $1 AND id = ANY($2::uuid[]) AND status = 'ready' AND deleted_at IS NULL
+  AND quick_look_status = 'succeeded' AND (quick_look -> 'subjects') IS NOT NULL
+`
+
+type ListAssetSubjectsParams struct {
+	WorkspaceID ids.WorkspaceID
+	AssetIds    []uuid.UUID
+}
+
+type ListAssetSubjectsRow struct {
+	AssetID  ids.AssetID
+	Subjects json.RawMessage
+}
+
+// Where the person is in the sampled frames of several videos (the quick look's "subjects" member), for the editor's checks and the
+// compiler's title placement. A video with none is not in the result.
+func (q *Queries) ListAssetSubjects(ctx context.Context, arg ListAssetSubjectsParams) ([]ListAssetSubjectsRow, error) {
+	rows, err := q.db.Query(ctx, listAssetSubjects, arg.WorkspaceID, arg.AssetIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAssetSubjectsRow
+	for rows.Next() {
+		var i ListAssetSubjectsRow
+		if err := rows.Scan(&i.AssetID, &i.Subjects); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAssetsForQuickLook = `-- name: ListAssetsForQuickLook :many
 SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason FROM assets
 WHERE workspace_id = $1 AND kind = 'video' AND status = 'ready' AND deleted_at IS NULL

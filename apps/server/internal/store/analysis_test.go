@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -149,6 +150,35 @@ func analysisSuite(t *testing.T, st *store.Store, suffix string) {
 		}
 		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, result(a, 1)); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("an analysis was saved on a deleted asset: %v", err)
+		}
+	})
+
+	t.Run("the subject boxes of the quick look are read, by workspace, for the assets that have them", func(t *testing.T) {
+		with, without := ready(wa, ua, "subjects-clip"), ready(wa, ua, "no-subjects-clip")
+		detail := []byte(`{"prompt_version":"quicklook.v2","subjects":{"aspect":0.5625,"samples":[{"at_ms":1500,"x":0.2,"y":0.2,"w":0.6,"h":0.7,"head_top_y":0.22}]}}`)
+		if _, err := st.ApplyQuickLook(ctx, wa.ID, with.ID, store.QuickLookResult{Title: "Row", Description: "A row.", Tags: []string{"row"}, Detail: detail}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.ApplyQuickLook(ctx, wa.ID, without.ID, store.QuickLookResult{Title: "Row 2", Description: "A row.", Tags: []string{"row"}, Detail: []byte(`{"prompt_version":"quicklook.v1"}`)}); err != nil {
+			t.Fatal(err)
+		}
+		rows, err := st.ListAssetSubjects(ctx, wa.ID, []ids.AssetID{with.ID, without.ID})
+		if err != nil || len(rows) != 1 || rows[0].AssetID != with.ID || !strings.Contains(string(rows[0].Subjects), `"head_top_y": 0.22`) && !strings.Contains(string(rows[0].Subjects), `"head_top_y":0.22`) {
+			t.Fatalf("subjects of workspace A: %+v %v", rows, err)
+		}
+		// Another workspace reads nothing of it; nothing asked is nothing read.
+		if rows, err := st.ListAssetSubjects(ctx, wb.ID, []ids.AssetID{with.ID}); err != nil || len(rows) != 0 {
+			t.Fatalf("workspace B read A's subjects: %+v %v", rows, err)
+		}
+		if rows, err := st.ListAssetSubjects(ctx, wa.ID, nil); err != nil || rows != nil {
+			t.Fatalf("no assets: %+v %v", rows, err)
+		}
+		// A quick look that failed has no boxes to give, even if an earlier one had.
+		if _, err := st.FailQuickLook(ctx, wa.ID, with.ID, []byte(`{"error":"spend_cap"}`)); err != nil {
+			t.Fatal(err)
+		}
+		if rows, _ := st.ListAssetSubjects(ctx, wa.ID, []ids.AssetID{with.ID}); len(rows) != 0 {
+			t.Fatalf("a failed quick look's boxes were read: %+v", rows)
 		}
 	})
 

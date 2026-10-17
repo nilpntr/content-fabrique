@@ -16,6 +16,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/quicklook"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
+	"github.com/nilpntr/content-fabrique/internal/subject"
 )
 
 const assetsQuickLookUsage = `Usage:
@@ -34,6 +35,10 @@ failed, or still pending. The frames it cut before are reused.
   --all        every ready video of the workspace, also those that have a quick look: it runs again and replaces the
                description and tags (and the title, unless a person edited it)
   --asset      only this asset (an ast_... id); it runs again even when it has a quick look
+  --subjects   only the videos whose quick look has no subject boxes yet (where the person is in each of the four frames: the
+               editor keeps titles off the head with them): it makes the same ONE call, stores the boxes and the frames, and
+               leaves the title, description and tags as they are (a person's edits and the earlier labels stay). About
+               $0.0005 a video. With --asset it is that asset, with the boxes added and the labels kept.
   --limit      at most this many videos (default 200)
   --env-file   the env file; default .env at the repository root, and a relative name is taken from there too
   --yes        needed unless CF_ENV is local or ci, the database is on this machine, and CF_ENV and DATABASE_URL come from
@@ -48,6 +53,15 @@ Example (the founder's workspace, live):  cd apps/server && go run ./cmd/cfctl a
 // quickLookHTTPClient replaces the model SDK's transport; tests set it to a fake API. Nil uses the default.
 var quickLookHTTPClient *http.Client
 
+// listLimit is how many videos to list: --limit, except that --subjects filters after listing, so it lists them all (up to the largest limit)
+// and applies --limit to what is left.
+func listLimit(subjectsOnly bool, limit int) int {
+	if subjectsOnly {
+		return 10000
+	}
+	return limit
+}
+
 // perAssetTimeout bounds one video: the proxy download, the frames and the model call.
 const perAssetTimeout = 5 * time.Minute
 
@@ -59,6 +73,7 @@ func cmdAssetsQuickLook(args []string, stdout, stderr io.Writer, lookup lookupEn
 	workspaceArg := flags.String("workspace", "", "workspace id")
 	all := flags.Bool("all", false, "every ready video, again")
 	assetArg := flags.String("asset", "", "one asset")
+	subjectsOnly := flags.Bool("subjects", false, "only the videos without subject boxes; keeps the labels")
 	limit := flags.Int("limit", 200, "most videos")
 	envFileArg := flags.String("env-file", "", "env file")
 	yes := flags.Bool("yes", false, "confirm outside plain local development")
@@ -187,14 +202,24 @@ func cmdAssetsQuickLook(args []string, stdout, stderr io.Writer, lookup lookupEn
 			return 1
 		}
 		targets = []store.Asset{a}
-	} else if targets, err = st.ListAssetsForQuickLook(ctx, ws.ID, *all, *limit); err != nil {
+	} else if targets, err = st.ListAssetsForQuickLook(ctx, ws.ID, *all || *subjectsOnly, listLimit(*subjectsOnly, *limit)); err != nil {
 		_, _ = fmt.Fprintf(errOut, "cfctl %s: listing the videos failed: %v\n", name, err)
 		return 1
+	}
+	if *subjectsOnly && wantAsset == nil {
+		var missing []store.Asset
+		for _, a := range targets {
+			// Without boxes, and never asked for them: a clip with nobody in it was asked and has none, and is not asked again.
+			if _, ok := subject.FromDetail(a.QuickLook); !ok && !quicklook.SubjectsRead(a.QuickLook) && a.QuickLookStatus != nil && *a.QuickLookStatus == store.QuickLookSucceeded {
+				missing = append(missing, a)
+			}
+		}
+		targets = missing[:min(len(missing), *limit)]
 	}
 
 	_, _ = fmt.Fprintf(out, "cfctl %s (CF_ENV=%s, LLM_MODE=%s, profile %s)\n  workspace %q (%s)\n  %d video(s)\n",
 		name, rt.Settings.Env, rt.Settings.Mode, rt.Router.DefaultProfile(), ws.Name, ws.ID, len(targets))
-	force := *all || wantAsset != nil
+	force := *all || wantAsset != nil || *subjectsOnly
 	failed, totalMicros := 0, int64(0)
 	for _, a := range targets {
 		if ctx.Err() != nil {
@@ -203,7 +228,7 @@ func cmdAssetsQuickLook(args []string, stdout, stderr io.Writer, lookup lookupEn
 		before, _ := st.UsageForRun(ctx, ws.ID, a.ID.UUID)
 		start := time.Now()
 		rctx, cancel := context.WithTimeout(ctx, perAssetTimeout)
-		res, err := svc.Run(rctx, ws.ID, a.ID, quicklook.Options{Force: force})
+		res, err := svc.Run(rctx, ws.ID, a.ID, quicklook.Options{Force: force, KeepLabels: *subjectsOnly})
 		cancel()
 		after, _ := st.UsageForRun(ctx, ws.ID, a.ID.UUID)
 		var cost int64

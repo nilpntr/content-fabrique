@@ -85,7 +85,7 @@ func TestRunLabelsTheClip(t *testing.T) {
 		t.Fatalf("%d model calls, want 1", len(calls))
 	}
 	body := calls[0].json(t)
-	if body["model"] != "claude-haiku-5-5" || body["max_tokens"] != float64(400) {
+	if body["model"] != "claude-haiku-5-5" || body["max_tokens"] != float64(700) {
 		t.Errorf("model/max_tokens = %v %v", body["model"], body["max_tokens"])
 	}
 	tools, _ := body["tools"].([]any)
