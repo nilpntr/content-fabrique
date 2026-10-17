@@ -9,6 +9,11 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/agents/llm/routing"
 )
 
+// ErrStageDisabled is what Resolve returns, wrapped in a *routing.DisabledError, for a stage marked `enabled: false`
+// (the inspector sub-agent of the editor, say). A disabled stage is not active, so it resolves to no model, and
+// `cfctl doctor` leaves its model out of the set it checks.
+var ErrStageDisabled = routing.ErrStageDisabled
+
 // Route is where one stage of one profile sends its calls.
 type Route struct {
 	Profile string

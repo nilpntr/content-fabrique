@@ -107,19 +107,65 @@ func TestRecordThenReplayRoundTrip(t *testing.T) {
 		t.Error("replay wrote a ledger row")
 	}
 	// The run budget is still charged, so budget behaviour matches live.
-	b := &fixedBudget{left: 1_000_000}
+	b := newSpyBudget(1_000_000)
 	req := cassetteRequest()
 	req.Run = RunInfo{Budget: b}
 	if _, err := rc.Messages(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
 	// Opus: 900*4 + 100*5 + 50*0.2 + 77*20 = 3600+500+10+1540 = 5650.
-	if len(b.spends) != 1 || b.spends[0] != 5650 {
-		t.Errorf("replay spends = %v", b.spends)
+	if len(b.settled) != 1 || b.settled[0] != 5650 || b.Spent() != 5650 {
+		t.Errorf("replay settled %v, spent %d", b.settled, b.Spent())
 	}
-	// CountTokens in replay is a local estimate, not an API call.
+	// This cassette was recorded without a count (the request was far under every cap, so none was needed): CountTokens
+	// in replay falls back to a local estimate, and is not an API call.
 	if n, err := rc.CountTokens(context.Background(), cassetteRequest()); err != nil || n < 100 {
 		t.Errorf("replay CountTokens = %d, %v", n, err)
+	}
+}
+
+// count_tokens results are stored in the cassette at record time and served in replay, so cap decisions come out as
+// they did live.
+func TestReplayServesTheRecordedTokenCount(t *testing.T) {
+	dir := t.TempDir()
+	// 650 micros is under the local bound of this request, so recording has to count it.
+	vars := map[string]string{"LLM_MODE": "record", "LLM_CASSETTE_DIR": dir, "LLM_MAX_REQUEST_MICROS": "650"}
+	rec := newRig(t, vars)
+	rec.api.countTokens = func(int, recordedCall) fakeReply { return fakeReply{Status: 200, Body: `{"input_tokens": 1234}`} }
+	ws := newWorkspaceID()
+	c, _ := rec.client(t, ws, "editor")
+	if _, err := c.Messages(context.Background(), simpleRequest()); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(rec.api.callsTo("/count_tokens")); n != 1 {
+		t.Fatalf("recording made %d counts, want 1", n)
+	}
+	key, _ := RequestKey(simpleRequest())
+	body := readCassettes(t, dir)[filepath.Join(dir, "editor", key+".json")]
+	if !strings.Contains(body, `"count_tokens": 1234`) {
+		t.Fatalf("the count was not stored:\n%s", body)
+	}
+
+	rp := newRig(t, map[string]string{"LLM_MODE": "replay", "LLM_CASSETTE_DIR": dir, "LLM_MAX_REQUEST_MICROS": "650"})
+	rc, _ := rp.client(t, ws, "editor")
+	if n, err := rc.CountTokens(context.Background(), simpleRequest()); err != nil || n != 1234 {
+		t.Fatalf("replayed count = %d, %v; want the recorded 1234", n, err)
+	}
+	// The same decisions as live: the call is counted (1234 tokens -> 123+500 = 624 micros <= 650) and goes through.
+	if _, err := rc.Messages(context.Background(), simpleRequest()); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	// A cap the recorded count does not clear refuses the replay, exactly as live would.
+	tight := newRig(t, map[string]string{"LLM_MODE": "replay", "LLM_CASSETTE_DIR": dir, "LLM_MAX_REQUEST_MICROS": "600"})
+	tc, _ := tight.client(t, ws, "editor")
+	if _, err := tc.Messages(context.Background(), simpleRequest()); !errors.Is(err, ErrCapExceeded) {
+		t.Fatalf("tight replay: %v", err)
+	}
+	// And a request with no cassette at all is a miss on the count too.
+	other := simpleRequest()
+	other.MaxTokens = 7
+	if _, err := rc.CountTokens(context.Background(), other); !errors.Is(err, ErrReplayMiss) {
+		t.Fatalf("count without cassette: %v", err)
 	}
 }
 
@@ -199,7 +245,7 @@ func TestRequestKey(t *testing.T) {
 		}
 	}
 	// Not part of the key: who is asking.
-	same("run info", func(r *Request) { r.Run = RunInfo{ID: newWorkspaceID().UUID, Profile: "x", Budget: &fixedBudget{}} })
+	same("run info", func(r *Request) { r.Run = RunInfo{ID: newWorkspaceID().UUID, Profile: "x", Budget: NewRunBudget(1)} })
 	// An image's identity is its bytes: the reference that produced them does not matter.
 	same("image ref", func(r *Request) { r.Messages[0].Content[1].Image.Ref = "r2://elsewhere" })
 	// JSON key order in a tool input or schema does not matter either.

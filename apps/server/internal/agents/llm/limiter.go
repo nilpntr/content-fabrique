@@ -63,30 +63,31 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// keyLimiter limits one API key: a semaphore on requests in flight, and a shared cool-down. When any caller is told
-// to back off, every caller of the key waits out the same pause instead of piling more requests onto a throttled key.
-type keyLimiter struct {
+// lane limits one kind of request on one API key: a semaphore on requests in flight, and a cool-down. When any caller
+// of the lane is told to back off, every caller of it waits out the same pause instead of piling more requests onto a
+// throttled key.
+type lane struct {
 	sem chan struct{}
 
 	mu       sync.Mutex
 	coolDown time.Time
 }
 
-func newKeyLimiter(concurrency int) *keyLimiter {
+func newLane(concurrency int) *lane {
 	if concurrency < 1 {
 		concurrency = DefaultConcurrency
 	}
-	return &keyLimiter{sem: make(chan struct{}, concurrency)}
+	return &lane{sem: make(chan struct{}, concurrency)}
 }
 
-func (l *keyLimiter) coolUntil() time.Time {
+func (l *lane) coolUntil() time.Time {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.coolDown
 }
 
 // extendCoolDown moves the pause out to at least t.
-func (l *keyLimiter) extendCoolDown(t time.Time) {
+func (l *lane) extendCoolDown(t time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if t.After(l.coolDown) {
@@ -96,7 +97,7 @@ func (l *keyLimiter) extendCoolDown(t time.Time) {
 
 // acquire waits for a free slot and for the cool-down to pass. A caller that has to wait is queued, not failed; only
 // the context ends the wait.
-func (l *keyLimiter) acquire(ctx context.Context, p retryPolicy) error {
+func (l *lane) acquire(ctx context.Context, p retryPolicy) error {
 	for {
 		select {
 		case l.sem <- struct{}{}:
@@ -104,7 +105,7 @@ func (l *keyLimiter) acquire(ctx context.Context, p retryPolicy) error {
 			return ctx.Err()
 		}
 		if wait := l.coolUntil().Sub(p.Now()); wait > 0 {
-			<-l.sem // do not hold a slot while paused: an unthrottled caller (count_tokens) may use it
+			<-l.sem // do not hold a slot while paused
 			if err := p.Sleep(ctx, wait); err != nil {
 				return err
 			}
@@ -114,82 +115,130 @@ func (l *keyLimiter) acquire(ctx context.Context, p retryPolicy) error {
 	}
 }
 
-func (l *keyLimiter) release() { <-l.sem }
+func (l *lane) release() { <-l.sem }
 
-// limiterRegistry hands out one keyLimiter per API key, so every client built for the same key shares its limit.
-// Keys are identified by a hash and never stored.
-type limiterRegistry struct {
-	mu sync.Mutex
-	m  map[string]*keyLimiter
+// keyLanes are the two lanes of one API key. count_tokens has its own slots and its own cool-down: a long generation
+// holding every Messages slot (or a Messages 429) must not stall the free count that decides whether the next call may
+// go out, and Anthropic rate-limits the two endpoints separately.
+type keyLanes struct {
+	messages *lane
+	count    *lane
 }
 
-func (r *limiterRegistry) forKey(key string, concurrency int) *keyLimiter {
+// limiterRegistry hands out the lanes of an API key, so every client built for the same key shares its limit. Keys are
+// identified by a hash and never stored.
+type limiterRegistry struct {
+	mu sync.Mutex
+	m  map[string]*keyLanes
+}
+
+func (r *limiterRegistry) forKey(key string, concurrency int) *keyLanes {
 	sum := sha256.Sum256([]byte(key))
 	id := hex.EncodeToString(sum[:])
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.m == nil {
-		r.m = map[string]*keyLimiter{}
+		r.m = map[string]*keyLanes{}
 	}
 	l, ok := r.m[id]
 	if !ok {
-		l = newKeyLimiter(concurrency)
+		l = &keyLanes{messages: newLane(concurrency), count: newLane(concurrency)}
 		r.m[id] = l
 	}
 	return l
 }
 
-// limited is the Client that applies a keyLimiter and the retry policy to the client inside it. This is the only
+// limited is the Client that applies the key's lanes and the retry policy to the client inside it. This is the only
 // place requests are retried.
+//
+// What is retried, with the same backoff, attempt and wait limits:
+//   - an error answer that says "not now" (APIError.Retryable: 408, 429, 500, 502, 503, 504, 529, overloaded): the
+//     server did not process the request, so a retry cannot bill twice. retry-after is honoured;
+//   - a transport failure (reset, timeout, dial error) of a request that never reached the wire (Messages), or of any
+//     count_tokens call, which is free and idempotent.
+//
+// A Messages request that was sent and then lost its connection is NOT retried: it may have run and been billed.
+// metered records it at its worst-case estimate (ErrOutcomeUnknown). No other 4xx is ever retried.
 type limited struct {
 	inner Client
-	lim   *keyLimiter
+	lanes *keyLanes
 	pol   retryPolicy
 	log   *slog.Logger
 }
 
-func newLimited(inner Client, lim *keyLimiter, pol retryPolicy, log *slog.Logger) *limited {
-	return &limited{inner: inner, lim: lim, pol: pol.withDefaults(), log: log}
+func newLimited(inner Client, lanes *keyLanes, pol retryPolicy, log *slog.Logger) *limited {
+	return &limited{inner: inner, lanes: lanes, pol: pol.withDefaults(), log: log}
 }
 
 // Messages implements Client.
 func (c *limited) Messages(ctx context.Context, req Request) (Response, error) {
 	var resp Response
-	err := c.do(ctx, "messages", func() (err error) { resp, err = c.inner.Messages(ctx, req); return })
+	err := c.do(ctx, "messages", c.lanes.messages, func() (err error) { resp, err = c.inner.Messages(ctx, req); return })
 	return resp, err
 }
 
 // CountTokens implements Client.
 func (c *limited) CountTokens(ctx context.Context, req Request) (int64, error) {
 	var n int64
-	err := c.do(ctx, "count_tokens", func() (err error) { n, err = c.inner.CountTokens(ctx, req); return })
+	err := c.do(ctx, "count_tokens", c.lanes.count, func() (err error) { n, err = c.inner.CountTokens(ctx, req); return })
 	return n, err
 }
 
-func (c *limited) do(ctx context.Context, op string, call func() error) error {
+// retryable decides whether err is worth another attempt, and how long the server asked to wait.
+func retryable(op string, err error) (ok bool, retryAfter time.Duration, throttled bool) {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		throttled = apiErr.Status == 429 || apiErr.Status == 529 || apiErr.Type == "overloaded_error" || apiErr.Type == "rate_limit_error"
+		return apiErr.Retryable(), apiErr.RetryAfter, throttled
+	}
+	var te *TransportError
+	if errors.As(err, &te) {
+		return op == "count_tokens" || !te.Sent, 0, false
+	}
+	return false, 0, false
+}
+
+func (c *limited) do(ctx context.Context, op string, l *lane, call func() error) error {
 	var waited time.Duration
 	for attempt := 1; ; attempt++ {
-		if err := c.lim.acquire(ctx, c.pol); err != nil {
+		if err := l.acquire(ctx, c.pol); err != nil {
 			return err
 		}
 		err := call()
-		c.lim.release()
-
-		var apiErr *APIError
-		if err == nil || !errors.As(err, &apiErr) || !apiErr.Retryable() {
+		l.release()
+		if err == nil || ctx.Err() != nil { // the caller giving up is never retried
 			return err
 		}
-		delay := c.delay(attempt, apiErr.RetryAfter)
-		if attempt >= c.pol.MaxAttempts || waited+delay > c.pol.MaxTotalWait {
-			return fmt.Errorf("%w: giving up on %s after %d attempts and %s of waiting: %w", ErrRateLimited, op, attempt, waited.Round(time.Millisecond), err)
+		ok, retryAfter, throttled := retryable(op, err)
+		if !ok {
+			return err
 		}
-		c.lim.extendCoolDown(c.pol.Now().Add(delay))
-		c.log.Warn("llm: throttled, backing off", "op", op, "status", apiErr.Status, "attempt", attempt, "wait", delay.Round(time.Millisecond), "request_id", apiErr.RequestID)
+		delay := c.delay(attempt, retryAfter)
+		if attempt >= c.pol.MaxAttempts || waited+delay > c.pol.MaxTotalWait {
+			sentinel := ErrRetriesExhausted
+			if throttled {
+				sentinel = ErrRateLimited
+			}
+			return fmt.Errorf("%w: giving up on %s after %d attempts and %s of waiting: %w", sentinel, op, attempt, waited.Round(time.Millisecond), err)
+		}
+		if throttled {
+			l.extendCoolDown(c.pol.Now().Add(delay))
+		}
+		c.log.Warn("llm: backing off", "op", op, "attempt", attempt, "wait", delay.Round(time.Millisecond), "reason", describeRetry(err))
 		if err := c.pol.Sleep(ctx, delay); err != nil {
 			return err
 		}
 		waited += delay
 	}
+}
+
+// describeRetry names why a call is being retried, without the error text (which can quote a URL).
+func describeRetry(err error) string {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return fmt.Sprintf("http %d %s request-id %s", apiErr.Status, apiErr.Type, apiErr.RequestID)
+	}
+	return "transport error before a response"
 }
 
 // delay is the wait before attempt+1: exponential with equal jitter (half fixed, half random), never shorter than the

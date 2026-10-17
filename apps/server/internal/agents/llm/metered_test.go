@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -151,21 +152,42 @@ func (c clientFunc) Messages(ctx context.Context, r Request) (Response, error) {
 }
 func (c clientFunc) CountTokens(context.Context, Request) (int64, error) { return c.count(), nil }
 
-func TestRunBudgetIsChargedAndEnforced(t *testing.T) {
+func TestRunBudgetReservesThenSettles(t *testing.T) {
 	rg := newRig(t, nil)
 	c, _ := rg.client(t, newWorkspaceID(), "editor")
-	b := &fixedBudget{left: 50_000}
-	req := simpleRequest() // Haiku: 1000 counted tokens*0.1 + 1000 max tokens*0.5 = 100+500 = 600 micros worst case
+	req := simpleRequest() // Haiku: the exact worst case is 1000 counted tokens*0.1 + 1000 max tokens*0.5 = 600 micros
+	ub := upperBoundEstimate(t, req)
+	if ub <= 600 {
+		t.Fatalf("test assumes the local upper bound (%d) is above the exact worst case (600)", ub)
+	}
+
+	b := newSpyBudget(50_000)
 	req.Run = RunInfo{Budget: b}
 	if _, err := c.Messages(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
-	// defaultUsage on Haiku: 1000*0.1 + 200*0.5 = 200 micros.
-	if len(b.spends) != 1 || b.spends[0] != 200 || b.Remaining() != 49_800 {
-		t.Fatalf("spends = %v, remaining %d", b.spends, b.Remaining())
+	// The worst case was set aside before sending (the local bound; no count_tokens call was needed) and settled at
+	// the real cost: defaultUsage on Haiku is 1000*0.1 + 200*0.5 = 200 micros.
+	if len(b.reserved) != 1 || b.reserved[0] != ub || len(b.settled) != 1 || b.settled[0] != 200 || b.Spent() != 200 || b.Remaining() != 49_800 {
+		t.Fatalf("reserved %v, settled %v, spent %d, remaining %d", b.reserved, b.settled, b.Spent(), b.Remaining())
 	}
-	// A run with less left than the worst case is refused before anything is sent.
-	b.left = 599
+	if n := len(rg.api.callsTo("/count_tokens")); n != 0 {
+		t.Errorf("%d count_tokens calls for a request far under every cap", n)
+	}
+
+	// A budget between the exact worst case and the local bound: the bound does not fit, the exact count does.
+	tight := newSpyBudget((ub + 600) / 2)
+	req.Run = RunInfo{Budget: tight}
+	if _, err := c.Messages(context.Background(), req); err != nil {
+		t.Fatalf("a budget that covers the exact worst case refused the call: %v", err)
+	}
+	if len(tight.reserved) != 1 || tight.reserved[0] != 600 || len(rg.api.callsTo("/count_tokens")) != 1 {
+		t.Errorf("reserved %v after %d counts; want one 600 reservation after one count", tight.reserved, len(rg.api.callsTo("/count_tokens")))
+	}
+
+	// Less than the exact worst case is refused before anything is sent, and leaves nothing reserved.
+	short := newSpyBudget(599)
+	req.Run = RunInfo{Budget: short}
 	sent := len(rg.api.messageCalls())
 	_, err := c.Messages(context.Background(), req)
 	var ce *CapError
@@ -175,41 +197,105 @@ func TestRunBudgetIsChargedAndEnforced(t *testing.T) {
 	if len(rg.api.messageCalls()) != sent {
 		t.Error("a refused call was sent")
 	}
-	// An overspent (negative) budget refuses everything.
-	b.left = -5
-	if _, err := c.Messages(context.Background(), req); !errors.Is(err, ErrCapExceeded) {
+	if short.Remaining() != 599 {
+		t.Errorf("a refused call left %d reserved", 599-short.Remaining())
+	}
+	// An overspent (negative) budget refuses everything; exactly enough is allowed.
+	if _, err := c.Messages(context.Background(), withBudget(req, NewRunBudget(-5))); !errors.Is(err, ErrCapExceeded) {
 		t.Fatalf("negative budget: %v", err)
 	}
-	// Exactly enough is allowed.
-	b.left = 600
-	if _, err := c.Messages(context.Background(), req); err != nil {
+	if _, err := c.Messages(context.Background(), withBudget(req, NewRunBudget(600))); err != nil {
 		t.Fatalf("exact budget refused: %v", err)
 	}
 }
 
-func TestPerRequestCapRefusesBeforeSending(t *testing.T) {
-	rg := newRig(t, map[string]string{"LLM_MAX_REQUEST_MICROS": "1000000"}) // $1
-	rg.api.countTokens = func(int, recordedCall) fakeReply { return fakeReply{Status: 200, Body: `{"input_tokens": 400000}`} }
+func withBudget(req Request, b Budget) Request { req.Run.Budget = b; return req }
+
+// Concurrent calls of one run can never overspend: each reserves its worst case before it is sent, so the second one
+// is refused while the first is in flight, and the room comes back (at the real cost) when the first settles.
+func TestRunBudgetNeverOverspendsUnderConcurrency(t *testing.T) {
+	rg := newRig(t, nil)
 	c, _ := rg.client(t, newWorkspaceID(), "editor")
 	req := simpleRequest()
-	req.Model = "claude-opus-5-5" // 400k*4 + 1000*20 = 1.6M + 20k micros
+	ub := upperBoundEstimate(t, req)
+	b := newSpyBudget(ub + 100) // room for one reservation, not two
+	req.Run = RunInfo{Budget: b}
+	inFlight, release := make(chan struct{}), make(chan struct{})
+	rg.api.messages = func(n int, _ recordedCall) fakeReply {
+		if n == 1 {
+			close(inFlight)
+			<-release
+		}
+		return okReply("ok", defaultUsage)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := c.Messages(context.Background(), req); done <- err }()
+	<-inFlight
 	_, err := c.Messages(context.Background(), req)
 	var ce *CapError
-	if !errors.As(err, &ce) || ce.Kind != CapRequest || ce.EstimateMicros != 1_620_000 || ce.LimitMicros != 1_000_000 {
+	if !errors.As(err, &ce) || ce.Kind != CapRun {
+		t.Fatalf("second concurrent call: %#v", err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if b.Spent() != 200 || b.Remaining() != ub+100-200 {
+		t.Errorf("spent %d, remaining %d", b.Spent(), b.Remaining())
+	}
+	if _, err := c.Messages(context.Background(), req); err != nil {
+		t.Fatalf("after the first settled: %v", err)
+	}
+
+	// Many goroutines against a small budget: the total settled never exceeds it, whatever the interleaving.
+	rg2 := newRig(t, nil)
+	rg2.api.messages = nil
+	c2, _ := rg2.client(t, newWorkspaceID(), "editor")
+	small := NewRunBudget(2_000) // each call reserves ub (~700) and settles at 200
+	r2 := withBudget(simpleRequest(), small)
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Add(1)
+		go func() { defer wg.Done(); _, _ = c2.Messages(context.Background(), r2) }()
+	}
+	wg.Wait()
+	if small.Spent() > 2_000 || small.Remaining() < 0 {
+		t.Errorf("overspent: spent %d, remaining %d", small.Spent(), small.Remaining())
+	}
+	if small.Spent() == 0 {
+		t.Error("no call went through")
+	}
+}
+
+func TestPerRequestCapRefusesBeforeSending(t *testing.T) {
+	// 500 micros is under the local bound (so the call is counted) and under the exact worst case of 600.
+	rg := newRig(t, map[string]string{"LLM_MAX_REQUEST_MICROS": "500"})
+	c, _ := rg.client(t, newWorkspaceID(), "editor")
+	_, err := c.Messages(context.Background(), simpleRequest())
+	var ce *CapError
+	if !errors.As(err, &ce) || ce.Kind != CapRequest || ce.EstimateMicros != 600 || ce.LimitMicros != 500 {
 		t.Fatalf("err = %#v", err)
 	}
 	if got := len(rg.api.messageCalls()); got != 0 {
 		t.Errorf("%d message calls were sent", got)
 	}
+	if got := len(rg.api.callsTo("/count_tokens")); got != 1 {
+		t.Errorf("%d count_tokens calls, want 1", got)
+	}
 	if len(rg.ledger.snapshot()) != 0 {
 		t.Error("a refused call wrote a ledger row")
 	}
-	// The default cap is $2.
+	// The default cap is $2: a 1.2 MB prompt on Opus counted at 600k tokens is 2.4M.
 	rg = newRig(t, nil)
 	rg.api.countTokens = func(int, recordedCall) fakeReply { return fakeReply{Status: 200, Body: `{"input_tokens": 600000}`} }
 	c, _ = rg.client(t, newWorkspaceID(), "editor")
-	if _, err := c.Messages(context.Background(), req); !errors.Is(err, ErrCapExceeded) { // 2.4M + 20k
+	big := padded(simpleRequest(), 1_200_000)
+	big.Model = "claude-opus-5-5"
+	if _, err := c.Messages(context.Background(), big); !errors.Is(err, ErrCapExceeded) { // 2.4M + 20k
 		t.Fatalf("default cap: %v", err)
+	}
+	if rg.api.totalCalls() != 1 {
+		t.Errorf("%d API calls; only the count should have gone out", rg.api.totalCalls())
 	}
 }
 
@@ -217,7 +303,8 @@ func TestCacheBreakpointsRaiseTheEstimate(t *testing.T) {
 	rg := newRig(t, map[string]string{"LLM_MAX_REQUEST_MICROS": "420000"})
 	rg.api.countTokens = func(int, recordedCall) fakeReply { return fakeReply{Status: 200, Body: `{"input_tokens": 80000}`} }
 	c, _ := rg.client(t, newWorkspaceID(), "editor")
-	req := simpleRequest()
+	// A 170 KB prompt: its local bound (about 450k micros) is over the cap, so it is counted.
+	req := padded(simpleRequest(), 170_000)
 	req.Model, req.MaxTokens = "claude-opus-5-5", 5000 // plain: 80000*4+5000*20 = 420000: allowed
 	if _, err := c.Messages(context.Background(), req); err != nil {
 		t.Fatalf("plain request refused: %v", err)
@@ -239,11 +326,12 @@ func TestDailyCapUsesTodaysLedger(t *testing.T) {
 		store.UsageEntry{WorkspaceID: ws, ListCostMicros: 3_500, CreatedAt: now.Add(-time.Minute), BilledTo: "test"}, // today
 	)
 	c, _ := rg.client(t, ws, "editor")
-	req := simpleRequest() // worst case 600 micros; 7500 spent today, so 2500 left
+	req := simpleRequest() // worst case 600 micros (its local bound a little more); 7500 spent today, so 2500 left
 	if _, err := c.Messages(context.Background(), req); err != nil {
 		t.Fatalf("under the cap: %v", err)
 	}
-	// That call cost 200 micros: 7700 spent. Raise max_tokens so the worst case no longer fits in the 2300 left.
+	// That call cost 200 micros: 7700 spent. Raise max_tokens so the worst case no longer fits in the 2300 left. The
+	// local bound does not fit either, so the call is counted, and the exact worst case is what the error reports.
 	req.MaxTokens = 5000 // 100 + 2500 = 2600
 	_, err := c.Messages(context.Background(), req)
 	var ce *CapError
@@ -259,8 +347,9 @@ func TestDailyCapUsesTodaysLedger(t *testing.T) {
 
 // Calls in flight are not in the ledger yet, so a burst must not all pass the check on the same stale total.
 func TestDailyCapCountsCallsInFlight(t *testing.T) {
-	rg := newRig(t, map[string]string{"DAILY_SPEND_CAP_MICROS": "1000"}) // room for one 600-micro worst case, not two
+	rg := newRig(t, map[string]string{"DAILY_SPEND_CAP_MICROS": "1000"}) // room for one worst case, not two
 	ws := newWorkspaceID()
+	ub := upperBoundEstimate(t, simpleRequest())
 	inFlight, release := make(chan struct{}), make(chan struct{})
 	rg.api.messages = func(n int, _ recordedCall) fakeReply {
 		if n == 1 {
@@ -274,17 +363,18 @@ func TestDailyCapCountsCallsInFlight(t *testing.T) {
 	go func() { _, err := c.Messages(context.Background(), simpleRequest()); done <- err }()
 	<-inFlight
 
-	// The first call is mid-flight and unmetered; a second one would be 600 + 600 > 1000.
+	// The first call is mid-flight and not in the ledger; its reservation is, so a second one (even at its exact worst
+	// case of 600) does not fit next to it.
 	_, err := c.Messages(context.Background(), simpleRequest())
 	var ce *CapError
-	if !errors.As(err, &ce) || ce.Kind != CapDaily || ce.LimitMicros != 400 {
-		t.Fatalf("second concurrent call: %#v", err)
+	if !errors.As(err, &ce) || ce.Kind != CapDaily || ce.LimitMicros != 1000-ub {
+		t.Fatalf("second concurrent call: %#v (want room %d)", err, 1000-ub)
 	}
 	close(release)
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	// Once the first is metered (200 micros), the reservation is gone and the next fits again (200 + 600 <= 1000).
+	// Once the first is metered (200 micros), the reservation is gone and the next fits again.
 	if _, err := c.Messages(context.Background(), simpleRequest()); err != nil {
 		t.Fatalf("after the first finished: %v", err)
 	}
@@ -399,7 +489,10 @@ func TestImageReferencesAreResolvedBeforeSending(t *testing.T) {
 	if req.Messages[0].Content[1].Image.Data != nil {
 		t.Error("the caller's request was changed")
 	}
-	// Both the token count and the message carried the bytes.
+	// Both the token count and the message carry the bytes (the call above needed no count; ask for one).
+	if _, err := c.CountTokens(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
 	for _, call := range append(rg.api.messageCalls(), rg.api.callsTo("/count_tokens")...) {
 		if strings.Count(string(call.Body), "ZnJhbWUtb25l") != 2 { // base64("frame-one")
 			t.Errorf("%s did not carry both resolved images: %s", call.Path, call.Body)

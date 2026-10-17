@@ -37,7 +37,9 @@ type UsageEntry struct {
 	PriceTableVersion  string
 	BilledTo           string
 	RequestID          string
-	CreatedAt          time.Time
+	// Estimated marks a row written for a call whose usage never came back: ListCostMicros is the reserved worst case.
+	Estimated bool
+	CreatedAt time.Time
 }
 
 // UsageRow is a ledger row as read back.
@@ -70,6 +72,7 @@ func (s *Store) InsertUsage(ctx context.Context, e UsageEntry) error {
 		PriceTableVersion:  e.PriceTableVersion,
 		BilledTo:           e.BilledTo,
 		RequestID:          e.RequestID,
+		Estimated:          e.Estimated,
 		CreatedAt:          e.CreatedAt,
 	})
 	return mapErr(err)
@@ -113,7 +116,7 @@ func usageRows(rows []db.UsageLedger) []UsageRow {
 			WorkspaceID: r.WorkspaceID, RunID: run, Stage: r.Stage, Kind: r.Kind, Model: r.Model,
 			InputTokens: r.InputTokens, CacheWriteTokens: r.CacheWriteTokens, CacheWrite1hTokens: r.CacheWrite1hTokens,
 			CacheReadTokens: r.CacheReadTokens, OutputTokens: r.OutputTokens, ListCostMicros: r.ListCostMicros,
-			PriceTableVersion: r.PriceTableVersion, BilledTo: r.BilledTo, RequestID: r.RequestID, CreatedAt: r.CreatedAt,
+			PriceTableVersion: r.PriceTableVersion, BilledTo: r.BilledTo, RequestID: r.RequestID, Estimated: r.Estimated, CreatedAt: r.CreatedAt,
 		}})
 	}
 	return out

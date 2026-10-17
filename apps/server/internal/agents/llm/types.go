@@ -16,6 +16,8 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"sync"
 
 	"github.com/google/uuid"
 )
@@ -104,6 +106,11 @@ type Block struct {
 	Thinking  string
 	Signature string
 	Data      string
+
+	// Raw is the block's JSON, kept for a block type this package does not model (server_tool_use,
+	// web_search_tool_result, ...). Such a block has Type set to what the API said and nothing else: append the
+	// assistant turn as it came and Raw is sent back verbatim, which the API needs for server tools and pause_turn.
+	Raw json.RawMessage
 }
 
 // TextBlock is a text block, the common case.
@@ -158,12 +165,58 @@ type Thinking struct {
 	Display string
 }
 
-// Budget is the dollar budget of one agent run. The runtime implements it over agent_runs.budget_micros.
+// Budget is the dollar budget of one agent run. The runtime implements it over agent_runs.budget_micros (RunBudget is
+// the in-memory implementation to build on). It works by reservation, so concurrent calls of one run can never
+// overspend: each call sets its worst case aside before it is sent and settles with the actual cost afterwards.
 type Budget interface {
-	// Remaining is how many micro-dollars the run may still spend.
-	Remaining() int64
-	// Spend records that a call cost micros (called after the call, with its list cost).
-	Spend(micros int64)
+	// Reserve sets micros aside, or returns an error (a *CapError of kind run) when the run does not have that much
+	// left after the reservations already held. On success the caller must call release exactly once, with the call's
+	// actual list cost: release(0) when nothing was spent, and the reserved amount itself when the outcome is unknown
+	// (the request was sent and no usage came back).
+	Reserve(micros int64) (release func(actual int64), err error)
+}
+
+// RunBudget is a Budget over a fixed limit, safe for concurrent use.
+type RunBudget struct {
+	mu       sync.Mutex
+	limit    int64
+	reserved int64
+	spent    int64
+}
+
+// NewRunBudget returns a budget of limitMicros micro-dollars.
+func NewRunBudget(limitMicros int64) *RunBudget { return &RunBudget{limit: limitMicros} }
+
+// Reserve implements Budget.
+func (b *RunBudget) Reserve(micros int64) (func(actual int64), error) {
+	if micros < 0 {
+		return nil, errors.New("llm: a reservation cannot be negative")
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if room := max(b.limit-b.spent-b.reserved, 0); micros > room {
+		return nil, &CapError{Kind: CapRun, EstimateMicros: micros, LimitMicros: room}
+	}
+	b.reserved += micros
+	var once sync.Once
+	return func(actual int64) {
+		once.Do(func() {
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			b.reserved -= micros
+			b.spent += max(actual, 0)
+		})
+	}, nil
+}
+
+// Spent is what the run has used, settled calls only.
+func (b *RunBudget) Spent() int64 { b.mu.Lock(); defer b.mu.Unlock(); return b.spent }
+
+// Remaining is what is left after settled spend and the reservations in flight.
+func (b *RunBudget) Remaining() int64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.limit - b.spent - b.reserved
 }
 
 // RunInfo says which agent run a request belongs to. The zero value is a call outside a run.
@@ -172,8 +225,8 @@ type RunInfo struct {
 	ID uuid.UUID
 	// Profile is the routing profile of the run, for the gateway metadata and the ledger log.
 	Profile string
-	// Budget is the run's dollar budget: a call is refused before it is sent when its worst-case cost exceeds
-	// Remaining. Nil means no per-run limit.
+	// Budget is the run's dollar budget: a call reserves its worst-case cost before it is sent and is refused when
+	// the run cannot cover it. Nil means no per-run limit.
 	Budget Budget
 }
 
@@ -210,6 +263,9 @@ type Usage struct {
 	CacheWrite1hTokens int64 `json:"cache_write_1h_tokens"`
 	CacheReadTokens    int64 `json:"cache_read_tokens"`
 	OutputTokens       int64 `json:"output_tokens"`
+	// CacheWriteSplitMissing says the response had cache writes but not their split by lifetime (a gateway dropped
+	// cache_creation). Pricing then assumes the dearer 1-hour rate when the request asked for a 1-hour breakpoint.
+	CacheWriteSplitMissing bool `json:"cache_write_split_missing,omitempty"`
 }
 
 // IsZero reports whether nothing was consumed.

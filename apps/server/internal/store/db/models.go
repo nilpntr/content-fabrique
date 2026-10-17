@@ -75,6 +75,7 @@ type UsageLedger struct {
 	PriceTableVersion  string
 	BilledTo           string
 	RequestID          string
+	Estimated          bool
 	CreatedAt          time.Time
 }
 

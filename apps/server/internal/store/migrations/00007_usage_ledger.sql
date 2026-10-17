@@ -15,12 +15,20 @@
 -- billed_to:   who pays. platform (we do), workspace_key (the creator's own Anthropic key, P4-00b) or test (development,
 --              ci and bench traffic, so test spend never mixes into customer margin).
 -- request_id:  Anthropic's request-id header. Unique when present, so a retried insert cannot double-count a call.
+-- estimated:   true when the request was sent and no usage came back (a timeout, a reset, a body cut off), so the call
+--              may have run and been billed. The row then holds the call's reserved worst-case cost (input_tokens is the
+--              counted or bounded prompt, output_tokens is max_tokens), which keeps the daily cap and run budgets
+--              conservative. A reconciliation against Anthropic's usage report can correct such rows.
+--
+-- Billing history is not deleted with a workspace: the foreign key RESTRICTs. A workspace is soft-deleted today
+-- (workspaces.deleted_at), so nothing deletes rows. A purge of a workspace (a GDPR erasure, say) has to move or
+-- anonymise its ledger rows deliberately, in the same change that adds the purge.
 
 -- +goose Up
 
 CREATE TABLE usage_ledger (
     id                    uuid        PRIMARY KEY DEFAULT uuidv7(),
-    workspace_id          uuid        NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+    workspace_id          uuid        NOT NULL REFERENCES workspaces (id) ON DELETE RESTRICT,
     run_id                uuid,
     stage                 text        NOT NULL,
     kind                  text        NOT NULL DEFAULT 'llm',
@@ -34,7 +42,8 @@ CREATE TABLE usage_ledger (
     price_table_version   text        NOT NULL,
     billed_to             text        NOT NULL,
     request_id            text        NOT NULL DEFAULT '',
-    created_at            timestamptz NOT NULL DEFAULT now(),
+    estimated             boolean     NOT NULL DEFAULT false,
+    created_at           timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT usage_ledger_kind_check CHECK (kind IN ('llm')),
     CONSTRAINT usage_ledger_billed_to_check CHECK (billed_to IN ('platform', 'workspace_key', 'test')),
     CONSTRAINT usage_ledger_tokens_check CHECK (

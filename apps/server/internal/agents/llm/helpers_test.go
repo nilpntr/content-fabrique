@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptrace"
 	"os"
 	"strings"
 	"sync"
@@ -54,6 +55,8 @@ type recordedCall struct {
 	Path   string
 	Header http.Header
 	Body   []byte
+	// Deadline is the context deadline the request carried (zero when none): the per-call timeout.
+	Deadline time.Time
 }
 
 func (c recordedCall) json(t testing.TB) map[string]any {
@@ -69,6 +72,10 @@ type fakeReply struct {
 	Status int
 	Header map[string]string
 	Body   string
+	// TransportErr makes the round trip fail below HTTP. WroteRequest says the request had reached the wire first (the
+	// outcome is then unknown); without it the failure happened before anything was sent.
+	TransportErr error
+	WroteRequest bool
 }
 
 type fakeAPI struct {
@@ -88,7 +95,8 @@ func (f *fakeAPI) client() *http.Client { return &http.Client{Transport: f} }
 func (f *fakeAPI) RoundTrip(r *http.Request) (*http.Response, error) {
 	body, _ := io.ReadAll(r.Body)
 	_ = r.Body.Close()
-	c := recordedCall{Method: r.Method, Path: r.URL.Path, Header: r.Header.Clone(), Body: body}
+	dl, _ := r.Context().Deadline()
+	c := recordedCall{Method: r.Method, Path: r.URL.Path, Header: r.Header.Clone(), Body: body, Deadline: dl}
 	f.mu.Lock()
 	f.calls = append(f.calls, c)
 	var rep fakeReply
@@ -120,6 +128,14 @@ func (f *fakeAPI) RoundTrip(r *http.Request) (*http.Response, error) {
 	f.mu.Unlock()
 	if handler != nil {
 		rep = handler()
+	}
+	if rep.TransportErr != nil {
+		if rep.WroteRequest {
+			if tr := httptrace.ContextClientTrace(r.Context()); tr != nil && tr.WroteRequest != nil {
+				tr.WroteRequest(httptrace.WroteRequestInfo{})
+			}
+		}
+		return nil, rep.TransportErr
 	}
 
 	h := http.Header{"Content-Type": {"application/json"}, "Request-Id": {reqID}}
@@ -297,19 +313,59 @@ func simpleRequest() Request {
 	}
 }
 
-// fixedBudget is a Budget over a plain number.
-type fixedBudget struct {
-	mu     sync.Mutex
-	left   int64
-	spends []int64
+// spyBudget is a RunBudget that records what was reserved and what each reservation settled at.
+type spyBudget struct {
+	*RunBudget
+	mu       sync.Mutex
+	reserved []int64
+	settled  []int64
 }
 
-func (b *fixedBudget) Remaining() int64 { b.mu.Lock(); defer b.mu.Unlock(); return b.left }
-func (b *fixedBudget) Spend(m int64) {
+func newSpyBudget(limit int64) *spyBudget { return &spyBudget{RunBudget: NewRunBudget(limit)} }
+
+func (b *spyBudget) Reserve(micros int64) (func(int64), error) {
+	release, err := b.RunBudget.Reserve(micros)
+	if err != nil {
+		return nil, err
+	}
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.left -= m
-	b.spends = append(b.spends, m)
+	b.reserved = append(b.reserved, micros)
+	b.mu.Unlock()
+	return func(actual int64) {
+		b.mu.Lock()
+		b.settled = append(b.settled, actual)
+		b.mu.Unlock()
+		release(actual)
+	}, nil
+}
+
+// upperBoundEstimate is what metered reserves for a request it did not need to count: the worst case at the local
+// upper bound of the input tokens.
+func upperBoundEstimate(t testing.TB, req Request) int64 {
+	t.Helper()
+	pt, err := LoadPriceTable(pricingFS, PriceFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens, err := upperBoundTokens(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	est, err := pt.EstimateMax(req.Model, tokens, int64(req.MaxTokens), cacheMarks(req))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return est
+}
+
+// padded returns the request with an extra text block of n bytes, so its local upper bound is large.
+func padded(req Request, n int) Request {
+	msgs := append([]Message(nil), req.Messages...)
+	last := msgs[len(msgs)-1]
+	last.Content = append(append([]Block(nil), last.Content...), TextBlock(strings.Repeat("x", n)))
+	msgs[len(msgs)-1] = last
+	req.Messages = msgs
+	return req
 }
 
 func mustNotContain(t *testing.T, what, haystack string, needles ...string) {

@@ -316,14 +316,15 @@ func TestAPIErrorsAreTypedAndScrubbed(t *testing.T) {
 	mustNotContain(t, "error text", err.Error(), testKey, testToken)
 	mustNotContain(t, "api error message", ae.Message, testKey, testToken)
 
-	for status, typ := range map[int]string{429: "rate_limit_error", 529: "overloaded_error"} {
-		e := &APIError{Status: status, Type: typ}
-		if !e.Retryable() {
+	for status, typ := range map[int]string{408: "", 429: "rate_limit_error", 500: "api_error", 502: "", 503: "", 504: "", 529: "overloaded_error"} {
+		if e := (&APIError{Status: status, Type: typ}); !e.Retryable() {
 			t.Errorf("%d is not retryable", status)
 		}
 	}
-	if (&APIError{Status: 500, Type: "api_error"}).Retryable() || (&APIError{Status: 400}).Retryable() {
-		t.Error("500/400 are retryable")
+	for _, status := range []int{400, 401, 403, 404, 409, 413, 422} {
+		if e := (&APIError{Status: status, Type: "invalid_request_error"}); e.Retryable() {
+			t.Errorf("%d is retryable", status)
+		}
 	}
 }
 

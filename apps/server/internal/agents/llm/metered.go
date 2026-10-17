@@ -28,11 +28,11 @@ const (
 	ledgerTimeout  = 10 * time.Second
 )
 
-// metered is the outermost client. It resolves image references, refuses a call that could break a spend cap, and
-// writes the ledger row of the call.
+// metered is the outermost client. It resolves image references, reserves the worst-case cost of a call against every
+// cap before sending it (refusing the call when a cap cannot cover it), and writes the ledger row of the call.
 //
 // In replay mode nothing was spent, so no ledger row is written and the daily cap is not consulted; the run budget
-// is still charged with the cost the recorded usage would have had, so budget behaviour under replay matches live.
+// is still reserved and settled with the cost the recorded usage would have had, so budget behaviour matches live.
 type metered struct {
 	inner   Client
 	ws      ids.WorkspaceID
@@ -62,6 +62,39 @@ func (m *metered) CountTokens(ctx context.Context, req Request) (int64, error) {
 	return m.inner.CountTokens(ctx, req)
 }
 
+// reservation is what one call has set aside: its worst-case cost against the run's budget and against the
+// workspace's daily cap.
+type reservation struct {
+	// est is the worst-case cost; tokens the input tokens it was worked out from (counted, or an upper bound).
+	est    int64
+	tokens int64
+
+	budget  func(actual int64) // settles the run budget; nil without one
+	daily   func()             // releases the in-process daily reservation; nil in replay
+	settled bool
+}
+
+// settle charges the run's budget with what the call really cost. Only the first call counts.
+func (r *reservation) settle(actual int64) {
+	if r.settled {
+		return
+	}
+	r.settled = true
+	if r.budget != nil {
+		r.budget(actual)
+	}
+}
+
+// done is the deferred clean-up of every path: a call that never settled cost nothing, and the daily reservation goes
+// once the ledger row (if any) is written.
+func (r *reservation) done() {
+	r.settle(0)
+	if r.daily != nil {
+		r.daily()
+		r.daily = nil
+	}
+}
+
 // Messages implements Client.
 func (m *metered) Messages(ctx context.Context, req Request) (Response, error) {
 	req, err := m.resolve(ctx, req)
@@ -69,49 +102,67 @@ func (m *metered) Messages(ctx context.Context, req Request) (Response, error) {
 		return Response{}, err
 	}
 	priced := m.prices.Priced(req.Model)
+	rsv := &reservation{}
 	if !priced {
 		if !m.allowUnpriced {
 			return Response{}, &UnpricedError{Model: req.Model, TableVersion: m.prices.Version}
 		}
 		m.log.Warn("llm: calling an unpriced model (LLM_ALLOW_UNPRICED=1): spend caps cannot be checked and the ledger records cost 0", "model", req.Model, "stage", m.stage)
-	} else {
-		// The reservation is held until the ledger row is written (the defer), so the daily cap never sees a gap.
-		release, err := m.checkCaps(ctx, req)
-		if err != nil {
-			return Response{}, err
-		}
-		defer release()
+	} else if rsv, err = m.reserveCaps(ctx, req); err != nil {
+		return Response{}, err
 	}
+	// The reservations are held until the ledger row is written: the budget settles with the real cost, and the daily
+	// reservation is released only after the row exists, so a concurrent call sees this one either as a reservation or
+	// as a row, never as neither.
+	defer rsv.done()
 
+	marks := cacheMarks(req)
 	resp, callErr := m.inner.Messages(ctx, req)
 	if resp.Usage.IsZero() {
+		// The request went out and nothing came back (a timeout, a reset, a cut-off body): it may have run and been
+		// billed. Charge the worst case, so caps and budgets stay conservative, and say so in the ledger.
+		if priced && callErr != nil && errors.Is(callErr, ErrOutcomeUnknown) {
+			rsv.settle(rsv.est)
+			if m.mode != ModeReplay {
+				row := m.row(req, rsv.est, m.prices.Version, true, Usage{InputTokens: rsv.tokens, OutputTokens: int64(req.MaxTokens)}, "")
+				if lerr := m.writeLedger(ctx, row); lerr != nil {
+					return resp, errors.Join(callErr, &LedgerError{Err: lerr})
+				}
+			}
+		}
 		return resp, callErr
 	}
 
+	if resp.Usage.CacheWriteSplitMissing && marks.OneHour {
+		// The response did not say how long the cache writes live: the request asked for a 1-hour breakpoint, so price
+		// them at the 1-hour rate rather than under-count.
+		resp.Usage.CacheWrite1hTokens = resp.Usage.CacheWriteTokens
+	}
 	cost, version := int64(0), UnpricedVersion
 	if priced {
-		var err error
 		if cost, err = m.prices.Cost(req.Model, resp.Usage); err != nil {
 			return resp, errors.Join(callErr, err) // unreachable while priced; fail closed if it ever is not
 		}
 		version = m.prices.Version
 	}
-	if b := req.Run.Budget; b != nil {
-		b.Spend(cost)
-	}
+	rsv.settle(cost)
 	if m.mode == ModeReplay {
 		return resp, callErr
 	}
-	entry := store.UsageEntry{
-		WorkspaceID: m.ws, RunID: req.Run.ID, Stage: m.stage, Kind: "llm", Model: req.Model,
-		InputTokens: resp.Usage.InputTokens, CacheWriteTokens: resp.Usage.CacheWriteTokens, CacheWrite1hTokens: resp.Usage.CacheWrite1hTokens,
-		CacheReadTokens: resp.Usage.CacheReadTokens, OutputTokens: resp.Usage.OutputTokens,
-		ListCostMicros: cost, PriceTableVersion: version, BilledTo: string(m.billing), RequestID: resp.RequestID, CreatedAt: m.now().UTC(),
-	}
-	if lerr := m.writeLedger(ctx, entry); lerr != nil {
+	if lerr := m.writeLedger(ctx, m.row(req, cost, version, false, resp.Usage, resp.RequestID)); lerr != nil {
 		return resp, errors.Join(callErr, &LedgerError{Err: lerr})
 	}
 	return resp, callErr
+}
+
+func (m *metered) row(req Request, cost int64, version string, estimated bool, u Usage, requestID string) store.UsageEntry {
+	return store.UsageEntry{
+		WorkspaceID: m.ws, RunID: req.Run.ID, Stage: m.stage, Kind: "llm", Model: req.Model,
+		InputTokens: u.InputTokens, CacheWriteTokens: u.CacheWriteTokens, CacheWrite1hTokens: u.CacheWrite1hTokens,
+		CacheReadTokens: u.CacheReadTokens, OutputTokens: u.OutputTokens,
+		ListCostMicros: cost, PriceTableVersion: version, BilledTo: string(m.billing), RequestID: requestID,
+		Estimated: estimated, CreatedAt: m.now().UTC(),
+	}
 }
 
 // writeLedger inserts the row, retrying a few times, and detached from the caller's cancellation: the call is already
@@ -132,49 +183,124 @@ func (m *metered) writeLedger(ctx context.Context, e store.UsageEntry) error {
 	m.log.Error("llm: usage ledger write failed", "error", err, "workspace_id", e.WorkspaceID.String(), "run_id", e.RunID.String(),
 		"stage", e.Stage, "model", e.Model, "input_tokens", e.InputTokens, "cache_write_tokens", e.CacheWriteTokens,
 		"cache_write_1h_tokens", e.CacheWrite1hTokens, "cache_read_tokens", e.CacheReadTokens, "output_tokens", e.OutputTokens,
-		"list_cost_micros", e.ListCostMicros, "price_table_version", e.PriceTableVersion, "billed_to", e.BilledTo, "request_id", e.RequestID)
+		"list_cost_micros", e.ListCostMicros, "price_table_version", e.PriceTableVersion, "billed_to", e.BilledTo,
+		"request_id", e.RequestID, "estimated", e.Estimated)
 	return err
 }
 
-// checkCaps estimates the worst-case cost of the request (counted input tokens at the dearest rate they could be
-// billed, plus max_tokens at the output price) and refuses it, before anything is sent, when that is over a cap.
-//
-// On success it returns the function that releases the daily-cap reservation of this call; call it once the ledger row
-// is written.
-func (m *metered) checkCaps(ctx context.Context, req Request) (release func(), err error) {
-	n, err := m.inner.CountTokens(ctx, req)
+// Token estimates that need no API call. The upper bound leans very high on purpose: it is only used to decide that a
+// request is so far under every cap that counting it exactly is not worth a round trip.
+const (
+	// upperBytesPerToken: no real text costs more than one token per two bytes of canonical JSON.
+	upperBytesPerToken = 2
+	// upperImageTokens is above the most an image costs (images are scaled to about 1,600 tokens).
+	upperImageTokens = 2000
+	// upperOverheadTokens covers the tokens the API adds for tools and the system.
+	upperOverheadTokens = 2000
+)
+
+// upperBoundTokens is a cheap, local upper bound of the request's input tokens.
+func upperBoundTokens(req Request) (int64, error) {
+	canon, images, err := canonicalRequest(req)
 	if err != nil {
-		return nil, fmt.Errorf("llm: counting tokens before sending: %w", err)
+		return 0, err
 	}
-	est, err := m.prices.EstimateMax(req.Model, n, int64(req.MaxTokens), cacheMarks(req))
+	return int64(len(canon))/upperBytesPerToken + int64(images)*upperImageTokens + upperOverheadTokens, nil
+}
+
+// reserveCaps works out the request's worst-case cost and sets it aside against every cap, before anything is sent.
+// It tries a cheap upper bound of the input tokens first and asks count_tokens only when that does not clear the
+// per-request cap, or when the run budget or the daily cap cannot cover the (inflated) bound.
+func (m *metered) reserveCaps(ctx context.Context, req Request) (*reservation, error) {
+	marks := cacheMarks(req)
+	tokens, err := upperBoundTokens(req)
 	if err != nil {
 		return nil, err
 	}
-	if est > m.maxRequest {
-		return nil, &CapError{Kind: CapRequest, EstimateMicros: est, LimitMicros: m.maxRequest}
+	counted := false
+	count := func() error {
+		n, err := m.inner.CountTokens(ctx, req)
+		if err != nil {
+			return fmt.Errorf("llm: counting tokens before sending: %w", err)
+		}
+		tokens, counted = n, true
+		return nil
 	}
-	if b := req.Run.Budget; b != nil {
-		if room := max(b.Remaining(), 0); est > room {
-			return nil, &CapError{Kind: CapRun, EstimateMicros: est, LimitMicros: room}
+	estimate := func() (int64, error) { return m.prices.EstimateMax(req.Model, tokens, int64(req.MaxTokens), marks) }
+
+	est, err := estimate()
+	if err != nil {
+		return nil, err
+	}
+	if est > m.maxRequest && !counted {
+		if err := count(); err != nil {
+			return nil, err
+		}
+		if est, err = estimate(); err != nil {
+			return nil, err
 		}
 	}
-	if m.mode == ModeReplay {
-		return func() {}, nil
+	for {
+		if est > m.maxRequest {
+			return nil, &CapError{Kind: CapRequest, EstimateMicros: est, LimitMicros: m.maxRequest}
+		}
+		rsv, err := m.take(ctx, req, est, tokens)
+		if err == nil {
+			return rsv, nil
+		}
+		var ce *CapError
+		if !errors.As(err, &ce) || counted {
+			return nil, err
+		}
+		// The inflated bound did not fit under the budget or the daily cap; the exact count may.
+		if err := count(); err != nil {
+			return nil, err
+		}
+		if est, err = estimate(); err != nil {
+			return nil, err
+		}
 	}
+}
+
+// take reserves est against the run's budget and the workspace's daily cap, or returns the error of the cap that
+// refused. Nothing stays reserved on an error.
+func (m *metered) take(ctx context.Context, req Request, est, tokens int64) (*reservation, error) {
+	rsv := &reservation{est: est, tokens: tokens}
+	if b := req.Run.Budget; b != nil {
+		release, err := b.Reserve(est)
+		if err != nil {
+			var ce *CapError
+			if errors.As(err, &ce) {
+				return nil, err
+			}
+			return nil, &CapError{Kind: CapRun, EstimateMicros: est, Cause: err}
+		}
+		rsv.budget = release
+	}
+	if m.mode == ModeReplay {
+		return rsv, nil
+	}
+	// Daily cap. Reserve first and remember what was reserved at that moment, then read the ledger, then check. A call
+	// that reserved earlier is either still in `before` or already a row in `spent` (its reservation is released only
+	// after its row is written), and a call that reserves later counts this one the same way, so no pair of concurrent
+	// calls can both miss each other. Counting both for an instant only over-reserves, which is the safe side. Other
+	// processes' in-flight calls are not seen; the overshoot is bounded by their concurrency and the per-request cap.
+	before := m.reserve.add(m.ws, est)
 	now := m.now().UTC()
 	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	spent, err := m.ledger.UsageCostMicros(ctx, m.ws, day, day.Add(24*time.Hour))
 	if err != nil {
+		m.reserve.release(m.ws, est)
+		rsv.done()
 		return nil, fmt.Errorf("llm: reading today's spend before sending: %w", err) // fail closed
 	}
-	// Calls of this process that are in flight are not in the ledger yet: count their worst cases too, so a burst of
-	// concurrent calls cannot all pass the check on the same stale total. (Other processes' in-flight calls are not
-	// seen; the overshoot is bounded by their concurrency and the per-request cap.)
-	reserved, ok := m.reserve.tryReserve(m.ws, est, m.dailyCap-spent)
-	if !ok {
-		return nil, &CapError{Kind: CapDaily, EstimateMicros: est, LimitMicros: max(m.dailyCap-spent-reserved, 0)}
+	if spent+before+est > m.dailyCap {
+		m.reserve.release(m.ws, est)
+		rsv.done()
+		return nil, &CapError{Kind: CapDaily, EstimateMicros: est, LimitMicros: max(m.dailyCap-spent-before, 0)}
 	}
-	return func() { m.reserve.release(m.ws, est) }, nil
+	rsv.daily = func() { m.reserve.release(m.ws, est) }
+	return rsv, nil
 }
 
 // reservations is the worst-case cost of the calls in flight, per workspace, shared by every client of a factory.
@@ -183,20 +309,16 @@ type reservations struct {
 	m  map[ids.WorkspaceID]int64
 }
 
-// tryReserve adds est to the workspace's reservations if it fits in room (the cap minus what the ledger says was
-// spent) next to what is already reserved. It returns the amount that was reserved before this call.
-func (r *reservations) tryReserve(ws ids.WorkspaceID, est, room int64) (reservedBefore int64, ok bool) {
+// add reserves est and returns the total that was reserved before it.
+func (r *reservations) add(ws ids.WorkspaceID, est int64) (before int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.m == nil {
 		r.m = map[ids.WorkspaceID]int64{}
 	}
-	reservedBefore = r.m[ws]
-	if est > room-reservedBefore {
-		return reservedBefore, false
-	}
-	r.m[ws] = reservedBefore + est
-	return reservedBefore, true
+	before = r.m[ws]
+	r.m[ws] = before + est
+	return before
 }
 
 func (r *reservations) release(ws ids.WorkspaceID, est int64) {

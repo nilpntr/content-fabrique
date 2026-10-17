@@ -50,7 +50,7 @@ type CapKind string
 const (
 	// CapRequest is LLM_MAX_REQUEST_MICROS: one call's worst-case cost.
 	CapRequest CapKind = "request"
-	// CapRun is the run's budget (Budget.Remaining).
+	// CapRun is the run's budget (Budget.Reserve).
 	CapRun CapKind = "run"
 	// CapDaily is DAILY_SPEND_CAP_MICROS: the workspace's spend today plus this call's worst case.
 	CapDaily CapKind = "daily"
@@ -67,7 +67,12 @@ type CapError struct {
 	EstimateMicros int64
 	// LimitMicros is the room that was left under the cap (the whole cap for CapRequest).
 	LimitMicros int64
+	// Cause is what a custom Budget said, when it refused with some other error.
+	Cause error
 }
+
+// Unwrap returns Cause.
+func (e *CapError) Unwrap() error { return e.Cause }
 
 func (e *CapError) Error() string {
 	return fmt.Sprintf("llm: refused before sending: the %s spend cap would be exceeded (worst case $%.4f, room $%.4f)",
@@ -79,6 +84,10 @@ func (e *CapError) Is(target error) bool { return target == ErrCapExceeded }
 
 // ErrRateLimited is wrapped by the error returned when 429 or 529 answers outlast the retry budget.
 var ErrRateLimited = errors.New("llm: rate limited")
+
+// ErrRetriesExhausted is wrapped by the error returned when retries of other failures (5xx, timeouts, resets) ran
+// out of attempts or waiting time.
+var ErrRetriesExhausted = errors.New("llm: retries exhausted")
 
 // ErrReplayMiss is wrapped by *ReplayMissError.
 var ErrReplayMiss = errors.New("llm: no recorded call for this request")
@@ -143,10 +152,37 @@ func (e *APIError) Error() string {
 	return b.String()
 }
 
-// Retryable reports whether the answer means "too busy, try later": 429, 529 and overloaded errors.
+// Retryable reports whether the answer means "the server could not take this now, try again": 429 and 529 (busy),
+// overloaded and rate-limit errors, 408, and 500, 502, 503 and 504. An error answer means the request was not
+// processed, so a retry cannot bill twice. Every other 4xx is the caller's mistake and is never retried.
 func (e *APIError) Retryable() bool {
-	return e.Status == 429 || e.Status == 529 || e.Type == "overloaded_error" || e.Type == "rate_limit_error"
+	switch e.Status {
+	case 408, 429, 500, 502, 503, 504, 529:
+		return true
+	}
+	return e.Type == "overloaded_error" || e.Type == "rate_limit_error"
 }
+
+// ErrOutcomeUnknown is wrapped by a *TransportError whose request was sent: the call may have run and been billed,
+// but no usage came back. It is never retried here, and the runtime must not retry it blindly either (it can look at
+// the run's events first). The ledger holds a row for it, marked estimated, at the reserved worst-case cost.
+var ErrOutcomeUnknown = errors.New("llm: the request was sent and its outcome is unknown")
+
+// TransportError is a failure below HTTP: a dial error, a reset, a timeout, a cancelled context, a body cut off.
+type TransportError struct {
+	// Sent says the request had been written to the connection, so the server may have acted on it.
+	Sent bool
+	Err  error
+	msg  string
+}
+
+func (e *TransportError) Error() string { return e.msg }
+
+// Unwrap keeps errors.Is(err, context.Canceled) and friends working.
+func (e *TransportError) Unwrap() error { return e.Err }
+
+// Is makes errors.Is(err, ErrOutcomeUnknown) true for a request that was sent.
+func (e *TransportError) Is(target error) bool { return target == ErrOutcomeUnknown && e.Sent }
 
 // IsAuth reports a 401 or 403: the key is wrong, revoked or lacks access. P4-00b marks a BYOK key invalid on it.
 func (e *APIError) IsAuth() bool { return e.Status == 401 || e.Status == 403 }

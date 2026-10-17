@@ -7,22 +7,88 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/google/uuid"
 )
 
 // anthropicHost is the direct API. A base URL on another host is a gateway.
 const anthropicHost = "api.anthropic.com"
 
-// defaultRequestTimeout is the timeout of one non-streaming request. It also tells the SDK not to refuse a large
-// max_tokens for "may take longer than 10 minutes" (streaming arrives with the runtime if it needs it).
-const defaultRequestTimeout = 10 * time.Minute
+// Timeouts of one non-streaming request. Setting an explicit timeout also tells the SDK not to refuse a large
+// max_tokens for "may take longer than 10 minutes". The timeout follows max_tokens and the model's speed instead of
+// being a flat number, because a call cut off after the model finished is paid for and lost.
+const (
+	countTokensTimeout = 2 * time.Minute
+	minRequestTimeout  = 10 * time.Minute
+	maxRequestTimeout  = 60 * time.Minute
+	requestTimeoutBase = 2 * time.Minute
+	// timeoutSafety multiplies the generation time the model's throughput predicts.
+	timeoutSafety = 3
+)
+
+// outputTokensPerSecond is a deliberately slow guess at a model family's generation speed, for the timeout only.
+func outputTokensPerSecond(model string) float64 {
+	switch {
+	case strings.Contains(model, "haiku"):
+		return 80
+	case strings.Contains(model, "sonnet"):
+		return 40
+	default: // opus and anything unknown
+		return 20
+	}
+}
+
+// requestTimeout is how long one Messages call may take: two minutes plus three times the time max_tokens takes at the
+// model's slow-case speed, between 10 and 60 minutes. Opus 5.5 with max_tokens 16000 gets 42 minutes.
+func requestTimeout(model string, maxTokens int) time.Duration {
+	gen := time.Duration(float64(maxTokens) / outputTokensPerSecond(model) * float64(time.Second))
+	return min(max(requestTimeoutBase+timeoutSafety*gen, minRequestTimeout), maxRequestTimeout)
+}
+
+// callState records, for one call, whether its request reached the wire. It travels in the request context and is
+// filled by trackingTransport.
+type callState struct{ sent atomic.Bool }
+
+type callStateKey struct{}
+
+// trackingTransport notes when a request has been written to the connection (net/http's own trace), or answered. A
+// failure before that is safe to retry; one after it may have been billed.
+type trackingTransport struct{ base http.RoundTripper }
+
+func (t trackingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	st, _ := r.Context().Value(callStateKey{}).(*callState)
+	if st != nil {
+		r = r.WithContext(httptrace.WithClientTrace(r.Context(), &httptrace.ClientTrace{
+			WroteRequest: func(httptrace.WroteRequestInfo) { st.sent.Store(true) },
+		}))
+	}
+	resp, err := t.base.RoundTrip(r)
+	if err == nil && st != nil {
+		st.sent.Store(true)
+	}
+	return resp, err
+}
+
+// trackedClient wraps the HTTP client (the default one when nil) so its transport reports whether a request was sent.
+func trackedClient(hc *http.Client) *http.Client {
+	if hc == nil {
+		hc = http.DefaultClient
+	}
+	base := hc.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return &http.Client{Transport: trackingTransport{base: base}, CheckRedirect: hc.CheckRedirect, Jar: hc.Jar, Timeout: hc.Timeout}
+}
 
 // isGateway reports whether baseURL points at a gateway (anything but empty and api.anthropic.com).
 func isGateway(baseURL string) bool {
@@ -49,7 +115,8 @@ type anthropicConfig struct {
 	// Workspace and Stage label the gateway's cf-aig-metadata.
 	Workspace string
 	Stage     string
-	Timeout   time.Duration
+	// Timeout overrides the per-call timeout (tests). Zero derives it from the model and max_tokens.
+	Timeout time.Duration
 }
 
 // anthropicClient is the Client over anthropic-sdk-go. It does not retry (MaxRetries 0): retries live in limited.
@@ -58,6 +125,7 @@ type anthropicClient struct {
 	gateway   bool
 	workspace string
 	stage     string
+	timeout   time.Duration
 	// secrets are removed from every error message that leaves this type.
 	secrets []string
 }
@@ -69,23 +137,17 @@ func newAnthropicClient(cfg anthropicConfig) *anthropicClient {
 			c.secrets = append(c.secrets, s)
 		}
 	}
-	timeout := cfg.Timeout
-	if timeout <= 0 {
-		timeout = defaultRequestTimeout
-	}
+	c.timeout = cfg.Timeout
 	// Explicit options only: the SDK's own environment defaults (ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL ...) must not
 	// decide which key or endpoint is used.
 	opts := []option.RequestOption{
 		option.WithoutEnvironmentDefaults(),
 		option.WithAPIKey(cfg.APIKey),
 		option.WithMaxRetries(0),
-		option.WithRequestTimeout(timeout),
+		option.WithHTTPClient(trackedClient(cfg.HTTPClient)),
 	}
 	if cfg.BaseURL != "" {
 		opts = append(opts, option.WithBaseURL(cfg.BaseURL))
-	}
-	if cfg.HTTPClient != nil {
-		opts = append(opts, option.WithHTTPClient(cfg.HTTPClient))
 	}
 	if c.gateway {
 		// The gateway keeps metadata (tokens, model, cost, duration) and not prompts or frames.
@@ -130,10 +192,16 @@ func (c *anthropicClient) Messages(ctx context.Context, req Request) (Response, 
 		return Response{}, err
 	}
 	var raw *http.Response
-	opts := append(c.requestOptions(req.Run), option.WithResponseInto(&raw))
+	timeout := c.timeout
+	if timeout <= 0 {
+		timeout = requestTimeout(req.Model, req.MaxTokens)
+	}
+	st := &callState{}
+	ctx = context.WithValue(ctx, callStateKey{}, st)
+	opts := append(c.requestOptions(req.Run), option.WithResponseInto(&raw), option.WithRequestTimeout(timeout))
 	msg, err := c.sdk.Messages.New(ctx, params, opts...)
 	if err != nil {
-		return Response{}, c.convertError(err)
+		return Response{}, c.convertError(err, st.sent.Load())
 	}
 	resp := fromMessage(msg)
 	if raw != nil {
@@ -148,15 +216,22 @@ func (c *anthropicClient) CountTokens(ctx context.Context, req Request) (int64, 
 	if err != nil {
 		return 0, err
 	}
-	res, err := c.sdk.Messages.CountTokens(ctx, params, c.requestOptions(req.Run)...)
+	timeout := c.timeout
+	if timeout <= 0 {
+		timeout = countTokensTimeout
+	}
+	st := &callState{}
+	ctx = context.WithValue(ctx, callStateKey{}, st)
+	res, err := c.sdk.Messages.CountTokens(ctx, params, append(c.requestOptions(req.Run), option.WithRequestTimeout(timeout))...)
 	if err != nil {
-		return 0, c.convertError(err)
+		return 0, c.convertError(err, st.sent.Load())
 	}
 	return res.InputTokens, nil
 }
 
-// convertError turns an SDK error into *APIError (for an answer from the server) or a scrubbed wrapper.
-func (c *anthropicClient) convertError(err error) error {
+// convertError turns an SDK error into *APIError (an answer from the server: the request was not processed) or a
+// *TransportError (anything below HTTP, with sent saying whether the request reached the wire).
+func (c *anthropicClient) convertError(err error, sent bool) error {
 	var apiErr *anthropic.Error
 	if errors.As(err, &apiErr) {
 		e := &APIError{Status: apiErr.StatusCode, RequestID: apiErr.RequestID, Type: string(apiErr.Type())}
@@ -180,18 +255,14 @@ func (c *anthropicClient) convertError(err error) error {
 		}
 		return e
 	}
-	return &scrubbedError{msg: "llm: request failed: " + scrub(err.Error(), c.secrets), err: err}
+	// The message has secrets removed. Unwrap keeps errors.Is(err, context.Canceled) and friends working; the wrapped
+	// value is not printed by this type.
+	where := "before the request was sent"
+	if sent {
+		where = "after the request was sent"
+	}
+	return &TransportError{Sent: sent, Err: err, msg: "llm: request failed " + where + ": " + scrub(err.Error(), c.secrets)}
 }
-
-// scrubbedError carries an error whose text had secrets removed. Unwrap keeps errors.Is(err, context.Canceled) and
-// friends working; the unwrapped value is not printed by this type.
-type scrubbedError struct {
-	msg string
-	err error
-}
-
-func (e *scrubbedError) Error() string { return e.msg }
-func (e *scrubbedError) Unwrap() error { return e.err }
 
 // scrub removes every secret from s.
 func scrub(s string, secrets []string) string {
@@ -322,6 +393,19 @@ func toBlock(b Block) (anthropic.ContentBlockParamUnion, error) {
 		return anthropic.NewThinkingBlock(b.Signature, b.Thinking), nil
 	case BlockRedactedThinking:
 		return anthropic.NewRedactedThinkingBlock(b.Data), nil
+	}
+	// A block this package does not model comes back as the raw JSON the API sent (server_tool_use,
+	// web_search_tool_result ...), so the assistant turn can be appended to the conversation unchanged.
+	if len(b.Raw) > 0 {
+		var probe struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(b.Raw, &probe) != nil || probe.Type == "" || probe.Type != string(b.Type) {
+			return anthropic.ContentBlockParamUnion{}, fmt.Errorf("llm: raw block of type %q is not a JSON object of that type", b.Type)
+		}
+		var u anthropic.ContentBlockParamUnion
+		param.SetJSON(b.Raw, &u)
+		return u, nil
 	}
 	return anthropic.ContentBlockParamUnion{}, fmt.Errorf("llm: unknown block type %q", b.Type)
 }
@@ -578,8 +662,9 @@ func fromMessage(m *anthropic.Message) Response {
 			}
 			r.Content = append(r.Content, Block{Type: BlockToolUse, ID: b.ID, Name: b.Name, Input: append(json.RawMessage(nil), in...)})
 		default:
-			// Server tool blocks (web_search ...) are not used yet. Keep a marker so a caller sees the reply was not empty.
-			r.Content = append(r.Content, Block{Type: BlockType(b.Type)})
+			// Server tool blocks (server_tool_use, web_search_tool_result ...) and anything newer: keep the JSON so the
+			// turn can be sent back unchanged.
+			r.Content = append(r.Content, Block{Type: BlockType(b.Type), Raw: json.RawMessage(b.RawJSON())})
 		}
 	}
 	return r
@@ -593,7 +678,13 @@ func fromUsage(u anthropic.Usage) Usage {
 		OutputTokens:     u.OutputTokens,
 	}
 	// cache_creation splits the writes by lifetime; the total is cache_creation_input_tokens. If a gateway drops the
-	// split, every write is priced as the cheaper 5-minute kind.
+	// split (it is absent, or does not add up to the total), say so: the cost is then worked out from the request's
+	// own breakpoints (metered.settleUsage), never silently at the cheaper 5-minute rate.
+	split := u.CacheCreation.Ephemeral1hInputTokens + u.CacheCreation.Ephemeral5mInputTokens
+	if out.CacheWriteTokens > 0 && split != out.CacheWriteTokens {
+		out.CacheWriteSplitMissing = true
+		return out
+	}
 	out.CacheWrite1hTokens = min(u.CacheCreation.Ephemeral1hInputTokens, out.CacheWriteTokens)
 	return out
 }

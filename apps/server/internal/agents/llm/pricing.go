@@ -179,12 +179,16 @@ type CacheMarks struct{ Any, OneHour bool }
 // EstimateMax is the worst-case cost of a request before it is sent: its counted input tokens, each priced as the
 // dearest way they could be billed (a cache write of the requested lifetime when the request has cache breakpoints,
 // plain input otherwise), plus maxTokens output tokens at the output price. A real call costs this much or less.
+//
+// A model with a long-prompt tier (Haiku 5.5) is priced at the dearer tier whenever input plus max_tokens could cross
+// the threshold. The count is an estimate of what will be billed, and the margin of max_tokens covers its error, so a
+// request near the threshold is never under-estimated.
 func (t *PriceTable) EstimateMax(model string, inputTokens int64, maxTokens int64, marks CacheMarks) (int64, error) {
 	m, ok := t.models[model]
 	if !ok {
 		return 0, &UnpricedError{Model: model, TableVersion: t.Version}
 	}
-	p := m.pricesFor(inputTokens)
+	p := m.pricesFor(inputTokens + maxTokens)
 	rate := p.Input
 	switch {
 	case marks.OneHour:

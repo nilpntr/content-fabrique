@@ -106,6 +106,47 @@ func LoadProfile(fsys fs.FS, name string) (Profile, error) {
 	return Profile{Name: name, models: models, doc: doc}, nil
 }
 
+// ErrStageDisabled is wrapped by *DisabledError.
+var ErrStageDisabled = errors.New("routing: stage is disabled in this profile")
+
+// DisabledError is what Entry returns for a stage (or a stage under one) marked `enabled: false`: it is not active, so
+// it resolves to nothing, exactly as Models leaves its model out.
+type DisabledError struct{ Profile, Stage string }
+
+func (e *DisabledError) Error() string {
+	return fmt.Sprintf("routing: stage %q of profile %q is disabled (enabled: false)", e.Stage, e.Profile)
+}
+
+// Is makes errors.Is(err, ErrStageDisabled) true.
+func (e *DisabledError) Is(target error) bool { return target == ErrStageDisabled }
+
+// Stages returns every stage Entry resolves, as dotted paths, sorted: the mappings that name a model and are not
+// disabled themselves or under a disabled mapping. The models of these stages are exactly Models().
+func (p Profile) Stages() []string {
+	var out []string
+	var walk func(n *yaml.Node, path string)
+	walk = func(n *yaml.Node, path string) {
+		if n.Kind != yaml.MappingNode || scalar(n, "enabled") == "false" {
+			return // a list element has no stage name
+		}
+		if path != "" && scalar(n, "model") != "" {
+			out = append(out, path)
+		}
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			child := n.Content[i].Value
+			if path != "" {
+				child = path + "." + child
+			}
+			walk(n.Content[i+1], child)
+		}
+	}
+	if p.doc != nil {
+		walk(p.doc, "")
+	}
+	slices.Sort(out)
+	return out
+}
+
 // Entry is what one stage of a profile resolves to.
 type Entry struct {
 	// Model is the native Anthropic model ID (claude-opus-5-5).
@@ -139,6 +180,9 @@ func (p Profile) Entry(stage string) (Entry, error) {
 		}
 		if next == nil {
 			return Entry{}, fmt.Errorf("routing: profile %q has no stage %q", p.Name, stage)
+		}
+		if next.Kind == yaml.MappingNode && scalar(next, "enabled") == "false" {
+			return Entry{}, &DisabledError{Profile: p.Name, Stage: stage}
 		}
 		n = next
 	}

@@ -96,6 +96,26 @@ func usageSuite(t *testing.T, st *store.Store, suffix string) {
 		}
 	})
 
+	t.Run("an estimated row is marked and counted", func(t *testing.T) {
+		w := newWorkspace("estimated")
+		e := entry(w, 9000, base, "")
+		e.Estimated = true
+		if err := st.InsertUsage(ctx, e); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.InsertUsage(ctx, entry(w, 1000, base, "")); err != nil {
+			t.Fatal(err)
+		}
+		rows, err := st.UsageForRun(ctx, w.ID, run)
+		if err != nil || len(rows) != 2 || !rows[0].Estimated || rows[1].Estimated {
+			t.Fatalf("rows = %+v, %v", rows, err)
+		}
+		day := base.Truncate(24 * time.Hour)
+		if got, _ := st.UsageCostMicros(ctx, w.ID, day, day.Add(24*time.Hour)); got != 10_000 {
+			t.Fatalf("sum = %d: an estimated row counts toward the cap", got)
+		}
+	})
+
 	t.Run("a call outside a run has no run id", func(t *testing.T) {
 		w := newWorkspace("norun")
 		e := entry(w, 1, base, "")

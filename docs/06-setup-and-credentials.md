@@ -49,9 +49,9 @@ Create four workspaces in the Console, one key each. Each has a monthly spend li
 
   | Variable | Default | What it does |
   |---|---|---|
-  | `LLM_MAX_REQUEST_MICROS` | 2000000 ($2) | Refuses any single call whose worst case is above it. The worst case is the counted input tokens at list price (a cache write if the request has cache breakpoints) plus `max_tokens` of output |
+  | `LLM_MAX_REQUEST_MICROS` | 2000000 ($2) | Refuses any single call whose worst case is above it. The worst case is the counted input tokens at list price (a cache write if the request has cache breakpoints) plus `max_tokens` of output. A cheap local bound is used when it clears the cap, so most calls need no `count_tokens` round trip |
   | `DAILY_SPEND_CAP_MICROS` | 20000000 ($20) | Per workspace and UTC day, summed from `usage_ledger`. A call is refused when today's spend plus its worst case is over the cap. A per-run budget is passed in by the agent runtime |
-  | `LLM_KEY_CONCURRENCY` | 4 | Requests in flight per API key. More callers wait in a queue. On 429 and 529 the client backs off with jitter and honours `retry-after`; nothing else retries |
+  | `LLM_KEY_CONCURRENCY` | 4 | Requests in flight per API key. More callers wait in a queue. On 429, 529 and 5xx answers the client backs off with jitter and honours `retry-after`; nothing else retries |
   | `LLM_ALLOW_UNPRICED` | empty | `1` lets a model with no price in the table run (ledger cost 0, caps cannot be checked). Empty refuses it |
   | `LLM_CASSETTE_DIR` | `testdata/cassettes` | Where `LLM_MODE=record` writes and `replay` reads cassettes (`<dir>/<stage>/<key>.json`) |
 
