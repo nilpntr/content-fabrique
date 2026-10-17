@@ -73,7 +73,7 @@ func TestSpendControlRules(t *testing.T) {
 		t.Errorf("local without the breaker: %s (%s)", r.Status, r.Reason)
 	}
 	for _, val := range []string{"0", "-1", "lots", "1.5"} {
-		for _, name := range []string{"PLATFORM_DAILY_SPEND_CAP_MICROS", "DAILY_SPEND_CAP_MICROS", "LLM_MAX_REQUEST_MICROS"} {
+		for _, name := range []string{"PLATFORM_DAILY_SPEND_CAP_MICROS", "PLATFORM_SPEND_SMALL_CALL_MICROS", "DAILY_SPEND_CAP_MICROS", "LLM_MAX_REQUEST_MICROS"} {
 			if r := check("staging", name, val); r.Status != Invalid {
 				t.Errorf("%s=%q: %s (%s), want invalid", name, val, r.Status, r.Reason)
 			}

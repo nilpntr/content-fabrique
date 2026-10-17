@@ -172,12 +172,17 @@ Test traffic keeps the behaviour developers rely on: the workspace daily cap, th
 **Caps in the code.**
 - `DAILY_SPEND_CAP_MICROS` (workspace), `PLATFORM_DAILY_SPEND_CAP_MICROS` (breaker, default $100 when unset, which `cfctl doctor` rejects in staging and production) and `TRANSCRIBE_DAILY_MINUTES` (as an audio cap, in milliseconds) are enforced in the database. The per-request cap and the run budget stay in process.
 - A reservation that counts against a money cap with no positive limit is refused (`ErrSpendCapNotSet`). A database that cannot be asked is an error, never a pass.
-- The breaker logs `spend.alert` with `type=platform_breaker` and `threshold_pct=80` (warning) when the settled counter passes 80 % of the cap, and `threshold_pct=100` (error) when a call is refused for it or a settle reaches the cap, each once per UTC day however many processes see it. A refusal is `spend.ErrPlatformPaused`: a run fails with `platform_spend_paused`; a transcription or quick look waits and retries; `spend.HTTPError` maps it to `503 platform_spend_paused` (and a workspace cap to `429 daily_spend_cap`) for any API handler that meets one. No endpoint does yet, because the paid calls run in the worker.
+- The breaker logs `spend.alert` with `type=platform_breaker` and `threshold_pct=80` (warning) when the settled counter passes 80 % of the cap, and `threshold_pct=100` (error) when it trips (see "Busy is not a trip"), each once per UTC day however many processes see it. A trip is `spend.ErrPlatformPaused`: a run fails with `platform_spend_paused`; a transcription or quick look waits and retries; `spend.HTTPError` maps it to `503 platform_spend_paused` (and a workspace cap to `429 daily_spend_cap`) for any API handler that meets one. No endpoint does yet, because the paid calls run in the worker.
 
 **Hold lifetimes.**
-- A model call: the request timeout (2 minutes plus three times the time `max_tokens` takes, 10 to 60 minutes) plus the retry wait (5 minutes) plus a 2-minute margin, but no longer than the run's wall-clock deadline plus the margin; never under 5 minutes.
-- Hosted transcription: one request per 10-minute chunk, each up to the client's 5-minute timeout, plus the margin. Local transcription: whisper's tool timeouts plus the margin.
-- A caller that dies therefore blocks at most one call's worth of budget, for at most that long.
+- A hold is short: 5 minutes. While its call is in flight, a heartbeat (`Hold.KeepAlive`, every minute) moves its expiry to now plus 5 minutes (`store.ExtendSpend`, which only moves it forward and never brings back a hold that is gone). No fixed lifetime could cover a model call that queues for its key's concurrency slot, cools down after a 429 and retries up to eight times, so the lifetime follows the call instead.
+- A caller that dies stops beating, and its hold stops counting 5 minutes after the last beat; the sweep then deletes it. A call whose ledger row could not be written stops beating too (its hold is kept, not released, and lapses on its own).
+- The model client, the transcription pipeline (provider calls of any length) use the same heartbeat. Renders and media jobs hold nothing.
+
+**Busy is not a trip.**
+- The breaker is *tripped* when the committed (settled) platform spend plus a small normal call no longer fits under the cap: `committed + PLATFORM_SPEND_SMALL_CALL_MICROS > cap` (default $0.10, `store.BreakerTripped`). Only a trip sets `tripped_at`, raises the 100 % alert and refuses with `platform_spend_paused`. The same rule is checked when a settle adds platform cost, so a crossing is alerted whether or not a call is refused at that moment.
+- A reservation that is refused while the rule says "not tripped" (a large request next to the live holds, or a burst of in-flight calls near the cap) is **busy**: `spend_cap_busy` (`store.CapPlatformBusy`, `spend.ErrSpendCapBusy`, `503 spend_cap_busy` through `spend.HTTPError`). It sets no flag and raises no alert, so the real crossing later still alerts once.
+- Callers wait on busy and fail only on a trip: an agent run sets `RunInfo.WaitOnBusy` and the model client retries the reservation with jittered backoff (2 s doubling to 1 min) until the run's wall-clock context ends, so a busy moment is never a failed run; transcription and quick look treat busy like a trip and wait (snooze) without using an attempt.
 
 **Metering.**
 
@@ -193,6 +198,7 @@ Render and media rows are costs already incurred, so they are recorded, counted 
 **Price table 2026-10b** adds `transcription` (Workers AI $0.0005 per audio minute, read from Cloudflare's pricing page on 2026-10-17 and to be confirmed against the first invoice; whisper.cpp as compute), `compute` ($0.000020 per vCPU-second, Cloudflare Containers' price, marked as an estimate) and `storage` (R2 Standard $0.015 per GB-month, egress free). Every ledger row records the version. `WORKERS_AI_PRICE_MICROS_PER_MINUTE` is now an optional override of the table.
 
 **Deviations from the text above, and why.**
+- The trip rule and the busy refusal above are not in the first text of this note; they came out of review (one large request must not burn the day's single 100 % alert).
 - Units are the smallest whole unit (`audio_ms`, `vcpu_ms`, `byte_days`, `bytes`), not seconds, GB-days and GB, so that quantities and costs stay integers for short chunks; reports divide.
 - The counters' minutes are milliseconds (`audio_ms`) for the same reason.
 - A counter row has `platform_micros` and `test_micros` instead of one number, because the workspace cap counts both (the local behaviour above) and the breaker counts only the first.

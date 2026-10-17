@@ -230,12 +230,12 @@ func (p *Pipeline) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, 
 		var err error
 		hold, err = p.cfg.Gate.Reserve(ctx, spend.Request{
 			Workspace: ws, BilledTo: p.cfg.BilledTo, Kind: store.KindTranscription, Micros: est, AudioMs: audio.DurationMs,
-			Key: p.holdKey(job, adhoc), TTL: p.holdTTL(audio.DurationMs),
+			Key: p.holdKey(job, adhoc),
 		})
 		var ce *spend.CapError
 		switch {
-		case errors.As(err, &ce) && ce.Cap == store.CapPlatformDaily:
-			log.WarnContext(ctx, "transcription waits: the platform spend breaker is open", "audio_ms", audio.DurationMs)
+		case errors.As(err, &ce) && (ce.Cap == store.CapPlatformDaily || ce.Cap == store.CapPlatformBusy):
+			log.WarnContext(ctx, "transcription waits: the platform spend breaker has no room for it", "audio_ms", audio.DurationMs, "cap", string(ce.Cap))
 			return Result{}, fmt.Errorf("%w: %w", ErrPlatformPaused, err)
 		case errors.As(err, &ce) && ce.Cap == store.CapWorkspaceAudio:
 			return p.blocked(ctx, ws, id, source, store.TranscriptMinutesCap, res, log)
@@ -248,7 +248,13 @@ func (p *Pipeline) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, 
 		return Result{}, errors.New("transcribe: the provider costs money and no spend gate is configured")
 	}
 	settled, keep := false, false
+	// The hold lives as long as the provider works (a heartbeat extends it); a worker that dies stops extending it and it expires.
+	stopBeat := func() {}
+	if hold != nil {
+		stopBeat = hold.KeepAlive(ctx)
+	}
 	defer func() {
+		stopBeat()
 		// A hold that no ledger row replaced goes back (nothing was sent, or nothing billed); one whose rows could not be written stays
 		// until it expires, so the caps stay conservative.
 		if hold != nil && !settled && !keep {
@@ -315,19 +321,6 @@ func (p *Pipeline) holdKey(job JobRef, adhoc string) string {
 		return "hold:transcribe:" + adhoc
 	}
 	return fmt.Sprintf("hold:transcribe:%d:%d", job.ID, job.Attempt)
-}
-
-// maxDurationer is implemented by a provider that knows how long its calls can take, for the lifetime of the reservation.
-type maxDurationer interface {
-	MaxDuration(audioMs int64) time.Duration
-}
-
-// holdTTL is how long the reservation of a transcription lives: the longest the provider can take on this audio, and a margin.
-func (p *Pipeline) holdTTL(audioMs int64) time.Duration {
-	if d, ok := p.cfg.Provider.(maxDurationer); ok {
-		return d.MaxDuration(audioMs) + spend.HoldMargin
-	}
-	return spend.DefaultHoldTTL
 }
 
 // meter writes the ledger row of every billed call, in the order they were made, with a fresh context: the calls are already paid

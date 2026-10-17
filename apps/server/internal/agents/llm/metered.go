@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,9 +20,6 @@ const (
 	ledgerAttempts = 3
 	ledgerTimeout  = 10 * time.Second
 )
-
-// callMargin is added to a call's longest duration when working out how long its hold must live.
-const callMargin = spend.HoldMargin
 
 // metered is the outermost client. It resolves image references, reserves the worst-case cost of a call against every
 // cap before sending it (refusing the call when a cap cannot cover it), and writes the ledger row of the call.
@@ -69,6 +67,8 @@ type reservation struct {
 
 	budget func(actual int64) // settles the run budget; nil without one
 	hold   *spend.Hold        // the database hold; nil in replay and for an unpriced call
+	// stopBeat ends the hold's heartbeat; nil without a hold.
+	stopBeat func()
 	// keepHold says the ledger row could not be written: the hold stays until it expires, so the caps stay conservative.
 	keepHold bool
 	settled  bool
@@ -153,6 +153,10 @@ func (m *metered) Messages(ctx context.Context, req Request) (Response, error) {
 // that should have replaced it could not be written.
 func (m *metered) done(r *reservation) {
 	r.settle(0)
+	if r.stopBeat != nil {
+		r.stopBeat() // a hold nobody extends expires by itself: this is what frees a hold whose row could not be written
+		r.stopBeat = nil
+	}
 	if r.hold != nil && !r.keepHold {
 		ctx, cancel := context.WithTimeout(context.Background(), ledgerTimeout)
 		defer cancel()
@@ -276,7 +280,7 @@ func (m *metered) reserveCaps(ctx context.Context, req Request, rsv *reservation
 			return got, nil
 		}
 		var ce *CapError
-		if !errors.As(err, &ce) || counted {
+		if !errors.As(err, &ce) || counted || ctx.Err() != nil {
 			return nil, err
 		}
 		// The inflated bound did not fit under the budget or the daily cap; the exact count may.
@@ -289,15 +293,11 @@ func (m *metered) reserveCaps(ctx context.Context, req Request, rsv *reservation
 	}
 }
 
-// holdTTL is how long a call's hold must live: the longest the call can take (the request's timeout, plus the retry wait the limiter
-// may add) and a margin, but not past the context's own deadline (a run's wall clock) plus the margin. A crashed caller's hold is
-// then gone by that time and stops blocking the caps.
-func holdTTL(ctx context.Context, req Request, now time.Time) time.Duration {
-	ttl := requestTimeout(req.Model, req.MaxTokens) + defaultMaxTotalWait + callMargin
-	if dl, ok := ctx.Deadline(); ok {
-		ttl = min(ttl, dl.Sub(now)+callMargin)
-	}
-	return max(ttl, spend.MinHoldTTL)
+// busyBackoff is how long a call that WaitOnBusy waits before asking the breaker again: 2 s, doubling to a minute, with jitter. A variable
+// so tests can shorten it.
+var busyBackoff = func(attempt int) time.Duration {
+	d := min(2*time.Second<<min(attempt, 5), time.Minute)
+	return d/2 + time.Duration(rand.Int64N(int64(d/2)+1))
 }
 
 // take reserves est against the run's budget and, in the database, the workspace's daily cap and the platform breaker, or returns
@@ -319,10 +319,25 @@ func (m *metered) take(ctx context.Context, req Request, rsv *reservation, est, 
 		rsv.budget = release
 		return rsv, nil
 	}
-	hold, err := m.gate.Reserve(ctx, spend.Request{
-		Workspace: m.ws, BilledTo: string(m.billing), Kind: store.KindLLM, Micros: est,
-		Key: "hold:" + rsv.ledgerKey(), TTL: holdTTL(ctx, req, m.now()),
-	})
+	// The hold is short and a heartbeat extends it for as long as the call is in flight (queued for the key's slot, cooling down after a
+	// 429, retrying: no fixed lifetime covers that), so a crashed caller's hold expires within spend.DefaultHoldTTL of its last beat.
+	var (
+		hold *spend.Hold
+		err  error
+	)
+	for attempt := 0; ; attempt++ {
+		hold, err = m.gate.Reserve(ctx, spend.Request{
+			Workspace: m.ws, BilledTo: string(m.billing), Kind: store.KindLLM, Micros: est, Key: "hold:" + rsv.ledgerKey(),
+		})
+		var sce *spend.CapError
+		if err == nil || !req.Run.WaitOnBusy || !errors.As(err, &sce) || sce.Cap != store.CapPlatformBusy {
+			break
+		}
+		// Busy, not tripped: wait for the live holds to settle and try again, until the context (the run's wall clock) ends.
+		if sleepCtx(ctx, busyBackoff(attempt)) != nil {
+			break
+		}
+	}
 	if err != nil {
 		if release != nil {
 			release(0) // nothing stays reserved on an error
@@ -330,14 +345,18 @@ func (m *metered) take(ctx context.Context, req Request, rsv *reservation, est, 
 		var sce *spend.CapError
 		if errors.As(err, &sce) {
 			kind := CapDaily
-			if sce.Cap == store.CapPlatformDaily {
+			switch sce.Cap {
+			case store.CapPlatformDaily:
 				kind = CapPlatform
+			case store.CapPlatformBusy:
+				kind = CapPlatformBusy
 			}
 			return nil, &CapError{Kind: kind, EstimateMicros: est, LimitMicros: sce.Room, Cause: err}
 		}
 		return nil, err // the database could not be asked: fail closed
 	}
 	rsv.budget, rsv.hold = release, hold
+	rsv.stopBeat = hold.KeepAlive(ctx)
 	return rsv, nil
 }
 

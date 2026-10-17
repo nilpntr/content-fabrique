@@ -43,6 +43,11 @@ RETURNING *;
 -- name: GetSpendHoldByKey :one
 SELECT * FROM spend_holds WHERE idempotency_key = @idempotency_key;
 
+-- The heartbeat of a call in flight: the expiry only moves forward, and a hold that is gone is not recreated.
+-- name: ExtendSpendHold :execrows
+UPDATE spend_holds SET expires_at = GREATEST(expires_at, @expires_at)
+WHERE idempotency_key = @idempotency_key AND scope = 'workspace' AND workspace_id = @workspace_id;
+
 -- Deletes the hold of a workspace. A key that belongs to another workspace's hold is not touched.
 -- name: DeleteWorkspaceSpendHold :execrows
 DELETE FROM spend_holds WHERE idempotency_key = @idempotency_key AND scope = 'workspace' AND workspace_id = @workspace_id;

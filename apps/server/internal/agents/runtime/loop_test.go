@@ -441,6 +441,7 @@ func TestOtherModelErrorsFailTheRun(t *testing.T) {
 		"rate limited":     {errors.Join(llm.ErrRateLimited, errors.New("still 429")), FailModelError},
 		"daily cap":        {&llm.CapError{Kind: llm.CapDaily, EstimateMicros: 5, LimitMicros: 1}, FailDailyCap},
 		"platform breaker": {&llm.CapError{Kind: llm.CapPlatform, EstimateMicros: 5, LimitMicros: 1}, FailPlatformSpendPaused},
+		"breaker busy":     {&llm.CapError{Kind: llm.CapPlatformBusy, EstimateMicros: 5, LimitMicros: 1}, FailSpendCapBusy},
 		"request cap":      {&llm.CapError{Kind: llm.CapRequest, EstimateMicros: 5, LimitMicros: 1}, FailRequestCap},
 		"replay miss":      {&llm.ReplayMissError{Stage: "ideation", Key: "abc", Path: "p"}, FailReplayMiss},
 	}

@@ -60,6 +60,10 @@ type Settings struct {
 	// PlatformDailySpendCapMicros is PLATFORM_DAILY_SPEND_CAP_MICROS: the breaker over every billed_to=platform cost (all workspaces, all
 	// kinds) per UTC day. When it trips, managed paid calls are refused until the next UTC day.
 	PlatformDailySpendCapMicros int64
+	// PlatformSmallCallMicros is PLATFORM_SPEND_SMALL_CALL_MICROS: the size of a normal small call in the breaker's trip rule. The breaker
+	// is tripped (alert, platform_spend_paused) when the committed platform spend plus this no longer fits under the cap; a refusal
+	// while it still fits is only spend_cap_busy. Default $0.10.
+	PlatformSmallCallMicros int64
 	// Concurrency is LLM_KEY_CONCURRENCY: requests in flight per API key.
 	Concurrency int
 	// AllowUnpriced is LLM_ALLOW_UNPRICED=1: run a model that has no price (cost recorded as 0).
@@ -71,7 +75,7 @@ type Settings struct {
 // SpendCaps are the money caps the settings say, for the spend gate: the workspace's daily cap and the platform breaker. The audio cap
 // (TRANSCRIBE_DAILY_MINUTES) is the transcription pipeline's to add.
 func (s Settings) SpendCaps() store.SpendCaps {
-	return store.SpendCaps{WorkspaceDailyMicros: s.DailySpendCapMicros, PlatformDailyMicros: s.PlatformDailySpendCapMicros}
+	return store.SpendCaps{WorkspaceDailyMicros: s.DailySpendCapMicros, PlatformDailyMicros: s.PlatformDailySpendCapMicros, PlatformSmallCallMicros: s.PlatformSmallCallMicros}
 }
 
 // LoadSettings parses the settings from environment variables, returning every problem found. Messages name the
@@ -120,6 +124,9 @@ func LoadSettings(getenv func(string) string) (Settings, error) {
 	}
 	if s.PlatformDailySpendCapMicros, err = positiveInt(get("PLATFORM_DAILY_SPEND_CAP_MICROS"), DefaultPlatformDailySpendCapMicros); err != nil {
 		errs = append(errs, fmt.Errorf("PLATFORM_DAILY_SPEND_CAP_MICROS: %w", err))
+	}
+	if s.PlatformSmallCallMicros, err = positiveInt(get("PLATFORM_SPEND_SMALL_CALL_MICROS"), store.DefaultPlatformSmallCallMicros); err != nil {
+		errs = append(errs, fmt.Errorf("PLATFORM_SPEND_SMALL_CALL_MICROS: %w", err))
 	}
 	conc, err := positiveInt(get("LLM_KEY_CONCURRENCY"), DefaultConcurrency)
 	if err != nil || conc > 64 {

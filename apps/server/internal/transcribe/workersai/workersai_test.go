@@ -346,17 +346,13 @@ func TestChunkWithAnUnknownOutcomeIsReportedAsEstimated(t *testing.T) {
 	}
 }
 
-func TestPriceAndLifetime(t *testing.T) {
+func TestPrice(t *testing.T) {
 	p := New(Config{AccountID: "a", APIToken: "t", PriceMicrosPerMinute: 500, PriceVersion: "2026-10b"})
 	if micros, v := p.CostMicros(90_000); micros != 750 || v != "2026-10b" {
 		t.Errorf("a minute and a half: %d %s", micros, v)
 	}
 	if micros, _ := p.CostMicros(1); micros != 1 {
 		t.Errorf("rounds up to a micro-dollar: %d", micros)
-	}
-	// 25 minutes of audio is three 10-minute chunks, each allowed the client's five minutes.
-	if d := p.MaxDuration(25 * 60_000); d != 15*time.Minute {
-		t.Errorf("max duration %v", d)
 	}
 	if micros, v := New(Config{}).CostMicros(60_000); micros != 0 || v != "unpriced" {
 		t.Errorf("unpriced: %d %s", micros, v)

@@ -108,14 +108,6 @@ const (
 	priceUnpriced   = "unpriced"
 )
 
-// MaxDuration is the longest transcribing audioMs of audio can take: one request per chunk, each up to the client's timeout. The
-// reservation in the database lives that long (plus a margin) so a crashed worker's hold stops blocking the caps afterwards.
-func (p *Provider) MaxDuration(audioMs int64) time.Duration {
-	chunkMs := int64(p.cfg.ChunkSeconds) * 1000
-	chunks := max((audioMs+chunkMs-1)/chunkMs, 1)
-	return time.Duration(chunks) * max(p.cfg.Client.Timeout, time.Minute)
-}
-
 // CostMicros implements transcribe.Provider.
 func (p *Provider) CostMicros(audioMs int64) (int64, string) {
 	if p.cfg.PriceMicrosPerMinute <= 0 {

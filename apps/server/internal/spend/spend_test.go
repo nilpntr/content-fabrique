@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -167,4 +168,80 @@ func TestComputeMeterRecordsOnceAndPricesFromTheTable(t *testing.T) {
 	if rows := mem.Rows(); len(rows) != 2 || rows[1].PriceTableVersion != "unpriced" || rows[1].ListCostMicros != 0 {
 		t.Errorf("rows = %+v", rows)
 	}
+}
+
+type clock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *clock) Now() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
+func (c *clock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = c.t.Add(d)
+}
+
+// A hold is short and a heartbeat extends it while its call is in flight: it keeps counting however long the call lives, and a caller
+// that dies (stops beating) stops blocking the caps one TTL after its last beat.
+func TestKeepAliveOutlivesLongCallsAndACrashedCallersHoldExpires(t *testing.T) {
+	clk := &clock{t: day}
+	mem := &spendtest.Memory{}
+	g := spend.NewGate(mem, spend.Options{
+		Caps: store.SpendCaps{WorkspaceDailyMicros: 1_000, PlatformDailyMicros: 1_000}, Now: clk.Now,
+		HoldTTL: 5 * time.Minute, Heartbeat: 5 * time.Millisecond,
+	})
+	w := ws()
+	ctx := context.Background()
+	full := spend.Request{Workspace: w, BilledTo: store.BilledToPlatform, Kind: store.KindLLM, Micros: 1_000}
+	blocked := func() bool {
+		_, err := g.Reserve(ctx, spend.Request{Workspace: w, BilledTo: store.BilledToPlatform, Kind: store.KindLLM, Micros: 1, Key: "probe-" + time.Now().String()})
+		return errors.Is(err, spend.ErrCapExceeded)
+	}
+
+	// A caller that heartbeats: 40 minutes pass in 4-minute steps and its hold still counts.
+	h, err := g.Reserve(ctx, full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := h.KeepAlive(ctx)
+	for range 10 {
+		clk.advance(4 * time.Minute)
+		deadline := time.Now().Add(5 * time.Second)
+		for len(mem.Holds()) == 1 && !mem.Holds()[0].ExpiresAt.After(clk.Now().Add(3*time.Minute)) {
+			if time.Now().After(deadline) {
+				t.Fatalf("no heartbeat reached the hold at %v: %+v", clk.Now(), mem.Holds())
+			}
+			time.Sleep(time.Millisecond)
+		}
+		if !blocked() {
+			t.Fatalf("a hold of a live call stopped counting at %v", clk.Now())
+		}
+	}
+	stop()
+	// The caller crashes: it never settles and never beats again. The hold counts until its TTL after the last beat, then it does not.
+	clk.advance(2 * time.Minute)
+	if !blocked() {
+		t.Fatal("the hold lapsed before its TTL")
+	}
+	clk.advance(4 * time.Minute)
+	if blocked() {
+		t.Fatal("a crashed caller's hold still blocks the caps after its TTL")
+	}
+
+	// A failing heartbeat is logged and does not stop the loop; stopping twice and a hold with nothing set aside are fine.
+	mem.FailExtend = spendtest.ErrDown
+	h2, err := g.Reserve(ctx, spend.Request{Workspace: w, BilledTo: store.BilledToPlatform, Kind: store.KindLLM, Micros: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop2 := h2.KeepAlive(ctx)
+	time.Sleep(30 * time.Millisecond)
+	stop2()
+	stop2()
+	free, err := g.Reserve(ctx, spend.Request{Workspace: w, BilledTo: store.BilledToPlatform, Kind: store.KindLLM})
+	if err != nil {
+		t.Fatal(err)
+	}
+	free.KeepAlive(ctx)()
 }

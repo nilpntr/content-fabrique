@@ -62,7 +62,24 @@ const (
 	CapPlatformDaily SpendCap = "platform_daily"
 	// CapWorkspaceAudio is TRANSCRIBE_DAILY_MINUTES: the audio a workspace may have transcribed per UTC day.
 	CapWorkspaceAudio SpendCap = "workspace_audio"
+	// CapPlatformBusy is a refusal by the breaker's room that is not a trip: this request does not fit next to the live holds (or is
+	// large), while the committed spend still leaves room for a normal small call. It is retryable: the holds settle or expire, or a
+	// smaller request fits. It never sets the trip flag and never raises the 100 % alert.
+	CapPlatformBusy SpendCap = "platform_busy"
 )
+
+// DefaultPlatformSmallCallMicros is $0.10: the size of "a normal small call" in the breaker's definition of a trip.
+const DefaultPlatformSmallCallMicros int64 = 100_000
+
+// BreakerTripped is the breaker's definition of a real crossing: the committed (settled) platform spend plus a small normal call no
+// longer fits under the cap. Live holds do not count, and neither does the size of one request, so a burst of in-flight calls or a
+// single large estimate near the cap is "busy", not "tripped". small <= 0 means DefaultPlatformSmallCallMicros.
+func BreakerTripped(committed, limit, small int64) bool {
+	if small <= 0 {
+		small = DefaultPlatformSmallCallMicros
+	}
+	return committed+small > limit
+}
 
 // ErrSpendCapExceeded is wrapped by every *SpendCapError.
 var ErrSpendCapExceeded = errors.New("store: spend cap exceeded")
@@ -95,6 +112,9 @@ type SpendCaps struct {
 	PlatformDailyMicros int64
 	// WorkspaceDailyAudioMs applies to reservations that carry audio; 0 means no limit.
 	WorkspaceDailyAudioMs int64
+	// PlatformSmallCallMicros is the size of a normal small call in the breaker's trip rule (BreakerTripped); 0 means
+	// DefaultPlatformSmallCallMicros.
+	PlatformSmallCallMicros int64
 }
 
 // SpendAlert is something worth a log line (type spend.alert) that a reservation or a settle found: the platform breaker passed
@@ -102,7 +122,7 @@ type SpendCaps struct {
 type SpendAlert struct {
 	// Type is "platform_breaker".
 	Type string
-	// Pct is 80 (warning) or 100 (tripped: a call was refused, or the counter reached the cap).
+	// Pct is 80 (warning) or 100 (tripped: the committed spend plus a small call no longer fits under the cap).
 	Pct         int
 	Period      string
 	SpentMicros int64
@@ -263,8 +283,8 @@ func (s *Store) ReserveSpend(ctx context.Context, p ReserveSpendParams) (SpendHo
 		}
 		if refusal = CheckSpendCaps(p, st); refusal != nil {
 			if refusal.Cap == CapPlatformDaily {
-				// The refusal is the trip: record it before the transaction ends, so the alert is logged once however many
-				// processes are refused.
+				// A real trip (the committed spend plus a small call no longer fits): record it before the transaction ends, so the
+				// alert is logged once however many processes are refused. A busy refusal (CapPlatformBusy) records nothing.
 				if n, err := q.MarkPlatformTripped(ctx, db.MarkPlatformTrippedParams{Now: &now, Period: period}); err != nil {
 					return err
 				} else if n == 1 {
@@ -320,7 +340,11 @@ type SpendState struct {
 func CheckSpendCaps(p ReserveSpendParams, st SpendState) *SpendCapError {
 	if p.BilledTo == BilledToPlatform && p.Micros > 0 {
 		if limit := p.Caps.PlatformDailyMicros; st.PlatformSpent+st.PlatformHeld+p.Micros > limit {
-			return &SpendCapError{Cap: CapPlatformDaily, Requested: p.Micros, Room: max(limit-st.PlatformSpent-st.PlatformHeld, 0)}
+			which := CapPlatformBusy
+			if BreakerTripped(st.PlatformSpent, limit, p.Caps.PlatformSmallCallMicros) {
+				which = CapPlatformDaily
+			}
+			return &SpendCapError{Cap: which, Requested: p.Micros, Room: max(limit-st.PlatformSpent-st.PlatformHeld, 0)}
 		}
 	}
 	if p.BilledTo != BilledToWorkspaceKey && p.Micros > 0 {
@@ -344,9 +368,11 @@ type SettleSpendParams struct {
 	// Rows are the ledger rows; every row needs an IdempotencyKey. A row whose key is already in the ledger is skipped, and its
 	// cost is not added to the counters again.
 	Rows []UsageEntry
-	// PlatformCapMicros is the breaker's cap, for the alerts; 0 raises none.
-	PlatformCapMicros int64
-	Now               time.Time
+	// PlatformCapMicros is the breaker's cap, for the alerts; 0 raises none. PlatformSmallCallMicros is the trip rule's small call
+	// (0: DefaultPlatformSmallCallMicros).
+	PlatformCapMicros       int64
+	PlatformSmallCallMicros int64
+	Now                     time.Time
 }
 
 // SettleSpend writes the rows, adds their cost to the counters and deletes the hold, in one transaction. It is idempotent on the
@@ -442,7 +468,7 @@ func (s *Store) SettleSpend(ctx context.Context, p SettleSpendParams) (int, []Sp
 						alerts = append(alerts, SpendAlert{Type: AlertPlatformBreaker, Pct: 80, Period: period, SpentMicros: c.PlatformMicros, CapMicros: limit})
 					}
 				}
-				if c.PlatformMicros >= limit {
+				if BreakerTripped(c.PlatformMicros, limit, p.PlatformSmallCallMicros) {
 					if n, err := q.MarkPlatformTripped(ctx, db.MarkPlatformTrippedParams{Now: &p.Now, Period: period}); err != nil {
 						return err
 					} else if n == 1 {
@@ -473,6 +499,16 @@ func (s *Store) SettleSpend(ctx context.Context, p SettleSpendParams) (int, []Sp
 		return 0, nil, mapErr(err)
 	}
 	return inserted, alerts, nil
+}
+
+// ExtendSpend moves the expiry of a live hold forward to expiresAt (never back): the heartbeat of a call that is still in flight. A
+// hold that is gone (settled, released or swept) is not an error and is not brought back.
+func (s *Store) ExtendSpend(ctx context.Context, ws ids.WorkspaceID, key string, expiresAt time.Time) error {
+	if !validKey(key) {
+		return fmt.Errorf("%w: a spend hold needs a key", ErrInvalid)
+	}
+	_, err := s.q.ExtendSpendHold(ctx, db.ExtendSpendHoldParams{ExpiresAt: expiresAt.UTC(), IdempotencyKey: key, WorkspaceID: nullableWorkspace(ws)})
+	return mapErr(err)
 }
 
 // ReleaseSpend gives a reservation back without charging anything (the call never went out, or failed with nothing billed). A hold

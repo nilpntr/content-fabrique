@@ -33,20 +33,23 @@ type Backend interface {
 	ReserveSpend(ctx context.Context, p store.ReserveSpendParams) (store.SpendHold, []store.SpendAlert, error)
 	SettleSpend(ctx context.Context, p store.SettleSpendParams) (int, []store.SpendAlert, error)
 	ReleaseSpend(ctx context.Context, ws ids.WorkspaceID, key string) error
+	ExtendSpend(ctx context.Context, ws ids.WorkspaceID, key string, expiresAt time.Time) error
 }
 
 var _ Backend = (*store.Store)(nil)
 
 // Hold lifetimes. A hold must outlive the call it covers, or the call's cost would be invisible to the caps while it runs; it must
-// not outlive a crash by much, or a dead worker would keep blocking budget. Each call kind chooses its own (see the callers); these
-// are the margin added to the call's own timeout and the lifetime when the caller does not know the call's duration.
+// not outlive a crash by much, or a dead worker would keep blocking budget. A call can be queued for a concurrency slot, cooled
+// down by a rate limit and retried for much longer than any fixed guess, so a hold is short and a heartbeat extends it while the
+// call is in flight (Hold.KeepAlive): a crashed caller stops extending it, and it expires HoldTTL after the last beat.
 const (
-	// HoldMargin is added to a call's longest duration.
-	HoldMargin = 2 * time.Minute
-	// DefaultHoldTTL is the lifetime when the caller gives none.
-	DefaultHoldTTL = 30 * time.Minute
-	// MinHoldTTL is the shortest lifetime a hold gets, whatever the caller works out.
-	MinHoldTTL = 5 * time.Minute
+	// DefaultHoldTTL is the lifetime a reservation gets, and how far each heartbeat pushes the expiry (now + HoldTTL).
+	DefaultHoldTTL = 5 * time.Minute
+	// MinHoldTTL is the shortest lifetime a hold gets.
+	MinHoldTTL = time.Minute
+	// DefaultHeartbeat is how often a call in flight extends its hold. It is a fraction of DefaultHoldTTL, so several beats can be lost
+	// to a database hiccup before the hold lapses.
+	DefaultHeartbeat = time.Minute
 )
 
 // Options configure a Gate.
@@ -57,14 +60,17 @@ type Options struct {
 	Now func() time.Time
 	// Logger receives the spend.alert lines.
 	Logger *slog.Logger
+	// HoldTTL and Heartbeat replace DefaultHoldTTL and DefaultHeartbeat (tests).
+	HoldTTL, Heartbeat time.Duration
 }
 
 // Gate reserves and settles spend. It is safe for concurrent use and holds no per-call state.
 type Gate struct {
-	b    Backend
-	caps store.SpendCaps
-	now  func() time.Time
-	log  *slog.Logger
+	b         Backend
+	caps      store.SpendCaps
+	now       func() time.Time
+	log       *slog.Logger
+	ttl, beat time.Duration
 }
 
 // NewGate returns a gate over the backend.
@@ -75,7 +81,13 @@ func NewGate(b Backend, o Options) *Gate {
 	if o.Logger == nil {
 		o.Logger = slog.Default()
 	}
-	return &Gate{b: b, caps: o.Caps, now: o.Now, log: o.Logger}
+	if o.HoldTTL <= 0 {
+		o.HoldTTL = DefaultHoldTTL
+	}
+	if o.Heartbeat <= 0 {
+		o.Heartbeat = DefaultHeartbeat
+	}
+	return &Gate{b: b, caps: o.Caps, now: o.Now, log: o.Logger, ttl: o.HoldTTL, beat: o.Heartbeat}
 }
 
 // Caps returns the limits the gate checks.
@@ -92,7 +104,7 @@ type Request struct {
 	AudioMs int64
 	// Key identifies the call; empty makes a random one. A repeated reservation with the same key returns the same hold.
 	Key string
-	// TTL is how long the hold counts; 0 means DefaultHoldTTL.
+	// TTL is how long the hold counts without a heartbeat; 0 means the gate's HoldTTL (DefaultHoldTTL).
 	TTL time.Duration
 }
 
@@ -115,7 +127,7 @@ func (g *Gate) Reserve(ctx context.Context, r Request) (*Hold, error) {
 		r.Key = "hold:" + uuid.NewString()
 	}
 	if r.TTL <= 0 {
-		r.TTL = DefaultHoldTTL
+		r.TTL = g.ttl
 	}
 	r.TTL = max(r.TTL, MinHoldTTL)
 	h, alerts, err := g.b.ReserveSpend(ctx, store.ReserveSpendParams{
@@ -131,6 +143,37 @@ func (g *Gate) Reserve(ctx context.Context, r Request) (*Hold, error) {
 		return nil, fmt.Errorf("spend: reserving: %w", err)
 	}
 	return &Hold{g: g, h: h}, nil
+}
+
+// KeepAlive starts the heartbeat of a call in flight: every beat moves the hold's expiry to now + the gate's HoldTTL, so the hold
+// counts for as long as the call runs however long it queues or retries. Call the returned stop once the call is over (settled,
+// released or abandoned). A process that dies stops beating and the hold expires HoldTTL later. A beat that fails is logged and
+// tried again at the next one. The heartbeat is independent of ctx's cancellation: the call may be cancelled while its answer is
+// still on the wire.
+func (h *Hold) KeepAlive(ctx context.Context) (stop func()) {
+	if h.h.ID == uuid.Nil {
+		return func() {} // nothing was set aside
+	}
+	bctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		t := time.NewTicker(h.g.beat)
+		defer t.Stop()
+		for {
+			select {
+			case <-bctx.Done():
+				return
+			case <-t.C:
+				ectx, ecancel := context.WithTimeout(bctx, 10*time.Second)
+				if err := h.g.b.ExtendSpend(ectx, h.h.Workspace, h.h.Key, h.g.now().Add(h.g.ttl)); err != nil && bctx.Err() == nil {
+					h.g.log.WarnContext(bctx, "spend: could not extend a hold; trying again at the next beat", "error", err, "workspace_id", h.h.Workspace.String())
+				}
+				ecancel()
+			}
+		}
+	}()
+	return func() { cancel(); <-done }
 }
 
 // Settle writes the ledger rows, adds their cost to the counters and removes the hold, in one transaction. It is idempotent on the
@@ -190,6 +233,10 @@ var ErrCapExceeded = errors.New("spend: spend cap exceeded")
 // ErrPlatformPaused is wrapped by the *CapError of the platform breaker: managed paid calls are refused for the rest of the UTC day.
 var ErrPlatformPaused = errors.New("spend: the platform daily spend breaker is open")
 
+// ErrSpendCapBusy is wrapped by the *CapError of a request that did not fit under the breaker's cap next to the live holds, while the
+// committed spend still leaves room for a normal call: retryable (spend_cap_busy), never a trip.
+var ErrSpendCapBusy = errors.New("spend: the platform spend cap is busy")
+
 // CapError is a reservation that was refused, before anything was sent, by a cap the database enforces.
 type CapError struct {
 	Cap store.SpendCap
@@ -203,13 +250,16 @@ func (e *CapError) Error() string {
 
 // Is makes errors.Is(err, ErrCapExceeded) true, and errors.Is(err, ErrPlatformPaused) for the breaker.
 func (e *CapError) Is(target error) bool {
-	return target == ErrCapExceeded || (target == ErrPlatformPaused && e.Cap == store.CapPlatformDaily)
+	return target == ErrCapExceeded || (target == ErrPlatformPaused && e.Cap == store.CapPlatformDaily) ||
+		(target == ErrSpendCapBusy && e.Cap == store.CapPlatformBusy)
 }
 
 // The error codes a spend refusal maps to where it crosses the API.
 const (
 	// CodePlatformSpendPaused is the 503 body code of the breaker.
 	CodePlatformSpendPaused = "platform_spend_paused"
+	// CodeSpendCapBusy is the 503 body code of a request the breaker's room could not take right now; it can be retried.
+	CodeSpendCapBusy = "spend_cap_busy"
 	// CodeDailySpendCap is the 429 body code of a workspace's daily cap.
 	CodeDailySpendCap = "daily_spend_cap"
 )
@@ -221,8 +271,11 @@ func HTTPError(err error) (status int, code string, ok bool) {
 	if !errors.As(err, &ce) {
 		return 0, "", false
 	}
-	if ce.Cap == store.CapPlatformDaily {
+	switch ce.Cap {
+	case store.CapPlatformDaily:
 		return http.StatusServiceUnavailable, CodePlatformSpendPaused, true
+	case store.CapPlatformBusy:
+		return http.StatusServiceUnavailable, CodeSpendCapBusy, true
 	}
 	return http.StatusTooManyRequests, CodeDailySpendCap, true
 }

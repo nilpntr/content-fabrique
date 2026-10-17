@@ -158,6 +158,26 @@ func (q *Queries) EnsureWorkspaceSpendCounter(ctx context.Context, arg EnsureWor
 	return err
 }
 
+const extendSpendHold = `-- name: ExtendSpendHold :execrows
+UPDATE spend_holds SET expires_at = GREATEST(expires_at, $1)
+WHERE idempotency_key = $2 AND scope = 'workspace' AND workspace_id = $3
+`
+
+type ExtendSpendHoldParams struct {
+	ExpiresAt      time.Time
+	IdempotencyKey string
+	WorkspaceID    pgtype.UUID
+}
+
+// The heartbeat of a call in flight: the expiry only moves forward, and a hold that is gone is not recreated.
+func (q *Queries) ExtendSpendHold(ctx context.Context, arg ExtendSpendHoldParams) (int64, error) {
+	result, err := q.db.Exec(ctx, extendSpendHold, arg.ExpiresAt, arg.IdempotencyKey, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getPlatformSpendCounter = `-- name: GetPlatformSpendCounter :one
 SELECT id, scope, workspace_id, period, platform_micros, test_micros, audio_ms, alerted_80_at, tripped_at, updated_at FROM spend_counters WHERE scope = 'platform' AND period = $1
 `

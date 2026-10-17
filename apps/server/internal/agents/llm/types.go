@@ -231,6 +231,10 @@ type RunInfo struct {
 	// optional; the zero value is none). The ledger's action_id is the run's ID until P7-01a introduces real actions.
 	ProjectID    ids.ProjectID
 	MemberUserID ids.UserID
+	// WaitOnBusy makes a call that the platform breaker's room could not take right now (spend_cap_busy: a large request next to the
+	// live holds near the cap, not a trip) wait and try again with backoff, until the context ends. An agent run sets it: its context
+	// ends at the run's wall clock, which bounds the wait. Without it the refusal is returned at once.
+	WaitOnBusy bool
 	// Budget is the run's dollar budget: a call reserves its worst-case cost before it is sent and is refused when
 	// the run cannot cover it. Nil means no per-run limit.
 	Budget Budget

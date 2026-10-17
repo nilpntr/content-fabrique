@@ -57,6 +57,8 @@ const (
 	CapDaily CapKind = "daily"
 	// CapPlatform is PLATFORM_DAILY_SPEND_CAP_MICROS, the breaker over all managed spend. errors.Is(err, spend.ErrPlatformPaused).
 	CapPlatform CapKind = "platform"
+	// CapPlatformBusy is a refusal by the breaker's room that is not a trip (spend.ErrSpendCapBusy): retryable. See RunInfo.WaitOnBusy.
+	CapPlatformBusy CapKind = "platform_busy"
 )
 
 // ErrCapExceeded is wrapped by every *CapError.

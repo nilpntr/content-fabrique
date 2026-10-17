@@ -660,3 +660,149 @@ func TestSpendMigrationBackfillsLegacyRows(t *testing.T) {
 		}
 	}
 }
+
+// A request that does not fit next to the live holds, or is large, while the committed spend still leaves room for a small normal call,
+// is busy: refused with a distinct retryable error, no trip flag, no 100 % alert. The real crossing later still fires the alert, once.
+func TestSpendBusyIsNotATripAndTheRealCrossingStillAlertsOnce(t *testing.T) {
+	rig := newSpendRig(t)
+	ctx := context.Background()
+	const platCap, small = int64(10_000), int64(100)
+	caps := store.SpendCaps{WorkspaceDailyMicros: 1 << 40, PlatformDailyMicros: platCap, PlatformSmallCallMicros: small}
+	var alerts alertLog
+	w := rig.workspace(t, "busy")
+	settle := func(key string, cost int64) {
+		t.Helper()
+		_, as, err := rig.a.SettleSpend(ctx, store.SettleSpendParams{
+			Workspace: w.ID, Rows: []store.UsageEntry{llmRow(w, "llm:"+key, store.BilledToPlatform, cost, spendDay)},
+			PlatformCapMicros: platCap, PlatformSmallCallMicros: small, Now: spendDay,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		alerts.add(as)
+	}
+	period := store.DayPeriod(spendDay)
+
+	settle("a", 5_000) // committed 5,000 of 10,000
+	var capErr *store.SpendCapError
+	// A big request does not fit (5,000 + 6,000), but 5,000 + a small call does: busy.
+	_, as, err := rig.b.ReserveSpend(ctx, reserve("big", w, store.BilledToPlatform, 6_000, caps, spendDay))
+	alerts.add(as)
+	if !errors.As(err, &capErr) || capErr.Cap != store.CapPlatformBusy || !errors.Is(err, store.ErrSpendCapExceeded) {
+		t.Fatalf("big request: %v", err)
+	}
+	// Live holds in the way are busy too, not a trip.
+	if _, as, err = rig.a.ReserveSpend(ctx, reserve("held", w, store.BilledToPlatform, 4_500, caps, spendDay)); err != nil {
+		t.Fatal(err)
+	} else {
+		alerts.add(as)
+	}
+	_, as, err = rig.b.ReserveSpend(ctx, reserve("blocked", w, store.BilledToPlatform, 600, caps, spendDay))
+	alerts.add(as)
+	if !errors.As(err, &capErr) || capErr.Cap != store.CapPlatformBusy {
+		t.Fatalf("blocked by a live hold: %v", err)
+	}
+	plat, _ := rig.a.PlatformSpend(ctx, period)
+	if plat.TrippedAt != nil {
+		t.Fatalf("a busy refusal set the trip flag: %+v", plat)
+	}
+	alerts.mu.Lock()
+	if alerts.pct[100] != 0 {
+		t.Fatalf("a busy refusal raised the 100 %% alert: %+v", alerts.list)
+	}
+	alerts.mu.Unlock()
+	if !errors.Is(error(capErr), store.ErrSpendCapExceeded) {
+		t.Fatal("busy is still a cap error")
+	}
+
+	// The held call settles at 4,900: committed spend is now 9,900, and 9,900 + a small call (100) is not over 10,000. Still not a trip.
+	settle("held", 4_900)
+	if _, as, err = rig.b.ReserveSpend(ctx, reserve("tight", w, store.BilledToPlatform, 150, caps, spendDay)); !errors.As(err, &capErr) || capErr.Cap != store.CapPlatformBusy {
+		t.Fatalf("tight: %v", err)
+	} else {
+		alerts.add(as)
+	}
+	if plat, _ = rig.a.PlatformSpend(ctx, period); plat.TrippedAt != nil {
+		t.Fatalf("tripped too early: %+v", plat)
+	}
+	// One more settle crosses for real: 9,900 + 50 + the small call is over the cap.
+	settle("last", 50)
+	for i := range 3 { // and every later refusal is the trip, whichever process sees it, with no second alert
+		st := rig.a
+		if i == 1 {
+			st = rig.b
+		}
+		_, as, err = st.ReserveSpend(ctx, reserve(fmt.Sprintf("after%d", i), w, store.BilledToPlatform, 200, caps, spendDay))
+		alerts.add(as)
+		if !errors.As(err, &capErr) || capErr.Cap != store.CapPlatformDaily || !errors.Is(err, store.ErrSpendCapExceeded) {
+			t.Fatalf("after the crossing: %v", err)
+		}
+	}
+	alerts.mu.Lock()
+	defer alerts.mu.Unlock()
+	if alerts.pct[100] != 1 || alerts.pct[80] != 1 {
+		t.Fatalf("alerts = %v, want exactly one at 80 and one at 100: %+v", alerts.pct, alerts.list)
+	}
+	if plat, _ = rig.a.PlatformSpend(ctx, period); plat.TrippedAt == nil {
+		t.Errorf("the real crossing did not set the flag: %+v", plat)
+	}
+}
+
+// A heartbeat keeps a live hold counting past its first expiry; a hold nobody extends expires on schedule; a hold that is gone is not
+// brought back; a hold of another workspace is not touched.
+func TestSpendExtendKeepsAHoldAliveAndNeverRevivesOne(t *testing.T) {
+	rig := newSpendRig(t)
+	ctx := context.Background()
+	w, other := rig.workspace(t, "ext"), rig.workspace(t, "ext2")
+	caps := store.SpendCaps{WorkspaceDailyMicros: 5_000, PlatformDailyMicros: 1 << 40}
+	p := reserve("live", w, store.BilledToPlatform, 5_000, caps, spendDay)
+	p.TTL = 5 * time.Minute
+	if _, _, err := rig.a.ReserveSpend(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	// Another workspace cannot extend it.
+	if err := rig.b.ExtendSpend(ctx, other.ID, "live", spendDay.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	probe := func(key string, at time.Time) error {
+		_, _, err := rig.b.ReserveSpend(ctx, reserve(key, w, store.BilledToPlatform, 1, caps, at))
+		return err
+	}
+	if err := probe("p1", spendDay.Add(6*time.Minute)); err != nil {
+		t.Fatalf("another workspace's extend kept the hold alive: %v", err)
+	}
+	// Re-make the hold, extend it by a heartbeat from the other pool, and it counts past the original expiry, up to the new one.
+	if err := rig.a.ReleaseSpend(ctx, w.ID, "p1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := rig.b.ExtendSpend(ctx, w.ID, "live", spendDay.Add(4*time.Minute+5*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := probe("p2", spendDay.Add(6*time.Minute)); !errors.Is(err, store.ErrSpendCapExceeded) {
+		t.Fatalf("an extended hold stopped counting at its first expiry: %v", err)
+	}
+	// An extend never moves the expiry back.
+	if err := rig.b.ExtendSpend(ctx, w.ID, "live", spendDay.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := probe("p3", spendDay.Add(8*time.Minute)); !errors.Is(err, store.ErrSpendCapExceeded) {
+		t.Fatalf("an extend moved the expiry back: %v", err)
+	}
+	// The caller crashes: no more beats, and the hold lapses at the last expiry.
+	if err := probe("p4", spendDay.Add(10*time.Minute)); err != nil {
+		t.Fatalf("a hold nobody extends still blocks: %v", err)
+	}
+	// A swept hold is not revived by a late beat.
+	if err := rig.a.ReleaseSpend(ctx, w.ID, "p4"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.a.SweepExpiredSpendHolds(ctx, spendDay.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := rig.b.ExtendSpend(ctx, w.ID, "live", spendDay.Add(2*time.Hour)); err != nil {
+		t.Fatalf("extending a gone hold: %v", err)
+	}
+	if err := probe("p5", spendDay.Add(time.Hour+time.Minute)); err != nil {
+		t.Fatalf("a swept hold came back: %v", err)
+	}
+}

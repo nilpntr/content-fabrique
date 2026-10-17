@@ -109,7 +109,7 @@ func TestAllowUnpricedIsRefusedOutsideDevelopmentAndCI(t *testing.T) {
 	if _, err := Load(mediaEnv(map[string]string{"CF_ENV": EnvProduction, "LLM_ALLOW_UNPRICED": "0"})); err != nil {
 		t.Errorf("0 is off: %v", err)
 	}
-	for name, val := range map[string]string{"LLM_ALLOW_UNPRICED": "yes", "PLATFORM_DAILY_SPEND_CAP_MICROS": "0", "DAILY_SPEND_CAP_MICROS": "-5", "LLM_MAX_REQUEST_MICROS": "x"} {
+	for name, val := range map[string]string{"LLM_ALLOW_UNPRICED": "yes", "PLATFORM_DAILY_SPEND_CAP_MICROS": "0", "PLATFORM_SPEND_SMALL_CALL_MICROS": "0", "DAILY_SPEND_CAP_MICROS": "-5", "LLM_MAX_REQUEST_MICROS": "x"} {
 		if _, err := Load(mediaEnv(map[string]string{name: val})); err == nil || !strings.Contains(err.Error(), name) {
 			t.Errorf("%s=%s: %v", name, val, err)
 		}

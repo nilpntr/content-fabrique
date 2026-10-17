@@ -39,8 +39,11 @@ type Memory struct {
 	// FailSettleAfterWrite makes the next n SettleSpend calls write everything and then fail, as a commit whose answer was lost.
 	FailSettleAfterWrite int
 
-	// Reserves, Settles and Releases count the calls made, failed ones included.
-	Reserves, Settles, Releases int
+	// FailExtend, when set, is returned by every ExtendSpend (a heartbeat the database did not take).
+	FailExtend error
+
+	// Reserves, Settles, Releases and Extends count the calls made, failed ones included.
+	Reserves, Settles, Releases, Extends int
 }
 
 // Seed adds rows as if they had been settled earlier. A row without a key gets one.
@@ -215,6 +218,28 @@ func (m *Memory) SettleSpend(_ context.Context, p store.SettleSpendParams) (int,
 		return 0, nil, ErrDown
 	}
 	return inserted, nil, nil
+}
+
+// ReleaseAll drops every hold, as if their callers had all settled or released.
+func (m *Memory) ReleaseAll() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	clear(m.holds)
+}
+
+// ExtendSpend implements spend.Backend: the expiry of a live hold only moves forward; a hold that is gone stays gone.
+func (m *Memory) ExtendSpend(_ context.Context, ws ids.WorkspaceID, key string, expiresAt time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Extends++
+	if m.FailExtend != nil {
+		return m.FailExtend
+	}
+	if h, ok := m.holds[key]; ok && h.Workspace == ws && expiresAt.After(h.ExpiresAt) {
+		h.ExpiresAt = expiresAt
+		m.holds[key] = h
+	}
+	return nil
 }
 
 // ReleaseSpend implements spend.Backend.

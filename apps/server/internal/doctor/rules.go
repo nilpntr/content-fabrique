@@ -197,9 +197,10 @@ var validators = map[string]validator{
 
 	// Spend control (D-31). Money is in micro-dollars. The breaker over all platform-billed cost must be set on purpose in staging
 	// and production (the variable is tagged [YOU-staging], so an empty one is reported missing there).
-	"DAILY_SPEND_CAP_MICROS":          positiveMicros,
-	"PLATFORM_DAILY_SPEND_CAP_MICROS": positiveMicros,
-	"LLM_MAX_REQUEST_MICROS":          positiveMicros,
+	"DAILY_SPEND_CAP_MICROS":           positiveMicros,
+	"PLATFORM_SPEND_SMALL_CALL_MICROS": positiveMicros,
+	"PLATFORM_DAILY_SPEND_CAP_MICROS":  positiveMicros,
+	"LLM_MAX_REQUEST_MICROS":           positiveMicros,
 	// An unpriced paid provider is never allowed outside development and ci: it would be recorded at 0 and no cap could see it.
 	"LLM_ALLOW_UNPRICED": func(r *run, val string) string {
 		if val != "1" && val != "0" {

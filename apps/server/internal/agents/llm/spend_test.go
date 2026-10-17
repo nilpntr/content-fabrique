@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/spend"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
@@ -159,24 +161,162 @@ func TestUnpricedFailsClosedOutsideDevelopmentAndCI(t *testing.T) {
 
 func env2(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
 
-// A hold must outlive the call it covers and not much longer: the request's timeout, the retry wait and a margin, but not past the
-// run's wall clock (the context's deadline) plus the margin.
-func TestHoldTTLFollowsTheCall(t *testing.T) {
-	req := simpleRequest()
-	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
-	long := holdTTL(context.Background(), req, now)
-	want := requestTimeout(req.Model, req.MaxTokens) + defaultMaxTotalWait + callMargin
-	if long != want || long < requestTimeout(req.Model, req.MaxTokens) {
-		t.Errorf("ttl = %v, want %v (and at least the request timeout)", long, want)
+// fakeClock is a clock the test moves; the spend gate and the heartbeat read it from other goroutines.
+type fakeClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *fakeClock) Now() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
+func (c *fakeClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = c.t.Add(d)
+}
+
+// A call can be queued for its key's slot, cooled down by a rate limit and retried for far longer than any fixed guess of its
+// duration. Its hold is short and a heartbeat extends it while the call is in flight, so it keeps counting against the caps for as long
+// as the call lives, and is gone once the call is over.
+func TestHoldOutlivesALongQueueWait(t *testing.T) {
+	clock := &fakeClock{t: time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)}
+	rg := newRig(t, nil, func(o *FactoryOptions) { o.now, o.heartbeat = clock.Now, 5*time.Millisecond })
+	started, release := make(chan struct{}), make(chan struct{})
+	rg.api.messages = func(n int, _ recordedCall) fakeReply {
+		if n == 1 {
+			close(started)
+			<-release
+		}
+		return okReply("ok", defaultUsage)
 	}
-	ctx, cancel := context.WithDeadline(context.Background(), now.Add(3*time.Minute))
-	defer cancel()
-	if got := holdTTL(ctx, req, now); got != 3*time.Minute+callMargin {
-		t.Errorf("with a 3-minute wall clock: %v", got)
+	c, _ := rg.client(t, newWorkspaceID(), "editor")
+	done := make(chan error, 1)
+	go func() { _, err := c.Messages(context.Background(), simpleRequest()); done <- err }()
+	<-started
+	if len(rg.ledger.Holds()) != 1 {
+		t.Fatalf("holds = %d", len(rg.ledger.Holds()))
 	}
-	ctx2, cancel2 := context.WithDeadline(context.Background(), now.Add(time.Second))
-	defer cancel2()
-	if got := holdTTL(ctx2, req, now); got != spend.MinHoldTTL {
-		t.Errorf("a nearly expired context still gets the minimum: %v", got)
+	// 24 minutes pass with the call still in flight (a hold with a fixed lifetime of its estimate would have lapsed after the first
+	// 17): after every 4-minute step the heartbeat has pushed the expiry past the new time.
+	for range 6 {
+		clock.advance(4 * time.Minute)
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			h := rg.ledger.Holds()
+			if len(h) == 1 && h[0].ExpiresAt.After(clock.Now().Add(3*time.Minute)) {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("the hold lapsed while the call was in flight: %+v at %v", h, clock.Now())
+			}
+			time.Sleep(2 * time.Millisecond)
+		}
 	}
+	if rg.ledger.Extends == 0 {
+		t.Error("nothing extended the hold")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	// The call is over: the hold went with its settle, and the heartbeat stopped.
+	if len(rg.ledger.Holds()) != 0 {
+		t.Errorf("holds left: %+v", rg.ledger.Holds())
+	}
+	n := rg.ledger.Extends
+	time.Sleep(30 * time.Millisecond)
+	if rg.ledger.Extends != n {
+		t.Error("the heartbeat outlived the call")
+	}
+}
+
+// A call whose ledger row could not be written keeps its hold, but no longer extends it: it expires on its own.
+func TestUnrecordedCallsHoldStopsBeingExtended(t *testing.T) {
+	clock := &fakeClock{t: time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)}
+	rg := newRig(t, nil, func(o *FactoryOptions) { o.now, o.heartbeat = clock.Now, 5*time.Millisecond })
+	rg.ledger.FailSettle = 100
+	c, _ := rg.client(t, newWorkspaceID(), "editor")
+	if _, err := c.Messages(context.Background(), simpleRequest()); !errors.Is(err, ErrLedger) {
+		t.Fatalf("err = %v", err)
+	}
+	h := rg.ledger.Holds()
+	if len(h) != 1 {
+		t.Fatalf("holds = %+v", h)
+	}
+	expires := h[0].ExpiresAt
+	n := rg.ledger.Extends
+	clock.advance(time.Hour)
+	time.Sleep(30 * time.Millisecond)
+	if rg.ledger.Extends != n || !rg.ledger.Holds()[0].ExpiresAt.Equal(expires) {
+		t.Error("an abandoned hold was still being extended")
+	}
+}
+
+// A request that does not fit next to the live holds while the committed spend still leaves room is busy, not a trip: it is refused
+// with a retryable error, sets no trip flag and raises no 100 % alert. An agent run (WaitOnBusy) waits for the holds to settle and
+// goes ahead, bounded by its context.
+func TestBreakerBusyIsRetryableAndNotATrip(t *testing.T) {
+	vars := map[string]string{"CF_ENV": "staging", "PLATFORM_DAILY_SPEND_CAP_MICROS": "100000", "PLATFORM_SPEND_SMALL_CALL_MICROS": "100", "DAILY_SPEND_CAP_MICROS": "100000000"}
+	setup := func(t *testing.T) (*rig, Client, ids.WorkspaceID) {
+		rg := newRig(t, vars)
+		ws := newWorkspaceID()
+		// Another caller holds nearly all the room: 99,800 of 100,000, with nothing spent yet.
+		if _, _, err := rg.ledger.ReserveSpend(context.Background(), store.ReserveSpendParams{
+			Key: "other", Workspace: newWorkspaceID(), BilledTo: store.BilledToPlatform, Kind: store.KindLLM, Micros: 99_800,
+			Caps: store.SpendCaps{WorkspaceDailyMicros: 1 << 40, PlatformDailyMicros: 100_000, PlatformSmallCallMicros: 100}, Now: *rg.now, TTL: time.Hour,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		c, _ := rg.client(t, ws, "editor")
+		return rg, c, ws
+	}
+	old := busyBackoff
+	busyBackoff = func(int) time.Duration { return 5 * time.Millisecond }
+	t.Cleanup(func() { busyBackoff = old })
+
+	t.Run("refused at once without waiting", func(t *testing.T) {
+		rg, c, _ := setup(t)
+		_, err := c.Messages(context.Background(), simpleRequest())
+		var ce *CapError
+		if !errors.As(err, &ce) || ce.Kind != CapPlatformBusy || !errors.Is(err, spend.ErrSpendCapBusy) || errors.Is(err, spend.ErrPlatformPaused) {
+			t.Fatalf("err = %#v", err)
+		}
+		if status, code, ok := spend.HTTPError(err); !ok || status != 503 || code != "spend_cap_busy" {
+			t.Errorf("crosses the API as %d %s", status, code)
+		}
+		if strings.Contains(rg.logs.String(), "threshold_pct=100") || len(rg.api.messageCalls()) != 0 {
+			t.Errorf("a busy refusal tripped the breaker or sent a request:\n%s", rg.logs.String())
+		}
+	})
+
+	t.Run("a run waits for the holds to settle", func(t *testing.T) {
+		rg, c, _ := setup(t)
+		// The other caller settles after a moment: its hold goes.
+		go func() {
+			time.Sleep(60 * time.Millisecond)
+			rg.ledger.ReleaseAll()
+		}()
+		req := simpleRequest()
+		req.Run = RunInfo{WaitOnBusy: true}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if _, err := c.Messages(ctx, req); err != nil {
+			t.Fatalf("the run did not get through once the room came back: %v", err)
+		}
+		if len(rg.api.messageCalls()) != 1 {
+			t.Errorf("message calls = %d", len(rg.api.messageCalls()))
+		}
+	})
+
+	t.Run("the wait is bounded by the context", func(t *testing.T) {
+		_, c, _ := setup(t)
+		req := simpleRequest()
+		req.Run = RunInfo{WaitOnBusy: true}
+		ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+		defer cancel()
+		_, err := c.Messages(ctx, req)
+		var ce *CapError
+		if !errors.As(err, &ce) || ce.Kind != CapPlatformBusy {
+			t.Fatalf("err = %#v, want the busy refusal when the wall clock ends the wait", err)
+		}
+	})
 }

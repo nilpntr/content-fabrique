@@ -89,12 +89,6 @@ func (p *Provider) Quantity(audioMs int64) (unit string, quantity int64) {
 	return "vcpu_ms", int64(float64(audioMs)*p.WallSecondsPerAudioSecond+0.5) * threads
 }
 
-// MaxDuration is the longest a transcription of audioMs of audio can take (the limit whisper-cli runs under), for the lifetime of the
-// reservation in the database.
-func (p *Provider) MaxDuration(audioMs int64) time.Duration {
-	return Timeout(time.Duration(audioMs)*time.Millisecond) + VADTimeout(time.Duration(audioMs)*time.Millisecond)
-}
-
 func (p *Provider) threads() string {
 	if p.Threads > 0 {
 		return strconv.Itoa(p.Threads)

@@ -297,7 +297,7 @@ func (s *Service) ask(ctx context.Context, a store.Asset, fr frameSet, d *detail
 		// The call is paid and answered but its ledger row could not be written (logged for reconciliation). The label is
 		// still worth keeping.
 		log.Error("quick look: the usage ledger row was not written", "error", err)
-	case errors.As(err, &capErr) && capErr.Kind == llm.CapPlatform:
+	case errors.As(err, &capErr) && (capErr.Kind == llm.CapPlatform || capErr.Kind == llm.CapPlatformBusy):
 		// The platform breaker is open (D-31): nothing was sent, and it closes at the next UTC day. The job waits (snoozed, no attempt
 		// used) like one without model access, rather than failing the clip's label for good.
 		return Result{}, "", fmt.Errorf("%w: %w", ErrModelUnavailable, err)

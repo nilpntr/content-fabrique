@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -287,4 +288,8 @@ func pricedWord(p *llm.PriceTable, model string) string {
 		return "model priced"
 	}
 	return "model UNPRICED: live calls are refused unless LLM_ALLOW_UNPRICED=1"
+}
+
+func (noLedger) ExtendSpend(context.Context, ids.WorkspaceID, string, time.Time) error {
+	return errNoLedger
 }

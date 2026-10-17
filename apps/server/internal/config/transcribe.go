@@ -122,7 +122,7 @@ func (c *Config) loadSpend(getenv Getenv) []error {
 	default:
 		errs = append(errs, errors.New("LLM_ALLOW_UNPRICED: must be 1 or empty"))
 	}
-	for _, name := range []string{"DAILY_SPEND_CAP_MICROS", "PLATFORM_DAILY_SPEND_CAP_MICROS", "LLM_MAX_REQUEST_MICROS"} {
+	for _, name := range []string{"DAILY_SPEND_CAP_MICROS", "PLATFORM_DAILY_SPEND_CAP_MICROS", "PLATFORM_SPEND_SMALL_CALL_MICROS", "LLM_MAX_REQUEST_MICROS"} {
 		if raw := strings.TrimSpace(getenv(name)); raw != "" {
 			if n, err := strconv.ParseInt(raw, 10, 64); err != nil || n < 1 {
 				errs = append(errs, errors.New(name+": must be a positive whole number of millionths of a dollar"))

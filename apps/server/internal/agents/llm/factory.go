@@ -61,6 +61,8 @@ type FactoryOptions struct {
 
 	retry retryPolicy
 	now   func() time.Time
+	// holdTTL and heartbeat shorten the spend holds' lifetime and beat (tests).
+	holdTTL, heartbeat time.Duration
 }
 
 // Factory is the ClientFactory of P4-00a.
@@ -104,7 +106,7 @@ func NewFactory(opts FactoryOptions) (*Factory, error) {
 	}
 	f := &Factory{opts: opts, keys: keys}
 	if opts.Ledger != nil {
-		f.gate = spend.NewGate(opts.Ledger, spend.Options{Caps: opts.Settings.SpendCaps(), Now: opts.now, Logger: opts.Logger})
+		f.gate = spend.NewGate(opts.Ledger, spend.Options{Caps: opts.Settings.SpendCaps(), Now: opts.now, Logger: opts.Logger, HoldTTL: opts.holdTTL, Heartbeat: opts.heartbeat})
 	}
 	return f, nil
 }
