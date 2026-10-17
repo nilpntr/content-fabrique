@@ -1,6 +1,4 @@
-function prefersReducedMotion(): boolean {
-  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
-}
+import { prefersReducedMotion } from "./reduced-motion";
 
 function motion(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
