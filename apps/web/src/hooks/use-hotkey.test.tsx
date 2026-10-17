@@ -108,3 +108,16 @@ test("only text-entry fields count as typing", () => {
   }
   expect(onKey).toHaveBeenCalledTimes(2);
 });
+
+test("skip leaves the key alone: no handler and no preventDefault", () => {
+  const onKey = vi.fn();
+  const skip = (event: KeyboardEvent) => event.target instanceof HTMLButtonElement;
+  const view = render(<Probe hotkey=" " options={{ skip }} onKey={onKey} />);
+  const onButton = press(view.getByRole("button", { name: "button" }), { key: " " });
+  expect(onKey).not.toHaveBeenCalled();
+  expect(onButton.defaultPrevented).toBe(false);
+
+  const onPage = press(document.body, { key: " " });
+  expect(onKey).toHaveBeenCalledTimes(1);
+  expect(onPage.defaultPrevented).toBe(true);
+});
