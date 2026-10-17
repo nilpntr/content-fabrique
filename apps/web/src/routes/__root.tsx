@@ -1,10 +1,13 @@
-import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
+import { ClerkProvider } from "@clerk/tanstack-react-start";
+import { createRootRoute, HeadContent, Outlet, redirect, Scripts, useRouterState } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { APP_NAME } from "@/components/logo";
+import { APP_NAME, Wordmark } from "@/components/logo";
 import { AppShell } from "@/components/app-shell";
 import { ToastProvider } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { THEME_SCRIPT } from "@/hooks/use-theme";
+import { decideAccess, isBarePath, SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/auth-guard";
+import { fetchSession } from "@/lib/session";
 import { getSidebarOpen } from "@/lib/sidebar-open";
 import { NotFound } from "@/pages/not-found";
 import appCss from "../index.css?url";
@@ -27,6 +30,16 @@ export const Route = createRootRoute({
     // Sets the `dark` class before first paint, so a dark-mode visitor never sees a light flash.
     scripts: [{ children: THEME_SCRIPT }],
   }),
+  // The route guard. Every route needs a signed-in user with an active workspace except the sign-in and sign-up pages
+  // (src/lib/auth-guard.ts). It runs on the server for the first request, before anything renders, and again on
+  // navigations in the browser, so a signed-out visitor is redirected and never receives app content. The session
+  // comes from Clerk's middleware (src/start.ts) through a server function.
+  beforeLoad: async ({ location }) => {
+    const session = await fetchSession();
+    const decision = decideAccess(location.pathname, session, location.searchStr);
+    if (decision.kind === "redirect") throw redirect({ href: decision.to });
+    return { session };
+  },
   // The sidebar's state lives in a cookie, so the server can render it collapsed on the first paint.
   // Only the first render needs it (it is the sidebar's initial state), so it never reloads on navigation or preload.
   loader: async () => ({ sidebarOpen: await getSidebarOpen() }),
@@ -45,7 +58,9 @@ function RootDocument({ children }: { children: ReactNode }) {
         <HeadContent />
       </head>
       <body>
-        {children}
+        <ClerkProvider signInUrl={SIGN_IN_PATH} signUpUrl={SIGN_UP_PATH} afterSignOutUrl={SIGN_IN_PATH}>
+          {children}
+        </ClerkProvider>
         <Scripts />
       </body>
     </html>
@@ -54,11 +69,22 @@ function RootDocument({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { sidebarOpen } = Route.useLoaderData();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
   return (
     <TooltipProvider>
       <ToastProvider>
-        <AppShell defaultSidebarOpen={sidebarOpen} />
+        {isBarePath(pathname) ? <BareLayout /> : <AppShell defaultSidebarOpen={sidebarOpen} />}
       </ToastProvider>
     </TooltipProvider>
+  );
+}
+
+/** Sign-in, sign-up and the workspace picker: no sidebar, because there is no app to show yet. */
+function BareLayout() {
+  return (
+    <main className="grid min-h-svh place-content-center justify-items-center gap-6 p-6">
+      <Wordmark />
+      <Outlet />
+    </main>
   );
 }
