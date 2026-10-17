@@ -1,7 +1,9 @@
+import { CreditsCard } from "@/components/credits";
 import { cardClassName } from "@/components/page-placeholder";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError } from "@/lib/api";
 import { useMe } from "@/lib/api/hooks";
+import { creditsOf } from "@/lib/credits";
 
 /** Settings. For now it shows what the API knows about the signed-in user and the active workspace (GET /v1/me). */
 export function SettingsPage() {
@@ -34,6 +36,14 @@ export function SettingsPage() {
           <Row label="Your role" value={me.data.workspace.role} />
         </dl>
       )}
+
+      {/* The balance, once the API reports one. */}
+      {me.data && creditsOf(me.data) ? (
+        <div className={`${cardClassName} max-w-xl space-y-3 [animation-delay:140ms]`}>
+          <h2 className="text-[15px] font-semibold tracking-[-0.01em]">Credits</h2>
+          <CreditsCard credits={creditsOf(me.data)} />
+        </div>
+      ) : null}
     </div>
   );
 }

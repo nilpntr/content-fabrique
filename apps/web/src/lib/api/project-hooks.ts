@@ -43,8 +43,8 @@ function useScope() {
   return { userId, orgId, ready: isLoaded && Boolean(isSignedIn) && Boolean(orgId) };
 }
 
-/** The projects of the workspace, newest first; pages on demand. */
-export function useProjects() {
+/** The projects of the workspace, newest first; pages on demand. `enabled: false` waits (the search palette asks only once it is opened). */
+export function useProjects({ enabled = true }: { enabled?: boolean } = {}) {
   const { userId, orgId, ready } = useScope();
   const getClient = useApiClient();
   return useInfiniteQuery({
@@ -53,7 +53,7 @@ export function useProjects() {
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (page) => (typeof page.next_cursor === "string" ? page.next_cursor : undefined),
     select: (data) => data.pages.flatMap((page) => (Array.isArray(page.items) ? page.items : [])),
-    enabled: ready,
+    enabled: enabled && ready,
     retry: retryUnlessClientError,
   });
 }
