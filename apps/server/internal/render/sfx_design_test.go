@@ -1,11 +1,16 @@
 package render
 
 import (
+	"bytes"
+	"context"
 	"crypto/sha256"
 	"flag"
 	"fmt"
 	"math"
+	"os/exec"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -354,6 +359,19 @@ func TestSFXInTheMix(t *testing.T) {
 			if dbfs(pk) < -30 {
 				t.Errorf("peak %.1f dBFS: inaudible", dbfs(pk))
 			}
+			// True peak (ebur128, 4x oversampled). The limiter is a sample-peak limiter at -1.5 dBFS: at the default gain the effect
+			// stays under -1 dBTP, the web target, before the programme is even added; at the loudest gain the spec allows a bright
+			// effect driven into the limiter can overshoot by up to 0.8 dB between the samples (measured: riser/sweep -0.8 dBTP,
+			// swish/blade -0.7), so there the check is -0.5 dBTP. The mix of a programme and a +6 dB effect is held to -1 dBTP
+			// by TestSoundEffectsLeaveTheProgrammeAlone.
+			if tp := truePeakOfGraph(t, ffmpeg, g); tp > -0.5 {
+				t.Errorf("true peak %.2f dBTP at +6 dB gain, want at most -0.5", tp)
+			}
+			if g0, _, err := SFXPreviewGraph(c, v, "s7", 0); err != nil {
+				t.Fatal(err)
+			} else if tp := truePeakOfGraph(t, ffmpeg, g0); tp > -1.0 {
+				t.Errorf("true peak %.2f dBTP at the default gain, want at most -1", tp)
+			}
 			for name, ch := range map[string][]float64{"left": s.l, "right": s.r} {
 				if d := math.Abs(mean(ch)); d > 0.002 {
 					t.Errorf("%s DC offset %.5f", name, d)
@@ -442,4 +460,27 @@ func TestSFXJitter(t *testing.T) {
 	if len(seen) < 5 {
 		t.Errorf("only %d different whoosh lengths in 20 items", len(seen))
 	}
+}
+
+var reTruePeak = regexp.MustCompile(`Peak:\s+(-?[0-9.]+|-inf) dBFS`)
+
+// truePeakOfGraph is the true peak in dBTP that ffmpeg's ebur128 reports for a graph that ends in [aout].
+func truePeakOfGraph(t testing.TB, ffmpeg, graph string) float64 {
+	t.Helper()
+	cmd := exec.CommandContext(context.Background(), ffmpeg, "-hide_banner", "-nostdin", "-nostats", //nolint:gosec // test helper
+		"-filter_complex", graph+";[aout]ebur128=peak=true:framelog=quiet[o]", "-map", "[o]", "-f", "null", "-")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("ebur128: %v\n%s", err, stderr.String())
+	}
+	all := reTruePeak.FindAllStringSubmatch(stderr.String(), -1)
+	if len(all) == 0 {
+		t.Fatalf("no true peak in the log:\n%s", stderr.String())
+	}
+	v, err := strconv.ParseFloat(all[len(all)-1][1], 64)
+	if err != nil {
+		return math.Inf(-1)
+	}
+	return v
 }
