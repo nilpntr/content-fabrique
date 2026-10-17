@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -238,6 +239,8 @@ func renderGallerySample(ctx context.Context, runner media.Runner, dir string, e
 }
 
 func galleryHTML(entries []galleryEntry, filesName string, gainDB float64) string {
+	// The directory name is a path the person chose: escaped for a URL and then for an attribute.
+	filesName = html.EscapeString(url.PathEscape(filesName))
 	var b strings.Builder
 	b.WriteString(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Content Fabrique sound effects</title>
 <style>

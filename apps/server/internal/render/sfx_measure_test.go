@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/cmplx"
 	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -34,7 +35,7 @@ func rawGraphJitter(cat, variant string, j jitter, id string) (graph string, ms 
 	}
 	st := append([]string{}, res.stmts...)
 	st = append(st, chain([]string{res.out}, []string{stereo48}, "aout"))
-	return joinStmts(st), res.ms, true
+	return strings.Join(st, ";"), res.ms, true
 }
 
 // decodeGraph runs a graph that ends in [aout] and returns the stereo samples.

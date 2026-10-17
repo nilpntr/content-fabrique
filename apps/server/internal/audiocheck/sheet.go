@@ -205,7 +205,7 @@ func axisStep(dur float64) float64 {
 
 // line draws a one pixel line (Bresenham).
 func line(img *image.RGBA, x0, y0, x1, y1 int, c color.Color) {
-	dx, dy := absInt(x1-x0), -absInt(y1-y0)
+	dx, dy := abs(x1-x0), -abs(y1-y0)
 	sx, sy := 1, 1
 	if x0 > x1 {
 		sx = -1
@@ -229,13 +229,6 @@ func line(img *image.RGBA, x0, y0, x1, y1 int, c color.Color) {
 			y0 += sy
 		}
 	}
-}
-
-func absInt(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
 }
 
 func encode(img image.Image) []byte {

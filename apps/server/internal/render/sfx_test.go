@@ -376,6 +376,34 @@ func TestEveryCategoryAndVariantRendersInOneTimeline(t *testing.T) {
 	}
 }
 
+// The speech a hit ducks under is the audible speech: a muted clip that overlaps a transition does not shorten the words of the
+// clip that is heard (the overlap of two words is resolved among the audible ones only).
+func TestDuckingIgnoresTheWordsOfAMutedClip(t *testing.T) {
+	words := map[string][]Word{
+		assetA: {{Text: "hello", StartMs: 1200, EndMs: 1950}}, // the last word of clip A, to 1950 ms
+		assetB: {{Text: "muted", StartMs: 0, EndMs: 400}},     // the first word of clip B, which is muted
+	}
+	resolver := ResolverFunc(func(id string, v Variant) (ResolvedAsset, error) {
+		return ResolvedAsset{Location: "/a/" + string(v) + "/" + id, HasAudio: true, Transcript: words[id]}, nil
+	})
+	a := clipAt("c1", assetA, 0, 2000, 0, withSourceAudio(0))
+	b := clipAt("c2", assetB, 0, 3000, 1500, withTransition(timeline.TransitionCrossfade, 500)) // starts at 1500, no source audio
+	// A hit at 1700 ms, on the tail of A's word: B's word (1500-1900 on the timeline) would cut A's word at 1500 if it counted.
+	spec := specOf(30, []timeline.VideoItem{a, b}, &timeline.AudioTrack{ID: "sound", Items: []timeline.AudioItem{sfxItem("s1", timeline.SFXImpact, 1700, nil)}})
+	plan, err := Compile(spec, Final, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plan.FilterComplex, "sidechaincompress") {
+		t.Error("the hit on the tail of the audible word does not duck: the muted clip's word shortened it")
+	}
+	// And the words of the muted clip alone are not speech: a hit there ducks nothing.
+	spec = specOf(30, []timeline.VideoItem{clipAt("c1", assetA, 0, 1000, 0, withSourceAudio(0)), clipAt("c2", assetB, 0, 3000, 1000)}, &timeline.AudioTrack{ID: "sound", Items: []timeline.AudioItem{sfxItem("s1", timeline.SFXImpact, 1100, nil)}})
+	if plan, err = Compile(spec, Final, resolver); err != nil || strings.Contains(plan.FilterComplex, "sidechaincompress") {
+		t.Errorf("a hit over a muted clip's speech ducked the programme: %v", err)
+	}
+}
+
 // genToneSource makes a 6 s clip with a 1 kHz tone as its sound: a stand-in for a clip with speech, whose level the ducking test
 // measures at the tone's frequency.
 func genToneSource(t *testing.T, ffmpeg string) string {

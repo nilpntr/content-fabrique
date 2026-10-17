@@ -146,13 +146,16 @@ func readPCM(path string) ([]float32, error) {
 }
 
 var (
-	reDuration = regexp.MustCompile(`Duration: (\d+):(\d+):(\d+(?:\.\d+)?)`)
-	reFPS      = regexp.MustCompile(`, (\d+(?:\.\d+)?) fps`)
+	// The patterns are anchored to the start of a line: the metadata tags of the input (untrusted) are printed in the same log, and a
+	// tag value is only ever printed after "name : " on its lines, so a line that starts with ffmpeg's own prefix is ffmpeg's.
+	reDuration = regexp.MustCompile(`(?m)^  Duration: (\d+):(\d+):(\d+(?:\.\d+)?)`)
+	reVideo    = regexp.MustCompile(`(?m)^  Stream #0:\d+.*Video:.*, (\d+(?:\.\d+)?) fps`)
+	reSummary  = regexp.MustCompile(`(?m)^\[Parsed_ebur128_\d+ @ 0x[0-9a-f]+\] Summary:`)
 	reLUFS     = regexp.MustCompile(`I:\s+(-?[0-9.]+|-inf) LUFS`)
 	reLRA      = regexp.MustCompile(`LRA:\s+(-?[0-9.]+) LU\b`)
 	rePeak     = regexp.MustCompile(`Peak:\s+(-?[0-9.]+|-inf) dBFS`)
-	reSilStart = regexp.MustCompile(`silence_start: (-?[0-9.e+-]+)`)
-	reSilEnd   = regexp.MustCompile(`silence_end: (-?[0-9.e+-]+) \| silence_duration: (-?[0-9.e+-]+)`)
+	reSilStart = regexp.MustCompile(`^\[silencedetect @ 0x[0-9a-f]+\] silence_start: (-?[0-9.e+-]+)`)
+	reSilEnd   = regexp.MustCompile(`^\[silencedetect @ 0x[0-9a-f]+\] silence_end: (-?[0-9.e+-]+) \| silence_duration: (-?[0-9.e+-]+)`)
 	reStat     = regexp.MustCompile(`^\[Parsed_astats_\d+ @ 0x[0-9a-f]+\] (.+)$`)
 	reFrame    = regexp.MustCompile(`^frame:\d+\s+pts:\d+\s+pts_time:(\S+)`)
 )
@@ -162,16 +165,11 @@ func parseInput(log string) (durationS, fps float64) {
 	if m := reDuration.FindStringSubmatch(log); m != nil {
 		h, _ := strconv.ParseFloat(m[1], 64)
 		mi, _ := strconv.ParseFloat(m[2], 64)
-		s, _ := strconv.ParseFloat(m[3], 64)
-		durationS = h*3600 + mi*60 + s
+		sec, _ := strconv.ParseFloat(m[3], 64)
+		durationS = h*3600 + mi*60 + sec
 	}
-	for _, line := range strings.Split(log, "\n") {
-		if strings.Contains(line, "Stream #0:") && strings.Contains(line, "Video:") {
-			if m := reFPS.FindStringSubmatch(line); m != nil {
-				fps, _ = strconv.ParseFloat(m[1], 64)
-				break
-			}
-		}
+	if m := reVideo.FindStringSubmatch(log); m != nil {
+		fps, _ = strconv.ParseFloat(m[1], 64)
 	}
 	return durationS, fps
 }
@@ -189,11 +187,11 @@ func num(s string) float64 {
 
 // parseSummary reads the ebur128 summary: integrated loudness, loudness range and the true peak. It reports whether there was one.
 func parseSummary(log string, m *measured) bool {
-	i := strings.Index(log, "Summary:")
-	if i < 0 {
+	all := reSummary.FindAllStringIndex(log, -1)
+	if len(all) == 0 {
 		return false
 	}
-	s := log[i:]
+	s := log[all[len(all)-1][0]:]
 	if v := reLUFS.FindStringSubmatch(s); v != nil {
 		m.integrated = num(v[1])
 	}
@@ -211,9 +209,7 @@ func parseSilences(log string, durationS float64) []Gap {
 	var gaps []Gap
 	start := math.NaN()
 	for _, line := range strings.Split(log, "\n") {
-		if !strings.Contains(line, "silencedetect") {
-			continue
-		}
+		line = strings.TrimRight(line, "\r")
 		if v := reSilStart.FindStringSubmatch(line); v != nil {
 			start = math.Max(0, num(v[1]))
 		} else if v := reSilEnd.FindStringSubmatch(line); v != nil {

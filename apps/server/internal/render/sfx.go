@@ -5,6 +5,7 @@ import (
 	"math"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
@@ -51,7 +52,6 @@ type builtSFX struct {
 	out   string
 	ms    int64
 	cat   string
-	vari  string
 }
 
 // buildItem resolves an item's variant and builds its layers under the label prefix.
@@ -67,7 +67,7 @@ func buildItem(prefix string, it *timeline.SFX) (builtSFX, error) {
 	if !ok {
 		return builtSFX{}, sfxSpecError(it)
 	}
-	return builtSFX{stmts: res.stmts, out: res.out, ms: res.ms, cat: it.Sfx, vari: variant}, nil
+	return builtSFX{stmts: res.stmts, out: res.out, ms: res.ms, cat: it.Sfx}, nil
 }
 
 // sfxPlacement is one effect placed on the timeline.
@@ -144,7 +144,7 @@ func SFXPreviewGraph(category, variant, id string, gainDB float64) (graph string
 	tail := []string{stereo48, "volume=" + f(sfxBaseDB+gainDB) + "dB", sfxLimiter}
 	st := append([]string{}, it.stmts...)
 	st = append(st, chain([]string{it.out}, tail, "aout"))
-	return joinStmts(st), it.ms, nil
+	return strings.Join(st, ";"), it.ms, nil
 }
 
 // SFXRawGraph is SFXPreviewGraph without the base level and the limiter: the effect as the recipe makes it, at its matched
@@ -156,18 +156,7 @@ func SFXRawGraph(category, variant, id string) (graph string, ms int64, err erro
 	}
 	st := append([]string{}, it.stmts...)
 	st = append(st, chain([]string{it.out}, []string{stereo48}, "aout"))
-	return joinStmts(st), it.ms, nil
-}
-
-func joinStmts(st []string) string {
-	out := ""
-	for i, s := range st {
-		if i > 0 {
-			out += ";"
-		}
-		out += s
-	}
-	return out
+	return strings.Join(st, ";"), it.ms, nil
 }
 
 // The ducking of the programme under the effects (P3-11). Where an effect overlaps speech from a clip's own sound, the programme is
@@ -194,12 +183,12 @@ const (
 // is in the mix (a clip with a speed ramp plays none, see audioGraph), merged when the pause between two words is short.
 func (c *compiler) speechSpans() [][2]int64 {
 	var spans [][2]int64
-	for _, w := range c.mapWords() {
-		cl := c.clips[w.clip]
+	audible := func(ci int) bool {
+		cl := c.clips[ci]
 		a := cl.item.Audio
-		if a == nil || !a.UseSourceOrDefault() || !cl.asset.HasAudio || cl.item.HasRamp() || a.GainDBOrDefault() <= duckMinClipGainDB {
-			continue
-		}
+		return a != nil && a.UseSourceOrDefault() && cl.asset.HasAudio && !cl.item.HasRamp() && a.GainDBOrDefault() > duckMinClipGainDB
+	}
+	for _, w := range c.mapWordsOf(audible) {
 		start, end := timeline.FrameStartMs(w.startF, c.fps), timeline.FrameStartMs(w.endF, c.fps)
 		if n := len(spans); n > 0 && start-spans[n-1][1] <= speechGapMs {
 			spans[n-1][1] = max(spans[n-1][1], end)

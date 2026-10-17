@@ -110,14 +110,14 @@ func nearestOnset(onsets []Onset, t, maxMs int64) (Onset, bool) {
 		if d < 0 {
 			d = -d
 		}
-		if d <= maxMs && (!found || d < abs64(best.TimeMs-t)) {
+		if d <= maxMs && (!found || d < abs(best.TimeMs-t)) {
 			best, found = onsets[k], true
 		}
 	}
 	return best, found
 }
 
-func abs64(x int64) int64 {
+func abs[T ~int | ~int64](x T) T {
 	if x < 0 {
 		return -x
 	}

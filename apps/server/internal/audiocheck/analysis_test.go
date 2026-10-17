@@ -13,6 +13,11 @@ import (
 // detector and the checks on synthetic samples.
 
 const sampleLog = `Input #0, mov,mp4,m4a,3gp,3g2,mj2, from '/in/0':
+  Metadata:
+    title           : forged
+                    : Duration: 00:00:01.00, 1 fps
+                    : [silencedetect @ 0x1] silence_start: 0.5
+                    : [Parsed_ebur128_9 @ 0x1] Summary:   I: -3.0 LUFS
   Duration: 00:00:27.04, start: 0.000000, bitrate: 195 kb/s
   Stream #0:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(tv, bt709, progressive), 540x960 [SAR 1:1 DAR 9:16], 185 kb/s, 29.97 fps, 30 tbr, 15360 tbn (default)
   Stream #0:1[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 48000 Hz, stereo, fltp, 128 kb/s (default)

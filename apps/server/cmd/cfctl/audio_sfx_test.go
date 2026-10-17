@@ -59,6 +59,16 @@ func TestSFXGalleryRefusesToWriteIntoTheRepository(t *testing.T) {
 	}
 }
 
+// The page is written for a path the person chose: a quote, a hash or a question mark in the files directory's name must not break
+// an attribute or cut a URL.
+func TestSFXGalleryPageEscapesTheFilesDirectory(t *testing.T) {
+	entries := []galleryEntry{{Category: "click", Variant: "ui", ID: "s1", Base: "click_ui_s1", Ms: 80}}
+	page := galleryHTML(entries, `a"b#c?d<e>_files`, 0)
+	if strings.Contains(page, `a"b`) || strings.Contains(page, "<e>") || !strings.Contains(page, `src="a%22b%23c%3Fd%3Ce%3E_files/click_ui_s1.wav"`) {
+		t.Errorf("the files directory is not escaped:\n%s", page[strings.Index(page, "<audio")-40:])
+	}
+}
+
 // The gallery renders every category and variant and three round-robin items per category, and writes a page that names them.
 func TestSFXGalleryWritesAPage(t *testing.T) {
 	needFFmpeg(t)

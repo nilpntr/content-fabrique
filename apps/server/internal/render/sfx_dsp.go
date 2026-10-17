@@ -121,13 +121,15 @@ func (b *sfxBuilder) mix(post string, layers ...string) string {
 func (b *sfxBuilder) sweep(name, id string, dur float64, steps int, q float64, hz func(x float64) float64) []string {
 	var cmds strings.Builder
 	for i := 0; i < steps; i++ {
-		x := float64(i) / float64(steps-1)
+		// Command i is sent at i/steps of the length and holds until the next one: it carries the value of the middle of its
+		// interval, so the curve is followed without running ahead of the envelope it belongs to.
+		x := (float64(i) + 0.5) / float64(steps)
 		if i > 0 {
 			cmds.WriteString(";")
 		}
 		fmt.Fprintf(&cmds, "%s %s@%s frequency %s", f(dur*float64(i)/float64(steps)), name, id, f1(hz(x)*b.j.filter))
 	}
-	filter := fmt.Sprintf("%s@%s=f=%s", name, id, f1(hz(0)*b.j.filter))
+	filter := fmt.Sprintf("%s@%s=f=%s", name, id, f1(hz(0.5/float64(steps))*b.j.filter))
 	if name == "bandpass" {
 		filter += fmt.Sprintf(":width_type=q:width=%s", f(q))
 	}

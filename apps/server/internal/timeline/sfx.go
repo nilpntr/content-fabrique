@@ -122,15 +122,6 @@ func ResolveSFXVariant(name, variant, id string) (string, bool) {
 	return "", false
 }
 
-// SFXLengthMs is the natural length of a sound effect's default variant, and false for a name that is not an effect.
-func SFXLengthMs(name string) (int64, bool) {
-	vs, ok := sfxCategory(name)
-	if !ok {
-		return 0, false
-	}
-	return vs[0].lengthMs, true
-}
-
 // SFXVariantLengthMs is the natural length of a concrete variant (as ResolveSFXVariant returns it). The renderer may vary the
 // length of some categories by a few percent per item (see docs/design/audio-v1.md); a riser's length is exact, because its peak
 // is where it ends.

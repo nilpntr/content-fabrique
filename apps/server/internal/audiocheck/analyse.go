@@ -102,8 +102,11 @@ func analyse(m measured, timeMap []render.TimeMapEntry, cfg config) Report {
 		if g.DurationS > r.Silence.LongestS {
 			r.Silence.LongestS = g.DurationS
 		}
-		if m.durationS-g.EndS < 0.05 {
-			r.Silence.EndS = g.DurationS
+		// The gap that reaches the end of the sound is the dead air at the end; a video that outlasts its sound by more than the
+		// codec's padding adds that to it.
+		audioEnd := float64(len(m.pcm)) / PCMRate
+		if audioEnd-g.EndS < 0.05 {
+			r.Silence.EndS = round(g.DurationS+math.Max(0, m.durationS-audioEnd-0.05), 3)
 		}
 	}
 
@@ -148,10 +151,10 @@ func analyse(m measured, timeMap []render.TimeMapEntry, cfg config) Report {
 		cs := CutSync{AtMs: c, OnsetMs: -1}
 		if o, ok := nearestOnset(onsets, c, 1000); ok {
 			cs.OnsetMs, cs.DeltaMs = o.TimeMs, o.TimeMs-c
-			if float64(abs64(cs.DeltaMs)) <= frameMs {
+			if float64(abs(cs.DeltaMs)) <= frameMs {
 				within++
 			}
-			if abs64(cs.DeltaMs) <= 100 {
+			if abs(cs.DeltaMs) <= 100 {
 				within100++
 			}
 		}
@@ -174,18 +177,18 @@ func analyse(m measured, timeMap []render.TimeMapEntry, cfg config) Report {
 				if o.TimeMs < p.AtMs-sfxSearchBeforeMs || o.TimeMs > p.AtMs+sfxSearchAfterMs {
 					continue
 				}
-				if !found || abs64(o.TimeMs-p.AtMs) < abs64(best.TimeMs-p.AtMs) {
+				if !found || abs(o.TimeMs-p.AtMs) < abs(best.TimeMs-p.AtMs) {
 					best, found = o, true
 				}
 			}
 			if found {
 				ss.OnsetMs, ss.DeltaMs = best.TimeMs, best.TimeMs-p.AtMs
 				r.Sync.SFXFound++
-				if float64(abs64(ss.DeltaMs)) <= frameMs {
+				if float64(abs(ss.DeltaMs)) <= frameMs {
 					ss.WithinFrame = true
 					sFrame++
 				}
-				if abs64(ss.DeltaMs) <= 100 {
+				if abs(ss.DeltaMs) <= 100 {
 					s100++
 				}
 			}

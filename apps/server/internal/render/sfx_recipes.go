@@ -3,6 +3,7 @@ package render
 import (
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
@@ -275,7 +276,11 @@ func (b *sfxBuilder) hit(hs hitSpec) string {
 	if hs.trHP > 0 {
 		td := math.Min(d, 0.3)
 		n := b.noise("white", 7, td, hpf(hs.trHP*b.j.filter))
-		tr := b.shape(n, fmt.Sprintf("%s*%s", attack(0.3), decay(hs.trTau)), td, saturate(hs.trDrive), gain(hs.trDB))
+		trPost := []string{gain(hs.trDB)}
+		if hs.trDrive > 0 {
+			trPost = append([]string{saturate(hs.trDrive)}, trPost...)
+		}
+		tr := b.shape(n, fmt.Sprintf("%s*%s", attack(0.3), decay(hs.trTau)), td, trPost...)
 		if hs.trBand > 0 {
 			n2 := b.noise("white", 8, td, bpf(hs.trBand*b.j.filter, 1.4))
 			tr = b.mix("", tr, b.shape(n2, fmt.Sprintf("%s*%s", attack(0.3), decay(hs.trTau*1.6)), td, gain(hs.trDB-3)))
@@ -292,7 +297,7 @@ func (b *sfxBuilder) hit(hs hitSpec) string {
 			for i, p := range []struct{ r, a float64 }{{1, 1}, {1.59, 0.7}, {2.14, 0.5}, {2.30, 0.5}, {2.65, 0.35}, {3.51, 0.25}} {
 				terms = append(terms, fmt.Sprintf("%s*sin(2*PI*%s*t)*exp(-t/%s)", f(p.a), f(hs.metal*p.r*b.j.pitch), f(hs.bodyDecay/(1+0.5*float64(i)))))
 			}
-			tone = b.tone(fmt.Sprintf("0.9*%s*(%s)", attack(0.5), join(terms, "+")), d, hpf(90), lpf(5000))
+			tone = b.tone(fmt.Sprintf("0.9*%s*(%s)", attack(0.5), strings.Join(terms, "+")), d, hpf(90), lpf(5000))
 		} else {
 			tone = b.tone(fmt.Sprintf("%s*sin(%s)*%s", attack(0.5), b.glide(hs.bodyF0, hs.bodyF1, hs.bodyTau), decay(hs.bodyDecay)), d, hpf(80), lpf(1200))
 		}
@@ -324,17 +329,6 @@ func (b *sfxBuilder) hit(hs hitSpec) string {
 	}
 	sum := b.mix("", layers...)
 	return b.glue(sum, hs.glueRatio, 20, 100)
-}
-
-func join(parts []string, sep string) string {
-	out := ""
-	for i, p := range parts {
-		if i > 0 {
-			out += sep
-		}
-		out += p
-	}
-	return out
 }
 
 func (b *sfxBuilder) impact(variant string) (string, float64) {
@@ -422,7 +416,7 @@ func (b *sfxBuilder) riserBody(d float64, s riserSpec) string {
 			// f(t) = f0 * 2^(semitones/12 * x^power): the phase is the integral, which pitchPhase writes as a series.
 			voices = append(voices, fmt.Sprintf("sin(%s)", pitchPhase(f0, s.semitones, d, s.power)))
 		}
-		tone := b.tone(fmt.Sprintf("%s*(%s)*%s", f(1/float64(s.voices)), join(voices, "+"), lev), d, hpf(150), gain(s.toneDB))
+		tone := b.tone(fmt.Sprintf("%s*(%s)*%s", f(1/float64(s.voices)), strings.Join(voices, "+"), lev), d, hpf(150), gain(s.toneDB))
 		layers = append(layers, tone)
 	}
 	var dry string
@@ -461,7 +455,7 @@ func pitchPhase(f0, semitones, d, power float64) string {
 		c := math.Pow(a, float64(k)) / fact / (float64(k)*power + 1)
 		terms = append(terms, fmt.Sprintf("%s*pow(t/%s,%s)", f(c), f(d), f(float64(k)*power+1)))
 	}
-	return fmt.Sprintf("2*PI*%s*%s*(%s)", f(f0), f(d), join(terms, "+"))
+	return fmt.Sprintf("2*PI*%s*%s*(%s)", f(f0), f(d), strings.Join(terms, "+"))
 }
 
 func (b *sfxBuilder) riser(variant string) (string, float64) {
@@ -539,7 +533,7 @@ func decelPhase(f0, semitones, d float64) string {
 		c := math.Pow(-a, float64(k)) / fact / (3 * float64(k))
 		terms = append(terms, fmt.Sprintf("%s*(1-exp(-%s*t/%s))", f(c), f(3*float64(k)), f(d)))
 	}
-	return fmt.Sprintf("2*PI*%s*%s*(%s)", f(f0*math.Exp(a)), f(d), join(terms, "+"))
+	return fmt.Sprintf("2*PI*%s*%s*(%s)", f(f0*math.Exp(a)), f(d), strings.Join(terms, "+"))
 }
 
 // ---- pop and click ----------------------------------------------------------------------------------------------------------
@@ -685,7 +679,7 @@ func (b *sfxBuilder) shimmer(variant string) (string, float64) {
 		amp := math.Pow(10, (rng.next()*12-6)/20) * 0.5
 		terms = append(terms, fmt.Sprintf("%s*if(gte(t,%s),min(1,(t-%s)/0.0008)*sin(2*PI*%s*(t-%s))*exp(-(t-%s)/%s),0)", f(amp), f(t0), f(t0), f(hz), f(t0), f(t0), f(tau)))
 	}
-	pings := b.tone(join(terms, "+"), d, hpf(1500), lpf(9000))
+	pings := b.tone(strings.Join(terms, "+"), d, hpf(1500), lpf(9000))
 	var layers []string
 	layers = append(layers, b.wide(pings, 8))
 	// The wash: noise above 6 kHz that swells and fades, well under the pings (about 18 dB for a sparkle, only 8 for a wash).
@@ -729,7 +723,7 @@ func (b *sfxBuilder) sting(variant string) (string, float64) {
 		voices = append(voices, fmt.Sprintf("sin(2*PI*%s*t)+sin(2*PI*%s*t)+0.25*sin(2*PI*%s*t)", f(hz*b.j.pitch), f(hz*b.j.pitch*1.003), f(hz*b.j.pitch*2)))
 	}
 	env := fmt.Sprintf("if(gte(t,0.02),min(1,(t-0.02)/0.15)*exp(-(t-0.02)/%s),0)", f(bloomDecay))
-	tone := b.tone(fmt.Sprintf("%s*(%s)/%s", env, join(voices, "+"), f(float64(len(chord))*2)), d)
+	tone := b.tone(fmt.Sprintf("%s*(%s)/%s", env, strings.Join(voices, "+"), f(float64(len(chord))*2)), d)
 	sw := b.sweep("lowpass", b.prefix+"s", 0.5, 12, 0, func(x float64) float64 { return 1000 + (bloomLP-1000)*math.Sqrt(x) })
 	tone = b.add([]string{tone}, append(sw, hpf(120), gain(bloomDB))...)
 	tone, wet := b.room(tone, 1.2, 0.5, 20, 5000)
