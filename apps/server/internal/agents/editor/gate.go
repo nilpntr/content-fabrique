@@ -42,6 +42,8 @@ type previewState struct {
 	plan       *Plan // the run's latest creative plan
 	checked    int   // the newest version check_edit ran on, 0 for none
 	checkCalls int   // how many times check_edit ran in this run
+	// checkByCall is the nth check each check_edit call (by tool_use_id) was, so a call that is run again gets the same answer.
+	checkByCall map[string]int
 }
 
 type previewLog struct {
@@ -123,13 +125,30 @@ func (l *previewLog) plan(run uuid.UUID) (Plan, bool) {
 	return *s.plan, true
 }
 
-// checkRun records a check_edit of version, the n-th of the run.
-func (l *previewLog) checkRun(run uuid.UUID, version, n int) {
+// checkRun records a check_edit of version, the n-th of the run, made by the tool call toolUseID (empty when it is not known).
+func (l *previewLog) checkRun(run uuid.UUID, version, n int, toolUseID string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	s := l.state(run)
 	s.checked = max(s.checked, version)
 	s.checkCalls = max(s.checkCalls, n)
+	if toolUseID != "" {
+		if s.checkByCall == nil {
+			s.checkByCall = map[string]int{}
+		}
+		s.checkByCall[toolUseID] = n
+	}
+}
+
+// checkNth is the nth check the tool call toolUseID was, when this worker saw it.
+func (l *previewLog) checkNth(run uuid.UUID, toolUseID string) (int, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if s := l.runs[run]; s != nil {
+		n, ok := s.checkByCall[toolUseID]
+		return n, ok
+	}
+	return 0, false
 }
 
 // checkState returns the newest version check_edit ran on and how many times it ran, in this worker's record.

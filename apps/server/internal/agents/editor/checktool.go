@@ -42,7 +42,7 @@ type CheckRecord struct {
 
 // AnalysisSource is what loading the analysis of a timeline's clips reads. *store.Store is the real one.
 type AnalysisSource interface {
-	ListAssetMoments(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) ([]store.Moment, error)
+	ListAssetSpans(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.AssetSpanRow, error)
 	ListAssetExposureSeries(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.ExposureSeriesRow, error)
 }
 
@@ -78,27 +78,25 @@ func LoadAssetAnalysis(ctx context.Context, src AnalysisSource, ws ids.Workspace
 		}
 		out[r.AssetID.String()] = a
 	}
-	for _, aid := range assets {
-		a, ok := out[aid.String()]
+	spans, err := src.ListAssetSpans(ctx, ws, assets)
+	if err != nil {
+		return nil, fmt.Errorf("read the reps and the dead time: %w", err)
+	}
+	for _, m := range spans {
+		a, ok := out[m.AssetID.String()]
 		if !ok {
 			continue
 		}
-		moments, err := src.ListAssetMoments(ctx, ws, aid)
-		if err != nil {
-			return nil, fmt.Errorf("read the moments of %s: %w", aid, err)
+		sp := Span{StartMs: int64(m.StartMs), EndMs: int64(m.EndMs)}
+		switch m.Kind {
+		case store.MomentRep:
+			a.Reps = append(a.Reps, sp)
+		case store.MomentHold:
+			a.Holds = append(a.Holds, sp)
+		case store.MomentDead:
+			a.Dead = append(a.Dead, sp)
 		}
-		for _, m := range moments {
-			sp := Span{StartMs: int64(m.StartMs), EndMs: int64(m.EndMs)}
-			switch m.Kind {
-			case store.MomentRep:
-				a.Reps = append(a.Reps, sp)
-			case store.MomentHold:
-				a.Holds = append(a.Holds, sp)
-			case store.MomentDead:
-				a.Dead = append(a.Dead, sp)
-			}
-		}
-		out[aid.String()] = a
+		out[m.AssetID.String()] = a
 	}
 	return out, nil
 }
@@ -133,7 +131,15 @@ func (d Deps) checkEdit(ctx context.Context, rc runtime.RunContext, _ noArgs) (r
 	if det.Project.CurrentTimelineVersion == nil {
 		return runtime.Result{}, runtime.UserErrorf("there is no timeline to check yet; make one with edit_timeline first")
 	}
+	// The run's own newest version is the one finish asks about, so it is the one checked, even when a person has saved a newer one.
 	v := int(*det.Project.CurrentTimelineVersion)
+	made, err := d.Store.GetTimelineVersionByAuthor(ctx, ws, pid, string(ops.AuthorAgent), ids.Encode(ids.PrefixRun, rc.RunID))
+	switch {
+	case err == nil:
+		v = int(made.Version)
+	case !errors.Is(err, store.ErrNotFound):
+		return runtime.Result{}, fmt.Errorf("look for the run's versions: %w", err)
+	}
 	var plan *Plan
 	if p, ok := d.planOf(ctx, rc); ok {
 		plan = &p
@@ -142,13 +148,15 @@ func (d Deps) checkEdit(ctx context.Context, rc runtime.RunContext, _ noArgs) (r
 	if err != nil {
 		return runtime.Result{}, err
 	}
-	nth := d.checksRun(ctx, rc) + 1
+	nth, seen := d.checkNth(ctx, rc)
 	pass, fail, skip := report.Counts()
-	rec := CheckRecord{RecordVersion: CheckRecordVersion, Report: report, Passed: pass, Failed: fail, Skipped: skip, Nth: nth}
-	if err := rc.Artifact(ctx, CheckArtifact, rec); err != nil {
-		return runtime.Result{}, fmt.Errorf("record the check: %w", err)
+	if !seen { // a call that is run again after a restart has its event already
+		rec := CheckRecord{RecordVersion: CheckRecordVersion, Report: report, Passed: pass, Failed: fail, Skipped: skip, Nth: nth}
+		if err := rc.Artifact(ctx, CheckArtifact, rec); err != nil {
+			return runtime.Result{}, fmt.Errorf("record the check: %w", err)
+		}
 	}
-	d.previews.checkRun(rc.RunID, v, nth)
+	d.previews.checkRun(rc.RunID, v, nth, rc.ToolUseID)
 
 	var b strings.Builder
 	b.WriteString(report.Text())
@@ -164,22 +172,29 @@ func (d Deps) checkEdit(ctx context.Context, rc runtime.RunContext, _ noArgs) (r
 	return runtime.Result{Content: []llm.Block{llm.TextBlock(b.String())}}, nil
 }
 
-// checksRun is how many times check_edit has run in this run: this worker's record, or (for a run that resumed in another worker)
-// the edit_check artifacts of the run.
-func (d Deps) checksRun(ctx context.Context, rc runtime.RunContext) int {
-	if _, n := d.previews.checkState(rc.RunID); n > 0 {
-		return n
+// checkNth is which check of the run this call is, and whether the call has been through before (a call that is run again after a
+// worker died answers as it did, and does not write a second event). It reads this worker's record; a worker with none (a takeover)
+// or a call that is being repeated reads the run's edit_check events instead.
+func (d Deps) checkNth(ctx context.Context, rc runtime.RunContext) (nth int, seen bool) {
+	if n, ok := d.previews.checkNth(rc.RunID, rc.ToolUseID); ok {
+		return n, true
 	}
-	n := 0
-	for _, rec := range runArtifacts(ctx, d.Store, rc.WorkspaceID, rc.RunID, CheckArtifact) {
-		var c struct {
-			Nth int `json:"nth"`
-		}
-		if json.Unmarshal(rec, &c) == nil {
-			n = max(n, c.Nth)
+	_, calls := d.previews.checkState(rc.RunID)
+	if calls == 0 || rc.Resumed {
+		for _, art := range runArtifacts(ctx, d.Store, rc.WorkspaceID, rc.RunID, CheckArtifact) {
+			var c struct {
+				Nth int `json:"nth"`
+			}
+			if json.Unmarshal(art.Data, &c) != nil {
+				continue
+			}
+			if art.ToolUseID == rc.ToolUseID {
+				return c.Nth, true
+			}
+			calls = max(calls, c.Nth)
 		}
 	}
-	return n
+	return calls + 1, false
 }
 
 // checked says check_edit has run on version (or on a later one) in this run.
@@ -187,36 +202,40 @@ func (d Deps) checked(ctx context.Context, rc runtime.RunContext, version int) b
 	if v, _ := d.previews.checkState(rc.RunID); v >= version {
 		return true
 	}
-	for _, rec := range runArtifacts(ctx, d.Store, rc.WorkspaceID, rc.RunID, CheckArtifact) {
+	for _, art := range runArtifacts(ctx, d.Store, rc.WorkspaceID, rc.RunID, CheckArtifact) {
 		var c struct {
 			Version int `json:"version"`
 			Nth     int `json:"nth"`
 		}
-		if json.Unmarshal(rec, &c) == nil && c.Version >= version {
-			d.previews.checkRun(rc.RunID, c.Version, c.Nth)
+		if json.Unmarshal(art.Data, &c) == nil && c.Version >= version {
+			d.previews.checkRun(rc.RunID, c.Version, c.Nth, art.ToolUseID)
 			return true
 		}
 	}
 	return false
 }
 
-// runArtifacts returns the data of the run's artifact events of a kind, oldest first. A read that fails is no artifacts.
-func runArtifacts(ctx context.Context, st EventSource, ws ids.WorkspaceID, run uuid.UUID, kind string) []json.RawMessage {
-	events, err := st.AgentEvents(ctx, ws, run, 0, 0)
+// artifact is the part of an artifact event the editor reads back: the call that made it and its data.
+type artifact struct {
+	ToolUseID string
+	Data      json.RawMessage
+}
+
+// runArtifacts returns the run's artifact events of a kind, oldest first. A read that fails is no artifacts.
+func runArtifacts(ctx context.Context, st EventSource, ws ids.WorkspaceID, run uuid.UUID, kind string) []artifact {
+	events, err := st.AgentArtifactEvents(ctx, ws, run, kind)
 	if err != nil {
 		return nil
 	}
-	var out []json.RawMessage
+	var out []artifact
 	for _, ev := range events {
-		if ev.Type != store.EventArtifact {
-			continue
-		}
 		var p struct {
-			Kind string          `json:"kind"`
-			Data json.RawMessage `json:"data"`
+			Kind      string          `json:"kind"`
+			ToolUseID string          `json:"tool_use_id"`
+			Data      json.RawMessage `json:"data"`
 		}
 		if json.Unmarshal(ev.Payload, &p) == nil && p.Kind == kind {
-			out = append(out, p.Data)
+			out = append(out, artifact{ToolUseID: p.ToolUseID, Data: p.Data})
 		}
 	}
 	return out

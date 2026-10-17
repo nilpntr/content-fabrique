@@ -394,6 +394,50 @@ func (q *Queries) ListAssetShots(ctx context.Context, arg ListAssetShotsParams) 
 	return items, nil
 }
 
+const listAssetSpans = `-- name: ListAssetSpans :many
+SELECT asset_id, kind, start_ms, end_ms FROM moments
+WHERE workspace_id = $1 AND asset_id = ANY($2::uuid[]) AND source = 'analysis' AND kind IN ('rep', 'hold', 'dead')
+ORDER BY asset_id, start_ms
+`
+
+type ListAssetSpansParams struct {
+	WorkspaceID ids.WorkspaceID
+	AssetIds    []uuid.UUID
+}
+
+type ListAssetSpansRow struct {
+	AssetID ids.AssetID
+	Kind    string
+	StartMs int32
+	EndMs   int32
+}
+
+// The reps, holds and dead time of several assets in one read, for the editor's check_edit.
+func (q *Queries) ListAssetSpans(ctx context.Context, arg ListAssetSpansParams) ([]ListAssetSpansRow, error) {
+	rows, err := q.db.Query(ctx, listAssetSpans, arg.WorkspaceID, arg.AssetIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAssetSpansRow
+	for rows.Next() {
+		var i ListAssetSpansRow
+		if err := rows.Scan(
+			&i.AssetID,
+			&i.Kind,
+			&i.StartMs,
+			&i.EndMs,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAssetsForAnalysis = `-- name: ListAssetsForAnalysis :many
 SELECT a.id, a.workspace_id, a.kind, a.status, a.filename, a.content_type, a.size_bytes, a.sha256, a.title, a.description, a.tags, a.r2_key, a.failure_reason, a.created_by, a.created_at, a.updated_at, a.deleted_at, a.duration_ms, a.width, a.height, a.fps, a.rotation, a.video_codec, a.audio_codec, a.has_audio, a.hdr, a.probe, a.ingest_progress, a.ingest_stage, a.ingested_at, a.title_source, a.quick_look_status, a.quick_look, a.quick_look_at, a.search, a.transcript_status, a.transcript_failure_reason FROM assets a
 LEFT JOIN asset_signals s ON s.workspace_id = a.workspace_id AND s.asset_id = a.id

@@ -30,6 +30,8 @@ type (
 	SignalsMeta = db.GetAssetSignalsMetaRow
 	// ExposureSeriesRow is the luma and 90th percentile luma series of one asset's analysis.
 	ExposureSeriesRow = db.ListAssetExposureSeriesRow
+	// AssetSpanRow is a rep, hold or dead stretch of an asset's analysis.
+	AssetSpanRow = db.ListAssetSpansRow
 	// DeadSpan is one of the longest dead spans of an asset, with the number of dead spans it has in all.
 	DeadSpan = db.ListDeadSpansRow
 )
@@ -202,6 +204,16 @@ func (s *Store) ListAssetExposureSeries(ctx context.Context, ws ids.WorkspaceID,
 		return nil, nil
 	}
 	rows, err := s.q.ListAssetExposureSeries(ctx, db.ListAssetExposureSeriesParams{WorkspaceID: ws, AssetIds: assetUUIDs(assets)})
+	return rows, mapErr(err)
+}
+
+// ListAssetSpans returns the reps, holds and dead time of the assets' analyses in time order (kind MomentRep, MomentHold or
+// MomentDead), for all of them in one read.
+func (s *Store) ListAssetSpans(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]AssetSpanRow, error) {
+	if len(assets) == 0 {
+		return nil, nil
+	}
+	rows, err := s.q.ListAssetSpans(ctx, db.ListAssetSpansParams{WorkspaceID: ws, AssetIds: assetUUIDs(assets)})
 	return rows, mapErr(err)
 }
 

@@ -308,10 +308,12 @@ func TestBeatSyncCheck(t *testing.T) {
 		t.Errorf("beat reason: %s", c.Detail)
 	}
 	// No grid: a workout must have one, a talking video has none.
-	if c := wantStatus(t, RunChecks(CheckInput{Spec: specOf(t, shots, title(0), nil), Plan: &Plan{ContentType: TypeWorkout, TargetLengthS: 6}}), CheckBeatSync, CheckFail); !strings.Contains(c.Detail, "no beat grid") {
+	if c := wantStatus(t, RunChecks(CheckInput{Spec: specOf(t, shots, title(0), nil), Plan: &Plan{ContentType: TypeWorkout, TargetLengthS: 6, TempoBPM: 124}}), CheckBeatSync, CheckFail); !strings.Contains(c.Detail, "no beat grid") {
 		t.Errorf("no grid reason: %s", c.Detail)
 	}
 	wantStatus(t, RunChecks(CheckInput{Spec: specOf(t, shots, title(0), nil), Plan: &Plan{ContentType: TypeTalking, TargetLengthS: 6}}), CheckBeatSync, CheckSkip)
+	// A plan with tempo 0 has no grid to write, whatever the type: the check does not contradict the plan.
+	wantStatus(t, RunChecks(CheckInput{Spec: specOf(t, shots, title(0), nil), Plan: &Plan{ContentType: TypeVlog, TargetLengthS: 6, TempoBPM: 0}}), CheckBeatSync, CheckSkip)
 }
 
 func TestReportText(t *testing.T) {

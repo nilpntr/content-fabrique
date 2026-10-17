@@ -128,9 +128,10 @@ func (d Deps) runContext(ctx context.Context, rc runtime.RunContext) ([]llm.Bloc
 	if err != nil {
 		return nil, err
 	}
+	hint := contentTypeHint(det.Project.Brief, rows, sums)
 	for _, caps := range contextSteps {
 		blocks := contextBlocks(det.Project.Format, det.Project.Brief, rows, sums, status, caps)
-		if hint := contentTypeHint(det.Project.Brief, rows, sums); hint != "" {
+		if hint != "" {
 			blocks = append(blocks, llm.TextBlock(hint))
 		}
 		blocks = append(blocks, commentsIntro(comments, total, now, caps.comments, caps.commentChars)...)

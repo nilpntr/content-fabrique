@@ -47,16 +47,20 @@ const (
 
 // The thresholds that do not depend on the kind of video.
 const (
-	hookMaxMs            = 2000
-	hookTitleByMs        = 500
-	repToleranceMs       = 150
-	repEdgesShare        = 0.85
-	deadShareMax         = 0.05
-	effectsMax           = 0.5
-	rampsMax             = 4
-	brightnessJumpMax    = 0.25
-	beatToleranceFrames  = 2
-	beatShareMin         = 0.7
+	hookMaxMs           = 2000
+	hookTitleByMs       = 500
+	repToleranceMs      = 150
+	repEdgesShare       = 0.85
+	deadShareMax        = 0.05
+	effectsMax          = 0.5
+	rampsMax            = 4
+	brightnessJumpMax   = 0.25
+	beatToleranceFrames = 2
+	beatShareMin        = 0.7
+	// durationLoPct and durationHiPct are the share of the plan's target length that a video may be: the same tolerance as plan_edit's
+	// note about a shot list that does not match its target.
+	durationLoPct        = 75
+	durationHiPct        = 125
 	defaultMinDurationMs = 15_000
 	defaultMaxDurationMs = 45_000
 	paceBuildsMinShots   = 6
@@ -193,6 +197,9 @@ func RunChecks(in CheckInput) Report {
 	items := slices.Clone(main.Items)
 	slices.SortStableFunc(items, func(a, b timeline.VideoItem) int { return cmp.Compare(a.AtMs, b.AtMs) })
 	lim := typeLimits[typ]
+	if in.Plan != nil && in.Plan.TempoBPM == 0 {
+		lim.beatGrid = false // the plan has no beat grid (a video that follows speech or a mood): the cuts are not judged against one
+	}
 	c := &checker{in: in, items: items, lim: lim, typ: typ, m: &r.Metrics}
 	c.total = timeline.TotalDuration(in.Spec)
 	c.durs = make([]int64, len(items))
@@ -509,7 +516,7 @@ func (c *checker) duration(targetS int) Check {
 	lo, hi := int64(defaultMinDurationMs), int64(defaultMaxDurationMs)
 	what := "the default range"
 	if targetS > 0 {
-		lo, hi = int64(targetS)*750, int64(targetS)*1250
+		lo, hi = int64(targetS)*10*durationLoPct, int64(targetS)*10*durationHiPct
 		what = fmt.Sprintf("the plan's %d s, give or take a quarter", targetS)
 	}
 	lo, hi = max(lo, timeline.MinTotalMs), min(hi, timeline.MaxTotalMs)
@@ -575,7 +582,7 @@ func (c *checker) beatSync() Check {
 		if c.lim.beatGrid {
 			return c.fail(CheckBeatSync, "there is no beat grid; write one with snap_cuts_to_beats (a bpm from 120 to 128, first_beat_ms 0, write_markers true) so the cuts land on the beat")
 		}
-		return c.skip(CheckBeatSync, "a %s video has no beat grid", c.typ)
+		return c.skip(CheckBeatSync, "no beat grid is expected (a %s video, or a plan with tempo 0)", c.typ)
 	}
 	slices.Sort(beats)
 	tol := int64(beatToleranceFrames) * 1000 / int64(max(c.in.Spec.Output.FPS, 1))

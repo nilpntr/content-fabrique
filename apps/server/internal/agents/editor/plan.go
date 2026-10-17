@@ -228,7 +228,7 @@ func BeatMs(bpm int) int64 { return (60000*2 + int64(bpm)) / (2 * int64(bpm)) }
 func planNotes(p Plan) []string {
 	var notes []string
 	target := int64(p.TargetLengthS) * 1000
-	if p.EstimatedLengthMs < target*7/10 || p.EstimatedLengthMs > target*13/10 {
+	if p.EstimatedLengthMs < target*durationLoPct/100 || p.EstimatedLengthMs > target*durationHiPct/100 {
 		notes = append(notes, fmt.Sprintf("The shot list adds up to %s but your target is %d s. Change one of them so they agree (a short video: fewer, shorter shots; too short: more shots).", secs(p.EstimatedLengthMs), p.TargetLengthS))
 	}
 	run, start := 1, 0
@@ -328,9 +328,9 @@ func (d Deps) planOf(ctx context.Context, rc runtime.RunContext) (Plan, bool) {
 	return p, ok
 }
 
-// EventSource reads a run's events. *store.Store is the real one.
+// EventSource reads a run's artifact events of one kind. *store.Store is the real one.
 type EventSource interface {
-	AgentEvents(ctx context.Context, ws ids.WorkspaceID, run uuid.UUID, afterSeq int32, limit int) ([]store.AgentEvent, error)
+	AgentArtifactEvents(ctx context.Context, ws ids.WorkspaceID, run uuid.UUID, kind string) ([]store.AgentEvent, error)
 }
 
 // PlanFromEvents reads the last creative_plan artifact of a run. The payload is the artifact's data, so a plan that cannot be read
@@ -338,9 +338,9 @@ type EventSource interface {
 func PlanFromEvents(ctx context.Context, st EventSource, ws ids.WorkspaceID, run uuid.UUID) (Plan, bool) {
 	var plan Plan
 	var found bool
-	for _, data := range runArtifacts(ctx, st, ws, run, PlanArtifact) {
+	for _, art := range runArtifacts(ctx, st, ws, run, PlanArtifact) {
 		var got Plan
-		if json.Unmarshal(data, &got) == nil && got.Version == PlanVersion {
+		if json.Unmarshal(art.Data, &got) == nil && got.Version == PlanVersion {
 			plan, found = got, true
 		}
 	}

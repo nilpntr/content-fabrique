@@ -96,20 +96,13 @@ func tidy(s string) string {
 // model, which decides. It returns "" unless one type is a clear winner. The text is the creator's, so it is only ever counted
 // for words, never read as an instruction.
 func LikelyContentType(text string) string {
-	lower := strings.ToLower(text)
-	words := map[string]int{}
-	for _, w := range strings.FieldsFunc(lower, func(r rune) bool { return !unicode.IsLetter(r) && r != '-' }) {
-		words[w]++
-	}
+	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) && r != '-' })
+	padded := " " + strings.Join(words, " ") + " " // whole words only: "day in" is not in "today in"
 	best, bestScore, second := "", 0, 0
 	for _, t := range ContentTypes {
 		score := 0
 		for _, kw := range typeKeywords[t] {
-			if strings.Contains(kw, " ") {
-				score += strings.Count(lower, kw)
-			} else {
-				score += words[kw] + words[kw+"s"]
-			}
+			score += strings.Count(padded, " "+kw+" ") + strings.Count(padded, " "+kw+"s ")
 		}
 		switch {
 		case score > bestScore:

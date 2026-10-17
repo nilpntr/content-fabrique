@@ -53,11 +53,12 @@ type Store interface {
 	ListMoments(ctx context.Context, ws ids.WorkspaceID, f store.MomentFilter) ([]store.Moment, error)
 	ListAssetAnalysisSummaries(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.AnalysisSummaryRow, error)
 	ListDeadSpans(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID, perAsset int) ([]store.DeadSpan, error)
-	// ListAssetMoments and ListAssetExposureSeries are what check_edit judges the edit against (the reps, the dead time, the luma).
-	ListAssetMoments(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) ([]store.Moment, error)
+	// ListAssetSpans and ListAssetExposureSeries are what check_edit judges the edit against (the reps, the dead time, the luma).
+	ListAssetSpans(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.AssetSpanRow, error)
 	ListAssetExposureSeries(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.ExposureSeriesRow, error)
-	// AgentEvents reads a run's events: the plan and the checks of a run that resumed in another worker are found there.
-	AgentEvents(ctx context.Context, ws ids.WorkspaceID, run uuid.UUID, afterSeq int32, limit int) ([]store.AgentEvent, error)
+	// AgentArtifactEvents reads a run's artifact events of one kind: the plan and the checks of a run that resumed in another worker
+	// are found there.
+	AgentArtifactEvents(ctx context.Context, ws ids.WorkspaceID, run uuid.UUID, kind string) ([]store.AgentEvent, error)
 }
 
 // Deps are what the editor's tools need.

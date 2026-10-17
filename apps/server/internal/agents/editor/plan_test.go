@@ -208,8 +208,9 @@ func TestContentTypeHint(t *testing.T) {
 		"How to bake bread, step by step, a simple recipe tutorial":     TypeTutorial,
 		"A day in Lisbon, my weekend trip vlog":                         TypeVlog,
 		"Rant to camera, my opinion on podcasts, story time":            TypeTalking,
-		"Some clips":                      "",
-		"workout and unboxing and recipe": "",
+		"Some clips": "",
+		"Clips from today in the gym, a set of reps": TypeWorkout, // "day in" is not "today in"
+		"workout and unboxing and recipe":            "",
 	}
 	for text, want := range cases {
 		if got := LikelyContentType(text); got != want {

@@ -153,3 +153,27 @@ func TestEndTurnNudgesForTheCheck(t *testing.T) {
 		t.Fatalf("checked: %+v %v", d, err)
 	}
 }
+
+// A call that is run again after a restart answers as it did and writes no second event; and the check is of the run's own newest
+// version, not of one a person saved meanwhile.
+func TestCheckEditIsRepeatableAndPinnedToTheRunsVersion(t *testing.T) {
+	g := newGateEnv(t)
+	g.ok(g.nextCall(g.rc), ToolEditTimeline, g.opsArgs(g.prj, addClipOp(g.clip, 6000, 9000), addClipOp(g.clip, 9000, 12000)))
+	first := g.nextCall(g.rc)
+	g.ok(first, ToolCheckEdit, `{}`)
+	events := len(*g.artifacts)
+	text := textOf(g.ok(again(first), ToolCheckEdit, `{}`))
+	if !strings.Contains(text, "your one revision pass") || len(*g.artifacts) != events {
+		t.Errorf("the repeated call: %d events after %d, text:\n%s", len(*g.artifacts), events, text)
+	}
+	if _, calls := g.deps.previews.checkState(first.RunID); calls != 1 {
+		t.Errorf("the repeated call counted as check %d", calls)
+	}
+
+	// Another run saves version 2; this run's check is still of its own version 1.
+	g.ok(g.runCtx(g.wsA, g.prj, ""), ToolEditTimeline, `{"base_version":1,"ops":[{"op":"set_look","preset":"bw"}]}`)
+	text = textOf(g.ok(g.nextCall(g.rc), ToolCheckEdit, `{}`))
+	if !strings.Contains(text, "check_edit for version 1 ") {
+		t.Errorf("the check is not of the run's own version:\n%s", text)
+	}
+}

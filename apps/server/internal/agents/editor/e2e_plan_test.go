@@ -21,9 +21,9 @@ func checkPlanAndChecks(t *testing.T, x *e2e) {
 		t.Errorf("plan lengths: %+v", plan)
 	}
 	var nth []int
-	for _, data := range runArtifacts(context.Background(), x.st, x.wsA.ID, x.run.ID, CheckArtifact) {
+	for _, art := range runArtifacts(context.Background(), x.st, x.wsA.ID, x.run.ID, CheckArtifact) {
 		var rec CheckRecord
-		if err := json.Unmarshal(data, &rec); err != nil {
+		if err := json.Unmarshal(art.Data, &rec); err != nil {
 			t.Fatal(err)
 		}
 		t.Logf("check %d of version %d: %d pass, %d fail, %d skip\n%s", rec.Nth, rec.Version, rec.Passed, rec.Failed, rec.Skipped, rec.Text())

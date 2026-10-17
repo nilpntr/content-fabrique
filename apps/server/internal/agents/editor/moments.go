@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 
@@ -199,7 +200,8 @@ func (d Deps) analysisSummaries(ctx context.Context, ws ids.WorkspaceID, rows []
 	// mean-based number that calls low-key footage dark). A clip whose series cannot be read keeps the cautious line.
 	series, err := d.Store.ListAssetExposureSeries(ctx, ws, assets)
 	if err != nil {
-		return nil, fmt.Errorf("analysis exposure: %w", err)
+		slog.WarnContext(ctx, "editor: the exposure series could not be read; the footage list keeps the cautious exposure line", "error", err)
+		series = nil
 	}
 	expo := make(map[ids.AssetID]analysis.Series, len(series))
 	for _, r := range series {
