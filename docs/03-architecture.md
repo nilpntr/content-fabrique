@@ -131,7 +131,7 @@ docs/
 
 ## 4. Data model
 
-Postgres, every tenant-owned row carries `workspace_id`. IDs are UUIDv7, which is time-sortable. Simplified:
+Postgres, every tenant-owned row carries `workspace_id`. IDs are UUIDv7, which is time-sortable; the API and the timeline spec show them as TypeIDs such as `ast_01j…` ([D-24](05-decisions.md#d-24-public-ids-are-typeids-over-uuidv7)). Simplified:
 
 ```mermaid
 erDiagram
@@ -174,7 +174,8 @@ erDiagram
 | `trends`, `trend_snapshots` | `kind` (sound, hashtag, format, topic), `external_id`, `title`, `meta` (bpm, snippet window, region); snapshots: `observed_at`, `rank`, `metrics`, `source` |
 | `concepts` | Global or per-workspace format templates: `structure` (slots, durations, text roles), `evidence`, `tags` |
 | `ideas` | `concept_id`, `hook`, `rationale`, `slot_plan` (slot → moment candidates), `sound_trend_id`, `status` |
-| `projects` | `idea_id`, `title`, `brief`, `status` (draft, editing, review, approved, exported), `current_timeline_id` |
+| `projects` | `idea_id`, `title`, `format` (9:16, 1:1, 4:5, 16:9, [D-25](05-decisions.md#d-25-output-formats-916-11-45-and-169-per-project)), `brief`, `status` (draft, editing, review, approved, exported), `current_timeline_id` |
+| `project_assets` | `project_id`, `asset_id`, `position`: the footage the creator selected in the new-project flow (P4-04b); the editor only uses these |
 | `timelines` | `project_id`, `version`, `spec` (jsonb), `schema_version`, `parent_id`, `author` (user or run), `change_summary`. Immutable once written. |
 | `renders` | `timeline_id`, `profile` (preview, final), `status`, `r2_key`, `time_map` (output ms → timeline item), `cpu_ms`, `error` |
 | `agent_runs` | `agent` (research, ideation, editor, worker), `parent_run_id` (sub-agent runs), `status` (queued, running, waiting_input, succeeded, failed, cancelled), `input`, `output`, `routing_profile`, `model`, `effort`, `escalated` (bool), token counts, `cost_micros`, `budget_micros`, `billed_to` |
@@ -246,6 +247,8 @@ All CPU/ML steps run in the `media-tools` image inside the sandbox layer (§8), 
 
 ### Spec (v1, abridged)
 
+The full rules for v1, the edit ops and the compiler are in the [timeline design note](design/timeline-v1.md).
+
 ```json
 {
   "schema": "contentfabrique.timeline/v1",
@@ -255,7 +258,7 @@ All CPU/ML steps run in the `media-tools` image inside the sandbox layer (§8), 
       "id": "main", "type": "video",
       "items": [
         {
-          "id": "c1", "asset_id": "ast_01J…", "moment_id": "mom_01J…",
+          "id": "c1", "asset_id": "ast_01j…", "moment_id": "mom_01j…",
           "source": { "in_ms": 3200, "out_ms": 5400 },
           "at_ms": 0, "speed": 1.0,
           "reframe": { "mode": "cover", "focus": { "x": 0.52, "y": 0.40 }, "zoom": 1.08 },
@@ -277,13 +280,13 @@ All CPU/ML steps run in the `media-tools` image inside the sandbox layer (§8), 
     {
       "id": "sound", "type": "audio",
       "items": [
-        { "id": "s1", "kind": "trend_sound", "trend_id": "trd_01J…", "at_ms": 0,
+        { "id": "s1", "kind": "trend_sound", "trend_id": "trd_01j…", "at_ms": 0,
           "source_offset_ms": 12000, "export": "cue_only", "gain_db": -3 }
       ]
     }
   ],
   "markers": [ { "at_ms": 2200, "kind": "beat", "strength": 1.0 } ],
-  "meta": { "idea_id": "ide_01J…", "concept_id": "con_01J…" }
+  "meta": { "idea_id": "ide_01j…", "concept_id": "con_01j…" }
 }
 ```
 
@@ -303,12 +306,12 @@ Agents (and the UI) change timelines through **high-level ops**, never by rewrit
 ### Renderer
 
 `internal/render` compiles a spec into one ffmpeg invocation per render (`-filter_complex`):
-- Per item: `trim/atrim` → `setpts` (speed) → scale/crop to 9:16 around the focus point → fps conversion → look (`eq`/`curves`/`lut3d`) → transitions (`xfade`).
+- Per item: `trim/atrim` → `setpts` (speed) → scale/crop to the project's format ([D-25](05-decisions.md#d-25-output-formats-916-11-45-and-169-per-project)) around the focus point → fps conversion → look (`eq`/`curves`/`lut3d`) → transitions (`xfade`).
 - Text: `drawtext` for simple text; **ASS subtitles via libass** for styled and animated text and word-highlight captions.
 - Audio: source audio and licensed tracks mixed (`amix`/`adelay`/`volume`) and normalised (`loudnorm`).
 - **Profiles**:
   - `preview`: 540×960, rendered from proxies, very fast encoder preset, with a watermark. Target: seconds for a 30 s edit.
-  - `final`: 1080×1920 from originals, high-quality CRF H.264 + AAC, `+faststart`.
+  - `final`: full size (1080×1920 for 9:16) from originals, high-quality CRF H.264 + AAC, `+faststart`.
   - CPU x264 is enough at our volumes: rendering costs fractions of a cent per short ([research §3.3](02-research.md#33-rendering)).
 - Output includes `time_map` (output ms → item id) for comment mapping, and a **contact sheet** (frames at every cut) that the Editor agent uses to check its own work cheaply.
 - **Golden tests**: a fixture set of specs rendered in CI, compared by frame hashes or SSIM.

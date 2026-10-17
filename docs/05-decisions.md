@@ -28,6 +28,8 @@
 | D-21 | Testing uses the first-party Claude API through its own dev gateway and is self-funded; no AWS credits, no Bedrock lane | Accepted (founder decision) |
 | D-22 | Cheap-first testing ladder: free replay, then Haiku, then Sonnet, then Opus, with an exit checklist per rung | Accepted (founder direction) |
 | D-23 | Product domain `contentfabrique.app`: the apex serves the landing page and the app, `api.` the API, `staging.` and `api-staging.` for staging | Accepted (the founder bought the domain) |
+| D-24 | Public IDs are TypeIDs (a type prefix plus a base32 UUIDv7); Postgres stores the plain `uuid` | Accepted (engineering, 2026-10-16) |
+| D-25 | Four output formats in v1: 9:16, 1:1, 4:5 and 16:9, chosen per project; TikTok stays the only publishing target | Accepted (founder decision, 2026-10-17) |
 
 ---
 
@@ -464,6 +466,72 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 **Consequences.** `.app` is on the browsers' HSTS preload list △, so every hostname is HTTPS-only from the first request. That is fine behind Cloudflare, but a plain-HTTP check fails, and local work stays on `localhost`. The web app and the API are different origins, and the session token travels in an `Authorization: Bearer` header ([architecture §9](03-architecture.md#9-api)), so no cookie crosses between them. The API therefore needs a CORS allowlist, built from `APP_BASE_URL`.
 
 **Revisit** if the landing page needs its own release cadence (then move the app to `app.`), or if the product is renamed.
+
+## D-24 Public IDs are TypeIDs over UUIDv7
+
+**Context.** The database uses UUIDv7 keys ([architecture §4](03-architecture.md#4-data-model)). The API, the timeline spec and the agents' tool calls also need IDs. A bare UUID doesn't say what it points at, so an agent can pass an asset ID where a moment ID belongs, and logs are harder to read. The architecture's examples already write `ast_01j…`.
+
+**Decision.**
+- **Outside the database, every ID is a [TypeID](https://github.com/jetify-com/typeid):** a lowercase type prefix, an underscore, and the UUIDv7 in 26-character Crockford base32, for example `ast_01jabcd…`.
+- **Postgres stores the plain `uuid`.** The conversion happens at the API and spec boundary in Go (`go.jetify.com/typeid`, Apache-2.0).
+- **Prefixes:**
+
+  | Prefix | Object | Prefix | Object |
+  |---|---|---|---|
+  | `wks` | workspace | `ast` | asset |
+  | `usr` | user | `mom` | moment |
+  | `shot` | shot | `ann` | annotation |
+  | `trd` | trend | `con` | concept |
+  | `ide` | idea | `prj` | project |
+  | `tl` | timeline | `ren` | render |
+  | `run` | agent run | `exp` | export |
+  | `lic` | licence | `upl` | upload |
+  | `evt` | event | | |
+
+  New tables add their prefix to this list.
+- **Clerk's own IDs** (`user_…`, `org_…`) are stored as text next to our keys and never reused as ours.
+
+**Alternatives.**
+- Bare UUIDs everywhere: simpler, but untyped.
+- ULIDs: same idea without a spec or a typed prefix.
+- Prefixed hex UUIDs: 40 characters, and they mix badly with log search.
+
+**Consequences.**
+- The OpenAPI spec types each ID field with a `pattern`.
+- The timeline JSON Schema checks the prefix per field ([timeline design note](design/timeline-v1.md)).
+- A wrong-type ID fails at decode time, before it reaches a query.
+
+**Revisit** if a client library can't handle the format, which is unlikely: it's a plain string.
+
+## D-25 Output formats: 9:16, 1:1, 4:5 and 16:9 per project
+
+**Context.** v1 was scoped to TikTok, so the timeline accepted only 1080×1920. The founder wants a new job to start with a format picker (one card per format, each showing a device in that shape) so creators can also cut square, portrait-feed and landscape versions.
+
+**Decision.**
+- **A project picks one output format when it is created:**
+
+  | Format | Size | Typical use | Safe zone |
+  |---|---|---|---|
+  | `9:16` | 1080×1920 | TikTok, Reels, Shorts | TikTok UI zones ([research §3.4](02-research.md#34-captions-safe-zones-beat-snapping)) |
+  | `1:1` | 1080×1080 | Feed posts | 5 % margin on every side |
+  | `4:5` | 1080×1350 | Instagram portrait feed | 5 % margin on every side |
+  | `16:9` | 1920×1080 | YouTube, landscape | 10 % title-safe margin, plus the bottom 15 % kept clear for player controls |
+
+- **The timeline's `output` takes these four sizes.** The renderer reframes to any of them with the same focus-point logic, and the preview renders at half size.
+- **TikTok remains the only publishing target.** A TikTok inbox draft (P6-04) is offered for `9:16` only; the other formats are downloads.
+- **Agent prompts and the trend board stay TikTok-tuned in v1.** The editor is told the format and its safe zone.
+
+**Alternatives.**
+- 9:16 only, with the other cards marked "coming soon": less work, but the founder wants the other formats to work now.
+- Rendering every format from one edit: deferred. One project, one format; a "duplicate as another format" action can come later.
+
+**Consequences.**
+- Safe zones become per-format values.
+- Golden render tests cover each format.
+- The editor eval set (P4-07) gets at least a few non-9:16 scenarios.
+- Format is chosen up front, so changing it later means a new project.
+
+**Revisit** when we add a second publishing platform, or when creators ask for one edit in several formats.
 
 ## Template for new decisions
 
