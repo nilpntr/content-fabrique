@@ -133,7 +133,7 @@ func loadExample(stderr io.Writer) (root string, example []envfile.Var, code int
 		_, _ = fmt.Fprintf(stderr, "cfctl: %v\n", err)
 		return "", nil, 2
 	}
-	f, err := os.Open(filepath.Join(root, envfile.ExampleFile))
+	f, err := os.Open(filepath.Join(root, envfile.ExampleFile)) //nolint:gosec // G304: the root is the operator's repo checkout, not request input
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "cfctl: cannot read %s\n", envfile.ExampleFile)
 		return "", nil, 2

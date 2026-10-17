@@ -60,6 +60,8 @@ function BreadcrumbLink({
 
 function BreadcrumbPage({ className, ...props }: React.ComponentProps<"span">) {
   return (
+    // biome-ignore lint/a11y/useFocusableInteractive: shadcn's current-page marker, a disabled link that must not be focusable (WAI-ARIA breadcrumb pattern).
+    // biome-ignore lint/a11y/useSemanticElements: the current page has no href, so an <a> would not be a link either.
     <span
       data-slot="breadcrumb-page"
       role="link"

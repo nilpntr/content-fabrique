@@ -64,6 +64,19 @@ tasks:
       - bun run --filter @cf/web test
       - cd apps/server && go test ./...
 
+  lint:
+    desc: Lint the Go code (golangci-lint, if installed) and the web code (Biome)
+    cmds:
+      - task: lint:go
+      - bun run --filter @cf/web lint
+
+  # The same pinned version as .github/workflows/ci.yml (change both together), run through `go run`, so it needs no install.
+  lint:go:
+    internal: true
+    dir: apps/server
+    cmds:
+      - go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 run
+
   # ── Environment ─────────────────────────────────────────────────────────────
 
   env:init:

@@ -82,6 +82,7 @@ function SidebarProvider({
         _setOpen(openState)
       }
 
+      // biome-ignore lint/suspicious/noDocumentCookie: shadcn persists the sidebar state in a cookie that the server can read; the Cookie Store API is not available everywhere yet.
       document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
     },
     [setOpenProp, open]
@@ -89,7 +90,7 @@ function SidebarProvider({
 
   const toggleSidebar = React.useCallback(() => {
     return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open)
-  }, [isMobile, setOpen, setOpenMobile])
+  }, [isMobile, setOpen])
 
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -118,7 +119,7 @@ function SidebarProvider({
       setOpenMobile,
       toggleSidebar,
     }),
-    [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar]
+    [state, open, setOpen, isMobile, openMobile, toggleSidebar]
   )
 
   return (
@@ -457,11 +458,13 @@ function SidebarContent({
     }
   }, [])
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `state` is the trigger, so the hover highlight resets when the sidebar expands or collapses.
   React.useEffect(() => {
     gliders.current?.hover.to(null)
   }, [state])
 
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: the handlers only move a decorative hover and focus highlight; the menu buttons inside stay the interactive elements.
     <div
       ref={ref}
       data-slot="sidebar-content"
