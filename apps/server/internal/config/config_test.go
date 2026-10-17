@@ -73,6 +73,7 @@ func TestLoadListenAddr(t *testing.T) {
 func TestLoadValues(t *testing.T) {
 	c, err := Load(env(map[string]string{
 		"CF_ENV":                      " staging ",
+		"APP_BASE_URL":                "https://staging.contentfabrique.app",
 		"OTEL_EXPORTER_OTLP_ENDPOINT": "https://api.axiom.co",
 	}))
 	if err != nil {

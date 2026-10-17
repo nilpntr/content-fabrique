@@ -1,3 +1,4 @@
+import { OrganizationSwitcher } from "@clerk/tanstack-react-start";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { APP_NAME, Wordmark } from "@/components/logo";
@@ -45,6 +46,15 @@ export function AppSidebar({ active }: { active: NavItem | undefined }) {
         >
           <Wordmark />
         </Link>
+        {/* The workspace is a Clerk organization; switching it changes what the API resolves from the token. */}
+        <div className="mt-2 group-data-[collapsible=icon]:hidden">
+          <OrganizationSwitcher
+            hidePersonal
+            afterSelectOrganizationUrl="/"
+            afterCreateOrganizationUrl="/"
+            appearance={{ elements: { rootBox: "w-full", organizationSwitcherTrigger: "w-full justify-between" } }}
+          />
+        </div>
       </SidebarHeader>
       <SidebarContent>
         <nav aria-label="Main">

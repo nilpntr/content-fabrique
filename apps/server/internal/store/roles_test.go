@@ -344,6 +344,7 @@ func assertAppRole(t *testing.T, srv *storetest.Server, database string) {
 
 	// 1. It can read and write rows: the whole repository suite, with every query as the app role.
 	repositorySuite(t, openStore(t, appDSN))
+	clerkSyncSuite(t, openStore(t, appDSN))
 
 	// Plain SQL as well, for the four verbs of the criterion.
 	for _, stmt := range []string{

@@ -7,18 +7,24 @@ export function PagePlaceholder({
   title,
   description,
   cards = 3,
+  actions,
   children,
 }: {
   title: string;
   description: string;
   cards?: number;
+  /** Buttons shown at the right of the heading. */
+  actions?: React.ReactNode;
   children?: React.ReactNode;
 }) {
   return (
     <div className="space-y-6">
-      <div className="animate-rise">
-        <h1 className="text-[1.625rem] leading-tight font-semibold tracking-[-0.025em] text-balance">{title}</h1>
-        <p className="mt-1.5 max-w-prose text-muted-foreground">{description}</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="animate-rise">
+          <h1 className="text-[1.625rem] leading-tight font-semibold tracking-[-0.025em] text-balance">{title}</h1>
+          <p className="mt-1.5 max-w-prose text-muted-foreground">{description}</p>
+        </div>
+        {actions ? <div className="animate-rise">{actions}</div> : null}
       </div>
       <div className="grid gap-4 md:grid-cols-3">
         {Array.from({ length: cards }, (_, i) => (

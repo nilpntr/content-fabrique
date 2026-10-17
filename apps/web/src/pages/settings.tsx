@@ -1,33 +1,57 @@
-import { cardClassName, PagePlaceholder } from "@/components/page-placeholder";
-import { APP_NAME } from "@/components/logo";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { notify } from "@/components/ui/toast";
+import { cardClassName } from "@/components/page-placeholder";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ApiError } from "@/lib/api";
+import { useMe } from "@/lib/use-me";
 
+/** Settings. For now it shows what the API knows about the signed-in user and the active workspace (GET /v1/me). */
 export function SettingsPage() {
+  const me = useMe();
+
   return (
-    <PagePlaceholder title="Settings" description="An example settings page." cards={1}>
-      <form
-        className={`${cardClassName} max-w-xl space-y-4 [animation-delay:95ms]`}
-        onSubmit={(event) => {
-          event.preventDefault();
-          notify("Settings saved", { description: "The workspace name is updated." });
-        }}
-      >
-        <div>
-          <label htmlFor="workspace-name" className="text-[13.5px] font-medium">
-            Workspace name
-          </label>
-          <p className="mt-0.5 text-[13px] text-muted-foreground">Shown in the sidebar and in page titles.</p>
+    <div className="space-y-6">
+      <div className="animate-rise">
+        <h1 className="text-[1.625rem] leading-tight font-semibold tracking-[-0.025em] text-balance">Settings</h1>
+        <p className="mt-1.5 max-w-prose text-muted-foreground">Your account and the workspace you are working in.</p>
+      </div>
+
+      {me.isPending ? (
+        <div className={`${cardClassName} max-w-xl space-y-3 [animation-delay:95ms]`} aria-busy="true">
+          <Skeleton className="h-4 w-1/3" />
+          <Skeleton className="h-5 w-2/3" />
+          <Skeleton className="h-5 w-1/2" />
         </div>
-        <Input id="workspace-name" name="workspace" defaultValue={APP_NAME} autoComplete="off" />
-        <div className="flex items-center gap-2">
-          <Button type="submit">Save changes</Button>
-          <Button type="reset" variant="ghost">
-            Reset
-          </Button>
+      ) : me.isError ? (
+        <div role="alert" className={`${cardClassName} max-w-xl space-y-1 [animation-delay:95ms]`}>
+          <p className="text-[13.5px] font-medium">Your account could not be loaded.</p>
+          <p className="text-[13px] text-muted-foreground">{describeError(me.error)}</p>
         </div>
-      </form>
-    </PagePlaceholder>
+      ) : (
+        <dl className={`${cardClassName} grid max-w-xl grid-cols-[8rem_1fr] gap-x-4 gap-y-3 text-[13.5px] [animation-delay:95ms]`}>
+          <Row label="Email" value={me.data.user.email} />
+          <Row label="User id" value={me.data.user.id} mono />
+          <Row label="Workspace" value={me.data.workspace.name} />
+          <Row label="Workspace id" value={me.data.workspace.id} mono />
+          <Row label="Your role" value={me.data.workspace.role} />
+        </dl>
+      )}
+    </div>
   );
+}
+
+function Row({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className={mono ? "min-w-0 truncate font-mono text-[12.5px]" : "min-w-0 truncate font-medium"}>{value}</dd>
+    </>
+  );
+}
+
+function describeError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.code === "no_active_workspace") return "Choose or create a workspace first.";
+    if (error.code === "network_error") return "The server could not be reached. Is the API running?";
+    return `${error.message} (${error.code})`;
+  }
+  return "Something went wrong.";
 }
