@@ -22,12 +22,15 @@ type Deps struct {
 
 // Mount registers the auth routes on mux:
 //
-//	GET  /v1/me              the signed-in user and workspace (behind the middleware)
-//	POST /v1/webhooks/clerk  Clerk's Svix-signed webhook (signed, not behind the middleware)
+//	GET  /v1/me                the signed-in user, workspace and entitlements (authenticated; open without a plan)
+//	GET  /v1/workspace/plan    the plan and what it includes (authenticated; open without a plan)
+//	GET  /v1/library/summary   counts for the library, the first paid-only endpoint (authenticated, active plan)
+//	POST /v1/webhooks/clerk    Clerk's Svix-signed webhook (signed, not behind the middleware)
 //
-// and returns the authentication middleware, which every other /v1 route (except webhooks) goes behind. Without
-// CLERK_SECRET_KEY the middleware answers 503 to everything it guards, and the webhook without CLERK_WEBHOOK_SECRET
-// answers 503, so a missing secret is never an open door.
+// and returns the guard that every other /v1 route (except webhooks) goes behind: the authentication middleware followed
+// by RequireActivePlan, so a route is paid-only unless it is on the allowlist documented in entitlements.go and mounted
+// here with authentication alone. Without CLERK_SECRET_KEY the guard answers 503 to everything it guards, and the
+// webhook without CLERK_WEBHOOK_SECRET answers 503, so a missing secret is never an open door.
 func Mount(mux *http.ServeMux, d Deps) (func(http.Handler) http.Handler, error) {
 	logger := d.Logger
 	if logger == nil {
@@ -62,7 +65,14 @@ func Mount(mux *http.ServeMux, d Deps) (func(http.Handler) http.Handler, error) 
 		return nil, err
 	}
 
-	mux.Handle("GET /v1/me", mw(MeHandler()))
+	// The allowlist: authenticated, and open to a workspace without a plan.
+	mux.Handle("GET /v1/me", mw(MeHandler(d.Store, logger)))
+	mux.Handle("GET /v1/workspace/plan", mw(WorkspacePlanHandler(d.Store, logger)))
 	mux.Handle("POST /v1/webhooks/clerk", wh)
-	return mw, nil
+
+	// Everything else: authenticated, then an active plan.
+	paid := RequireActivePlan(d.Store, logger)
+	guard := func(next http.Handler) http.Handler { return mw(paid(next)) }
+	mux.Handle("GET /v1/library/summary", guard(LibrarySummaryHandler()))
+	return guard, nil
 }

@@ -3,6 +3,7 @@ import { SearchIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { CommandPalette } from "@/components/command-palette";
+import { PlanGate } from "@/components/plan-gate";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage } from "@/components/ui/breadcrumb";
 import { Kbd } from "@/components/ui/kbd";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
@@ -75,7 +76,9 @@ export function AppShell({ defaultSidebarOpen = true }: { defaultSidebarOpen?: b
           </button>
         </header>
         <div className="flex-1 px-6 pt-6 pb-12">
-          <Outlet />
+          <PlanGate>
+            <Outlet />
+          </PlanGate>
         </div>
       </SidebarInset>
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />

@@ -46,7 +46,7 @@ func TestUnknownKeyIDsDoNotAmplifyIntoClerkCalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := mw(MeHandler())
+	h := mw(MeHandler(&fakeEnts{}, nil))
 
 	// The first request fetches the key set once.
 	if rec := get(h, "Bearer "+f.token(t, nil)); rec.Code != http.StatusOK {
@@ -77,7 +77,7 @@ func TestConcurrentUnknownKeyIDsShareOneFetch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := mw(MeHandler())
+	h := mw(MeHandler(&fakeEnts{}, nil))
 	other, _ := rsa.GenerateKey(rand.Reader, 2048)
 
 	var wg sync.WaitGroup
@@ -140,7 +140,7 @@ func TestKeySetUnavailableIs503(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := mw(MeHandler())
+	h := mw(MeHandler(&fakeEnts{}, nil))
 	tok := f.token(t, nil)
 
 	for range 5 {

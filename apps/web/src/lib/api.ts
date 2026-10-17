@@ -76,10 +76,24 @@ async function toApiError(response: Response): Promise<ApiError> {
   return new ApiError(response.status, "unknown_error", `The server answered ${response.status}.`);
 }
 
+/** The plans, as the API names them. `none` is no plan: the paywall. */
+export type PlanName = "none" | "trial" | "studio" | "creator" | "pro";
+
+/** The workspace's plan (P0-16). Only `active` decides what the app shows; the rest is for display. */
+export interface Entitlements {
+  plan: PlanName;
+  /** `none` when the workspace never had a plan. */
+  status: "none" | "active" | "past_due" | "canceled";
+  active: boolean;
+  /** ISO time when the paid period ends, or null when it does not. */
+  current_period_end: string | null;
+}
+
 /** GET /v1/me. */
 export interface Me {
   user: { id: string; email: string };
   workspace: { id: string; name: string; role: "owner" | "editor" | "viewer" };
+  entitlements: Entitlements;
 }
 
 export function fetchMe(options: Omit<RequestOptions, "method" | "body">): Promise<Me> {

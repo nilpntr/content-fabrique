@@ -47,7 +47,6 @@ type Workspace struct {
 	ID             ids.WorkspaceID
 	ClerkOrgID     string
 	Name           string
-	Plan           string
 	Region         string
 	BillingMode    string
 	CreatedAt      time.Time
@@ -63,4 +62,15 @@ type WorkspaceMember struct {
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	ClerkUpdatedAt int64
+}
+
+type WorkspacePlan struct {
+	WorkspaceID      ids.WorkspaceID
+	Plan             string
+	Status           string
+	Source           string
+	CurrentPeriodEnd *time.Time
+	GrantedBy        string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }

@@ -11,6 +11,7 @@ export const SIGNED_IN: Session = { isAuthenticated: true, userId: "user_test", 
 export const ME = {
   user: { id: "usr_01test", email: "ada@example.com" },
   workspace: { id: "wks_01test", name: "Fit Studio", role: "owner" },
+  entitlements: { plan: "creator", status: "active", active: true, current_period_end: null },
 };
 
 export const clerkMock = {

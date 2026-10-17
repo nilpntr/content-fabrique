@@ -53,15 +53,13 @@ const (
 
 // Defaults for a new workspace. The EU region follows D-15.
 const (
-	DefaultPlan   = "free"
 	DefaultRegion = "eu"
 )
 
-// NewWorkspace is the input of CreateWorkspace. Plan, Region and BillingMode fall back to the defaults.
+// NewWorkspace is the input of CreateWorkspace. Region and BillingMode fall back to the defaults.
 type NewWorkspace struct {
 	ClerkOrgID  string
 	Name        string
-	Plan        string
 	Region      string
 	BillingMode BillingMode
 }
@@ -71,9 +69,6 @@ type NewWorkspace struct {
 func (s *Store) CreateWorkspace(ctx context.Context, in NewWorkspace) (Workspace, error) {
 	if strings.TrimSpace(in.ClerkOrgID) == "" || strings.TrimSpace(in.Name) == "" {
 		return Workspace{}, fmt.Errorf("%w: clerk org id and name are required", ErrInvalid)
-	}
-	if in.Plan == "" {
-		in.Plan = DefaultPlan
 	}
 	if in.Region == "" {
 		in.Region = DefaultRegion
@@ -85,7 +80,7 @@ func (s *Store) CreateWorkspace(ctx context.Context, in NewWorkspace) (Workspace
 		return Workspace{}, fmt.Errorf("%w: billing mode %q", ErrInvalid, in.BillingMode)
 	}
 	w, err := s.q.CreateWorkspace(ctx, db.CreateWorkspaceParams{
-		ClerkOrgID: in.ClerkOrgID, Name: in.Name, Plan: in.Plan, Region: in.Region, BillingMode: string(in.BillingMode),
+		ClerkOrgID: in.ClerkOrgID, Name: in.Name, Region: in.Region, BillingMode: string(in.BillingMode),
 	})
 	return w, mapErr(err)
 }
