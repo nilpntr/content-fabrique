@@ -527,6 +527,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/annotations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The comments on one target, or on a project
+         * @description Either `target_type` with `target_id` (the comments on one clip, render or version) or `project_id` (every comment on the renders
+         *     and versions of the project): not both, and one of the two is required. Replies come in the same list, with `parent_id` set. Oldest
+         *     first; page with `cursor` (the `next_cursor` of the previous page). Every role may read.
+         */
+        get: operations["listAnnotations"];
+        put?: never;
+        /**
+         * Comment on a clip, a render or a version of a timeline
+         * @description Adds a comment on a range of `target_id`'s time. `target_type` says what that is: `asset` (a clip of the library, `ast_`), `render`
+         *     (an output, `ren_`) or `timeline_version` (a stored version, `tl_`, for a version that has no render yet). A comment on a render
+         *     or a version carries the project and the version it was made on (`project_id`, `timeline_version`), which the server reads from the
+         *     target; `project_id` in the request is optional, and when it is there it must be the target's project (`404` otherwise). A
+         *     point comment has `end_ms` equal to `start_ms`. `pin` is a point or a box on the frame, normalised to 0..1 from the top left.
+         *     `kind` is `comment` (the default), `instruction`, or one of the constraints `include`, `exclude` and `prefer`. With `parent_id` the
+         *     comment is a reply to a comment: it takes the target and range of that comment, has kind `comment` and no pin, and a reply to a reply is
+         *     refused. `body` is plain text of at most 2,000 characters (a bare marker may have none, except a `comment` or an `instruction`).
+         *     A target or a parent of another workspace is `404 not_found`, the same as one that does not exist. Only owners and editors may
+         *     comment.
+         */
+        post: operations["createAnnotation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/annotations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The annotation's TypeID. */
+                id: components["parameters"]["AnnotationIdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a comment
+         * @description Soft-deletes the comment and its replies. Only the author may delete a comment (`403 insufficient_role` for anyone else, the editor's replies included).
+         */
+        delete: operations["deleteAnnotation"];
+        options?: never;
+        head?: never;
+        /**
+         * Edit, resolve or reopen a comment
+         * @description Changes what the request names and leaves the rest. The author of a comment may change anything; another owner or editor may only
+         *     change `status` (to resolve or reopen it), and the editor's replies are never edited (`403 insufficient_role`). `status` takes `open`
+         *     or `resolved`: `applied` is set by the editor agent when a run has dealt with the comment, and a person reopens it with `open`.
+         *     Editing the text, kind, range or pin of an applied comment reopens it. `remove_pin` takes the pin off. The range of a reply
+         *     cannot be changed (it follows its comment). Editing a comment moves the range of its replies with it.
+         */
+        patch: operations["updateAnnotation"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1193,6 +1259,118 @@ export interface components {
             /** @description Pass it as `cursor` for the next page. Null on the last page. */
             next_cursor: string | null;
         };
+        /**
+         * @description What a comment is about, and what `target_id` is a TypeID of.
+         * @enum {string}
+         */
+        AnnotationTargetType: "asset" | "render" | "timeline_version";
+        /**
+         * @description `comment` (a note for the creator or the editor), `instruction` (a note addressed to the editor agent), or a constraint on the range:
+         *     `include` (keep it), `exclude` (leave it out), `prefer` (favour it).
+         * @enum {string}
+         */
+        AnnotationKind: "comment" | "include" | "exclude" | "prefer" | "instruction";
+        /**
+         * @description `open`; `applied` (an editor run dealt with it: `applied_in_run_id`, and `addressed_in_version` when that run made a version); or
+         *     `resolved` (closed by hand).
+         * @enum {string}
+         */
+        AnnotationStatus: "open" | "applied" | "resolved";
+        /**
+         * @description A spot on the frame, normalised to 0..1 from the top left: a point (`x`, `y`) or a box (`x`, `y` and its size `w`, `h`, which
+         *     come together and keep the box inside the frame).
+         */
+        AnnotationPin: {
+            /** Format: double */
+            x: number;
+            /** Format: double */
+            y: number;
+            /** Format: double */
+            w?: number;
+            /** Format: double */
+            h?: number;
+        };
+        AnnotationAuthor: {
+            kind: components["schemas"]["AuthorKind"];
+            /** @description The user's TypeID, or the editor run's id. */
+            id: string;
+        };
+        Annotation: {
+            id: components["schemas"]["AnnotationId"];
+            target_type: components["schemas"]["AnnotationTargetType"];
+            /** @description The TypeID of the clip, render or version. */
+            target_id: string;
+            /** @description The project of a comment on a render or a version. Null for a clip. */
+            project_id: components["schemas"]["ProjectId"] | null;
+            /** @description The version a comment on a render or a version was made on (of a render, the version it was made from). Null for a clip. */
+            timeline_version: number | null;
+            /** Format: int64 */
+            start_ms: number;
+            /**
+             * Format: int64
+             * @description Equal to `start_ms` for a comment on a moment.
+             */
+            end_ms: number;
+            pin: components["schemas"]["AnnotationPin"] | null;
+            kind: components["schemas"]["AnnotationKind"];
+            body: string;
+            status: components["schemas"]["AnnotationStatus"];
+            /** @description Set on a reply: the comment it answers. */
+            parent_id: components["schemas"]["AnnotationId"] | null;
+            author: components["schemas"]["AnnotationAuthor"];
+            applied_in_run_id: components["schemas"]["RunId"] | null;
+            /** @description The version the editor run that applied the comment made. Null while the comment is not applied, and when the run made none. */
+            addressed_in_version: number | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /**
+         * @description `target_type`, `target_id` and `start_ms` are required, except in a reply (`parent_id`): a reply takes the target and the range of the
+         *     comment it answers, and when it names them they must be the comment's own.
+         */
+        CreateAnnotationRequest: {
+            target_type?: components["schemas"]["AnnotationTargetType"];
+            /** @description The TypeID of the clip (`ast_`), the render (`ren_`) or the version (`tl_`). */
+            target_id?: string;
+            project_id?: components["schemas"]["ProjectId"];
+            /** Format: int64 */
+            start_ms?: number;
+            /**
+             * Format: int64
+             * @description Defaults to `start_ms` (a comment on a moment).
+             */
+            end_ms?: number;
+            pin?: components["schemas"]["AnnotationPin"];
+            /** @description Defaults to `comment`. */
+            kind?: components["schemas"]["AnnotationKind"];
+            /** @description Plain text. Required (not empty) for a `comment` and an `instruction`. */
+            body?: string;
+            parent_id?: components["schemas"]["AnnotationId"];
+        };
+        /** @description Every field is optional; the ones that are absent stay as they are. At least one must be there. */
+        UpdateAnnotationRequest: {
+            body?: string;
+            kind?: components["schemas"]["AnnotationKind"];
+            /**
+             * @description `open` (reopen) or `resolved`. A person cannot set `applied`.
+             * @enum {string}
+             */
+            status?: "open" | "resolved";
+            /** Format: int64 */
+            start_ms?: number;
+            /** Format: int64 */
+            end_ms?: number;
+            pin?: components["schemas"]["AnnotationPin"];
+            /** @description Take the pin off. Not with `pin`. */
+            remove_pin?: boolean;
+        };
+        ListAnnotationsResponse: {
+            items: components["schemas"]["Annotation"][];
+            /** @description Pass it as `cursor` for the next page. Null on the last page. */
+            next_cursor: string | null;
+        };
         WebhookResult: {
             /**
              * @description `applied`: the event changed something. `duplicate`: a replay of a delivery already applied. `ignored`: an event
@@ -1295,6 +1473,8 @@ export interface components {
         AssetIdPath: components["schemas"]["AssetId"];
         /** @description The project's TypeID. */
         ProjectIdPath: components["schemas"]["ProjectId"];
+        /** @description The annotation's TypeID. */
+        AnnotationIdPath: components["schemas"]["AnnotationId"];
         /** @description The render's TypeID. */
         RenderIdPath: components["schemas"]["RenderId"];
         /** @description The run's TypeID. */
@@ -2224,6 +2404,135 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Render"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    listAnnotations: {
+        parameters: {
+            query?: {
+                target_type?: components["schemas"]["AnnotationTargetType"];
+                /** @description The TypeID of the target (`ast_`, `ren_` or `tl_` after `target_type`). */
+                target_id?: string;
+                project_id?: components["schemas"]["ProjectId"];
+                /** @description How many comments to return (default 200). */
+                limit?: number;
+                /** @description The `next_cursor` of the previous page. */
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of comments. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListAnnotationsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    createAnnotation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAnnotationRequest"];
+            };
+        };
+        responses: {
+            /** @description The comment. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Annotation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    deleteAnnotation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The annotation's TypeID. */
+                id: components["parameters"]["AnnotationIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    updateAnnotation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The annotation's TypeID. */
+                id: components["parameters"]["AnnotationIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAnnotationRequest"];
+            };
+        };
+        responses: {
+            /** @description The comment as it is now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Annotation"];
                 };
             };
             400: components["responses"]["BadRequest"];

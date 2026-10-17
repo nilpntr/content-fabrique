@@ -1,32 +1,5 @@
 import { expect, test } from "vitest";
-import type { ReviewAnnotation } from "@/components/editor/types";
-import { createMemoryCommentsStore } from "./comments-store";
 import { chooseRun, isRunId, recallRun, rememberRun } from "./last-run";
-
-const comment = (id: string): ReviewAnnotation => ({
-  id,
-  version: 1,
-  start_ms: 0,
-  end_ms: 0,
-  kind: "comment",
-  body: id,
-  status: "open",
-  author: { kind: "creator", name: "You" },
-  created_at: "2026-10-17T10:00:00Z",
-});
-
-test("a project's comments are replaced as a whole, kept per project, and the list is a copy", () => {
-  const store = createMemoryCommentsStore();
-  store.replace("prj_a", [comment("one"), comment("two")]);
-  store.replace("prj_b", [comment("other")]);
-  expect(store.list("prj_a").map((c) => c.id)).toEqual(["one", "two"]);
-  expect(store.list("prj_b").map((c) => c.id)).toEqual(["other"]);
-  expect(store.list("prj_c")).toEqual([]);
-  store.list("prj_a").pop();
-  expect(store.list("prj_a")).toHaveLength(2);
-  store.replace("prj_a", [comment("two")]);
-  expect(store.list("prj_a").map((c) => c.id)).toEqual(["two"]);
-});
 
 test("the run of a project is remembered in this browser; text that is not a run is ignored", () => {
   window.localStorage.clear();

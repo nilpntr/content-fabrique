@@ -46,6 +46,8 @@ tags:
     description: Agent runs. The editor agent edits a project's timeline in a run; the run is a record of every step, its cost and its result (paid-only).
   - name: renders
     description: Renders of a project's timeline versions, the preview and the final MP4, with their time map and contact sheet (paid-only).
+  - name: annotations
+    description: Comments on a clip, on a render or on a version of a timeline - on a range of time, with a kind and an optional pin on the frame (paid-only).
   - name: webhooks
     description: Called by other services, not by the web app. Not part of the generated TypeScript client or of the generated Go server interface.
 
@@ -1096,6 +1098,174 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /v1/annotations:
+    post:
+      operationId: createAnnotation
+      tags: [annotations]
+      summary: Comment on a clip, a render or a version of a timeline
+      description: |
+        Adds a comment on a range of `target_id`'s time. `target_type` says what that is: `asset` (a clip of the library, `ast_`), `render`
+        (an output, `ren_`) or `timeline_version` (a stored version, `tl_`, for a version that has no render yet). A comment on a render
+        or a version carries the project and the version it was made on (`project_id`, `timeline_version`), which the server reads from the
+        target; `project_id` in the request is optional, and when it is there it must be the target's project (`404` otherwise). A
+        point comment has `end_ms` equal to `start_ms`. `pin` is a point or a box on the frame, normalised to 0..1 from the top left.
+        `kind` is `comment` (the default), `instruction`, or one of the constraints `include`, `exclude` and `prefer`. With `parent_id` the
+        comment is a reply to a comment: it takes the target and range of that comment, has kind `comment` and no pin, and a reply to a reply is
+        refused. `body` is plain text of at most 2,000 characters (a bare marker may have none, except a `comment` or an `instruction`).
+        A target or a parent of another workspace is `404 not_found`, the same as one that does not exist. Only owners and editors may
+        comment.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAnnotationRequest"
+      responses:
+        "201":
+          description: The comment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Annotation"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    get:
+      operationId: listAnnotations
+      tags: [annotations]
+      summary: The comments on one target, or on a project
+      description: |
+        Either `target_type` with `target_id` (the comments on one clip, render or version) or `project_id` (every comment on the renders
+        and versions of the project): not both, and one of the two is required. Replies come in the same list, with `parent_id` set. Oldest
+        first; page with `cursor` (the `next_cursor` of the previous page). Every role may read.
+      parameters:
+        - name: target_type
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/AnnotationTargetType"
+        - name: target_id
+          in: query
+          required: false
+          description: The TypeID of the target (`ast_`, `ren_` or `tl_` after `target_type`).
+          schema:
+            type: string
+        - name: project_id
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ProjectId"
+        - name: limit
+          in: query
+          required: false
+          description: How many comments to return (default 200).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 200
+        - name: cursor
+          in: query
+          required: false
+          description: The `next_cursor` of the previous page.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: A page of comments.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListAnnotationsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/annotations/{id}:
+    parameters:
+      - $ref: "#/components/parameters/AnnotationIdPath"
+    patch:
+      operationId: updateAnnotation
+      tags: [annotations]
+      summary: Edit, resolve or reopen a comment
+      description: |
+        Changes what the request names and leaves the rest. The author of a comment may change anything; another owner or editor may only
+        change `status` (to resolve or reopen it), and the editor's replies are never edited (`403 insufficient_role`). `status` takes `open`
+        or `resolved`: `applied` is set by the editor agent when a run has dealt with the comment, and a person reopens it with `open`.
+        Editing the text, kind, range or pin of an applied comment reopens it. `remove_pin` takes the pin off. The range of a reply
+        cannot be changed (it follows its comment). Editing a comment moves the range of its replies with it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAnnotationRequest"
+      responses:
+        "200":
+          description: The comment as it is now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Annotation"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    delete:
+      operationId: deleteAnnotation
+      tags: [annotations]
+      summary: Delete a comment
+      description: Soft-deletes the comment and its replies. Only the author may delete a comment (`403 insufficient_role` for anyone else, the editor's replies included).
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
   /v1/webhooks/clerk:
     post:
       operationId: receiveClerkWebhook
@@ -1189,6 +1359,14 @@ components:
       description: The project's TypeID.
       schema:
         $ref: "#/components/schemas/ProjectId"
+
+    AnnotationIdPath:
+      name: id
+      in: path
+      required: true
+      description: The annotation's TypeID.
+      schema:
+        $ref: "#/components/schemas/AnnotationId"
 
     RenderIdPath:
       name: id
@@ -2513,6 +2691,198 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Render"
+        next_cursor:
+          type: [string, "null"]
+          description: Pass it as `cursor` for the next page. Null on the last page.
+
+    # ── Annotations ─────────────────────────────────────────────────────────────
+
+    AnnotationTargetType:
+      type: string
+      description: What a comment is about, and what `target_id` is a TypeID of.
+      enum: [asset, render, timeline_version]
+
+    AnnotationKind:
+      type: string
+      description: |
+        `comment` (a note for the creator or the editor), `instruction` (a note addressed to the editor agent), or a constraint on the range:
+        `include` (keep it), `exclude` (leave it out), `prefer` (favour it).
+      enum: [comment, include, exclude, prefer, instruction]
+
+    AnnotationStatus:
+      type: string
+      description: |
+        `open`; `applied` (an editor run dealt with it: `applied_in_run_id`, and `addressed_in_version` when that run made a version); or
+        `resolved` (closed by hand).
+      enum: [open, applied, resolved]
+
+    AnnotationPin:
+      type: object
+      description: |
+        A spot on the frame, normalised to 0..1 from the top left: a point (`x`, `y`) or a box (`x`, `y` and its size `w`, `h`, which
+        come together and keep the box inside the frame).
+      required: [x, y]
+      properties:
+        x:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        y:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        w:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+          maximum: 1
+        h:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+          maximum: 1
+
+    AnnotationAuthor:
+      type: object
+      required: [kind, id]
+      properties:
+        kind:
+          $ref: "#/components/schemas/AuthorKind"
+        id:
+          type: string
+          description: The user's TypeID, or the editor run's id.
+
+    Annotation:
+      type: object
+      required: [id, target_type, target_id, project_id, timeline_version, start_ms, end_ms, pin, kind, body, status, parent_id, author, applied_in_run_id, addressed_in_version, created_at, updated_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/AnnotationId"
+        target_type:
+          $ref: "#/components/schemas/AnnotationTargetType"
+        target_id:
+          type: string
+          description: The TypeID of the clip, render or version.
+        project_id:
+          oneOf:
+            - $ref: "#/components/schemas/ProjectId"
+            - type: "null"
+          description: The project of a comment on a render or a version. Null for a clip.
+        timeline_version:
+          type: [integer, "null"]
+          description: The version a comment on a render or a version was made on (of a render, the version it was made from). Null for a clip.
+        start_ms:
+          type: integer
+          format: int64
+          minimum: 0
+        end_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Equal to `start_ms` for a comment on a moment.
+        pin:
+          oneOf:
+            - $ref: "#/components/schemas/AnnotationPin"
+            - type: "null"
+        kind:
+          $ref: "#/components/schemas/AnnotationKind"
+        body:
+          type: string
+        status:
+          $ref: "#/components/schemas/AnnotationStatus"
+        parent_id:
+          oneOf:
+            - $ref: "#/components/schemas/AnnotationId"
+            - type: "null"
+          description: "Set on a reply: the comment it answers."
+        author:
+          $ref: "#/components/schemas/AnnotationAuthor"
+        applied_in_run_id:
+          oneOf:
+            - $ref: "#/components/schemas/RunId"
+            - type: "null"
+        addressed_in_version:
+          type: [integer, "null"]
+          description: The version the editor run that applied the comment made. Null while the comment is not applied, and when the run made none.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateAnnotationRequest:
+      type: object
+      description: |
+        `target_type`, `target_id` and `start_ms` are required, except in a reply (`parent_id`): a reply takes the target and the range of the
+        comment it answers, and when it names them they must be the comment's own.
+      properties:
+        target_type:
+          $ref: "#/components/schemas/AnnotationTargetType"
+        target_id:
+          type: string
+          description: The TypeID of the clip (`ast_`), the render (`ren_`) or the version (`tl_`).
+        project_id:
+          $ref: "#/components/schemas/ProjectId"
+        start_ms:
+          type: integer
+          format: int64
+          minimum: 0
+        end_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Defaults to `start_ms` (a comment on a moment).
+        pin:
+          $ref: "#/components/schemas/AnnotationPin"
+        kind:
+          allOf:
+            - $ref: "#/components/schemas/AnnotationKind"
+          description: Defaults to `comment`.
+        body:
+          type: string
+          maxLength: 2000
+          description: Plain text. Required (not empty) for a `comment` and an `instruction`.
+        parent_id:
+          $ref: "#/components/schemas/AnnotationId"
+
+    UpdateAnnotationRequest:
+      type: object
+      description: Every field is optional; the ones that are absent stay as they are. At least one must be there.
+      properties:
+        body:
+          type: string
+          maxLength: 2000
+        kind:
+          $ref: "#/components/schemas/AnnotationKind"
+        status:
+          type: string
+          description: "`open` (reopen) or `resolved`. A person cannot set `applied`."
+          enum: [open, resolved]
+        start_ms:
+          type: integer
+          format: int64
+          minimum: 0
+        end_ms:
+          type: integer
+          format: int64
+          minimum: 0
+        pin:
+          $ref: "#/components/schemas/AnnotationPin"
+        remove_pin:
+          type: boolean
+          description: Take the pin off. Not with `pin`.
+
+    ListAnnotationsResponse:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Annotation"
         next_cursor:
           type: [string, "null"]
           description: Pass it as `cursor` for the next page. Null on the last page.

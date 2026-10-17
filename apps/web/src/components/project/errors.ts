@@ -56,3 +56,13 @@ const RENDER_FAILURES: Readonly<Record<string, string>> = {
 export function renderFailureMessage(reason: string | null | undefined): string {
   return (reason ? RENDER_FAILURES[reason] : undefined) ?? "the video could not be made";
 }
+
+/** The words for a refused or failed write of a comment. */
+export function commentMessage(error: unknown): string {
+  if (status(error) === 402) return "Your workspace needs an active plan to comment.";
+  if (status(error) === 403) return "Your role in this workspace can't change this comment. Only owners and editors can comment, and only the author can edit or delete a comment.";
+  if (status(error) === 404) return "That comment or version is gone, so the change was not saved.";
+  if (status(error) === 400) return "That comment was not accepted. Check its length and try again.";
+  if (status(error) === 0) return "The server could not be reached, so the change was not saved.";
+  return "The comment could not be saved. Try again.";
+}

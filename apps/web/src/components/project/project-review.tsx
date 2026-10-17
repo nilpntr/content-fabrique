@@ -5,8 +5,10 @@ import type { OutputFormat, ReviewAnnotation, ReviewVersion } from "@/components
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Project, TimelineVersionSummary } from "@/lib/api/client";
+import { type CommentTarget, useAnnotations, useCommentActions } from "@/lib/api/annotation-hooks";
+import { useMe } from "@/lib/api/hooks";
 import { usePreviewRender, useRenderTimeMap, useTimelineSpecs } from "@/lib/api/project-hooks";
-import { COMMENTS_NOT_SAVED_NOTE, type CommentsStore } from "./comments-store";
+import { toReviewAnnotation, toReviewAnnotations } from "./annotations";
 import { renderMessage } from "./errors";
 import { PreviewStatus } from "./preview-status";
 import { loadingReviewVersion, toReviewVersion } from "./review-data";
@@ -14,8 +16,8 @@ import { VersionHistory } from "./version-history";
 
 /**
  * The review screen on a project's real data: the versions of its timeline (each version's spec gives the cut marks and the
- * labels; the asset titles name the clips), the preview render of the version on screen as the video, and comments that live
- * in `comments` (in memory for now).
+ * labels; the asset titles name the clips), the preview render of the version on screen as the video, and the project's comments,
+ * which live in the API (P1-08): they show at once when written, and a write the API refuses is taken back with a message.
  *
  * Specs are fetched lazily: the latest version, the one on screen, and the ones that have comments (a comment is moved
  * between versions through their time maps). The other versions are listed and can be chosen, and show as loading until their
@@ -24,14 +26,12 @@ import { VersionHistory } from "./version-history";
 export function ProjectReview({
   project,
   versions,
-  comments,
   runActive = false,
   now,
 }: {
   project: Project;
   /** Newest first, as the API lists them. */
   versions: readonly TimelineVersionSummary[];
-  comments: CommentsStore;
   /** An editor run is working: with no version yet, the screen says the first cut is on its way. */
   runActive?: boolean;
   now?: number;
@@ -40,8 +40,11 @@ export function ProjectReview({
   const [shown, setShown] = React.useState<number | undefined>(undefined);
   const selected = shown ?? (latest || undefined);
 
-  // Read from the store on every render, so that a screen that opens again starts from what was written.
-  const stored = comments.list(project.id);
+  const annotations = useAnnotations(project.id);
+  const me = useMe().data?.user.id;
+  // One list until the data changes, so that the screen can tell a new list from a re-render.
+  const stored = React.useMemo(() => toReviewAnnotations(annotations.data ?? [], me), [annotations.data, me]);
+  const actions = useCommentActions(project.id);
   const wanted = new Set<number>([latest, ...(selected ? [selected] : []), ...stored.map((comment) => comment.version)]);
   const needed = versions.filter((version) => wanted.has(version.version));
   const specs = useTimelineSpecs(project.id, needed);
@@ -67,10 +70,23 @@ export function ProjectReview({
       return full ?? loadingReviewVersion(summary, format);
     });
   const loadedLatest = reviewVersions.reduce((max, version) => (version.loading ? max : Math.max(max, version.version)), 0);
-  const firstLoad = loadedLatest === 0 && specs.some((query) => query.isPending);
+  const firstLoad = loadedLatest === 0 && (specs.some((query) => query.isPending) || annotations.isPending);
   const failed = loadedLatest === 0 && !firstLoad && versions.length > 0;
 
-  const onCommentsChange = React.useCallback((next: ReviewAnnotation[]) => comments.replace(project.id, next), [comments, project.id]);
+  // A comment is about the video the creator watched: the ready preview of that version when it is on screen, else the version.
+  const targetOf = (version: number): CommentTarget | undefined => {
+    if (readyRender && readyRender.timeline_version === version) return { type: "render", id: readyRender.id };
+    const summary = versions.find((candidate) => candidate.version === version);
+    return summary ? { type: "timeline_version", id: summary.id } : undefined;
+  };
+  const onCommentCreate = async (comment: ReviewAnnotation) => {
+    const saved = await actions.create(
+      { tempId: comment.id, version: comment.version, start_ms: comment.start_ms, end_ms: comment.end_ms, pin: comment.pin, body: comment.body },
+      targetOf(comment.version),
+    );
+    return saved ? toReviewAnnotation(saved, me) : undefined;
+  };
+  const commentsNote = annotations.isError ? "Your comments could not be loaded. Reload the page to try again." : undefined;
 
   if (versions.length === 0) {
     return (
@@ -115,8 +131,12 @@ export function ProjectReview({
       assetNames={assetNames}
       localVideo={false}
       placeholderLabel={renderState.kind === "ready" ? "Preview loading" : "No video preview yet"}
-      commentsNote={COMMENTS_NOT_SAVED_NOTE}
-      onCommentsChange={onCommentsChange}
+      commentsNote={commentsNote}
+      onCommentCreate={onCommentCreate}
+      onCommentUpdate={(id, patch) => void actions.update(id, patch)}
+      onCommentDelete={(id) => void actions.remove(id)}
+      commentsError={actions.error}
+      onDismissCommentsError={actions.clearError}
       onVersionChange={setShown}
       onVideoError={preview.refreshUrls}
       aboveVideo={({ version }) => {

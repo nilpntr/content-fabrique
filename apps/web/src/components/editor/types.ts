@@ -68,6 +68,8 @@ export type AnnotationStatus = "open" | "applied" | "resolved";
 export interface CommentAuthor {
   kind: "creator" | "agent";
   name: string;
+  /** The signed-in user wrote it: only they can edit or delete it. */
+  own?: boolean;
 }
 
 /**

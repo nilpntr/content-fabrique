@@ -58,6 +58,8 @@ type Deps struct {
 	Frames   FrameSource
 	// Preview renders previews; nil means UnavailablePreviews.
 	Preview PreviewRenderer
+	// Comments is where the creator's open comments come from (and where the end of a run reports to); nil means a run has none.
+	Comments CommentSource
 }
 
 func (d Deps) check() error {
@@ -103,6 +105,7 @@ func Tools(d Deps) ([]runtime.Tool, error) {
 		{ToolListFootage, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.listFootage) }},
 		{ToolViewClip, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.viewClip) }},
 		{ToolGetTimeline, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getTimeline) }},
+		{ToolGetComments, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getComments) }},
 		{ToolEditTimeline, true, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.editTimeline) }},
 		{ToolRenderPreview, true, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.renderPreview) }},
 		{ToolFinish, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.finish) }},
@@ -527,16 +530,24 @@ func (d Deps) finish(ctx context.Context, rc runtime.RunContext, in finishArgs) 
 	// A run ends by having edited the timeline, or by saying that there was nothing to edit. The versions this run made have its
 	// TypeID as their author.
 	var version any // the version number the run finished on, null when it made none
+	var madeVersion *int
 	made, err := d.Store.GetTimelineVersionByAuthor(ctx, ws, pid, string(ops.AuthorAgent), ids.Encode(ids.PrefixRun, rc.RunID))
 	switch {
 	case err == nil:
 		version = made.Version
+		v := int(made.Version)
+		madeVersion = &v
 	case !errors.Is(err, store.ErrNotFound):
 		return runtime.Result{}, fmt.Errorf("look for the run's versions: %w", err)
 	case det.Project.CurrentTimelineVersion == nil:
 		return runtime.Errorf("you cannot finish yet: there is no timeline. Build one with edit_timeline first"), nil
 	case !in.NoEditNeeded:
 		return runtime.Errorf("you cannot finish yet: this run has not changed the timeline. Make your edit with edit_timeline first. If the timeline already does what the creator asked and nothing needs to change, call finish again with no_edit_needed set to true"), nil
+	}
+	// The creator's comments this run was handed are dealt with: applied by this run, in the version it made. Done before the result
+	// is stored; a call that runs twice finds nothing left to mark the second time.
+	if err := d.markCommentsAddressed(ctx, rc, ws, pid, madeVersion); err != nil {
+		return runtime.Result{}, err
 	}
 	summary = cutRunes(summary, maxSummaryChars)
 	out, _ := json.Marshal(map[string]any{"summary": summary, "timeline_version": version})

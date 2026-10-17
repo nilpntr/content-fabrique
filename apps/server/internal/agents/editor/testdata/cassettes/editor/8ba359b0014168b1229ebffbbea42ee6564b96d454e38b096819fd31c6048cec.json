@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "c8a9277b9280ead8cc95d9fa1565901c92ea8c1506a2c31c9d44e1d55bc3807f",
-  "recorded_at": "2026-10-17T12:35:15Z",
+  "key": "8ba359b0014168b1229ebffbbea42ee6564b96d454e38b096819fd31c6048cec",
+  "recorded_at": "2026-10-17T13:48:36Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 16000,
@@ -21,18 +21,6 @@
           "text",
           "text"
         ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
       }
     ],
     "tools": [
@@ -40,6 +28,7 @@
       "list_footage",
       "view_clip",
       "get_timeline",
+      "get_comments",
       "edit_timeline",
       "render_preview",
       "finish"
@@ -52,19 +41,17 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_2",
-        "name": "view_clip",
-        "input": {
-          "asset_id": "ast_01jc000000e00800000000000a"
-        }
+        "id": "toolu_ed_1",
+        "name": "list_footage",
+        "input": {}
       }
     ],
     "usage": {
-      "input_tokens": 380,
-      "cache_write_tokens": 900,
+      "input_tokens": 410,
+      "cache_write_tokens": 9200,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 9200,
-      "output_tokens": 74
+      "cache_read_tokens": 0,
+      "output_tokens": 61
     }
   }
 }

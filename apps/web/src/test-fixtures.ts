@@ -1,5 +1,5 @@
 /** Canned API objects for tests, in the types of the contract. Each factory takes the fields a test cares about. */
-import type { ApiAsset, Project, ProjectSummary, Render, Run, RunEvent, TimelineVersion, TimelineVersionSummary } from "@/lib/api/client";
+import type { Annotation, ApiAsset, Project, ProjectSummary, Render, Run, RunEvent, TimelineVersion, TimelineVersionSummary } from "@/lib/api/client";
 
 const ID = "01jh6m00000000000000000000";
 const typeId = (prefix: string, n: number) => `${prefix}_${ID.slice(0, 26 - String(n).length)}${n}`;
@@ -8,6 +8,7 @@ export const assetId = (n: number) => typeId("ast", n);
 export const projectId = (n = 1) => typeId("prj", n);
 export const runId = (n = 1) => typeId("run", n);
 export const renderId = (n = 1) => typeId("ren", n);
+export const annotationId = (n = 1) => typeId("ann", n);
 
 const NOW = "2026-10-17T10:00:00Z";
 
@@ -173,4 +174,28 @@ export function readyRender(over: Partial<Render> = {}): Render {
     urls_expires_at: "2099-01-01T00:00:00Z",
     ...over,
   });
+}
+
+/** A comment on version 3 of project 1, by the signed-in user (`usr_01test`, see ME in test-clerk). */
+export function annotation(n = 1, over: Partial<Annotation> = {}): Annotation {
+  return {
+    id: annotationId(n),
+    target_type: "timeline_version",
+    target_id: typeId("tl", 3),
+    project_id: projectId(1),
+    timeline_version: 3,
+    start_ms: 1000,
+    end_ms: 2000,
+    pin: null,
+    kind: "comment",
+    body: `Comment ${n}`,
+    status: "open",
+    parent_id: null,
+    author: { kind: "user", id: "usr_01test" },
+    applied_in_run_id: null,
+    addressed_in_version: null,
+    created_at: `2026-10-17T10:0${n}:00Z`,
+    updated_at: NOW,
+    ...over,
+  };
 }
