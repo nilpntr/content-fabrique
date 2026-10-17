@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "99b95d945420e50a560d63f466ca6977dcf22341a8ecef7d1180852a8e940c21",
-  "recorded_at": "2026-10-17T14:30:37Z",
+  "key": "e3542f526a88815ce70cb928d55c7b14ec72bba40081a3cb99a623e2568fe7f2",
+  "recorded_at": "2026-10-17T14:31:49Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 16000,
@@ -20,18 +20,6 @@
           "text",
           "text",
           "text"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
         ]
       }
     ],
@@ -53,19 +41,21 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_2",
-        "name": "view_clip",
+        "id": "toolu_ed_1",
+        "name": "find_moments",
         "input": {
-          "asset_id": "ast_01jc000000e00800000000000a"
+          "asset_id": "ast_01jc000000e00800000000000a",
+          "kind": "rep",
+          "min_score": 0.7
         }
       }
     ],
     "usage": {
-      "input_tokens": 380,
-      "cache_write_tokens": 900,
+      "input_tokens": 410,
+      "cache_write_tokens": 9200,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 9200,
-      "output_tokens": 74
+      "cache_read_tokens": 0,
+      "output_tokens": 61
     }
   }
 }

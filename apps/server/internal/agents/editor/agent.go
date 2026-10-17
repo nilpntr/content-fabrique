@@ -31,6 +31,7 @@ var DefaultBudgets = runtime.Budgets{Micros: 5_000_000, Tokens: 4_000_000, ToolC
 
 // NewAgent defines the editor agent: its prompt, its tools, and the context it starts every run with.
 func NewAgent(d Deps) (runtime.Agent, error) {
+	d = d.withState()
 	tools, err := Tools(d)
 	if err != nil {
 		return runtime.Agent{}, err
@@ -42,6 +43,8 @@ func NewAgent(d Deps) (runtime.Agent, error) {
 		Tools:   tools,
 		Opening: opening,
 		Context: d.runContext,
+		EndTurn: d.endTurn,
+		OnEnd:   d.previews.forget,
 		Budgets: DefaultBudgets,
 	}, nil
 }

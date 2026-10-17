@@ -179,6 +179,12 @@ func (p *fakePreview) RenderAndWait(ctx context.Context, ws ids.WorkspaceID, pro
 	return p.ref, p.dur, p.err
 }
 
+// sheet makes the fake renderer answer with a contact sheet inside the workspace.
+func (e *env) sheet(prj ids.ProjectID) {
+	e.preview.err, e.preview.dur = nil, 16000
+	e.preview.ref = ContactSheetRef(fmt.Sprintf("ws/%s/previews/%s/v1/contact.jpg", e.wsA.ID, prj))
+}
+
 // ---- the environment --------------------------------------------------------------------------------------------------
 
 type env struct {
@@ -214,7 +220,7 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	e.frames = &fakeFrames{objs: e.objs}
-	e.deps = Deps{Projects: e.svc, Store: st, Frames: e.frames, Preview: e.preview}
+	e.deps = Deps{Projects: e.svc, Store: st, Frames: e.frames, Preview: e.preview}.withState()
 	e.rebuild()
 	return e
 }

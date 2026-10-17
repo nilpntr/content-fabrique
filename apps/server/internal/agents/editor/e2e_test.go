@@ -50,7 +50,7 @@ var (
 
 const projectBrief = "A 20 second back-day short. Open on the heaviest set. Keep it punchy."
 
-// fakeAnthropic plays the Messages API for the editor: find_moments, view_clip, edit_timeline, get_timeline, finish.
+// fakeAnthropic plays the Messages API for the editor: find_moments, view_clip, edit_timeline, get_timeline, render_preview, finish.
 type fakeAnthropic struct {
 	mu       sync.Mutex
 	messages int
@@ -106,8 +106,10 @@ func (f *fakeAnthropic) turn(n int) string {
 		return message(use("toolu_ed_3", "edit_timeline", ops), 450, 2100, 10100, 301)
 	case 4:
 		return message(use("toolu_ed_4", "get_timeline", `{}`), 420, 700, 12200, 58)
+	case 5:
+		return message(use("toolu_ed_5", "render_preview", `{}`), 410, 600, 13500, 40)
 	default:
-		return message(use("toolu_ed_5", "finish", `{"summary":"I cut a 17 second video from your three clips. It opens on the heaviest lat pulldown rep with the words HEAVY LAT DAY, then the cable row, then the wide gym shot. Check the wide shot: I framed it with a blurred fill so nobody is cropped out."}`), 400, 650, 12900, 92)
+		return message(use("toolu_ed_6", "finish", `{"summary":"I cut a 17 second video from your three clips. It opens on the heaviest lat pulldown rep with the words HEAVY LAT DAY, then the cable row, then the wide gym shot. Check the wide shot: I framed it with a blurred fill so nobody is cropped out."}`), 400, 650, 14100, 92)
 	}
 }
 
@@ -156,6 +158,9 @@ func newE2E(t *testing.T, vars map[string]string, api *fakeAnthropic) *e2e {
 	}
 	x := &e2e{env: e, api: api}
 	x.prj = e.project(e.wsA, "9:16", projectBrief, clipA, clipB, clipC)
+	// The preview renderer answers with a contact sheet the image resolver can read.
+	e.sheet(x.prj)
+	e.objs.set(string(e.preview.ref), testJPEG("contact sheet", 384, 384))
 
 	// Frames go through the real frame service with a fake ffmpeg, into the in-memory store the image resolver reads.
 	e.deps.Frames = newFrameService(e, &fakeRunner{})
@@ -244,8 +249,8 @@ func TestEditorCassettesAreCurrent(t *testing.T) {
 		t.Fatalf("the recording run = %s %v %s", r.Status, r.FailureReason, r.Output)
 	}
 	fresh := cassetteNames(t, tmp)
-	if len(fresh) != 5 {
-		t.Fatalf("recorded %d cassettes, want 5: %v", len(fresh), fresh)
+	if len(fresh) != 6 {
+		t.Fatalf("recorded %d cassettes, want 6: %v", len(fresh), fresh)
 	}
 	dest := filepath.Join(cassetteDir, editorStage)
 	if os.Getenv("CF_UPDATE_CASSETTES") == "1" {
@@ -287,8 +292,8 @@ func (x *e2e) get() store.AgentRun { return x.runRow(x.run) }
 func TestEditorRecordedRequests(t *testing.T) {
 	x := recordEditor(t, t.TempDir())
 	api := x.api
-	if len(api.requests) != 5 {
-		t.Fatalf("%d model calls, want 5", len(api.requests))
+	if len(api.requests) != 6 {
+		t.Fatalf("%d model calls, want 6", len(api.requests))
 	}
 	for i, body := range api.bodies {
 		// An object key never goes to the model: images are bytes in the request, and the text names assets, not objects.
@@ -366,12 +371,12 @@ func TestEditorRunInReplayMode(t *testing.T) {
 	if !strings.HasPrefix(summary, "I cut a 17 second video") || version == nil || *version != 1 {
 		t.Fatalf("output: %s", r.Output)
 	}
-	if r.ToolCalls != 5 || r.BilledTo != "test" || r.Model != "claude-haiku-5-5" || r.ProjectID != x.prj {
+	if r.ToolCalls != 6 || r.BilledTo != "test" || r.Model != "claude-haiku-5-5" || r.ProjectID != x.prj {
 		t.Fatalf("run: %+v", r)
 	}
 
 	// The cache numbers are in the run's totals and in every model call's event.
-	if r.InputTokens != 410+380+450+420+400 || r.CacheWriteTokens != 9200+900+2100+700+650 || r.CacheReadTokens != 9200+10100+12200+12900 || r.OutputTokens != 61+74+301+58+92 {
+	if r.InputTokens != 410+380+450+420+410+400 || r.CacheWriteTokens != 9200+900+2100+700+600+650 || r.CacheReadTokens != 9200+10100+12200+13500+14100 || r.OutputTokens != 61+74+301+58+40+92 {
 		t.Fatalf("token totals: in %d write %d read %d out %d", r.InputTokens, r.CacheWriteTokens, r.CacheReadTokens, r.OutputTokens)
 	}
 	var calls int
@@ -390,7 +395,7 @@ func TestEditorRunInReplayMode(t *testing.T) {
 			t.Errorf("call %d: no cache numbers in the event: %s", calls, ev.Payload)
 		}
 	}
-	if calls != 5 {
+	if calls != 6 {
 		t.Fatalf("%d model calls", calls)
 	}
 	if r.CostMicros <= 0 || r.CostMicros >= r.BudgetMicros {
@@ -440,7 +445,7 @@ func TestEditorRunInReplayMode(t *testing.T) {
 	}
 
 	// The view_clip result is in the run's events as references, and the frames are in the object store under the asset's prefix.
-	var sawFrames int
+	var sawFrames, sawSheet int
 	for _, ev := range x.events(x.run) {
 		if ev.Type != store.EventToolResult {
 			continue
@@ -454,6 +459,10 @@ func TestEditorRunInReplayMode(t *testing.T) {
 		}
 		_ = json.Unmarshal(ev.Payload, &p)
 		for _, b := range p.Content {
+			if b.Type == "image" && p.Name == ToolRenderPreview {
+				sawSheet++
+				continue
+			}
 			if b.Type == "image" {
 				sawFrames++
 				if !strings.HasPrefix(b.Ref, "ws/"+x.wsA.ID.String()+"/assets/"+clipA.String()+"/frames/") {
@@ -470,6 +479,9 @@ func TestEditorRunInReplayMode(t *testing.T) {
 	}
 	if sawFrames != 6 {
 		t.Errorf("%d frames in the events, want 6", sawFrames)
+	}
+	if sawSheet != 1 {
+		t.Errorf("%d contact sheets in the events, want 1", sawSheet)
 	}
 	// And the artifact of the edit.
 	var artifacts int

@@ -1,13 +1,13 @@
 # Editor system prompt: changelog
 
-The editor agent's system prompt is `editor.v1.3.md`, embedded in the Go binary. The text the model receives is the runtime's
+The editor agent's system prompt is `editor.v1.4.md`, embedded in the Go binary. The text the model receives is the runtime's
 preamble (`runtime.SystemPreamble`, the untrusted-data rule) followed by this file. The prompt version (`PromptVersion` in
 `prompt.go`) is stored in every run's input, so a run can always be tied to the text it was given.
 
 Rules for changing it:
 
 - A change to the text is a new entry here and, when it changes behaviour on purpose, a new `PromptVersion` (a new file, such as
-  `editor.v1.3.md`). A typo fix or a clarification that changes nothing keeps the version and says so here.
+  `editor.v1.4.md`). A typo fix or a clarification that changes nothing keeps the version and says so here.
 - The prompt is part of every request's cache key, so any change starts a cold prompt cache (one cache write, then reads).
   Record mode cassettes depend on it too: after a change, re-record with
   `CF_UPDATE_CASSETTES=1 go test ./internal/agents/editor -run TestEditorCassettesAreCurrent`.
@@ -15,10 +15,10 @@ Rules for changing it:
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
 
-## editor.v1.3 (2026-10-17)
+## editor.v1.4 (2026-10-17)
 
 Clip analysis landed (P2-02 shots, P2-03 quality signals, the deterministic slice of P2-09 reps) with the `find_moments` tool and an
-analysis line per clip in the run context and in `list_footage`. The file is now `editor.v1.3.md`. Cause: the founder's first
+analysis line per clip in the run context and in `list_footage`. The file is now `editor.v1.4.md`. Cause: the founder's first
 Opus edit of real gym footage had cuts of exactly 3 s that landed mid-rep, shots of the lifter standing between sets, and
 exposure that jumped between angles; the editor saw 3 to 8 stills per 90 s clip and could not tell where the reps were.
 
@@ -34,6 +34,22 @@ exposure that jumped between angles; the editor saw 3 to 8 stills per 90 s clip 
   relied on (they never carry the clip's title or tags).
 - `rep_candidate` moments (slow, tired reps next to a set that do not repeat clearly) are returned below the reps; use them only after looking, never as ready cuts, and never skip them as dead time.
 - Cassettes re-recorded (the prompt, the tool list and the run context changed).
+
+## editor.v1.3 (2026-10-17)
+
+The founder's first live run (Haiku, dev-cheap) never called render_preview, so its summary said it had not checked a preview, and
+it ended its turn in plain text instead of calling finish. The file is now `editor.v1.3.md`.
+
+- Step 5 makes the preview mandatory when previews exist: finish is refused until the newest version the run made has a
+  successful render_preview, and an edit after a preview needs another. If render_preview says previews are not available (or
+  fails twice), the model checks with get_timeline and finishes.
+- Step 6 and "Finishing" say that a run ends with a finish call; a plain-text reply without it is nudged once (a status event
+  `nudge`, sent to the model as a user message), and counts as the finish only when the newest version was previewed.
+- With no renderer wired the same promise holds: a plain-text reply is nudged once to call finish, then accepted as the finish.
+  An accepted reply writes the output finish writes (the message, the version the run made).
+- Previews that fail (the renderer, the sheet, the version) count per version: two in a row let the model finish that version
+  without one, a success clears the count, and the next version needs a preview again.
+- Code, not prompt: `Deps.previewGate` (finish) and `Deps.endTurn` (the runtime's `Agent.EndTurn` hook) in `gate.go`.
 
 ## editor.v1.2 (2026-10-17)
 
