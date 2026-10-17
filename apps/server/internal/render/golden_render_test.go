@@ -42,7 +42,7 @@ type sample struct {
 }
 
 // sampleFrames picks the frames to compare: the first and last frame, the frames around every cut (the last frame before it and
-// the first of the next item: a cut that is one frame early shows in the first, one that is late in the second), the middle of every transition, the first frame after it and the middle of every item.
+// the first of the next item: a cut that is one frame early shows in the first, one that is late in the second), the middle of every transition, the first frame after a whip and the middle of every item.
 func sampleFrames(p Plan) []sample {
 	byFrame := map[int64]sample{}
 	add := func(f int64, kind string, sensitive bool) {
@@ -64,9 +64,11 @@ func sampleFrames(p Plan) []sample {
 		add(c.Frame, "cut", false)
 		if c.TransitionFrames > 0 {
 			add(c.Frame+c.TransitionFrames/2, "transition", false)
-			// The first frame after the transition is the incoming clip alone: a transition effect (the whip's blur) that
-			// runs one frame too long shows here.
-			add(c.Frame+c.TransitionFrames, "after-transition", false)
+			// The first frame after a whip is the incoming clip alone: a blur window that runs one frame too long shows
+			// here. (Only for the whip: the effect that has a window of its own to get wrong.)
+			if c.Transition == timeline.TransitionWhip {
+				add(c.Frame+c.TransitionFrames, "after-transition", false)
+			}
 		}
 	}
 	// The middle of each item, from the time map (which assigns [out_start, out_end) to each main item).
