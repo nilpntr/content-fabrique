@@ -60,6 +60,8 @@ const (
 	// creditHoldRenewBelow: the heartbeat writes the hold only when less than this is left, so a heartbeat every few seconds writes about
 	// once in ten minutes.
 	creditHoldRenewBelow = 20 * time.Minute
+	// creditHoldStaleAfter: a hold whose run is still "active" is kept by the sweep until it has been expired this long.
+	creditHoldStaleAfter = 30 * 24 * time.Hour
 )
 
 // ErrInsufficientCredits is wrapped by *InsufficientCreditsError.
@@ -121,8 +123,8 @@ func sourceOf(r db.ListCreditSourcesRow) CreditSource {
 	return s
 }
 
-// creditSources lists the sources that have not expired at now, in the order of use, empty ones included (the balance shows an allowance
-// that is all used up; a charge skips it).
+// creditSources lists the sources that have not expired at now (by time, or by an expire row), in the order of use, empty ones included
+// (the balance shows an allowance that is all used up; a charge skips it).
 func (s *Store) creditSources(ctx context.Context, ws ids.WorkspaceID, now time.Time) ([]CreditSource, error) {
 	at := now.UTC()
 	rows, err := s.q.ListCreditSources(ctx, db.ListCreditSourcesParams{WorkspaceID: ws, Now: &at})
@@ -131,6 +133,9 @@ func (s *Store) creditSources(ctx context.Context, ws ids.WorkspaceID, now time.
 	}
 	out := make([]CreditSource, 0, len(rows))
 	for _, r := range rows {
+		if r.Expired {
+			continue // taken by an expire row (a plan change replaced it, or the job ran): nothing is left, and it is not shown
+		}
 		out = append(out, sourceOf(r))
 	}
 	return out, nil
@@ -502,7 +507,7 @@ type CreditSweepResult struct {
 // SweepExpiredCreditHolds deletes the holds past their expiry (a run whose worker and retries are gone). They had stopped counting
 // already; this gives the table its size back and tells the caller what crashed runs left behind.
 func (s *Store) SweepExpiredCreditHolds(ctx context.Context, now time.Time) (CreditSweepResult, error) {
-	r, err := s.q.DeleteExpiredCreditHolds(ctx, now.UTC())
+	r, err := s.q.DeleteExpiredCreditHolds(ctx, db.DeleteExpiredCreditHoldsParams{Now: now.UTC(), StaleBefore: now.UTC().Add(-creditHoldStaleAfter)})
 	return CreditSweepResult{Holds: r.Holds, Credits: r.Credits}, mapErr(err)
 }
 
@@ -632,15 +637,17 @@ func (s *Store) AdjustCredits(ctx context.Context, p AdjustCreditsParams) (int, 
 		if err != nil {
 			return err
 		}
+		held, err := tx.q.SumActiveCreditHolds(ctx, db.SumActiveCreditHoldsParams{WorkspaceID: p.Workspace, Now: now})
+		if err != nil {
+			return err
+		}
 		need := -p.Credits
-		total := 0
+		// Only what is free can be taken: credits that a run in progress holds will be charged to it.
+		if avail := balanceOf(sources, int(held)).Available; avail < need {
+			return &InsufficientCreditsError{Needed: need, Available: avail}
+		}
+		rows := 0
 		for _, src := range sources {
-			total += src.Remaining
-		}
-		if total < need {
-			return &InsufficientCreditsError{Needed: need, Available: total}
-		}
-		for i, src := range sources {
 			if need == 0 {
 				break
 			}
@@ -648,11 +655,13 @@ func (s *Store) AdjustCredits(ctx context.Context, p AdjustCreditsParams) (int, 
 			if n <= 0 {
 				continue
 			}
-			row.Credits, row.GrantID, row.IdempotencyKey = -int32(n), pgtype.UUID{Bytes: src.ID, Valid: true}, fmt.Sprintf("%s:%d", key, i) //nolint:gosec // bounded above
+			// The first row is always ":0", which is what the replay check above looks for.
+			row.Credits, row.GrantID, row.IdempotencyKey = -int32(n), pgtype.UUID{Bytes: src.ID, Valid: true}, fmt.Sprintf("%s:%d", key, rows) //nolint:gosec // bounded above
 			if _, err := tx.q.InsertCreditLedger(ctx, row); err != nil {
 				return err
 			}
 			need -= n
+			rows++
 		}
 		return nil
 	})
@@ -685,29 +694,35 @@ func (s *Store) RefundAction(ctx context.Context, ws ids.WorkspaceID, actionID u
 			return err
 		}
 		for _, c := range charges {
-			if c.Credits >= 0 || !c.GrantID.Valid {
-				continue
-			}
-			src, err := tx.q.GetCreditSource(ctx, db.GetCreditSourceParams{WorkspaceID: ws, ID: c.GrantID.Bytes})
-			if err != nil {
-				return err
-			}
-			if src.ExpiresAt != nil && !src.ExpiresAt.After(now) {
-				lost += int(-c.Credits)
-				continue
-			}
-			_, err = tx.q.InsertCreditLedger(ctx, db.InsertCreditLedgerParams{
-				WorkspaceID: ws, Kind: CreditRefund, Credits: -c.Credits, GrantID: c.GrantID, Action: c.Action, ActionID: c.ActionID,
+			// Every charge row gets a refund row, so that the action stops counting as a charged edit: one that gives the credits back to
+			// their source, or a zero-credit one for a free charge and for credits whose source has expired (they are not brought back).
+			row := db.InsertCreditLedgerParams{
+				WorkspaceID: ws, Kind: CreditRefund, Action: c.Action, ActionID: c.ActionID,
 				ProjectID: c.ProjectID, MemberUserID: c.MemberUserID, Plan: c.Plan, PlanListVersion: c.PlanListVersion,
 				Actor: &actor, Reason: &reason, IdempotencyKey: fmt.Sprintf("refund:%s:%s", actionID, c.ID), CreatedAt: now,
-			})
-			switch {
+			}
+			back := 0
+			if c.Credits < 0 && c.GrantID.Valid {
+				src, err := tx.q.GetCreditSource(ctx, db.GetCreditSourceParams{WorkspaceID: ws, ID: c.GrantID.Bytes})
+				if err != nil {
+					return err
+				}
+				if !src.Expired && (src.ExpiresAt == nil || src.ExpiresAt.After(now)) {
+					row.Credits, row.GrantID = -c.Credits, c.GrantID
+					back = int(-c.Credits)
+				}
+			}
+			switch _, err := tx.q.InsertCreditLedger(ctx, row); {
 			case errors.Is(err, errNoRows):
 				continue // refunded already
 			case err != nil:
 				return err
 			}
-			refunded += int(-c.Credits)
+			if back > 0 {
+				refunded += back
+			} else if c.Credits < 0 {
+				lost += int(-c.Credits)
+			}
 		}
 		return nil
 	})
@@ -833,7 +848,9 @@ func (s *Store) SyncAllowance(ctx context.Context, ws ids.WorkspaceID, specs map
 		res.Plan = plan
 
 		changed := acct.Plan != "" && acct.Plan != string(plan)
+		generation := acct.PlanGeneration
 		if changed {
+			generation++
 			sources, err := tx.creditSources(ctx, ws, now)
 			if err != nil {
 				return err
@@ -872,6 +889,11 @@ func (s *Store) SyncAllowance(ctx context.Context, ws ids.WorkspaceID, specs map
 			end := res.PeriodEnd
 			until, expires, keyTail = &end, &end, "until:"+end.Format(time.RFC3339)
 		}
+		if generation > 0 && spec.Refill { // a trial is once ever, whatever happened in between
+			// After a change of plan the key says so: the plan that comes back within the same period (a downgrade after an upgrade) is
+			// granted again, because its replaced allowance was expired.
+			keyTail = fmt.Sprintf("g%d:%s", generation, keyTail)
+		}
 		p := string(plan)
 		version := spec.ListVersion
 		_, err = tx.q.InsertCreditLedger(ctx, db.InsertCreditLedgerParams{
@@ -886,7 +908,7 @@ func (s *Store) SyncAllowance(ctx context.Context, ws ids.WorkspaceID, specs map
 		default:
 			return err
 		}
-		return tx.q.SetCreditAccountPeriod(ctx, db.SetCreditAccountPeriodParams{WorkspaceID: ws, Plan: p, PeriodAnchor: anchor, AllowanceUntil: until})
+		return tx.q.SetCreditAccountPeriod(ctx, db.SetCreditAccountPeriodParams{WorkspaceID: ws, Plan: p, PeriodAnchor: anchor, AllowanceUntil: until, PlanGeneration: generation})
 	})
 	if err != nil {
 		return AllowanceResult{}, mapErr(err)
@@ -949,13 +971,15 @@ func (s *Store) ExpireDueCredits(ctx context.Context, now time.Time, limit int) 
 	return sources, credits, nil
 }
 
-// WorkspacesNeedingAllowance lists up to limit workspaces whose allowance may need granting at now: SyncAllowance decides for each.
-func (s *Store) WorkspacesNeedingAllowance(ctx context.Context, now time.Time, limit int) ([]ids.WorkspaceID, error) {
+// WorkspacesNeedingAllowance lists up to limit workspaces whose allowance may need granting at now, with an id above after (the zero ID
+// starts the list; pass the last id of a full page to get the next one): SyncAllowance decides for each. Paging by id means a workspace
+// that stays on the list (one that fails every time) cannot hide the ones behind it.
+func (s *Store) WorkspacesNeedingAllowance(ctx context.Context, now time.Time, after ids.WorkspaceID, limit int) ([]ids.WorkspaceID, error) {
 	if limit < 1 {
 		return nil, fmt.Errorf("%w: limit %d", ErrInvalid, limit)
 	}
 	now = now.UTC()
-	rows, err := s.q.ListWorkspacesNeedingAllowance(ctx, db.ListWorkspacesNeedingAllowanceParams{Now: &now, RowLimit: int32(limit)}) //nolint:gosec // checked above
+	rows, err := s.q.ListWorkspacesNeedingAllowance(ctx, db.ListWorkspacesNeedingAllowanceParams{Now: &now, After: after, RowLimit: int32(limit)}) //nolint:gosec // checked above
 	if err != nil {
 		return nil, mapErr(err)
 	}

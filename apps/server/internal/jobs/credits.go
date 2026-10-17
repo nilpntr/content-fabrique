@@ -8,6 +8,7 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/nilpntr/content-fabrique/internal/credits"
+	"github.com/nilpntr/content-fabrique/internal/ids"
 )
 
 // The periodic work of credits (P7-01a, docs/design/spend-control-v1.md sections 3 and 5): the allowance of each period, the expiry of
@@ -28,8 +29,11 @@ const (
 	creditsPeriodsID   = "credits_periods"
 	creditHoldsSweepID = "credit_holds_sweep"
 
-	// creditsBatch is how many workspaces and sources one run of the periods job handles; the next run (a minute later) takes the rest.
-	creditsBatch = 500
+	// creditsBatch is how many workspaces one page of the periods job lists and how many sources it expires; creditsMaxPages pages are read
+	// per run, and the next run (a minute later) takes the rest. The pages go by workspace id, so a workspace that fails every time cannot
+	// keep the ones behind it from their allowance.
+	creditsBatch    = 500
+	creditsMaxPages = 20
 )
 
 // CreditsPeriodsArgs is the periodic job that grants the allowance of the period each workspace is in and expires the credits that ran
@@ -78,24 +82,31 @@ func (w *CreditsPeriodsWorker) Work(ctx context.Context, _ *river.Job[CreditsPer
 	now := w.deps.now()
 	var out CreditsPeriodsOutput
 
-	todo, err := w.deps.Store.WorkspacesNeedingAllowance(ctx, now, creditsBatch)
-	if err != nil {
-		return fmt.Errorf("credits periods: list workspaces: %w", err)
-	}
 	failed := 0
-	for _, ws := range todo {
-		res, err := svc.SyncAllowance(ctx, ws)
+	var after ids.WorkspaceID
+	for page := 0; page < creditsMaxPages; page++ {
+		todo, err := w.deps.Store.WorkspacesNeedingAllowance(ctx, now, after, creditsBatch)
 		if err != nil {
-			failed++
-			log.ErrorContext(ctx, "credits: granting the allowance failed", "workspace_id", ws.String(), "error", err)
-			continue
+			return fmt.Errorf("credits periods: list workspaces: %w", err)
 		}
-		out.Workspaces++
-		out.Granted += res.Granted
-		out.Replaced += res.Replaced
-		if res.Granted > 0 || res.Replaced > 0 {
-			log.InfoContext(ctx, "credits: allowance granted", "workspace_id", ws.String(), "plan", string(res.Plan), "credits", res.Granted,
-				"replaced", res.Replaced, "period_end", res.PeriodEnd)
+		for _, ws := range todo {
+			after = ws
+			res, err := svc.SyncAllowance(ctx, ws)
+			if err != nil {
+				failed++
+				log.ErrorContext(ctx, "credits: granting the allowance failed", "workspace_id", ws.String(), "error", err)
+				continue
+			}
+			out.Workspaces++
+			out.Granted += res.Granted
+			out.Replaced += res.Replaced
+			if res.Granted > 0 || res.Replaced > 0 {
+				log.InfoContext(ctx, "credits: allowance granted", "workspace_id", ws.String(), "plan", string(res.Plan), "credits", res.Granted,
+					"replaced", res.Replaced, "period_end", res.PeriodEnd)
+			}
+		}
+		if len(todo) < creditsBatch {
+			break
 		}
 	}
 	sources, expired, err := w.deps.Store.ExpireDueCredits(ctx, now, creditsBatch)

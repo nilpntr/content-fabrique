@@ -573,7 +573,7 @@ func TestCreditsAllowanceFollowsTheMerchantPeriod(t *testing.T) {
 	if _, err := rig.a.GrantPlan(ctx, store.GrantInput{WorkspaceID: ws.ID, Plan: plans.Pro, PeriodEnd: &next, Source: store.SourceMerchant, GrantedBy: "paddle", Force: true}); err != nil {
 		t.Fatal(err)
 	}
-	due, err := rig.a.WorkspacesNeedingAllowance(ctx, creditDay.AddDate(0, 0, 19), 10)
+	due, err := rig.a.WorkspacesNeedingAllowance(ctx, creditDay.AddDate(0, 0, 19), ids.WorkspaceID{}, 10)
 	if err != nil || len(due) != 1 || due[0] != ws.ID {
 		t.Fatalf("workspaces needing an allowance = %v, %v", due, err)
 	}
@@ -581,7 +581,7 @@ func TestCreditsAllowanceFollowsTheMerchantPeriod(t *testing.T) {
 	if err != nil || res.Granted != 400 || !res.PeriodEnd.Equal(next) {
 		t.Fatalf("renewal = %+v, %v", res, err)
 	}
-	if due, _ := rig.a.WorkspacesNeedingAllowance(ctx, creditDay.AddDate(0, 0, 19), 10); len(due) != 0 {
+	if due, _ := rig.a.WorkspacesNeedingAllowance(ctx, creditDay.AddDate(0, 0, 19), ids.WorkspaceID{}, 10); len(due) != 0 {
 		t.Fatalf("still needing an allowance: %v", due)
 	}
 }
@@ -612,7 +612,7 @@ func TestCreditsTrialIsGrantedOnceAndNeverRefilled(t *testing.T) {
 		if res, err := rig.a.SyncAllowance(ctx, ws.ID, specs, at); err != nil || res.Granted != 0 {
 			t.Fatalf("after %d months: %+v, %v", months, res, err)
 		}
-		if due, err := rig.a.WorkspacesNeedingAllowance(ctx, at, 10); err != nil || len(due) != 0 {
+		if due, err := rig.a.WorkspacesNeedingAllowance(ctx, at, ids.WorkspaceID{}, 10); err != nil || len(due) != 0 {
 			t.Fatalf("after %d months the job would look at %v (%v)", months, due, err)
 		}
 		if got := available(t, rig.a, ws, at); got != 14 {
@@ -1349,5 +1349,238 @@ func TestCreditsRunHeartbeatRenewsItsHold(t *testing.T) {
 	// A fenced beat (the run was taken over) changes nothing.
 	if err := r.st.TouchAgentRun(ctx, r.ws.ID, run.ID, c.Epoch+7, 0); !errors.Is(err, store.ErrRunFenced) {
 		t.Fatalf("fenced beat: %v", err)
+	}
+}
+
+// ---- found by review ---------------------------------------------------------------------------------------------
+
+// The allowance the balance shows is the live one: a plan change that expired the old allowance does not leave its size behind.
+func TestCreditsBalanceAfterAPlanChangeShowsOnlyTheLiveAllowance(t *testing.T) {
+	rig := newSpendRig(t)
+	ctx := context.Background()
+	list, _ := credits.LoadDefault()
+	specs := list.AllowanceSpecs()
+	ws := rig.workspace(t, "shows")
+	for _, plan := range []plans.Plan{plans.Trial, plans.Creator, plans.Pro} {
+		if _, err := rig.a.GrantPlan(ctx, store.GrantInput{WorkspaceID: ws.ID, Plan: plan, GrantedBy: "test"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := rig.a.SyncAllowance(ctx, ws.ID, specs, creditDay); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b, err := rig.a.CreditBalance(ctx, ws.ID, creditDay)
+	if err != nil || b.Allowance != 400 || b.Available != 400 || b.PeriodEnd == nil || !b.PeriodEnd.Equal(store.AddMonths(creditDay, 1)) || b.Plan != "pro" {
+		t.Fatalf("balance = %+v, %v; want only pro's 400", b, err)
+	}
+}
+
+// A plan that comes back within the same period gets its allowance again: the first one was expired when the plan went away.
+func TestCreditsPlanComingBackInTheSamePeriodIsGrantedAgain(t *testing.T) {
+	rig := newSpendRig(t)
+	ctx := context.Background()
+	list, _ := credits.LoadDefault()
+	specs := list.AllowanceSpecs()
+	ws := rig.workspace(t, "flip")
+	end := creditDay.AddDate(0, 0, 20)
+	grant := func(plan plans.Plan) {
+		t.Helper()
+		in := store.GrantInput{WorkspaceID: ws.ID, Plan: plan, PeriodEnd: &end, Source: store.SourceMerchant, GrantedBy: "paddle", Force: true}
+		if _, err := rig.a.GrantPlan(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, plan := range []plans.Plan{plans.Creator, plans.Pro, plans.Creator} {
+		grant(plan)
+		res, err := rig.a.SyncAllowance(ctx, ws.ID, specs, creditDay.Add(time.Duration(i)*time.Hour))
+		if err != nil || res.Granted != specs[plan].Credits {
+			t.Fatalf("step %d (%s): %+v, %v", i, plan, res, err)
+		}
+	}
+	if got := available(t, rig.a, ws, creditDay.Add(3*time.Hour)); got != 150 {
+		t.Fatalf("available = %d, want the 150 of creator", got)
+	}
+	// Syncing again changes nothing.
+	if res, err := rig.a.SyncAllowance(ctx, ws.ID, specs, creditDay.Add(4*time.Hour)); err != nil || res.Granted != 0 || res.Replaced != 0 {
+		t.Fatalf("again: %+v, %v", res, err)
+	}
+	rig.checkLedger(t, ws)
+}
+
+// The replay of a taking-away is detected whichever source it started from, and it cannot take credits that a run has held.
+func TestCreditsAdjustReplayWithAnEmptyFirstSourceAndHolds(t *testing.T) {
+	rig := newSpendRig(t)
+	ctx := context.Background()
+	list, _ := credits.LoadDefault()
+	ws := rig.workspace(t, "adjust2")
+	if _, err := rig.a.GrantPlan(ctx, store.GrantInput{WorkspaceID: ws.ID, Plan: plans.Creator, GrantedBy: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.a.SyncAllowance(ctx, ws.ID, list.AllowanceSpecs(), creditDay); err != nil {
+		t.Fatal(err)
+	}
+	rig.topUp(t, rig.a, ws, 30, creditDay.AddDate(0, 1, 0), creditDay)
+	// Use the whole allowance, so the first source in the order of use is empty.
+	id := newUUID()
+	if _, err := rig.a.HoldCredits(ctx, hold(ws, store.ActionEditFirst, id, 150, creditDay)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.a.SettleCredits(ctx, ws.ID, id, true, creditDay); err != nil {
+		t.Fatal(err)
+	}
+	adj := func(n int) error {
+		_, err := rig.a.AdjustCredits(ctx, store.AdjustCreditsParams{Workspace: ws.ID, Credits: -n, Actor: "t", Reason: "t", Key: "same-key", Now: creditDay})
+		return err
+	}
+	if err := adj(10); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := adj(10); err != nil {
+			t.Fatalf("replay: %v", err)
+		}
+	}
+	if got := available(t, rig.a, ws, creditDay); got != 20 {
+		t.Fatalf("available = %d, want 20: the replays took credits", got)
+	}
+	// A run holds 15 of the 20: only 5 are free to take away.
+	if _, err := rig.a.HoldCredits(ctx, hold(ws, store.ActionEditFirst, newUUID(), 15, creditDay)); err != nil {
+		t.Fatal(err)
+	}
+	var ins *store.InsufficientCreditsError
+	if _, err := rig.a.AdjustCredits(ctx, store.AdjustCreditsParams{Workspace: ws.ID, Credits: -6, Actor: "t", Reason: "t", Now: creditDay}); !errors.As(err, &ins) || ins.Available != 5 {
+		t.Fatalf("taking 6 of 5 free credits: %v", err)
+	}
+	rig.checkLedger(t, ws)
+}
+
+// A refund gives back what can be given back, and in every case the action stops counting as a charged edit.
+func TestCreditsRefundOfFreeAndExpiredCharges(t *testing.T) {
+	rig := newSpendRig(t)
+	ctx := context.Background()
+	list, _ := credits.LoadDefault()
+	specs := list.AllowanceSpecs()
+	ws := rig.workspace(t, "refund2")
+
+	// A free (zero-credit) edit.
+	free := ids.ProjectID{UUID: newUUID()}
+	fid := newUUID()
+	p := hold(ws, store.ActionEditFirst, fid, 0, creditDay)
+	p.Project = free
+	if _, err := rig.a.HoldCredits(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.a.SettleCredits(ctx, ws.ID, fid, true, creditDay); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := rig.a.ProjectHasChargedEdit(ctx, ws.ID, free); !ok {
+		t.Fatal("a free edit is not recorded")
+	}
+	if got, lost, err := rig.a.RefundAction(ctx, ws.ID, fid, "t", "t", creditDay); err != nil || got != 0 || lost != 0 {
+		t.Fatalf("refund of a free edit: %d %d %v", got, lost, err)
+	}
+	if ok, _ := rig.a.ProjectHasChargedEdit(ctx, ws.ID, free); ok {
+		t.Fatal("a refunded free edit still counts")
+	}
+
+	// An allowance that a plan change replaced: the credits cannot come back, and the edit stops counting.
+	if _, err := rig.a.GrantPlan(ctx, store.GrantInput{WorkspaceID: ws.ID, Plan: plans.Creator, GrantedBy: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.a.SyncAllowance(ctx, ws.ID, specs, creditDay); err != nil {
+		t.Fatal(err)
+	}
+	project := ids.ProjectID{UUID: newUUID()}
+	id := newUUID()
+	q := hold(ws, store.ActionEditFirst, id, 6, creditDay)
+	q.Project = project
+	if _, err := rig.a.HoldCredits(ctx, q); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.a.SettleCredits(ctx, ws.ID, id, true, creditDay); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.a.GrantPlan(ctx, store.GrantInput{WorkspaceID: ws.ID, Plan: plans.Pro, GrantedBy: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.a.SyncAllowance(ctx, ws.ID, specs, creditDay.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	before := available(t, rig.a, ws, creditDay.Add(2*time.Hour))
+	got, lost, err := rig.a.RefundAction(ctx, ws.ID, id, "t", "t", creditDay.Add(2*time.Hour))
+	if err != nil || got != 0 || lost != 6 {
+		t.Fatalf("refund into a replaced allowance: %d %d %v", got, lost, err)
+	}
+	if after := available(t, rig.a, ws, creditDay.Add(2*time.Hour)); after != before {
+		t.Fatalf("a refund resurrected a replaced allowance: %d to %d", before, after)
+	}
+	if ok, _ := rig.a.ProjectHasChargedEdit(ctx, ws.ID, project); ok {
+		t.Fatal("a refunded edit still counts")
+	}
+	if got, lost, err := rig.a.RefundAction(ctx, ws.ID, id, "t", "t", creditDay.Add(2*time.Hour)); err != nil || got != 0 || lost != 0 {
+		t.Fatalf("a second refund: %d %d %v", got, lost, err)
+	}
+	rig.checkLedger(t, ws)
+}
+
+// A hold lives as long as its run is active, however long the queue or the outage: it keeps counting and the sweep leaves it; once the
+// run is over it goes with its expiry.
+func TestCreditsHoldOfAnActiveRunOutlivesItsExpiry(t *testing.T) {
+	r := newRunRig(t, "active", 30)
+	ctx := context.Background()
+	run := r.start(6, store.ActionEditFirst, ids.ProjectID{UUID: newUUID()})
+	conn := r.rig.superConn(t)
+	if _, err := conn.Exec(ctx, `UPDATE credit_holds SET expires_at = now() - interval '5 hours' WHERE action_id = $1`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := available(t, r.st, r.ws, time.Now()); got != 24 {
+		t.Fatalf("available = %d: the expired hold of a queued run stopped counting", got)
+	}
+	if res, err := r.st.SweepExpiredCreditHolds(ctx, time.Now()); err != nil || res.Holds != 0 {
+		t.Fatalf("the sweep took the hold of a queued run: %+v, %v", res, err)
+	}
+	// The run finishes: its hold is settled as always.
+	r.end(run, store.AgentSucceeded, "")
+	if r.charged(run) != 6 {
+		t.Fatalf("charged %d, want 6", r.charged(run))
+	}
+	// A stuck run is not kept for ever: 30 days past the expiry the hold goes.
+	stuck := r.start(6, store.ActionEditFirst, ids.ProjectID{UUID: newUUID()})
+	if _, err := conn.Exec(ctx, `UPDATE credit_holds SET expires_at = now() - interval '31 days' WHERE action_id = $1`, stuck.ID); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := r.st.SweepExpiredCreditHolds(ctx, time.Now()); err != nil || res.Holds != 1 {
+		t.Fatalf("the sweep of a run stuck for a month: %+v, %v", res, err)
+	}
+}
+
+// The list of workspaces that need an allowance is paged by id, so one that stays on it cannot hide the others.
+func TestCreditsWorkspacesNeedingAllowanceArePaged(t *testing.T) {
+	rig := newSpendRig(t)
+	ctx := context.Background()
+	var all []ids.WorkspaceID
+	for i := range 5 {
+		w := rig.workspace(t, fmt.Sprintf("page%d", i))
+		if _, err := rig.a.GrantPlan(ctx, store.GrantInput{WorkspaceID: w.ID, Plan: plans.Creator, GrantedBy: "test"}); err != nil {
+			t.Fatal(err)
+		}
+		all = append(all, w.ID)
+	}
+	slices.SortFunc(all, func(a, b ids.WorkspaceID) int { return slices.Compare(a.UUID[:], b.UUID[:]) })
+	var got []ids.WorkspaceID
+	var after ids.WorkspaceID
+	for {
+		page, err := rig.a.WorkspacesNeedingAllowance(ctx, time.Now(), after, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, page...)
+		if len(page) < 2 {
+			break
+		}
+		after = page[len(page)-1]
+	}
+	if !slices.Equal(got, all) {
+		t.Fatalf("paged list = %v, want %v", got, all)
 	}
 }

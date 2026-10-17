@@ -11,7 +11,7 @@
 --
 -- credit_ledger: append-only for the app role (SELECT and INSERT, cf_grant_app_append_only). One row per event.
 --     kind:     grant_allowance (a plan's allowance for a period; trial: once), grant_topup (bought or given; expires), charge (credits used
---               by an action), refund (a charge given back), expire (unused credits of a grant that ran out of time, or that a plan change
+--               by an action), refund (a charge given back; a zero-credit refund marks a free or expired charge as given back, so it stops counting as a charged edit), expire (unused credits of a grant that ran out of time, or that a plan change
 --               replaced), adjust (an operator's correction, with actor and reason).
 --     credits:  signed. Grants and positive adjusts add, charges and expiries take away, refunds add back.
 --     SOURCES and USE. A row that adds credits (grant_allowance, grant_topup and a positive adjust) is a SOURCE. Every row that takes
@@ -43,6 +43,9 @@ CREATE TABLE credit_accounts (
     period_anchor   timestamptz,
     -- When the current allowance period ends (null: the allowance does not refill, a trial's).
     allowance_until timestamptz,
+    -- How many times the plan has changed. It is part of the allowance's ledger key from the first change on, so a plan that comes back
+    -- within the same period (a downgrade after an upgrade) gets its allowance again instead of finding the old key.
+    plan_generation integer     NOT NULL DEFAULT 0,
     created_at      timestamptz NOT NULL DEFAULT now(),
     updated_at      timestamptz NOT NULL DEFAULT now()
 );
@@ -80,7 +83,7 @@ CREATE TABLE credit_ledger (
         CASE kind
             WHEN 'grant_allowance' THEN credits > 0
             WHEN 'grant_topup' THEN credits > 0
-            WHEN 'refund' THEN credits > 0
+            WHEN 'refund' THEN credits >= 0
             WHEN 'charge' THEN credits <= 0
             WHEN 'expire' THEN credits <= 0
             ELSE credits <> 0
@@ -90,7 +93,8 @@ CREATE TABLE credit_ledger (
         CASE
             WHEN kind IN ('grant_allowance', 'grant_topup') THEN grant_id IS NULL
             WHEN kind = 'adjust' AND credits > 0 THEN grant_id IS NULL
-            WHEN kind IN ('refund', 'expire', 'adjust') THEN grant_id IS NOT NULL
+            WHEN kind = 'refund' THEN credits = 0 OR grant_id IS NOT NULL
+            WHEN kind IN ('expire', 'adjust') THEN grant_id IS NOT NULL
             WHEN kind = 'charge' THEN credits = 0 OR grant_id IS NOT NULL
             ELSE true
         END),

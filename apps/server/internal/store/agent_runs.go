@@ -328,8 +328,10 @@ func (s *Store) TouchAgentRun(ctx context.Context, ws ids.WorkspaceID, run uuid.
 	if n == 0 {
 		return ErrRunFenced
 	}
-	// The run is alive: so is its credit hold. A no-op unless the hold is within twenty minutes of its expiry.
-	return s.RenewCreditHold(ctx, ws, run, time.Now())
+	// The run is alive: so is its credit hold. A no-op unless the hold is within twenty minutes of its expiry. Best effort: a hold also
+	// lives as long as its run is active, so a failure here must never fail the heartbeat of a healthy run.
+	_ = s.RenewCreditHold(ctx, ws, run, time.Now())
+	return nil
 }
 
 // MarkAgentRunForResume is the sweeper's claim on a stale run: true means this call marked it (so the caller enqueues the

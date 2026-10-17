@@ -53,19 +53,30 @@ func (q *Queries) DeleteCreditHold(ctx context.Context, arg DeleteCreditHoldPara
 
 const deleteExpiredCreditHolds = `-- name: DeleteExpiredCreditHolds :one
 WITH gone AS (
-    DELETE FROM credit_holds WHERE expires_at <= $1 RETURNING credits
+    DELETE FROM credit_holds h
+    WHERE h.expires_at <= $1
+      AND (h.expires_at <= $2
+           OR NOT EXISTS (SELECT 1 FROM agent_runs r WHERE r.workspace_id = h.workspace_id AND r.id = h.action_id AND r.status IN ('queued', 'running', 'waiting_input')))
+    RETURNING h.credits
 )
 SELECT count(*)::bigint AS holds, COALESCE(sum(credits), 0)::bigint AS credits FROM gone
 `
+
+type DeleteExpiredCreditHoldsParams struct {
+	Now         time.Time
+	StaleBefore time.Time
+}
 
 type DeleteExpiredCreditHoldsRow struct {
 	Holds   int64
 	Credits int64
 }
 
-// Deletes the holds past their expiry, across workspaces (the sweep). They had stopped counting already.
-func (q *Queries) DeleteExpiredCreditHolds(ctx context.Context, now time.Time) (DeleteExpiredCreditHoldsRow, error) {
-	row := q.db.QueryRow(ctx, deleteExpiredCreditHolds, now)
+// Deletes the holds past their expiry, across workspaces (the sweep), except those of a run that is still active: that run will settle
+// its hold. A hold nobody settles (its run row is gone or finished, or it never had one) goes as soon as it expires; one whose run
+// has been "active" for 30 days past the expiry (stale_before) goes too, so a run that is stuck for good cannot keep credits for ever.
+func (q *Queries) DeleteExpiredCreditHolds(ctx context.Context, arg DeleteExpiredCreditHoldsParams) (DeleteExpiredCreditHoldsRow, error) {
+	row := q.db.QueryRow(ctx, deleteExpiredCreditHolds, arg.Now, arg.StaleBefore)
 	var i DeleteExpiredCreditHoldsRow
 	err := row.Scan(&i.Holds, &i.Credits)
 	return i, err
@@ -118,7 +129,7 @@ func (q *Queries) ExtendCreditHold(ctx context.Context, arg ExtendCreditHoldPara
 }
 
 const getCreditAccount = `-- name: GetCreditAccount :one
-SELECT workspace_id, plan, period_anchor, allowance_until, created_at, updated_at FROM credit_accounts WHERE workspace_id = $1
+SELECT workspace_id, plan, period_anchor, allowance_until, plan_generation, created_at, updated_at FROM credit_accounts WHERE workspace_id = $1
 `
 
 func (q *Queries) GetCreditAccount(ctx context.Context, workspaceID ids.WorkspaceID) (CreditAccount, error) {
@@ -129,6 +140,7 @@ func (q *Queries) GetCreditAccount(ctx context.Context, workspaceID ids.Workspac
 		&i.Plan,
 		&i.PeriodAnchor,
 		&i.AllowanceUntil,
+		&i.PlanGeneration,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -199,7 +211,8 @@ func (q *Queries) GetCreditLedgerByKey(ctx context.Context, arg GetCreditLedgerB
 
 const getCreditSource = `-- name: GetCreditSource :one
 SELECT s.id, s.kind, s.credits AS granted, s.expires_at, s.created_at, s.plan,
-       (s.credits + COALESCE(u.used, 0))::integer AS remaining
+       (s.credits + COALESCE(u.used, 0))::integer AS remaining,
+       EXISTS (SELECT 1 FROM credit_ledger e WHERE e.grant_id = s.id AND e.kind = 'expire') AS expired
 FROM credit_ledger s
 LEFT JOIN LATERAL (
     SELECT SUM(c.credits) AS used FROM credit_ledger c WHERE c.grant_id = s.id AND c.workspace_id = s.workspace_id
@@ -220,6 +233,7 @@ type GetCreditSourceRow struct {
 	CreatedAt time.Time
 	Plan      *string
 	Remaining int32
+	Expired   bool
 }
 
 // A source, with what is left of it.
@@ -234,6 +248,7 @@ func (q *Queries) GetCreditSource(ctx context.Context, arg GetCreditSourceParams
 		&i.CreatedAt,
 		&i.Plan,
 		&i.Remaining,
+		&i.Expired,
 	)
 	return i, err
 }
@@ -492,7 +507,8 @@ func (q *Queries) ListCreditRefundsOfAction(ctx context.Context, arg ListCreditR
 
 const listCreditSources = `-- name: ListCreditSources :many
 SELECT s.id, s.kind, s.credits AS granted, s.expires_at, s.created_at, s.plan,
-       (s.credits + COALESCE(u.used, 0))::integer AS remaining
+       (s.credits + COALESCE(u.used, 0))::integer AS remaining,
+       EXISTS (SELECT 1 FROM credit_ledger e WHERE e.grant_id = s.id AND e.kind = 'expire') AS expired
 FROM credit_ledger s
 LEFT JOIN LATERAL (
     SELECT SUM(c.credits) AS used FROM credit_ledger c WHERE c.grant_id = s.id AND c.workspace_id = s.workspace_id
@@ -515,6 +531,7 @@ type ListCreditSourcesRow struct {
 	CreatedAt time.Time
 	Plan      *string
 	Remaining int32
+	Expired   bool
 }
 
 // The sources the workspace can use now (not past their expiry) with what is left of each, in the order they are used: the allowance
@@ -537,6 +554,7 @@ func (q *Queries) ListCreditSources(ctx context.Context, arg ListCreditSourcesPa
 			&i.CreatedAt,
 			&i.Plan,
 			&i.Remaining,
+			&i.Expired,
 		); err != nil {
 			return nil, err
 		}
@@ -598,13 +616,15 @@ WHERE wp.plan <> 'none' AND wp.status = 'active' AND (wp.current_period_end IS N
   AND (ca.workspace_id IS NULL
        OR ca.plan <> wp.plan
        OR (ca.allowance_until IS NOT NULL AND ca.allowance_until <= $1)
-       OR (wp.source = 'merchant' AND wp.current_period_end IS DISTINCT FROM ca.allowance_until))
+       OR (wp.source = 'merchant' AND wp.plan <> 'trial' AND wp.current_period_end IS DISTINCT FROM ca.allowance_until))
+  AND wp.workspace_id > $2
 ORDER BY wp.workspace_id
-LIMIT $2
+LIMIT $3
 `
 
 type ListWorkspacesNeedingAllowanceParams struct {
 	Now      *time.Time
+	After    ids.WorkspaceID
 	RowLimit int32
 }
 
@@ -612,7 +632,7 @@ type ListWorkspacesNeedingAllowanceParams struct {
 // or an allowance period that has ended, or (a plan managed by the merchant of record) a period end that is not the one granted. The
 // job re-checks each one under the account lock; this only narrows the list.
 func (q *Queries) ListWorkspacesNeedingAllowance(ctx context.Context, arg ListWorkspacesNeedingAllowanceParams) ([]ids.WorkspaceID, error) {
-	rows, err := q.db.Query(ctx, listWorkspacesNeedingAllowance, arg.Now, arg.RowLimit)
+	rows, err := q.db.Query(ctx, listWorkspacesNeedingAllowance, arg.Now, arg.After, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -632,7 +652,7 @@ func (q *Queries) ListWorkspacesNeedingAllowance(ctx context.Context, arg ListWo
 }
 
 const lockCreditAccount = `-- name: LockCreditAccount :one
-SELECT workspace_id, plan, period_anchor, allowance_until, created_at, updated_at FROM credit_accounts WHERE workspace_id = $1 FOR UPDATE
+SELECT workspace_id, plan, period_anchor, allowance_until, plan_generation, created_at, updated_at FROM credit_accounts WHERE workspace_id = $1 FOR UPDATE
 `
 
 func (q *Queries) LockCreditAccount(ctx context.Context, workspaceID ids.WorkspaceID) (CreditAccount, error) {
@@ -643,6 +663,7 @@ func (q *Queries) LockCreditAccount(ctx context.Context, workspaceID ids.Workspa
 		&i.Plan,
 		&i.PeriodAnchor,
 		&i.AllowanceUntil,
+		&i.PlanGeneration,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -674,14 +695,15 @@ func (q *Queries) ProjectHasChargedEdit(ctx context.Context, arg ProjectHasCharg
 
 const setCreditAccountPeriod = `-- name: SetCreditAccountPeriod :exec
 UPDATE credit_accounts
-SET plan = $1, period_anchor = $2, allowance_until = $3
-WHERE workspace_id = $4
+SET plan = $1, period_anchor = $2, allowance_until = $3, plan_generation = $4
+WHERE workspace_id = $5
 `
 
 type SetCreditAccountPeriodParams struct {
 	Plan           string
 	PeriodAnchor   *time.Time
 	AllowanceUntil *time.Time
+	PlanGeneration int32
 	WorkspaceID    ids.WorkspaceID
 }
 
@@ -690,15 +712,18 @@ func (q *Queries) SetCreditAccountPeriod(ctx context.Context, arg SetCreditAccou
 		arg.Plan,
 		arg.PeriodAnchor,
 		arg.AllowanceUntil,
+		arg.PlanGeneration,
 		arg.WorkspaceID,
 	)
 	return err
 }
 
 const sumActiveCreditHolds = `-- name: SumActiveCreditHolds :one
-SELECT COALESCE(SUM(credits), 0)::integer AS credits
-FROM credit_holds
-WHERE workspace_id = $1 AND expires_at > $2
+SELECT COALESCE(SUM(h.credits), 0)::integer AS credits
+FROM credit_holds h
+WHERE h.workspace_id = $1
+  AND (h.expires_at > $2
+       OR EXISTS (SELECT 1 FROM agent_runs r WHERE r.workspace_id = h.workspace_id AND r.id = h.action_id AND r.status IN ('queued', 'running', 'waiting_input')))
 `
 
 type SumActiveCreditHoldsParams struct {
@@ -706,7 +731,9 @@ type SumActiveCreditHoldsParams struct {
 	Now         time.Time
 }
 
-// The credits set aside by the holds that still count (past their expiry a hold stops counting, like a spend hold).
+// The credits set aside by the holds that still count: a hold counts until its expiry, and for as long as its run is still active (queued,
+// running or waiting for its creator), however long that takes, so a long queue or an outage cannot free the credits of a run that will
+// still finish and be charged.
 func (q *Queries) SumActiveCreditHolds(ctx context.Context, arg SumActiveCreditHoldsParams) (int32, error) {
 	row := q.db.QueryRow(ctx, sumActiveCreditHolds, arg.WorkspaceID, arg.Now)
 	var credits int32

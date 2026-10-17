@@ -19,7 +19,7 @@ SELECT * FROM credit_accounts WHERE workspace_id = @workspace_id;
 
 -- name: SetCreditAccountPeriod :exec
 UPDATE credit_accounts
-SET plan = @plan, period_anchor = @period_anchor, allowance_until = @allowance_until
+SET plan = @plan, period_anchor = @period_anchor, allowance_until = @allowance_until, plan_generation = @plan_generation
 WHERE workspace_id = @workspace_id;
 
 -- The sources the workspace can use now (not past their expiry) with what is left of each, in the order they are used: the allowance
@@ -27,7 +27,8 @@ WHERE workspace_id = @workspace_id;
 -- credits left are its own credits plus every row that names it (charges and expiries are negative, refunds positive).
 -- name: ListCreditSources :many
 SELECT s.id, s.kind, s.credits AS granted, s.expires_at, s.created_at, s.plan,
-       (s.credits + COALESCE(u.used, 0))::integer AS remaining
+       (s.credits + COALESCE(u.used, 0))::integer AS remaining,
+       EXISTS (SELECT 1 FROM credit_ledger e WHERE e.grant_id = s.id AND e.kind = 'expire') AS expired
 FROM credit_ledger s
 LEFT JOIN LATERAL (
     SELECT SUM(c.credits) AS used FROM credit_ledger c WHERE c.grant_id = s.id AND c.workspace_id = s.workspace_id
@@ -36,11 +37,15 @@ WHERE s.workspace_id = @workspace_id AND s.credits > 0 AND s.kind IN ('grant_all
   AND (s.expires_at IS NULL OR s.expires_at > @now)
 ORDER BY (s.kind <> 'grant_allowance'), s.expires_at NULLS LAST, s.created_at, s.id;
 
--- The credits set aside by the holds that still count (past their expiry a hold stops counting, like a spend hold).
+-- The credits set aside by the holds that still count: a hold counts until its expiry, and for as long as its run is still active (queued,
+-- running or waiting for its creator), however long that takes, so a long queue or an outage cannot free the credits of a run that will
+-- still finish and be charged.
 -- name: SumActiveCreditHolds :one
-SELECT COALESCE(SUM(credits), 0)::integer AS credits
-FROM credit_holds
-WHERE workspace_id = @workspace_id AND expires_at > @now;
+SELECT COALESCE(SUM(h.credits), 0)::integer AS credits
+FROM credit_holds h
+WHERE h.workspace_id = @workspace_id
+  AND (h.expires_at > @now
+       OR EXISTS (SELECT 1 FROM agent_runs r WHERE r.workspace_id = h.workspace_id AND r.id = h.action_id AND r.status IN ('queued', 'running', 'waiting_input')));
 
 -- One ledger row. A key that is already in the ledger inserts nothing (no row comes back).
 -- name: InsertCreditLedger :one
@@ -99,10 +104,16 @@ DELETE FROM credit_holds WHERE workspace_id = @workspace_id AND action_id = @act
 UPDATE credit_holds SET expires_at = @expires_at
 WHERE workspace_id = @workspace_id AND action_id = @action_id AND expires_at < @renew_below AND expires_at < @expires_at;
 
--- Deletes the holds past their expiry, across workspaces (the sweep). They had stopped counting already.
+-- Deletes the holds past their expiry, across workspaces (the sweep), except those of a run that is still active: that run will settle
+-- its hold. A hold nobody settles (its run row is gone or finished, or it never had one) goes as soon as it expires; one whose run
+-- has been "active" for 30 days past the expiry (stale_before) goes too, so a run that is stuck for good cannot keep credits for ever.
 -- name: DeleteExpiredCreditHolds :one
 WITH gone AS (
-    DELETE FROM credit_holds WHERE expires_at <= @now RETURNING credits
+    DELETE FROM credit_holds h
+    WHERE h.expires_at <= @now
+      AND (h.expires_at <= @stale_before
+           OR NOT EXISTS (SELECT 1 FROM agent_runs r WHERE r.workspace_id = h.workspace_id AND r.id = h.action_id AND r.status IN ('queued', 'running', 'waiting_input')))
+    RETURNING h.credits
 )
 SELECT count(*)::bigint AS holds, COALESCE(sum(credits), 0)::bigint AS credits FROM gone;
 
@@ -118,7 +129,8 @@ LIMIT @row_limit;
 -- A source, with what is left of it.
 -- name: GetCreditSource :one
 SELECT s.id, s.kind, s.credits AS granted, s.expires_at, s.created_at, s.plan,
-       (s.credits + COALESCE(u.used, 0))::integer AS remaining
+       (s.credits + COALESCE(u.used, 0))::integer AS remaining,
+       EXISTS (SELECT 1 FROM credit_ledger e WHERE e.grant_id = s.id AND e.kind = 'expire') AS expired
 FROM credit_ledger s
 LEFT JOIN LATERAL (
     SELECT SUM(c.credits) AS used FROM credit_ledger c WHERE c.grant_id = s.id AND c.workspace_id = s.workspace_id
@@ -137,7 +149,8 @@ WHERE wp.plan <> 'none' AND wp.status = 'active' AND (wp.current_period_end IS N
   AND (ca.workspace_id IS NULL
        OR ca.plan <> wp.plan
        OR (ca.allowance_until IS NOT NULL AND ca.allowance_until <= @now)
-       OR (wp.source = 'merchant' AND wp.current_period_end IS DISTINCT FROM ca.allowance_until))
+       OR (wp.source = 'merchant' AND wp.plan <> 'trial' AND wp.current_period_end IS DISTINCT FROM ca.allowance_until))
+  AND wp.workspace_id > @after
 ORDER BY wp.workspace_id
 LIMIT @row_limit;
 

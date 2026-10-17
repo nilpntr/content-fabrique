@@ -303,7 +303,7 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 	svc, runner := rt.Service, rt.Runner
 	run, err := svc.Start(ctx, runtime.StartParams{
 		Agent: *agentName, WorkspaceID: ws, ProjectID: projectID.UUID, Input: runInput, Profile: *profile,
-		Budgets: runtime.Budgets{Micros: int64(*budgetUSD * 1e6), Tokens: *maxTokens, ToolCalls: *maxCalls, WallClock: *wall},
+		Budgets:   runtime.Budgets{Micros: int64(*budgetUSD * 1e6), Tokens: *maxTokens, ToolCalls: *maxCalls, WallClock: *wall},
 		NoCredits: *noCredits,
 	})
 	if err != nil {

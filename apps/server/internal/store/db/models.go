@@ -182,6 +182,7 @@ type CreditAccount struct {
 	Plan           string
 	PeriodAnchor   *time.Time
 	AllowanceUntil *time.Time
+	PlanGeneration int32
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
