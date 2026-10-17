@@ -1,86 +1,49 @@
 package timeline
 
 import (
-	"math"
-	"strings"
-	"unicode/utf8"
+	"fmt"
+
+	"github.com/nilpntr/content-fabrique/internal/timeline/style"
 )
 
-// Rect is a pixel rectangle: Left and Top are inclusive, Right and Bottom are the edges just outside it.
-type Rect struct {
-	Left, Top, Right, Bottom int
+// TextPlacement is where a text item goes: its style, the text laid out in it and the box it takes, padding included.
+// Validate and the renderer both get it from PlaceText, so the box the validator checks is the box the renderer draws.
+type TextPlacement struct {
+	Style  style.Style
+	Layout style.Layout
+	Zone   style.Zone
+	// Box is the box before any clamping: centred on the item's position, or the box of its anchor.
+	Box style.Rect
 }
 
-func (r Rect) width() int  { return r.Right - r.Left }
-func (r Rect) height() int { return r.Bottom - r.Top }
+// ShortSide is the shorter side of an output, which text sizes scale with (1080 px on every format).
+func (o Output) ShortSide() int { return min(o.Width, o.Height) }
 
-func (r Rect) contains(o Rect) bool {
-	return o.Left >= r.Left && o.Right <= r.Right && o.Top >= r.Top && o.Bottom <= r.Bottom
+// Zone returns the safe zone of the output's format at its size (design note section 5, D-25; the geometry is in the style
+// package, shared with the renderer). ok is false for an unknown format.
+func (o Output) Zone() (style.Zone, bool) {
+	return style.ZoneFor(string(o.Format), o.Width, o.Height)
 }
 
-func (r Rect) overlaps(o Rect) bool {
-	return o.Left < r.Right && o.Right > r.Left && o.Top < r.Bottom && o.Bottom > r.Top
-}
-
-// SafeZone is where text may go in one format: inside Inner, and out of every rectangle in Blocked.
-type SafeZone struct {
-	Inner   Rect
-	Blocked []Rect
-}
-
-// SafeZoneFor returns the safe zone of a format (design note section 5, D-25):
-//
-//   - 9:16 follows research 3.4: out of the top 240 px, the bottom 660 px and 120 px on each side, and out of the
-//     right-hand action column (x > 900 for y > 840).
-//   - 1:1 and 4:5 keep a 5 % margin on every side.
-//   - 16:9 keeps a 10 % title-safe margin and the bottom 15 % clear.
-//
-// Percentages are of the side they cut, rounded half up to a pixel. ok is false for an unknown format.
-func SafeZoneFor(f Format) (z SafeZone, ok bool) {
-	w, h, ok := f.Size()
+// PlaceText lays a text item out in its style and places it, for an output. A text is wrapped at the width of the zone's
+// centre column (for 9:16 the safe zone narrowed to keep clear of the action column), so centred text never meets it.
+// It returns an error for an unknown style or format.
+func PlaceText(out Output, it TextItem) (TextPlacement, error) {
+	st, ok := style.Lookup(it.Style)
 	if !ok {
-		return SafeZone{}, false
+		return TextPlacement{}, fmt.Errorf("unknown style %q", it.Style)
 	}
-	switch f {
-	case Format9x16:
-		return SafeZone{
-			Inner:   Rect{Left: 120, Top: 240, Right: w - 120, Bottom: h - 660},
-			Blocked: []Rect{{Left: 900, Top: 840, Right: w, Bottom: h}},
-		}, true
-	case Format1x1, Format4x5:
-		mx, my := percent(w, 5), percent(h, 5)
-		return SafeZone{Inner: Rect{Left: mx, Top: my, Right: w - mx, Bottom: h - my}}, true
-	default: // Format16x9
-		mx, top, bottom := percent(w, 10), percent(h, 10), percent(h, 15)
-		return SafeZone{Inner: Rect{Left: mx, Top: top, Right: w - mx, Bottom: h - bottom}}, true
+	zone, ok := out.Zone()
+	if !ok {
+		return TextPlacement{}, fmt.Errorf("unknown format %q", out.Format)
 	}
-}
-
-// percent is pct % of v, rounded half up.
-func percent(v, pct int) int { return (v*pct + 50) / 100 }
-
-// roundHalfUp is floor(x + 0.5).
-func roundHalfUp(x float64) int { return int(math.Floor(x + 0.5)) }
-
-// EstimateTextBox estimates the pixel box a text item takes when it is placed by position, centred on the point
-// (x, y) of the output. Each explicit line is 0.6 em per character wide (an em is the font size). A line wider than
-// the safe zone wraps there: it takes ceil(width / safe width) lines, so the box grows taller instead of wider than
-// the zone. The box is as wide as the widest line, capped at the safe width, and as tall as the style's line height
-// times the total number of lines. P3-04 replaces the width with libass font metrics; the issue code stays the same.
-// The three anchors are boxes inside the safe zone by construction, so they are not estimated.
-func EstimateTextBox(text string, style Style, pos Point, outW, outH int, zone SafeZone) Rect {
-	safeW := max(zone.Inner.width(), 1)
-	widest, lines := 0, 0
-	for _, l := range strings.Split(text, "\n") {
-		w := roundHalfUp(0.6 * float64(style.FontSizePx) * float64(utf8.RuneCountInString(l)))
-		widest = max(widest, w)
-		lines += max((w+safeW-1)/safeW, 1) // an empty line still takes a line
+	lay := style.Measure(st, out.ShortSide(), it.Text, style.MaxBoxWidth(zone, out.Width))
+	w, h := lay.Box()
+	var box style.Rect
+	if it.Position != nil {
+		box = style.PlacePosition(out.Width, out.Height, it.Position.X, it.Position.Y, w, h)
+	} else {
+		box = style.PlaceAnchor(zone, it.Anchor, out.Width, out.Height, w, h)
 	}
-	w := min(widest, safeW)
-	h := style.LineHeightPx * lines
-	cx := roundHalfUp(pos.X * float64(outW))
-	cy := roundHalfUp(pos.Y * float64(outH))
-	left := cx - w/2
-	top := cy - h/2
-	return Rect{Left: left, Top: top, Right: left + w, Bottom: top + h}
+	return TextPlacement{Style: st, Layout: lay, Zone: zone, Box: box}, nil
 }

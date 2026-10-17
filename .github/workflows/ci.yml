@@ -95,6 +95,7 @@ jobs:
               - 'apps/server/internal/sandbox/**'
               - 'apps/server/internal/media/**'
               - 'packages/schemas/timeline/**'
+              - 'packages/media-tools/fonts/**'
               - 'apps/server/go.mod'
               - 'apps/server/go.sum'
               - 'go.work'
@@ -473,6 +474,10 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: '1'
         run: python3 -I -m unittest discover -s packages/media-tools/licenses -v
+
+      # The vendored fonts and their OFL licence texts are the ones pinned in fonts/manifest.tsv (SHA-256 of every file).
+      - name: Fonts match the manifest
+        run: packages/media-tools/scripts/fetch-fonts.sh --check
 
       - name: Build the image
         run: docker build --tag media-tools:ci packages/media-tools

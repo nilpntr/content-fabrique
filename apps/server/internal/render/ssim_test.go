@@ -9,6 +9,20 @@ import (
 // minSSIM is the acceptance threshold of the golden frames (design note section 7).
 const minSSIM = 0.98
 
+// minTextSSIM is the threshold of the frames that show text or captions: libass rasterises and animates a little differently
+// between versions and platforms (the committed frames are made with the media-tools image, CI renders with a static ffmpeg), so
+// glyph edges and the middle of an animation move by a pixel. A caption on the wrong frame or in the wrong place scores far lower
+// (the text tests check timing and position exactly; this checks that the picture is what it should be).
+const minTextSSIM = 0.95
+
+// minSSIMFor returns the threshold for a sample: the lower one when text or a caption is on screen in it.
+func minSSIMFor(s sample) float64 {
+	if s.text {
+		return minTextSSIM
+	}
+	return minSSIM
+}
+
 // ssim is the mean structural similarity of two images of the same size: the mean over the red, green and blue planes of
 // the SSIM of 8x8 windows taken every 4 pixels, with the usual constants for 8-bit data. It is a pure Go
 // implementation, so the comparison does not depend on the ffmpeg that is installed. Images of different sizes score 0.

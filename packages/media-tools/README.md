@@ -29,7 +29,9 @@ go run ./cmd/cfctl media bench                                   # docker vs har
 - Subtitle text in legacy encodings converts to UTF-8 through glibc's iconv: the image ships the gconv modules for UTF-16/32,
   the Latin, Cyrillic, Greek, Hebrew, Arabic, Turkish and Thai code pages, Shift_JIS, EUC-JP, EUC-KR, GBK, GB18030 and Big5
   (`scripts/smoke-charsets.sh` runs in the Dockerfile and in CI).
-- `/usr/share/fonts/cf` is where caption fonts go (P3-04); fontconfig reads only that directory.
+- `/usr/share/fonts/cf` holds the title and caption fonts (P3-04: Anton, Inter, Montserrat, all SIL OFL 1.1, from
+  `fonts/manifest.tsv`); fontconfig reads only that directory. A render stages the same files next to its `.ass` file and points
+  the `ass` filter at them, so the output does not depend on which fonts a provider has installed.
 
 ## Contents
 

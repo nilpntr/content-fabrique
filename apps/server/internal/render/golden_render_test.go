@@ -24,8 +24,20 @@ import (
 // final profile too, and frames at sampled positions are compared with small PNGs committed under testdata/golden/frames
 // by SSIM. The frames of the test media carry their source frame number, so a cut that is one frame off fails.
 
-// goldenWidth is the width the sampled frames are scaled to before they are compared and committed.
-const goldenWidth = 108
+// goldenWidth is the width the sampled frames are scaled to before they are compared and committed; goldenTextWidth is the width
+// for fixtures with text or captions, which need more pixels to show where the words are.
+const (
+	goldenWidth     = 108
+	goldenTextWidth = 216
+)
+
+// goldenWidthFor is the comparison width of a plan: wider when it draws text or captions (not just the watermark).
+func goldenWidthFor(p Plan) int {
+	if p.Subtitles != nil && (p.Subtitles.TextEvents > 0 || p.Subtitles.CaptionEvents > 0) {
+		return goldenTextWidth
+	}
+	return goldenWidth
+}
 
 // finalFixtures are the render fixtures that are also rendered with the final profile: one per kind of work (a cover
 // with a focus point, a transition with a blur, blur_fill, an audio mix and the full edit).
@@ -39,11 +51,13 @@ type sample struct {
 	// sensitive is set for mid frames of clips that play at normal or higher speed, whose next frame must look
 	// different, or the frame number could not tell an off-by-one apart.
 	sensitive bool
+	// text is set when a text item or a caption is on screen in the frame (not just the watermark).
+	text bool
 }
 
 // sampleFrames picks the frames to compare: the first and last frame, the frames around every cut (the last frame before it and
 // the first of the next item: a cut that is one frame early shows in the first, one that is late in the second), the middle of every transition, the first frame after a whip and the middle of every item.
-func sampleFrames(p Plan) []sample {
+func sampleFrames(t testing.TB, p Plan) []sample {
 	byFrame := map[int64]sample{}
 	add := func(f int64, kind string, sensitive bool) {
 		if f < 0 || f >= p.TotalFrames {
@@ -71,17 +85,40 @@ func sampleFrames(p Plan) []sample {
 			}
 		}
 	}
-	// The middle of each item, from the time map (which assigns [out_start, out_end) to each main item).
+	// The middle of each item, from the time map (which assigns [out_start, out_end) to each main item). A text item is sampled
+	// in the middle of its time as well, after its animation, and up to six caption events in the middle of theirs.
 	for _, e := range p.TimeMap {
 		if e.SourceInMs == nil {
+			a, b := timeline.Frame(e.OutStartMs, p.FPS), timeline.Frame(e.OutEndMs, p.FPS)
+			add((a+b)/2, "text", false)
 			continue
 		}
 		startF := timeline.Frame(e.OutStartMs, p.FPS)
 		endF := timeline.Frame(e.OutEndMs, p.FPS)
 		add((startF+endF)/2, "mid", *e.Speed >= 1 && endF-startF > 4 && (startF+endF)/2+1 < p.TotalFrames)
 	}
+	if p.Subtitles != nil && p.Subtitles.CaptionEvents > 0 {
+		var mids []int64
+		for _, d := range parseDialogues(t, p.Subtitles.ASS) {
+			if d.layer == layerCaption {
+				mids = append(mids, (firstFrameAt(t, d.start, p.FPS)+firstFrameAt(t, d.end, p.FPS))/2)
+			}
+		}
+		for i := 0; i < 6 && len(mids) > 0; i++ {
+			add(mids[i*len(mids)/6%len(mids)], "caption", false)
+		}
+	}
+	var shown [][2]int64 // frames [from, to) on which a text item or a caption is on screen
+	if p.Subtitles != nil {
+		for _, d := range parseDialogues(t, p.Subtitles.ASS) {
+			if d.layer != layerWatermark {
+				shown = append(shown, [2]int64{firstFrameAt(t, d.start, p.FPS), firstFrameAt(t, d.end, p.FPS)})
+			}
+		}
+	}
 	out := make([]sample, 0, len(byFrame))
 	for _, s := range byFrame {
+		s.text = slices.ContainsFunc(shown, func(r [2]int64) bool { return s.frame >= r[0] && s.frame < r[1] })
 		out = append(out, s)
 	}
 	slices.SortFunc(out, func(a, b sample) int { return int(a.frame - b.frame) })
@@ -152,7 +189,7 @@ func goldenRender(t *testing.T, ffmpeg, ffprobe, name string, spec *timeline.Spe
 		t.Errorf("audio is %.3f s long, video %d ms", info.audioSec, plan.DurationMs)
 	}
 
-	samples := sampleFrames(plan)
+	samples := sampleFrames(t, plan)
 	// The frame after each sensitive sample is extracted as well, to prove the test could see an off-by-one.
 	want := map[int64]bool{}
 	for _, s := range samples {
@@ -166,7 +203,7 @@ func goldenRender(t *testing.T, ffmpeg, ffprobe, name string, spec *timeline.Spe
 		frames = append(frames, f)
 	}
 	slices.Sort(frames)
-	imgs := extractFrames(t, ffmpeg, out, frames)
+	imgs := extractFrames(t, ffmpeg, out, frames, goldenWidthFor(plan))
 
 	gdir := filepath.Join("testdata", "golden", "frames", name, string(prof.Name))
 	if *update {
@@ -189,8 +226,8 @@ func goldenRender(t *testing.T, ffmpeg, ffprobe, name string, spec *timeline.Spe
 			if got < lowest {
 				lowest, lowestAt = got, fmt.Sprintf("frame %d (%s)", s.frame, s.kind)
 			}
-			if got < minSSIM {
-				t.Errorf("frame %d (%s): SSIM %.4f against %s, want at least %.2f", s.frame, s.kind, got, path, minSSIM)
+			if floor := minSSIMFor(s); got < floor {
+				t.Errorf("frame %d (%s): SSIM %.4f against %s, want at least %.2f", s.frame, s.kind, got, path, floor)
 			}
 		}
 		if s.sensitive {
@@ -255,15 +292,15 @@ func probe(t *testing.T, ffprobe, path string) probeInfo {
 	return info
 }
 
-// extractFrames decodes the given frames (numbered from 0, ascending) of a video, scaled to goldenWidth.
-func extractFrames(t *testing.T, ffmpeg, video string, frames []int64) map[int64]image.Image {
+// extractFrames decodes the given frames (numbered from 0, ascending) of a video, scaled to width.
+func extractFrames(t *testing.T, ffmpeg, video string, frames []int64, width int) map[int64]image.Image {
 	t.Helper()
 	dir := t.TempDir()
 	terms := make([]string, len(frames))
 	for i, f := range frames {
 		terms[i] = fmt.Sprintf("eq(n,%d)", f)
 	}
-	vf := fmt.Sprintf("select='%s',scale=%d:-2:flags=area", strings.Join(terms, "+"), goldenWidth)
+	vf := fmt.Sprintf("select='%s',scale=%d:-2:flags=area", strings.Join(terms, "+"), width)
 	cmd := exec.CommandContext(context.Background(), ffmpeg, "-hide_banner", "-loglevel", "error", "-i", video, "-vf", vf, "-fps_mode", "passthrough", filepath.Join(dir, "%05d.png")) //nolint:gosec // test helper
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

@@ -11,7 +11,8 @@
 //     production the runner is a media.SandboxRunner over the docker or hardened provider of internal/sandbox, with the
 //     media-tools image; in development, the local provider.
 //
-// What this package does not do yet: text and captions (P3-04, which adds the ASS file and the style registry) and the
-// preview watermark (it needs a font from the same registry). Text items compile to nothing and are listed in
-// Plan.PendingText, so a test can assert that nothing is drawn.
+// Text and captions (P3-04): every text item, every caption and the preview watermark is a Dialogue event of one generated ASS
+// script (Plan.Subtitles), burned in by the ass filter after the clips are joined. The text is laid out with the style registry
+// and safe zones of internal/timeline/style, the same code timeline.Validate checks with; Execute stages the script and the
+// OFL fonts next to the output so every provider draws it the same way.
 package render

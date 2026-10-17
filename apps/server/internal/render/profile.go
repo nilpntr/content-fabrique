@@ -50,8 +50,7 @@ type Profile struct {
 	Faststart bool `json:"faststart"`
 	// BeatGuide mixes in the clicks generated from the markers (preview only).
 	BeatGuide bool `json:"beat_guide"`
-	// Watermark marks the profile as watermarked. The watermark needs a font, so it arrives with P3-04: until then the
-	// Plan reports it in PendingWatermark and draws nothing.
+	// Watermark draws a small PREVIEW mark in the corner of the safe zone (part of the ASS script).
 	Watermark bool `json:"watermark"`
 	// LoudnormPasses is 1 for a single dynamic pass and 2 for measure-then-apply.
 	LoudnormPasses int `json:"loudnorm_passes"`

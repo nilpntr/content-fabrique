@@ -1,0 +1,3 @@
+# The font files and licence texts are stored exactly as the upstream projects publish them: manifest.tsv pins the SHA-256 of
+# each file (one licence text has CRLF line endings), so no line-ending conversion may touch them.
+* -text

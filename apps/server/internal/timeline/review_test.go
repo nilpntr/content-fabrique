@@ -48,20 +48,20 @@ func TestWrongAssetKind(t *testing.T) {
 	wantCodes(t, validateSpec(t, addTrack(baseSpec(), audioTrack(creator("s1", assetVideo30, 0, 0, nil)))), CodeWrongAssetKind)
 }
 
-func TestUnknownStyleIsAWarning(t *testing.T) {
+func TestUnknownStyleIsAnError(t *testing.T) {
 	s := addTrack(baseSpec(), textTrack(TextItem{ID: "t1", AtMs: 0, DurationMs: 1000, Text: "Hi", Style: "comic_sans", Anchor: AnchorCenter}))
 	res := validateSpec(t, s)
 	wantCodes(t, res, CodeUnknownStyle)
-	if res.Issues[0].Severity != SeverityWarning {
+	if res.Issues[0].Severity != SeverityError {
 		t.Fatalf("severity %q", res.Issues[0].Severity)
 	}
-	if !res.OK() || len(res.Errors()) != 0 {
-		t.Fatal("a warning must not block a version")
+	if res.OK() || len(res.Errors()) != 1 {
+		t.Fatal("an unknown style must block a version (P3-04 made it an error)")
 	}
-	// An error next to it still blocks.
+	// A second error next to it is reported as well.
 	s = addTrack(s, audioTrack(creator("s1", assetNoRights, 0, 0, nil)))
 	res = validateSpec(t, s)
-	if res.OK() || len(res.Errors()) != 1 || res.Errors()[0].Code != CodeUnlicensedAudio {
+	if res.OK() || len(res.Errors()) != 2 {
 		t.Fatalf("got %+v", res.Issues)
 	}
 }

@@ -95,7 +95,7 @@ func baseSpec(t testing.TB) timeline.Spec {
       {"id": "c3", "asset_id": "`+vid30+`", "source": {"in_ms": 0, "out_ms": 3000}, "at_ms": 7000}
     ]},
     {"id": "text", "type": "text", "items": [
-      {"id": "t1", "at_ms": 500, "duration_ms": 2000, "text": "Hello", "style": "title_bold", "anchor": "center"}
+      {"id": "t1", "at_ms": 500, "duration_ms": 2000, "text": "Hello", "style": "title_bold", "anchor": "upper_third"}
     ]},
     {"id": "sound", "type": "audio", "items": [
       {"id": "s1", "kind": "trend_sound", "trend_id": "`+trend+`", "at_ms": 0, "source_offset_ms": 0, "export": "cue_only"}
