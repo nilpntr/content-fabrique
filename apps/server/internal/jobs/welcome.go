@@ -21,6 +21,9 @@ type Deps struct {
 	// Objects is object storage (R2 or MinIO), for the jobs that remove objects. Nil when storage is not configured: those
 	// jobs then fail and are retried, so a worker started later (with the settings) finishes them.
 	Objects ObjectStore
+	// Ingest is the media pipeline for the asset_ingest job. Nil when the worker has no object storage or sandbox set up:
+	// ingest jobs then wait (snoozed) until a worker that has them picks them up.
+	Ingest AssetIngester
 	// Now replaces time.Now (tests).
 	Now func() time.Time
 	// Register optionally adds more workers to the bundle (tests, and packages with jobs of their own later).

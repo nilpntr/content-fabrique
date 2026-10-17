@@ -60,7 +60,10 @@ type Metadata struct {
 	SizeBytes  int64  `json:"sizeBytes"`         // 0 when unknown
 	BitRate    int64  `json:"bitRate,omitempty"` // container bit rate, bits per second
 	HasVideo   bool   `json:"hasVideo"`
-	HasAudio   bool   `json:"hasAudio"`
+	// VideoIndex is the stream index of the video stream the other fields describe, usable as `-map 0:<n>`. Meaningful
+	// only when HasVideo.
+	VideoIndex int  `json:"videoIndex"`
+	HasAudio   bool `json:"hasAudio"`
 
 	// Width and Height are the display size: after the rotation and the sample aspect ratio are applied, so an
 	// upright iPhone portrait clip is 2160x3840 although it is stored as 3840x2160.
@@ -201,6 +204,7 @@ func Normalise(raw []byte) (Metadata, error) {
 
 func (m *Metadata) fillVideo(s *rawStream) {
 	m.HasVideo = true
+	m.VideoIndex = s.Index
 	m.Codecs.Video = s.CodecName
 	m.PixFmt = s.PixFmt
 	m.CodedWidth, m.CodedHeight = s.Width, s.Height

@@ -5,6 +5,7 @@
   "sizeBytes": 120000000,
   "bitRate": 44624000,
   "hasVideo": true,
+  "videoIndex": 0,
   "hasAudio": true,
   "width": 2160,
   "height": 3840,
