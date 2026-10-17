@@ -2,6 +2,7 @@ import { Check, Clock, Search } from "lucide-react";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { usePrefersReducedMotion } from "@/hooks/use-prefers-reduced-motion";
 import { cn } from "@/lib/utils";
 import { Chip } from "./chip";
 import { formatDuration } from "./duration";
@@ -27,10 +28,13 @@ export function FootageStep({
   assets,
   selectedIds,
   onChange,
+  onMediaError,
 }: {
   assets: readonly Asset[];
   selectedIds: readonly AssetId[];
   onChange: (ids: AssetId[]) => void;
+  /** A poster or preview would not load (its URL expired): the caller can fetch the list again for fresh ones. */
+  onMediaError?: () => void;
 }) {
   const [query, setQuery] = React.useState("");
   const [activeTags, setActiveTags] = React.useState<string[]>([]);
@@ -154,7 +158,7 @@ export function FootageStep({
       ) : (
         <ul className="grid grid-cols-2 gap-3 p-1 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {visible.map((asset) => (
-            <ClipCard key={asset.id} asset={asset} selected={selected.has(asset.id)} onToggle={toggle} />
+            <ClipCard key={asset.id} asset={asset} selected={selected.has(asset.id)} onToggle={toggle} onMediaError={onMediaError} />
           ))}
         </ul>
       )}
@@ -166,15 +170,20 @@ function ClipCard({
   asset,
   selected,
   onToggle,
+  onMediaError,
 }: {
   asset: Asset;
   selected: boolean;
   onToggle: (id: AssetId, range: boolean) => void;
+  onMediaError?: () => void;
 }) {
   const titleId = React.useId();
   const metaId = React.useId();
+  const reducedMotion = usePrefersReducedMotion();
+  // The loop is only fetched once the pointer rests on the card, and never for someone who asked for less motion.
+  const [hovering, setHovering] = React.useState(false);
   return (
-    <li className="relative">
+    <li className="relative" onPointerEnter={(event) => setHovering(event.pointerType === "mouse")} onPointerLeave={() => setHovering(false)}>
       <input
         type="checkbox"
         checked={selected}
@@ -194,7 +203,10 @@ function ClipCard({
         )}
       >
         <div className="relative aspect-4/5 bg-wash">
-          <img src={asset.posterUrl} alt="" loading="lazy" draggable={false} className="size-full object-cover" />
+          {asset.posterUrl ? <img src={asset.posterUrl} alt="" loading="lazy" draggable={false} onError={onMediaError} className="size-full object-cover" /> : null}
+          {hovering && asset.hoverPreviewUrl && !reducedMotion ? (
+            <video src={asset.hoverPreviewUrl} muted loop autoPlay playsInline aria-hidden="true" tabIndex={-1} onError={onMediaError} className="pointer-events-none absolute inset-0 size-full object-cover" />
+          ) : null}
           <span
             aria-hidden="true"
             className={cn(

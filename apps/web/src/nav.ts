@@ -1,5 +1,5 @@
 import { useLocation, useMatches } from "@tanstack/react-router";
-import { BarChart3Icon, FilmIcon, LayoutDashboardIcon, type LucideIcon, PlusIcon, SettingsIcon } from "lucide-react";
+import { BarChart3Icon, FilmIcon, FolderOpenIcon, LayoutDashboardIcon, type LucideIcon, PlusIcon, SettingsIcon } from "lucide-react";
 import type { FileRouteTypes } from "@/routeTree.gen";
 
 export interface NavItem {
@@ -11,6 +11,7 @@ export interface NavItem {
 
 export const NAV_ITEMS: readonly NavItem[] = [
   { title: "Overview", to: "/", icon: LayoutDashboardIcon },
+  { title: "Projects", to: "/projects", icon: FolderOpenIcon },
   { title: "New project", to: "/projects/new", icon: PlusIcon },
   { title: "Library", to: "/library", icon: FilmIcon },
   { title: "Reports", to: "/reports", icon: BarChart3Icon },
@@ -36,5 +37,6 @@ export function useActiveNavItem(): NavItem | undefined {
   const pathname = useLocation({ select: (location) => location.pathname });
   const leaf = matches.at(-1);
   if (!leaf || trimSlash(leaf.pathname) !== trimSlash(pathname)) return undefined;
-  return NAV_ITEMS.find((item) => matches.some((match) => matchesNavItem(item, match.routeId)));
+  // The most specific item wins: `/projects/new` is under `/projects`, and belongs to "New project".
+  return NAV_ITEMS.filter((item) => matches.some((match) => matchesNavItem(item, match.routeId))).sort((a, b) => b.to.length - a.to.length)[0];
 }

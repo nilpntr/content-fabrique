@@ -12,6 +12,19 @@ export const LIBRARY_SUMMARY_QUERY_KEY = "library-summary";
 /** The query key prefix of GET /v1/assets (see lib/api/hooks.ts). */
 export const ASSETS_QUERY_KEY = "assets";
 
+// The keys of the projects hooks (lib/api/hooks.ts). Each is followed by the Clerk user and organization, then by the ids.
+/** The list of projects: `[PROJECTS_QUERY_KEY, user, org]`. */
+export const PROJECTS_QUERY_KEY = "projects";
+/** One project: `[PROJECT_QUERY_KEY, user, org, projectId]`. */
+export const PROJECT_QUERY_KEY = "project";
+/** The versions of a project's timeline: `[TIMELINES_QUERY_KEY, user, org, projectId]`, and `[..., projectId, version]` for one with its spec. */
+export const TIMELINES_QUERY_KEY = "timelines";
+/** One agent run: `[RUN_QUERY_KEY, user, org, runId]`. */
+export const RUN_QUERY_KEY = "run";
+/** The preview render of a version: `[RENDERS_QUERY_KEY, user, org, projectId, version]` (the list), `[RENDER_QUERY_KEY, ..., renderId]` (one). */
+export const RENDERS_QUERY_KEY = "renders";
+export const RENDER_QUERY_KEY = "render";
+
 /** Whether an error is the API's 402: the workspace's plan lapsed (or was revoked) since `me` was fetched. */
 export function isPlanRequired(error: unknown): boolean {
   return error instanceof ApiError && error.status === 402 && error.code === PLAN_REQUIRED_CODE;
