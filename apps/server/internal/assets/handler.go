@@ -74,11 +74,16 @@ func assetOf(a store.Asset) api.Asset {
 	if tags == nil {
 		tags = []string{}
 	}
+	titleSource := api.TitleSource(a.TitleSource)
 	out := api.Asset{
 		Id: a.ID.String(), Kind: api.AssetKind(a.Kind), Status: api.AssetStatus(a.Status), Filename: a.Filename,
-		ContentType: a.ContentType, SizeBytes: a.SizeBytes, Sha256: a.Sha256, Title: a.Title, Description: a.Description,
-		Tags: tags, FailureReason: a.FailureReason, IngestProgress: int(a.IngestProgress), IngestStage: a.IngestStage,
+		ContentType: a.ContentType, SizeBytes: a.SizeBytes, Sha256: a.Sha256, Title: a.Title, TitleSource: &titleSource,
+		Description: a.Description, Tags: tags, FailureReason: a.FailureReason, IngestProgress: int(a.IngestProgress), IngestStage: a.IngestStage,
 		CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt,
+	}
+	if a.QuickLookStatus != nil {
+		qs := api.QuickLookStatus(*a.QuickLookStatus)
+		out.QuickLookStatus = &qs
 	}
 	if a.Status == store.AssetReady && a.DurationMs != nil {
 		out.Media = &api.MediaInfo{
@@ -196,7 +201,11 @@ func (h *Handler) ListAssets(ctx context.Context, req api.ListAssetsRequestObjec
 		if req.Params.Cursor != nil {
 			cursor = *req.Params.Cursor
 		}
-		rows, next, e = h.svc.List(ctx, who, limit, cursor)
+		query := ""
+		if req.Params.Q != nil {
+			query = *req.Params.Q
+		}
+		rows, next, e = h.svc.List(ctx, who, query, limit, cursor)
 	}
 	if e != nil {
 		switch e.Status {
@@ -252,6 +261,40 @@ func (h *Handler) GetAsset(ctx context.Context, req api.GetAssetRequestObject) (
 		return nil, undocumented("getAsset", e)
 	}
 	return api.GetAsset200JSONResponse(viewOf(v)), nil
+}
+
+// UpdateAsset is PATCH /v1/assets/{id}: the title a person typed.
+func (h *Handler) UpdateAsset(ctx context.Context, req api.UpdateAssetRequestObject) (api.UpdateAssetResponseObject, error) {
+	who, e := h.begin(ctx, true)
+	var v View
+	if e == nil {
+		var id ids.AssetID
+		switch id, e = parseID(req.Id); {
+		case e != nil:
+		case req.Body == nil:
+			e = invalid("a request body is required")
+		default:
+			v, e = h.svc.Rename(ctx, who, id, req.Body.Title)
+		}
+	}
+	if e != nil {
+		switch e.Status {
+		case 400:
+			return api.UpdateAsset400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body(e))}, nil
+		case 401:
+			return api.UpdateAsset401JSONResponse{UnauthenticatedJSONResponse: api.UnauthenticatedJSONResponse(body(e))}, nil
+		case 403:
+			return api.UpdateAsset403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(body(e))}, nil
+		case 404:
+			return api.UpdateAsset404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(body(e))}, nil
+		case 500:
+			return api.UpdateAsset500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(body(e))}, nil
+		case 503:
+			return api.UpdateAsset503JSONResponse{UnavailableJSONResponse: api.UnavailableJSONResponse(body(e))}, nil
+		}
+		return nil, undocumented("updateAsset", e)
+	}
+	return api.UpdateAsset200JSONResponse(viewOf(v)), nil
 }
 
 // GetAssetSpriteVtt is GET /v1/assets/{id}/sprite.vtt.

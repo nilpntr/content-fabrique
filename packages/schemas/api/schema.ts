@@ -77,6 +77,10 @@ export interface paths {
          * List the workspace's assets, newest first
          * @description Cursor pagination. Deleted assets are not listed. A `ready` asset carries its `media` facts and short-lived
          *     `derivatives` URLs, as in `getAsset`.
+         *     With `q` only the assets that match the search are listed (still newest first, same cursor): every word of `q`
+         *     must occur, as the start of a word, in the asset's title, description, tags or file name, with English stemming
+         *     (`row` finds "Barbell rows"). Characters other than letters and digits only separate words; a `q` without any
+         *     word lists everything.
          */
         get: operations["listAssets"];
         put?: never;
@@ -125,7 +129,13 @@ export interface paths {
         delete: operations["deleteAsset"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Edit an asset's title
+         * @description Sets the title. The title is cleaned like every title (control characters, markup characters and extra spaces
+         *     removed) and must have 1 to 255 characters left. From then on the asset's `title_source` is `user` and the quick
+         *     look never overwrites the title again. Only owners and editors may edit.
+         */
+        patch: operations["updateAsset"];
         trace?: never;
     };
     "/v1/assets/{id}/upload": {
@@ -645,6 +655,23 @@ export interface components {
          * @enum {string}
          */
         AssetStatus: "uploading" | "uploaded" | "processing" | "ready" | "failed";
+        /**
+         * @description Where the title came from: `filename` (the file name without its extension, what the upload made), `quicklook`
+         *     (written by the quick look) or `user` (edited with `updateAsset`; never overwritten).
+         * @enum {string}
+         */
+        TitleSource: "filename" | "quicklook" | "user";
+        /**
+         * @description `pending` (the clip is ready and its quick look has not finished), `succeeded` (title, description and tags were
+         *     written), `failed` (the clip is usable but has no description or tags; the title is still the file name) or
+         *     `skipped` (nothing is owed: the asset failed its ingest, or the job could not run for a day).
+         * @enum {string}
+         */
+        QuickLookStatus: "pending" | "succeeded" | "failed" | "skipped";
+        UpdateAssetRequest: {
+            /** @description The new title. Cleaned by the server; 1 to 255 characters must remain. */
+            title: string;
+        };
         Asset: {
             id: components["schemas"]["AssetId"];
             kind: components["schemas"]["AssetKind"];
@@ -656,10 +683,16 @@ export interface components {
             size_bytes: number;
             /** @description The SHA-256 (lowercase hex) the client claimed when it started the upload. Null when it did not say. Not verified by the upload itself. */
             sha256: string | null;
-            /** @description Editable. Starts as the file name without its extension. */
+            /** @description Editable with `updateAsset`. Starts as the file name without its extension; the quick look replaces it unless it was edited. */
             title: string;
+            /** @description Present on every asset the server returns (optional in the schema only so older clients and fixtures still type-check). */
+            title_source?: components["schemas"]["TitleSource"];
+            /** @description A one-line description written by the quick look (at most 160 characters). Empty until then. */
             description: string;
+            /** @description At most 8 lowercase tags of one to three words, written by the quick look. Empty until then. */
             tags: string[];
+            /** @description The state of the quick look (the title, description and tags a video gets right after its ingest). Absent for an asset it does not apply to (audio, images, and videos from before it existed). */
+            quick_look_status?: components["schemas"]["QuickLookStatus"];
             /**
              * @description Why the asset is `failed`, as a code that is safe to show. The upload failed: `upload_expired`, `size_mismatch`,
              *     `upload_aborted`. The ingest could not process the file: `unsupported_format` (not a container we accept),
@@ -1382,6 +1415,8 @@ export interface operations {
     listAssets: {
         parameters: {
             query?: {
+                /** @description Search words, at most 100 characters. At most the first 8 words are used. */
+                q?: string;
                 /** @description How many assets to return (default 50). */
                 limit?: number;
                 /** @description The `next_cursor` of the previous page. Opaque. */
@@ -1515,6 +1550,40 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    updateAsset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The asset's TypeID. */
+                id: components["parameters"]["AssetIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAssetRequest"];
+            };
+        };
+        responses: {
+            /** @description The asset as it is now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Asset"];
+                };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthenticated"];

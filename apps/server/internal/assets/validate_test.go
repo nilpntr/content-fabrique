@@ -122,12 +122,13 @@ func TestSanitizeFilenameCapsLength(t *testing.T) {
 
 func TestTitleOf(t *testing.T) {
 	for in, want := range map[string]string{
-		"clip.mp4":               "clip",
-		"My.Video.final.mov":     "My.Video.final",
-		"noextension":            "noextension",
-		"trail .mp4":             "trail",
-		"日本語.mp4":                "日本語",
-		strings.Repeat("é", 300): strings.Repeat("é", MaxTitleChars),
+		"clip.mp4":                             "clip",
+		"My.Video.final.mov":                   "My.Video.final",
+		"noextension":                          "noextension",
+		"Gino's $100 [take 2] ^heavy~ | x.mp4": "Gino's $100 [take 2] ^heavy~ | x",
+		"trail .mp4":                           "trail",
+		"日本語.mp4":                              "日本語",
+		strings.Repeat("é", 300):               strings.Repeat("é", MaxTitleChars),
 	} {
 		if got := titleOf(in); got != want {
 			t.Errorf("titleOf(%q) = %q, want %q", in, got, want)

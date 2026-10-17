@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,7 +10,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -51,6 +51,9 @@ type Frame struct {
 	Ref string
 	// Err says, for the model, why there is no picture at this moment.
 	Err string
+	// JPEG holds the picture's bytes when this call has just made it (so a caller that wants the bytes need not read them
+	// back); nil for a frame that was already cached.
+	JPEG []byte
 }
 
 // FrameSource makes the frames of a clip. *FrameService is the real one.
@@ -105,10 +108,19 @@ func ClampMs(at, durationMs int64) int64 {
 	return at
 }
 
-// Frames implements FrameSource.
+// Frames implements FrameSource: FramesSized at FrameLongSide.
 func (s *FrameService) Frames(ctx context.Context, ws ids.WorkspaceID, asset ids.AssetID, atMs []int64) ([]Frame, error) {
+	return s.FramesSized(ctx, ws, asset, atMs, FrameLongSide)
+}
+
+// FramesSized is Frames at another size: longSide pixels on the long side (16 to 4096). The cache key holds the size, so
+// pictures of different sizes of one moment live side by side. The quick look (P1-04b) takes its candidates at 512 px with it.
+func (s *FrameService) FramesSized(ctx context.Context, ws ids.WorkspaceID, asset ids.AssetID, atMs []int64, longSide int) ([]Frame, error) {
 	if len(atMs) == 0 || len(atMs) > media.MaxFrameBatch {
 		return nil, fmt.Errorf("editor: %d frames asked for, 1 to %d allowed", len(atMs), media.MaxFrameBatch)
+	}
+	if longSide < 16 || longSide > 4096 {
+		return nil, fmt.Errorf("editor: a frame size of %d px is outside 16..4096", longSide)
 	}
 	proxy, err := s.proxy(ctx, ws, asset)
 	if err != nil {
@@ -119,7 +131,7 @@ func (s *FrameService) Frames(ctx context.Context, ws ids.WorkspaceID, asset ids
 	first := map[int64]int{} // shown time -> index of the first frame that shows it
 	for i, req := range atMs {
 		at := ClampMs(req, proxy.durationMs)
-		key, err := storage.FrameKey(ws, asset, at, FrameLongSide)
+		key, err := storage.FrameKey(ws, asset, at, longSide)
 		if err != nil {
 			return nil, err
 		}
@@ -136,7 +148,7 @@ func (s *FrameService) Frames(ctx context.Context, ws ids.WorkspaceID, asset ids
 		}
 	}
 	if len(missing) > 0 {
-		cause, err := s.extract(ctx, asset, proxy.key, out, missing)
+		cause, err := s.extract(ctx, asset, proxy.key, out, missing, longSide)
 		if err != nil {
 			return nil, err
 		}
@@ -192,7 +204,7 @@ func (s *FrameService) proxy(ctx context.Context, ws ids.WorkspaceID, asset ids.
 // extract cuts the frames out[i] for i in missing, in one ffmpeg run, and stores them. A frame that did not come out right gets
 // Err; cause is the first thing that went wrong (nil when everything worked). The error is for what is not the clip's doing:
 // the sandbox, storage, the disk.
-func (s *FrameService) extract(ctx context.Context, asset ids.AssetID, proxyKey string, out []Frame, missing []int) (cause, err error) {
+func (s *FrameService) extract(ctx context.Context, asset ids.AssetID, proxyKey string, out []Frame, missing []int, longSide int) (cause, err error) {
 	dir, err := os.MkdirTemp(s.TempDir, "frames-")
 	if err != nil {
 		return nil, fmt.Errorf("editor: temp dir: %w", err)
@@ -214,7 +226,7 @@ func (s *FrameService) extract(ctx context.Context, asset ids.AssetID, proxyKey 
 	for n, i := range missing {
 		specs[n] = media.FrameSpec{AtMs: out[i].AtMs, Output: media.OutputPath(fmt.Sprintf("f%d.jpg", n))}
 	}
-	args, err := media.FramesArgs(media.InputPath(0), specs, FrameLongSide)
+	args, err := media.FramesArgs(media.InputPath(0), specs, longSide)
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +242,8 @@ func (s *FrameService) extract(ctx context.Context, asset ids.AssetID, proxyKey 
 		cause = &media.ToolError{Tool: "ffmpeg", ExitCode: res.ExitCode, Stderr: media.StderrSnippet(res.Stderr)}
 	}
 	for n, i := range missing {
-		serr := s.store(ctx, filepath.Join(outDir, fmt.Sprintf("f%d.jpg", n)), out[i].Ref)
+		data, serr := s.store(ctx, filepath.Join(outDir, fmt.Sprintf("f%d.jpg", n)), out[i].Ref)
+		out[i].JPEG = data
 		switch {
 		case serr == nil:
 		case errors.Is(serr, errBadFrame):
@@ -286,32 +299,27 @@ var jpegMagic = []byte{0xFF, 0xD8, 0xFF}
 // errBadFrame marks a frame the tool did not produce, or produced as something else than a small JPEG.
 var errBadFrame = errors.New("editor: no usable frame")
 
-// store checks what the sandbox wrote (output of a tool is untrusted: a regular file, small, a JPEG) and uploads it. A file that
-// is missing or wrong is errBadFrame; a failure of storage is returned as it is.
-func (s *FrameService) store(ctx context.Context, path, key string) error {
+// store checks what the sandbox wrote (output of a tool is untrusted: a regular file, small, a JPEG) and uploads it, returning
+// the bytes it uploaded. A file that is missing or wrong is errBadFrame; a failure of storage is returned as it is.
+func (s *FrameService) store(ctx context.Context, path, key string) ([]byte, error) {
 	fi, err := os.Lstat(path)
 	if err != nil {
-		return fmt.Errorf("%w: ffmpeg wrote no frame", errBadFrame)
+		return nil, fmt.Errorf("%w: ffmpeg wrote no frame", errBadFrame)
 	}
 	if !fi.Mode().IsRegular() || fi.Size() < 100 || fi.Size() > maxFrameFileBytes {
-		return fmt.Errorf("%w: ffmpeg wrote a frame that is not a regular file of a plausible size (%d bytes)", errBadFrame, fi.Size())
+		return nil, fmt.Errorf("%w: ffmpeg wrote a frame that is not a regular file of a plausible size (%d bytes)", errBadFrame, fi.Size())
 	}
-	f, err := os.Open(path) // #nosec G304 -- a file this process just checked, in its job dir
+	data, err := os.ReadFile(path) // #nosec G304 -- a file this process just checked, in its job dir; at most maxFrameFileBytes
 	if err != nil {
-		return fmt.Errorf("%w: %w", errBadFrame, err)
+		return nil, fmt.Errorf("%w: %w", errBadFrame, err)
 	}
-	defer func() { _ = f.Close() }()
-	head := make([]byte, len(jpegMagic))
-	if _, err := io.ReadFull(f, head); err != nil || !slices.Equal(head, jpegMagic) {
-		return fmt.Errorf("%w: ffmpeg wrote a frame that is not a JPEG", errBadFrame)
+	if !bytes.HasPrefix(data, jpegMagic) {
+		return nil, fmt.Errorf("%w: ffmpeg wrote a frame that is not a JPEG", errBadFrame)
 	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return err
+	if err := s.Objects.Put(ctx, key, bytes.NewReader(data), int64(len(data)), "image/jpeg"); err != nil {
+		return nil, fmt.Errorf("editor: store a frame: %w", err)
 	}
-	if err := s.Objects.Put(ctx, key, f, fi.Size(), "image/jpeg"); err != nil {
-		return fmt.Errorf("editor: store a frame: %w", err)
-	}
-	return nil
+	return data, nil
 }
 
 // OverviewTimes are the times of the overview of a clip: a frame every OverviewStepMs, starting at 0, and at most

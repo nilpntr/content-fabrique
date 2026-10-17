@@ -41,6 +41,9 @@ sql:
             go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "UploadID" }
           - column: "assets.created_by"
             go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "UserID" }
+          # The generated search vector is never read by Go, but a row scan needs a type for it.
+          - column: "assets.search"
+            go_type: { import: "github.com/jackc/pgx/v5/pgtype", type: "TSVector" }
           # Any other uuid is a plain google/uuid.
           - db_type: "uuid"
             go_type: "github.com/google/uuid.UUID"
