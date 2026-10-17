@@ -133,7 +133,7 @@ func TestIntegrationMemoryLimit(t *testing.T) {
 	d := integrationProvider(t, root)
 	// A 4K veryslow x264 encode needs hundreds of MiB for its look-ahead and reference frames: under a 64 MiB limit the job must be killed.
 	args := []string{"ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=3840x2160:rate=30:duration=2",
-		"-c:v", "libx264", "-preset", "veryslow", "-x264-params", "rc-lookahead=60:ref=8", "-f", "null", "-"}
+		"-threads", "2", "-c:v", "libx264", "-preset", "veryslow", "-x264-params", "rc-lookahead=30:ref=4:threads=2:lookahead-threads=1", "-f", "null", "-"}
 	res, err := d.Run(context.Background(), Job{Image: *dockerImage, Args: args, Limits: Limits{CPU: 1, MemoryMB: 64, Timeout: time.Minute, PIDs: 128}})
 	if err != nil {
 		t.Fatal(err)
@@ -142,8 +142,53 @@ func TestIntegrationMemoryLimit(t *testing.T) {
 		t.Fatalf("job should have been OOM-killed: exit %d, stderr %q", res.ExitCode, res.Stderr)
 	}
 	// The same job within a generous limit works, so the kill above was the limit and not a broken command.
-	res, err = d.Run(context.Background(), Job{Image: *dockerImage, Args: args, Limits: Limits{CPU: 2, MemoryMB: 3072, Timeout: 2 * time.Minute, PIDs: 256}})
+	res, err = d.Run(context.Background(), Job{Image: *dockerImage, Args: args, Limits: Limits{CPU: 2, MemoryMB: 4096, Timeout: 2 * time.Minute, PIDs: 256}})
 	if err != nil || res.ExitCode != 0 {
 		t.Fatalf("control run: exit %d, %v, stderr %q", res.ExitCode, err, res.Stderr)
+	}
+}
+
+// A 0600 input is readable by the container because the container runs as the worker's own uid. When the worker is root the
+// container runs as nobody and cannot read a root-owned 0600 file: the provider says so up front, and a staged copy with a
+// readable mode works.
+func TestIntegrationInputPermissions(t *testing.T) {
+	root := tmpRoot(t)
+	d := integrationProvider(t, root)
+	in := filepath.Join(root, "private.bin")
+	if err := os.WriteFile(in, []byte("not media"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(in, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	job := Job{Image: *dockerImage, Args: []string{"ffprobe", "-v", "error", "-show_format", "/in/0"}, Limits: DefaultLimits(),
+		Mounts: []Mount{{Host: in, Container: "/in/0"}}}
+	run := func() (Result, error) { return d.Run(context.Background(), job) }
+
+	if os.Getuid() == 0 {
+		if _, err := run(); !errors.Is(err, ErrInputUnreadable) {
+			t.Fatalf("a root-owned 0600 input must be refused for the unprivileged container user, got %v", err)
+		}
+		if err := os.Chmod(in, 0o644); err != nil { // #nosec G302 -- the staged copy is meant to be readable
+			t.Fatal(err)
+		}
+	}
+	res, err := run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// ffprobe opened the file (and rejected its content), so there was no permission problem.
+	if !strings.Contains(string(res.Stderr), "Invalid data found") || strings.Contains(string(res.Stderr), "Permission denied") {
+		t.Fatalf("exit %d, stderr %q", res.ExitCode, res.Stderr)
+	}
+}
+
+// A missing image is a sandbox failure, not "the tool failed".
+func TestIntegrationMissingImageIsASandboxError(t *testing.T) {
+	root := tmpRoot(t)
+	d := integrationProvider(t, root)
+	_, err := d.Run(context.Background(), Job{Image: "media-tools:does-not-exist", Args: []string{"ffprobe"}, Limits: DefaultLimits()})
+	if !errors.Is(err, ErrSandbox) {
+		t.Fatalf("want ErrSandbox, got %v", err)
 	}
 }

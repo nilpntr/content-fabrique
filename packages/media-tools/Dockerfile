@@ -72,7 +72,7 @@ RUN set -eux; \
     make -j"$(nproc)"; \
     make install
 
-COPY scripts/assemble-rootfs.sh /usr/local/sbin/assemble-rootfs.sh
+COPY scripts/assemble-rootfs.sh scripts/smoke-charsets.sh /usr/local/sbin/
 COPY fonts.conf /rootfs-src/fonts.conf
 COPY fonts/ /rootfs-src/fonts/
 RUN set -eux; \
@@ -80,9 +80,12 @@ RUN set -eux; \
     cp /rootfs-src/fonts.conf /rootfs/etc/fonts/fonts.conf; \
     cp -r /rootfs-src/fonts/. /rootfs/usr/share/fonts/cf/; \
     chmod 1777 /rootfs/tmp; \
-    # Smoke test inside the build: the binaries must start with only what is in /rootfs.
+    # Smoke tests inside the build: the binaries must start with only what is in /rootfs, and subtitle text in legacy
+    # encodings must convert (this needs the gconv modules).
     chroot /rootfs /usr/local/bin/ffmpeg -hide_banner -version >/dev/null; \
-    chroot /rootfs /usr/local/bin/ffprobe -hide_banner -version >/dev/null
+    chroot /rootfs /usr/local/bin/ffprobe -hide_banner -version >/dev/null; \
+    /usr/local/sbin/smoke-charsets.sh /rootfs/tmp/smoke /tmp/smoke chroot /rootfs /usr/local/bin/ffmpeg; \
+    rm -rf /rootfs/tmp/smoke
 
 FROM scratch
 COPY --from=build /rootfs/ /

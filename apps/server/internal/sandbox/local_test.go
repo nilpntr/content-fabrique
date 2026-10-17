@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -82,5 +83,73 @@ func TestBoundedBuffer(t *testing.T) {
 	got, trunc := b.snapshot()
 	if string(got) != "abcde" || !trunc {
 		t.Fatalf("%q %v", got, trunc)
+	}
+}
+
+// A command that exited by itself is a result even if the deadline passed while Wait was returning; only a command that was
+// killed while the context was done is a timeout.
+func TestFinishPrefersTheExitOverTheContext(t *testing.T) {
+	dead, cancel := context.WithCancel(context.Background())
+	cancel()
+	run := func(script string) (*exec.Cmd, error) {
+		cmd := exec.Command("sh", "-c", script) // #nosec G204 -- test script
+		return cmd, cmd.Run()
+	}
+
+	cmd, err := run("exit 3")
+	var res Result
+	kill, ferr := finish(dead, nil, cmd, err, time.Second, false, &res)
+	if ferr != nil || kill || res.ExitCode != 3 || res.TimedOut {
+		t.Fatalf("clean exit with a done context: kill=%v err=%v %+v", kill, ferr, res)
+	}
+
+	cmd, err = run("exit 0")
+	res = Result{}
+	if kill, ferr = finish(dead, nil, cmd, err, time.Second, false, &res); ferr != nil || kill || res.ExitCode != 0 {
+		t.Fatalf("clean exit 0: kill=%v err=%v %+v", kill, ferr, res)
+	}
+
+	// Killed by a signal while the context is done: a timeout (or the parent's cancellation).
+	cmd, err = run("kill -9 $$")
+	res = Result{}
+	kill, ferr = finish(dead, nil, cmd, err, time.Second, false, &res)
+	if !errors.Is(ferr, ErrTimeout) || !kill || !res.TimedOut {
+		t.Fatalf("killed under a done context: kill=%v err=%v %+v", kill, ferr, res)
+	}
+	res = Result{}
+	if _, ferr = finish(dead, dead.Err(), cmd, err, time.Second, false, &res); !errors.Is(ferr, context.Canceled) || res.TimedOut {
+		t.Fatalf("parent cancelled: %v %+v", ferr, res)
+	}
+
+	// Killed by a signal with a live context: a sandbox failure for docker, 128+signal for the local tool.
+	live := context.Background()
+	cmd, err = run("kill -9 $$")
+	res = Result{}
+	if _, ferr = finish(live, nil, cmd, err, time.Second, false, &res); !errors.Is(ferr, ErrSandbox) {
+		t.Fatalf("signalled docker CLI: %v", ferr)
+	}
+	res = Result{}
+	if _, ferr = finish(live, nil, cmd, err, time.Second, true, &res); ferr != nil || res.ExitCode != 137 {
+		t.Fatalf("signalled local tool: %v %+v", ferr, res)
+	}
+}
+
+func TestLocalSegfaultIsAResult(t *testing.T) {
+	res, err := NewLocal(Policy{}).Run(context.Background(), Job{Args: []string{"sh", "-c", "kill -SEGV $$"}, Limits: DefaultLimits()})
+	if err != nil || res.ExitCode != 139 {
+		t.Fatalf("%+v, %v", res, err)
+	}
+}
+
+func TestCheckLocalAllowed(t *testing.T) {
+	for _, env := range []string{"", "local", "ci", "bench", "LOCAL"} {
+		if err := CheckLocalAllowed(env); err != nil {
+			t.Errorf("%q: %v", env, err)
+		}
+	}
+	for _, env := range []string{"staging", "production", "Production", " staging "} {
+		if err := CheckLocalAllowed(env); err == nil {
+			t.Errorf("%q must be refused", env)
+		}
 	}
 }

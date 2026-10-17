@@ -2,9 +2,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/nilpntr/content-fabrique/internal/version"
 )
@@ -55,4 +58,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "cfctl: unknown command %q\n\n%s", args[0], usage)
 		return 2
 	}
+}
+
+// signalContext is the context every long-running subcommand uses: it ends on Ctrl-C or SIGTERM, so work in flight (a
+// database call, a sandbox job) is cancelled cleanly. Call the returned function when done.
+func signalContext() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 }

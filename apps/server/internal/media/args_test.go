@@ -13,7 +13,7 @@ import (
 
 func TestProbeArgsGolden(t *testing.T) {
 	got := strings.Join(ProbeArgs("/in/0"), " ")
-	want := "ffprobe -v error -protocol_whitelist file -print_format json -show_format -show_streams -i /in/0"
+	want := "ffprobe -v error -protocol_whitelist file -format_whitelist mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg -print_format json -show_format -show_streams -i /in/0"
 	if got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}
@@ -51,10 +51,41 @@ func TestRawAndCopyArgsGolden(t *testing.T) {
 	if _, err := RawClipArgs("x", 61); err == nil {
 		t.Error("61 s of raw video must be refused")
 	}
-	want = "ffmpeg -nostdin -hide_banner -v error -y -protocol_whitelist file -i /in/0 -map 0 -c copy /work/out.avi"
+	want = "ffmpeg -nostdin -hide_banner -v error -y -protocol_whitelist file -format_whitelist mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg -i /in/0 -map 0 -c copy /work/out.avi"
 	if got := strings.Join(CopyArgs("/in/0", "/work/out.avi"), " "); got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}
+}
+
+func TestEveryUntrustedInputIsWhitelisted(t *testing.T) {
+	for name, args := range map[string][]string{
+		"probe":     ProbeArgs("/in/0"),
+		"copy":      CopyArgs("/in/0", "/work/o"),
+		"transcode": mustArgs(TranscodeH264Args("/in/0", "/work/o", TranscodeOptions{})),
+	} {
+		j := strings.Join(args, " ")
+		if !strings.Contains(j, "-format_whitelist "+UntrustedFormats+" ") || !strings.Contains(j, "-protocol_whitelist file ") {
+			t.Errorf("%s does not restrict its input: %s", name, j)
+		}
+		// Input options must come before -i to apply to it.
+		if strings.Index(j, "-format_whitelist") > strings.Index(j, " -i ") {
+			t.Errorf("%s: whitelist after -i: %s", name, j)
+		}
+	}
+	for _, bad := range []string{"concat", "hls", "lavfi", "dash", "rtsp", "data"} {
+		for _, f := range strings.Split(UntrustedFormats, ",") {
+			if f == bad {
+				t.Errorf("%s must not be whitelisted", bad)
+			}
+		}
+	}
+}
+
+func mustArgs(a []string, err error) []string {
+	if err != nil {
+		panic(err)
+	}
+	return a
 }
 
 func TestTranscodeArgsGolden(t *testing.T) {
@@ -62,7 +93,7 @@ func TestTranscodeArgsGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "ffmpeg -nostdin -hide_banner -v error -y -protocol_whitelist file -i /in/0 -map 0:v:0 -map 0:a:0? " +
+	want := "ffmpeg -nostdin -hide_banner -v error -y -protocol_whitelist file -format_whitelist mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg -i /in/0 -map 0:v:0 -map 0:a:0? " +
 		"-c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart /work/out.mp4"
 	if got := strings.Join(a, " "); got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
@@ -70,8 +101,19 @@ func TestTranscodeArgsGolden(t *testing.T) {
 	if _, err := TranscodeH264Args("a", "b", TranscodeOptions{Preset: "x; rm -rf /"}); err == nil {
 		t.Error("an unknown preset must be refused")
 	}
-	if _, err := TranscodeH264Args("a", "b", TranscodeOptions{CRF: 52}); err == nil {
+	if _, err := TranscodeH264Args("a", "b", TranscodeOptions{CRF: CRF(52)}); err == nil {
 		t.Error("CRF 52 must be refused")
+	}
+	if _, err := TranscodeH264Args("a", "b", TranscodeOptions{CRF: CRF(-1)}); err == nil {
+		t.Error("CRF -1 must be refused")
+	}
+	// 0 is lossless and expressible; unset means 23.
+	lossless, err := TranscodeH264Args("a", "b", TranscodeOptions{CRF: CRF(0)})
+	if err != nil || !strings.Contains(strings.Join(lossless, " "), "-crf 0 ") {
+		t.Errorf("CRF 0: %v %v", lossless, err)
+	}
+	if def, _ := TranscodeH264Args("a", "b", TranscodeOptions{}); !strings.Contains(strings.Join(def, " "), "-crf 23 ") {
+		t.Errorf("default CRF: %v", def)
 	}
 	if _, err := VersionArgs("sh"); err == nil {
 		t.Error("only ffmpeg and ffprobe have version args")

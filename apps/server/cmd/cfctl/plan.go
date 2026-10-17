@@ -8,11 +8,8 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/config"
@@ -208,7 +205,7 @@ func cmdPlan(args []string, stdout, stderr io.Writer, lookup lookupEnv) int {
 		}
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signalContext()
 	defer stop()
 	st, err := store.Open(ctx, dsn, store.Options{AppName: "cfctl", MaxConns: 2})
 	if err != nil {

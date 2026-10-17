@@ -2,7 +2,6 @@ package sandbox
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -75,23 +74,9 @@ func (l *Local) Run(ctx context.Context, job Job) (Result, error) {
 	res.Stdout, res.StdoutTruncated = stdout.snapshot()
 	res.Stderr, res.StderrTruncated = stderr.snapshot()
 
-	var exitErr *exec.ExitError
-	switch {
-	case runCtx.Err() != nil:
-		res.ExitCode = -1
-		if ctx.Err() != nil {
-			return res, ctx.Err()
-		}
-		res.TimedOut = true
-		return res, fmt.Errorf("%w after %v", ErrTimeout, v.Limits.Timeout)
-	case runErr == nil:
-		return res, nil
-	case errors.As(runErr, &exitErr):
-		res.ExitCode = exitErr.ExitCode()
-		return res, nil
-	default:
-		return res, fmt.Errorf("sandbox: local provider: %w", runErr)
-	}
+	kill, err := finish(runCtx, ctx.Err(), cmd, runErr, v.Limits.Timeout, true, &res)
+	_ = kill // the process group was already killed by cmd.Cancel
+	return res, err
 }
 
 // rewriteMountPath maps a container path (or a path below one) to its host path.

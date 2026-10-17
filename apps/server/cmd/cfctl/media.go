@@ -1,17 +1,14 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/media"
@@ -46,10 +43,21 @@ a Markdown table of timings: how much the hardened provider (gVisor) costs compa
 type mediaDeps struct {
 	// newProvider builds a sandbox provider rooted at the allowed host directory.
 	newProvider func(name, dockerBin, root string) (sandbox.Provider, error)
+	// lookupEnv reads the process environment (CF_ENV).
+	lookupEnv func(string) (string, bool)
 }
 
 func defaultMediaDeps() mediaDeps {
-	return mediaDeps{newProvider: newMediaProvider}
+	return mediaDeps{newProvider: newMediaProvider, lookupEnv: os.LookupEnv}
+}
+
+// checkProviderAllowed refuses the local provider (no isolation) in staging and production.
+func (d mediaDeps) checkProviderAllowed(name string) error {
+	if name != "local" || d.lookupEnv == nil {
+		return nil
+	}
+	env, _ := d.lookupEnv("CF_ENV")
+	return sandbox.CheckLocalAllowed(env)
 }
 
 func newMediaProvider(name, dockerBin, root string) (sandbox.Provider, error) {
@@ -103,10 +111,6 @@ func parseInterspersed(fs *flag.FlagSet, args []string) (positional []string, er
 	}
 }
 
-func signalContext() (context.Context, context.CancelFunc) {
-	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-}
-
 func cmdMediaProbe(args []string, stdout, stderr io.Writer, deps mediaDeps) int {
 	fs := flag.NewFlagSet("media probe", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -127,13 +131,23 @@ func cmdMediaProbe(args []string, stdout, stderr io.Writer, deps mediaDeps) int 
 		_, _ = fmt.Fprintf(stderr, "cfctl media probe: want exactly one file, got %d\n", len(files))
 		return 2
 	}
+	if err := deps.checkProviderAllowed(*provider); err != nil {
+		_, _ = fmt.Fprintf(stderr, "cfctl media probe: %v\n", err)
+		return 2
+	}
 	abs, err := filepath.Abs(files[0])
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "cfctl media probe: %v\n", err)
 		return 2
 	}
-	// The sandbox may see the file's own directory and nothing else.
-	p, err := deps.newProvider(*provider, *dockerBin, filepath.Dir(abs))
+	// The sandbox may see the file the argument points to, after symlinks, and the directory it lives in is the allowed root:
+	// a symlink cannot lead the mount anywhere else.
+	target, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "cfctl media probe: %v\n", err)
+		return 1
+	}
+	p, err := deps.newProvider(*provider, *dockerBin, filepath.Dir(target))
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "cfctl media probe: %v\n", err)
 		return 2
@@ -147,7 +161,7 @@ func cmdMediaProbe(args []string, stdout, stderr io.Writer, deps mediaDeps) int 
 
 	ctx, stop := signalContext()
 	defer stop()
-	m, err := media.Probe(ctx, runner, abs)
+	m, err := media.Probe(ctx, runner, target)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "cfctl media probe: %v\n", err)
 		return 1
@@ -161,7 +175,7 @@ func cmdMediaProbe(args []string, stdout, stderr io.Writer, deps mediaDeps) int 
 		}
 		return 0
 	}
-	writeMetadataTable(stdout, filepath.Base(abs), m)
+	writeMetadataTable(stdout, filepath.Base(files[0]), m)
 	return 0
 }
 

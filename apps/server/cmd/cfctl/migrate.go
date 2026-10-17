@@ -9,12 +9,9 @@ import (
 	"io"
 	"io/fs"
 	"net/url"
-	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/doctor"
@@ -166,7 +163,7 @@ func cmdMigrate(args []string, stdout, stderr io.Writer, lookup lookupEnv) int {
 		}
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signalContext()
 	defer stop()
 
 	migrator, err := store.NewMigrator(dsn)

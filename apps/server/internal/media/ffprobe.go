@@ -9,12 +9,14 @@ import (
 )
 
 // ProbeArgs is the ffprobe command line that prints everything Normalise needs as JSON. The input is a container path.
-// `-protocol_whitelist file` stops playlist-style inputs (HLS, concat) from opening anything but local files.
+// `-protocol_whitelist file` stops playlist-style inputs (HLS, concat) from opening anything but local files, and
+// `-format_whitelist` limits the demuxers to UntrustedFormats.
 func ProbeArgs(input string) []string {
 	return []string{
 		"ffprobe",
 		"-v", "error",
 		"-protocol_whitelist", "file",
+		"-format_whitelist", UntrustedFormats,
 		"-print_format", "json",
 		"-show_format",
 		"-show_streams",

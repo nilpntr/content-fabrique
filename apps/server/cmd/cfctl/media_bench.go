@@ -57,6 +57,10 @@ func cmdMediaBench(args []string, stdout, stderr io.Writer, deps mediaDeps) int 
 	names := strings.Split(*providers, ",")
 	for i := range names {
 		names[i] = strings.TrimSpace(names[i])
+		if err := deps.checkProviderAllowed(names[i]); err != nil {
+			_, _ = fmt.Fprintf(stderr, "cfctl media bench: %v\n", err)
+			return 2
+		}
 	}
 
 	work, err := os.MkdirTemp("", "cf-bench-")
@@ -182,7 +186,7 @@ func (b *bencher) transcode(r *media.SandboxRunner, clip, name string) (time.Dur
 	if err != nil {
 		return 0, err
 	}
-	args, err := media.TranscodeH264Args(media.InputPath(0), media.OutputPath("out.mp4"), media.TranscodeOptions{Preset: "veryfast", CRF: 23})
+	args, err := media.TranscodeH264Args(media.InputPath(0), media.OutputPath("out.mp4"), media.TranscodeOptions{Preset: "veryfast", CRF: media.CRF(23)})
 	if err != nil {
 		return 0, err
 	}

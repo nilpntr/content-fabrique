@@ -1,8 +1,8 @@
-#!/bin/sh
+#!/bin/bash
 # Builds /rootfs, the whole content of the media-tools image, from the freshly built ffmpeg: the two binaries, exactly the
 # shared libraries they load (found with ldd), the licence text of every package those libraries come from, and an
 # inventory of all of it. Nothing else goes in: no shell, no package manager, no coreutils.
-set -eu
+set -euo pipefail
 
 FFMPEG_VERSION=$1
 FFMPEG_SHA256=$2
@@ -25,15 +25,48 @@ for bin in ffmpeg ffprobe; do
   echo "$out" | awk '$2 == "=>" && $3 ~ /^\// {print $3} $1 ~ /^\// {print $1}' >>/tmp/libs.raw
 done
 sort -u /tmp/libs.raw >/tmp/libs.txt
+if [ ! -s /tmp/libs.txt ]; then
+  echo "no shared libraries found for ffmpeg: ldd output not understood" >&2
+  exit 1
+fi
 while read -r lib; do
   cp -L --parents "$lib" "$R"
 done </tmp/libs.txt
+
+# glibc's iconv loads one shared module per character set at run time (dlopen), so ldd does not see them. ffmpeg and libass
+# convert subtitle text from other encodings to UTF-8 through iconv (-sub_charenc). Ship the sets creators' subtitle files are
+# likely to use: Unicode (UTF-16/32), Western and Central European and Cyrillic code pages, Greek, Hebrew, Arabic, Turkish,
+# Thai, Japanese (Shift_JIS, EUC-JP), Korean (EUC-KR), Chinese (GBK, GB18030, Big5), with the table libraries the CJK modules
+# load (libJIS and friends). Their package, libc6, is in the inventory
+# already. ISO-8859-1, ASCII and UTF-8 are built into glibc.
+gconv=$(dpkg-architecture -qDEB_HOST_MULTIARCH)
+gdir=/usr/lib/$gconv/gconv
+for m in UTF-16 UTF-32 UNICODE UTF-7 'ISO8859-*' 'CP125*' IBM437 IBM850 IBM852 IBM866 TIS-620 KOI8-R KOI8-U MACINTOSH \
+         SJIS CP932 EUC-JP EUC-KR UHC JOHAB GBK GB18030 EUC-CN BIG5 \
+         libCNS libGB libISOIR165 libJIS libJISX0213 libKSC; do
+  found=0
+  for f in "$gdir"/$m.so; do
+    [ -e "$f" ] || continue
+    found=1
+    cp -L --parents "$f" "$R"
+  done
+  if [ "$found" = 0 ]; then
+    echo "gconv module $m not found in $gdir" >&2
+    exit 1
+  fi
+done
+cp -a --parents "$gdir/gconv-modules" "$R"
+if [ -d "$gdir/gconv-modules.d" ]; then cp -a --parents "$gdir/gconv-modules.d" "$R"; fi
 
 # Which Debian package owns each library (resolved through symlinks, because of the merged /usr).
 : >/tmp/pkgs.txt
 while read -r lib; do
   real=$(readlink -f "$lib")
-  owner=$(dpkg -S "$real" | head -n1 | cut -d: -f1)
+  owner=$(dpkg -S "$real" | cut -d: -f1 | sort -u)
+  if [ -z "$owner" ] || [ "$(echo "$owner" | wc -l)" -ne 1 ]; then
+    echo "no single Debian package owns $lib ($real): '$owner'" >&2
+    exit 1
+  fi
   echo "$owner" >>/tmp/pkgs.txt
 done </tmp/libs.txt
 sort -u /tmp/pkgs.txt -o /tmp/pkgs.txt

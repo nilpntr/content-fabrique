@@ -28,6 +28,9 @@ func (f *fixtureProvider) Run(_ context.Context, j sandbox.Job) (sandbox.Result,
 	return sandbox.Result{Stdout: f.json}, nil
 }
 
+// lastRoot is the allowed root the most recent newProvider call was given.
+var lastRoot string
+
 func fixtureDeps(t *testing.T, fixture string) (mediaDeps, *fixtureProvider, *string) {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "media", "testdata", fixture+".json"))
@@ -36,8 +39,8 @@ func fixtureDeps(t *testing.T, fixture string) (mediaDeps, *fixtureProvider, *st
 	}
 	fp := &fixtureProvider{name: "docker", json: raw}
 	var gotName string
-	return mediaDeps{newProvider: func(name, _, _ string) (sandbox.Provider, error) {
-		gotName = name
+	return mediaDeps{newProvider: func(name, _, root string) (sandbox.Provider, error) {
+		gotName, lastRoot = name, root
 		return fp, nil
 	}}, fp, &gotName
 }
@@ -230,5 +233,61 @@ func TestMediaProbeLocalGenerated(t *testing.T) {
 	}
 	if !m.HDR || m.HDRFormat != "pq" || m.Width != 128 || m.Height != 72 || m.Container != "mp4" || m.SelectedAudio == nil || m.DurationMs < 900 {
 		t.Errorf("%+v", m)
+	}
+}
+
+// The allowed root is the directory of the resolved target, so a symlink never widens what the sandbox may mount.
+func TestMediaProbeResolvesSymlinks(t *testing.T) {
+	deps, fp, _ := fixtureDeps(t, "rotated_180")
+	realDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(realDir, "real.mov")
+	if err := os.WriteFile(target, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	linkDir := t.TempDir()
+	link := filepath.Join(linkDir, "link.mov")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errs := runMedia(t, deps, "probe", link); code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	if lastRoot != realDir {
+		t.Errorf("allowed root %q, want the target's directory %q", lastRoot, realDir)
+	}
+	if got := fp.job.Mounts[0].Host; got != target {
+		t.Errorf("mounted %q, want the resolved target %q", got, target)
+	}
+}
+
+func TestMediaLocalProviderRefusedInStagingAndProduction(t *testing.T) {
+	deps, _, name := fixtureDeps(t, "rotated_180")
+	clip := tempClip(t)
+	for env, want := range map[string]int{"production": 2, "staging": 2, "local": 0, "ci": 0, "": 0} {
+		d := deps
+		d.lookupEnv = func(k string) (string, bool) {
+			if k == "CF_ENV" {
+				return env, env != ""
+			}
+			return "", false
+		}
+		*name = ""
+		if code, _, errs := runMedia(t, d, "probe", clip, "--provider", "local"); code != want {
+			t.Errorf("CF_ENV=%q: exit %d, want %d (%s)", env, code, want, errs)
+		} else if want == 2 && (*name != "" || !strings.Contains(errs, "CF_ENV")) {
+			t.Errorf("CF_ENV=%q: provider built or no explanation: %q %q", env, *name, errs)
+		}
+		if code, _, _ := runMedia(t, d, "bench", "--providers", "docker,local"); env == "production" && code != 2 {
+			t.Errorf("bench with local in production: exit %d", code)
+		}
+	}
+	// docker is allowed everywhere.
+	d := deps
+	d.lookupEnv = func(string) (string, bool) { return "production", true }
+	if code, _, errs := runMedia(t, d, "probe", clip, "--provider", "hardened"); code != 0 {
+		t.Errorf("hardened in production: %d %s", code, errs)
 	}
 }

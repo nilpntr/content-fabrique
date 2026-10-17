@@ -39,6 +39,12 @@ type Provider interface {
 	Run(ctx context.Context, job Job) (Result, error)
 }
 
+// ErrSandbox is returned (wrapped) when the sandbox itself failed and the job's program never ran to a result: the Docker
+// daemon is unreachable, the image or runtime is missing, the container could not be created or the program could not be
+// started (docker's exit codes 125, 126 and 127). A tool that ran and failed is not an ErrSandbox: that is a non-zero
+// Result.ExitCode. Callers retry or alert on ErrSandbox, and report ExitCode failures to the user.
+var ErrSandbox = errors.New("sandbox: sandbox failure")
+
 // ErrTimeout is returned (wrapped) when a job exceeded Limits.Timeout and was killed.
 var ErrTimeout = errors.New("sandbox: job timed out")
 
@@ -259,4 +265,14 @@ func (p Policy) resolvedRoots() ([]string, error) {
 		roots = append(roots, resolved)
 	}
 	return roots, nil
+}
+
+// CheckLocalAllowed refuses the local provider (which isolates nothing) when cfEnv, the value of CF_ENV, names a staging
+// or production environment. Every entry point that can select a provider by name calls it before building the local one.
+func CheckLocalAllowed(cfEnv string) error {
+	switch strings.ToLower(strings.TrimSpace(cfEnv)) {
+	case "staging", "production":
+		return fmt.Errorf("the local sandbox provider isolates nothing and is not allowed when CF_ENV=%s; use docker or hardened", cfEnv)
+	}
+	return nil
 }

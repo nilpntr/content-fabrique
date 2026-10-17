@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -167,6 +168,8 @@ if [ "$1" = rm ]; then echo "$@" >> '` + marker + `'; exit 0; fi
 case "$*" in
   *sleepy*) exec sleep 30 ;;
   *exit7*) echo oops >&2; exit 7 ;;
+  *exit125*) echo 'docker: Error response from daemon: pull access denied' >&2; exit 125 ;;
+  *exit127*) echo 'exec: not found' >&2; exit 127 ;;
   *noisy*) head -c 100000 /dev/zero | tr '\0' x; head -c 100000 /dev/zero | tr '\0' y >&2; exit 0 ;;
 esac
 echo "$@"
@@ -206,6 +209,103 @@ func TestDockerRunOutcomes(t *testing.T) {
 	calls, rerr := os.ReadFile(marker)
 	if rerr != nil || !strings.HasPrefix(string(calls), "rm --force cf-sbx-") {
 		t.Fatalf("the container must be removed by name after a timeout, got %q (%v)", calls, rerr)
+	}
+}
+
+// Docker's own failures (125, 126, 127: daemon error, missing image or runtime, program not runnable) are sandbox errors, never a
+// tool exit code, so a caller cannot mistake a missing image for "ffmpeg rejected the file".
+func TestDockerInfrastructureFailuresAreErrors(t *testing.T) {
+	bin, _ := fakeDocker(t)
+	d := &Docker{Binary: bin, User: "1:1"}
+	for _, prog := range []string{"exit125", "exit127"} {
+		res, err := d.Run(context.Background(), Job{Image: "media-tools:dev", Args: []string{prog}, Limits: DefaultLimits()})
+		if !errors.Is(err, ErrSandbox) {
+			t.Fatalf("%s: want ErrSandbox, got %v (exit %d)", prog, err, res.ExitCode)
+		}
+		if errors.Is(err, ErrTimeout) {
+			t.Errorf("%s: not a timeout", prog)
+		}
+		if !strings.Contains(err.Error(), "docker run exited") {
+			t.Errorf("%s: %v", prog, err)
+		}
+	}
+	// ...while a tool's own exit code is a result.
+	if res, err := d.Run(context.Background(), Job{Image: "media-tools:dev", Args: []string{"exit7"}, Limits: DefaultLimits()}); err != nil || res.ExitCode != 7 {
+		t.Fatalf("tool exit code: %+v, %v", res, err)
+	}
+	// A docker CLI that cannot be started at all is a sandbox failure too.
+	missing := &Docker{Binary: "/nonexistent/docker", User: "1:1"}
+	if _, err := missing.Run(context.Background(), Job{Image: "media-tools:dev", Args: []string{"x"}, Limits: DefaultLimits()}); !errors.Is(err, ErrSandbox) {
+		t.Fatalf("missing docker binary: %v", err)
+	}
+}
+
+func TestUserFor(t *testing.T) {
+	tests := []struct {
+		uid, gid int
+		override string
+		want     string
+		chown    bool
+	}{
+		{0, 0, "", "65534:65534", true},
+		{0, 1000, "", "65534:65534", true},
+		{1000, 1000, "", "1000:1000", false},
+		{1000, 0, "", "1000:0", false}, // gid 0 alone is not root: keep the uid
+		{501, 20, "", "501:20", false},
+		{0, 0, "7:8", "7:8", false},
+	}
+	for _, tc := range tests {
+		got, chown := userFor(tc.uid, tc.gid, tc.override)
+		if got != tc.want || chown != tc.chown {
+			t.Errorf("userFor(%d,%d,%q) = %q,%v want %q,%v", tc.uid, tc.gid, tc.override, got, chown, tc.want, tc.chown)
+		}
+	}
+}
+
+// The container user must be able to read inputs. A file it cannot read is refused up front, with a reason, instead of
+// starting a container that fails with "Permission denied".
+func TestDockerRefusesInputsTheContainerUserCannotRead(t *testing.T) {
+	bin, _ := fakeDocker(t)
+	root := tmpRoot(t)
+	private := filepath.Join(root, "private.mov")
+	public := filepath.Join(root, "public.mov")
+	for p, mode := range map[string]os.FileMode{private: 0o600, public: 0o644} {
+		if err := os.WriteFile(p, []byte("x"), mode); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(p, mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	other := fmt.Sprintf("%d:%d", os.Getuid()+1000, os.Getgid()+1000)
+	run := func(user, file string) error {
+		d := &Docker{Policy: Policy{AllowedRoots: []string{root}}, Binary: bin, User: user}
+		_, err := d.Run(context.Background(), Job{Image: "media-tools:dev", Args: []string{"ffprobe", "/in/0"}, Limits: DefaultLimits(),
+			Mounts: []Mount{{Host: file, Container: "/in/0"}}})
+		return err
+	}
+	if err := run(other, private); !errors.Is(err, ErrInputUnreadable) {
+		t.Fatalf("a 0600 file of another user must be refused, got %v", err)
+	}
+	if err := run(other, public); err != nil {
+		t.Fatalf("a world-readable file must pass: %v", err)
+	}
+	// The worker's own uid reads its own 0600 file: the default for a non-root worker.
+	if os.Getuid() != 0 {
+		if err := run(fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()), private); err != nil {
+			t.Fatalf("own 0600 file: %v", err)
+		}
+	}
+	// The output directory must be writable by the container user.
+	out := filepath.Join(root, "out")
+	if err := os.Mkdir(out, 0o755); err != nil { // #nosec G301 -- test
+		t.Fatal(err)
+	}
+	d := &Docker{Policy: Policy{AllowedRoots: []string{root}}, Binary: bin, User: other}
+	_, err := d.Run(context.Background(), Job{Image: "media-tools:dev", Args: []string{"ffmpeg"}, Limits: DefaultLimits(),
+		Mounts: []Mount{{Host: out, Container: WorkDir, Writable: true}}})
+	if !errors.Is(err, ErrInputUnreadable) {
+		t.Fatalf("a read-only output dir must be refused, got %v", err)
 	}
 }
 

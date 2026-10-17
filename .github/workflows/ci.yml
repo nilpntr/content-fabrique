@@ -417,6 +417,14 @@ jobs:
           fi
           docker run --rm --network none --read-only --user 12345:12345 media-tools:ci ffprobe -hide_banner -version | head -1
 
+      # Subtitle text in legacy encodings must convert to UTF-8: that needs the gconv modules shipped in the image.
+      - name: Subtitle character sets
+        run: |
+          mkdir "$RUNNER_TEMP/charsets"
+          packages/media-tools/scripts/smoke-charsets.sh "$RUNNER_TEMP/charsets" /work \
+            docker run --rm --network none --read-only --user "$(id -u):$(id -g)" \
+            --mount "type=bind,src=$RUNNER_TEMP/charsets,dst=/work" media-tools:ci ffmpeg
+
       - name: Licence inventory
         env:
           PYTHONDONTWRITEBYTECODE: '1'
@@ -447,7 +455,7 @@ jobs:
 
       - name: Sandbox integration tests against the image
         working-directory: apps/server
-        run: go test ./internal/sandbox -run Integration -docker-image media-tools:ci -v
+        run: go test ./internal/sandbox ./internal/media -run Integration -docker-image media-tools:ci -v
 
   # gVisor overhead (D-08, P1-03): installs runsc (pinned and checksum-verified), registers it with Docker, then transcodes a
   # generated 1080p 30 s clip with the docker and hardened providers three times each and prints the table. It also runs the
@@ -496,7 +504,7 @@ jobs:
 
       - name: Sandbox integration tests under runsc
         working-directory: apps/server
-        run: go test ./internal/sandbox -run Integration -docker-image media-tools:ci -docker-runtime runsc -v
+        run: go test ./internal/sandbox ./internal/media -run Integration -docker-image media-tools:ci -docker-runtime runsc -v
 
       # Two CPU limits: 2 CPUs throttles the transcode through the CFS quota (both providers become quota-bound), 4 CPUs is every
       # vCPU of the runner, so the encode is not throttled and the provider's own cost shows.

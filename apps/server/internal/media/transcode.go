@@ -5,6 +5,17 @@ import (
 	"strconv"
 )
 
+// UntrustedFormats are the container formats we accept from uploads: the demuxers ffmpeg may use on a user's file. Every
+// other demuxer (playlists such as HLS and concat that open further files, the lavfi source, raw and exotic formats) is
+// refused with "Format not on whitelist". Names are ffmpeg demuxer names; "mov" etc. are the aliases of one demuxer, so
+// they are listed individually. To accept another format, add its demuxer name here and say why.
+const UntrustedFormats = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg"
+
+// inputOptions are the options placed before -i for a file we did not make: local files only, known containers only.
+func inputOptions() []string {
+	return []string{"-protocol_whitelist", "file", "-format_whitelist", UntrustedFormats}
+}
+
 // common is the start of every ffmpeg command: no stdin, quiet, overwrite, local files only.
 func common() []string {
 	return []string{"ffmpeg", "-nostdin", "-hide_banner", "-v", "error", "-y"}
@@ -47,15 +58,18 @@ func RawClipArgs(output string, seconds int) ([]string, error) {
 // CopyArgs remuxes every stream without re-encoding: the work is reading and writing the file. Input and output are
 // container paths.
 func CopyArgs(input, output string) []string {
-	a := common()
-	return append(a, "-protocol_whitelist", "file", "-i", input, "-map", "0", "-c", "copy", output)
+	a := append(common(), inputOptions()...)
+	return append(a, "-i", input, "-map", "0", "-c", "copy", output)
 }
 
 // TranscodeOptions parameterise TranscodeH264Args.
 type TranscodeOptions struct {
 	Preset string // x264 preset, default "veryfast"
-	CRF    int    // 0..51; default 23 when zero
+	CRF    *int   // 0..51 (0 is lossless); nil means the default, 23. Use CRF(n).
 }
+
+// CRF returns a pointer for TranscodeOptions.CRF, so that 0 (lossless) can be told apart from "not set".
+func CRF(n int) *int { return &n }
 
 var x264Presets = map[string]bool{
 	"ultrafast": true, "superfast": true, "veryfast": true, "faster": true, "fast": true,
@@ -68,21 +82,21 @@ func TranscodeH264Args(input, output string, o TranscodeOptions) ([]string, erro
 	if o.Preset == "" {
 		o.Preset = "veryfast"
 	}
-	if o.CRF == 0 {
-		o.CRF = 23
+	crf := 23
+	if o.CRF != nil {
+		crf = *o.CRF
 	}
 	if !x264Presets[o.Preset] {
 		return nil, fmt.Errorf("media: unknown x264 preset %q", o.Preset)
 	}
-	if o.CRF < 0 || o.CRF > 51 {
-		return nil, fmt.Errorf("media: CRF %d must be in 0..51", o.CRF)
+	if crf < 0 || crf > 51 {
+		return nil, fmt.Errorf("media: CRF %d must be in 0..51", crf)
 	}
-	a := common()
+	a := append(common(), inputOptions()...)
 	a = append(a,
-		"-protocol_whitelist", "file",
 		"-i", input,
 		"-map", "0:v:0", "-map", "0:a:0?",
-		"-c:v", "libx264", "-preset", o.Preset, "-crf", strconv.Itoa(o.CRF), "-pix_fmt", "yuv420p",
+		"-c:v", "libx264", "-preset", o.Preset, "-crf", strconv.Itoa(crf), "-pix_fmt", "yuv420p",
 		"-c:a", "aac", "-b:a", "128k",
 		"-movflags", "+faststart",
 		output,
