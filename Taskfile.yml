@@ -72,6 +72,19 @@ tasks:
     cmds:
       - bun run --filter @cf/schemas gen
 
+  gen:timeline:
+    desc: Copy the timeline JSON Schema into the Go package that embeds it (apps/server/internal/timeline/schema). Commit the result
+    dir: apps/server
+    cmds:
+      - go generate ./internal/timeline
+
+  gen:
+    desc: Regenerate everything generated (sqlc code, the schema's TypeScript types, the Go copy of the schema). Commit the result
+    cmds:
+      - task: gen:sql
+      - task: gen:schemas
+      - task: gen:timeline
+
   # ── Build and test ──────────────────────────────────────────────────────────
 
   install:
