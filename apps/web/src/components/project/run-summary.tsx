@@ -1,6 +1,6 @@
 import { Coins, Cpu, Hourglass, MousePointerClick, Sparkles } from "lucide-react";
 import * as React from "react";
-import type { Run } from "@/lib/api/client";
+import type { Run, RunCredits } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 import { Pill } from "./badges";
 import { formatElapsed, formatUsd } from "./run-steps";
@@ -82,22 +82,26 @@ export function FinishSummary({ text, version, className }: { text: string; vers
 }
 
 /**
- * What the run cost the creator in credits. Credits arrive with the spend-control work (docs/design/spend-control-v1.md, PR #138):
- * `Run` has no field for them yet, so {@link runCreditsOf} returns nothing and the line shows only the model, the time and the calls.
+ * What the run costs in credits, from `run.credits` (docs/design/spend-control-v1.md): held while it works, charged when it
+ * succeeds, refunded when the charge was given back. A run that was released (it failed, or made nothing) has none, and neither does
+ * a run on a workspace without credits: nothing is shown then.
  */
-export type RunCredits = { state: "charged"; credits: number } | { state: "refunded" };
-
-/**
- * TODO(#138): read the credits the run was charged (or that were released) from the run once the API says so. `GET /v1/runs/{id}`
- * has no such field on main and none is invented here: until it has, the slot stays empty.
- */
-export function runCreditsOf(_run: Run): RunCredits | undefined {
-  return undefined;
+export function runCreditsOf(run: Pick<Run, "credits">): RunCredits | undefined {
+  return run.credits ?? undefined;
 }
 
-function creditsText(credits: RunCredits): string {
-  if (credits.state === "refunded") return "Credits refunded";
-  return `${credits.credits} ${credits.credits === 1 ? "credit" : "credits"}`;
+const creditCount = (credits: number): string => `${credits} ${credits === 1 ? "credit" : "credits"}`;
+
+/** "6 credits", "2 credits · revision", "Refunded" or "Holding 6 credits…". */
+export function creditsText(credits: RunCredits): string {
+  switch (credits.state) {
+    case "held":
+      return `Holding ${creditCount(credits.credits)}…`;
+    case "refunded":
+      return "Refunded";
+    default:
+      return `${creditCount(credits.credits)}${credits.action === "edit.revision" ? " · revision" : ""}`;
+  }
 }
 
 const titleCase = (word: string): string => word.replace(/^./, (c) => c.toUpperCase());
@@ -134,7 +138,12 @@ export function RunCostLine({ run, credits, className }: { run: Pick<Run, "model
         <span className="text-subtle-foreground">of {formatUsd(run.budget_micros)}</span>
       </li>
       {credits ? (
-        <li className="inline-flex items-center gap-1.5 font-sans font-medium text-foreground" data-slot="credits">
+        <li
+          className="inline-flex items-center gap-1.5 font-sans font-medium text-foreground"
+          data-slot="credits"
+          data-state={credits.state}
+          title={credits.state === "refunded" ? `${creditCount(credits.credits)} given back` : undefined}
+        >
           <Coins aria-hidden className="size-3.5 text-subtle-foreground" />
           {creditsText(credits)}
         </li>

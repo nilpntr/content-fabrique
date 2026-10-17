@@ -22,6 +22,8 @@ export const PROJECT_QUERY_KEY = "project";
 export const TIMELINES_QUERY_KEY = "timelines";
 /** One agent run: `[RUN_QUERY_KEY, user, org, runId]`. */
 export const RUN_QUERY_KEY = "run";
+/** The artifacts of one run (its plan, self-review, previews, versions): `[RUN_ARTIFACTS_QUERY_KEY, user, org, runId]`. */
+export const RUN_ARTIFACTS_QUERY_KEY = "run-artifacts";
 /** The preview render of a version: `[RENDERS_QUERY_KEY, user, org, projectId, version]` (the list), `[RENDER_QUERY_KEY, ..., renderId]` (one). */
 export const RENDERS_QUERY_KEY = "renders";
 export const RENDER_QUERY_KEY = "render";

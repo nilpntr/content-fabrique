@@ -12,11 +12,13 @@ import {
   fetchRender,
   fetchRenders,
   fetchRun,
+  fetchRunArtifacts,
   fetchTimelineVersion,
   fetchTimelineVersions,
   type Render,
   RUN_EVENTS_PAGE,
   type Run,
+  type RunArtifact,
   type RunEvent,
   type RunStatus,
   replyToRun,
@@ -30,7 +32,7 @@ import { useApiClient } from "@/lib/api/provider";
 import { parseTimeMap } from "@/components/project/review-data";
 import type { TimeMapEntry } from "@/components/editor/types";
 import { URL_REFRESH_MIN_MS, useRefreshThrottle } from "@/lib/refresh-throttle";
-import { ANNOTATIONS_QUERY_KEY, PROJECT_QUERY_KEY, PROJECTS_QUERY_KEY, RENDER_QUERY_KEY, RENDERS_QUERY_KEY, RUN_QUERY_KEY, TIMELINES_QUERY_KEY } from "@/lib/query-client";
+import { ANNOTATIONS_QUERY_KEY, ME_QUERY_KEY, PROJECT_QUERY_KEY, PROJECTS_QUERY_KEY, RENDER_QUERY_KEY, RENDERS_QUERY_KEY, RUN_ARTIFACTS_QUERY_KEY, RUN_QUERY_KEY, TIMELINES_QUERY_KEY } from "@/lib/query-client";
 
 /**
  * The hooks of projects, runs and renders. Keys are `[prefix, userId, orgId, ...ids]`, like the library's, so a workspace
@@ -132,14 +134,18 @@ export function runPollDelay(status: RunStatus | undefined): number | false {
   return false;
 }
 
-/** The events of both, by `seq`, oldest first. */
-export function mergeEvents(known: readonly RunEvent[], more: readonly RunEvent[]): RunEvent[] {
-  const bySeq = new Map<number, RunEvent>();
-  for (const event of [...known, ...more]) bySeq.set(event.seq, event);
+/** The items of both, by `seq` (a later one replaces an earlier one of the same `seq`), oldest first. */
+function mergeBySeq<T extends { seq: number }>(known: readonly T[], more: readonly T[]): T[] {
+  const bySeq = new Map<number, T>();
+  for (const item of [...known, ...more]) bySeq.set(item.seq, item);
   return [...bySeq.values()].sort((a, b) => a.seq - b.seq);
 }
 
-const lastSeq = (events: readonly RunEvent[]) => events.reduce((max, event) => Math.max(max, event.seq), 0);
+/** The events of both, by `seq`, oldest first. */
+export const mergeEvents = (known: readonly RunEvent[], more: readonly RunEvent[]): RunEvent[] => mergeBySeq(known, more);
+
+/** The largest `seq` of the items, 0 for none: where to ask from next. */
+const lastSeq = (items: readonly { seq: number }[]): number => items.reduce((max, item) => Math.max(max, item.seq), 0);
 
 /** The run as the API answered, with the events it had before kept: GET /v1/runs/{id} only returns the ones after a sequence number. */
 function withKnownEvents(next: Run, previous: Run | undefined): Run {
@@ -184,14 +190,20 @@ export function useRunQuery(runId: string | undefined) {
  * because the run made versions. Use it once per page.
  */
 export function useRun(runId: string | undefined) {
+  const { userId, orgId } = useScope();
   const queryClient = useQueryClient();
   const query = useRunQuery(runId);
   const status = query.data?.status;
   const previous = useRef<RunStatus | undefined>(undefined);
   useEffect(() => {
-    if (isRunActive(previous.current) && status !== undefined && !isRunActive(status)) invalidateProject(queryClient);
+    if (isRunActive(previous.current) && status !== undefined && !isRunActive(status)) {
+      invalidateProject(queryClient);
+      // The run was charged, or its credits released, when it ended: the balance in the header and the run's own credits are read again.
+      void queryClient.invalidateQueries({ queryKey: [ME_QUERY_KEY] });
+      void queryClient.invalidateQueries({ queryKey: [RUN_QUERY_KEY, userId, orgId, runId] });
+    }
     previous.current = status;
-  }, [status, queryClient]);
+  }, [status, queryClient, userId, orgId, runId]);
   return query;
 }
 
@@ -205,8 +217,63 @@ export function useStartEdit() {
     onSuccess: (run) => {
       queryClient.setQueryData([RUN_QUERY_KEY, userId, orgId, run.id], run);
       invalidateProject(queryClient);
+      // The run's credits are held from the moment it starts: the balance in the header moves.
+      void queryClient.invalidateQueries({ queryKey: [ME_QUERY_KEY] });
     },
   });
+}
+
+async function fetchArtifactFeed(client: ApiClient, runId: string, previous: readonly RunArtifact[] | undefined, signal: AbortSignal): Promise<RunArtifact[]> {
+  let all: RunArtifact[] = [...(previous ?? [])];
+  let cursor = lastSeq(all);
+  // Only the artifacts after the ones we have, a page at a time; the loop is bounded.
+  for (let page = 0; page < 10; page++) {
+    const answer = await fetchRunArtifacts(client, runId, cursor, signal);
+    all = mergeBySeq(all, Array.isArray(answer.artifacts) ? answer.artifacts : []);
+    if (typeof answer.next_after_seq !== "number") break;
+    cursor = answer.next_after_seq;
+  }
+  return all;
+}
+
+/** The artifact lists that were last fetched while their run was still working: they may be missing what it recorded after that. */
+const fetchedWhileWorking = new Set<string>();
+
+/**
+ * The whole artifacts of a run (its plan and self-review above all): `wanted` is false for a run whose events show none, so the
+ * endpoint is asked only for a run that has some and only while it is on screen. While the run works they are fetched again as it
+ * does (the ones after those we have, at the pace of the run itself), once more when it ends, and never after: a finished run's
+ * artifacts do not change, so they stay in the cache, unless the list was last fetched while the run still worked (the creator went
+ * away and came back), when it is fetched again on mount. A refusal (an older server has no such endpoint) stops the asking, and
+ * leaves `data` empty: the feed shows what the event summaries carry.
+ */
+export function useRunArtifacts(runId: string | undefined, { wanted, status }: { wanted: boolean; status: RunStatus | undefined }) {
+  const { userId, orgId, ready } = useScope();
+  const getClient = useApiClient();
+  const queryClient = useQueryClient();
+  const key = [RUN_ARTIFACTS_QUERY_KEY, userId, orgId, runId];
+  const id = JSON.stringify(key);
+  const active = isRunActive(status);
+  const query = useQuery({
+    queryKey: key,
+    queryFn: ({ signal }) => {
+      if (active) fetchedWhileWorking.add(id);
+      else fetchedWhileWorking.delete(id);
+      return fetchArtifactFeed(getClient(), runId as string, queryClient.getQueryData<RunArtifact[]>(key), signal);
+    },
+    enabled: ready && Boolean(runId) && wanted,
+    staleTime: active ? 1000 : fetchedWhileWorking.has(id) ? 0 : Number.POSITIVE_INFINITY,
+    retry: retryUnlessClientError,
+    refetchInterval: (q) => (q.state.error instanceof ApiError && q.state.error.status >= 400 && q.state.error.status < 500 ? false : runPollDelay(status)),
+  });
+  // The run has just ended: what it recorded last is fetched once more.
+  const wasActive = useRef(false);
+  const { refetch } = query;
+  useEffect(() => {
+    if (wasActive.current && !active && wanted) void refetch();
+    wasActive.current = active;
+  }, [active, wanted, refetch]);
+  return query;
 }
 
 function useRunCommand(mutate: (client: ApiClient, runId: string, arg: string) => Promise<Run>) {

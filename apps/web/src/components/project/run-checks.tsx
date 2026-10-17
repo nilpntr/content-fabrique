@@ -26,6 +26,9 @@ const CHECK_NAMES: Readonly<Record<string, string>> = {
 
 export const checkName = (id: string): string => CHECK_NAMES[id] ?? id.replaceAll("_", " ").replace(/^./, (c) => c.toUpperCase());
 
+/** A round with more checks than this folds to the ones that need a look. */
+const FOLD_ABOVE = 16;
+
 const FIX_NAMES: Readonly<Record<Fix, string>> = { match_exposure: "match_exposure", edit: "re-edit" };
 
 const STATUS: Readonly<Record<CheckStatus, { label: string; chip: string; icon: React.ReactNode }>> = {
@@ -86,13 +89,18 @@ export function EditChecksCard({ rounds, className }: { rounds: CheckRound[]; cl
   const latest = rounds.length;
   const [picked, setPicked] = React.useState<number | null>(null);
   const [openId, setOpenId] = React.useState<string | null>(null);
+  const [showAll, setShowAll] = React.useState(false);
   // Follows the newest round until the creator picks one, and goes back to following when the picked one is no longer there.
   const index = picked !== null && picked <= latest ? picked : latest;
   const round = rounds[index - 1];
   if (!round) return null;
 
   const missing = applicable(round) + round.skipped - round.checks.length;
-  const open = round.checks.find((check) => check.id === openId && check.detail);
+  // A long list of checks folds to the ones that need a look (what failed or is borderline); the passes open on request.
+  const long = round.checks.length > FOLD_ABOVE;
+  const shown = long && !showAll ? round.checks.filter((check) => check.status === "fail" || check.status === "borderline") : round.checks;
+  // The reason on show is the one of a chip that is on show.
+  const open = shown.find((check) => check.id === openId && check.detail);
   const allPass = round.failed === 0;
 
   return (
@@ -136,6 +144,7 @@ export function EditChecksCard({ rounds, className }: { rounds: CheckRound[]; cl
                   onClick={() => {
                     setPicked(each.nth);
                     setOpenId(null);
+                    setShowAll(false);
                   }}
                   className={cn(
                     "inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-full px-2.5 font-medium tabular-nums outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand",
@@ -153,9 +162,24 @@ export function EditChecksCard({ rounds, className }: { rounds: CheckRound[]; cl
 
       {round.checks.length > 0 ? (
         <ul aria-label={`Checks of round ${round.nth}`} className="flex flex-wrap gap-1.5">
-          {round.checks.map((check) => (
+          {shown.map((check) => (
             <CheckChip key={check.id} check={check} open={openId === check.id} onToggle={() => setOpenId((current) => (current === check.id ? null : check.id))} />
           ))}
+          {long ? (
+            <li>
+              <button
+                type="button"
+                aria-expanded={showAll}
+                onClick={() => {
+                  setShowAll((all) => !all);
+                  setOpenId(null);
+                }}
+                className="inline-flex h-6 cursor-pointer items-center rounded-full px-2.5 text-[12px] font-medium text-muted-foreground underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-brand"
+              >
+                {showAll ? "Show fewer" : `Show all ${round.checks.length} checks`}
+              </button>
+            </li>
+          ) : null}
           {missing > 0 ? (
             <li>
               <Pill className="tabular-nums">+ {missing} more</Pill>

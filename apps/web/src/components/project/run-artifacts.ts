@@ -1,17 +1,17 @@
-import type { RunEvent } from "@/lib/api/client";
+import type { RunArtifact, RunEvent } from "@/lib/api/client";
 
 /**
  * What the editor made along the way, for the run feed: the creative plan (`plan_edit`), the self-review rounds (`check_edit`)
  * and the brightness match (`match_exposure`).
  *
- * The editor records the plan and every check as an `artifact` event with the full payload (docs/design/edit-style-v1.md
- * sections 6 and 7), but `GET /v1/runs/{id}` returns only a one-line summary of an event (`RunEvent.text`, 400 bytes, no
- * payload). Until the API carries the payload, this file reads what the summaries do carry: the head of the `plan_edit` call
- * (content type, story, hook), the head of its answer (playbook, tempo, target length and the first shots) and the head of
- * each `check_edit` answer (the counts, and the first checks). The cards show whatever is known and leave out the rest.
+ * The editor records the plan and every check as an `artifact` with the full payload (docs/design/edit-style-v1.md sections 6 and
+ * 7), and `GET /v1/runs/{id}/artifacts` returns them whole: {@link planFromArtifact} and {@link checkRoundFromArtifact} read them,
+ * and {@link runArtifacts} puts them together with what ran between the checks. A run's events carry only a one-line summary of each
+ * (`RunEvent.text`, 400 bytes), so while the artifacts are not there (not fetched yet, the endpoint failed) the same cards are made
+ * from those summaries as far as they go: the head of the `plan_edit` call, the head of its answer, the head of each `check_edit`
+ * answer. The cards show whatever is known and leave out the rest.
  *
- * {@link planFromArtifact} and {@link checkRoundFromArtifact} read the payloads as the design note documents them; they are
- * what the cards are tested with, and what a payload-carrying API will use.
+ * Calls, answers and artifacts are paired by `call_id`. A run from before the API had call ids has none, and is paired by order.
  */
 
 export interface PlanShot {
@@ -77,7 +77,8 @@ export interface BrightnessMatch {
   clips: number;
 }
 
-export interface RunArtifacts {
+/** What the run feed shows of a run's artifacts. */
+export interface RunFeedArtifacts {
   plan?: CreativePlan;
   rounds: CheckRound[];
 }
@@ -237,25 +238,56 @@ export function matchFromSummary(text: string): BrightnessMatch | undefined {
 // ---- The run ---------------------------------------------------------------------------------------------------------
 
 /**
- * The answer of the call at `index`: the next `tool_result` of the same tool, before another call of it. A failed answer is not one.
- * The events carry no call id, so this is by order, which is safe because the runtime writes a call and its result one after the
- * other (the call, the run of the tool, the result) before it starts the next call.
+ * What came of the call at `index`: its `tool_result`, and whether that failed. A call with an id is paired with the result that
+ * has the same id. A call with none (a run from before the API had ids), or whose result has none, is paired by order: the next
+ * result of the same tool that has no id, before another call of the tool, which is safe because the runtime writes a call and its
+ * result one after the other. Nothing found yet means the call is in flight.
  */
-export function answerTo(events: readonly RunEvent[], index: number): RunEvent | undefined {
+function resultOf(events: readonly RunEvent[], index: number): { result: RunEvent; failed: boolean } | undefined {
   const call = events[index];
+  const id = call?.call_id;
+  if (id) {
+    for (let i = index + 1; i < events.length; i++) {
+      const event = events[i];
+      if (event?.type === "tool_result" && event.call_id === id) return { result: event, failed: Boolean(event.is_error) };
+    }
+  }
   for (let i = index + 1; i < events.length; i++) {
     const event = events[i];
     if (!event) continue;
     if (event.type === "tool_call" && event.tool === call?.tool) return undefined;
-    if (event.type === "tool_result" && event.tool === call?.tool) return event.is_error ? undefined : event;
+    if (event.type === "tool_result" && event.tool === call?.tool && !event.call_id) return { result: event, failed: Boolean(event.is_error) };
   }
   return undefined;
 }
 
-/** The plan and the check rounds (with what ran between them, a brightness match included) of a run, from its events (oldest first). */
-export function runArtifacts(events: readonly RunEvent[]): RunArtifacts {
-  let plan: CreativePlan | undefined;
-  const rounds: CheckRound[] = [];
+/** The answer of the call at `index`, or undefined when it is in flight or failed. See {@link resultOf} for the pairing. */
+export function answerTo(events: readonly RunEvent[], index: number): RunEvent | undefined {
+  const found = resultOf(events, index);
+  return found && !found.failed ? found.result : undefined;
+}
+
+/** Whether the call at `index` has a result, a failed one too: it is not in flight. */
+export function isSettled(events: readonly RunEvent[], index: number): boolean {
+  return resultOf(events, index) !== undefined;
+}
+
+/** One answered `check_edit` call: its id, what ran since the check before it, and its round as the summary of its answer gives it. */
+interface CheckCall {
+  callId: string | null;
+  fixes: Fix[];
+  summary: CheckRound | undefined;
+}
+
+/**
+ * The plan and the check rounds of a run (with what ran between them, a brightness match included), from its events (oldest first)
+ * and, when there are some, its artifacts. A round is found by its check call: the artifact with the call's id (by place for a run
+ * with no ids) gives it whole, and the summary of the call's answer gives it as far as 400 bytes go when there is no artifact (not
+ * fetched yet, or one this reader cannot read). An artifact of a check the events do not show yet comes last.
+ */
+export function runArtifacts(events: readonly RunEvent[], artifacts?: readonly RunArtifact[]): RunFeedArtifacts {
+  let summaryPlan: CreativePlan | undefined;
+  const checkCalls: CheckCall[] = [];
   let pending: Fix[] = [];
   events.forEach((event, index) => {
     if (event.type !== "tool_call") return;
@@ -263,22 +295,49 @@ export function runArtifacts(events: readonly RunEvent[]): RunArtifacts {
       const answer = answerTo(events, index);
       // A plan the tool refused is no plan. The last accepted one is the plan.
       const read = answer ? planFromSummaries(event.text, answer.text) : undefined;
-      if (read) plan = read;
+      if (read) summaryPlan = read;
     } else if (event.tool === "check_edit") {
       const answer = answerTo(events, index);
-      const round = answer ? checkRoundFromSummary(answer.text, rounds.length + 1) : undefined;
-      if (round) {
-        rounds.push({ ...round, fixes: pending });
-        pending = [];
-      }
+      if (!answer) return;
+      checkCalls.push({ callId: event.call_id ?? null, fixes: pending, summary: checkRoundFromSummary(answer.text, 0) });
+      pending = [];
     } else if (event.tool === "match_exposure") {
       const answer = answerTo(events, index);
       const read = answer ? matchFromSummary(answer.text) : undefined;
-      if (read && rounds.length > 0 && read.clips > 0) pending = [...pending, "match_exposure"];
-    } else if (event.tool === "edit_timeline" && rounds.length > 0) {
+      if (read && checkCalls.length > 0 && read.clips > 0) pending = [...pending, "match_exposure"];
+    } else if (event.tool === "edit_timeline" && checkCalls.length > 0) {
       // Edits before the first check are the editor's first pass, not a fix.
       if (answerTo(events, index)) pending = pending.at(-1) === "edit" ? pending : [...pending, "edit"];
     }
   });
+
+  // The last plan the editor recorded that this reader can read is the plan.
+  let plan = summaryPlan;
+  const storedChecks: RunArtifact[] = [];
+  for (const artifact of artifacts ?? []) {
+    if (artifact.kind === "creative_plan") plan = planFromArtifact(artifact.data) ?? plan;
+    else if (artifact.kind === "edit_check") storedChecks.push(artifact);
+  }
+
+  const claimed = new Set<RunArtifact>();
+  const rounds: CheckRound[] = [];
+  checkCalls.forEach((call, i) => {
+    // By the call's id; a run with no ids has artifacts with none, matched by place.
+    const byId = call.callId ? storedChecks.find((artifact) => artifact.call_id === call.callId) : undefined;
+    const byPlace = !byId && !call.callId && storedChecks[i] && !storedChecks[i]?.call_id ? storedChecks[i] : undefined;
+    const artifact = byId ?? byPlace;
+    if (artifact) claimed.add(artifact);
+    const round = (artifact ? checkRoundFromArtifact(artifact.data, 0) : undefined) ?? call.summary;
+    if (round) rounds.push({ ...round, nth: rounds.length + 1, fixes: call.fixes });
+  });
+  // A check the artifacts have and the events do not show yet.
+  for (const artifact of storedChecks) {
+    if (claimed.has(artifact)) continue;
+    const round = checkRoundFromArtifact(artifact.data, 0);
+    if (round) rounds.push({ ...round, nth: rounds.length + 1, fixes: [] });
+  }
   return { ...(plan ? { plan } : {}), rounds };
 }
+
+/** Whether a run's events say it has artifacts to fetch: the endpoint is asked only then. */
+export const hasArtifactEvents = (events: readonly RunEvent[]): boolean => events.some((event) => event.type === "artifact");
