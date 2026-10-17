@@ -1135,13 +1135,34 @@ func TestCreditsRunEndsSettleTheHold(t *testing.T) {
 	r.rig.checkLedger(t, r.ws)
 }
 
-// A creator who cancels is charged if a preview of the run was rendered (they got something), and not otherwise.
-func TestCreditsCancelChargesOnlyAfterAPreview(t *testing.T) {
+// A creator who cancels is charged for the work the run made (a timeline version) and not for anything else: not for a preview of earlier
+// work, and not for a run that made nothing.
+func TestCreditsCancelChargesOnlyForAVersion(t *testing.T) {
 	r := newRunRig(t, "cancel", 30)
 	ctx := context.Background()
+	u, err := r.st.UpsertUserByClerkID(ctx, "user_cancel_"+newUUID().String(), "cancel@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pr, err := r.st.CreateProject(ctx, r.ws.ID, store.NewProject{Title: "p", Format: "9:16", CreatedBy: u.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	version := 0
+	addVersion := func(run store.AgentRun, kind string) {
+		t.Helper()
+		version++
+		in := store.NewTimelineVersion{Version: version, Parent: version - 1, Spec: json.RawMessage(`{}`), AuthorKind: kind, AuthorID: "usr_x"}
+		if kind == store.AuthorAgent {
+			in.AuthorID = ids.Encode(ids.PrefixRun, run.ID)
+		}
+		if _, err := r.st.AddTimelineVersion(ctx, r.ws.ID, pr.ID, in); err != nil {
+			t.Fatal(err)
+		}
+	}
 
-	// Cancelled while queued: no preview, released.
-	queued := r.start(6, store.ActionEditFirst, ids.ProjectID{UUID: newUUID()})
+	// Cancelled while queued: released.
+	queued := r.start(6, store.ActionEditFirst, pr.ID)
 	if _, err := r.st.RequestAgentRunCancel(ctx, r.ws.ID, queued.ID, json.RawMessage(`{}`), json.RawMessage(`{"state":"cancelled"}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -1149,59 +1170,60 @@ func TestCreditsCancelChargesOnlyAfterAPreview(t *testing.T) {
 		t.Fatalf("cancelled in the queue: held %v charged %d", r.held(queued), r.charged(queued))
 	}
 
-	// Cancelled while running, after the loop saw the request, with no preview: released.
-	noPreview := r.start(6, store.ActionEditFirst, ids.ProjectID{UUID: newUUID()})
-	c, err := r.st.ClaimAgentRun(ctx, r.ws.ID, noPreview.ID, time.Minute)
+	// Cancelled while running, after the loop saw the request, having made nothing: released.
+	nothing := r.start(6, store.ActionEditFirst, pr.ID)
+	c, err := r.st.ClaimAgentRun(ctx, r.ws.ID, nothing.ID, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.st.RequestAgentRunCancel(ctx, r.ws.ID, noPreview.ID, json.RawMessage(`{}`), json.RawMessage(`{}`)); err != nil {
+	if _, err := r.st.RequestAgentRunCancel(ctx, r.ws.ID, nothing.ID, json.RawMessage(`{}`), json.RawMessage(`{}`)); err != nil {
 		t.Fatal(err)
 	}
-	if !r.held(noPreview) {
+	if !r.held(nothing) {
 		t.Fatal("a cancel request on a running run settled it before the loop ended it")
 	}
-	if _, err := r.st.EndAgentRun(ctx, r.ws.ID, noPreview.ID, c.Epoch, store.RunEnd{Status: store.AgentCancelled, Event: json.RawMessage(`{"state":"cancelled"}`)}); err != nil {
+	if _, err := r.st.EndAgentRun(ctx, r.ws.ID, nothing.ID, c.Epoch, store.RunEnd{Status: store.AgentCancelled, Event: json.RawMessage(`{"state":"cancelled"}`)}); err != nil {
 		t.Fatal(err)
 	}
-	if r.held(noPreview) || r.charged(noPreview) != 0 {
-		t.Fatalf("cancelled without a preview: held %v charged %d", r.held(noPreview), r.charged(noPreview))
+	if r.held(nothing) || r.charged(nothing) != 0 {
+		t.Fatalf("cancelled having made nothing: held %v charged %d", r.held(nothing), r.charged(nothing))
 	}
 
-	// Cancelled after a preview was rendered: charged.
-	project := ids.ProjectID{UUID: newUUID()}
-	previewed := r.start(6, store.ActionEditFirst, project)
-	c, err = r.st.ClaimAgentRun(ctx, r.ws.ID, previewed.ID, time.Minute)
+	// Cancelled after a preview of work the run did not make (an earlier version, a person's): released. A preview is not what is charged.
+	addVersion(store.AgentRun{}, store.AuthorUser)
+	previewOnly := r.start(2, store.ActionEditRevision, pr.ID)
+	c, err = r.st.ClaimAgentRun(ctx, r.ws.ID, previewOnly.ID, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.st.AppendAgentEvent(ctx, r.ws.ID, previewed.ID, c.Epoch, store.EventArtifact, json.RawMessage(`{"kind":"preview","data":{"version":1,"duration_ms":9000}}`), store.EventDelta{}); err != nil {
+	if _, err := r.st.AppendAgentEvent(ctx, r.ws.ID, previewOnly.ID, c.Epoch, store.EventArtifact, json.RawMessage(`{"kind":"preview","data":{"version":1,"duration_ms":9000}}`), store.EventDelta{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.st.EndAgentRun(ctx, r.ws.ID, previewed.ID, c.Epoch, store.RunEnd{Status: store.AgentCancelled, Event: json.RawMessage(`{"state":"cancelled"}`)}); err != nil {
+	if _, err := r.st.EndAgentRun(ctx, r.ws.ID, previewOnly.ID, c.Epoch, store.RunEnd{Status: store.AgentCancelled, Event: json.RawMessage(`{"state":"cancelled"}`)}); err != nil {
 		t.Fatal(err)
 	}
-	if r.held(previewed) || r.charged(previewed) != 6 {
-		t.Fatalf("cancelled after a preview: held %v charged %d", r.held(previewed), r.charged(previewed))
+	if r.held(previewOnly) || r.charged(previewOnly) != 0 {
+		t.Fatalf("cancelled after a preview of earlier work: held %v charged %d", r.held(previewOnly), r.charged(previewOnly))
 	}
-	if has, _ := r.st.ProjectHasChargedEdit(ctx, r.ws.ID, project); !has {
+	if ok, _ := r.st.ProjectHasChargedEdit(ctx, r.ws.ID, pr.ID); ok {
+		t.Fatal("a preview of earlier work made the project a charged edit")
+	}
+
+	// Cancelled after a version of its own, before any preview: charged, and the project has a charged edit.
+	made := r.start(6, store.ActionEditFirst, pr.ID)
+	c, err = r.st.ClaimAgentRun(ctx, r.ws.ID, made.ID, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addVersion(made, store.AuthorAgent)
+	if _, err := r.st.EndAgentRun(ctx, r.ws.ID, made.ID, c.Epoch, store.RunEnd{Status: store.AgentCancelled, Event: json.RawMessage(`{"state":"cancelled"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if r.held(made) || r.charged(made) != 6 {
+		t.Fatalf("cancelled after a version: held %v charged %d", r.held(made), r.charged(made))
+	}
+	if has, _ := r.st.ProjectHasChargedEdit(ctx, r.ws.ID, pr.ID); !has {
 		t.Fatal("a charged cancel is not a charged edit")
-	}
-
-	// A different artifact is not a preview.
-	other := r.start(6, store.ActionEditFirst, ids.ProjectID{UUID: newUUID()})
-	c, err = r.st.ClaimAgentRun(ctx, r.ws.ID, other.ID, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.st.AppendAgentEvent(ctx, r.ws.ID, other.ID, c.Epoch, store.EventArtifact, json.RawMessage(`{"kind":"creative_plan","data":{}}`), store.EventDelta{}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.st.EndAgentRun(ctx, r.ws.ID, other.ID, c.Epoch, store.RunEnd{Status: store.AgentCancelled, Event: json.RawMessage(`{"state":"cancelled"}`)}); err != nil {
-		t.Fatal(err)
-	}
-	if r.charged(other) != 0 {
-		t.Fatalf("a plan is not a preview, but %d were charged", r.charged(other))
 	}
 	r.rig.checkLedger(t, r.ws)
 }
@@ -1684,4 +1706,263 @@ func TestCreditsNoEditNeededIsReleased(t *testing.T) {
 	if r.charged(plain) != 2 {
 		t.Fatalf("a success with no marker was charged %d, want 2", r.charged(plain))
 	}
+}
+
+// ---- a run that spans the end of a period -----------------------------------------------------------------------
+
+// remaining is what is left of a source, from the ledger.
+func (r spendRig) remaining(t *testing.T, source uuid.UUID) int {
+	t.Helper()
+	var n int
+	err := r.superConn(t).QueryRow(context.Background(), `SELECT s.credits + COALESCE((SELECT sum(c.credits) FROM credit_ledger c WHERE c.grant_id = s.id), 0) FROM credit_ledger s WHERE s.id = $1`, source).Scan(&n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// holdMadeAt dates a hold: created_at is the database's clock, and these tests live in 2026-11.
+func (r spendRig) holdMadeAt(t *testing.T, action uuid.UUID, at time.Time) {
+	t.Helper()
+	if _, err := r.superConn(t).Exec(context.Background(), `UPDATE credit_holds SET created_at = $2 WHERE action_id = $1`, action, at); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type rolloverRig struct {
+	rig    spendRig
+	ws     store.Workspace
+	specs  map[plans.Plan]store.AllowanceSpec
+	old    uuid.UUID // the first period's allowance
+	start  time.Time
+	end    time.Time
+	action uuid.UUID
+}
+
+// newRollover has a creator workspace with its first allowance (150), and a run that holds 6 credits from an hour before the period ends.
+func newRollover(t *testing.T, name string) *rolloverRig {
+	t.Helper()
+	rig := newSpendRig(t)
+	ctx := context.Background()
+	list, _ := credits.LoadDefault()
+	x := &rolloverRig{rig: rig, ws: rig.workspace(t, name), specs: list.AllowanceSpecs(), start: creditDay}
+	x.end = store.AddMonths(x.start, 1)
+	if _, err := rig.a.GrantPlan(ctx, store.GrantInput{WorkspaceID: x.ws.ID, Plan: plans.Creator, GrantedBy: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.a.SyncAllowance(ctx, x.ws.ID, x.specs, x.start); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := rig.a.CreditLedger(ctx, x.ws.ID, 5)
+	x.old = rows[0].ID
+	x.action = newUUID()
+	at := x.end.Add(-time.Hour)
+	if _, err := rig.a.HoldCredits(ctx, store.HoldCreditsParams{Workspace: x.ws.ID, Action: store.ActionEditFirst, ActionID: x.action, Credits: 6, Now: at, TTL: 3 * time.Hour}); err != nil {
+		t.Fatal(err)
+	}
+	rig.holdMadeAt(t, x.action, at)
+	return x
+}
+
+// The run holds 6 credits of the allowance when the period ends. The expiry leaves those 6 in the old allowance, takes the other 144, and
+// the next period's allowance is whole; the run's charge then comes out of the old allowance, once.
+func TestCreditsRunSpanningARolloverIsChargedOnceFromTheOldAllowance(t *testing.T) {
+	x := newRollover(t, "span")
+	ctx := context.Background()
+	rig := x.rig
+	after := x.end.Add(5 * time.Minute)
+	if n, left, err := rig.a.ExpireDueCredits(ctx, after, 10); err != nil || n != 1 || left != 144 {
+		t.Fatalf("expiry = %d sources, %d credits, %v; want 144 (the 6 a run holds stay)", n, left, err)
+	}
+	if got := rig.remaining(t, x.old); got != 6 {
+		t.Fatalf("the old allowance has %d left, want the 6 the run holds", got)
+	}
+	if res, err := rig.a.SyncAllowance(ctx, x.ws.ID, x.specs, after); err != nil || res.Granted != 150 {
+		t.Fatalf("the next allowance: %+v, %v", res, err)
+	}
+	// The run's 6 are already out of the live credits: the whole new allowance is available.
+	if got := available(t, rig.a, x.ws, after); got != 150 {
+		t.Fatalf("available = %d, want the whole new allowance of 150", got)
+	}
+	// Charged: from the old allowance, so the new one is untouched.
+	res, err := rig.a.SettleCredits(ctx, x.ws.ID, x.action, true, after.Add(20*time.Minute))
+	if err != nil || res.Charged != 6 || res.Short != 0 {
+		t.Fatalf("settle = %+v, %v", res, err)
+	}
+	if got := rig.remaining(t, x.old); got != 0 {
+		t.Fatalf("the old allowance has %d left after the charge", got)
+	}
+	if got := available(t, rig.a, x.ws, after.Add(time.Hour)); got != 150 {
+		t.Fatalf("available after the charge = %d, want 150: the run was charged twice", got)
+	}
+	rows, _ := rig.a.CreditLedger(ctx, x.ws.ID, 50)
+	total := 0
+	for _, r := range rows {
+		if r.Kind == store.CreditCharge {
+			total += int(-r.Credits)
+			if r.GrantID.Bytes != x.old {
+				t.Errorf("the charge took from %v, not the old allowance", r.GrantID.Bytes)
+			}
+		}
+	}
+	if total != 6 {
+		t.Fatalf("%d credits charged, want 6", total)
+	}
+	rig.checkLedger(t, x.ws)
+}
+
+// The same run released instead (it failed): the 6 expire then, exactly, and nothing is charged.
+func TestCreditsRunSpanningARolloverThatIsReleasedExpiresItsFrozenCredits(t *testing.T) {
+	x := newRollover(t, "spanrel")
+	ctx := context.Background()
+	rig := x.rig
+	after := x.end.Add(5 * time.Minute)
+	if _, _, err := rig.a.ExpireDueCredits(ctx, after, 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.a.SyncAllowance(ctx, x.ws.ID, x.specs, after); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.a.ReleaseCredits(ctx, x.ws.ID, x.action, after.Add(10*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if got := rig.remaining(t, x.old); got != 0 {
+		t.Fatalf("the old allowance has %d left after the release; the remainder must expire", got)
+	}
+	if got := available(t, rig.a, x.ws, after.Add(time.Hour)); got != 150 {
+		t.Fatalf("available = %d, want 150", got)
+	}
+	rows, _ := rig.a.CreditLedger(ctx, x.ws.ID, 50)
+	var expired int
+	for _, r := range rows {
+		if r.Kind == store.CreditCharge {
+			t.Fatalf("a released run was charged: %+v", r)
+		}
+		if r.Kind == store.CreditExpire && r.GrantID.Bytes == x.old {
+			expired += int(-r.Credits)
+		}
+	}
+	if expired != 150 {
+		t.Fatalf("%d credits of the old allowance expired, want all 150 (144 at the end, 6 at the release)", expired)
+	}
+	// Releasing again changes nothing.
+	if _, err := rig.a.ReleaseCredits(ctx, x.ws.ID, x.action, after.Add(20*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	rig.checkLedger(t, x.ws)
+}
+
+// A plan change replaces the allowance the same way: what a running run holds stays in the old one.
+func TestCreditsRunSpanningAPlanChangeIsChargedFromTheOldAllowance(t *testing.T) {
+	x := newRollover(t, "spanplan")
+	ctx := context.Background()
+	rig := x.rig
+	at := x.end.Add(-30 * time.Minute)
+	if _, err := rig.a.GrantPlan(ctx, store.GrantInput{WorkspaceID: x.ws.ID, Plan: plans.Pro, GrantedBy: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := rig.a.SyncAllowance(ctx, x.ws.ID, x.specs, at)
+	if err != nil || res.Granted != 400 || res.Replaced != 144 {
+		t.Fatalf("plan change = %+v, %v; want 400 granted and 144 replaced (6 stay for the run)", res, err)
+	}
+	if got := available(t, rig.a, x.ws, at); got != 400 {
+		t.Fatalf("available = %d, want 400", got)
+	}
+	if res, err := rig.a.SettleCredits(ctx, x.ws.ID, x.action, true, at.Add(time.Minute)); err != nil || res.Charged != 6 {
+		t.Fatalf("settle = %+v, %v", res, err)
+	}
+	if got := available(t, rig.a, x.ws, at.Add(time.Hour)); got != 400 || rig.remaining(t, x.old) != 0 {
+		t.Fatalf("available %d, old allowance left %d", got, rig.remaining(t, x.old))
+	}
+	rig.checkLedger(t, x.ws)
+}
+
+// A hold that is swept (its run is gone) takes its frozen credits with it.
+func TestCreditsSweptHoldExpiresItsFrozenCredits(t *testing.T) {
+	x := newRollover(t, "spanswept")
+	ctx := context.Background()
+	rig := x.rig
+	after := x.end.Add(5 * time.Minute)
+	if _, _, err := rig.a.ExpireDueCredits(ctx, after, 10); err != nil {
+		t.Fatal(err)
+	}
+	// The hold expires at end+2h; the sweep runs at end+3h.
+	if res, err := rig.a.SweepExpiredCreditHolds(ctx, x.end.Add(3*time.Hour)); err != nil || res.Holds != 1 || res.Credits != 6 {
+		t.Fatalf("sweep = %+v, %v", res, err)
+	}
+	if got := rig.remaining(t, x.old); got != 0 {
+		t.Fatalf("the old allowance has %d left after the sweep", got)
+	}
+	if _, err := rig.a.GetCreditHold(ctx, x.ws.ID, x.action); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the hold: %v", err)
+	}
+	rig.checkLedger(t, x.ws)
+}
+
+// Holds made after the period ended rest on the new allowance, not on the old one, and several holds share what is left in order.
+func TestCreditsFrozenCreditsFollowTheHoldsThatRestOnThem(t *testing.T) {
+	rig := newSpendRig(t)
+	ctx := context.Background()
+	list, _ := credits.LoadDefault()
+	specs := list.AllowanceSpecs()
+	ws := rig.workspace(t, "frozen2")
+	if _, err := rig.a.GrantPlan(ctx, store.GrantInput{WorkspaceID: ws.ID, Plan: plans.Creator, GrantedBy: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.a.SyncAllowance(ctx, ws.ID, specs, creditDay); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := rig.a.CreditLedger(ctx, ws.ID, 5)
+	old := rows[0].ID
+	end := store.AddMonths(creditDay, 1)
+	// 140 used, 10 left; two runs hold 6 and 4 before the end, and a third holds 6 after it (of the new allowance).
+	big := newUUID()
+	if _, err := rig.a.HoldCredits(ctx, hold(ws, store.ActionEditFirst, big, 140, creditDay)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.a.SettleCredits(ctx, ws.ID, big, true, creditDay); err != nil {
+		t.Fatal(err)
+	}
+	h1, h2, h3 := newUUID(), newUUID(), newUUID()
+	for i, h := range []struct {
+		id uuid.UUID
+		n  int
+		at time.Time
+	}{{h1, 6, end.Add(-2 * time.Hour)}, {h2, 4, end.Add(-time.Hour)}} {
+		_ = i
+		if _, err := rig.a.HoldCredits(ctx, store.HoldCreditsParams{Workspace: ws.ID, Action: store.ActionEditFirst, ActionID: h.id, Credits: h.n, Now: h.at, TTL: 4 * time.Hour}); err != nil {
+			t.Fatal(err)
+		}
+		rig.holdMadeAt(t, h.id, h.at)
+	}
+	late := end.Add(2 * time.Minute)
+	if _, err := rig.a.SyncAllowance(ctx, ws.ID, specs, late); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.a.HoldCredits(ctx, store.HoldCreditsParams{Workspace: ws.ID, Action: store.ActionEditFirst, ActionID: h3, Credits: 6, Now: late, TTL: 4 * time.Hour}); err != nil {
+		t.Fatal(err)
+	}
+	rig.holdMadeAt(t, h3, late)
+	// The expiry job runs a little later: the 10 credits left are all held by the two earlier runs, so none of them expires.
+	if n, left, err := rig.a.ExpireDueCredits(ctx, end.Add(5*time.Minute), 10); err != nil || n != 1 || left != 0 {
+		t.Fatalf("expiry = %d sources %d credits, %v; want none expired: both runs hold what is left", n, left, err)
+	}
+	if got := rig.remaining(t, old); got != 10 {
+		t.Fatalf("old allowance left = %d, want 10", got)
+	}
+	if got := available(t, rig.a, ws, end.Add(6*time.Minute)); got != 150-6 {
+		t.Fatalf("available = %d, want 144 (the new allowance less the third run's 6)", got)
+	}
+	for _, id := range []uuid.UUID{h1, h2, h3} {
+		if res, err := rig.a.SettleCredits(ctx, ws.ID, id, true, end.Add(30*time.Minute)); err != nil || res.Short != 0 {
+			t.Fatalf("settle %s = %+v, %v", id, res, err)
+		}
+	}
+	if got := rig.remaining(t, old); got != 0 {
+		t.Fatalf("old allowance left = %d after both runs were charged", got)
+	}
+	if got := available(t, rig.a, ws, end.Add(time.Hour)); got != 150-6 {
+		t.Fatalf("available = %d, want 144: the third run is charged from the new allowance", got)
+	}
+	rig.checkLedger(t, ws)
 }

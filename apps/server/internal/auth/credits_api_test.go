@@ -198,3 +198,26 @@ func TestStartEditChargesFirstThenRevision(t *testing.T) {
 		t.Fatalf("bob's credits = %+v", c)
 	}
 }
+
+// A workspace on the BYOK plan (studio) cannot start a model run until its own key can pay for it: 402 byok_key_required, and no run, no
+// hold. A managed workspace is not affected.
+func TestStartEditOnAByokPlanNeedsTheWorkspacesOwnKey(t *testing.T) {
+	e := newAssetsEnv(t, func(o *assetsEnvOptions) { o.runs = true })
+	ctx := context.Background()
+	if _, err := e.st.GrantPlan(ctx, store.GrantInput{WorkspaceID: e.ws["bob"], Plan: "studio", GrantedBy: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	bp := e.newProjectAs("bob", "9:16")
+	rec := e.do(http.MethodPost, editPath(bp), "bob", nil)
+	wantError(t, rec, http.StatusPaymentRequired, string(api.ErrorCodeByokKeyRequired))
+	var body api.Error
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Error.Message != "this plan uses your own Anthropic key; add it in settings" {
+		t.Fatalf("body = %s", rec.Body)
+	}
+	var runs, holds int
+	if err := e.pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM agent_runs WHERE workspace_id = $1), (SELECT count(*) FROM credit_holds WHERE workspace_id = $1)`, e.ws["bob"]).Scan(&runs, &holds); err != nil || runs != 0 || holds != 0 {
+		t.Fatalf("%d runs and %d holds after the refusal (%v)", runs, holds, err)
+	}
+	p := e.newProject("ada", "9:16", e.readyAsset("ada", "lat.mp4"))
+	e.startEdit("ada", p, nil)
+}

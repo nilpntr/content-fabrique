@@ -303,3 +303,29 @@ func TestPriceListFilesAreNamedByVersion(t *testing.T) {
 		}
 	}
 }
+
+// The invariant leaves a BYOK plan's run budget out only because the creator's own key pays for it, and the runtime refuses a BYOK run on
+// any other key. If that rule ever stopped holding, the budget would be our cost: the check says so (the assumption is code, not a skip).
+func TestInvariantAssumesByokRunsArePaidByTheCreatorsKey(t *testing.T) {
+	if credits.RequiredBilling(credits.BYOK) != credits.BilledToWorkspaceKey || credits.RequiredBilling(credits.Managed) != "" {
+		t.Fatalf("required billing: byok %q, managed %q", credits.RequiredBilling(credits.BYOK), credits.RequiredBilling(credits.Managed))
+	}
+	l, _ := credits.LoadDefault()
+	if vs := l.Check(); len(vs) != 0 {
+		t.Fatalf("the list fails its own invariant: %v", vs)
+	}
+	// A rule under which our key pays for a BYOK run: the studio plan's $2 per edit is far over what its credits earn.
+	ours := func(credits.BillingMode) string { return "platform" }
+	got := map[credits.Action]bool{}
+	for _, v := range l.CheckBilling(ours) {
+		if v.Plan != plans.Studio {
+			t.Errorf("unexpected violation %s", v)
+		}
+		got[v.Action] = true
+	}
+	for _, a := range []credits.Action{credits.EditFirst, credits.EditRevision, credits.IdeationRun} {
+		if !got[a] {
+			t.Errorf("a BYOK run billed to our key was not caught for %s", a)
+		}
+	}
+}

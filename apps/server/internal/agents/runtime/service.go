@@ -59,6 +59,9 @@ var (
 	ErrUnknownAgent = errors.New("runtime: unknown agent")
 	// ErrInvalidInput is returned, wrapped, when the run's input does not suit the agent or a budget is out of range.
 	ErrInvalidInput = errors.New("runtime: invalid run input")
+	// ErrBYOKKeyRequired is returned when the workspace is on a plan whose model calls its own Anthropic key must pay for and the run would
+	// be billed to another key (ours): the API answers 402 byok_key_required.
+	ErrBYOKKeyRequired = errors.New("runtime: this plan uses the workspace's own Anthropic key, and the run would not be billed to it")
 	// ErrNoCredits is returned when a run that costs credits is started by a Service that has no credits service.
 	ErrNoCredits = errors.New("runtime: this service has no credits service, so a run that costs credits cannot be started")
 	// ErrEmptyReply and ErrReplyTooLong are returned by Reply.
@@ -130,6 +133,13 @@ func (s *Service) Create(ctx context.Context, tx *store.Store, p StartParams) (s
 	_, billing, err := s.Factory.For(ctx, p.WorkspaceID, agent.Stage)
 	if err != nil {
 		return store.AgentRun{}, err
+	}
+	// A BYOK plan's run budget ($2) is not counted as our cost because the creator's own key pays for it. Until a workspace's own key can be
+	// used (P4-00b) the factory bills our key, and such a run would cost us up to its budget for a fraction of its price: refuse it.
+	if quote != nil {
+		if want := credits.RequiredBilling(quote.BillingMode); want != "" && string(billing) != want {
+			return store.AgentRun{}, ErrBYOKKeyRequired
+		}
 	}
 	input := p.Input
 	if len(input) == 0 {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/credits"
 	"github.com/nilpntr/content-fabrique/internal/credits/creditstest"
 	"github.com/nilpntr/content-fabrique/internal/ids"
@@ -216,5 +217,43 @@ func TestARevisionRunsOnTheRevisionEntry(t *testing.T) {
 	}
 	if rev.MinOutputTokens != 0 {
 		t.Errorf("min_output_tokens = %d for an entry that does not set one", rev.MinOutputTokens)
+	}
+}
+
+// workspaceKeyFactory bills every call to the workspace's own key, as the key resolver of P4-00b will for a BYOK workspace.
+type workspaceKeyFactory struct{ fakeFactory }
+
+func (f workspaceKeyFactory) For(context.Context, ids.WorkspaceID, string) (llm.Client, llm.Billing, error) {
+	return f.client, llm.BilledToWorkspaceKey, nil
+}
+
+// A BYOK plan (studio) is priced as if the creator's key paid for the model. Until a workspace's own key can be used, the factory bills
+// ours, and the run is refused: no run, no hold. With the creator's key it starts.
+func TestAByokRunOnOurKeyIsRefused(t *testing.T) {
+	e := newEnv(t, newScripted(), withBilledAgent)
+	e.svc.Credits = creditstest.Service(t, e.st)
+	creditstest.Fund(t, e.st, e.ws.ID, plans.Studio, 50)
+	project := e.project()
+	if _, err := e.startEdit(project, Budgets{}, false); !errors.Is(err, ErrBYOKKeyRequired) {
+		t.Fatalf("a studio run billed to us: %v", err)
+	}
+	if runs, holds := e.counts(); runs != 0 || holds != 0 {
+		t.Fatalf("%d runs and %d holds after the refusal", runs, holds)
+	}
+	// With the workspace's own key it starts, under the plan's run budget.
+	e.svc.Factory = workspaceKeyFactory{fakeFactory{client: newScripted()}}
+	run, err := e.startEdit(project, Budgets{}, false)
+	if err != nil || run.BilledTo != string(llm.BilledToWorkspaceKey) || run.BudgetMicros != 2_000_000 {
+		t.Fatalf("a studio run on the creator's key: %+v, %v", run, err)
+	}
+	// A managed plan on the platform's (here test) key is not affected, and a free development run on a studio workspace is not either.
+	other := newEnv(t, newScripted(), withBilledAgent)
+	other.svc.Credits = creditstest.Service(t, other.st)
+	creditstest.Fund(t, other.st, other.ws.ID, plans.Creator, 50)
+	if _, err := other.startEdit(other.project(), Budgets{}, false); err != nil {
+		t.Fatalf("a creator run: %v", err)
+	}
+	if _, err := e.startEdit(e.project(), Budgets{Micros: 100_000}, true); err != nil {
+		t.Fatalf("a free run on a studio workspace: %v", err)
 	}
 }

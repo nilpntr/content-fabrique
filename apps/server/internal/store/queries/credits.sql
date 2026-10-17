@@ -39,9 +39,10 @@ ORDER BY (s.kind <> 'grant_allowance'), s.expires_at NULLS LAST, s.created_at, s
 
 -- The credits set aside by the holds that still count: a hold counts until its expiry, and for as long as its run is still active (queued,
 -- running or waiting for its creator), however long that takes, so a long queue or an outage cannot free the credits of a run that will
--- still finish and be charged.
+-- still finish and be charged. Only the part that is not frozen counts: a frozen part rests on a source that expired and is out of the
+-- live sources already.
 -- name: SumActiveCreditHolds :one
-SELECT COALESCE(SUM(h.credits), 0)::integer AS credits
+SELECT COALESCE(SUM(h.credits - h.frozen_credits), 0)::integer AS credits
 FROM credit_holds h
 WHERE h.workspace_id = @workspace_id
   AND (h.expires_at > @now
@@ -110,6 +111,21 @@ SELECT EXISTS (
 -- name: GetCreditHoldByAction :one
 SELECT * FROM credit_holds WHERE workspace_id = @workspace_id AND action_id = @action_id;
 
+-- The active holds of a workspace, oldest first (the same rule as SumActiveCreditHolds).
+-- name: ListActiveCreditHolds :many
+SELECT h.id, h.action_id, h.credits, h.frozen_source_id, h.frozen_credits, h.created_at
+FROM credit_holds h
+WHERE h.workspace_id = @workspace_id
+  AND (h.expires_at > @now
+       OR EXISTS (SELECT 1 FROM agent_runs r WHERE r.workspace_id = h.workspace_id AND r.id = h.action_id AND r.status IN ('queued', 'running', 'waiting_input')))
+ORDER BY h.created_at, h.id;
+
+-- Leaves credits of an expired source frozen for a hold. A hold rests on one source at most.
+-- name: FreezeCreditHold :execrows
+UPDATE credit_holds SET frozen_source_id = @source_id, frozen_credits = frozen_credits + @credits
+WHERE workspace_id = @workspace_id AND id = @id AND credits - frozen_credits >= @credits
+  AND (frozen_source_id IS NULL OR frozen_source_id = @source_id);
+
 -- A second hold for the same action (or the same key) inserts nothing; the caller reads the first one.
 -- name: InsertCreditHold :one
 INSERT INTO credit_holds (workspace_id, action, action_id, credits, project_id, member_user_id, plan, plan_list_version, expires_at, idempotency_key)
@@ -132,12 +148,31 @@ WHERE workspace_id = @workspace_id AND action_id = @action_id AND expires_at < @
 -- name: DeleteExpiredCreditHolds :one
 WITH gone AS (
     DELETE FROM credit_holds h
-    WHERE h.expires_at <= @now
+    WHERE h.expires_at <= @now AND h.frozen_credits = 0
       AND (h.expires_at <= @stale_before
            OR NOT EXISTS (SELECT 1 FROM agent_runs r WHERE r.workspace_id = h.workspace_id AND r.id = h.action_id AND r.status IN ('queued', 'running', 'waiting_input')))
     RETURNING h.credits
 )
 SELECT count(*)::bigint AS holds, COALESCE(sum(credits), 0)::bigint AS credits FROM gone;
+
+-- The expired holds that have frozen credits, across workspaces (the sweep handles each under its workspace's lock, so the frozen credits
+-- expire with the hold). Same rule as DeleteExpiredCreditHolds.
+-- name: ListExpiredCreditHoldsWithFrozen :many
+SELECT h.id, h.workspace_id, h.action_id
+FROM credit_holds h
+WHERE h.expires_at <= @now AND h.frozen_credits > 0
+  AND (h.expires_at <= @stale_before
+       OR NOT EXISTS (SELECT 1 FROM agent_runs r WHERE r.workspace_id = h.workspace_id AND r.id = h.action_id AND r.status IN ('queued', 'running', 'waiting_input')))
+ORDER BY h.expires_at, h.id
+LIMIT @row_limit;
+
+-- Deletes one expired hold (the rule of DeleteExpiredCreditHolds, checked again under the lock) and returns it.
+-- name: DeleteExpiredCreditHoldByID :one
+DELETE FROM credit_holds h
+WHERE h.workspace_id = @workspace_id AND h.id = @id AND h.expires_at <= @now
+  AND (h.expires_at <= @stale_before
+       OR NOT EXISTS (SELECT 1 FROM agent_runs r WHERE r.workspace_id = h.workspace_id AND r.id = h.action_id AND r.status IN ('queued', 'running', 'waiting_input')))
+RETURNING h.*;
 
 -- The sources whose expiry has passed and that have no expire row yet, across workspaces, oldest first (the expiry job).
 -- name: ListDueCreditExpiries :many
@@ -175,13 +210,6 @@ WHERE wp.plan <> 'none' AND wp.status = 'active' AND (wp.current_period_end IS N
   AND wp.workspace_id > @after
 ORDER BY wp.workspace_id
 LIMIT @row_limit;
-
--- Does the run have a preview artifact (the creator saw something). The editor records {"kind": "preview"} for each version it renders.
--- name: AgentRunHasPreview :one
-SELECT EXISTS (
-    SELECT 1 FROM agent_events
-    WHERE workspace_id = @workspace_id AND run_id = @run_id AND type = 'artifact' AND payload ->> 'kind' = 'preview'
-) AS previewed;
 
 -- The ledger of a workspace, newest first (cfctl credits show).
 -- name: ListCreditLedger :many

@@ -201,6 +201,8 @@ type CreditHold struct {
 	ExpiresAt       time.Time
 	IdempotencyKey  string
 	CreatedAt       time.Time
+	FrozenSourceID  pgtype.UUID
+	FrozenCredits   int32
 }
 
 type CreditLedger struct {

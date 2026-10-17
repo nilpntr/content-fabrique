@@ -58,6 +58,8 @@ type Quote struct {
 	// Plan is the workspace's plan at the time of the quote ("" when there is none and the run is free).
 	Plan        plans.Plan
 	ListVersion string
+	// BillingMode is the plan's mode ("" for a free run): a BYOK run must be billed to the workspace's own key (RequiredBilling).
+	BillingMode BillingMode
 	// Free is true for a run started without credits: it still gets a hold (of zero credits), so that it is recorded as a charged edit.
 	Free bool
 }
@@ -99,6 +101,7 @@ func (s *Service) QuoteEdit(ctx context.Context, tx *store.Store, ws ids.Workspa
 	if free {
 		return q, nil
 	}
+	q.BillingMode = s.List.Plans[ent.Plan].BillingMode
 	q.Credits = s.List.Credits[action]
 	q.BudgetMicros = s.List.Plans[ent.Plan].COGSBudgetMicros[action]
 	return q, nil

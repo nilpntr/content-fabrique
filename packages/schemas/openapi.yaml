@@ -865,10 +865,11 @@ paths:
         **Credits.** The run costs credits, set aside (held) in the same step that creates the run: the server decides from the
         project whether it is the first edit (6 credits: the project has no charged edit yet) or a revision (2 credits), and the
         price comes from the server's price list, never from the request. A workspace with fewer credits available than that gets
-        `402 credits_exhausted` and no run is created (a workspace with no active plan gets `402 plan_required`, as everywhere).
+        `402 credits_exhausted` and no run is created (a workspace with no active plan gets `402 plan_required`, as everywhere). A workspace
+        on a BYOK plan (studio) pays for the model with its own Anthropic key: until it has one the start is refused with
+        `402 byok_key_required` and no run is created.
         The credits are charged when the run succeeds and released when it fails. When the creator cancels it they are charged if the
-        run had already made a timeline version or rendered a preview (the work is in the project), and released if it had done
-        neither. `GET /v1/me` has the balance.
+        run had already made a timeline version (the work is in the project), and released if it had not. `GET /v1/me` has the balance.
 
         The run's spend cap is set by the server from the workspace's plan and the kind of edit; the request cannot change it. It is
         enforced before every model call. `budget_usd` is accepted for compatibility (and still has to be a positive number) but is
@@ -1601,6 +1602,7 @@ components:
         - run_not_waiting # 409: the run is not waiting for an answer
         - model_not_configured # 503: the server has no model access (ANTHROPIC_API_KEY or LLM_MODE) or no such routing profile
         - edit_not_charged # 422: a final render needs an edit of the project that was charged (run the editor first)
+        - byok_key_required # 402: the plan uses the workspace's own Anthropic key (BYOK) and none is set up, so no model run can start
         - version_not_charged # 422: a final render of a version that contains editor work that was not charged (a failed or released run)
 
     ErrorDetail:

@@ -206,6 +206,8 @@ func (h *Runs) startEdit(ctx context.Context, req api.StartEditRequestObject) (s
 	case errors.Is(err, store.ErrInsufficientCredits):
 		// The stable code the web app opens its upgrade dialog on. The message carries no numbers: the balance is in GET /v1/me.
 		return store.AgentRun{}, &failure{http.StatusPaymentRequired, api.ErrorCodeCreditsExhausted, "this workspace does not have enough credits for this edit"}
+	case errors.Is(err, runtime.ErrBYOKKeyRequired):
+		return store.AgentRun{}, &failure{http.StatusPaymentRequired, api.ErrorCodeByokKeyRequired, "this plan uses your own Anthropic key; add it in settings"}
 	case errors.Is(err, credits.ErrNoPlan):
 		return store.AgentRun{}, &failure{http.StatusPaymentRequired, api.ErrorCodePlanRequired, "this workspace has no active plan"}
 	case errors.Is(err, runtime.ErrInvalidInput):

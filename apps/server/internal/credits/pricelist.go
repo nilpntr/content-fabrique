@@ -50,6 +50,20 @@ const (
 	BYOK    BillingMode = "byok"
 )
 
+// BilledToWorkspaceKey is the ledger's billed_to for model calls that the creator's own Anthropic key pays (llm.BilledToWorkspaceKey).
+const BilledToWorkspaceKey = "workspace_key"
+
+// RequiredBilling says who must pay for the model calls of a run under a plan of the given mode: the creator's own key for a BYOK plan,
+// and "" (no requirement: our key, or test traffic in development) for a managed one. The price list's profit invariant assumes it: a BYOK
+// plan's run budget is not our cost only because a run is refused unless its key is the workspace's own (runtime.Service.Create enforces
+// this with the same function, and Check fails if it ever stops being true).
+func RequiredBilling(m BillingMode) string {
+	if m == BYOK {
+		return BilledToWorkspaceKey
+	}
+	return ""
+}
+
 // Plan is what one plan includes in a price list.
 type Plan struct {
 	Name          plans.Plan

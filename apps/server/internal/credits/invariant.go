@@ -49,9 +49,16 @@ func (l *PriceList) NetRevenuePerCreditMicros(p Plan) *big.Rat {
 // with three cases that the design note names:
 //   - a managed plan: the run budget is checked against what the plan's credits earn;
 //   - the trial: it earns nothing, so the run budget is checked against its fixed COGS allowance, spread over the trial's credits;
-//   - a BYOK plan: its tokens are billed to the creator's key, so its run budget is not our cost; the non-LLM budget (compute, storage,
-//     transcription), which is our cost, is checked against what the plan's credits earn.
-func (l *PriceList) Check() []Violation {
+//   - a BYOK plan: its tokens are billed to the creator's key (RequiredBilling; a run on any other key is refused), so its run budget is
+//     not our cost; the non-LLM budget (compute, storage, transcription), which is our cost, is checked against what the plan's credits
+//     earn. If the rule did not make the creator's key pay, the run budget would be our cost and is checked like a managed plan's.
+func (l *PriceList) Check() []Violation { return l.CheckBilling(RequiredBilling) }
+
+// CheckBilling is Check for a given rule of who pays for the model calls of each billing mode. A BYOK plan's run budget is left out of the
+// invariant only when the rule makes the creator's own key pay for it; under any other rule that budget is our cost and is checked like a
+// managed plan's, which a BYOK plan's $2 cannot pass. This is the assumption written down as code: the runtime refuses a BYOK run on our
+// key (RequiredBilling), and a test fails if the rule and the list ever disagree.
+func (l *PriceList) CheckBilling(payer func(BillingMode) string) []Violation {
 	var out []Violation
 	planNames := make([]string, 0, len(l.Plans))
 	for p := range l.Plans {
@@ -73,7 +80,7 @@ func (l *PriceList) Check() []Violation {
 				budget = p.COGSBudgetMicros[a]
 				limit = new(big.Rat).SetFrac64(l.TrialCOGSAllowanceMicros*credits, int64(p.AllowanceCredits))
 				rule = "trial: allowance x credits / trial credits"
-			case p.BillingMode == BYOK:
+			case p.BillingMode == BYOK && payer(BYOK) == BilledToWorkspaceKey:
 				budget = p.NonLLMCOGSBudgetMicros[a]
 				limit = l.shareOfRevenue(p, credits)
 				rule = "byok: non-LLM budget <= max share x net revenue x credits"

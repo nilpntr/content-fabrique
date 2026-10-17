@@ -35,26 +35,6 @@ func (q *Queries) ActionIsCharged(ctx context.Context, arg ActionIsChargedParams
 	return charged, err
 }
 
-const agentRunHasPreview = `-- name: AgentRunHasPreview :one
-SELECT EXISTS (
-    SELECT 1 FROM agent_events
-    WHERE workspace_id = $1 AND run_id = $2 AND type = 'artifact' AND payload ->> 'kind' = 'preview'
-) AS previewed
-`
-
-type AgentRunHasPreviewParams struct {
-	WorkspaceID ids.WorkspaceID
-	RunID       uuid.UUID
-}
-
-// Does the run have a preview artifact (the creator saw something). The editor records {"kind": "preview"} for each version it renders.
-func (q *Queries) AgentRunHasPreview(ctx context.Context, arg AgentRunHasPreviewParams) (bool, error) {
-	row := q.db.QueryRow(ctx, agentRunHasPreview, arg.WorkspaceID, arg.RunID)
-	var previewed bool
-	err := row.Scan(&previewed)
-	return previewed, err
-}
-
 const agentRunTimelineVersion = `-- name: AgentRunTimelineVersion :one
 SELECT COALESCE(max(version), 0)::integer AS version
 FROM timeline_versions
@@ -92,10 +72,53 @@ func (q *Queries) DeleteCreditHold(ctx context.Context, arg DeleteCreditHoldPara
 	return result.RowsAffected(), nil
 }
 
+const deleteExpiredCreditHoldByID = `-- name: DeleteExpiredCreditHoldByID :one
+DELETE FROM credit_holds h
+WHERE h.workspace_id = $1 AND h.id = $2 AND h.expires_at <= $3
+  AND (h.expires_at <= $4
+       OR NOT EXISTS (SELECT 1 FROM agent_runs r WHERE r.workspace_id = h.workspace_id AND r.id = h.action_id AND r.status IN ('queued', 'running', 'waiting_input')))
+RETURNING h.id, h.workspace_id, h.action, h.action_id, h.credits, h.project_id, h.member_user_id, h.plan, h.plan_list_version, h.expires_at, h.idempotency_key, h.created_at, h.frozen_source_id, h.frozen_credits
+`
+
+type DeleteExpiredCreditHoldByIDParams struct {
+	WorkspaceID ids.WorkspaceID
+	ID          uuid.UUID
+	Now         time.Time
+	StaleBefore time.Time
+}
+
+// Deletes one expired hold (the rule of DeleteExpiredCreditHolds, checked again under the lock) and returns it.
+func (q *Queries) DeleteExpiredCreditHoldByID(ctx context.Context, arg DeleteExpiredCreditHoldByIDParams) (CreditHold, error) {
+	row := q.db.QueryRow(ctx, deleteExpiredCreditHoldByID,
+		arg.WorkspaceID,
+		arg.ID,
+		arg.Now,
+		arg.StaleBefore,
+	)
+	var i CreditHold
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Action,
+		&i.ActionID,
+		&i.Credits,
+		&i.ProjectID,
+		&i.MemberUserID,
+		&i.Plan,
+		&i.PlanListVersion,
+		&i.ExpiresAt,
+		&i.IdempotencyKey,
+		&i.CreatedAt,
+		&i.FrozenSourceID,
+		&i.FrozenCredits,
+	)
+	return i, err
+}
+
 const deleteExpiredCreditHolds = `-- name: DeleteExpiredCreditHolds :one
 WITH gone AS (
     DELETE FROM credit_holds h
-    WHERE h.expires_at <= $1
+    WHERE h.expires_at <= $1 AND h.frozen_credits = 0
       AND (h.expires_at <= $2
            OR NOT EXISTS (SELECT 1 FROM agent_runs r WHERE r.workspace_id = h.workspace_id AND r.id = h.action_id AND r.status IN ('queued', 'running', 'waiting_input')))
     RETURNING h.credits
@@ -169,6 +192,33 @@ func (q *Queries) ExtendCreditHold(ctx context.Context, arg ExtendCreditHoldPara
 	return result.RowsAffected(), nil
 }
 
+const freezeCreditHold = `-- name: FreezeCreditHold :execrows
+UPDATE credit_holds SET frozen_source_id = $1, frozen_credits = frozen_credits + $2
+WHERE workspace_id = $3 AND id = $4 AND credits - frozen_credits >= $2
+  AND (frozen_source_id IS NULL OR frozen_source_id = $1)
+`
+
+type FreezeCreditHoldParams struct {
+	SourceID    pgtype.UUID
+	Credits     int32
+	WorkspaceID ids.WorkspaceID
+	ID          uuid.UUID
+}
+
+// Leaves credits of an expired source frozen for a hold. A hold rests on one source at most.
+func (q *Queries) FreezeCreditHold(ctx context.Context, arg FreezeCreditHoldParams) (int64, error) {
+	result, err := q.db.Exec(ctx, freezeCreditHold,
+		arg.SourceID,
+		arg.Credits,
+		arg.WorkspaceID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getCreditAccount = `-- name: GetCreditAccount :one
 SELECT workspace_id, plan, period_anchor, allowance_until, plan_generation, created_at, updated_at FROM credit_accounts WHERE workspace_id = $1
 `
@@ -189,7 +239,7 @@ func (q *Queries) GetCreditAccount(ctx context.Context, workspaceID ids.Workspac
 }
 
 const getCreditHoldByAction = `-- name: GetCreditHoldByAction :one
-SELECT id, workspace_id, action, action_id, credits, project_id, member_user_id, plan, plan_list_version, expires_at, idempotency_key, created_at FROM credit_holds WHERE workspace_id = $1 AND action_id = $2
+SELECT id, workspace_id, action, action_id, credits, project_id, member_user_id, plan, plan_list_version, expires_at, idempotency_key, created_at, frozen_source_id, frozen_credits FROM credit_holds WHERE workspace_id = $1 AND action_id = $2
 `
 
 type GetCreditHoldByActionParams struct {
@@ -213,6 +263,8 @@ func (q *Queries) GetCreditHoldByAction(ctx context.Context, arg GetCreditHoldBy
 		&i.ExpiresAt,
 		&i.IdempotencyKey,
 		&i.CreatedAt,
+		&i.FrozenSourceID,
+		&i.FrozenCredits,
 	)
 	return i, err
 }
@@ -299,7 +351,7 @@ const insertCreditHold = `-- name: InsertCreditHold :one
 INSERT INTO credit_holds (workspace_id, action, action_id, credits, project_id, member_user_id, plan, plan_list_version, expires_at, idempotency_key)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT DO NOTHING
-RETURNING id, workspace_id, action, action_id, credits, project_id, member_user_id, plan, plan_list_version, expires_at, idempotency_key, created_at
+RETURNING id, workspace_id, action, action_id, credits, project_id, member_user_id, plan, plan_list_version, expires_at, idempotency_key, created_at, frozen_source_id, frozen_credits
 `
 
 type InsertCreditHoldParams struct {
@@ -343,6 +395,8 @@ func (q *Queries) InsertCreditHold(ctx context.Context, arg InsertCreditHoldPara
 		&i.ExpiresAt,
 		&i.IdempotencyKey,
 		&i.CreatedAt,
+		&i.FrozenSourceID,
+		&i.FrozenCredits,
 	)
 	return i, err
 }
@@ -402,6 +456,57 @@ func (q *Queries) InsertCreditLedger(ctx context.Context, arg InsertCreditLedger
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const listActiveCreditHolds = `-- name: ListActiveCreditHolds :many
+SELECT h.id, h.action_id, h.credits, h.frozen_source_id, h.frozen_credits, h.created_at
+FROM credit_holds h
+WHERE h.workspace_id = $1
+  AND (h.expires_at > $2
+       OR EXISTS (SELECT 1 FROM agent_runs r WHERE r.workspace_id = h.workspace_id AND r.id = h.action_id AND r.status IN ('queued', 'running', 'waiting_input')))
+ORDER BY h.created_at, h.id
+`
+
+type ListActiveCreditHoldsParams struct {
+	WorkspaceID ids.WorkspaceID
+	Now         time.Time
+}
+
+type ListActiveCreditHoldsRow struct {
+	ID             uuid.UUID
+	ActionID       uuid.UUID
+	Credits        int32
+	FrozenSourceID pgtype.UUID
+	FrozenCredits  int32
+	CreatedAt      time.Time
+}
+
+// The active holds of a workspace, oldest first (the same rule as SumActiveCreditHolds).
+func (q *Queries) ListActiveCreditHolds(ctx context.Context, arg ListActiveCreditHoldsParams) ([]ListActiveCreditHoldsRow, error) {
+	rows, err := q.db.Query(ctx, listActiveCreditHolds, arg.WorkspaceID, arg.Now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveCreditHoldsRow
+	for rows.Next() {
+		var i ListActiveCreditHoldsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ActionID,
+			&i.Credits,
+			&i.FrozenSourceID,
+			&i.FrozenCredits,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listCreditChargesOfAction = `-- name: ListCreditChargesOfAction :many
@@ -654,6 +759,50 @@ func (q *Queries) ListDueCreditExpiries(ctx context.Context, arg ListDueCreditEx
 	return items, nil
 }
 
+const listExpiredCreditHoldsWithFrozen = `-- name: ListExpiredCreditHoldsWithFrozen :many
+SELECT h.id, h.workspace_id, h.action_id
+FROM credit_holds h
+WHERE h.expires_at <= $1 AND h.frozen_credits > 0
+  AND (h.expires_at <= $2
+       OR NOT EXISTS (SELECT 1 FROM agent_runs r WHERE r.workspace_id = h.workspace_id AND r.id = h.action_id AND r.status IN ('queued', 'running', 'waiting_input')))
+ORDER BY h.expires_at, h.id
+LIMIT $3
+`
+
+type ListExpiredCreditHoldsWithFrozenParams struct {
+	Now         time.Time
+	StaleBefore time.Time
+	RowLimit    int32
+}
+
+type ListExpiredCreditHoldsWithFrozenRow struct {
+	ID          uuid.UUID
+	WorkspaceID ids.WorkspaceID
+	ActionID    uuid.UUID
+}
+
+// The expired holds that have frozen credits, across workspaces (the sweep handles each under its workspace's lock, so the frozen credits
+// expire with the hold). Same rule as DeleteExpiredCreditHolds.
+func (q *Queries) ListExpiredCreditHoldsWithFrozen(ctx context.Context, arg ListExpiredCreditHoldsWithFrozenParams) ([]ListExpiredCreditHoldsWithFrozenRow, error) {
+	rows, err := q.db.Query(ctx, listExpiredCreditHoldsWithFrozen, arg.Now, arg.StaleBefore, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListExpiredCreditHoldsWithFrozenRow
+	for rows.Next() {
+		var i ListExpiredCreditHoldsWithFrozenRow
+		if err := rows.Scan(&i.ID, &i.WorkspaceID, &i.ActionID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkspacesNeedingAllowance = `-- name: ListWorkspacesNeedingAllowance :many
 SELECT wp.workspace_id
 FROM workspace_plans wp
@@ -792,7 +941,7 @@ func (q *Queries) SetCreditAccountPeriod(ctx context.Context, arg SetCreditAccou
 }
 
 const sumActiveCreditHolds = `-- name: SumActiveCreditHolds :one
-SELECT COALESCE(SUM(h.credits), 0)::integer AS credits
+SELECT COALESCE(SUM(h.credits - h.frozen_credits), 0)::integer AS credits
 FROM credit_holds h
 WHERE h.workspace_id = $1
   AND (h.expires_at > $2
@@ -806,7 +955,8 @@ type SumActiveCreditHoldsParams struct {
 
 // The credits set aside by the holds that still count: a hold counts until its expiry, and for as long as its run is still active (queued,
 // running or waiting for its creator), however long that takes, so a long queue or an outage cannot free the credits of a run that will
-// still finish and be charged.
+// still finish and be charged. Only the part that is not frozen counts: a frozen part rests on a source that expired and is out of the
+// live sources already.
 func (q *Queries) SumActiveCreditHolds(ctx context.Context, arg SumActiveCreditHoldsParams) (int32, error) {
 	row := q.db.QueryRow(ctx, sumActiveCreditHolds, arg.WorkspaceID, arg.Now)
 	var credits int32

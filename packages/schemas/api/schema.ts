@@ -428,10 +428,11 @@ export interface paths {
          *     **Credits.** The run costs credits, set aside (held) in the same step that creates the run: the server decides from the
          *     project whether it is the first edit (6 credits: the project has no charged edit yet) or a revision (2 credits), and the
          *     price comes from the server's price list, never from the request. A workspace with fewer credits available than that gets
-         *     `402 credits_exhausted` and no run is created (a workspace with no active plan gets `402 plan_required`, as everywhere).
+         *     `402 credits_exhausted` and no run is created (a workspace with no active plan gets `402 plan_required`, as everywhere). A workspace
+         *     on a BYOK plan (studio) pays for the model with its own Anthropic key: until it has one the start is refused with
+         *     `402 byok_key_required` and no run is created.
          *     The credits are charged when the run succeeds and released when it fails. When the creator cancels it they are charged if the
-         *     run had already made a timeline version or rendered a preview (the work is in the project), and released if it had done
-         *     neither. `GET /v1/me` has the balance.
+         *     run had already made a timeline version (the work is in the project), and released if it had not. `GET /v1/me` has the balance.
          *
          *     The run's spend cap is set by the server from the workspace's plan and the kind of edit; the request cannot change it. It is
          *     enforced before every model call. `budget_usd` is accepted for compatibility (and still has to be a positive number) but is
@@ -664,7 +665,7 @@ export interface components {
          *     code as a generic failure of its HTTP status.
          * @enum {string}
          */
-        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "credits_exhausted" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured" | "assets_not_usable" | "version_conflict" | "invalid_ops" | "no_change" | "timeline_invalid" | "too_many_renders" | "run_in_progress" | "run_not_waiting" | "model_not_configured" | "edit_not_charged" | "version_not_charged";
+        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "credits_exhausted" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured" | "assets_not_usable" | "version_conflict" | "invalid_ops" | "no_change" | "timeline_invalid" | "too_many_renders" | "run_in_progress" | "run_not_waiting" | "model_not_configured" | "edit_not_charged" | "byok_key_required" | "version_not_charged";
         ErrorDetail: {
             code: components["schemas"]["ErrorCode"];
             /** @description For people. It may change; do not branch on it. */

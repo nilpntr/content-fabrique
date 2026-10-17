@@ -429,8 +429,14 @@ func (s *Store) SettleCredits(ctx context.Context, ws ids.WorkspaceID, actionID 
 		}
 		if len(charged) > 0 {
 			res.Replayed = true // charged already: only the hold was left behind
+			if err := tx.expireFrozen(ctx, hold, now); err != nil {
+				return err
+			}
 		} else if !charge {
 			res.Released = true
+			if err := tx.expireFrozen(ctx, hold, now); err != nil {
+				return err
+			}
 		} else {
 			if err := tx.chargeHold(ctx, hold, now, &res); err != nil {
 				return err
@@ -462,6 +468,26 @@ func (s *Store) chargeHold(ctx context.Context, hold db.CreditHold, now time.Tim
 		n      int
 	}
 	var takes []take
+	// The part of the hold that rests on a source that expired while the run worked is charged to that source first: it was kept for this
+	// hold, and the live allowance of the new period must not pay for it again. What is left of the frozen part (the hold was for more
+	// than the price now, which does not happen today) expires.
+	if hold.FrozenCredits > 0 && hold.FrozenSourceID.Valid {
+		frozen, err := s.q.GetCreditSource(ctx, db.GetCreditSourceParams{WorkspaceID: hold.WorkspaceID, ID: hold.FrozenSourceID.Bytes})
+		if err != nil {
+			return err
+		}
+		n := min(int(frozen.Remaining), int(hold.FrozenCredits), need)
+		if n > 0 {
+			takes = append(takes, take{CreditSource{ID: frozen.ID, Kind: frozen.Kind, Remaining: int(frozen.Remaining)}, n})
+			need -= n
+		}
+		if left := int(hold.FrozenCredits) - n; left > 0 {
+			reason := "the frozen credits of a hold that were not charged"
+			if err := s.expireFrozenPart(ctx, hold, left, now, &reason); err != nil {
+				return err
+			}
+		}
+	}
 	for _, src := range sources {
 		if need == 0 {
 			break
@@ -523,8 +549,38 @@ type CreditSweepResult struct {
 // SweepExpiredCreditHolds deletes the holds past their expiry (a run whose worker and retries are gone). They had stopped counting
 // already; this gives the table its size back and tells the caller what crashed runs left behind.
 func (s *Store) SweepExpiredCreditHolds(ctx context.Context, now time.Time) (CreditSweepResult, error) {
-	r, err := s.q.DeleteExpiredCreditHolds(ctx, db.DeleteExpiredCreditHoldsParams{Now: now.UTC(), StaleBefore: now.UTC().Add(-creditHoldStaleAfter)})
-	return CreditSweepResult{Holds: r.Holds, Credits: r.Credits}, mapErr(err)
+	now = now.UTC()
+	stale := now.Add(-creditHoldStaleAfter)
+	var out CreditSweepResult
+	// The holds with frozen credits go one at a time, under their workspace's lock, so that the frozen credits expire with them.
+	frozen, err := s.q.ListExpiredCreditHoldsWithFrozen(ctx, db.ListExpiredCreditHoldsWithFrozenParams{Now: now, StaleBefore: stale, RowLimit: 200})
+	if err != nil {
+		return out, mapErr(err)
+	}
+	for _, f := range frozen {
+		err := s.inTx(ctx, func(tx *Store) error {
+			if _, err := tx.lockCreditAccount(ctx, f.WorkspaceID); err != nil {
+				return err
+			}
+			h, err := tx.q.DeleteExpiredCreditHoldByID(ctx, db.DeleteExpiredCreditHoldByIDParams{WorkspaceID: f.WorkspaceID, ID: f.ID, Now: now, StaleBefore: stale})
+			if errors.Is(err, errNoRows) {
+				return nil // settled, renewed or swept by someone else
+			}
+			if err != nil {
+				return err
+			}
+			out.Holds++
+			out.Credits += int64(h.Credits)
+			return tx.expireFrozen(ctx, h, now)
+		})
+		if err != nil {
+			return out, mapErr(err)
+		}
+	}
+	r, err := s.q.DeleteExpiredCreditHolds(ctx, db.DeleteExpiredCreditHoldsParams{Now: now, StaleBefore: stale})
+	out.Holds += r.Holds
+	out.Credits += r.Credits
+	return out, mapErr(err)
 }
 
 // ---- Grants, adjustments and refunds ----------------------------------------------------------------------------
@@ -904,10 +960,11 @@ func (s *Store) SyncAllowance(ctx context.Context, ws ids.WorkspaceID, specs map
 					continue
 				}
 				reason := fmt.Sprintf("the plan changed from %s to %s", acct.Plan, plan)
-				if err := tx.expireSource(ctx, ws, src.ID, src.Remaining, now, &reason); err != nil {
+				expired, err := tx.expireSourceKeepingHolds(ctx, ws, src.ID, now, now, &reason)
+				if err != nil {
 					return err
 				}
-				res.Replaced += src.Remaining
+				res.Replaced += expired
 			}
 		}
 
@@ -981,6 +1038,94 @@ func (s *Store) expireSource(ctx context.Context, ws ids.WorkspaceID, source uui
 	return err
 }
 
+// expireFrozen expires the frozen credits of a hold that is released, replayed or swept: the source they rest on has expired, and nothing
+// will take them now. The account is locked.
+func (s *Store) expireFrozen(ctx context.Context, hold db.CreditHold, now time.Time) error {
+	if hold.FrozenCredits == 0 || !hold.FrozenSourceID.Valid {
+		return nil
+	}
+	reason := "the run that held these credits ended without being charged, after their period"
+	return s.expireFrozenPart(ctx, hold, int(hold.FrozenCredits), now, &reason)
+}
+
+func (s *Store) expireFrozenPart(ctx context.Context, hold db.CreditHold, credits int, at time.Time, reason *string) error {
+	_, err := s.q.InsertCreditLedger(ctx, db.InsertCreditLedgerParams{
+		WorkspaceID: hold.WorkspaceID, Kind: CreditExpire, Credits: -int32(credits), GrantID: hold.FrozenSourceID, //nolint:gosec // what a hold froze
+		Reason: reason, IdempotencyKey: fmt.Sprintf("expire:%s:%s", uuid.UUID(hold.FrozenSourceID.Bytes), hold.ActionID), CreatedAt: at.UTC(),
+	})
+	if errors.Is(err, errNoRows) {
+		return nil
+	}
+	return err
+}
+
+// expireSourceKeepingHolds expires what is left of a source at the moment `at` it stopped being usable (its expiry, or the plan change that
+// replaced it), except the credits that active holds made before then rest on: those stay in the source, frozen for their holds, and are
+// charged to it when the run is charged or expire when it is released (see migration 00020). The holds rest on the sources in the order of
+// use, so a hold rests on this one only as far as the sources before it in that order cannot cover the holds. now is when it is done (a
+// hold that has ended since is not active any more). It returns the credits it expired. The account is locked.
+func (s *Store) expireSourceKeepingHolds(ctx context.Context, ws ids.WorkspaceID, source uuid.UUID, at, now time.Time, reason *string) (int, error) {
+	rem, earlier := 0, 0
+	sources, err := s.creditSources(ctx, ws, at.Add(-time.Microsecond))
+	if err != nil {
+		return 0, err
+	}
+	found := false
+	for _, src := range sources {
+		if src.ID == source {
+			rem, found = src.Remaining, true
+			break
+		}
+		earlier += src.Remaining
+	}
+	if !found { // not in the list (it had expired by the clock before `at`, or has nothing): all of what is left goes
+		src, err := s.q.GetCreditSource(ctx, db.GetCreditSourceParams{WorkspaceID: ws, ID: source})
+		if err != nil {
+			return 0, err
+		}
+		rem, earlier = int(src.Remaining), 0
+		if err := s.expireSource(ctx, ws, source, rem, at, reason); err != nil {
+			return 0, err
+		}
+		return rem, nil
+	}
+	holds, err := s.q.ListActiveCreditHolds(ctx, db.ListActiveCreditHoldsParams{WorkspaceID: ws, Now: now.UTC()})
+	if err != nil {
+		return 0, err
+	}
+	need := 0
+	for _, h := range holds {
+		if h.CreatedAt.Before(at) {
+			need += int(h.Credits - h.FrozenCredits)
+		}
+	}
+	left := min(max(need-earlier, 0), rem)
+	allocated := 0
+	for _, h := range holds {
+		if left == 0 {
+			break
+		}
+		uncovered := int(h.Credits - h.FrozenCredits)
+		if !h.CreatedAt.Before(at) || uncovered <= 0 || (h.FrozenSourceID.Valid && h.FrozenSourceID.Bytes != source) {
+			continue
+		}
+		f := min(uncovered, left)
+		n, err := s.q.FreezeCreditHold(ctx, db.FreezeCreditHoldParams{WorkspaceID: ws, ID: h.ID, SourceID: pgtype.UUID{Bytes: source, Valid: true}, Credits: int32(f)}) //nolint:gosec // a price
+		if err != nil {
+			return 0, err
+		}
+		if n == 1 {
+			left -= f
+			allocated += f
+		}
+	}
+	expired := rem - allocated
+	if err := s.expireSource(ctx, ws, source, expired, at, reason); err != nil {
+		return 0, err
+	}
+	return expired, nil
+}
+
 // ExpireDueCredits writes the expire row of every source whose expiry has passed and that has none, taking exactly what is left of it.
 // It does at most limit sources, oldest expiry first, and returns how many it expired and how many credits they held. Safe to run twice
 // and from several workers: each source is handled under its workspace's account lock and the row's key is unique.
@@ -1000,19 +1145,17 @@ func (s *Store) ExpireDueCredits(ctx context.Context, now time.Time, limit int) 
 			if _, err := tx.lockCreditAccount(ctx, d.WorkspaceID); err != nil {
 				return err
 			}
-			src, err := tx.q.GetCreditSource(ctx, db.GetCreditSourceParams{WorkspaceID: d.WorkspaceID, ID: d.ID})
-			if err != nil {
-				return err
-			}
 			if _, err := tx.q.GetCreditLedgerByKey(ctx, db.GetCreditLedgerByKeyParams{WorkspaceID: d.WorkspaceID, IdempotencyKey: "expire:" + d.ID.String()}); err == nil {
 				return nil // expired by someone else while we waited
 			} else if !errors.Is(err, errNoRows) {
 				return err
 			}
-			left = int(src.Remaining)
 			reason := "expired"
-			// The row is dated at the moment the source stopped being usable, so a period's report lines up with its end.
-			return tx.expireSource(ctx, d.WorkspaceID, d.ID, left, *d.ExpiresAt, &reason)
+			// The row is dated at the moment the source stopped being usable, so a period's report lines up with its end. Credits that a run
+			// still working holds are left in it until that run is charged or released.
+			var err error
+			left, err = tx.expireSourceKeepingHolds(ctx, d.WorkspaceID, d.ID, *d.ExpiresAt, now, &reason)
+			return err
 		})
 		if err != nil {
 			return sources, credits, mapErr(err)
@@ -1047,8 +1190,7 @@ func (s *Store) runAuthoredVersion(ctx context.Context, ws ids.WorkspaceID, run 
 }
 
 // settleRunCredits settles the credit hold of a run that has just reached a final status, in the transaction that put it there: success
-// charges, failure releases, and a cancel charges when the run authored a timeline version or rendered a preview and releases when it did
-// neither. A run with no hold (the
+// charges, failure releases, and a cancel charges when the run authored a timeline version and releases when it did not. A run with no hold (the
 // echo agent) is left alone. A run that parks for input keeps its hold, with a long expiry. s must be a transaction Store.
 func (s *Store) settleRunCredits(ctx context.Context, ws ids.WorkspaceID, run AgentRun, now time.Time) error {
 	var charge bool
@@ -1071,16 +1213,11 @@ func (s *Store) settleRunCredits(ctx context.Context, ws ids.WorkspaceID, run Ag
 		charge = false
 	case AgentCancelled:
 		// The creator keeps what the run made: a cancel is charged when the run authored a timeline version (the work is in the project,
-		// and a cancel before the preview must not make a revision free) or rendered a preview, and released when it did neither.
-		previewed, err := s.q.AgentRunHasPreview(ctx, db.AgentRunHasPreviewParams{WorkspaceID: ws, RunID: run.ID})
-		if err != nil {
+		// and a cancel before the preview must not make a revision free), and released when it did not. A preview alone does not count:
+		// render_preview can look at a version the run did not make (an earlier one), and then there is nothing the run gave the creator.
+		var err error
+		if charge, err = s.runAuthoredVersion(ctx, ws, run.ID); err != nil {
 			return err
-		}
-		charge = previewed
-		if !charge {
-			if charge, err = s.runAuthoredVersion(ctx, ws, run.ID); err != nil {
-				return err
-			}
 		}
 	case AgentWaitingInput:
 		return s.ExtendCreditHold(ctx, ws, run.ID, now.Add(CreditHoldWaitingTTL))
