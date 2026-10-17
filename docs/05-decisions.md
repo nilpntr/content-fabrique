@@ -33,6 +33,7 @@
 | D-26 | Video effects are curated presets (camera moves, transitions, graphic templates) the agent and the creator pick; bespoke effects only through the flagged sandbox | Accepted (director, 2026-10-17; founder to confirm the first templates) |
 | D-27 | Transcription: whisper.cpp in the media-tools sandbox locally; Workers AI `whisper-large-v3-turbo` through Cloudflare on staging and production; one provider interface | Accepted (founder decision, 2026-10-17) |
 | D-28 | The editor is content-aware across genres (talking, unboxing/product, workout, vlog, tutorial); fitness stays the launch niche for trends and marketing | Accepted (founder direction, 2026-10-17) |
+| D-29 | Content Fabrique runs in its own Dutch operating BV (werkmaatschappij) under the founder's holding; Paddle is the merchant of record | Proposed (founder direction 2026-10-17; confirm with the accountant) |
 
 ---
 
@@ -630,6 +631,26 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 - Transcription moves up the queue.
 
 **Revisit** when a genre's results lag the others in the evals, or when the beta shows which genres creators actually upload.
+
+## D-29 Legal entity: an operating BV under the holding; Paddle as merchant of record
+
+**Context.** Several things need a legal entity: the merchant-of-record account, the TikTok developer app, Anthropic's commercial terms, the data processing agreements and the domain registrant. Content Fabrique also carries risks: creators' personal data (GDPR), copyright and takedown claims, and AI-output disputes. Open question 4 in the plan asked which company operates it.
+
+**Decision** (proposed, to confirm with the accountant).
+- **Content Fabrique gets its own operating BV** (werkmaatschappij), owned by the founder's holding BV. Other ventures get their own operating BVs, so each one's liabilities stay in its own company.
+- **Everything is contracted in the operating BV's name from day one:** Paddle, the TikTok developer app, the Anthropic organisation for production, the DPAs with Cloudflare, Clerk and the database host, and the domain registrant.
+- **Paddle is the merchant of record** ([D-13](#d-13-billing)). It handles EU VAT (OSS), worldwide sales tax, invoices, refunds and chargebacks. It supports both subscriptions and credit top-ups. Stripe's merchant-of-record offering stays the alternative to compare at signup.
+- **Keep the holding protected.** Avoid personal or holding guarantees for the operating BV. Decide on a fiscal unity with the accountant, because it makes the holding jointly liable for the group's corporate tax. Respect the distribution test (uitkeringstoets) before moving money up.
+
+**Alternatives.**
+- Start in the holding: fast, but it exposes the holding's assets, and moving accounts and customers later is painful.
+- One operating BV for all ventures: cheaper, but each venture's risks reach the others.
+
+**Consequences.**
+- A notary and KvK step before Paddle onboarding and the TikTok app review.
+- The company site on `contentfabrique.app` names the BV in its terms and privacy policy (P0-12).
+
+**Revisit** when an investor or a sale wants a different structure.
 
 ## Template for new decisions
 
