@@ -56,7 +56,7 @@ func (c *compiler) subtitles() (*Subtitles, error) {
 					b.warn("text_dropped", "text item %s is left out: its %d x %d px box cannot be put inside the %s safe zone", it.ID, pl.Box.Width(), pl.Box.Height(), out.Format)
 					continue
 				}
-				b.addText(layerText, timeline.Frame(it.AtMs, c.fps), timeline.Frame(it.AtMs+it.DurationMs, c.fps), pl.Layout, pl.Zone, box, it.AnimationOrDefault())
+				b.addText(layerText, timeline.Frame(it.AtMs, c.fps), timeline.Frame(it.AtMs+it.DurationMs, c.fps), pl.Layout, pl.Zone, box, it.AnimationOrDefault(), pl.Align)
 			}
 		case *timeline.CaptionsTrack:
 			if tr.Enabled {
@@ -75,7 +75,7 @@ func (c *compiler) subtitles() (*Subtitles, error) {
 		lay := style.Measure(st, out.ShortSide(), "PREVIEW", style.MaxBoxWidth(zone, out.Width))
 		w, h := lay.Box()
 		if box, ok := zone.Fit(style.PlaceWatermark(zone, w, h)); ok {
-			b.addText(layerWatermark, 0, c.total, lay, zone, box, style.AnimNone)
+			b.addText(layerWatermark, 0, c.total, lay, zone, box, style.AnimNone, style.AlignCenter)
 		}
 	}
 	c.plan.Warnings = b.warnings

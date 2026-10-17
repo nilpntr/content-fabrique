@@ -104,6 +104,12 @@ func TestSummarize(t *testing.T) {
 			{"op":"add","path":"/tracks/1/items/0/animation","value":"fade"},
 			{"op":"replace","path":"/tracks/1/items/0/style","value":"caption_plain"}]`,
 			[]string{`changed the text of t1 to "Bye"`, "set the animation of t1 to fade", "set the style of t1 to caption_plain"}},
+		{"text look", `[
+			{"op":"add","path":"/tracks/1/items/0/fill","value":"#F2E9A0"},
+			{"op":"add","path":"/tracks/1/items/0/scale","value":0.85},
+			{"op":"add","path":"/tracks/1/items/0/shadow","value":"none"},
+			{"op":"add","path":"/tracks/1/items/0/align","value":"left"}]`,
+			[]string{"set the colour of t1 to #F2E9A0", "set the size of t1 to 0.85 times its style's", "set the shadow of t1 to none", "set the alignment of t1 to left"}},
 		{"anchor to position", `[{"op":"remove","path":"/tracks/1/items/0/anchor"},{"op":"add","path":"/tracks/1/items/0/position","value":{"x":0.5,"y":0.4}}]`,
 			[]string{"moved t1 to position 0.5/0.4"}},
 		{"position to anchor", `[{"op":"add","path":"/tracks/1/items/0/anchor","value":"lower_third"}]`, []string{"moved t1 to the lower third"}},

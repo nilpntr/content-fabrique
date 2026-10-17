@@ -36,7 +36,7 @@ func main() {
 			log.Fatalf("%s: %v", f, err)
 		}
 		t := style.BuildTable(ff)
-		fmt.Fprintf(&b, "\t%q: {\n\t\tUnitsPerEm: %d, WinAscent: %d, WinDescent: %d, Notdef: %d,\n\t\tRuns: []AdvRun{", f, t.UnitsPerEm, t.WinAscent, t.WinDescent, t.Notdef)
+		fmt.Fprintf(&b, "\t%q: {\n\t\tUnitsPerEm: %d, WinAscent: %d, WinDescent: %d, CapHeight: %d, Notdef: %d,\n\t\tRuns: []AdvRun{", f, t.UnitsPerEm, t.WinAscent, t.WinDescent, t.CapHeight, t.Notdef)
 		for i, r := range t.Runs {
 			if i%4 == 0 {
 				b.WriteString("\n\t\t\t")

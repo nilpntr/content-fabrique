@@ -40,8 +40,8 @@ func renderFixtures(t testing.TB) []string {
 		}
 		_ = f.Close()
 	}
-	if len(names) != 33 {
-		t.Fatalf("want 33 render fixtures (20 in render.txt, 5 text and caption fixtures in render-text.txt, 4 motion fixtures in render-motion.txt, 4 look and sound-effect fixtures in render-looks.txt), have %d", len(names))
+	if len(names) != 34 {
+		t.Fatalf("want 34 render fixtures (20 in render.txt, 6 text and caption fixtures in render-text.txt, 4 motion fixtures in render-motion.txt, 4 look and sound-effect fixtures in render-looks.txt), have %d", len(names))
 	}
 	return names
 }

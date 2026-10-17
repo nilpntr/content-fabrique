@@ -95,7 +95,7 @@ The new craft features reach the editor agent as edit ops, whose descriptions in
 
 Every addition comes with schema fixtures, ops, validation rules (for example, a speed ramp must not exceed the source length, and a motion preset needs a long enough shot), compiler support and golden renders in all four formats.
 
-## 6. Editor v2 as built (`internal/agents/editor`, prompt `editor.v2.2`)
+## 6. Editor v2 as built (`internal/agents/editor`, prompt `editor.v2.3`)
 
 **The flow of a run.** Understand (`find_moments`, `view_clip`) → `plan_edit` → `edit_timeline` (in the order of section 7) → `render_preview` → `check_edit` → at most one revision (`edit_timeline`, `render_preview`, `check_edit`) → `finish`. The tools are in [agent-runtime-v1](agent-runtime-v1.md) section 5; the gates are the first `edit_timeline` of a run (refused without a plan) and `finish` (refused without a preview and a `check_edit` of the newest version the run made). Both gates keep their record in the worker and fall back to the run's events, so a run that resumes in another worker is not asked to plan or check again. The revision limit is guidance in the answer of `check_edit` ("this was the check after your revision pass: do not revise again"), not a refusal, so a run that cannot fix a check can still finish and say why; the run's budgets still bound it.
 
@@ -109,7 +109,7 @@ Every addition comes with schema fixtures, ops, validation rules (for example, a
   "target_length_s": 25, "tempo_bpm": 124, "pace": "building",
   "beat_ms": 484, "estimated_length_ms": 24200,
   "shots": [{"role": "hook", "what": "...", "asset_id": "ast_...", "beats": 3, "effect": "punch_in", "length_ms": 1452}],
-  "prompt_version": "editor.v2.2"}}
+  "prompt_version": "editor.v2.3"}}
 ```
 
 `data.version` is the shape's version (a reader checks it first). A later `plan_edit` writes another event; the last one is the plan. `role` is one of hook, build, peak, detail, step, reveal, payoff, broll, ending; `pace` is steady, building or fast; `effect` is none, punch_in, push_in, pull_back, shake, speed_ramp, whip, zoom_through or flash. `asset_id` and `effect` may be absent (`effect` is `none` when left out).
@@ -205,5 +205,5 @@ Sections 2 and 3 are the generic craft of a genre. A creator who shows us their 
 - **A profile per workspace** (medians, ranges and a confidence over 1 to 10 reference videos) is measured with ffmpeg and one Haiku read of the title, stored in `creator_style_profiles`, and read by the editor.
 - **The run context** carries a compact `creator_style` block as untrusted data; `plan_edit` ends with a note computed from the profile; the prompt has a section "Following the creator's style" that puts the creator's style over the playbook and over the prompt's own pacing, effect, hook and beat defaults. A workspace with no profile gets the same prompt behaviour as before.
 - **`check_edit` takes its thresholds from the profile and has a `style_match` check** (the table in section 7 gives the checks that change): the hook may run to the creator's first cut, the median shot may be as long as the creator's takes, effects are none for a creator who has none, a beat grid is not demanded when the creator's cuts are not on the beat, the duration is the creator's range. `style_match` reports a distance per dimension with a one-line fix. `cfctl eval editor` prints it.
-- **Two title styles** for the creator's titles: `title_series` (bold condensed uppercase, cream, no outline) and `title_lowercase` (a quiet lowercase line).
+- **Two title styles** for the creator's titles: `title_series` (bold condensed uppercase, cream, a light shadow, about 4 % of the frame height) and `title_lowercase` (a quiet lowercase line), and per-item text overrides (`fill`, `scale`, `shadow`, `align`) that bring either to the creator's own colour, size, shadow and alignment. The profile's title recipe says which (prompt `editor.v2.3`), and `style_match` measures the title's colour, lines, size and shadow.
 - **Sound.** The profile's audio block describes the trending sound the creator puts on after our export (the quiet intro and the lift, the energy arc, the tempo, the loudness, whether the cuts sit on the beat, music only or with effects). The export itself stays sound-ready (P3-12); the profile tells the editor where the hook ends (at the lift), whether to snap cuts to a beat grid and whether to add sound effects, and it is the similarity key for recommending a trend sound in P5-02.

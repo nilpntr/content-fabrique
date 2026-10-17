@@ -142,6 +142,10 @@ type TextStyle struct {
 	Weight    string `json:"weight,omitempty"`
 	Condensed bool   `json:"condensed,omitempty"`
 	Lines     int    `json:"lines,omitempty"`
+	// TextHeightPct is the height of the capital letters as a percentage of the frame height, and Shadow is none, soft or strong (what
+	// the vision read saw, an estimate).
+	TextHeightPct float64 `json:"text_height_pct,omitempty"`
+	Shadow        string  `json:"shadow,omitempty"`
 	// ExerciseLabels says there are small labels (an exercise name, a tag) besides the title.
 	ExerciseLabels bool `json:"exercise_labels,omitempty"`
 	// Captions says there are spoken-word captions.
@@ -295,15 +299,20 @@ type LookProfile struct {
 
 // TextProfile aggregates the title text styles read from the references.
 type TextProfile struct {
-	Read         int     `json:"read"` // how many references had a text read
-	TitleShare   float64 `json:"title_share"`
-	Case         string  `json:"case,omitempty"`
-	Colour       string  `json:"colour,omitempty"`
-	Position     string  `json:"position,omitempty"`
-	Alignment    string  `json:"alignment,omitempty"`
-	Weight       string  `json:"weight,omitempty"`
-	Condensed    bool    `json:"condensed,omitempty"`
-	Lines        int     `json:"lines,omitempty"`
+	Read       int     `json:"read"` // how many references had a text read
+	TitleShare float64 `json:"title_share"`
+	Case       string  `json:"case,omitempty"`
+	Colour     string  `json:"colour,omitempty"`
+	Position   string  `json:"position,omitempty"`
+	Alignment  string  `json:"alignment,omitempty"`
+	Weight     string  `json:"weight,omitempty"`
+	Condensed  bool    `json:"condensed,omitempty"`
+	Lines      int     `json:"lines,omitempty"`
+	// OneLineShare is the share of the titled references whose title is one line; HeightPct the median cap height as a percentage of the
+	// frame height (0: not read); Shadow the majority shadow (none, soft or strong).
+	OneLineShare float64 `json:"one_line_share,omitempty"`
+	HeightPct    float64 `json:"height_pct,omitempty"`
+	Shadow       string  `json:"shadow,omitempty"`
 	LabelShare   float64 `json:"label_share"`
 	CaptionShare float64 `json:"caption_share"`
 	// Examples are up to three titles as read: the creator's own words, untrusted.
@@ -540,12 +549,19 @@ func aggregateText(refs []Measures) *TextProfile {
 	if len(titled) == 0 {
 		return t
 	}
-	var cases, colours, positions, aligns, weights []string
-	var condensed float64
-	var lines []float64
+	var cases, colours, positions, aligns, weights, shadows []string
+	var condensed, oneLine float64
+	var lines, heights []float64
 	for _, r := range titled {
 		cases, colours, positions = append(cases, r.Case), append(colours, strings.ToUpper(r.Colour)), append(positions, r.Position)
 		aligns, weights = append(aligns, r.Alignment), append(weights, r.Weight)
+		shadows = append(shadows, r.Shadow)
+		if r.Lines == 1 {
+			oneLine++
+		}
+		if r.TextHeightPct > 0 {
+			heights = append(heights, r.TextHeightPct)
+		}
 		if r.Condensed {
 			condensed++
 		}
@@ -556,7 +572,11 @@ func aggregateText(refs []Measures) *TextProfile {
 			t.Examples = append(t.Examples, r.Text)
 		}
 	}
-	t.Case, t.Colour, t.Position, t.Alignment, t.Weight = majority(cases), majority(colours), majority(positions), majority(aligns), majority(weights)
+	t.Case, t.Colour, t.Position, t.Alignment, t.Weight = majority(cases), medianColour(colours), majority(positions), majority(aligns), majority(weights)
+	t.Shadow, t.OneLineShare = majority(shadows), round2(oneLine/float64(len(titled)))
+	if len(heights) > 0 {
+		t.HeightPct = RangeOf(heights).Median
+	}
 	t.Condensed = condensed*2 > float64(len(titled))
 	if len(lines) > 0 {
 		t.Lines = int(math.Round(RangeOf(lines).Median))
@@ -691,6 +711,15 @@ func (p *Profile) Describe() string {
 			if t.Condensed {
 				b.WriteString(", condensed")
 			}
+			if t.HeightPct > 0 {
+				fmt.Fprintf(&b, ", letters about %.1f %% of the frame height", t.HeightPct)
+			}
+			if t.Shadow != "" {
+				fmt.Fprintf(&b, ", %s shadow", t.Shadow)
+			}
+			if t.OneLineShare >= 0.5 {
+				b.WriteString(", one line")
+			}
 			if t.LabelShare == 0 {
 				b.WriteString(", no exercise labels")
 			}
@@ -779,7 +808,18 @@ func (p *Profile) CompactBlock() string {
 	fmt.Fprintf(&b, "effects: %s (motion presets, transitions and speed ramps: use them only when the verdict is not none); labels: %s\n", p.Effects.Verdict, labelsWord(p.Text))
 	fmt.Fprintf(&b, "look: grade %s; footage %s (p90 luma %s)\n", p.Look.Grade, map[bool]string{true: "low-key", false: "normally lit"}[p.Look.LowKey], p.Look.LumaP90)
 	if t := p.Text; t != nil && t.TitleShare > 0 {
-		fmt.Fprintf(&b, "title: case %s, colour %s, %s, %s, weight %s, condensed %v, lines %d\n", orDash(t.Case), orDash(t.Colour), orDash(t.Position), orDash(t.Alignment), orDash(t.Weight), t.Condensed, t.Lines)
+		fmt.Fprintf(&b, "title: case %s, colour %s, %s, %s, weight %s, condensed %v, lines %d (one line in %.0f %% of the videos)", orDash(t.Case), orDash(t.Colour),
+			orDash(t.Position), orDash(t.Alignment), orDash(t.Weight), t.Condensed, t.Lines, t.OneLineShare*100)
+		if t.HeightPct > 0 {
+			fmt.Fprintf(&b, ", letter height %.1f %% of the frame", t.HeightPct)
+		}
+		if t.Shadow != "" {
+			fmt.Fprintf(&b, ", shadow %s", t.Shadow)
+		}
+		b.WriteString("\n")
+		if r := p.TitleRecipe(); r != nil {
+			b.WriteString(r.Describe() + "\n")
+		}
 	} else if t != nil {
 		b.WriteString("title: none\n")
 	}

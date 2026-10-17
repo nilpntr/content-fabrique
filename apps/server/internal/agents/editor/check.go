@@ -845,6 +845,8 @@ func (c *checker) editStats() styleprofile.EditStats {
 				if it.AtMs < firstTitleAt { // the case judged is the earliest title's, whatever track it is on
 					firstTitleAt = it.AtMs
 					e.TitleCase, e.TitleAtS = styleprofile.CaseOf(it.Text), float64(it.AtMs)/1000
+					e.TitleFill, e.TitleLines, e.TitleHeightPct, e.TitleShadow = "", 0, 0, "" // not the look of a later title
+					c.titleLook(&e, it)
 				}
 			}
 		case *timeline.AudioTrack:
@@ -856,6 +858,25 @@ func (c *checker) editStats() styleprofile.EditStats {
 		}
 	}
 	return e
+}
+
+// titleLook reads the look of a title as the renderer draws it (the style with the item's overrides): the fill, the lines it wraps to,
+// the height of its capitals and its shadow.
+func (c *checker) titleLook(e *styleprofile.EditStats, it timeline.TextItem) {
+	out := c.in.Spec.Output
+	pl, err := timeline.PlaceText(out, it)
+	if err != nil {
+		return
+	}
+	e.TitleFill, e.TitleLines = pl.Style.Fill.Hex(), len(pl.Layout.Lines)
+	// The size is a share of a 9:16 frame's height (1920 px for a 1080 px short side), as the profile has it, whatever the format of the
+	// output: text sizes scale with the short side, so the same scale is the same share on every format.
+	e.TitleHeightPct = math.Round(pl.Style.CapHeightPct(out.ShortSide(), out.ShortSide()*1920/1080)*10) / 10
+	e.TitleShadow = pl.Style.ShadowName()
+	e.TitleScale = 1
+	if it.Scale != nil {
+		e.TitleScale = *it.Scale
+	}
 }
 
 // styleMatch measures the edit against the creator's profile: one line per dimension, with the fix for the ones out of range.

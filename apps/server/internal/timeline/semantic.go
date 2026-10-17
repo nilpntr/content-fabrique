@@ -376,6 +376,21 @@ func (c *checker) checkText() {
 					"text item %s uses style %q, which is not in the style registry; use one of: %s",
 					it.ID, it.Style, strings.Join(style.IDs(), ", "))
 			}
+			// The overrides: each field is checked on its own, at its own path, whatever the style.
+			for _, f := range []struct {
+				field string
+				err   error
+			}{
+				{"fill", style.Overrides{Fill: it.Fill}.Validate()},
+				{"scale", style.Overrides{Scale: it.Scale}.Validate()},
+				{"shadow", style.Overrides{Shadow: it.Shadow}.Validate()},
+				{"align", alignErr(it.Align)},
+			} {
+				if f.err != nil {
+					c.add(CodeInvalidTextStyle, path+"/"+f.field, "text item %s: %v", it.ID, f.err)
+					styleOK = false
+				}
+			}
 			if c.hasTimeline() {
 				if end := it.AtMs + it.DurationMs; end > c.total {
 					c.add(CodeOutsideTimeline, path,
@@ -384,6 +399,7 @@ func (c *checker) checkText() {
 				}
 			}
 			if styleOK {
+				st, _ = st.With(it.StyleOverrides()) // the font is the base style's, so what the character check reads does not change
 				if bad := st.Unsupported(it.Text); len(bad) > 0 {
 					c.add(CodeUnsupportedCharacter, path+"/text",
 						"text item %s has characters the font of style %s has no glyph for (%s), so they cannot be drawn or measured; use plain Latin or Cyrillic letters, digits and common punctuation",
@@ -394,6 +410,13 @@ func (c *checker) checkText() {
 			}
 		}
 	}
+}
+
+func alignErr(a string) error {
+	if style.ValidAlign(a) {
+		return nil
+	}
+	return fmt.Errorf("align %q is not one of left, center, right", a)
 }
 
 // checkTextBox lays the item out with the renderer's own layout (real font advance widths, word wrap at the safe column,

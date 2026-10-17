@@ -543,6 +543,18 @@ func (s *summarizer) itemField(typ, id string, rest []string, op Operation, item
 			return
 		}
 		s.say("set the animation of %s to %s", id, str(newV))
+	case field == "fill" || field == "scale" || field == "shadow" || field == "align":
+		// The text's own look: a colour, a size, a shadow or the alignment of its lines.
+		names := map[string]string{"fill": "colour", "scale": "size", "shadow": "shadow", "align": "alignment"}
+		if op.Op == OpRemove {
+			s.say("reset the %s of %s to its style's", names[field], id)
+			return
+		}
+		if field == "scale" {
+			s.say("set the size of %s to %s times its style's", id, scalar(newV))
+			return
+		}
+		s.say("set the %s of %s to %s", names[field], id, str(newV))
 	case field == "gain_db":
 		if op.Op == OpRemove {
 			s.say("reset the gain of %s to 0 dB", id)

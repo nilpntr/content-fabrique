@@ -1,0 +1,80 @@
+{
+  "schema": "contentfabrique.timeline/v1",
+  "output": {
+    "format": "9:16",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000"
+  },
+  "tracks": [
+    {
+      "id": "main",
+      "type": "video",
+      "items": [
+        {
+          "id": "c1",
+          "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+          "source": {
+            "in_ms": 0,
+            "out_ms": 8000
+          },
+          "at_ms": 0
+        }
+      ]
+    },
+    {
+      "id": "text",
+      "type": "text",
+      "items": [
+        {
+          "id": "t1",
+          "at_ms": 0,
+          "duration_ms": 1500,
+          "text": "BUILDING LATS 101",
+          "style": "title_series",
+          "anchor": "upper_third",
+          "fill": "#F2E9A0",
+          "scale": 0.85,
+          "shadow": "none",
+          "align": "center"
+        },
+        {
+          "id": "t2",
+          "at_ms": 1500,
+          "duration_ms": 1500,
+          "text": "BRACHIORADIALIS\nBUILDER 101",
+          "style": "title_series",
+          "anchor": "upper_third",
+          "fill": "#f2e9a0",
+          "scale": 1,
+          "shadow": "soft",
+          "align": "left"
+        },
+        {
+          "id": "t3",
+          "at_ms": 3000,
+          "duration_ms": 1500,
+          "text": "how to bake a\ncroissant tricep",
+          "style": "title_lowercase",
+          "anchor": "upper_third",
+          "scale": 1.1,
+          "shadow": "strong",
+          "align": "right",
+          "animation": "fade"
+        },
+        {
+          "id": "t4",
+          "at_ms": 4500,
+          "duration_ms": 1500,
+          "text": "Barbell back squat",
+          "style": "label_box",
+          "anchor": "lower_third",
+          "fill": "#FFD60A",
+          "scale": 0.6
+        }
+      ]
+    }
+  ],
+  "markers": []
+}

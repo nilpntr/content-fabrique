@@ -44,6 +44,9 @@ const (
 	CodeFadeTooLong Code = "fade_too_long"
 	// CodeUnknownStyle is a text style the style registry (package style) does not know.
 	CodeUnknownStyle Code = "unknown_style"
+	// CodeInvalidTextStyle is a text item whose fill, scale, shadow or align is not a value the renderer accepts (a spec that went
+	// through the JSON Schema cannot have one; a spec built in Go can).
+	CodeInvalidTextStyle Code = "invalid_text_style"
 	// CodeUnsupportedCharacter is a text with a character that the font of its style has no glyph for: it could not be drawn
 	// or measured, so the safe-zone check could not hold.
 	CodeUnsupportedCharacter Code = "unsupported_character"

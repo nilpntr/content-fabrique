@@ -1,6 +1,6 @@
 # Editor system prompt: changelog
 
-The editor agent's system prompt is `editor.v2.2.md`, embedded in the Go binary, and the genre playbooks are the files in
+The editor agent's system prompt is `editor.v2.3.md`, embedded in the Go binary, and the genre playbooks are the files in
 `playbooks/`, embedded too. The text the model receives is the runtime's preamble (`runtime.SystemPreamble`, the untrusted-data
 rule) followed by this file. The prompt version (`PromptVersion` in `prompt.go`) is stored in every run's input, so a run can
 always be tied to the text it was given; a playbook has its own version (`workout.v2`, in `playbooks.go`) that the run's plan
@@ -21,6 +21,25 @@ Rules for changing it:
 - The cache hit rate of a run is visible: `cfctl agent show <run>` prints the cache write and read tokens of every model call and
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
+
+## editor.v2.3 (2026-10-17)
+
+The creator's title, as the creator has it (P6-05 follow-up). The first live run with a style profile matched the structure of the
+creator's own video and missed the title: two lines of capitals in a heavy white-cream, about 6 % of the frame height with a dark
+drop shadow, against his one line of pale yellow, about 4 %, no shadow. Text items now carry per-item overrides (`fill`, `scale`,
+`shadow`, `align`), `title_series` is smaller and lighter, and the profile says how the creator's title looks. The file is
+`editor.v2.3.md`; it changes what the editor writes for a creator who has a profile, and nothing for one who has none, so it is a minor
+version.
+
+- **The title bullet of "Following the creator's style" is rewritten around the title recipe** that the `creator_style` block (and
+  the note at the end of `plan_edit`) now holds: the style, the anchor and the overrides (fill, scale, shadow, align) that bring the
+  style to the creator's colour, letter size, shadow and alignment. The editor writes the title with `add_text` and exactly those
+  fields, keeps it at the anchor `upper_third` (the top of the safe zone, above the subject's head) and not at a free position, writes
+  it in the creator's case and, when the recipe says one line, keeps it to one line (a short text, or a lower scale).
+- **check_edit** measures the title against the profile (`style_match`: title colour as a CIE76 colour difference, lines, the height of
+  the capitals as a share of the creator's, and the shadow) and says what to set.
+- **Tools.** `add_text` and `update_text` take `fill` (#RRGGBB), `scale` (0.6 to 1.4), `shadow` (none, soft, strong) and `align` (left,
+  center, right); their descriptions in the op schema are the tool documentation.
 
 ## editor.v2.2 (2026-10-17)
 

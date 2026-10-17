@@ -156,9 +156,9 @@ var registry = []Style{
 		OutlinePct: 10, Role: RoleText,
 	},
 	{
-		ID: "title_series", Description: "A bold condensed uppercase title in cream with a soft shadow and no outline, for a series title; at most two short lines. Write the text in capitals.",
-		Font: "anton", EmPct: 6.0, Fill: cream, Shadow: Colour{0, 0, 0, 170},
-		ShadowPct: 4, Role: RoleText,
+		ID: "title_series", Description: "A bold condensed uppercase title in cream with a light shadow and no outline, small enough for one line (about 4 % of the frame height in capitals), for a series title; at most two short lines. Write the text in capitals.",
+		Font: "anton", EmPct: 4.6, Fill: cream, Shadow: Colour{0, 0, 0, 120},
+		ShadowPct: 2, Role: RoleText,
 	},
 }
 

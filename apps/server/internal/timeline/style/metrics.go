@@ -12,6 +12,8 @@ type FontTable struct {
 	// WinAscent and WinDescent are the OS/2 usWinAscent and usWinDescent. libass sizes the font so that the ASS font size is
 	// their sum in pixels: one font unit is size / (WinAscent + WinDescent) pixels wide, and a line is size pixels tall.
 	WinAscent, WinDescent int
+	// CapHeight is the OS/2 sCapHeight in font units (0 when the font has none).
+	CapHeight int
 	// Notdef is the advance of the font's missing-glyph box.
 	Notdef uint16
 	// Runs lists maximal runs of consecutive characters the font maps; Adv holds their advances, run after run.
@@ -46,7 +48,7 @@ func InLayoutSet(r rune) bool {
 
 // BuildTable extracts the layout table of a parsed font. It is what gen writes into metrics_gen.go.
 func BuildTable(f *FontFile) *FontTable {
-	t := &FontTable{UnitsPerEm: f.UnitsPerEm, WinAscent: f.WinAscent, WinDescent: f.WinDescent, Notdef: f.NotdefAdvance}
+	t := &FontTable{UnitsPerEm: f.UnitsPerEm, WinAscent: f.WinAscent, WinDescent: f.WinDescent, CapHeight: f.CapHeight, Notdef: f.NotdefAdvance}
 	if t.WinAscent+t.WinDescent == 0 {
 		t.WinAscent, t.WinDescent = f.HheaAscent, -f.HheaDescent
 	}

@@ -5,7 +5,7 @@ package style
 // generatedTables holds the layout tables of the fonts in packages/media-tools/fonts, by file name.
 var generatedTables = map[string]*FontTable{
 	"Anton-Regular.ttf": {
-		UnitsPerEm: 2048, WinAscent: 2876, WinDescent: 674, Notdef: 1022,
+		UnitsPerEm: 2048, WinAscent: 2876, WinDescent: 674, CapHeight: 1760, Notdef: 1022,
 		Runs: []AdvRun{
 			{0x0020, 0, 95}, {0x00A0, 95, 226}, {0x0186, 321, 5}, {0x018E, 326, 7},
 			{0x0196, 333, 12}, {0x01A4, 345, 2}, {0x01A9, 347, 1}, {0x01AC, 348, 14},
@@ -76,7 +76,7 @@ var generatedTables = map[string]*FontTable{
 		},
 	},
 	"Inter-Bold.ttf": {
-		UnitsPerEm: 2048, WinAscent: 1984, WinDescent: 494, Notdef: 1344,
+		UnitsPerEm: 2048, WinAscent: 1984, WinDescent: 494, CapHeight: 1490, Notdef: 1344,
 		Runs: []AdvRun{
 			{0x0020, 0, 95}, {0x00A0, 95, 13}, {0x00AE, 108, 155}, {0x014A, 263, 122},
 			{0x01C5, 385, 139}, {0x0300, 524, 5}, {0x0306, 529, 5}, {0x030C, 534, 1},
@@ -167,7 +167,7 @@ var generatedTables = map[string]*FontTable{
 		},
 	},
 	"Montserrat-ExtraBold.ttf": {
-		UnitsPerEm: 1000, WinAscent: 1109, WinDescent: 270, Notdef: 587,
+		UnitsPerEm: 1000, WinAscent: 1109, WinDescent: 270, CapHeight: 700, Notdef: 587,
 		Runs: []AdvRun{
 			{0x0020, 0, 95}, {0x00A0, 95, 224}, {0x018F, 319, 1}, {0x0192, 320, 1},
 			{0x01A0, 321, 2}, {0x01AF, 323, 2}, {0x01B7, 325, 1}, {0x01C4, 326, 11},

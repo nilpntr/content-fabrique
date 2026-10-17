@@ -92,6 +92,9 @@ func styleNote(p *styleprofile.Profile) string {
 	if p.Text != nil && p.Text.LabelShare == 0 {
 		b.WriteString("They use one title and no exercise labels. ")
 	}
+	if r := p.TitleRecipe(); r != nil {
+		b.WriteString(r.Describe() + " ")
+	}
 	if p.Look.Grade == "none" {
 		b.WriteString("They post the natural picture: no look. ")
 	}

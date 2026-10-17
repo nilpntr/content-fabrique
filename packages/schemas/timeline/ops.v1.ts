@@ -896,6 +896,22 @@ export type PositionY = number;
  */
 export type Animation = "none" | "pop_in" | "fade" | "typewriter" | "slide_up";
 /**
+ * The colour of the letters as #RRGGBB, for this text only (for example #F2E9A0). Without it the style's own colour is used.
+ */
+export type FillColour = string;
+/**
+ * The size of the text relative to its style's size, from 0.6 to 1.4 (kept to a hundredth). Without it the style's own size (1) is used.
+ */
+export type SizeScale = number;
+/**
+ * The drop shadow of the letters: none, soft (a light one) or strong (a heavy one). Without it the style's own shadow is used.
+ */
+export type Shadow = "none" | "soft" | "strong";
+/**
+ * How the lines of a text of more than one line sit against each other in its box: left, center or right. Default center.
+ */
+export type Alignment = "left" | "center" | "right";
+/**
  * Change fields of a text item; the fields you leave out stay as they are. Setting anchor removes the position and the other way round. Give at least one field.
  */
 export type UpdateText = UpdateText1 & UpdateText2;
@@ -920,6 +936,18 @@ export type UpdateText1 =
     }
   | {
       animation: unknown;
+    }
+  | {
+      fill: unknown;
+    }
+  | {
+      scale: unknown;
+    }
+  | {
+      shadow: unknown;
+    }
+  | {
+      align: unknown;
     };
 /**
  * "update_text".
@@ -1417,6 +1445,10 @@ export interface AddText2 {
   anchor?: Anchor;
   position?: Position;
   animation?: Animation;
+  fill?: FillColour;
+  scale?: SizeScale;
+  shadow?: Shadow;
+  align?: Alignment;
 }
 /**
  * A free place for the text's centre as fractions of the frame. The text must stay inside the format's safe zone (checked by the Go layer). Set this or anchor, not both.
@@ -1435,6 +1467,10 @@ export interface UpdateText2 {
   anchor?: Anchor;
   position?: Position;
   animation?: Animation;
+  fill?: FillColour;
+  scale?: SizeScale;
+  shadow?: Shadow;
+  align?: Alignment;
 }
 /**
  * Remove a text item.

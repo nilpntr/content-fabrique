@@ -1,0 +1,12 @@
+{
+  "op": "add_text",
+  "at_ms": 0,
+  "duration_ms": 1500,
+  "text": "BUILDING LATS 101",
+  "style": "title_series",
+  "anchor": "upper_third",
+  "fill": "#F2E9A0",
+  "scale": 0.85,
+  "shadow": "none",
+  "align": "left"
+}

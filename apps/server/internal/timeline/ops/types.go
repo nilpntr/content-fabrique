@@ -137,6 +137,10 @@ type AddText struct {
 	Anchor     string          `json:"anchor,omitempty"`
 	Position   *timeline.Point `json:"position,omitempty"`
 	Animation  string          `json:"animation,omitempty"`
+	Fill       string          `json:"fill,omitempty"`
+	Scale      *float64        `json:"scale,omitempty"`
+	Shadow     string          `json:"shadow,omitempty"`
+	Align      string          `json:"align,omitempty"`
 }
 
 // UpdateText changes the fields of a text item that are set.
@@ -149,6 +153,10 @@ type UpdateText struct {
 	Anchor     string          `json:"anchor,omitempty"`
 	Position   *timeline.Point `json:"position,omitempty"`
 	Animation  string          `json:"animation,omitempty"`
+	Fill       string          `json:"fill,omitempty"`
+	Scale      *float64        `json:"scale,omitempty"`
+	Shadow     string          `json:"shadow,omitempty"`
+	Align      string          `json:"align,omitempty"`
 }
 
 // RemoveText removes a text item.

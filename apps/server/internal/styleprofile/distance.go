@@ -2,6 +2,7 @@ package styleprofile
 
 import (
 	"fmt"
+	"github.com/nilpntr/content-fabrique/internal/timeline/style"
 	"math"
 	"slices"
 	"strings"
@@ -22,6 +23,14 @@ type EditStats struct {
 	Effects int
 	// Titles counts the texts that are titles and Labels the small labels (every text beyond the first title, and the label styles).
 	Titles, Labels int
+	// TitleFill is the first title's fill as "#RRGGBB", TitleLines its number of lines, TitleHeightPct the height of its capitals as a
+	// percentage of the frame height and TitleShadow its shadow (none, soft or strong); all zero when it was not measured.
+	TitleFill      string
+	TitleLines     int
+	TitleHeightPct float64
+	TitleShadow    string
+	// TitleScale is the scale override of the title (1 when it has none).
+	TitleScale float64
 	// TitleCase is "upper", "lower" or "mixed" for the first title ("" when there is none); TitleAtS is when it starts.
 	TitleCase string
 	TitleAtS  float64
@@ -150,6 +159,9 @@ func (p *Profile) Compare(e EditStats) Distance {
 		titles := p.Text.TitleShare > 0
 		add("title", fmt.Sprintf("%d titles", e.Titles), map[bool]string{true: "one title", false: "no title"}[titles],
 			(titles && e.Titles == 1) || (!titles && e.Titles == 0), map[bool]string{true: "use exactly one title", false: "leave the title out"}[titles])
+		if titles && e.Titles >= 1 {
+			p.compareTitleLook(e, add)
+		}
 		if p.Text.LabelShare == 0 {
 			add("labels", fmt.Sprintf("%d labels", e.Labels), "none (the creator uses no exercise labels)", e.Labels == 0, "take the exercise labels out: the creator has one title only")
 		}
@@ -186,6 +198,60 @@ func (p *Profile) Compare(e EditStats) Distance {
 		score = round2(float64(ok) / float64(len(dims)))
 	}
 	return Distance{Dimensions: dims, Score: score}
+}
+
+// DeltaEMax is the colour difference (CIE76) up to which a title colour counts as the creator's.
+const DeltaEMax = 12.0
+
+// The share of the creator's letter height the title's may be within: 70 % to 135 %.
+const (
+	TitleSizeLo = 0.70
+	TitleSizeHi = 1.35
+)
+
+// shadowRank orders the shadows: none, soft, strong.
+func shadowRank(s string) int {
+	switch s {
+	case "strong":
+		return 2
+	case "soft":
+		return 1
+	}
+	return 0
+}
+
+// compareTitleLook adds the dimensions of the title's look: its colour (the colour difference), its lines, the size of its letters and
+// its shadow, each only when the profile and the edit both have the number.
+func (p *Profile) compareTitleLook(e EditStats, add func(id, value, expected string, ok bool, fix string)) {
+	t := p.Text
+	if hexColour6.MatchString(t.Colour) && hexColour6.MatchString(e.TitleFill) {
+		de, _ := DeltaE(t.Colour, e.TitleFill)
+		add("title_colour", fmt.Sprintf("%s (colour difference %.0f)", strings.ToUpper(e.TitleFill), de), fmt.Sprintf("%s within %.0f", t.Colour, DeltaEMax), de <= DeltaEMax,
+			fmt.Sprintf("set the title's fill to %s", t.Colour))
+	}
+	if t.OneLineShare >= 0.5 && e.TitleLines > 0 {
+		add("title_lines", fmt.Sprintf("%d lines", e.TitleLines), "one line (the creator's titles are one line)", e.TitleLines == 1,
+			"make the title one line: shorten the text or lower its scale")
+	}
+	if t.HeightPct > 0 && e.TitleHeightPct > 0 {
+		ratio := e.TitleHeightPct / t.HeightPct
+		add("title_size", fmt.Sprintf("capitals %.1f %% of the frame height", e.TitleHeightPct), fmt.Sprintf("about %.1f %% (%.1f to %.1f)", t.HeightPct, t.HeightPct*TitleSizeLo, t.HeightPct*TitleSizeHi),
+			ratio >= TitleSizeLo && ratio <= TitleSizeHi, titleSizeFix(e, ratio, t.HeightPct))
+	}
+	if t.Shadow != "" && e.TitleShadow != "" {
+		add("title_shadow", e.TitleShadow, "at most "+t.Shadow, shadowRank(e.TitleShadow) <= shadowRank(t.Shadow),
+			fmt.Sprintf("set the title's shadow to %s", t.Shadow))
+	}
+}
+
+// titleSizeFix says what scale to set, as a number in the range the ops take (0.6 to 1.4, from the title's own scale and how far off it is).
+func titleSizeFix(e EditStats, ratio, target float64) string {
+	cur := e.TitleScale
+	if cur == 0 {
+		cur = 1
+	}
+	want := math.Round(math.Min(math.Max(cur/ratio, style.MinScale), style.MaxScale)*100) / 100
+	return fmt.Sprintf("set the title's scale to %g to make the capitals about %.1f %% of the frame height", want, target)
 }
 
 // cutsFix is the one-line fix for the cuts dimension, chosen from the bound that failed: too many cuts, a pace that is too fast for

@@ -1,0 +1,9 @@
+{
+  "op": "add_text",
+  "at_ms": 0,
+  "duration_ms": 1500,
+  "text": "HI",
+  "style": "title_series",
+  "anchor": "upper_third",
+  "fill": "#F2E9A0; \\an8"
+}

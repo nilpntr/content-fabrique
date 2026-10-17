@@ -18,6 +18,8 @@ type FontFile struct {
 	// OS/2 usWinAscent and usWinDescent. libass sizes a font so that the font size is WinAscent + WinDescent in pixels.
 	HheaAscent, HheaDescent, LineGap int
 	WinAscent, WinDescent            int
+	// CapHeight is the OS/2 sCapHeight (0 when the table has none): the height of the capital letters, in font units.
+	CapHeight int
 	// Family and Full are the font's family (name ID 1) and full name (name ID 4).
 	Family, Full string
 	// Advance maps a character to its advance width in font units.
@@ -65,6 +67,9 @@ func ParseFont(data []byte) (*FontFile, error) {
 	if os2 := tables["OS/2"]; os2 != nil {
 		o := reader{b: os2}
 		f.WinAscent, f.WinDescent = int(o.u16(74)), int(o.u16(76))
+		if o.u16(0) >= 2 { // sCapHeight exists from OS/2 version 2
+			f.CapHeight = int(o.u16(88))
+		}
 	}
 	if head.err != nil || hhea.err != nil || maxp.err != nil {
 		return nil, errors.New("style: font header tables are truncated")
