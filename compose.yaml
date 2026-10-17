@@ -1,5 +1,7 @@
 # Local services for development: `task up` (or `task dev`, which also starts web, api and worker).
-# Compose reads the .env at the repository root. The names are the ones in .env.example, so there is one place to change a value.
+# Compose reads the .env at the repository root, with the names from .env.example. DATABASE_URL, DATABASE_DIRECT_URL and
+# DATABASE_MIGRATE_URL repeat the POSTGRES_* credentials, and R2_ENDPOINT repeats the MinIO port, so change them together.
+# A variable exported in your shell overrides the .env value in Compose (scripts/dev.sh does the opposite), so do not export these names.
 # Run `task env:init` first if .env does not exist yet.
 name: content-fabrique
 
@@ -65,6 +67,7 @@ services:
     command:
       - |
         set -eu
+        aws configure set default.s3.addressing_style path
         if aws s3api head-bucket --bucket "$$BUCKET" 2>/dev/null; then
           echo "bucket $$BUCKET already exists"
         else

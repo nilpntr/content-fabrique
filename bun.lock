@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "skeleton-dashboard-ui",
+      "name": "content-fabrique",
     },
     "apps/web": {
       "name": "@cf/web",

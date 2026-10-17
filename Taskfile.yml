@@ -12,10 +12,19 @@ tasks:
   dev:
     desc: "Start everything locally: Postgres + MinIO (Docker), then web (:3000), api (:8080) and worker (:8081). Ctrl-C stops the three processes"
     cmds:
-      - task: env:init
+      - task: install
+      - task: env:ensure
       - task: up
       # Loads .env, builds the api and worker, runs the three processes and stops them together (see the script).
       - ./scripts/dev.sh
+
+  # `task dev` creates .env only when it is missing; run `task env:init` yourself to fill secrets in an existing file.
+  env:ensure:
+    internal: true
+    status:
+      - test -f .env
+    cmds:
+      - task: env:init
 
   up:
     desc: Start Postgres and MinIO with Docker Compose, wait until they are healthy, and create the bucket

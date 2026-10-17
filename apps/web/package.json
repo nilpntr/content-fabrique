@@ -3,7 +3,6 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "packageManager": "bun@1.4.2",
   "description": "A skeleton dashboard: TanStack Start on Cloudflare Workers, Tailwind 4, shadcn on Base UI, with an inset sidebar shell.",
   "scripts": {
     "dev": "vite dev",

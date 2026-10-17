@@ -5,7 +5,7 @@ A base template for dashboards: TanStack Start (React 19, server-rendered) on Cl
 ## Run
 
 ```sh
-bun install         # run at the repo root: one bun.lock, workspaces apps/web + packages/*
+bun install         # at the repo root (or `task install`): one bun.lock for apps/web + packages/*
 bun run dev        # http://localhost:3000, Vite with the Workers runtime
 bun run check      # typecheck + tests
 bun run build      # client and Worker bundles in dist/

@@ -173,7 +173,7 @@ Go 1.24 or newer (the Anthropic Go SDK needs it ◐), Node 22 LTS and bun 1.4 or
 
 ### Running it locally (P0-02)
 
-The repository is two workspaces at the root: bun (`apps/web` as `@cf/web`, plus `packages/*`, one `bun.lock`) and Go (`go.work` with `apps/server`). Install once with `bun install` at the root. Then, with Docker running:
+The repository is two workspaces at the root: bun (`apps/web` as `@cf/web`, plus `packages/*`, one `bun.lock`) and Go (`go.work` with `apps/server`). Install with `task install` (`bun install --frozen-lockfile` at the root); `task dev` runs it too. Use plain `bun install` only when you change a dependency, and commit the new `bun.lock`. With Docker running:
 
 ```bash
 cp .env.example .env     # first time only; `task dev` also does this if .env is missing
@@ -189,8 +189,9 @@ task down                # stop Postgres and MinIO (the data stays); `task reset
 | Postgres | `localhost:5432` | `compose.yaml`, `pgvector/pgvector:pg17`, `POSTGRES_*`, volume `postgres-data` |
 | MinIO | S3 API `R2_ENDPOINT` (http://localhost:9000), console http://localhost:9001 | `compose.yaml`, volume `minio-data` |
 
-- **`task dev` steps:** `task env:init` (creates `.env`, fills the generated secrets), `task up` (`docker compose up --wait` for Postgres and MinIO, then the one-shot `minio-init` that creates the `R2_BUCKET` bucket and is safe to run again), then `scripts/dev.sh`, which reads `.env`, builds the api and worker into `.dev/bin/` and runs the three processes. If one of them exits, the script stops the other two.
+- **`task dev` steps:** `task install`, `.env` creation if it is missing (`task env:init`: copies `.env.example`, fills the generated secrets; run it yourself to fill them in an existing file), `task up` (`docker compose up --wait` for Postgres and MinIO, then the one-shot `minio-init` that creates the `R2_BUCKET` bucket and is safe to run again), then `scripts/dev.sh`, which reads `.env`, builds the api and worker into `.dev/bin/` and runs the three processes. If one of them exits, the script stops the other two.
 - **MinIO.** MinIO no longer publishes public images, so `compose.yaml` uses Chainguard's `cgr.dev/chainguard/minio`, pinned by the same digest as `.github/workflows/env.yml` (change both together). Its root user and password are `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`, and the console accepts the same pair. The bucket is created with the AWS CLI image (`amazon/aws-cli`, pinned by digest), not `mc`.
+- **Which value wins.** Compose lets a variable exported in your shell override `.env`, while `scripts/dev.sh` lets a non-empty `.env` value win (the same rule as `cfctl doctor`). So do not export `POSTGRES_*`, `R2_*` or the other names from `.env.example` in your shell: the services and the processes would disagree. `DATABASE_URL` and the two other database URLs repeat the `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` values, so change them together.
 - Compose publishes the ports on `127.0.0.1` only, since the default credentials are `cf:cf` and `minioadmin`. A Postgres already running on your machine's port 5432 has to be stopped first, because `DATABASE_URL` in `.env.example` points there.
 - With the services up, `task doctor` reports Postgres and object storage as ok; Anthropic and Clerk stay missing until you fill the `[YOU-now]` lines.
 - Other tasks: `task build`, `task test`, `task install`, `task up`. `task` alone lists them.
