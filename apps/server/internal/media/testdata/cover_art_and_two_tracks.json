@@ -1,0 +1,59 @@
+{
+  "streams": [
+    {
+      "index": 0,
+      "codec_name": "mjpeg",
+      "codec_type": "video",
+      "codec_tag_string": "avc1",
+      "width": 600,
+      "height": 600,
+      "pix_fmt": "yuv420p",
+      "color_space": "bt709",
+      "color_transfer": "bt709",
+      "color_primaries": "bt709",
+      "r_frame_rate": "90000/1",
+      "avg_frame_rate": "0/0",
+      "duration": "87.135000",
+      "disposition": {
+        "default": 0,
+        "attached_pic": 1
+      }
+    },
+    {
+      "index": 1,
+      "codec_name": "aac",
+      "codec_type": "audio",
+      "codec_tag_string": "mp4a",
+      "sample_rate": "48000",
+      "channels": 2,
+      "channel_layout": "stereo",
+      "duration": "87.135000",
+      "disposition": {
+        "default": 0,
+        "attached_pic": 0
+      }
+    },
+    {
+      "index": 2,
+      "codec_name": "opus",
+      "codec_type": "audio",
+      "codec_tag_string": "[0][0][0][0]",
+      "sample_rate": "48000",
+      "channels": 2,
+      "duration": "1.0",
+      "disposition": {
+        "default": 1,
+        "attached_pic": 0
+      }
+    }
+  ],
+  "format": {
+    "filename": "/in/0",
+    "nb_streams": 8,
+    "format_name": "matroska,webm",
+    "format_long_name": "QuickTime / MOV",
+    "duration": "87.135000",
+    "size": "486020117",
+    "bit_rate": "44624000"
+  }
+}

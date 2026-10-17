@@ -1,0 +1,43 @@
+{
+  "container": "matroska",
+  "formatName": "matroska,webm",
+  "durationMs": 87135,
+  "sizeBytes": 486020117,
+  "bitRate": 44624000,
+  "hasVideo": true,
+  "hasAudio": true,
+  "width": 3840,
+  "height": 2160,
+  "codedWidth": 3840,
+  "codedHeight": 2160,
+  "rotation": 0,
+  "fps": {
+    "num": 24000,
+    "den": 1001,
+    "value": 23.976023976023978
+  },
+  "codecs": {
+    "video": "hevc",
+    "audio": [
+      "aac"
+    ]
+  },
+  "pixFmt": "yuv420p10le",
+  "colorSpace": "bt2020nc",
+  "colorTransfer": "smpte2084",
+  "colorPrimaries": "bt2020",
+  "hdr": true,
+  "hdrFormat": "pq",
+  "audioStreams": [
+    {
+      "index": 1,
+      "codec": "aac",
+      "codecTag": "mp4a",
+      "channels": 2,
+      "sampleRate": 48000,
+      "default": true,
+      "decodable": true
+    }
+  ],
+  "selectedAudio": 1
+}

@@ -1,0 +1,143 @@
+{
+  "_comment": "Allowlist for the media-tools image (D-16 as amended). Every component in the image must be listed. 'permissive' needs binaryLicence on check.py's permissive list; 'copyleft-exception' needs a reason and is the only way GPL/LGPL gets in: ffmpeg, x264 and their runtime libraries, as separate processes in our own containers, never linked into our code or distributed. AGPL, SSPL, non-commercial and non-free are banned in check.py and cannot be allowlisted. copyrightSha256 pins the copyright file a human reviewed: when it changes, the check fails until someone re-reads it. Regenerate with: python3 packages/media-tools/licenses/check.py --image media-tools:dev --print-shas",
+  "ffmpegConfigure": {
+    "requiredEnable": [
+      "--enable-gpl",
+      "--enable-libx264"
+    ],
+    "allowedEnable": [
+      "--enable-gpl",
+      "--enable-zlib",
+      "--enable-iconv",
+      "--enable-libx264",
+      "--enable-libdav1d",
+      "--enable-libzimg",
+      "--enable-libass",
+      "--enable-libfreetype",
+      "--enable-libfontconfig",
+      "--enable-libharfbuzz"
+    ]
+  },
+  "components": {
+    "ffmpeg": {
+      "category": "copyleft-exception",
+      "binaryLicence": "GPL-2.0-or-later",
+      "copyrightSha256": "75179de85cf1aec6fe4d0871797269d1f54d116f46e7b78cfc0eca6e4ecc735b",
+      "reason": "Built --enable-gpl because libx264 is GPL. Runs as a separate process in our containers; never linked into our code and never distributed (D-16 amendment). Source: ffmpeg.org release tarball checked against sourceSha256.",
+      "sourceSha256": "7138d28c96d9d3e3af4ee3d8cad72741f8ffb40da90c1112235dea3ecd3178a3"
+    },
+    "libass9": {
+      "category": "permissive",
+      "binaryLicence": "ISC",
+      "copyrightSha256": "c3eb686a3786caa0e3033ee78908b6996a60fe9d163ecf7dc1c61871e19f88b7"
+    },
+    "libatomic1": {
+      "category": "copyleft-exception",
+      "binaryLicence": "GPL-3.0-or-later WITH GCC-exception-3.1",
+      "copyrightSha256": "20390f8a6f3b1e4d7cb45dd8652dabb259bbef688cbad839bcdb0b9ba7252f79",
+      "reason": "GCC runtime library, linked by the allowed tools. The GCC Runtime Library Exception lets programs link it without becoming GPL. Part of the container's OS layer, not our code."
+    },
+    "libbrotli1": {
+      "category": "permissive",
+      "binaryLicence": "MIT",
+      "copyrightSha256": "24a64e5bb83d0960d1835696a1e23c0896ad6055b0ca47c66ab0eb9a766324b1"
+    },
+    "libbz2-1.0": {
+      "category": "permissive",
+      "binaryLicence": "BSD-variant",
+      "copyrightSha256": "832ed535ff3c3d025a8d2348eb1b697b89addcf2eaadbc17650262040b9145e2"
+    },
+    "libc6": {
+      "category": "copyleft-exception",
+      "binaryLicence": "LGPL-2.1-or-later",
+      "copyrightSha256": "f5788886720a2605a946e81d571e6c8162b09f58d2e2ceb8d36e5768fccd850d",
+      "reason": "glibc, the C library the allowed tools run on. Dynamically linked, never linked into our code."
+    },
+    "libdav1d7": {
+      "category": "permissive",
+      "binaryLicence": "BSD-2-clause",
+      "copyrightSha256": "38aaebbbf5ab0c19a5d4029acb5ce6566f8bd95e07eff6f6472753f5bea83d97"
+    },
+    "libexpat1": {
+      "category": "permissive",
+      "binaryLicence": "MIT",
+      "copyrightSha256": "60919fe1a156395ff14511bb6ff79756c50ade2fff59ac60c9bae1d8a7fe6292"
+    },
+    "libfontconfig1": {
+      "category": "permissive",
+      "binaryLicence": "HPND-sell-variant",
+      "copyrightSha256": "b215a61cdd3e62b5b17cc28b1852c78acb3dd38be0fb30706f7efc050dba91db"
+    },
+    "libfreetype6": {
+      "category": "permissive",
+      "binaryLicence": "FTL",
+      "copyrightSha256": "acdab1506824347784d2cc0a634cfa17dbf525c0d5b4902b4ac9d0d4e1fed6c7"
+    },
+    "libfribidi0": {
+      "category": "copyleft-exception",
+      "binaryLicence": "LGPL-2.1-or-later",
+      "copyrightSha256": "a9b76593ba12d42b47000f8779d0b631432147980e71464e8ba88238becbc038",
+      "reason": "Bidi text layout, a dependency of libass. Dynamically linked into the ffmpeg process only."
+    },
+    "libgcc-s1": {
+      "category": "copyleft-exception",
+      "binaryLicence": "GPL-3.0-or-later WITH GCC-exception-3.1",
+      "copyrightSha256": "20390f8a6f3b1e4d7cb45dd8652dabb259bbef688cbad839bcdb0b9ba7252f79",
+      "reason": "GCC runtime library, linked by the allowed tools (see libatomic1)."
+    },
+    "libglib2.0-0t64": {
+      "category": "copyleft-exception",
+      "binaryLicence": "LGPL-2.1-or-later",
+      "copyrightSha256": "b9fe78c8a0720c051c9ac8e8c6f25663b54f228e501d24fc0ba89c66cec7f7c1",
+      "reason": "GLib, a dependency of Debian's libharfbuzz. Dynamically linked into the ffmpeg process only."
+    },
+    "libgraphite2-3": {
+      "category": "copyleft-exception",
+      "binaryLicence": "LGPL-2.1-or-later",
+      "copyrightSha256": "a33017ba0308c41bdbde4751bff349ab7b26af45fadbb1e3e7ac67c372985572",
+      "reason": "Graphite font shaping, a dependency of Debian's libharfbuzz (tri-licensed LGPL-2.1+/GPL-2+/MPL-1.1; used under the LGPL). Dynamically linked into the ffmpeg process only."
+    },
+    "libharfbuzz0b": {
+      "category": "permissive",
+      "binaryLicence": "MIT",
+      "copyrightSha256": "9295e101a07824e8ae77c448884bd357a64b831cd4c47f125bf4ac7ea0d8f911"
+    },
+    "libpcre2-8-0": {
+      "category": "permissive",
+      "binaryLicence": "BSD-3-clause",
+      "copyrightSha256": "e915cde4251f96ec6af107ecd2e194440a4e69440893b0c982802f8a1e4ae40a"
+    },
+    "libpng16-16t64": {
+      "category": "permissive",
+      "binaryLicence": "libpng",
+      "copyrightSha256": "7e729164c60950b2b57f1712d82a051c9ba54f421c9b69815d9e4686ddc5709b"
+    },
+    "libstdc++6": {
+      "category": "copyleft-exception",
+      "binaryLicence": "GPL-3.0-or-later WITH GCC-exception-3.1",
+      "copyrightSha256": "20390f8a6f3b1e4d7cb45dd8652dabb259bbef688cbad839bcdb0b9ba7252f79",
+      "reason": "GCC C++ runtime, needed by libzimg and libharfbuzz inside the ffmpeg process (see libatomic1)."
+    },
+    "libunibreak6": {
+      "category": "permissive",
+      "binaryLicence": "Zlib",
+      "copyrightSha256": "b3470fe912c697024754b5fd352d9f3b856b6696c4e7f85c34e91a044de276cd"
+    },
+    "libx264-164": {
+      "category": "copyleft-exception",
+      "binaryLicence": "GPL-2.0-or-later",
+      "copyrightSha256": "b8b4d68a602bf580d47237c3119e52ac7a70121de39fb365ca28a63b3a200655",
+      "reason": "x264, the H.264 encoder (D-16 amendment names it). Loaded only by the ffmpeg process in the container."
+    },
+    "libzimg2": {
+      "category": "permissive",
+      "binaryLicence": "WTFPL",
+      "copyrightSha256": "b302dc2568943b3326d3be15d03fe968888d1673962891ea93050a2f41e6e609"
+    },
+    "zlib1g": {
+      "category": "permissive",
+      "binaryLicence": "Zlib",
+      "copyrightSha256": "9e5b96d63773a5d177ba264254390f792be07e41748ebd94730981c6cac31cc6"
+    }
+  }
+}

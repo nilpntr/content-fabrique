@@ -1,0 +1,53 @@
+{
+  "container": "mov",
+  "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+  "durationMs": 87135,
+  "sizeBytes": 120000000,
+  "bitRate": 44624000,
+  "hasVideo": true,
+  "hasAudio": true,
+  "width": 2160,
+  "height": 3840,
+  "codedWidth": 3840,
+  "codedHeight": 2160,
+  "rotation": -90,
+  "fps": {
+    "num": 30000,
+    "den": 1001,
+    "value": 29.97002997002997
+  },
+  "codecs": {
+    "video": "hevc",
+    "audio": [
+      "aac",
+      "unknown"
+    ]
+  },
+  "pixFmt": "yuv420p10le",
+  "colorSpace": "bt2020nc",
+  "colorTransfer": "arib-std-b67",
+  "colorPrimaries": "bt2020",
+  "hdr": true,
+  "hdrFormat": "hlg",
+  "audioStreams": [
+    {
+      "index": 1,
+      "codec": "aac",
+      "codecTag": "mp4a",
+      "channels": 2,
+      "sampleRate": 48000,
+      "default": true,
+      "decodable": true
+    },
+    {
+      "index": 2,
+      "codec": "unknown",
+      "codecTag": "apac",
+      "channels": 4,
+      "sampleRate": 48000,
+      "default": false,
+      "decodable": false
+    }
+  ],
+  "selectedAudio": 1
+}
