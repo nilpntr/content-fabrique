@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/nilpntr/content-fabrique/internal/agents/runapi"
 	"github.com/nilpntr/content-fabrique/internal/api"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
@@ -48,9 +47,10 @@ func TestRunsStartEdit(t *testing.T) {
 	e := newAssetsEnv(t, func(o *assetsEnvOptions) { o.runs = true })
 	p := e.newProject("ada", "9:16", e.readyAsset("ada", "lat.mp4"))
 
+	// The budget is the creator plan's for a first edit ($0.96, spend control v1 section 4), whatever the request says.
 	run := e.startEdit("ada", p, map[string]any{"instructions": "Open on the heaviest set.", "profile": "v1-start", "budget_usd": 3})
 	if !strings.HasPrefix(run.Id, "run_") || run.Agent != "editor" || run.Status != api.RunStatusQueued || run.ProjectId == nil || *run.ProjectId != p.Id ||
-		run.RoutingProfile != "v1-start" || !strings.HasPrefix(run.Model, "claude-opus") || run.BudgetMicros != 3_000_000 || run.BudgetToolCalls != 60 ||
+		run.RoutingProfile != "v1-start" || !strings.HasPrefix(run.Model, "claude-opus") || run.BudgetMicros != creatorFirstEditBudget || run.BudgetToolCalls != 60 ||
 		run.BudgetWallClockMs != 15*60*1000 || run.BilledTo != "test" || run.CostMicros != 0 || len(run.Events) != 0 || run.LastSeq != 0 || run.Tokens.CacheHitRate != nil {
 		t.Fatalf("run: %+v", run)
 	}
@@ -72,22 +72,24 @@ func TestRunsStartEdit(t *testing.T) {
 	e.fail(http.MethodPost, editPath(p), "ada", nil, http.StatusConflict, api.ErrorCodeRunInProgress)
 	e.call(http.MethodPost, runPath(run, "/cancel"), "ada", nil, http.StatusOK, nil)
 
-	// The defaults, and the server's maximum.
+	// The defaults. The cancelled run rendered no preview, so it was released, not charged: this is still the project's first edit.
 	second := e.startEdit("ada", p, nil)
-	if second.BudgetMicros != runapi.DefaultBudgetMicros || second.RoutingProfile != "dev-cheap" || !strings.Contains(second.Model, "haiku") {
+	if second.BudgetMicros != creatorFirstEditBudget || second.RoutingProfile != "dev-cheap" || !strings.Contains(second.Model, "haiku") {
 		t.Errorf("defaults: budget %d profile %s model %s", second.BudgetMicros, second.RoutingProfile, second.Model)
 	}
 	e.call(http.MethodPost, runPath(second, "/cancel"), "ada", nil, http.StatusOK, nil)
-	third := e.startEdit("ada", p, map[string]any{"budget_usd": 500})
-	if third.BudgetMicros != runapi.MaxBudgetMicros {
-		t.Errorf("an over-large budget was not capped: %d", third.BudgetMicros)
-	}
-	e.call(http.MethodPost, runPath(third, "/cancel"), "ada", nil, http.StatusOK, nil)
-	small := e.startEdit("ada", p, map[string]any{"budget_usd": 0.25})
-	if small.BudgetMicros != 250_000 {
-		t.Errorf("budget %d", small.BudgetMicros)
+	// A request cannot raise the budget, or lower it: the server's plan sets it.
+	for _, usd := range []float64{500, 0.25} {
+		r := e.startEdit("ada", p, map[string]any{"budget_usd": usd})
+		if r.BudgetMicros != creatorFirstEditBudget {
+			t.Errorf("budget_usd %v changed the budget to %d", usd, r.BudgetMicros)
+		}
+		e.call(http.MethodPost, runPath(r, "/cancel"), "ada", nil, http.StatusOK, nil)
 	}
 }
+
+// creatorFirstEditBudget is config/plans/2026-10.yaml: the creator plan's COGS budget for edit.first.
+const creatorFirstEditBudget = 960_000
 
 func TestRunsStartEditRefusals(t *testing.T) {
 	e := newAssetsEnv(t, func(o *assetsEnvOptions) { o.runs = true })

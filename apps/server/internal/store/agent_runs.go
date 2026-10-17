@@ -225,9 +225,13 @@ func (s *Store) EndAgentRun(ctx context.Context, ws ids.WorkspaceID, run uuid.UU
 		}
 		if end.Status == AgentWaitingInput && r.Status == AgentCancelled {
 			// A cancel was requested while the run was asking: the cancel wins (the query did it).
-			_, err = tx.AppendAgentEventUnfenced(ctx, ws, run, EventStatus, json.RawMessage(`{"state":"cancelled"}`))
+			if _, err = tx.AppendAgentEventUnfenced(ctx, ws, run, EventStatus, json.RawMessage(`{"state":"cancelled"}`)); err != nil {
+				return err
+			}
 		}
-		return err
+		// The credit hold of the run is settled in the same transaction as its end (P7-01a): the run is finished exactly when its
+		// credits are charged or released, and a replay of the end cannot charge twice.
+		return tx.settleRunCredits(ctx, ws, r, time.Now())
 	})
 	return out, err
 }
@@ -248,9 +252,13 @@ func (s *Store) RequestAgentRunCancel(ctx context.Context, ws ids.WorkspaceID, i
 		}
 		out = r
 		if r.Status == AgentCancelled {
-			_, err = tx.AppendAgentEventUnfenced(ctx, ws, id, EventStatus, event)
+			if _, err = tx.AppendAgentEventUnfenced(ctx, ws, id, EventStatus, event); err != nil {
+				return err
+			}
+			// Cancelled before it ever ran, or while it waited for an answer: charged if the creator was shown a preview, released if not.
+			return tx.settleRunCredits(ctx, ws, r, time.Now())
 		}
-		return err
+		return nil
 	})
 	return out, err
 }
@@ -320,7 +328,8 @@ func (s *Store) TouchAgentRun(ctx context.Context, ws ids.WorkspaceID, run uuid.
 	if n == 0 {
 		return ErrRunFenced
 	}
-	return nil
+	// The run is alive: so is its credit hold. A no-op unless the hold is within twenty minutes of its expiry.
+	return s.RenewCreditHold(ctx, ws, run, time.Now())
 }
 
 // MarkAgentRunForResume is the sweeper's claim on a stale run: true means this call marked it (so the caller enqueues the

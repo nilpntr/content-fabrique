@@ -177,6 +177,49 @@ type CreatorProfile struct {
 	UpdatedAt       time.Time
 }
 
+type CreditAccount struct {
+	WorkspaceID    ids.WorkspaceID
+	Plan           string
+	PeriodAnchor   *time.Time
+	AllowanceUntil *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+type CreditHold struct {
+	ID              uuid.UUID
+	WorkspaceID     ids.WorkspaceID
+	Action          string
+	ActionID        uuid.UUID
+	Credits         int32
+	ProjectID       pgtype.UUID
+	MemberUserID    pgtype.UUID
+	Plan            *string
+	PlanListVersion *string
+	ExpiresAt       time.Time
+	IdempotencyKey  string
+	CreatedAt       time.Time
+}
+
+type CreditLedger struct {
+	ID              uuid.UUID
+	WorkspaceID     ids.WorkspaceID
+	Kind            string
+	Credits         int32
+	GrantID         pgtype.UUID
+	Action          *string
+	ActionID        pgtype.UUID
+	ProjectID       pgtype.UUID
+	MemberUserID    pgtype.UUID
+	Plan            *string
+	PlanListVersion *string
+	ExpiresAt       *time.Time
+	Actor           *string
+	Reason          *string
+	IdempotencyKey  string
+	CreatedAt       time.Time
+}
+
 type Moment struct {
 	ID          uuid.UUID
 	WorkspaceID ids.WorkspaceID

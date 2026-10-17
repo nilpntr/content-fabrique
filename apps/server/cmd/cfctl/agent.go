@@ -23,6 +23,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/config"
+	"github.com/nilpntr/content-fabrique/internal/credits"
 	"github.com/nilpntr/content-fabrique/internal/doctor"
 	"github.com/nilpntr/content-fabrique/internal/envfile"
 	"github.com/nilpntr/content-fabrique/internal/ids"
@@ -52,6 +53,10 @@ status, totals, every event and the usage_ledger rows, which is how a run's cost
   --yes        run is refused unless CF_ENV is local or ci and the database is this machine, with CF_ENV and DATABASE_URL
                from the same place; --yes overrides that
   --events     run: also print the events when the run ends
+  --no-credits run an editor run without credits. By default it is charged like the API's: the workspace needs an active plan and
+               enough credits (cfctl plan grant, cfctl credits grant), the run gets the plan's budget for a first edit or a revision,
+               and it is charged when it succeeds, released when it fails. With --no-credits it costs nothing and keeps the budget flags,
+               but it is still recorded as an edit of the project. Only with CF_ENV=local or ci (it is refused anywhere else)
 
 When the agent calls ask_user, run prints the question and reads the answer from standard input.
 `
@@ -172,6 +177,7 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 	envFileArg := flags.String("env-file", "", "env file")
 	yes := flags.Bool("yes", false, "confirm outside plain local development")
 	showEvents := flags.Bool("events", false, "print the events at the end")
+	noCredits := flags.Bool("no-credits", false, "run an editor run without credits (local and ci only)")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -221,6 +227,14 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 	case config.EnvStaging, config.EnvProduction:
 		_, _ = fmt.Fprintf(errOut, "cfctl agent run: this command is for development only and is refused with CF_ENV=%s\n", cfEnv)
 		return 2
+	}
+	if *noCredits {
+		// Staging and production are refused above for the whole command; this keeps the flag local and ci only even if that ever changes,
+		// and refuses an environment nobody named (a missing CF_ENV is not "local").
+		if cfEnv := env.vars["CF_ENV"]; cfEnv != config.EnvLocal && cfEnv != config.EnvCI {
+			_, _ = fmt.Fprintf(errOut, "cfctl agent run: --no-credits is for CF_ENV=local or ci only (CF_ENV is %q)\n", cfEnv)
+			return 2
+		}
 	}
 	settings, err := llm.LoadSettings(env.get)
 	if err != nil {
@@ -287,11 +301,20 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 		return 2
 	}
 	svc, runner := rt.Service, rt.Runner
-	run, err := svc.Create(ctx, st, runtime.StartParams{
+	run, err := svc.Start(ctx, runtime.StartParams{
 		Agent: *agentName, WorkspaceID: ws, ProjectID: projectID.UUID, Input: runInput, Profile: *profile,
 		Budgets: runtime.Budgets{Micros: int64(*budgetUSD * 1e6), Tokens: *maxTokens, ToolCalls: *maxCalls, WallClock: *wall},
+		NoCredits: *noCredits,
 	})
 	if err != nil {
+		if errors.Is(err, store.ErrInsufficientCredits) {
+			_, _ = fmt.Fprintf(errOut, "cfctl agent run: this workspace does not have enough credits for this edit (%v). Grant some with cfctl credits grant, or pass --no-credits (local and ci only)\n", err)
+			return 1
+		}
+		if errors.Is(err, credits.ErrNoPlan) {
+			_, _ = fmt.Fprintln(errOut, "cfctl agent run: this workspace has no active plan. Grant one with cfctl plan grant, or pass --no-credits (local and ci only)")
+			return 1
+		}
 		if errors.Is(err, llm.ErrNoKey) {
 			_, _ = fmt.Fprintf(errOut, "cfctl agent run: %v. Fill ANTHROPIC_API_KEY in %s, or use LLM_MODE=replay\n", err, displayPath(env.root, env.path))
 			return 1

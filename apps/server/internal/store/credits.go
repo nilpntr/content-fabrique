@@ -1,0 +1,990 @@
+package store
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/plans"
+	"github.com/nilpntr/content-fabrique/internal/store/db"
+)
+
+// Credits (P7-01a, docs/design/spend-control-v1.md sections 3 to 5 and 10; the model is described in migration 00018).
+//
+// The balance is a sum over an append-only ledger. Sources (an allowance, a top-up, a positive adjustment) add credits; every charge,
+// refund, expiry and negative adjustment names the source it took from or gave back to (grant_id), so the credits left in a source are
+// exact and its expiry takes exactly what is left. Active holds are subtracted from what is available.
+//
+// Every function that changes the balance takes the workspace's credit_accounts row FOR UPDATE first, so two requests for the last
+// credits take turns and exactly one wins.
+//
+// Lock order. A transaction takes at most one of the following kinds of locks, in this order: (1) the project row (the start of an
+// edit; the export), (2) the run row (the end of a run), (3) the workspace's credit_accounts row. The spend counters (spend.go) are only
+// ever locked in other transactions, never in one that holds a credit account: a credit hold is taken in the request that creates the
+// run, a spend reservation in the worker's model call, a credit settle in the transaction that ends the run. Nothing nests them, so they
+// cannot deadlock.
+
+// The credit_ledger kinds.
+const (
+	CreditGrantAllowance = "grant_allowance"
+	CreditGrantTopUp     = "grant_topup"
+	CreditCharge         = "charge"
+	CreditRefund         = "refund"
+	CreditExpire         = "expire"
+	CreditAdjust         = "adjust"
+)
+
+// The actions the ledger names (the price list's keys, package credits).
+const (
+	ActionEditFirst    = "edit.first"
+	ActionEditRevision = "edit.revision"
+	ActionExportFinal  = "export.final"
+	ActionIdeationRun  = "ideation.run"
+)
+
+// How long the hold of a run lasts, and when it is renewed. The hold follows its run (the heartbeat moves its expiry forward), so these
+// are about how long a run can go without a sign of life, not about how long a run takes.
+const (
+	// CreditHoldQueuedTTL is how long a hold made at the start of a run lasts while the run waits in the queue for a worker.
+	CreditHoldQueuedTTL = 2 * time.Hour
+	// CreditHoldRunTTL is how long a hold lasts after the run's last heartbeat.
+	CreditHoldRunTTL = 30 * time.Minute
+	// CreditHoldWaitingTTL is how long the hold of a run that waits for its creator's answer lasts.
+	CreditHoldWaitingTTL = 7 * 24 * time.Hour
+	// creditHoldRenewBelow: the heartbeat writes the hold only when less than this is left, so a heartbeat every few seconds writes about
+	// once in ten minutes.
+	creditHoldRenewBelow = 20 * time.Minute
+)
+
+// ErrInsufficientCredits is wrapped by *InsufficientCreditsError.
+var ErrInsufficientCredits = errors.New("store: not enough credits")
+
+// InsufficientCreditsError says how many credits were asked for and how many were available.
+type InsufficientCreditsError struct{ Needed, Available int }
+
+func (e *InsufficientCreditsError) Error() string {
+	return fmt.Sprintf("store: not enough credits (needed %d, available %d)", e.Needed, e.Available)
+}
+
+// Is makes errors.Is(err, ErrInsufficientCredits) true.
+func (e *InsufficientCreditsError) Is(target error) bool { return target == ErrInsufficientCredits }
+
+// CreditLedgerRow is a row of credit_ledger as read back.
+type CreditLedgerRow = db.CreditLedger
+
+// CreditSource is a grant (or a positive adjustment) that can still be used, with what is left of it.
+type CreditSource struct {
+	ID        uuid.UUID
+	Kind      string
+	Granted   int
+	Remaining int
+	// ExpiresAt is nil for a source that never expires (a trial's allowance).
+	ExpiresAt *time.Time
+	Plan      string
+	CreatedAt time.Time
+}
+
+// CreditTopUp is a usable source that is not the allowance: what is left of it and when it expires.
+type CreditTopUp struct {
+	Credits   int
+	ExpiresAt time.Time
+}
+
+// CreditBalance is what a workspace can spend right now.
+type CreditBalance struct {
+	// Available is what a new action can use: what is left in the usable sources minus the active holds, never below zero.
+	Available int
+	// Held is what the active holds set aside.
+	Held int
+	// Allowance is the size of the allowance of the current period (0 when the workspace has none); AllowanceRemaining what is left of it.
+	Allowance          int
+	AllowanceRemaining int
+	// PeriodEnd is when the current allowance expires; nil for none, or for a trial's, which does not.
+	PeriodEnd *time.Time
+	// TopUps are the other usable sources, earliest expiry first.
+	TopUps []CreditTopUp
+	// Plan is the plan the current allowance belongs to ("" before the first grant).
+	Plan string
+}
+
+func sourceOf(r db.ListCreditSourcesRow) CreditSource {
+	s := CreditSource{ID: r.ID, Kind: r.Kind, Granted: int(r.Granted), Remaining: int(r.Remaining), ExpiresAt: r.ExpiresAt, CreatedAt: r.CreatedAt}
+	if r.Plan != nil {
+		s.Plan = *r.Plan
+	}
+	return s
+}
+
+// creditSources lists the sources that have not expired at now, in the order of use, empty ones included (the balance shows an allowance
+// that is all used up; a charge skips it).
+func (s *Store) creditSources(ctx context.Context, ws ids.WorkspaceID, now time.Time) ([]CreditSource, error) {
+	at := now.UTC()
+	rows, err := s.q.ListCreditSources(ctx, db.ListCreditSourcesParams{WorkspaceID: ws, Now: &at})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CreditSource, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, sourceOf(r))
+	}
+	return out, nil
+}
+
+func balanceOf(sources []CreditSource, held int) CreditBalance {
+	b := CreditBalance{Held: held}
+	total := 0
+	for _, src := range sources {
+		total += src.Remaining
+		if src.Kind == CreditGrantAllowance {
+			b.Allowance += src.Granted
+			b.AllowanceRemaining += src.Remaining
+			if src.ExpiresAt != nil && (b.PeriodEnd == nil || src.ExpiresAt.Before(*b.PeriodEnd)) {
+				e := *src.ExpiresAt
+				b.PeriodEnd = &e
+			}
+			if b.Plan == "" {
+				b.Plan = src.Plan
+			}
+			continue
+		}
+		if src.ExpiresAt != nil && src.Remaining > 0 {
+			b.TopUps = append(b.TopUps, CreditTopUp{Credits: src.Remaining, ExpiresAt: *src.ExpiresAt})
+		}
+	}
+	b.Available = max(total-held, 0)
+	return b
+}
+
+// CreditBalance returns what the workspace can spend at now. It reads without a lock (it is a display, not a decision); a hold or a
+// charge in flight may or may not be counted.
+func (s *Store) CreditBalance(ctx context.Context, ws ids.WorkspaceID, now time.Time) (CreditBalance, error) {
+	sources, err := s.creditSources(ctx, ws, now)
+	if err != nil {
+		return CreditBalance{}, mapErr(err)
+	}
+	held, err := s.q.SumActiveCreditHolds(ctx, db.SumActiveCreditHoldsParams{WorkspaceID: ws, Now: now.UTC()})
+	if err != nil {
+		return CreditBalance{}, mapErr(err)
+	}
+	b := balanceOf(sources, int(held))
+	if acct, err := s.q.GetCreditAccount(ctx, ws); err == nil {
+		b.Plan = acct.Plan
+	}
+	return b, nil
+}
+
+// CreditAccount is the bookkeeping row of a workspace's credits.
+type CreditAccount struct {
+	Plan           string
+	PeriodAnchor   *time.Time
+	AllowanceUntil *time.Time
+}
+
+// GetCreditAccount returns the workspace's account, or the zero value when it has none yet.
+func (s *Store) GetCreditAccount(ctx context.Context, ws ids.WorkspaceID) (CreditAccount, error) {
+	a, err := s.q.GetCreditAccount(ctx, ws)
+	if errors.Is(err, errNoRows) {
+		return CreditAccount{}, nil
+	}
+	return CreditAccount{Plan: a.Plan, PeriodAnchor: a.PeriodAnchor, AllowanceUntil: a.AllowanceUntil}, mapErr(err)
+}
+
+// CreditLedger returns the workspace's newest ledger rows, newest first.
+func (s *Store) CreditLedger(ctx context.Context, ws ids.WorkspaceID, limit int) ([]CreditLedgerRow, error) {
+	if limit < 1 || limit > 1000 {
+		return nil, fmt.Errorf("%w: limit %d", ErrInvalid, limit)
+	}
+	rows, err := s.q.ListCreditLedger(ctx, db.ListCreditLedgerParams{WorkspaceID: ws, RowLimit: int32(limit)}) //nolint:gosec // checked above
+	return rows, mapErr(err)
+}
+
+// lockCreditAccount makes sure the account exists and locks it for the rest of the transaction.
+func (s *Store) lockCreditAccount(ctx context.Context, ws ids.WorkspaceID) (db.CreditAccount, error) {
+	if err := s.q.EnsureCreditAccount(ctx, ws); err != nil {
+		return db.CreditAccount{}, err
+	}
+	return s.q.LockCreditAccount(ctx, ws)
+}
+
+// ---- Holds ------------------------------------------------------------------------------------------------------
+
+// HoldCreditsParams is a request to set credits aside for an action.
+type HoldCreditsParams struct {
+	Workspace ids.WorkspaceID
+	// Action is one of the Action constants; ActionID identifies this occurrence (the agent run's id for an edit). A second hold for the
+	// same ActionID returns the first one and sets nothing more aside.
+	Action   string
+	ActionID uuid.UUID
+	// Credits is the price from the price list. 0 is allowed: the hold then exists (no editor run is ever without one) and needs nothing.
+	Credits int
+	// Project and Member attribute the action (both optional).
+	Project ids.ProjectID
+	Member  ids.UserID
+	// Plan and ListVersion are recorded on the charge.
+	Plan, ListVersion string
+	Now               time.Time
+	TTL               time.Duration
+}
+
+// CreditHold is a hold as read back.
+type CreditHold struct {
+	ID          uuid.UUID
+	Workspace   ids.WorkspaceID
+	Action      string
+	ActionID    uuid.UUID
+	Credits     int
+	Project     ids.ProjectID
+	Member      ids.UserID
+	Plan        string
+	ListVersion string
+	ExpiresAt   time.Time
+}
+
+func holdOf(h db.CreditHold) CreditHold {
+	out := CreditHold{ID: h.ID, Workspace: h.WorkspaceID, Action: h.Action, ActionID: h.ActionID, Credits: int(h.Credits), ExpiresAt: h.ExpiresAt}
+	if h.ProjectID.Valid {
+		out.Project = ids.ProjectID{UUID: h.ProjectID.Bytes}
+	}
+	if h.MemberUserID.Valid {
+		out.Member = ids.UserID{UUID: h.MemberUserID.Bytes}
+	}
+	if h.Plan != nil {
+		out.Plan = *h.Plan
+	}
+	if h.PlanListVersion != nil {
+		out.ListVersion = *h.PlanListVersion
+	}
+	return out
+}
+
+func validCreditAction(a string) bool {
+	switch a {
+	case ActionEditFirst, ActionEditRevision, ActionExportFinal, ActionIdeationRun:
+		return true
+	}
+	return false
+}
+
+func optText(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func optUUID(u uuid.UUID) pgtype.UUID { return pgtype.UUID{Bytes: u, Valid: u != uuid.Nil} }
+
+// HoldCredits sets the credits of an action aside, in one transaction that locks the workspace's account, or returns an
+// *InsufficientCreditsError. Nothing is set aside on an error. Called from inside the transaction that creates the run, so the hold
+// and the run exist together or not at all.
+func (s *Store) HoldCredits(ctx context.Context, p HoldCreditsParams) (CreditHold, error) {
+	switch {
+	case p.Workspace.IsZero():
+		return CreditHold{}, fmt.Errorf("%w: a credit hold needs a workspace", ErrInvalid)
+	case !validCreditAction(p.Action), p.ActionID == uuid.Nil:
+		return CreditHold{}, fmt.Errorf("%w: a credit hold needs a known action and an action id", ErrInvalid)
+	case p.Credits < 0, p.TTL <= 0, p.Now.IsZero():
+		return CreditHold{}, fmt.Errorf("%w: a credit hold needs a non-negative amount, a time and a TTL", ErrInvalid)
+	}
+	now := p.Now.UTC()
+	var hold CreditHold
+	err := s.inTx(ctx, func(tx *Store) error {
+		if _, err := tx.lockCreditAccount(ctx, p.Workspace); err != nil {
+			return err
+		}
+		// A repeated request for the same action finds its hold.
+		old, err := tx.q.GetCreditHoldByAction(ctx, db.GetCreditHoldByActionParams{WorkspaceID: p.Workspace, ActionID: p.ActionID})
+		if err == nil {
+			hold = holdOf(old)
+			return nil
+		}
+		if !errors.Is(err, errNoRows) {
+			return err
+		}
+		if p.Credits > 0 {
+			sources, err := tx.creditSources(ctx, p.Workspace, now)
+			if err != nil {
+				return err
+			}
+			held, err := tx.q.SumActiveCreditHolds(ctx, db.SumActiveCreditHoldsParams{WorkspaceID: p.Workspace, Now: now})
+			if err != nil {
+				return err
+			}
+			if avail := balanceOf(sources, int(held)).Available; avail < p.Credits {
+				return &InsufficientCreditsError{Needed: p.Credits, Available: avail}
+			}
+		}
+		row, err := tx.q.InsertCreditHold(ctx, db.InsertCreditHoldParams{
+			WorkspaceID: p.Workspace, Action: p.Action, ActionID: p.ActionID, Credits: int32(p.Credits), //nolint:gosec // a price list value
+			ProjectID: optUUID(p.Project.UUID), MemberUserID: optUUID(p.Member.UUID), Plan: optText(p.Plan), PlanListVersion: optText(p.ListVersion),
+			ExpiresAt: now.Add(p.TTL), IdempotencyKey: "hold:" + p.ActionID.String(),
+		})
+		if err != nil {
+			return err // a conflict cannot happen: the account is locked and the hold was looked for above
+		}
+		hold = holdOf(row)
+		return nil
+	})
+	if err != nil {
+		var ins *InsufficientCreditsError
+		if errors.As(err, &ins) {
+			return CreditHold{}, err
+		}
+		return CreditHold{}, mapErr(err)
+	}
+	return hold, nil
+}
+
+// GetCreditHold returns the hold of an action, or ErrNotFound.
+func (s *Store) GetCreditHold(ctx context.Context, ws ids.WorkspaceID, actionID uuid.UUID) (CreditHold, error) {
+	h, err := s.q.GetCreditHoldByAction(ctx, db.GetCreditHoldByActionParams{WorkspaceID: ws, ActionID: actionID})
+	if err != nil {
+		return CreditHold{}, mapErr(err)
+	}
+	return holdOf(h), nil
+}
+
+// ExtendCreditHold moves the expiry of an action's hold forward to expiresAt. It never moves it back, and a hold that is gone is not
+// recreated.
+func (s *Store) ExtendCreditHold(ctx context.Context, ws ids.WorkspaceID, actionID uuid.UUID, expiresAt time.Time) error {
+	expiresAt = expiresAt.UTC()
+	_, err := s.q.ExtendCreditHold(ctx, db.ExtendCreditHoldParams{ExpiresAt: expiresAt, WorkspaceID: ws, ActionID: actionID, RenewBelow: expiresAt})
+	return mapErr(err)
+}
+
+// RenewCreditHold is the heartbeat of the run that owns a hold: it moves the expiry to now plus CreditHoldRunTTL, but only when less
+// than twenty minutes of it are left, so a heartbeat every few seconds writes about once in ten minutes.
+func (s *Store) RenewCreditHold(ctx context.Context, ws ids.WorkspaceID, actionID uuid.UUID, now time.Time) error {
+	now = now.UTC()
+	_, err := s.q.ExtendCreditHold(ctx, db.ExtendCreditHoldParams{
+		ExpiresAt: now.Add(CreditHoldRunTTL), WorkspaceID: ws, ActionID: actionID, RenewBelow: now.Add(creditHoldRenewBelow),
+	})
+	return mapErr(err)
+}
+
+// CreditSettlement says what SettleCredits did.
+type CreditSettlement struct {
+	// Held is true when the action had a hold; false when it had none (it was never billed, or was settled already).
+	Held bool
+	// Charged is the credits taken from the sources (0 for a release, a replay, or a zero-credit action).
+	Charged int
+	// Short is how many credits of the hold could not be taken because the sources ran out (an allowance that expired while the run was
+	// working). It is recorded on the charge row and absorbed: the creator is never charged below zero.
+	Short int
+	// Replayed is true when the action had been charged already; nothing was added.
+	Replayed bool
+	// Released is true when the hold was removed without a charge.
+	Released bool
+}
+
+// SettleCredits ends the hold of an action, in one transaction: with charge it writes the charge rows (one per source it takes from)
+// and deletes the hold; without it only deletes the hold. It is idempotent on the action id, so a replayed settle charges once.
+//
+// Called from the transaction that ends the run (EndAgentRun), so the run's end and its charge commit together.
+func (s *Store) SettleCredits(ctx context.Context, ws ids.WorkspaceID, actionID uuid.UUID, charge bool, now time.Time) (CreditSettlement, error) {
+	if ws.IsZero() || actionID == uuid.Nil {
+		return CreditSettlement{}, fmt.Errorf("%w: settling needs a workspace and an action id", ErrInvalid)
+	}
+	// Most runs have no hold (the echo agent): do not lock anything for them. A hold is created before its run can end, so a missing hold
+	// here is final.
+	if _, err := s.q.GetCreditHoldByAction(ctx, db.GetCreditHoldByActionParams{WorkspaceID: ws, ActionID: actionID}); errors.Is(err, errNoRows) {
+		return CreditSettlement{}, nil
+	} else if err != nil {
+		return CreditSettlement{}, mapErr(err)
+	}
+	now = now.UTC()
+	var res CreditSettlement
+	err := s.inTx(ctx, func(tx *Store) error {
+		res = CreditSettlement{}
+		if _, err := tx.lockCreditAccount(ctx, ws); err != nil {
+			return err
+		}
+		hold, err := tx.q.GetCreditHoldByAction(ctx, db.GetCreditHoldByActionParams{WorkspaceID: ws, ActionID: actionID})
+		if errors.Is(err, errNoRows) {
+			return nil // settled by someone else while we waited for the lock
+		}
+		if err != nil {
+			return err
+		}
+		res.Held = true
+		charged, err := tx.q.ListCreditChargesOfAction(ctx, db.ListCreditChargesOfActionParams{WorkspaceID: ws, ActionID: optUUID(actionID)})
+		if err != nil {
+			return err
+		}
+		if len(charged) > 0 {
+			res.Replayed = true // charged already: only the hold was left behind
+		} else if !charge {
+			res.Released = true
+		} else {
+			if err := tx.chargeHold(ctx, hold, now, &res); err != nil {
+				return err
+			}
+		}
+		_, err = tx.q.DeleteCreditHold(ctx, db.DeleteCreditHoldParams{WorkspaceID: ws, ActionID: actionID})
+		return err
+	})
+	if err != nil {
+		return CreditSettlement{}, mapErr(err)
+	}
+	return res, nil
+}
+
+// ReleaseCredits removes the hold of an action without charging. A hold that is gone is not an error.
+func (s *Store) ReleaseCredits(ctx context.Context, ws ids.WorkspaceID, actionID uuid.UUID, now time.Time) (CreditSettlement, error) {
+	return s.SettleCredits(ctx, ws, actionID, false, now)
+}
+
+// chargeHold writes the charge rows of a hold, taking from the sources in the order of use. The account is locked.
+func (s *Store) chargeHold(ctx context.Context, hold db.CreditHold, now time.Time, res *CreditSettlement) error {
+	sources, err := s.creditSources(ctx, hold.WorkspaceID, now)
+	if err != nil {
+		return err
+	}
+	need := int(hold.Credits)
+	type take struct {
+		source CreditSource
+		n      int
+	}
+	var takes []take
+	for _, src := range sources {
+		if need == 0 {
+			break
+		}
+		n := min(src.Remaining, need)
+		if n <= 0 {
+			continue
+		}
+		takes = append(takes, take{src, n})
+		need -= n
+	}
+	res.Charged = int(hold.Credits) - need
+	res.Short = need
+	reason := (*string)(nil)
+	if need > 0 {
+		r := fmt.Sprintf("short by %d: the credits ran out (an allowance expired) before the action ended", need)
+		reason = &r
+	}
+	insert := func(i int, credits int32, grant pgtype.UUID) error {
+		_, err := s.q.InsertCreditLedger(ctx, db.InsertCreditLedgerParams{
+			WorkspaceID: hold.WorkspaceID, Kind: CreditCharge, Credits: credits, GrantID: grant, Action: &hold.Action, ActionID: optUUID(hold.ActionID),
+			ProjectID: hold.ProjectID, MemberUserID: hold.MemberUserID, Plan: hold.Plan, PlanListVersion: hold.PlanListVersion,
+			Reason: reason, IdempotencyKey: fmt.Sprintf("charge:%s:%d", hold.ActionID, i), CreatedAt: now,
+		})
+		if errors.Is(err, errNoRows) {
+			return nil // already there
+		}
+		return err
+	}
+	if len(takes) == 0 {
+		// A free action, or nothing left to take: still one row, because it records that the action happened (a charged edit).
+		return insert(0, 0, pgtype.UUID{})
+	}
+	for i, t := range takes {
+		if err := insert(i, -int32(t.n), pgtype.UUID{Bytes: t.source.ID, Valid: true}); err != nil { //nolint:gosec // a price list value
+			return err
+		}
+	}
+	return nil
+}
+
+// CreditSweepResult is what SweepExpiredCreditHolds removed.
+type CreditSweepResult struct {
+	Holds   int64
+	Credits int64
+}
+
+// SweepExpiredCreditHolds deletes the holds past their expiry (a run whose worker and retries are gone). They had stopped counting
+// already; this gives the table its size back and tells the caller what crashed runs left behind.
+func (s *Store) SweepExpiredCreditHolds(ctx context.Context, now time.Time) (CreditSweepResult, error) {
+	r, err := s.q.DeleteExpiredCreditHolds(ctx, now.UTC())
+	return CreditSweepResult{Holds: r.Holds, Credits: r.Credits}, mapErr(err)
+}
+
+// ---- Grants, adjustments and refunds ----------------------------------------------------------------------------
+
+// GrantTopUpParams is a top-up: credits that last until ExpiresAt.
+type GrantTopUpParams struct {
+	Workspace ids.WorkspaceID
+	Credits   int
+	ExpiresAt time.Time
+	// Actor and Reason say who granted and why (the purchase, the operator).
+	Actor, Reason string
+	// Key makes the grant idempotent: a second grant with the same key adds nothing. Empty gets a random key.
+	Key               string
+	Plan, ListVersion string
+	Now               time.Time
+}
+
+// GrantTopUp adds a top-up to the workspace. It returns the id of the grant row, and false when the key was used already.
+func (s *Store) GrantTopUp(ctx context.Context, p GrantTopUpParams) (uuid.UUID, bool, error) {
+	switch {
+	case p.Workspace.IsZero():
+		return uuid.Nil, false, fmt.Errorf("%w: a top-up needs a workspace", ErrInvalid)
+	case p.Credits < 1:
+		return uuid.Nil, false, fmt.Errorf("%w: a top-up needs a positive number of credits", ErrInvalid)
+	case p.Now.IsZero() || !p.ExpiresAt.After(p.Now):
+		return uuid.Nil, false, fmt.Errorf("%w: a top-up needs an expiry in the future", ErrInvalid)
+	}
+	key := p.Key
+	if key == "" {
+		key = "topup:" + uuid.NewString()
+	}
+	if !validKey(key) {
+		return uuid.Nil, false, fmt.Errorf("%w: a ledger key of 1 to 200 characters", ErrInvalid)
+	}
+	var (
+		id      uuid.UUID
+		created bool
+	)
+	err := s.inTx(ctx, func(tx *Store) error {
+		if _, err := tx.lockCreditAccount(ctx, p.Workspace); err != nil {
+			return err
+		}
+		exp := p.ExpiresAt.UTC()
+		var err error
+		id, err = tx.q.InsertCreditLedger(ctx, db.InsertCreditLedgerParams{
+			WorkspaceID: p.Workspace, Kind: CreditGrantTopUp, Credits: int32(p.Credits), //nolint:gosec // bounded by the caller
+			Plan: optText(p.Plan), PlanListVersion: optText(p.ListVersion), ExpiresAt: &exp,
+			Actor: optText(strings.TrimSpace(p.Actor)), Reason: optText(strings.TrimSpace(p.Reason)), IdempotencyKey: key, CreatedAt: p.Now.UTC(),
+		})
+		if errors.Is(err, errNoRows) {
+			old, gerr := tx.q.GetCreditLedgerByKey(ctx, db.GetCreditLedgerByKeyParams{WorkspaceID: p.Workspace, IdempotencyKey: key})
+			if gerr != nil {
+				return gerr
+			}
+			id = old.ID
+			return nil
+		}
+		created = err == nil
+		return err
+	})
+	if err != nil {
+		return uuid.Nil, false, mapErr(err)
+	}
+	return id, created, nil
+}
+
+// AdjustCreditsParams is an operator's correction.
+type AdjustCreditsParams struct {
+	Workspace ids.WorkspaceID
+	// Credits is signed: positive adds credits that last until ExpiresAt (which is then required), negative takes credits away from the
+	// sources in the order of use, and fails with *InsufficientCreditsError when the workspace has fewer.
+	Credits   int
+	ExpiresAt time.Time
+	// Actor and Reason are required: every adjustment says who made it and why.
+	Actor, Reason string
+	Key           string
+	Now           time.Time
+}
+
+// AdjustCredits writes an adjustment. It returns the credits that moved (positive or negative).
+func (s *Store) AdjustCredits(ctx context.Context, p AdjustCreditsParams) (int, error) {
+	actor, reason := strings.TrimSpace(p.Actor), strings.TrimSpace(p.Reason)
+	switch {
+	case p.Workspace.IsZero():
+		return 0, fmt.Errorf("%w: an adjustment needs a workspace", ErrInvalid)
+	case p.Credits == 0:
+		return 0, fmt.Errorf("%w: an adjustment of zero credits", ErrInvalid)
+	case actor == "" || reason == "":
+		return 0, fmt.Errorf("%w: an adjustment needs an actor and a reason", ErrInvalid)
+	case p.Now.IsZero():
+		return 0, fmt.Errorf("%w: an adjustment needs a time", ErrInvalid)
+	case p.Credits > 0 && !p.ExpiresAt.After(p.Now):
+		return 0, fmt.Errorf("%w: credits added by an adjustment need an expiry in the future", ErrInvalid)
+	}
+	key := p.Key
+	if key == "" {
+		key = "adjust:" + uuid.NewString()
+	}
+	if !validKey(key) {
+		return 0, fmt.Errorf("%w: a ledger key of 1 to 200 characters", ErrInvalid)
+	}
+	now := p.Now.UTC()
+	err := s.inTx(ctx, func(tx *Store) error {
+		if _, err := tx.lockCreditAccount(ctx, p.Workspace); err != nil {
+			return err
+		}
+		row := db.InsertCreditLedgerParams{
+			WorkspaceID: p.Workspace, Kind: CreditAdjust, Credits: int32(p.Credits), //nolint:gosec // bounded by the caller
+			Actor: &actor, Reason: &reason, IdempotencyKey: key, CreatedAt: now,
+		}
+		if p.Credits > 0 {
+			exp := p.ExpiresAt.UTC()
+			row.ExpiresAt = &exp
+			_, err := tx.q.InsertCreditLedger(ctx, row)
+			if errors.Is(err, errNoRows) {
+				return nil // replayed
+			}
+			return err
+		}
+		if _, err := tx.q.GetCreditLedgerByKey(ctx, db.GetCreditLedgerByKeyParams{WorkspaceID: p.Workspace, IdempotencyKey: key + ":0"}); err == nil {
+			return nil // replayed
+		} else if !errors.Is(err, errNoRows) {
+			return err
+		}
+		sources, err := tx.creditSources(ctx, p.Workspace, now)
+		if err != nil {
+			return err
+		}
+		need := -p.Credits
+		total := 0
+		for _, src := range sources {
+			total += src.Remaining
+		}
+		if total < need {
+			return &InsufficientCreditsError{Needed: need, Available: total}
+		}
+		for i, src := range sources {
+			if need == 0 {
+				break
+			}
+			n := min(src.Remaining, need)
+			if n <= 0 {
+				continue
+			}
+			row.Credits, row.GrantID, row.IdempotencyKey = -int32(n), pgtype.UUID{Bytes: src.ID, Valid: true}, fmt.Sprintf("%s:%d", key, i) //nolint:gosec // bounded above
+			if _, err := tx.q.InsertCreditLedger(ctx, row); err != nil {
+				return err
+			}
+			need -= n
+		}
+		return nil
+	})
+	if err != nil {
+		var ins *InsufficientCreditsError
+		if errors.As(err, &ins) {
+			return 0, err
+		}
+		return 0, mapErr(err)
+	}
+	return p.Credits, nil
+}
+
+// RefundAction gives an action's charge back: for each charge row, a refund row to the same source, if that source has not expired
+// (credits that would have expired are not brought back). It is idempotent. It returns the credits given back and the credits that
+// could not be because their source had expired.
+func (s *Store) RefundAction(ctx context.Context, ws ids.WorkspaceID, actionID uuid.UUID, actor, reason string, now time.Time) (refunded, lost int, err error) {
+	actor, reason = strings.TrimSpace(actor), strings.TrimSpace(reason)
+	if ws.IsZero() || actionID == uuid.Nil || actor == "" || reason == "" || now.IsZero() {
+		return 0, 0, fmt.Errorf("%w: a refund needs a workspace, an action, an actor, a reason and a time", ErrInvalid)
+	}
+	now = now.UTC()
+	err = s.inTx(ctx, func(tx *Store) error {
+		refunded, lost = 0, 0
+		if _, err := tx.lockCreditAccount(ctx, ws); err != nil {
+			return err
+		}
+		charges, err := tx.q.ListCreditChargesOfAction(ctx, db.ListCreditChargesOfActionParams{WorkspaceID: ws, ActionID: optUUID(actionID)})
+		if err != nil {
+			return err
+		}
+		for _, c := range charges {
+			if c.Credits >= 0 || !c.GrantID.Valid {
+				continue
+			}
+			src, err := tx.q.GetCreditSource(ctx, db.GetCreditSourceParams{WorkspaceID: ws, ID: c.GrantID.Bytes})
+			if err != nil {
+				return err
+			}
+			if src.ExpiresAt != nil && !src.ExpiresAt.After(now) {
+				lost += int(-c.Credits)
+				continue
+			}
+			_, err = tx.q.InsertCreditLedger(ctx, db.InsertCreditLedgerParams{
+				WorkspaceID: ws, Kind: CreditRefund, Credits: -c.Credits, GrantID: c.GrantID, Action: c.Action, ActionID: c.ActionID,
+				ProjectID: c.ProjectID, MemberUserID: c.MemberUserID, Plan: c.Plan, PlanListVersion: c.PlanListVersion,
+				Actor: &actor, Reason: &reason, IdempotencyKey: fmt.Sprintf("refund:%s:%s", actionID, c.ID), CreatedAt: now,
+			})
+			switch {
+			case errors.Is(err, errNoRows):
+				continue // refunded already
+			case err != nil:
+				return err
+			}
+			refunded += int(-c.Credits)
+		}
+		return nil
+	})
+	return refunded, lost, mapErr(err)
+}
+
+// ProjectHasChargedEdit says whether the project has an edit that was charged and not refunded: the first edit, or a revision. A run that
+// failed was released, not charged, so it does not count. This decides first or revision, and whether a final export may be made.
+func (s *Store) ProjectHasChargedEdit(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID) (bool, error) {
+	ok, err := s.q.ProjectHasChargedEdit(ctx, db.ProjectHasChargedEditParams{WorkspaceID: ws, ProjectID: optUUID(project.UUID)})
+	return ok, mapErr(err)
+}
+
+// RecordCreditActionParams records an action that costs nothing but must be on the ledger (a final export).
+type RecordCreditActionParams struct {
+	Workspace         ids.WorkspaceID
+	Action            string
+	ActionID          uuid.UUID
+	Project           ids.ProjectID
+	Member            ids.UserID
+	Plan, ListVersion string
+	Now               time.Time
+}
+
+// RecordFreeCreditAction writes a zero-credit charge row for the action. It is idempotent on the action id, and needs no lock: it moves
+// no credits.
+func (s *Store) RecordFreeCreditAction(ctx context.Context, p RecordCreditActionParams) error {
+	if p.Workspace.IsZero() || !validCreditAction(p.Action) || p.ActionID == uuid.Nil || p.Now.IsZero() {
+		return fmt.Errorf("%w: a free action needs a workspace, a known action, an action id and a time", ErrInvalid)
+	}
+	_, err := s.q.InsertCreditLedger(ctx, db.InsertCreditLedgerParams{
+		WorkspaceID: p.Workspace, Kind: CreditCharge, Credits: 0, Action: &p.Action, ActionID: optUUID(p.ActionID),
+		ProjectID: optUUID(p.Project.UUID), MemberUserID: optUUID(p.Member.UUID), Plan: optText(p.Plan), PlanListVersion: optText(p.ListVersion),
+		IdempotencyKey: fmt.Sprintf("charge:%s:0", p.ActionID), CreatedAt: p.Now.UTC(),
+	})
+	if errors.Is(err, errNoRows) {
+		return nil
+	}
+	return mapErr(err)
+}
+
+// ---- Allowances and expiry --------------------------------------------------------------------------------------
+
+// AllowanceSpec is what a plan's allowance is, from the price list.
+type AllowanceSpec struct {
+	Plan    plans.Plan
+	Credits int
+	// Refill is true for a plan that gets its allowance again every period; a trial gets it once.
+	Refill      bool
+	ListVersion string
+}
+
+// AllowanceResult says what SyncAllowance did.
+type AllowanceResult struct {
+	// Granted is the credits of the allowance written by this call (0 when the period had been granted already, or the workspace has no
+	// active plan).
+	Granted int
+	Plan    plans.Plan
+	// PeriodStart and PeriodEnd are the period the allowance belongs to; zero for a trial's, which has none.
+	PeriodStart, PeriodEnd time.Time
+	// Replaced is the credits of the old plan's allowance that a change of plan expired.
+	Replaced int
+}
+
+func daysIn(year int, month time.Month) int {
+	return time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC).Day()
+}
+
+// AddMonths adds n months to t in UTC, keeping the day of the month when the month has it and its last day when not (31 January plus one
+// month is 28 February). Periods are computed from the anchor each time, not chained, so the day never drifts down.
+func AddMonths(t time.Time, n int) time.Time {
+	t = t.UTC()
+	y, m, d := t.Date()
+	first := time.Date(y, m+time.Month(n), 1, 0, 0, 0, 0, time.UTC)
+	d = min(d, daysIn(first.Year(), first.Month()))
+	return time.Date(first.Year(), first.Month(), d, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
+}
+
+// ManualPeriod returns the monthly period of a manual plan that contains now: the periods start at the anchor and are a month long.
+func ManualPeriod(anchor, now time.Time) (start, end time.Time) {
+	anchor, now = anchor.UTC(), now.UTC()
+	n := (now.Year()-anchor.Year())*12 + int(now.Month()) - int(anchor.Month())
+	if AddMonths(anchor, n).After(now) {
+		n--
+	}
+	n = max(n, 0)
+	return AddMonths(anchor, n), AddMonths(anchor, n+1)
+}
+
+// SyncAllowance grants the workspace's allowance for the period that contains now, if it has not been granted. It is idempotent: the
+// grant's key names the workspace, the plan and the period, so a second call, or a second worker, adds nothing.
+//
+//   - The plan is the one in workspace_plans, when it is active at now; a workspace with no active plan gets nothing.
+//   - A plan managed by the merchant of record has the period that ends at its current_period_end and starts a month earlier. Any other
+//     plan (a manual grant) has monthly periods from the day this account first got the plan.
+//   - A trial's allowance is granted once and never refilled; it does not expire by itself.
+//   - A different plan than the one the account last got replaces the allowance: what is left of the old one expires (an expire row),
+//     and the new plan's allowance is granted in full. A manual plan's periods start again from now.
+func (s *Store) SyncAllowance(ctx context.Context, ws ids.WorkspaceID, specs map[plans.Plan]AllowanceSpec, now time.Time) (AllowanceResult, error) {
+	if ws.IsZero() || now.IsZero() {
+		return AllowanceResult{}, fmt.Errorf("%w: an allowance needs a workspace and a time", ErrInvalid)
+	}
+	now = now.UTC()
+	var res AllowanceResult
+	err := s.inTx(ctx, func(tx *Store) error {
+		res = AllowanceResult{}
+		acct, err := tx.lockCreditAccount(ctx, ws)
+		if err != nil {
+			return err
+		}
+		wp, err := tx.q.GetWorkspacePlan(ctx, ws)
+		if err != nil {
+			return err
+		}
+		plan := plans.Plan(wp.Plan)
+		if !plan.Grantable() || wp.Status != string(StatusActive) || (wp.CurrentPeriodEnd != nil && !wp.CurrentPeriodEnd.After(now)) {
+			return nil // no active plan at now: no allowance
+		}
+		spec, ok := specs[plan]
+		if !ok {
+			return fmt.Errorf("store: the price list has no allowance for plan %q", plan)
+		}
+		res.Plan = plan
+
+		changed := acct.Plan != "" && acct.Plan != string(plan)
+		if changed {
+			sources, err := tx.creditSources(ctx, ws, now)
+			if err != nil {
+				return err
+			}
+			for _, src := range sources {
+				if src.Kind != CreditGrantAllowance {
+					continue
+				}
+				reason := fmt.Sprintf("the plan changed from %s to %s", acct.Plan, plan)
+				if err := tx.expireSource(ctx, ws, src.ID, src.Remaining, now, &reason); err != nil {
+					return err
+				}
+				res.Replaced += src.Remaining
+			}
+		}
+
+		var (
+			anchor  = acct.PeriodAnchor
+			until   *time.Time
+			keyTail string
+			expires *time.Time
+		)
+		switch {
+		case !spec.Refill:
+			keyTail = "once"
+		case PlanSource(wp.Source) == SourceMerchant && wp.CurrentPeriodEnd != nil:
+			end := wp.CurrentPeriodEnd.UTC()
+			res.PeriodStart, res.PeriodEnd = AddMonths(end, -1), end
+			until, expires, keyTail = &end, &end, "until:"+end.Format(time.RFC3339)
+		default:
+			if anchor == nil || changed {
+				a := now
+				anchor = &a
+			}
+			res.PeriodStart, res.PeriodEnd = ManualPeriod(*anchor, now)
+			end := res.PeriodEnd
+			until, expires, keyTail = &end, &end, "until:"+end.Format(time.RFC3339)
+		}
+		p := string(plan)
+		version := spec.ListVersion
+		_, err = tx.q.InsertCreditLedger(ctx, db.InsertCreditLedgerParams{
+			WorkspaceID: ws, Kind: CreditGrantAllowance, Credits: int32(spec.Credits), //nolint:gosec // a price list value
+			Plan: &p, PlanListVersion: &version, ExpiresAt: expires,
+			IdempotencyKey: fmt.Sprintf("allowance:%s:%s:%s", ws.UUID, plan, keyTail), CreatedAt: now,
+		})
+		switch {
+		case err == nil:
+			res.Granted = spec.Credits
+		case errors.Is(err, errNoRows): // this period was granted already
+		default:
+			return err
+		}
+		return tx.q.SetCreditAccountPeriod(ctx, db.SetCreditAccountPeriodParams{WorkspaceID: ws, Plan: p, PeriodAnchor: anchor, AllowanceUntil: until})
+	})
+	if err != nil {
+		return AllowanceResult{}, mapErr(err)
+	}
+	return res, nil
+}
+
+// expireSource writes the expire row of a source: it takes what is left, exactly (remaining may be 0, which still marks the source as
+// expired). The account is locked.
+func (s *Store) expireSource(ctx context.Context, ws ids.WorkspaceID, source uuid.UUID, remaining int, at time.Time, reason *string) error {
+	_, err := s.q.InsertCreditLedger(ctx, db.InsertCreditLedgerParams{
+		WorkspaceID: ws, Kind: CreditExpire, Credits: -int32(max(remaining, 0)), GrantID: pgtype.UUID{Bytes: source, Valid: true}, //nolint:gosec // what a source had
+		Reason: reason, IdempotencyKey: "expire:" + source.String(), CreatedAt: at.UTC(),
+	})
+	if errors.Is(err, errNoRows) {
+		return nil
+	}
+	return err
+}
+
+// ExpireDueCredits writes the expire row of every source whose expiry has passed and that has none, taking exactly what is left of it.
+// It does at most limit sources, oldest expiry first, and returns how many it expired and how many credits they held. Safe to run twice
+// and from several workers: each source is handled under its workspace's account lock and the row's key is unique.
+func (s *Store) ExpireDueCredits(ctx context.Context, now time.Time, limit int) (sources, credits int, err error) {
+	if limit < 1 {
+		return 0, 0, fmt.Errorf("%w: limit %d", ErrInvalid, limit)
+	}
+	now = now.UTC()
+	due, err := s.q.ListDueCreditExpiries(ctx, db.ListDueCreditExpiriesParams{Now: &now, RowLimit: int32(limit)}) //nolint:gosec // checked above
+	if err != nil {
+		return 0, 0, mapErr(err)
+	}
+	for _, d := range due {
+		var left int
+		err := s.inTx(ctx, func(tx *Store) error {
+			left = 0
+			if _, err := tx.lockCreditAccount(ctx, d.WorkspaceID); err != nil {
+				return err
+			}
+			src, err := tx.q.GetCreditSource(ctx, db.GetCreditSourceParams{WorkspaceID: d.WorkspaceID, ID: d.ID})
+			if err != nil {
+				return err
+			}
+			if _, err := tx.q.GetCreditLedgerByKey(ctx, db.GetCreditLedgerByKeyParams{WorkspaceID: d.WorkspaceID, IdempotencyKey: "expire:" + d.ID.String()}); err == nil {
+				return nil // expired by someone else while we waited
+			} else if !errors.Is(err, errNoRows) {
+				return err
+			}
+			left = int(src.Remaining)
+			reason := "expired"
+			// The row is dated at the moment the source stopped being usable, so a period's report lines up with its end.
+			return tx.expireSource(ctx, d.WorkspaceID, d.ID, left, *d.ExpiresAt, &reason)
+		})
+		if err != nil {
+			return sources, credits, mapErr(err)
+		}
+		sources++
+		credits += left
+	}
+	return sources, credits, nil
+}
+
+// WorkspacesNeedingAllowance lists up to limit workspaces whose allowance may need granting at now: SyncAllowance decides for each.
+func (s *Store) WorkspacesNeedingAllowance(ctx context.Context, now time.Time, limit int) ([]ids.WorkspaceID, error) {
+	if limit < 1 {
+		return nil, fmt.Errorf("%w: limit %d", ErrInvalid, limit)
+	}
+	now = now.UTC()
+	rows, err := s.q.ListWorkspacesNeedingAllowance(ctx, db.ListWorkspacesNeedingAllowanceParams{Now: &now, RowLimit: int32(limit)}) //nolint:gosec // checked above
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	return rows, nil
+}
+
+// ---- The end of a run -------------------------------------------------------------------------------------------
+
+// settleRunCredits settles the credit hold of a run that has just reached a final status, in the transaction that put it there: success
+// charges, failure releases, and a cancel charges when the creator was shown a preview and releases when not. A run with no hold (the
+// echo agent) is left alone. A run that parks for input keeps its hold, with a long expiry. s must be a transaction Store.
+func (s *Store) settleRunCredits(ctx context.Context, ws ids.WorkspaceID, run AgentRun, now time.Time) error {
+	var charge bool
+	switch run.Status {
+	case AgentSucceeded:
+		charge = true
+	case AgentFailed:
+		charge = false
+	case AgentCancelled:
+		previewed, err := s.q.AgentRunHasPreview(ctx, db.AgentRunHasPreviewParams{WorkspaceID: ws, RunID: run.ID})
+		if err != nil {
+			return err
+		}
+		charge = previewed
+	case AgentWaitingInput:
+		return s.ExtendCreditHold(ctx, ws, run.ID, now.Add(CreditHoldWaitingTTL))
+	default:
+		return nil
+	}
+	_, err := s.SettleCredits(ctx, ws, run.ID, charge, now)
+	return err
+}

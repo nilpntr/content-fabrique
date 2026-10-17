@@ -64,6 +64,9 @@ paths:
       description: |
         Open to a workspace without a plan: it is how the web app finds out. A plan that cannot be read does not fail the
         request; it is reported as `entitlements.status = "unknown"` (never active).
+
+        `credits` is the workspace's credit balance (spend control, D-31). It is left out when the balance cannot be read, which
+        does not fail the request either.
       responses:
         "200":
           description: The caller.
@@ -857,8 +860,18 @@ paths:
         (`422 assets_not_usable`; an audio file is not a clip to cut).
         `instructions` is the creator's extra instruction for this run (text, at most 2,000 characters; the model treats it as data
         that steers the content of the video, nothing else). `profile` picks the model profile of the run; the default is the
-        server's. `budget_usd` is the run's spend cap in dollars: the default is $5, and a larger value is cut to the server's maximum
-        (also $5 unless the operator raised it). The cap is enforced before every model call.
+        server's.
+
+        **Credits.** The run costs credits, set aside (held) in the same step that creates the run: the server decides from the
+        project whether it is the first edit (6 credits: the project has no charged edit yet) or a revision (2 credits), and the
+        price comes from the server's price list, never from the request. A workspace with fewer credits available than that gets
+        `402 credits_exhausted` and no run is created (a workspace with no active plan gets `402 plan_required`, as everywhere).
+        The credits are charged when the run succeeds, released when it fails, and when the creator cancels it they are charged if
+        the run had already rendered a preview and released if not. `GET /v1/me` has the balance.
+
+        The run's spend cap is set by the server from the workspace's plan and the kind of edit; the request cannot change it. It is
+        enforced before every model call. `budget_usd` is accepted for compatibility (and still has to be a positive number) but is
+        ignored.
       requestBody:
         required: false
         content:
@@ -1043,6 +1056,10 @@ paths:
         The version must exist and validate against the project's footage as it is now (`422 timeline_invalid` otherwise: an asset
         deleted since the edit, say). At most 5 renders per workspace are in flight at once (`429 too_many_renders`). Only
         owners and editors may render.
+
+        A `final` render (the export) costs no credits but needs an edit of the project that was charged: a project that has had
+        no successful editor run is refused with `422 edit_not_charged`. A queued final render is recorded on the credit ledger as
+        the `export.final` action at 0 credits. Previews have no such requirement.
       requestBody:
         required: true
         content:
@@ -1073,7 +1090,9 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "422":
-          description: "`timeline_invalid`: the version does not validate against the project's footage now."
+          description: |
+            `timeline_invalid`: the version does not validate against the project's footage now. Or `edit_not_charged`: a final
+            render of a project that has no charged edit.
           content:
             application/json:
               schema:
@@ -1542,6 +1561,7 @@ components:
         - unauthenticated # 401: no token
         - invalid_token # 401: the token failed verification (signature, expiry, issuer, azp)
         - plan_required # 402: the workspace has no active plan
+        - credits_exhausted # 402: the workspace does not have enough credits for the action (a new edit run); GET /v1/me has the balance
         - no_active_workspace # 403: signed in, but no organization is active
         - user_deleted # 403
         - workspace_deleted # 403
@@ -1575,6 +1595,7 @@ components:
         - run_in_progress # 409: the project already has an editor run that has not finished
         - run_not_waiting # 409: the run is not waiting for an answer
         - model_not_configured # 503: the server has no model access (ANTHROPIC_API_KEY or LLM_MODE) or no such routing profile
+        - edit_not_charged # 422: a final render needs an edit of the project that was charged (run the editor first)
 
     ErrorDetail:
       type: object
@@ -1748,6 +1769,49 @@ components:
           $ref: "#/components/schemas/MeWorkspace"
         entitlements:
           $ref: "#/components/schemas/Entitlements"
+        credits:
+          $ref: "#/components/schemas/Credits"
+
+    CreditTopUp:
+      type: object
+      description: Credits that are not the period's allowance (bought or given) and when they expire.
+      required: [credits, expires_at]
+      properties:
+        credits:
+          type: integer
+          minimum: 1
+          description: What is left of this top-up.
+        expires_at:
+          type: string
+          format: date-time
+
+    Credits:
+      type: object
+      description: |
+        The workspace's credits (1 video = 10 credits). Credits in use by a run that has not finished are already taken out of
+        `available`. Allowance that is not used by the end of its period expires; top-ups last 12 months. The allowance is used first,
+        then the top-ups, earliest expiry first.
+      required: [available, allowance, period_end, low, top_ups]
+      properties:
+        available:
+          type: integer
+          minimum: 0
+          description: What a new action can use now, allowance and top-ups together.
+        allowance:
+          type: integer
+          minimum: 0
+          description: The size of the current period's allowance; 0 when the workspace has none.
+        period_end:
+          type: [string, "null"]
+          format: date-time
+          description: When the current allowance expires and the next is granted. `null` when there is none, or it does not end (a trial's).
+        low:
+          type: boolean
+          description: At least 80 % of the allowance is used (`available` is at most a fifth of `allowance`). Always false without an allowance.
+        top_ups:
+          type: array
+          items:
+            $ref: "#/components/schemas/CreditTopUp"
 
     WorkspacePlanResponse:
       description: The entitlements, flattened, plus where the plan came from and what it includes.
@@ -2635,7 +2699,7 @@ components:
         budget_usd:
           type: number
           exclusiveMinimum: 0
-          description: The run's spend cap in dollars. Default 5; a larger value is cut to the server's maximum.
+          description: Ignored. The run's spend cap is set by the server from the plan (it used to be the caller's, up to $5).
 
     ReplyRequest:
       type: object

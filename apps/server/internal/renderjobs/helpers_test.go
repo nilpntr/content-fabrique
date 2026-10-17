@@ -21,6 +21,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nilpntr/content-fabrique/internal/credits/creditstest"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
@@ -192,6 +193,7 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	svc.Credits = creditstest.Service(t, st) // a final render is the export.final action: it needs a charged edit
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -293,7 +295,32 @@ func (e *env) exists(t *testing.T, key string) bool {
 	return err == nil
 }
 
+// newProject makes a project that has had an edit charged, as one the editor worked on has: the renders of these tests can be exported.
+// newProjectUncharged makes one that has not.
 func (e *env) newProject(t *testing.T, w store.Workspace, assets ...store.Asset) store.Project {
+	t.Helper()
+	p := e.newProjectUncharged(t, w, assets...)
+	e.chargeEdit(t, w, p)
+	return p
+}
+
+// chargeEdit records a first edit of the project that cost no credits, through the store's own functions: a zero-credit hold, settled with
+// a charge, which is how a run started with cfctl agent run --no-credits ends.
+func (e *env) chargeEdit(t *testing.T, w store.Workspace, p store.Project) {
+	t.Helper()
+	ctx := context.Background()
+	action := newV7(t)
+	if _, err := e.st.HoldCredits(ctx, store.HoldCreditsParams{
+		Workspace: w.ID, Action: store.ActionEditFirst, ActionID: action, Credits: 0, Project: p.ID, ListVersion: "test", Now: time.Now(), TTL: time.Hour,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.SettleCredits(ctx, w.ID, action, true, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (e *env) newProjectUncharged(t *testing.T, w store.Workspace, assets ...store.Asset) store.Project {
 	t.Helper()
 	ctx := context.Background()
 	var p store.Project

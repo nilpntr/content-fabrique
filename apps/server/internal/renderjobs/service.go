@@ -9,10 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 
 	"github.com/nilpntr/content-fabrique/internal/api"
+	"github.com/nilpntr/content-fabrique/internal/credits"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
 	"github.com/nilpntr/content-fabrique/internal/projects"
@@ -52,6 +54,7 @@ var (
 	errProjectNotFound = &Error{Status: 404, Code: api.ErrorCodeNotFound, Message: "no such project"}
 	errVersionNotFound = &Error{Status: 404, Code: api.ErrorCodeNotFound, Message: "no such timeline version"}
 	errRenderNotFound  = &Error{Status: 404, Code: api.ErrorCodeNotFound, Message: "no such render"}
+	errNotCharged      = &Error{Status: 422, Code: api.ErrorCodeEditNotCharged, Message: "this project has no charged edit yet: run the editor on it before exporting"}
 	errTooMany         = &Error{Status: 429, Code: api.ErrorCodeTooManyRenders, Message: fmt.Sprintf("this workspace already has %d renders waiting or running; wait for one to finish", MaxInFlight)}
 	errQueueMigration  = &Error{Status: 503, Code: api.ErrorCodeQueueNotMigrated, Message: "the job queue is not ready; try again later"}
 )
@@ -86,6 +89,12 @@ func AgentCaller(ws ids.WorkspaceID, runID string) Caller {
 	return Caller{Workspace: ws, Kind: store.RenderRequestedByAgent, ID: runID}
 }
 
+// Credits records a final export on the credit ledger and refuses one for a project that has no charged edit (*credits.Service is the
+// real one).
+type Credits interface {
+	RecordFinalExport(ctx context.Context, tx *store.Store, ws ids.WorkspaceID, project ids.ProjectID, member ids.UserID, render uuid.UUID) error
+}
+
 // Service is the renders API without HTTP.
 type Service struct {
 	store   *store.Store
@@ -93,6 +102,9 @@ type Service struct {
 	enq     Enqueuer
 	logger  *slog.Logger
 	now     func() time.Time
+	// Credits is consulted for a final render (the export.final action, P7-01a): a project needs a charged edit, and the export is
+	// recorded on the ledger. Set it before the service is used. Nil refuses every final render (fail closed); previews never use it.
+	Credits Credits
 }
 
 // NewService returns a Service. The store, object storage and the enqueuer are required.
@@ -159,10 +171,26 @@ func (s *Service) Request(ctx context.Context, who Caller, project ids.ProjectID
 		if res := timeline.Validate(v.Spec, projects.CatalogOf(rows)); !res.OK() {
 			return &Error{Status: 422, Code: api.ErrorCodeTimelineInvalid, Message: invalidMessage(res.Errors())}
 		}
+		if profile == store.ProfileFinal && s.Credits == nil {
+			return errors.New("renderjobs: a final render needs the credits service, and this service has none")
+		}
 		if r, err = tx.CreateRender(ctx, who.Workspace, store.NewRender{
 			Project: project, Version: version, Profile: profile, RequestedByKind: who.Kind, RequestedByID: who.ID,
 		}); err != nil {
 			return err
+		}
+		if profile == store.ProfileFinal {
+			// export.final costs nothing, but only an edit that was charged can be exported; the export goes on the ledger.
+			var member ids.UserID
+			if who.Kind == store.RenderRequestedByUser {
+				member, _ = ids.ParseUserID(who.ID) // a malformed id leaves the export unattributed
+			}
+			if err := s.Credits.RecordFinalExport(ctx, tx, who.Workspace, project, member, r.ID.UUID); err != nil {
+				if errors.Is(err, credits.ErrEditNotCharged) {
+					return errNotCharged
+				}
+				return err
+			}
 		}
 		if _, err := s.enq.InsertInStore(ctx, tx, jobs.RenderArgs{WorkspaceID: who.Workspace, RenderID: r.ID}, &river.InsertOpts{Priority: jobs.RenderPriority(profile)}); err != nil {
 			return err
