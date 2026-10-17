@@ -2603,7 +2603,7 @@ export interface operations {
             query?: {
                 /** @description Only artifacts after this sequence number (the `seq` of a `RunEvent`). */
                 after_seq?: number;
-                /** @description Only artifacts of this kind, such as `creative_plan`. */
+                /** @description Only artifacts of this kind, such as `creative_plan`. 1 to 64 lowercase letters and underscores. */
                 kind?: string;
                 /** @description How many artifacts to return (default 20). */
                 limit?: number;

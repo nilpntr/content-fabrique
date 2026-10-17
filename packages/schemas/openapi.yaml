@@ -1006,10 +1006,10 @@ paths:
         - name: kind
           in: query
           required: false
-          description: Only artifacts of this kind, such as `creative_plan`.
+          description: Only artifacts of this kind, such as `creative_plan`. 1 to 64 lowercase letters and underscores.
           schema:
             type: string
-            maxLength: 64
+            pattern: "^[a-z_]{1,64}$"
         - name: limit
           in: query
           required: false

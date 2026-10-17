@@ -315,6 +315,20 @@ const (
 	maxKindLen       = 64
 )
 
+// validKind reports whether s can be an artifact kind: ^[a-z_]{1,64}$. Anything else (a NUL byte, invalid UTF-8) is refused before it
+// reaches the database.
+func validKind(s string) bool {
+	if len(s) < 1 || len(s) > maxKindLen {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c != '_' && (c < 'a' || c > 'z') {
+			return false
+		}
+	}
+	return true
+}
+
 // GetRunArtifacts is GET /v1/runs/{id}/artifacts.
 func (h *Runs) GetRunArtifacts(ctx context.Context, req api.GetRunArtifactsRequestObject) (api.GetRunArtifactsResponseObject, error) {
 	out, f := h.getRunArtifacts(ctx, req)
@@ -359,8 +373,8 @@ func (h *Runs) getRunArtifacts(ctx context.Context, req api.GetRunArtifactsReque
 		}
 	}
 	if req.Params.Kind != nil {
-		if kind = *req.Params.Kind; len(kind) > maxKindLen {
-			return api.RunArtifacts{}, bad("kind is too long")
+		if kind = *req.Params.Kind; !validKind(kind) {
+			return api.RunArtifacts{}, bad("kind must be 1 to 64 lowercase letters and underscores")
 		}
 	}
 	// The run first, so that a run of another workspace is 404 and not an empty list.

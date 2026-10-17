@@ -136,7 +136,7 @@ func TestRunsArtifacts(t *testing.T) {
 	if len(page.Artifacts) != 0 {
 		t.Errorf("after the last: %+v", page)
 	}
-	for _, q := range []string{"?limit=0", "?limit=51", "?after_seq=-1", "?limit=x", "?kind=" + strings.Repeat("k", 65)} {
+	for _, q := range []string{"?limit=0", "?limit=51", "?after_seq=-1", "?limit=x", "?kind=" + strings.Repeat("k", 65), "?kind=%00", "?kind=%ff", "?kind=", "?kind=Plan", "?kind=a%20b"} {
 		e.fail(http.MethodGet, runPath(run, "/artifacts"+q), "ada", nil, http.StatusBadRequest, api.ErrorCodeInvalidRequest)
 	}
 
