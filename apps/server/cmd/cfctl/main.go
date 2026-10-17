@@ -22,6 +22,7 @@ Commands:
   migrate    apply the database migrations as the schema-owning role (cfctl migrate help)
   plan       grant, revoke or show the plan of a person's workspace, until billing exists (cfctl plan help)
   assets     import local media files into a workspace's library, development only (cfctl assets help)
+  project    create a project for the editor, show a project's versions, development only (cfctl project help)
   render     render a timeline spec with ffmpeg, for local manual runs (cfctl render --help)
   media      probe a file's metadata, benchmark the sandbox providers (cfctl media help)
   agent      run an agent in this process and show a run's events and costs, development only (cfctl agent help)
@@ -55,6 +56,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdPlan(args[1:], stdout, stderr, os.LookupEnv)
 	case "assets":
 		return cmdAssets(args[1:], stdout, stderr, os.LookupEnv)
+	case "project":
+		return cmdProject(args[1:], stdout, stderr, os.LookupEnv, defaultAgentDeps())
 	case "render":
 		return cmdRender(args[1:], stdout, stderr)
 	case "media":
