@@ -211,6 +211,27 @@ describe("retries", () => {
     await until(manager, doneCount(1));
   });
 
+  test("a connection that is down for minutes is waited out, not failed after a fixed number of tries", async () => {
+    const { manager, transport, server, clock } = setup({ options: { maxPartAttempts: 3, maxApiAttempts: 2, networkGraceMs: 5 * 60_000 } });
+    // Down for the first 12 pauses (a few minutes of virtual time), then back.
+    transport.script = () => (clock.sleeps.length < 12 ? new PutError(0, "The connection to object storage failed.") : undefined);
+    server.failNext("state", ...Array.from({ length: 10 }, () => new ApiError(0, "network_error", "no")));
+    await manager.init();
+    await manager.add([fakeFile("a.mp4", 20 * MiB)]);
+    await until(manager, doneCount(1));
+    expect(clock.sleeps.length).toBeGreaterThanOrEqual(12); // far more than the 3 tries of maxPartAttempts
+    expect(Math.max(...clock.sleeps)).toBeLessThanOrEqual(30_000);
+  });
+
+  test("but not forever: after networkGraceMs without an answer the file fails, and keeps what it has", async () => {
+    const { manager, transport } = setup({ options: { networkGraceMs: 2 * 60_000 } });
+    transport.script = () => new PutError(0, "The connection to object storage failed.");
+    await manager.init();
+    await manager.add([fakeFile("a.mp4", 20 * MiB)]);
+    const snapshot = await until(manager, settled);
+    expect(snapshot.items[0]).toMatchObject({ status: "failed", error: { code: "part_failed" } });
+  });
+
   test("API calls that hit a gateway error are tried again", async () => {
     const { manager, server } = setup();
     server.failNext("create", new ApiError(502, "unknown_error", "bad gateway"));

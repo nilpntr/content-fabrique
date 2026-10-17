@@ -86,8 +86,10 @@ export interface ManagerOptions {
   maxPartsPerFile: number;
   /** Tries per part before the file fails. */
   maxPartAttempts: number;
-  /** Tries per API call before the file fails. */
+  /** Tries per API call before the file fails (for server hiccups; see networkGraceMs for lost connections). */
   maxApiAttempts: number;
+  /** How long a lost connection is waited out, part by part and call by call, before the file fails. */
+  networkGraceMs: number;
   /** How many part URLs one /parts call asks for (the API takes 100). */
   presignBatch: number;
   /** Part URLs are valid for 15 minutes; they are renewed after this many ms. */
@@ -107,6 +109,7 @@ export const DEFAULT_OPTIONS: ManagerOptions = {
   maxPartsPerFile: 4,
   maxPartAttempts: 8,
   maxApiAttempts: 6,
+  networkGraceMs: 10 * 60_000,
   presignBatch: 20,
   urlTtlMs: 14 * 60_000,
   urlSkewMs: 30_000,
@@ -285,7 +288,7 @@ export class UploadManager {
     );
     this.isReady = true;
     this.resolveReady();
-    this.dirty();
+    this.flush(); // at once: the tray should not wait for the batching timer to show what was stored
     this.pump();
   }
 
@@ -536,6 +539,7 @@ export class UploadManager {
 
   private async createUpload(item: Item, signal: AbortSignal): Promise<Job> {
     const { rec } = item;
+    let since = -1;
     for (let attempt = 0; ; attempt++) {
       throwIfAborted(signal);
       if (rec.createStarted) {
@@ -573,7 +577,8 @@ export class UploadManager {
           item.note = "Waiting for a free upload slot";
           throw new DeferError(delay);
         }
-        if (isTransientApiError(error) && attempt + 1 < this.opts.maxApiAttempts && !signal.aborted) {
+        if (since < 0) since = this.clock.now();
+        if (this.worthRetrying(error, attempt, since) && !signal.aborted) {
           await this.backoff(item, attempt, signal, "Reconnecting");
           continue;
         }
@@ -709,6 +714,7 @@ export class UploadManager {
 
   private async uploadPart(item: Item, job: Job, file: File, n: number, signal: AbortSignal): Promise<void> {
     const { start, end } = partRange(job.size, job.partSize, job.partCount, n);
+    let since = -1; // when this part first failed
     for (let attempt = 0; ; attempt++) {
       throwIfAborted(signal);
       await this.net.waitOnline(signal);
@@ -742,11 +748,15 @@ export class UploadManager {
           throw error;
         }
       }
-      if (attempt + 1 >= this.opts.maxPartAttempts) {
+      if (since < 0) since = this.clock.now();
+      // No answer at all is waited out (the connection is down, not the part); other failures get maxPartAttempts tries.
+      const noAnswer = (failed instanceof PutError || failed instanceof ApiError) && failed.status === 0;
+      const exhausted = noAnswer ? this.clock.now() - since >= this.opts.networkGraceMs : attempt + 1 >= this.opts.maxPartAttempts;
+      if (exhausted) {
         if (failed instanceof PutError && failed.status === 0 && !(await readable(file, start))) {
           throw new UploadFailure("file_unreadable", "The file can no longer be read. Was it moved, deleted or changed?");
         }
-        throw new UploadFailure("part_failed", `Part ${n} failed ${this.opts.maxPartAttempts} times: ${failed?.message ?? "unknown error"}`);
+        throw new UploadFailure("part_failed", noAnswer ? `Part ${n} could not be uploaded: ${failed?.message}` : `Part ${n} failed ${this.opts.maxPartAttempts} times: ${failed?.message ?? "unknown error"}`);
       }
       await this.backoff(item, attempt, signal, `Retrying part ${n}`);
     }
@@ -835,16 +845,25 @@ export class UploadManager {
 
   /** An API call tried again while the failure is a passing one. */
   private async call<T>(item: Item, signal: AbortSignal, fn: () => Promise<T>): Promise<T> {
+    let since = -1;
     for (let attempt = 0; ; attempt++) {
       throwIfAborted(signal);
       try {
         return await fn();
       } catch (error) {
         if (signal.aborted) throw signal.reason;
-        if (!isTransientApiError(error) || attempt + 1 >= this.opts.maxApiAttempts) throw error;
+        if (since < 0) since = this.clock.now();
+        if (!this.worthRetrying(error, attempt, since)) throw error;
         await this.backoff(item, attempt, signal, "Reconnecting");
       }
     }
+  }
+
+  /** Whether a failed API call is worth another try: a lost connection is waited out for networkGraceMs, other hiccups get a few tries. */
+  private worthRetrying(error: unknown, attempt: number, since: number): boolean {
+    if (!isTransientApiError(error)) return false;
+    if (error instanceof ApiError && error.status === 0) return this.clock.now() - since < this.opts.networkGraceMs;
+    return attempt + 1 < this.opts.maxApiAttempts;
   }
 
   private async backoff(item: Item, attempt: number, signal: AbortSignal, what: string): Promise<void> {
