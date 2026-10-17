@@ -135,12 +135,16 @@ type (
 	userKind      struct{}
 	assetKind     struct{}
 	uploadKind    struct{}
+	projectKind   struct{}
+	timelineKind  struct{}
 )
 
 func (workspaceKind) Prefix() string { return PrefixWorkspace }
 func (userKind) Prefix() string      { return PrefixUser }
 func (assetKind) Prefix() string     { return PrefixAsset }
 func (uploadKind) Prefix() string    { return PrefixUpload }
+func (projectKind) Prefix() string   { return PrefixProject }
+func (timelineKind) Prefix() string  { return PrefixTimeline }
 
 type (
 	// WorkspaceID is the key of a workspace (wks_...). Every tenant-owned row carries one.
@@ -151,6 +155,10 @@ type (
 	AssetID = ID[assetKind]
 	// UploadID is the key of a multipart upload (upl_...).
 	UploadID = ID[uploadKind]
+	// ProjectID is the key of a project (prj_...).
+	ProjectID = ID[projectKind]
+	// TimelineID is the key of one stored timeline version (tl_...).
+	TimelineID = ID[timelineKind]
 )
 
 // ParseWorkspaceID reads a wks_ TypeID.
@@ -164,3 +172,9 @@ func ParseAssetID(s string) (AssetID, error) { return Parse[assetKind](s) }
 
 // ParseUploadID reads an upl_ TypeID.
 func ParseUploadID(s string) (UploadID, error) { return Parse[uploadKind](s) }
+
+// ParseProjectID reads a prj_ TypeID.
+func ParseProjectID(s string) (ProjectID, error) { return Parse[projectKind](s) }
+
+// ParseTimelineID reads a tl_ TypeID.
+func ParseTimelineID(s string) (TimelineID, error) { return Parse[timelineKind](s) }

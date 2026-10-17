@@ -9,10 +9,15 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/nilpntr/content-fabrique/internal/storage/storagetest"
 	"github.com/nilpntr/content-fabrique/internal/store/storetest"
 )
 
-func TestMain(m *testing.M) { os.Exit(storetest.Run(m)) }
+func TestMain(m *testing.M) {
+	code := storetest.Run(m)
+	storagetest.Stop() // the MinIO of the assets import tests, if one was started
+	os.Exit(code)
+}
 
 // migrateCLI runs `cfctl migrate args...` with an env file that holds url and returns the exit code and output.
 func migrateCLI(t *testing.T, url string, args ...string) (code int, stdout, stderr string) {

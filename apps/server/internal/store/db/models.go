@@ -70,6 +70,43 @@ type CreatorProfile struct {
 	UpdatedAt       time.Time
 }
 
+type Project struct {
+	ID                     ids.ProjectID
+	WorkspaceID            ids.WorkspaceID
+	Title                  string
+	Format                 string
+	Brief                  string
+	Status                 string
+	CurrentTimelineVersion *int32
+	CreatedBy              ids.UserID
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	DeletedAt              *time.Time
+}
+
+type ProjectAsset struct {
+	WorkspaceID ids.WorkspaceID
+	ProjectID   ids.ProjectID
+	AssetID     ids.AssetID
+	Position    int32
+	CreatedAt   time.Time
+}
+
+type TimelineVersion struct {
+	ID            ids.TimelineID
+	WorkspaceID   ids.WorkspaceID
+	ProjectID     ids.ProjectID
+	Version       int32
+	ParentVersion *int32
+	Spec          json.RawMessage
+	Ops           json.RawMessage
+	Diff          json.RawMessage
+	Summary       []string
+	AuthorKind    string
+	AuthorID      string
+	CreatedAt     time.Time
+}
+
 type Upload struct {
 	ID          ids.UploadID
 	WorkspaceID ids.WorkspaceID

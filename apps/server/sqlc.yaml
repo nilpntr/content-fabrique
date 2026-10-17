@@ -27,6 +27,14 @@ sql:
             go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "AssetID" }
           - column: "*.asset_id"
             go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "AssetID" }
+          - column: "projects.id"
+            go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "ProjectID" }
+          - column: "*.project_id"
+            go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "ProjectID" }
+          - column: "timeline_versions.id"
+            go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "TimelineID" }
+          - column: "projects.created_by"
+            go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "UserID" }
           - column: "uploads.id"
             go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "UploadID" }
           - column: "assets.created_by"
