@@ -37,7 +37,11 @@ import (
 
 // Failure reasons of a render (renders.failure_reason). They are codes that are safe to show.
 const (
-	ReasonInvalidTimeline   = "invalid_timeline"
+	ReasonInvalidTimeline = "invalid_timeline"
+	// ReasonGraphTooLong is an invalid_timeline whose filter graph is too long for one process argument (render.ErrGraphTooLong):
+	// too many sound effects or clips. It is a code with a short cause so that an editor run can be told what to remove; the full
+	// compile message is not stored (the failure reason is at most 64 characters).
+	ReasonGraphTooLong      = ReasonInvalidTimeline + ": filter graph too long"
 	ReasonSourceUnavailable = "source_unavailable"
 	ReasonInputsTooLarge    = "inputs_too_large"
 	ReasonRenderFailed      = "render_failed"

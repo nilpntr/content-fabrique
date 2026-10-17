@@ -36,6 +36,7 @@
 | D-29 | Content Fabrique runs in its own Dutch operating BV (werkmaatschappij) under the founder's holding; Paddle is the merchant of record | Proposed (founder direction 2026-10-17; confirm with the accountant) |
 | D-30 | Semantic search lives in Postgres with pgvector, hybrid with full-text search; no separate vector database | Proposed (director, 2026-10-17; founder asked) |
 | D-31 | Spend control: credits charged per action; every action's COGS budget is derived from its price (≤ 40 % of net credit value); caps hold across processes in the database; platform breaker | Accepted (director, 2026-10-17; founder asked) |
+| D-32 | Audio: effects are synthesised in ffmpeg and edits are checked with ffmpeg measurements; no audio models, nothing ported from earshot but its numbers and ideas | Accepted (founder decision, 2026-10-17) |
 
 ---
 
@@ -725,6 +726,26 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 - The numbers above are starting hypotheses. Calibrate them from `cfctl spend report` after the beta.
 
 **Revisit** when real COGS per action is known (the beta), or when checkout (P7-01c) brings real prices and fees.
+
+## D-32 Audio is synthesised and measured with ffmpeg, no audio models
+
+**Context.** The editor cannot hear, and the generated sound effects of P3-10 sounded cheap (single-layer noise). The founder pointed at **earshot** ([github.com/Leonxlnx/earshot](https://github.com/Leonxlnx/earshot), MIT, Copyright (c) 2026 Leon Lin, Python), a tool that lets coding agents hear, judge and synthesise sounds, and asked us to take inspiration from it. It has two halves: a library of knowledge and model-free measurements (the design chain per sound, the numbers of seven measured launch films, loudness and sync checks) and a runtime with models (CLAP and AST classifiers, about 1.4 GB, 20 to 40 s to load per call).
+
+**Decision.**
+- We take earshot's **knowledge and measurement ideas, not its runtime.** No Python, no torch, no CLAP or AST models. Everything stays Go plus ffmpeg in the media-tools sandbox, deterministic, with no audio assets and no model calls.
+- The sound effects are rebuilt with the professional design chain (layers, bands, saturation, glue, a short dark room, a loudness match) and the editor gets model-free "ears": `internal/audiocheck` measures loudness, silence, onsets, the hook, sync, density and defects from ffmpeg and plain Go, and checks them against targets from earshot's measured launch films and web delivery practice, each with its source and the estimates marked ([audio v1](design/audio-v1.md)).
+- **Attribution.** Only numbers and ideas are used; no earshot code is used or ported. Where its values appear in our code (`internal/render/sfx_dsp.go`, `internal/audiocheck/analyse.go`) the comment says so, with the MIT licence and its copyright line, and so do audio v1 and the edit style note. Nothing of earshot ships in the media-tools image, so its licence inventory (`packages/media-tools/LICENSES.md`) is unchanged: a licence entry there is for a component that ships, and a change to that directory would also make every local image stale (the image records a hash of it).
+
+**Alternatives.**
+- Run earshot or its models in the sandbox: a 1.4 GB model download, 20 to 40 s of load per call, a D-16 licence review of the model weights, a Python and torch toolchain in the image, and a two-day-old project as a dependency. Its own `docs/LIMITS.md` says the model-free measurements are the trustworthy part and its model verdicts are hints (right about half the time for exposed events, a quarter under music), and a score from a classifier is a target that can be satisfied without the sound being good (Goodhart).
+- Licensed sound libraries for the effects: real recordings sound better than synthesis (earshot says so), but they need assets, licences and a store, and they are not deterministic across a library update. Revisit when the effects are the weak point.
+
+**Consequences.**
+- The effects are ours (export `licensed`), reproducible and free; the quality ceiling is that of synthesis, which is why there is a gallery to listen to and tests that pin the measured shape and not the taste.
+- The editor will get a sound report for the cost of one ffmpeg pass and no tokens; it is advice, with estimates marked, and it cannot judge taste (it says where and how loud, not whether it is good).
+- The numbers of seven films are a small sample, and they describe music-led launch films; a talking-head edit breaks some of them, so those checks are estimates and warnings.
+
+**Revisit** when a measured listening test on our own edits contradicts a target (the targets are data in `internal/audiocheck`), or when the effects are shown to be the weak point of an edit (licensed recordings).
 
 ## Template for new decisions
 

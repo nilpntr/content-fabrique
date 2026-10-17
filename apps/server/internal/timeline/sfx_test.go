@@ -71,13 +71,15 @@ func TestSoundEffectRoundTripAndStrictDecoding(t *testing.T) {
 	}
 }
 
-func TestSFXLength(t *testing.T) {
+// The default variants keep the lengths the effects had before variants existed.
+func TestSFXDefaultLengths(t *testing.T) {
 	for name, want := range map[string]int64{SFXWhoosh: 600, SFXImpact: 800, SFXRiser: 1500, SFXSwish: 300} {
-		if got, ok := SFXLengthMs(name); !ok || got != want {
-			t.Errorf("%s: %d %v", name, got, ok)
+		def, _ := SFXDefaultVariant(name)
+		if got, ok := SFXVariantLengthMs(name, def); !ok || got != want {
+			t.Errorf("%s/%s: %d %v", name, def, got, ok)
 		}
 	}
-	if _, ok := SFXLengthMs("boom"); ok {
+	if _, ok := SFXDefaultVariant("boom"); ok {
 		t.Error("boom is not an effect")
 	}
 }

@@ -69,6 +69,10 @@ func (p *PreviewRenderer) RenderAndWait(ctx context.Context, ws ids.WorkspaceID,
 	case err == nil:
 	case ctx.Err() != nil:
 		return "", 0, ctx.Err()
+	case errors.As(err, &failed) && failed.Reason == ReasonGraphTooLong:
+		return "", 0, runtime.UserErrorf("the preview was not rendered: the timeline's filter graph is too long, which means too many sound effects (or clips). Remove sound effects with remove_sound (a few per video are plenty), then render the new version")
+	case errors.As(err, &failed) && failed.Reason == ReasonInvalidTimeline:
+		return "", 0, runtime.UserErrorf("the preview render failed (%s): the timeline could not be compiled. Read the issues of get_timeline; if it lists none, remove the sound effects you added last, then render again", failed.Reason)
 	case errors.As(err, &failed):
 		return "", 0, runtime.UserErrorf("the preview render failed (%s). Check your work with get_timeline instead, and carry on", failed.Reason)
 	case errors.As(err, &refused) && (refused.Status == 422 || refused.Status == 429):

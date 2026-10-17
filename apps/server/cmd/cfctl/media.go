@@ -62,7 +62,12 @@ func (d mediaDeps) checkProviderAllowed(name string) error {
 }
 
 func newMediaProvider(name, dockerBin, root string) (sandbox.Provider, error) {
-	pol := sandbox.Policy{AllowedRoots: []string{root}}
+	return newSandboxProvider(name, dockerBin, root)
+}
+
+// newSandboxProvider builds the named sandbox provider (local, docker or hardened) that may mount the given roots.
+func newSandboxProvider(name, dockerBin string, roots ...string) (sandbox.Provider, error) {
+	pol := sandbox.Policy{AllowedRoots: roots}
 	switch name {
 	case "local":
 		return sandbox.NewLocal(pol), nil

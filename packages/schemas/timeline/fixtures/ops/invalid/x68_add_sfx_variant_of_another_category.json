@@ -1,0 +1,6 @@
+{
+  "op": "add_sfx",
+  "sfx": "riser",
+  "variant": "air",
+  "at_ms": 100
+}

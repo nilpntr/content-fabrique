@@ -176,9 +176,16 @@ func fitCaption(st style.Style, zone style.Zone, band style.Rect, out timeline.O
 // that plays: a word that straddles the clip's in or out point keeps the part inside; one entirely outside is dropped. A word
 // is at least one frame long, and a word never overlaps the one before it by a frame: the later word starts where the
 // earlier one ends if the speech overlaps in the transcript.
-func (c *compiler) mapWords() []mappedWord {
+func (c *compiler) mapWords() []mappedWord { return c.mapWordsOf(nil) }
+
+// mapWordsOf is mapWords for the clips keep accepts (nil: all of them). The overlap of two words is resolved among the words that
+// are kept, so a clip that is left out does not shorten the words of the others.
+func (c *compiler) mapWordsOf(keep func(clipIndex int) bool) []mappedWord {
 	var all []mappedWord
 	for ci, cl := range c.clips {
+		if keep != nil && !keep(ci) {
+			continue
+		}
 		in, out := cl.item.Source.InMs, cl.item.Source.OutMs
 		it := cl.item
 		t0 := timeline.FrameStartMs(cl.startFrame, c.fps)

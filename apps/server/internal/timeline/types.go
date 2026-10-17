@@ -109,11 +109,6 @@ const (
 	LookAuto     = "auto"
 	LookGymMoody = "gym_moody"
 
-	SFXWhoosh = "whoosh"
-	SFXImpact = "impact"
-	SFXRiser  = "riser"
-	SFXSwish  = "swish"
-
 	AnimationNone = "none"
 
 	TransitionCut        = "cut"
@@ -456,30 +451,6 @@ const (
 	AudioSFX           AudioKind = "sfx"
 )
 
-// The synthesised sound effects (P3-10 part B): their natural lengths in ms. An effect plays for its length, cut at the end of
-// the timeline.
-const (
-	SFXWhooshMs = 600
-	SFXImpactMs = 800
-	SFXRiserMs  = 1500
-	SFXSwishMs  = 300
-)
-
-// SFXLengthMs is the natural length of a sound effect, and false for a name that is not one.
-func SFXLengthMs(name string) (int64, bool) {
-	switch name {
-	case SFXWhoosh:
-		return SFXWhooshMs, true
-	case SFXImpact:
-		return SFXImpactMs, true
-	case SFXRiser:
-		return SFXRiserMs, true
-	case SFXSwish:
-		return SFXSwishMs, true
-	}
-	return 0, false
-}
-
 // AudioItem is one of *TrendSound, *LicensedTrack and *CreatorAudio. The "kind" field tells them apart in JSON; each
 // type writes its own "kind" when encoded. As with Track, the interface is satisfied by the pointer types only.
 type AudioItem interface {
@@ -555,13 +526,15 @@ type CreatorAudio struct {
 }
 
 // SFX is a sound effect the renderer synthesises (no asset, no licence: it is ours). It is not built on AudioCommon: it has
-// no source offset, and its length is the effect's own (SFXLengthMs), cut at the end of the timeline.
+// no source offset, and its length is the effect's own (SFXVariantLengthMs), cut at the end of the timeline. Variant is one of
+// the category's variants, "auto" (round-robin by id) or empty (the category's default); see sfx.go.
 type SFX struct {
-	ID     string   `json:"id"`
-	Sfx    string   `json:"sfx"`
-	AtMs   int64    `json:"at_ms"`
-	Export string   `json:"export"`
-	GainDB *float64 `json:"gain_db,omitempty"`
+	ID      string   `json:"id"`
+	Sfx     string   `json:"sfx"`
+	Variant string   `json:"variant,omitempty"`
+	AtMs    int64    `json:"at_ms"`
+	Export  string   `json:"export"`
+	GainDB  *float64 `json:"gain_db,omitempty"`
 }
 
 // AudioKind implements AudioItem.

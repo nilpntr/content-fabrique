@@ -2,6 +2,7 @@ package ops
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
@@ -544,8 +545,12 @@ func (a *applier) setSound(o *SetSound) bool {
 }
 
 func (a *applier) addSFX(o *AddSFX) bool {
-	if _, ok := timeline.SFXLengthMs(o.Sfx); !ok {
-		return a.errf(CodeBadArgument, "sfx %q is not a sound effect; use whoosh, impact, riser or swish", o.Sfx)
+	variants, ok := timeline.SFXVariants(o.Sfx)
+	if !ok {
+		return a.errf(CodeBadArgument, "sfx %q is not a sound effect; use one of %s", o.Sfx, strings.Join(timeline.SFXCategories(), ", "))
+	}
+	if _, ok := timeline.ResolveSFXVariant(o.Sfx, o.Variant, ""); !ok {
+		return a.errf(CodeBadArgument, "variant %q is not a variant of %s; use one of %s, or auto", o.Variant, o.Sfx, strings.Join(variants, ", "))
 	}
 	id, ok := a.claimID(o.ID, "s")
 	if !ok {
@@ -558,7 +563,7 @@ func (a *applier) addSFX(o *AddSFX) bool {
 		a.spec.Tracks = append(a.spec.Tracks, at)
 		a.touch(at.ID)
 	}
-	at.Items = append(at.Items, &timeline.SFX{ID: id, Sfx: o.Sfx, AtMs: o.AtMs, Export: timeline.ExportLicensed, GainDB: copyPtr(o.GainDB)})
+	at.Items = append(at.Items, &timeline.SFX{ID: id, Sfx: o.Sfx, Variant: o.Variant, AtMs: o.AtMs, Export: timeline.ExportLicensed, GainDB: copyPtr(o.GainDB)})
 	a.touch(id)
 	a.created = append(a.created, Created{OpIndex: a.idx, Kind: "sound", ID: id})
 	return true

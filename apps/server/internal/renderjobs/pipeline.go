@@ -402,6 +402,8 @@ func (r *run) execute(ctx context.Context) (finished, error) {
 		return finished{}, stager.infra
 	case stager.fatal != nil:
 		return finished{}, stager.fatal
+	case cerr != nil && errors.Is(cerr, render.ErrGraphTooLong):
+		return finished{}, fileErr(ReasonGraphTooLong, cerr)
 	case cerr != nil && errors.Is(cerr, render.ErrInvalidSpec):
 		return finished{}, fileErr(ReasonInvalidTimeline, cerr)
 	case cerr != nil:
