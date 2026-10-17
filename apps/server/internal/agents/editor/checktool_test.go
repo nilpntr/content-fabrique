@@ -88,7 +88,7 @@ func TestCheckEditReadsTheTimelineAndTheAnalysis(t *testing.T) {
 		Kind string      `json:"kind"`
 		Data CheckRecord `json:"data"`
 	}
-	if err := json.Unmarshal((*g.artifacts)[len(*g.artifacts)-1], &rec); err != nil || rec.Kind != CheckArtifact || rec.Data.Nth != 1 || rec.Data.Version != 1 || rec.Data.Failed < 2 || len(rec.Data.Checks) != 13 || rec.Data.RecordVersion != CheckRecordVersion {
+	if err := json.Unmarshal((*g.artifacts)[len(*g.artifacts)-1], &rec); err != nil || rec.Kind != CheckArtifact || rec.Data.Nth != 1 || rec.Data.Version != 1 || rec.Data.Failed < 2 || len(rec.Data.Checks) != 14 || rec.Data.RecordVersion != CheckRecordVersion {
 		t.Fatalf("the recorded check: %v %+v", err, rec)
 	}
 

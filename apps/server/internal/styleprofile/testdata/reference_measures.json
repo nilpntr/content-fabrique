@@ -1,0 +1,349 @@
+[
+ {
+  "name": "reference 1",
+  "duration_s": 14.63,
+  "fps": 30.344036697247706,
+  "codec": "hevc",
+  "width": 1080,
+  "height": 1920,
+  "cuts_s": [
+   2.1,
+   3.33,
+   10.77
+  ],
+  "shots_s": [
+   2.1,
+   1.23,
+   7.44,
+   3.86
+  ],
+  "video": {
+   "motion_median": 0.8,
+   "zoom_events": 0,
+   "push_in_share": 0,
+   "flashes": 0,
+   "effects_per_minute": 0,
+   "luma_mean": 0.08,
+   "luma_p90": 0.25,
+   "sat_mean": 0.03,
+   "sat_p90": 0.09,
+   "vignette_ratio": 0.24
+  },
+  "audio": {
+   "has_audio": true,
+   "integrated_lufs": -15.6,
+   "range_lu": 1.6,
+   "intro_s": 3.2,
+   "lift_lu": 2.9,
+   "quarter_lufs": [
+    -17.6,
+    -15.2,
+    -15.2,
+    -15.4
+   ],
+   "arc": "builds",
+   "ending_lu": 0.2,
+   "tempo_bpm": 78,
+   "tempo_confidence": 0.59,
+   "cut_onset_ms": [
+    210,
+    -265
+   ],
+   "cut_beat_ms": [
+    214,
+    -94,
+    -347
+   ],
+   "cuts_within_100ms": 0,
+   "beat_locked": false,
+   "first_cut_onset_ms": -560,
+   "first_cut_at_lift": false,
+   "music_present": true,
+   "flatness": 0.14,
+   "hits_per_10s": 0,
+   "content": "music_only",
+   "speech": "unknown"
+  },
+  "text": {
+   "title_present": true,
+   "text": "BUILDING LATS 101",
+   "case": "upper",
+   "colour": "#FFF0B0",
+   "position": "upper_third",
+   "alignment": "center",
+   "weight": "bold",
+   "condensed": true,
+   "lines": 1
+  }
+ },
+ {
+  "name": "reference 2",
+  "duration_s": 43.8,
+  "fps": 30,
+  "codec": "h264",
+  "width": 576,
+  "height": 1024,
+  "cuts_s": [],
+  "shots_s": [
+   43.8
+  ],
+  "video": {
+   "motion_median": 0.89,
+   "zoom_events": 0,
+   "push_in_share": 0,
+   "flashes": 0,
+   "effects_per_minute": 0,
+   "luma_mean": 0.08,
+   "luma_p90": 0.14,
+   "sat_mean": 0.03,
+   "sat_p90": 0.05,
+   "vignette_ratio": 1.37
+  },
+  "audio": {
+   "has_audio": true,
+   "integrated_lufs": -17,
+   "range_lu": 4.5,
+   "intro_s": 1.9,
+   "lift_lu": 2.8,
+   "quarter_lufs": [
+    -19.7,
+    -18.4,
+    -16.6,
+    -15.2
+   ],
+   "arc": "builds",
+   "ending_lu": 2.1,
+   "tempo_bpm": 70,
+   "tempo_confidence": 0.58,
+   "cuts_within_100ms": 0,
+   "beat_locked": false,
+   "first_cut_onset_ms": 0,
+   "first_cut_at_lift": false,
+   "music_present": true,
+   "flatness": 0.14,
+   "hits_per_10s": 0,
+   "content": "music_only",
+   "speech": "unknown"
+  },
+  "text": {
+   "title_present": false
+  }
+ },
+ {
+  "name": "reference 3",
+  "duration_s": 25.3,
+  "fps": 30,
+  "codec": "h264",
+  "width": 576,
+  "height": 1024,
+  "cuts_s": [
+   2.33,
+   3.63,
+   24.1
+  ],
+  "shots_s": [
+   2.33,
+   1.3,
+   20.47,
+   1.2
+  ],
+  "video": {
+   "motion_median": 1.4,
+   "zoom_events": 0,
+   "push_in_share": 0,
+   "flashes": 0,
+   "effects_per_minute": 0,
+   "luma_mean": 0.11,
+   "luma_p90": 0.35,
+   "sat_mean": 0.06,
+   "sat_p90": 0.13,
+   "vignette_ratio": 0.82
+  },
+  "audio": {
+   "has_audio": true,
+   "integrated_lufs": -15.9,
+   "range_lu": 0.8,
+   "intro_s": 2.9,
+   "lift_lu": 1.9,
+   "quarter_lufs": [
+    -16.8,
+    -15.6,
+    -15.7,
+    -15.8
+   ],
+   "arc": "flat",
+   "ending_lu": 0.2,
+   "tempo_bpm": 124,
+   "tempo_confidence": 0.54,
+   "cut_onset_ms": [
+    -30,
+    255,
+    -20
+   ],
+   "cut_beat_ms": [
+    -110,
+    222,
+    -114
+   ],
+   "cuts_within_100ms": 0.67,
+   "beat_locked": false,
+   "first_cut_onset_ms": -105,
+   "first_cut_at_lift": true,
+   "music_present": true,
+   "flatness": 0.14,
+   "hits_per_10s": 0,
+   "content": "music_only",
+   "speech": "unknown"
+  },
+  "text": {
+   "title_present": true,
+   "text": "how to bake a croissant tricep",
+   "case": "lower",
+   "colour": "#FFFAC8",
+   "position": "upper_third",
+   "alignment": "center",
+   "weight": "regular",
+   "condensed": false,
+   "lines": 2
+  }
+ },
+ {
+  "name": "reference 4",
+  "duration_s": 28.6,
+  "fps": 30,
+  "codec": "h264",
+  "width": 576,
+  "height": 1024,
+  "cuts_s": [],
+  "shots_s": [
+   28.6
+  ],
+  "video": {
+   "motion_median": 1.61,
+   "zoom_events": 0,
+   "push_in_share": 0,
+   "flashes": 0,
+   "effects_per_minute": 0,
+   "luma_mean": 0.07,
+   "luma_p90": 0.24,
+   "sat_mean": 0.03,
+   "sat_p90": 0.08,
+   "vignette_ratio": 0.3
+  },
+  "audio": {
+   "has_audio": true,
+   "integrated_lufs": -19,
+   "range_lu": 2.9,
+   "intro_s": 7.4,
+   "lift_lu": 5.5,
+   "quarter_lufs": [
+    -21.2,
+    -20.6,
+    -19.7,
+    -18.7
+   ],
+   "arc": "builds",
+   "ending_lu": 0.8,
+   "tempo_bpm": 76,
+   "tempo_confidence": 0.14,
+   "cuts_within_100ms": 0,
+   "beat_locked": false,
+   "first_cut_onset_ms": 0,
+   "first_cut_at_lift": false,
+   "music_present": true,
+   "flatness": 0.03,
+   "hits_per_10s": 1,
+   "content": "music_only",
+   "speech": "unknown"
+  },
+  "text": {
+   "title_present": true,
+   "text": "BRACHIORADIALIS BUILDER 101",
+   "case": "upper",
+   "colour": "#FFF0B0",
+   "position": "upper_third",
+   "alignment": "left",
+   "weight": "bold",
+   "condensed": true,
+   "lines": 2
+  }
+ },
+ {
+  "name": "reference 5",
+  "duration_s": 18.57,
+  "fps": 30,
+  "codec": "h264",
+  "width": 576,
+  "height": 1024,
+  "cuts_s": [
+   2.47,
+   5.23,
+   6.63,
+   7.93,
+   9.3
+  ],
+  "shots_s": [
+   2.47,
+   2.76,
+   1.4,
+   1.3,
+   1.37,
+   9.27
+  ],
+  "video": {
+   "motion_median": 0.46,
+   "zoom_events": 0,
+   "push_in_share": 0,
+   "flashes": 0,
+   "effects_per_minute": 0,
+   "luma_mean": 0.07,
+   "luma_p90": 0.18,
+   "sat_mean": 0.02,
+   "sat_p90": 0.03,
+   "vignette_ratio": 1.2
+  },
+  "audio": {
+   "has_audio": true,
+   "integrated_lufs": -16.7,
+   "range_lu": 0.8,
+   "intro_s": 2.1,
+   "lift_lu": 3.3,
+   "quarter_lufs": [
+    -17.5,
+    -16.5,
+    -16.8,
+    -16.8
+   ],
+   "arc": "flat",
+   "ending_lu": 0.2,
+   "tempo_bpm": 117,
+   "tempo_confidence": 0.48,
+   "cut_onset_ms": [
+    515,
+    -35,
+    90,
+    510,
+    155
+   ],
+   "cut_beat_ms": [
+    -5,
+    191,
+    52,
+    -186,
+    158
+   ],
+   "cuts_within_100ms": 0.4,
+   "beat_locked": false,
+   "first_cut_onset_ms": -520,
+   "first_cut_at_lift": true,
+   "music_present": true,
+   "flatness": 0.1,
+   "hits_per_10s": 2.7,
+   "content": "music_only",
+   "speech": "unknown"
+  },
+  "text": {
+   "title_present": false
+  }
+ }
+]

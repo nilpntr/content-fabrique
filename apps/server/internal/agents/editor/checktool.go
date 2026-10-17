@@ -16,6 +16,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/analysis"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
+	"github.com/nilpntr/content-fabrique/internal/styleprofile"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 	"github.com/nilpntr/content-fabrique/internal/timeline/ops"
 )
@@ -107,7 +108,7 @@ func LoadAssetAnalysis(ctx context.Context, src AnalysisSource, ws ids.Workspace
 //
 // sampler measures the version's preview render for the checks that look at the rendered picture; nil, or a version with no preview,
 // leaves those checks "not applicable".
-func CheckVersion(ctx context.Context, projects Projects, src AnalysisSource, ws ids.WorkspaceID, pid ids.ProjectID, version int, plan *Plan, sampler RenderSampler) (Report, error) {
+func CheckVersion(ctx context.Context, projects Projects, src AnalysisSource, ws ids.WorkspaceID, pid ids.ProjectID, version int, plan *Plan, sampler RenderSampler, style *styleprofile.Profile) (Report, error) {
 	vd, perr := projects.Version(ctx, actor(ws), pid, version)
 	if perr != nil {
 		return Report{}, projectErr(perr)
@@ -120,7 +121,7 @@ func CheckVersion(ctx context.Context, projects Projects, src AnalysisSource, ws
 	if err != nil {
 		return Report{}, err
 	}
-	in := CheckInput{Version: version, Spec: spec, Plan: plan, Assets: assets, Issues: vd.Issues}
+	in := CheckInput{Version: version, Spec: spec, Plan: plan, Assets: assets, Issues: vd.Issues, Style: style}
 	if sampler != nil {
 		switch series, err := sampler.Rendered(ctx, ws, pid, version); {
 		case err == nil:
@@ -164,7 +165,7 @@ func (d Deps) checkEdit(ctx context.Context, rc runtime.RunContext, _ noArgs) (r
 	if d.previewsOn() && !d.previewOK(ctx, rc, v) {
 		return runtime.Result{}, runtime.UserErrorf("version %d has not been previewed. Call render_preview first, then check_edit: the checks measure the rendered picture (a look can crush the footage), not only the timeline", v)
 	}
-	report, err := CheckVersion(ctx, d.Projects, d.Store, ws, pid, v, plan, d.Rendered)
+	report, err := CheckVersion(ctx, d.Projects, d.Store, ws, pid, v, plan, d.Rendered, d.style(ctx, ws))
 	if err != nil {
 		return runtime.Result{}, err
 	}

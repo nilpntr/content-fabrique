@@ -14,6 +14,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
+	"github.com/nilpntr/content-fabrique/internal/styleprofile"
 )
 
 // plan_edit: the understand step and the creative plan (D-28, docs/design/edit-style-v1.md section 2). Before the first edit the
@@ -130,7 +131,7 @@ type planArgsShot struct {
 
 // BuildPlan checks a plan_edit call and works out its numbers. footage is the set of the project's clips (an asset id the plan names
 // must be one of them); f is what the build can do. The error is written for the model.
-func BuildPlan(in planArgs, footage map[string]bool, f Features) (Plan, error) {
+func BuildPlan(in planArgs, footage map[string]bool, f Features, style *styleprofile.Profile) (Plan, error) {
 	fail := func(format string, a ...any) (Plan, error) {
 		return Plan{}, runtime.UserErrorf("the plan is not valid: "+format, a...)
 	}
@@ -178,7 +179,8 @@ func BuildPlan(in planArgs, footage map[string]bool, f Features) (Plan, error) {
 	if in.TempoBPM != 0 && (in.TempoBPM < MinTempoBPM || in.TempoBPM > MaxTempoBPM) {
 		return fail("tempo_bpm is %d; use 0 for a video with no beat grid, or %d to %d (120 to 128 is the default for a short video)", in.TempoBPM, MinTempoBPM, MaxTempoBPM)
 	}
-	if in.TempoBPM == 0 && typeLimits[p.ContentType].gridRequired {
+	// A creator whose cuts sit loosely near the music's onsets (not on a grid) needs no beat grid, whatever the content type.
+	if in.TempoBPM == 0 && typeLimits[p.ContentType].gridRequired && (style == nil || style.Audio.BeatLocked) {
 		return fail("tempo_bpm 0 means no beat grid, which a %s video needs: use 120 to 128 so the cuts land on the beat", p.ContentType)
 	}
 	p.TempoBPM = in.TempoBPM
@@ -230,7 +232,7 @@ func BuildPlan(in planArgs, footage map[string]bool, f Features) (Plan, error) {
 func BeatMs(bpm int) int64 { return (60000*2 + int64(bpm)) / (2 * int64(bpm)) }
 
 // planNotes are the things about a valid plan that the editor should hear now rather than at check_edit.
-func planNotes(p Plan) []string {
+func planNotes(p Plan, style *styleprofile.Profile) []string {
 	var notes []string
 	target := int64(p.TargetLengthS) * 1000
 	if p.EstimatedLengthMs < target*durationLoPct/100 || p.EstimatedLengthMs > target*durationHiPct/100 {
@@ -247,8 +249,23 @@ func planNotes(p Plan) []string {
 		}
 		run, start = 1, i
 	}
-	if p.Shots[0].LengthMs > 2000 {
-		notes = append(notes, fmt.Sprintf("The hook shot is %s long. The first shot should be 1 to 2 seconds.", secs(p.Shots[0].LengthMs)))
+	if style != nil && style.Effects.Verdict == styleprofile.EffectsNone {
+		n := 0
+		for _, s := range p.Shots {
+			if s.Effect != "none" {
+				n++
+			}
+		}
+		if n > 0 {
+			notes = append(notes, fmt.Sprintf("%d shots of the plan have an effect. This creator's videos have none: set every effect to none.", n))
+		}
+	}
+	if hookMax := applyStyle(limits{}, style).hookMaxMs; p.Shots[0].LengthMs > hookMax {
+		if style != nil {
+			notes = append(notes, fmt.Sprintf("The hook shot is %s long. The creator's first cut comes by %s.", secs(p.Shots[0].LengthMs), secs(hookMax)))
+		} else {
+			notes = append(notes, fmt.Sprintf("The hook shot is %s long. The first shot should be 1 to 2 seconds.", secs(p.Shots[0].LengthMs)))
+		}
 	}
 	return notes
 }
@@ -287,7 +304,8 @@ func (d Deps) planEdit(ctx context.Context, rc runtime.RunContext, in planArgs) 
 		footage[v.AssetID.String()] = true
 	}
 	feat := d.features()
-	plan, err := BuildPlan(in, footage, feat)
+	style := d.style(ctx, ws)
+	plan, err := BuildPlan(in, footage, feat, style)
 	if err != nil {
 		return runtime.Result{}, err
 	}
@@ -303,11 +321,12 @@ func (d Deps) planEdit(ctx context.Context, rc runtime.RunContext, in planArgs) 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Plan saved (it is shown to the creator). Content type %s, playbook %s.\n", plan.ContentType, plan.PlaybookVersion)
 	b.WriteString(plan.describe())
-	for _, n := range planNotes(plan) {
+	for _, n := range planNotes(plan, style) {
 		b.WriteString("Note: " + n + "\n")
 	}
 	b.WriteString("\nThe playbook for this kind of video. Follow it; it is the craft of the genre, and check_edit will measure your edit against it.\n\n")
-	return runtime.Result{Content: []llm.Block{llm.TextBlock(b.String() + book)}}, nil
+	blocks := []llm.Block{llm.TextBlock(b.String() + book + styleNote(style))}
+	return runtime.Result{Content: append(blocks, styleBlocks(style)...)}, nil
 }
 
 // features is what the build offers (the tests of the gate replace it).

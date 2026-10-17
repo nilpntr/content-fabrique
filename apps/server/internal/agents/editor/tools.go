@@ -56,6 +56,8 @@ type Store interface {
 	// ListAssetSpans and ListAssetExposureSeries are what check_edit judges the edit against (the reps, the dead time, the luma).
 	ListAssetSpans(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.AssetSpanRow, error)
 	ListAssetExposureSeries(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.ExposureSeriesRow, error)
+	// GetCreatorStyle reads the workspace's creator style profile (P6-05); ErrNotFound when it has none.
+	GetCreatorStyle(ctx context.Context, ws ids.WorkspaceID) (store.CreatorStyle, error)
 	// GetAgentRun reads the run's row (its model and max_tokens, for the worst-case cost of a call).
 	GetAgentRun(ctx context.Context, ws ids.WorkspaceID, id uuid.UUID) (store.AgentRun, error)
 	// AgentArtifactEvents reads a run's artifact events of one kind: the plan and the checks of a run that resumed in another worker

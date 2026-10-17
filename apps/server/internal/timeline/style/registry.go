@@ -110,6 +110,9 @@ type Style struct {
 var white = Opaque(255, 255, 255)
 var yellow = Opaque(0xFF, 0xD6, 0x0A)
 
+// cream is the title colour of the creator style profile's reference videos (P6-05): a warm off-white, #F5F0DC.
+var cream = Opaque(0xF5, 0xF0, 0xDC)
+
 // registry is the style registry. Order is alphabetical by id, which is the order IDs returns.
 var registry = []Style{
 	{
@@ -143,9 +146,19 @@ var registry = []Style{
 		OutlinePct: 7, ShadowPct: 3, Role: RoleText,
 	},
 	{
+		ID: "title_lowercase", Description: "A witty lowercase one-liner in cream, centred, with no outline and a soft shadow: the quiet title of a creator who writes the way they talk. Write the text in lowercase.",
+		Font: "inter-bold", EmPct: 4.0, Fill: cream, Shadow: Colour{0, 0, 0, 170},
+		ShadowPct: 5, Role: RoleText,
+	},
+	{
 		ID: "title_outline", Description: "A tall condensed title with a thick black outline; for punchy one-line hooks.",
 		Font: "anton", EmPct: 5.5, Fill: white, Outline: Opaque(0, 0, 0),
 		OutlinePct: 10, Role: RoleText,
+	},
+	{
+		ID: "title_series", Description: "A bold condensed uppercase title in cream with a soft shadow and no outline, for a series title; at most two short lines. Write the text in capitals.",
+		Font: "anton", EmPct: 6.0, Fill: cream, Shadow: Colour{0, 0, 0, 170},
+		ShadowPct: 4, Role: RoleText,
 	},
 }
 
