@@ -95,7 +95,7 @@ The new craft features reach the editor agent as edit ops, whose descriptions in
 
 Every addition comes with schema fixtures, ops, validation rules (for example, a speed ramp must not exceed the source length, and a motion preset needs a long enough shot), compiler support and golden renders in all four formats.
 
-## 6. Editor v2 as built (`internal/agents/editor`, prompt `editor.v2.0`)
+## 6. Editor v2 as built (`internal/agents/editor`, prompt `editor.v2.1`)
 
 **The flow of a run.** Understand (`find_moments`, `view_clip`) → `plan_edit` → `edit_timeline` (in the order of section 7) → `render_preview` → `check_edit` → at most one revision (`edit_timeline`, `render_preview`, `check_edit`) → `finish`. The tools are in [agent-runtime-v1](agent-runtime-v1.md) section 5; the gates are the first `edit_timeline` of a run (refused without a plan) and `finish` (refused without a preview and a `check_edit` of the newest version the run made). Both gates keep their record in the worker and fall back to the run's events, so a run that resumes in another worker is not asked to plan or check again. The revision limit is guidance in the answer of `check_edit` ("this was the check after your revision pass: do not revise again"), not a refusal, so a run that cannot fix a check can still finish and say why; the run's budgets still bound it.
 
@@ -104,12 +104,12 @@ Every addition comes with schema fixtures, ops, validation rules (for example, a
 ```json
 {"kind": "creative_plan", "tool_use_id": "toolu_...", "data": {
   "version": 1,
-  "content_type": "workout", "playbook": "workout", "playbook_version": "workout.v1",
+  "content_type": "workout", "playbook": "workout", "playbook_version": "workout.v2",
   "story": "...", "hook": "...", "arc": "...", "ending": "...",
   "target_length_s": 25, "tempo_bpm": 124, "pace": "building",
   "beat_ms": 484, "estimated_length_ms": 24200,
   "shots": [{"role": "hook", "what": "...", "asset_id": "ast_...", "beats": 3, "effect": "punch_in", "length_ms": 1452}],
-  "prompt_version": "editor.v2.0"}}
+  "prompt_version": "editor.v2.1"}}
 ```
 
 `data.version` is the shape's version (a reader checks it first). A later `plan_edit` writes another event; the last one is the plan. `role` is one of hook, build, peak, detail, step, reveal, payoff, broll, ending; `pace` is steady, building or fast; `effect` is none, punch_in, push_in, pull_back, shake, speed_ramp, whip, zoom_through or flash. `asset_id` and `effect` may be absent (`effect` is `none` when left out).
@@ -128,8 +128,9 @@ Every number is computed in Go from the stored timeline version and the stored c
   "checks": [{"id": "hook_length", "status": "pass", "detail": "the first shot is 1.47 s long (at most 2.00 s)"}],
   "metrics": {"duration_ms": 12350, "shots": 6, "shot_min_ms": 1470, "shot_median_ms": 1930, "shot_max_ms": 3150, "longest_equal_run": 1,
               "rep_edges_on": 6, "rep_edges_total": 6, "dead_share": 0.02, "effects": 2, "ramps": 0, "effects_per_cut": 0.4,
-              "cuts_on_beat": 5, "cuts": 5, "brightness_max_jump": 0.07, "brightness_range": 0.12},
-  "passed": 10, "failed": 1, "skipped": 1, "nth": 1}}
+              "cuts_on_beat": 5, "cuts": 5, "brightness_max_jump": 0.07, "brightness_range": 0.12,
+              "audio_profile": "sound_ready", "audio_lufs": -21, "audio_bed_lufs": -24.2, "audio_source": "stem", "audio_ms": 310},
+  "passed": 13, "failed": 1, "skipped": 1, "nth": 1}}
 ```
 
 | Check | Passes when | Notes |
@@ -147,6 +148,9 @@ Every number is computed in Go from the stored timeline version and the stored c
 | `brightness_jump` | no cut jumps more than 0.25 in the p90 luma of the lit part of the picture, or by 1.8 times with at least 0.10 | measured on the **rendered preview** (below), not the source: the exposure of each shot is the median, over the samples of the middle half of its time on screen, of the 90th percentile luma of the frame (`analysis.Series.ExposureBetween`): not the mean, so low-key footage is not penalised. In low-key footage the numbers are small, hence the ratio: the founder's posing clip (p90 0.37) is 1.9 times the gym clips (0.20) and only 0.17 apart. Not applicable without a preview |
 | `crushed` | every shot's rendered p90 luma keeps at least 70 % of its source's p90 (allowing for the exposure hint the clip carries), and likewise its mean, and none renders near black (p90 under 0.04) | measured on the rendered preview against the analysis of the part of the clip the shot plays. Not applicable without a preview |
 | `beat_sync` | at least 70 % of the cuts are within 2 frames of a beat marker | a workout, unboxing, vlog or general video with no markers fails; talking and tutorial skip it |
+| `audio_level` | the ears' level checks of the preview's sound pass: has a sound track, the integrated loudness in the profile's window (sound-ready: -19 to -15 LUFS; programme: the web's -16 to -9), true peak, no clipping, DC or imbalance | measured on the **preview's audio stem** (the mix without the beat guide), or the video's own sound when there is no guide; `skip` without a preview (P3-12, [audio v1](audio-v1.md) section 6) |
+| `audio_bed` | sound-ready profile only: the bed is there (sound over -45 LUFS at least 90 % of the time), has no gap over 0.5 s and is steady (the quietest tenth within 6 LU of the median) | the fix names `set_clip_audio` mode `bed` or an effect on a clip with no sound |
+| `audio_effects` | the effects land on their frame (hard attacks within a frame, whooshes within 100 ms), every accent peaks at least 4 LU over the bed and within 6 LU of a -14 LUFS trend sound, and the density is at most 4 per 10 s | an estimate close to its bar is reported as "borderline" and passes |
 
 `beat_sync` was not in the list of step 5; it is the check for step 3 (the editor writes the grid, so it should be measured).
 
@@ -164,6 +168,19 @@ Every number is computed in Go from the stored timeline version and the stored c
 
 **Measuring.** `cfctl eval editor --workspace <wks_...> --project <prj_...> [--version N] [--json]` runs the same checks over a stored version (the current one by default), with the plan of the editor run that made it when the run wrote one. With object storage (`R2_*`) and the media sandbox configured it also measures the version's preview render, so `crushed` and `brightness_jump` apply; without them it says so. It costs nothing and writes nothing. (`--workspace` is required, as for the other `cfctl` commands: every store query is scoped to a workspace.)
 
+## Sound-ready exports (P3-12)
+
+> Proposed by the director ([D-33](../05-decisions.md#d-33-exports-are-sound-ready)); the founder confirms. Built in `editor.v2.1`.
+
+The export has no music and no trend sound, and the creator adds a trending sound in TikTok over it. So it must not be silent without that sound and must not fight it:
+
+- **No speech:** the clips' own sound is a **low bed** (`set_clip_audio` mode `bed`, once, without `id`: about -24 LUFS, evened out across clips, short fades at the cuts, never normalised up to the programme), and the generated effects go on top.
+- **Speech** (the brief or description says so, or the playbook is talking): that clip is `full`, the programme at its own level, ducked under effects; the other clips stay a bed. `full` is never for ambience.
+- **A trend sound stays a cue**: never exported; the preview keeps the beat guide, and the edit is still cut to the grid so it matches what the creator adds.
+- **Levels:** the bed is about -24 LUFS short-term and nothing is normalised to a programme target; the effects peak around -12 to -10 LUFS (within 6 LU of a -14 LUFS trend sound, which dominates the bed); the export integrates at about -21 to -19 LUFS for few effects. The editor leaves `gain_db` alone unless `check_edit` says an effect is lost in the bed.
+- **The playbooks** (all at `v2`): workout keeps the gym as a bed, a whoosh on each whip, a sub_drop with the impact on the drop, a riser into the hook and a sting on the loop; unboxing keeps the reveal's own sound as `full` and the rest a bed; talking is `full` on speech and a bed on cutaways; general, vlog and tutorial use bed and full instead of `use_source`.
+- **The checks** `audio_level`, `audio_bed` and `audio_effects` (section 7) listen to the preview and say what to change: a missing bed, an effect lost in the bed (a few dB or a heavier variant), a bed that is not at about -24 LUFS or an export outside -24 to -16 LUFS.
+
 ## Sound (P3-11)
 
 > The rules below come from the measured profile of seven professional launch films and the practice notes of **earshot** ([github.com/Leonxlnx/earshot](https://github.com/Leonxlnx/earshot), MIT licence, Copyright (c) 2026 Leon Lin; its `docs/launch-video-sound.md` and `docs/motion-sfx-techniques.md`). "Measured" means measured by earshot on those seven films (small sample: what pros did here, not laws); "practice" is established professional practice it cites. We took numbers and ideas, not code. The sound design and the ears that check it are in [audio v1](audio-v1.md).
@@ -172,7 +189,7 @@ Every number is computed in Go from the stored timeline version and the stored c
 - **Sync: on the frame, not on every cut.** An effect lands on its frame: a **whoosh** peaks on the cut (or on the fastest frame of the move) and starts 0.2 to 0.6 s before it, so put its `at_ms` that long before the cut and match its length to the move (`fast` for a quick whip, `heavy` for a big one); a **click** is on the frame the cursor presses, not when the UI reacts; an **impact** or **sting** is exactly on the reveal frame. A sound a frame or two off breaks the illusion: let it lead by up to a frame, never lag by two. A hit on every cut is **not** what the pros do: sound on visual events is no better than chance in most of the references (81 % of cuts have an onset within 100 ms, but 86 % do by chance, measured), because dense music covers the cuts. Deliberate accents go on the moments that matter. With a sparse sound track (no dense music) every cut needs some sound.
 - **The arc: open strong, hold the body, land the ending.** Sound from frame 0, no silent cold open (the first sound within 0.04 to 0.48 s, median 0.13 s, measured). A steady body: the loudest 3 s sit only 1.1 to 3.5 LU above the programme (measured), so do not make the viewer wait for a climax. Land the ending at body level with a short fade or a sting finishing within about 0.5 s of the last frame; avoid a long fade-out and dead air (measured: a median 0.04 s of silence after the sound). Shape the energy with arrangement (layers in and out, a stop-down before the reveal), not with big level changes.
 - **The big reveal.** A riser, then a stop-down (0.1 to 0.5 s of near silence, practice; 4 of 7 films drop the sound 10 dB or more for 0.15 to 1.5 s, measured), then an **impact with a sub drop** on the reveal frame. Once or twice per film, not on every scene. Reserve the longest, widest whoosh for the biggest move.
-- **Loudness.** Master at about **-14 LUFS integrated, true peak at most -1 dBTP** (practice; the renderer does this). Up to about -10 for a punchy social cut. The effects are mixed after the normalisation, at a level matched to their category, with a -1.5 dBFS ceiling.
+- **Loudness.** (A programme; an export with no speech is a bed and effects, see "Sound-ready exports" above.) Master at about **-14 LUFS integrated, true peak at most -1 dBTP** (practice; the renderer does this). Up to about -10 for a punchy social cut. The effects are mixed after the normalisation, at a level matched to their category, with a -1.5 dBFS ceiling.
 - **Voice-over.** Duck the music 3 to 6 dB under speech and keep effects out of its way: never put a big hit on top of a key word (practice). The renderer ducks the programme a few dB under an accent that overlaps speech from a clip's own sound.
 - **UI foley.** One click per on-screen click, short, bright (2 to 6 kHz) and well under the hits (about 10 to 15 dB under the music's peaks, practice); notifications short and soft.
 

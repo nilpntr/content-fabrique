@@ -74,7 +74,7 @@ var hints = map[string]string{
 	NameUpdateText + "|":    "give at least one field to change, and not both anchor and position",
 	NameSetTransition + "|": "cut takes no duration_ms; every other type (crossfade, dip_to_black, whip, whip_left, whip_right, zoom_through, flash) needs a duration_ms from 100 to 1000",
 	NameSetCaptions + "|":   "give at least one of enabled, style, uppercase and max_words",
-	NameSetClipAudio + "|":  "give at least one of use_source and gain_db",
+	NameSetClipAudio + "|":  "give at least one of mode (mute, bed or full), use_source (the old spelling, not together with mode) and gain_db",
 }
 
 // checkOpDoc validates one decoded op (numbers as json.Number) against its schema and returns the problems as issues

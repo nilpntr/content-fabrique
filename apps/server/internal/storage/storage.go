@@ -182,6 +182,9 @@ const (
 	RenderMP4Name          = "render.mp4"
 	RenderContactSheetName = "contact_sheet.jpg"
 	RenderTimeMapName      = "time_map.json"
+	// RenderAudioStemName is the audio of a preview render without its beat guide (P3-12), AAC in an MP4 container: what the audio check
+	// measures. Only a preview with a guide has one, and no row records it: its key is derived (a reader asks storage whether it exists).
+	RenderAudioStemName = "audio_stem.m4a"
 )
 
 // RenderPrefix is the prefix of every object of one render: ws/{workspace}/projects/{project}/renders/{render}/. It is under
@@ -190,10 +193,10 @@ func RenderPrefix(ws ids.WorkspaceID, project ids.ProjectID, render ids.RenderID
 	return "ws/" + ws.String() + "/projects/" + project.String() + "/renders/" + render.String() + "/"
 }
 
-// RenderKey is the key of one file of a render. name must be one of the three RenderXxxName constants.
+// RenderKey is the key of one file of a render. name must be one of the RenderXxxName constants.
 func RenderKey(ws ids.WorkspaceID, project ids.ProjectID, render ids.RenderID, name string) (string, error) {
 	switch name {
-	case RenderMP4Name, RenderContactSheetName, RenderTimeMapName:
+	case RenderMP4Name, RenderContactSheetName, RenderTimeMapName, RenderAudioStemName:
 		return RenderPrefix(ws, project, render) + name, nil
 	}
 	return "", fmt.Errorf("storage: %q is not a file of a render", name)

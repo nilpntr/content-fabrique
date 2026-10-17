@@ -162,6 +162,16 @@ func TestSpeedRampValidation(t *testing.T) {
 			c.Audio = &VideoAudio{UseSource: ptr(true)}
 			return c
 		}(), []Code{CodeRampAudioMuted}},
+		{"a ramp, and a bed, plays the bed at the average speed with no warning", func() VideoItem {
+			c := ramp(good...)
+			c.Audio = &VideoAudio{Mode: AudioModeBed}
+			return c
+		}(), nil},
+		{"a ramp, and full mode, is muted with a warning", func() VideoItem {
+			c := ramp(good...)
+			c.Audio = &VideoAudio{Mode: AudioModeFull}
+			return c
+		}(), []Code{CodeRampAudioMuted}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

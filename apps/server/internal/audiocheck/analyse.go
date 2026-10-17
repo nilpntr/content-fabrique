@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/nilpntr/content-fabrique/internal/render"
+	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
 // The numbers the report is held to, and where each comes from. "earshot" is the measured profile of seven professional launch films
@@ -16,25 +17,46 @@ import (
 const (
 	// Integrated loudness: earshot measured -22.2 to -7.3 LUFS (median -14.8, 4 of 7 inside -16..-9); practice is about -14 for the
 	// web and up to about -10 for a punchy social cut. The check passes in the web window earshot scores, -16 to -9.
-	targetLUFS        = -14.0
-	lufsWindowLo      = -16.0
-	lufsWindowHi      = -9.0
-	lufsWarnMargin    = 3.0
-	truePeakLimit     = -1.0 // practice: <= -1 dBTP on the master, because AAC/MP3 encoding adds up to about 1 dB of overshoot
-	truePeakDecoded   = 0.0  // earshot scores an already-decoded MP4 against 0 dBTP (6 of 7 films were measured above it: a flaw)
-	rangeMaxLU        = 12.5 // earshot: loudness range 1.7 to 12.2 LU (median 5.5); only the upper end is a target, a flat mix is fine
-	rangeWarnMaxLU    = 18.0 // estimate: speech with pauses reads wide, but past this the level wanders
-	firstSoundMaxS    = 0.5  // earshot: first sound within 0.04 to 0.48 s (median 0.13 s); no silent cold open
-	firstSoundWarnS   = 1.0  // estimate
-	bodyWithinLU      = 3.0  // estimate: earshot: 6 of 7 films open within -1.8..+2.2 LU of the integrated level
-	bodyMaxS          = 1.5  // estimate: the edit style's hook is in the first 2 s; the momentary window itself needs about 0.3 s
-	bodyWarnS         = 3.0  // estimate
-	gapMaxS           = 0.5  // earshot: no silent hole longer than 0.04 s except one film's deliberate 1.66 s; a stop-down is 0.15 to 1.5 s
-	gapWarnS          = 1.7  // earshot: the longest deliberate silence measured
-	endSilenceMaxS    = 0.5  // earshot: dead air after the sound, median 0.04 s; practice: finish within about 0.5 s of the last frame
-	endSilenceWarnS   = 1.5  // estimate
-	endLUMin          = -4.0 // earshot: the last 3 s reach body level, -2.2 to +5.6 LU against the integrated level (median +0.2)
-	endLUMax          = 6.0
+	targetLUFS      = -14.0
+	lufsWindowLo    = -16.0
+	lufsWindowHi    = -9.0
+	lufsWarnMargin  = 3.0
+	truePeakLimit   = -1.0 // practice: <= -1 dBTP on the master, because AAC/MP3 encoding adds up to about 1 dB of overshoot
+	truePeakDecoded = 0.0  // earshot scores an already-decoded MP4 against 0 dBTP (6 of 7 films were measured above it: a flaw)
+	rangeMaxLU      = 12.5 // earshot: loudness range 1.7 to 12.2 LU (median 5.5); only the upper end is a target, a flat mix is fine
+	rangeWarnMaxLU  = 18.0 // estimate: speech with pauses reads wide, but past this the level wanders
+	firstSoundMaxS  = 0.5  // earshot: first sound within 0.04 to 0.48 s (median 0.13 s); no silent cold open
+	firstSoundWarnS = 1.0  // estimate
+	bodyWithinLU    = 3.0  // estimate: earshot: 6 of 7 films open within -1.8..+2.2 LU of the integrated level
+	bodyMaxS        = 1.5  // estimate: the edit style's hook is in the first 2 s; the momentary window itself needs about 0.3 s
+	bodyWarnS       = 3.0  // estimate
+	gapMaxS         = 0.5  // earshot: no silent hole longer than 0.04 s except one film's deliberate 1.66 s; a stop-down is 0.15 to 1.5 s
+	gapWarnS        = 1.7  // earshot: the longest deliberate silence measured
+	endSilenceMaxS  = 0.5  // earshot: dead air after the sound, median 0.04 s; practice: finish within about 0.5 s of the last frame
+	endSilenceWarnS = 1.5  // estimate
+	endLUMin        = -4.0 // earshot: the last 3 s reach body level, -2.2 to +5.6 LU against the integrated level (median +0.2)
+	endLUMax        = 6.0
+	// The sound-ready profile (P3-12), sources: our own design (D-33) and the earshot/practice notes in audio-v1.md; all are estimates.
+	// The export is a bed (about -24 LUFS) and effects, not normalised to a programme target: the creator's trend sound brings the
+	// programme loudness. The integrated loudness simply results, about -21 to -19 for an edit with few effects; the window is wide
+	// enough for many effects (up to -16) and for a very sparse edit (down to -24, the bed alone).
+	soundReadyLo      = -24.0
+	soundReadyHi      = -16.0
+	soundReadyWarn    = 2.0
+	bedLevelLUFS      = -24.0 // the bed's median short-term loudness (render.BedTargetLUFS)
+	bedLevelTolLU     = 3.0   // the bed is on level within this many LU of that, and competes with a trend sound at -14 when louder
+	bedLevelWarnLU    = 5.0
+	bedGapMaxS        = 0.5 // the bed has no gap longer than this (a cut fades for 20 ms, so a longer hole is a clip with no sound or an error)
+	bedGapWarnS       = 1.0
+	bedPresentLUFS    = -45.0 // the momentary loudness above which the bed is there
+	bedCoverageMin    = 0.9
+	bedCoverageWarn   = 0.7
+	bedSteadyDipLU    = 6.0 // the 10th percentile of the momentary loudness is at most this far under its median
+	bedSteadyWarnLU   = 9.0
+	cutThroughMinLU   = 4.0   // a hit is clearly heard over the bed when its momentary peak is this far over the bed
+	trendLUFS         = -14.0 // a typical trend sound's loudness once the creator layers it in TikTok
+	trendMarginLU     = 6.0   // a hit within this many LU under the trend sound is still heard (masking: a transient 6 dB under music stays detectable)
+	sfxPeakWindowMs   = 800   // the stretch for an effect whose length is not known
 	cutSyncMinLift    = 0.15  // estimate: points over the chance level; dense sound scores 80+ % by chance, so the share alone proves nothing
 	cutSyncMinShare   = 0.5   // estimate: earshot measured a median of 81 % of cuts with an onset within 100 ms, but 86 % by chance
 	sfxFrameMinShare  = 0.8   // estimate: our effects start on their sample, so almost all should land within a frame unless masked
@@ -55,7 +77,11 @@ var chanceOffsetsMs = []int64{-900, -600, -300, 300, 600, 900}
 
 // analyse turns the measurements into the report.
 func analyse(m measured, timeMap []render.TimeMapEntry, cfg config) Report {
-	r := Report{DurationS: round(m.durationS, 3), FPS: m.fps, HasAudio: m.hasAudio}
+	profile := cfg.profile
+	if profile == "" {
+		profile = ProfileProgramme
+	}
+	r := Report{Profile: profile, DurationS: round(m.durationS, 3), FPS: m.fps, HasAudio: m.hasAudio}
 	fps := m.fps
 	if cfg.fps > 0 {
 		fps = cfg.fps
@@ -168,7 +194,7 @@ func analyse(m measured, timeMap []render.TimeMapEntry, cfg config) Report {
 	}
 	var sFrame, s100 int
 	for _, p := range cfg.sfx {
-		ss := SFXSync{ID: p.ID, Sfx: p.Sfx, Variant: p.Variant, AtMs: p.AtMs, OnsetMs: -1}
+		ss := SFXSync{ID: p.ID, Sfx: p.Sfx, Variant: p.Variant, AtMs: p.AtMs, OnsetMs: -1, Accent: timeline.SFXIsAccent(p.Sfx), PeakLUFS: silenceFloor}
 		if p.AtMs < durMs {
 			r.Sync.SFXPlanned++
 			// The first onset in the window, nearest to at_ms: an effect has one transient, the mix may have others around it.
@@ -199,6 +225,39 @@ func analyse(m measured, timeMap []render.TimeMapEntry, cfg config) Report {
 	if r.Sync.SFXPlanned > 0 {
 		r.Sync.SFXWithinFrameShare = round(float64(sFrame)/float64(r.Sync.SFXPlanned), 3)
 		r.Sync.SFXWithin100msShare = round(float64(s100)/float64(r.Sync.SFXPlanned), 3)
+	}
+
+	// The bed and how the effects sit on it (the sound-ready profile).
+	if profile == ProfileSoundReady {
+		r.Bed = bedStats(m.momentary)
+		for i := range r.Sync.SFX {
+			s := &r.Sync.SFX[i]
+			if s.AtMs >= durMs {
+				continue
+			}
+			// A momentary point is stamped at the end of its 400 ms window, so the windows that hold the effect end between 200 ms after it
+			// starts (before that they are mostly what came before) and 400 ms after it ends. A riser peaks at its end, so the stretch is
+			// the effect's own length, not a fixed 800 ms.
+			length := int64(sfxPeakWindowMs)
+			if v, ok := timeline.ResolveSFXVariant(s.Sfx, s.Variant, s.ID); ok {
+				if l, ok := timeline.SFXVariantLengthMs(s.Sfx, v); ok {
+					length = l
+				}
+			}
+			from, to := s.AtMs+min(length, 200), s.AtMs+length+400
+			peak := math.Inf(-1)
+			for _, p := range m.momentary {
+				if ms := int64(p.TimeS * 1000); ms >= from && ms <= to {
+					peak = math.Max(peak, p.LUFS)
+				}
+			}
+			if !math.IsInf(peak, -1) {
+				s.PeakLUFS = round(peak, 1)
+				if r.Bed != nil {
+					s.MarginLU = round(peak-r.Bed.LevelLUFS, 1)
+				}
+			}
+		}
 	}
 
 	// Problems.
@@ -311,4 +370,33 @@ func problems(m measured) Problems {
 		p.Imbalance = p.ImbalanceDB > imbalanceMaxDB
 	}
 	return p
+}
+
+// bedStats measures the bed from the momentary loudness: windows with a full 400 ms of sound (from 0.4 s), the median and the 10th
+// percentile of those above digital silence, and the share of them above bedPresentLUFS.
+func bedStats(pts []LoudnessPoint) *BedStats {
+	var vals []float64
+	present, n := 0, 0
+	for _, p := range pts {
+		if p.TimeS < 0.4 {
+			continue
+		}
+		n++
+		if p.LUFS >= bedPresentLUFS {
+			present++
+		}
+		if p.LUFS > -70 {
+			vals = append(vals, p.LUFS)
+		}
+	}
+	if n == 0 {
+		return &BedStats{LevelLUFS: silenceFloor, P10LUFS: silenceFloor}
+	}
+	b := &BedStats{LevelLUFS: silenceFloor, P10LUFS: silenceFloor, Coverage: round(float64(present)/float64(n), 3)}
+	if len(vals) > 0 {
+		slices.Sort(vals)
+		b.LevelLUFS = round(vals[len(vals)/2], 1)
+		b.P10LUFS = round(vals[len(vals)/10], 1)
+	}
+	return b
 }

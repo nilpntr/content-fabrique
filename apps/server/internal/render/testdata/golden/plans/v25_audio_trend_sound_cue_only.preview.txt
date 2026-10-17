@@ -52,7 +52,8 @@ filter_complex:
   sine=frequency=1000:sample_rate=48000:duration=6.000:samples_per_frame=48,volume='8*(between(t,0.5,0.53)+between(t,1,1.03))':eval=frame:precision=float,aformat=sample_fmts=fltp:channel_layouts=stereo[abeatb];
   sine=frequency=1500:sample_rate=48000:duration=6.000:samples_per_frame=48,volume='8*(between(t,0,0.03))':eval=frame:precision=float,aformat=sample_fmts=fltp:channel_layouts=stereo[abeatd];
   [abeatb][abeatd]amix=inputs=2:duration=first:normalize=0:dropout_transition=0,volume=-12dB[abeat];
-  [abed][abeat]amix=inputs=2:duration=first:normalize=0:dropout_transition=0[aout]
+  [abed]asplit=2[astem][acg];
+  [acg][abeat]amix=inputs=2:duration=first:normalize=0:dropout_transition=0[aout]
 
 inputs:
 [

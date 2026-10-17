@@ -231,7 +231,9 @@ type SetCaptions struct {
 
 // SetClipAudio sets whether a clip's own sound plays and how loud. The fields that are set change.
 type SetClipAudio struct {
-	ID        string   `json:"id"`
+	// ID is the clip; empty sets every clip of the main track (the way to set the bed policy once).
+	ID        string   `json:"id,omitempty"`
+	Mode      string   `json:"mode,omitempty"`
 	UseSource *bool    `json:"use_source,omitempty"`
 	GainDB    *float64 `json:"gain_db,omitempty"`
 }

@@ -70,34 +70,71 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 	)
 	c.plan.SoundCues = []SoundCue{}
 
-	// Source audio of the clips that ask for it.
+	// Source audio of the clips that ask for it. A clip in full mode is part of the programme; a clip in bed mode is the ambience
+	// bed, set to its own level by the evening pass (BedPlan).
+	var (
+		bedPads []string
+		bedPlan = &BedPlan{TargetLUFS: BedTargetLUFS, BelowLU: BedBelowSpeechLU, MaxGainDB: bedMaxGainDB}
+		meter   []string
+	)
 	for i, cl := range c.clips {
 		a := cl.item.Audio
-		if a == nil || !a.UseSourceOrDefault() || !cl.asset.HasAudio {
-			continue
+		mode := timeline.ClipAudioMode(a)
+		if mode != timeline.AudioModeMute && mode != timeline.AudioModeBed && mode != timeline.AudioModeFull {
+			return audioResult{}, fmt.Errorf("%w: clip %s: audio mode %q is not one of mute, bed and full", ErrInvalidSpec, cl.item.ID, mode)
 		}
-		if cl.item.HasRamp() {
-			// atempo cannot follow a changing speed, so a clip with a speed ramp plays no sound of its own (Validate warns
-			// with ramp_audio_muted). It gets no input in the mix either.
+		if mode == timeline.AudioModeMute || !cl.asset.HasAudio {
 			continue
 		}
 		it := cl.item
 		start := timeline.FrameStartMs(cl.startFrame, c.fps)
 		dur := timeline.FrameStartMs(cl.endFrame, c.fps) - start
+		speed := it.SpeedOrDefault()
+		if it.HasRamp() {
+			// atempo cannot follow a changing speed, so a speech clip with a speed ramp plays no sound of its own (Validate warns
+			// with ramp_audio_muted): it gets no input in the mix either. An ambience bed does not need to follow the ramp: it plays
+			// at the clip's average speed, which keeps the bed continuous under the ramped shot.
+			if mode != timeline.AudioModeBed || timeline.OutputDuration(it) <= 0 {
+				continue
+			}
+			speed = float64(it.Source.OutMs-it.Source.InMs) / float64(timeline.OutputDuration(it))
+		}
 		f := []string{
 			"atrim=end=" + secs(it.Source.OutMs-it.Source.InMs),
 			"asetpts=PTS-STARTPTS",
 		}
-		f = append(f, atempoChain(it.SpeedOrDefault())...)
+		f = append(f, atempoChain(speed)...)
 		f = append(f, stereo48)
-		f = append(f, volumeFilter(a.GainDBOrDefault())...)
+		pre := slices.Clone(f)
+		trim := a.GainDBOrDefault()
+		bc := BedClip{ItemID: it.ID, Role: "ref", MeterFile: fmt.Sprintf("bedmeter_%d.txt", i)}
+		if mode == timeline.AudioModeBed {
+			// The nominal gain is the trim alone; the evening pass swaps the measured one in (the filter is named so that it is found).
+			bc.Role, bc.TrimDB = "bed", trim
+			bc.Filter = fmt.Sprintf("volume@bed%d=%sdB", i, num(trim))
+			f = append(f, bc.Filter)
+		} else {
+			f = append(f, volumeFilter(trim)...)
+		}
+		meter = append(meter, chain([]string{fmt.Sprintf("%d:a", cl.idx)}, append(pre, "ebur128=framelog=quiet:metadata=1", "ametadata=mode=print:file="+bc.MeterFile), fmt.Sprintf("m%d", i)))
+		bedPlan.Clips = append(bedPlan.Clips, bc)
 		// Where clips overlap in a transition, the two sound tracks cross over as well.
-		if cl.overlapFrames > 0 {
+		fadeIn, fadeOut := cl.overlapFrames > 0, i+1 < len(c.clips) && c.clips[i+1].overlapFrames > 0
+		if fadeIn {
 			f = append(f, "afade=t=in:st=0:d="+c.frameSecs(cl.overlapFrames))
 		}
-		if i+1 < len(c.clips) && c.clips[i+1].overlapFrames > 0 {
+		if fadeOut {
 			d := c.clips[i+1].overlapFrames
 			f = append(f, fmt.Sprintf("afade=t=out:st=%s:d=%s", c.frameSecs(cl.endFrame-cl.startFrame-d), c.frameSecs(d)))
+		}
+		if mode == timeline.AudioModeBed {
+			// A bed clip that is cut (not crossfaded) fades for a few ms at its edges, so that the bed does not click at a cut.
+			if !fadeIn {
+				f = append(f, fmt.Sprintf("afade=t=in:st=0:d=%s", secs(bedFadeMs)))
+			}
+			if !fadeOut && dur > 2*bedFadeMs {
+				f = append(f, fmt.Sprintf("afade=t=out:st=%s:d=%s", secs(dur-bedFadeMs), secs(bedFadeMs)))
+			}
 		}
 		f = append(f, "atrim=end="+secs(dur), "asetpts=PTS-STARTPTS")
 		if start > 0 {
@@ -105,7 +142,29 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 		}
 		pad := fmt.Sprintf("as%d", i)
 		stmts = append(stmts, chain([]string{fmt.Sprintf("%d:a", cl.idx)}, f, pad))
-		mixPads = append(mixPads, pad)
+		if mode == timeline.AudioModeBed {
+			bedPads = append(bedPads, pad)
+		} else {
+			mixPads = append(mixPads, pad)
+		}
+	}
+	hasBed := false
+	for _, bc := range bedPlan.Clips {
+		hasBed = hasBed || bc.Role == "bed"
+	}
+	if hasBed {
+		c.plan.Bed = bedPlan
+		bedPlan.MeterArgs = c.audioOnlyArgs(strings.Join(meter, ";"), func() []string {
+			var maps []string
+			for i, cl := range c.clips {
+				for _, bc := range bedPlan.Clips {
+					if bc.ItemID == cl.item.ID {
+						maps = append(maps, fmt.Sprintf("[m%d]", i))
+					}
+				}
+			}
+			return maps
+		}())
 	}
 
 	// Audio track items. A cue_only item is a cue and nothing else, whatever the profile (D-03): it is not resolved, it
@@ -181,6 +240,11 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 	// timeline are not boosted to -14 LUFS.
 	guide := c.beatGuide()
 	// The sound effects are the same kind of thing: an accent mixed in after the normalisation, at a fixed level.
+	// In a sound-ready edit (a bed and no programme sound) the effects are lifted over the bed, which is not normalised up to them.
+	c.sfxBoostDB = 0
+	if len(mixPads) == 0 && len(bedPads) > 0 {
+		c.sfxBoostDB = SoundReadyEffectGainDB
+	}
 	places, err := c.sfxPlacements()
 	if err != nil {
 		return audioResult{}, err
@@ -207,6 +271,13 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 	bed := fmt.Sprintf("anullsrc=r=%d:cl=stereo:d=%s[abed]", AudioSampleRate, secs(c.totalMs))
 	stmts = append([]string{bed}, stmts...)
 
+	// An edit with no programme sound is a bed and the effects: it is mixed as it is, with no normalisation (soundReadyMix). With a
+	// programme (speech, music) the bed clips join it, below the speech.
+	if len(mixPads) == 0 && len(bedPads) > 0 {
+		return c.soundReadyMix(stmts, bedPads, sfxStmts, sfxPads, guide)
+	}
+	mixPads = append(mixPads, bedPads...)
+
 	progOut := "aout"
 	if len(post) > 0 {
 		progOut = "aprog"
@@ -224,7 +295,9 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 		// loudnorm resamples to 192 kHz internally, so the rate and layout are set again after it.
 		stmts = append(stmts, mix+","+ln+","+stereo48+"["+progOut+"]")
 		prog = progOut
-		res.loudnorm = &LoudnormPlan{Filter: ln, TwoPass: c.profile.LoudnormPasses >= 2}
+		// A preview with a beat guide writes an audio stem, which the audio check measures as the export: the stem must have the
+		// export's loudness stage (two linear passes), not the preview's dynamic single pass, which levels a different mix.
+		res.loudnorm = &LoudnormPlan{Filter: ln, TwoPass: c.profile.LoudnormPasses >= 2 || len(guide) > 0}
 		if res.loudnorm.TwoPass {
 			measure := append(slices.Clone(stmts[:len(stmts)-1]), mix+","+ln+":print_format=json[aout]")
 			res.pass1Graph = strings.Join(measure, ";")
@@ -238,20 +311,65 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 			stmts = append(stmts, duckStmts...)
 			prog = duckedProg
 		}
-		in := "[" + prog + "]"
-		for _, p := range post {
-			in += "[" + p + "]"
-		}
-		mix := fmt.Sprintf("%samix=inputs=%d:duration=first:normalize=0:dropout_transition=0", in, len(post)+1)
+		// The core is the programme and the effects; the beat guide (preview only) goes on top of it, and the core without the guide
+		// is the audio stem the audio check measures (StemLabel).
+		core := prog
 		if len(sfxPads) > 0 {
+			in := "[" + prog + "]"
+			for _, p := range sfxPads {
+				in += "[" + p + "]"
+			}
+			core = "acore"
+			if len(guide) == 0 {
+				core = "aout"
+			}
 			// A limiter at sfxLimitDB (-1.5 dBFS: headroom under the -1 dBTP target for inter-sample peaks), so the effects cannot
 			// push the mix past the peak ceiling. alimiter compensates its own look-ahead delay (latency=1), so the sound stays
 			// where it was and keeps its length (see sfx.go).
-			mix += "," + sfxLimiter
+			stmts = append(stmts, fmt.Sprintf("%samix=inputs=%d:duration=first:normalize=0:dropout_transition=0,%s[%s]", in, len(sfxPads)+1, sfxLimiter, core))
 		}
-		stmts = append(stmts, mix+"[aout]")
+		if len(guide) > 0 {
+			stmts = append(stmts, fmt.Sprintf("[%s]asplit=2[astem][acg]", core))
+			c.plan.StemLabel = "astem"
+			mix := "[acg][abeat]amix=inputs=2:duration=first:normalize=0:dropout_transition=0"
+			if len(sfxPads) > 0 {
+				mix += "," + sfxLimiter
+			}
+			stmts = append(stmts, mix+"[aout]")
+		}
 	case prog == "abed":
 		stmts = append(stmts, "[abed]anull[aout]")
+	}
+	res.statements = stmts
+	return res, nil
+}
+
+// soundReadyMix mixes an edit whose sound is the bed and the effects. The bed clips were set to their own level by the evening pass
+// (BedPlan) and the effects to their category's level plus SoundReadyEffectGainDB (sfxPlacements); they are summed and limited under
+// the sound-ready ceiling, and nothing is normalised: the integrated loudness of the export results from the bed and the effects. The
+// beat guide (preview only) goes on top, and the mix without it is the audio stem (StemLabel).
+func (c *compiler) soundReadyMix(stmts, bedPads, sfxStmts, sfxPads []string, guide []string) (audioResult, error) {
+	var res audioResult
+	c.plan.SoundReady = true
+	in := "[abed]"
+	for _, p := range bedPads {
+		in += "[" + p + "]"
+	}
+	stmts = append(stmts, fmt.Sprintf("%samix=inputs=%d:duration=first:normalize=0:dropout_transition=0[abedmix]", in, len(bedPads)+1))
+	stmts = append(stmts, sfxStmts...)
+	mixIn := "[abedmix]"
+	for _, p := range sfxPads {
+		mixIn += "[" + p + "]"
+	}
+	core := "aout"
+	if len(guide) > 0 {
+		core = "acore"
+	}
+	stmts = append(stmts, fmt.Sprintf("%samix=inputs=%d:duration=first:normalize=0:dropout_transition=0,%s,%s[%s]", mixIn, len(sfxPads)+1, stereo48, limiterAt(SoundReadyCeilingDB), core))
+	if len(guide) > 0 {
+		stmts = append(stmts, guide...)
+		stmts = append(stmts, "[acore]asplit=2[astem][acg]", "[acg][abeat]amix=inputs=2:duration=first:normalize=0:dropout_transition=0,"+sfxLimiter+"[aout]")
+		c.plan.StemLabel = "astem"
 	}
 	res.statements = stmts
 	return res, nil

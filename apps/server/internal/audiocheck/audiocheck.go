@@ -43,7 +43,10 @@ const (
 // Report is the whole listening report. Everything but Sheet is JSON.
 type Report struct {
 	// Summary is the plain-language reading of the report: the verdict, what to fix and the key numbers. It comes first.
-	Summary   string  `json:"summary"`
+	Summary string `json:"summary"`
+	// Profile is what the edit's sound is held to: ProfileProgramme (speech or music, the web's loudness) or ProfileSoundReady (a bed
+	// and effects, to which the creator adds a trend sound).
+	Profile   string  `json:"profile"`
 	DurationS float64 `json:"duration_s"`
 	FPS       float64 `json:"fps"`
 	HasAudio  bool    `json:"has_audio"`
@@ -58,6 +61,8 @@ type Report struct {
 	Sync     Sync     `json:"sync"`
 	Density  Density  `json:"density"`
 	Problems Problems `json:"problems"`
+	// Bed is the measurement of the ambience bed, in the sound-ready profile.
+	Bed *BedStats `json:"bed,omitempty"`
 
 	// Sheet is the PNG: a waveform and a loudness strip with the cuts, the effects, the onsets and the silences, on the contact
 	// sheet's time axis. It is not part of the JSON.
@@ -169,6 +174,15 @@ type CutSync struct {
 	DeltaMs int64 `json:"delta_ms"`
 }
 
+// BedStats is the ambience bed as measured in the momentary loudness (sound-ready profile).
+type BedStats struct {
+	// LevelLUFS is the median momentary loudness over the sound, P10LUFS its 10th percentile (the dips), Coverage the share of the time
+	// the momentary loudness is above BedPresentLUFS.
+	LevelLUFS float64 `json:"level_lufs"`
+	P10LUFS   float64 `json:"p10_lufs"`
+	Coverage  float64 `json:"coverage"`
+}
+
 // SFXSync is one planned effect and the onset measured near its at_ms.
 type SFXSync struct {
 	ID      string `json:"id"`
@@ -179,6 +193,11 @@ type SFXSync struct {
 	OnsetMs     int64 `json:"onset_ms"`
 	DeltaMs     int64 `json:"delta_ms"`
 	WithinFrame bool  `json:"within_frame"`
+	// Accent is true for the loud designed hits; PeakLUFS is the loudest momentary loudness over the stretch the effect covers (from 200 ms in to 400 ms after its end), and
+	// MarginLU how far that is over the bed (sound-ready profile).
+	Accent   bool    `json:"accent"`
+	PeakLUFS float64 `json:"peak_lufs"`
+	MarginLU float64 `json:"margin_lu"`
 }
 
 // Density is how busy the sound is.
@@ -233,6 +252,41 @@ func PlannedSFXFromSpec(spec *timeline.Spec) []PlannedSFX {
 	return out
 }
 
+// The profiles (P3-12). A programme edit has speech or music and is held to the web's loudness; a sound-ready edit has no programme
+// sound (no speech, no music: the clips' sound is a low bed, and the creator adds a trend sound in TikTok) and is held to what that
+// export needs instead.
+const (
+	ProfileProgramme  = "programme"
+	ProfileSoundReady = "sound_ready"
+)
+
+// ProfileFromSpec chooses the profile of an edit: sound-ready when no sound of the programme is exported (no clip in full mode, no
+// licensed track, no creator audio), programme otherwise. A trend sound is cue-only and never counts.
+func ProfileFromSpec(spec *timeline.Spec) string {
+	if spec == nil {
+		return ProfileProgramme
+	}
+	for _, t := range spec.Tracks {
+		switch tr := t.(type) {
+		case *timeline.VideoTrack:
+			for _, it := range tr.Items {
+				// A clip with a speed ramp has its speech muted by the renderer (a bed plays on): it is not a programme.
+				if timeline.ClipAudioMode(it.Audio) == timeline.AudioModeFull && !it.HasRamp() {
+					return ProfileProgramme
+				}
+			}
+		case *timeline.AudioTrack:
+			for _, it := range tr.Items {
+				switch it.(type) {
+				case *timeline.LicensedTrack, *timeline.CreatorAudio:
+					return ProfileProgramme
+				}
+			}
+		}
+	}
+	return ProfileSoundReady
+}
+
 // Option changes how Check works.
 type Option func(*config)
 
@@ -240,10 +294,26 @@ type config struct {
 	fps     float64
 	sfx     []PlannedSFX
 	workDir string
+	profile string
 }
 
 // WithFPS sets the frame rate that "within a frame" is measured against (the plan's FPS). Without it the rate is read from the file.
 func WithFPS(fps int) Option { return func(c *config) { c.fps = float64(fps) } }
+
+// WithProfile sets the profile (ProfileProgramme, the default, or ProfileSoundReady).
+func WithProfile(p string) Option { return func(c *config) { c.profile = p } }
+
+// WithSpec gives everything the check takes from the timeline: the planned effects, the frame rate and the profile (ProfileFromSpec).
+func WithSpec(spec *timeline.Spec) Option {
+	return func(c *config) {
+		if spec == nil {
+			return
+		}
+		c.sfx = PlannedSFXFromSpec(spec)
+		c.fps = float64(spec.Output.FPS)
+		c.profile = ProfileFromSpec(spec)
+	}
+}
 
 // WithSFX gives the planned sound effects, to measure where each is heard and how dense they are.
 func WithSFX(items []PlannedSFX) Option { return func(c *config) { c.sfx = items } }

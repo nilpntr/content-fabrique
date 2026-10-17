@@ -37,6 +37,7 @@
 | D-30 | Semantic search lives in Postgres with pgvector, hybrid with full-text search; no separate vector database | Proposed (director, 2026-10-17; founder asked) |
 | D-31 | Spend control: credits charged per action; every action's COGS budget is derived from its price (≤ 40 % of net credit value); caps hold across processes in the database; platform breaker | Accepted (director, 2026-10-17; founder asked) |
 | D-32 | Audio: effects are synthesised in ffmpeg and edits are checked with ffmpeg measurements; no audio models, nothing ported from earshot but its numbers and ideas | Accepted (founder decision, 2026-10-17) |
+| D-33 | Exports are sound-ready: no music and no trend sound, the clips' own sound as a low bed, effects on top, speech as the programme; amends D-03 | Proposed (director, 2026-10-17; the founder confirms) |
 
 ---
 
@@ -85,6 +86,8 @@ A SaaS that bakes a trending song into an exported MP4 makes copies it has no li
 - Baked-in music is allowed only from sources with a licence covering our use (licensed stock library, the creator's own uploads with a rights attestation).
 
 **Revisit** when we have a music licensing partner, or if TikTok offers an API path to attach sounds.
+
+**Amended by [D-33](#d-33-exports-are-sound-ready):** what the export holds besides the cue is now decided (a bed of the clips' own sound and the generated effects); the cue-only rule itself is unchanged.
 
 ## D-04 Job orchestration: River on Postgres
 
@@ -746,6 +749,32 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 - The numbers of seven films are a small sample, and they describe music-led launch films; a talking-head edit breaks some of them, so those checks are estimates and warnings.
 
 **Revisit** when a measured listening test on our own edits contradicts a target (the targets are data in `internal/audiocheck`), or when the effects are shown to be the weak point of an edit (licensed recordings).
+
+## D-33 Exports are sound-ready
+
+> Status: **Proposed** by the director (2026-10-17), built in P3-12 so that it can be listened to; the founder confirms or changes it. Every part is reversible: the clip sound mode is a field of the timeline, the levels are constants in `internal/render/plan.go` and `internal/audiocheck`, and the editor's behaviour is one prompt version (`editor.v2.1`).
+
+**Context.** D-03 keeps the trend sound out of the export, and until now a clip's own sound was off unless the editor turned it on, so a workout export was silent between the few generated effects: the creator had to add a sound in TikTok before the video felt like anything, and the effects (mixed after the programme normalisation at a fixed level) were tuned for a programme. The first live runs showed the cost: a silent video with an impact in it. The founder's footage has real gym sound in it (plates, a room), which is exactly the ambience a sound-ready cut wants under the creator's trend sound.
+
+**Decision.** An export is *sound-ready*: it has no music and no trend sound (D-03 is unchanged: a trend sound is a cue, and the preview keeps its generated beat guide), and it is not silent.
+- **Footage with no speech:** each clip's own sound is a **low ambience bed**, about -24 LUFS short-term, **evened out across clips** (each clip is measured and set to the same level, correcting by at most 18 dB) with a 20 ms fade at the cuts, and the **generated effects sit on top**, lifted so that they peak around -12 to -10 LUFS.
+- **Footage with speech** (a clip the editor sets to `full`, or the talking playbook): the speech is the **programme** at the programme level and the programme is **ducked under the effects**, as before. A bed under other clips of the same video is 10 LU under the speech.
+- **The bed is an ambience and the trend sound dominates.** The bed is **about -24 LUFS short-term (median)**, evened across clips; at -18 it would be only 4 LU under a trend sound at about -14, which TikTok layers with its original-sound slider at 100 % by default. **Nothing is normalised to a programme target** (not -14, not -17): the bed is set to its own level, the effects to their category's loudness plus 4.5 dB so that their short-term peaks land around **-12 to -10 LUFS** (still within 6 LU of -14, so they cut through the trend sound), and the export's integrated loudness simply results, about **-21 to -19 LUFS** for an edit with few effects (the ears accept -24 to -16: the creator's trend sound brings the programme loudness). A ceiling limiter (-4.5 dBFS sample peak) in the core mix keeps the true peak at or under **-2.5 dBTP** after AAC.
+- **The editor sets this with one op,** `set_clip_audio` with `mode` (`mute` the default, `bed`, `full`) and no `id` (every clip). The editor's checks listen to the preview (`audio_level`, `audio_bed`, `audio_effects`) and its prompt teaches the policy (`editor.v2.1`).
+
+**Alternatives.**
+- **Keep clips muted** (the old default; D-03 alone): the export is silent between effects, and the creator's trend sound hides the effects. Rejected: the product promise is a video that is nearly ready to post.
+- **Put the clips' sound in at the programme level (-14):** a room tone becomes loud and fights the trend sound. Rejected; the mode `full` still exists for speech.
+- **Detect speech automatically and pick the mode in the renderer:** needs transcripts for every clip (P2-05) and a threshold nobody has tuned. Rejected for now; the editor chooses from the description, the brief and the playbook, and `full` is one op away. Revisit when transcripts are in the editor's context.
+- **A fixed bed level and no evening:** clips from different angles differ by 10 LU or more, so the bed would jump at every cut. Rejected.
+
+**Consequences.**
+- The export has sound under every shot, so a video is never silent; a clip with no sound track gives no bed and the check says so (`bed_gaps`), the fix being an effect on it.
+- The preview renders the same mix plus the beat guide; the **audio stem** (the mix without the guide) is stored next to the preview so that the editor's check measures the export, not the guide. It has no database column (its key is derived from the render's), so a preview rendered before this change has none and the audio checks say so.
+- A speed-ramped clip keeps its bed, at the clip's average speed; its speech is still muted (a tempo cannot follow a ramp).
+- Measured on the founder's 26 s back-day edit with a bed on every clip: bed -24.2 LUFS (median short-term), effects at -11.1, -9.6 and -14.5 LUFS, integrated -21.0 LUFS, true peak -2.7 to -2.8 dBTP. (An earlier version of this decision normalised the bed and the effects together to -17 LUFS; that lifted the bed to -18, 4 LU under a trend sound, and was changed before merge.) The levers are `BedTargetLUFS`, `SoundReadyEffectGainDB` and `SoundReadyCeilingDB` in `internal/render/plan.go`.
+
+**Revisit** when the founder has listened to a few real exports, or when transcripts are available to the editor.
 
 ## Template for new decisions
 
