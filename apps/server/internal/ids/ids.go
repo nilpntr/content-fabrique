@@ -133,16 +133,24 @@ func (id *ID[P]) Scan(src any) error { return id.UUID.Scan(src) }
 type (
 	workspaceKind struct{}
 	userKind      struct{}
+	assetKind     struct{}
+	uploadKind    struct{}
 )
 
 func (workspaceKind) Prefix() string { return PrefixWorkspace }
 func (userKind) Prefix() string      { return PrefixUser }
+func (assetKind) Prefix() string     { return PrefixAsset }
+func (uploadKind) Prefix() string    { return PrefixUpload }
 
 type (
 	// WorkspaceID is the key of a workspace (wks_...). Every tenant-owned row carries one.
 	WorkspaceID = ID[workspaceKind]
 	// UserID is the key of a user (usr_...).
 	UserID = ID[userKind]
+	// AssetID is the key of an asset (ast_...).
+	AssetID = ID[assetKind]
+	// UploadID is the key of a multipart upload (upl_...).
+	UploadID = ID[uploadKind]
 )
 
 // ParseWorkspaceID reads a wks_ TypeID.
@@ -150,3 +158,9 @@ func ParseWorkspaceID(s string) (WorkspaceID, error) { return Parse[workspaceKin
 
 // ParseUserID reads a usr_ TypeID.
 func ParseUserID(s string) (UserID, error) { return Parse[userKind](s) }
+
+// ParseAssetID reads an ast_ TypeID.
+func ParseAssetID(s string) (AssetID, error) { return Parse[assetKind](s) }
+
+// ParseUploadID reads an upl_ TypeID.
+func ParseUploadID(s string) (UploadID, error) { return Parse[uploadKind](s) }

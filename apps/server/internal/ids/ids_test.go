@@ -151,3 +151,27 @@ func newUserID() (UserID, error) {
 	u, err := newUUID()
 	return FromUUID[userKind](u), err
 }
+
+func TestAssetAndUploadIDs(t *testing.T) {
+	u, err := newUUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	asset, upload := FromUUID[assetKind](u), FromUUID[uploadKind](u)
+	if !strings.HasPrefix(asset.String(), "ast_") || !strings.HasPrefix(upload.String(), "upl_") {
+		t.Fatalf("asset %s, upload %s", asset, upload)
+	}
+	back, err := ParseAssetID(asset.String())
+	if err != nil || back != asset {
+		t.Fatalf("ParseAssetID = %v, %v", back, err)
+	}
+	if _, err := ParseAssetID(upload.String()); err == nil {
+		t.Error("an upl_ id was accepted as an asset id")
+	}
+	if _, err := ParseUploadID(asset.String()); err == nil {
+		t.Error("an ast_ id was accepted as an upload id")
+	}
+	if _, err := ParseAssetID("ast_00000000000000000000000000"); err == nil {
+		t.Error("the nil asset id was accepted")
+	}
+}

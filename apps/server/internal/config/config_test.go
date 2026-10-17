@@ -107,3 +107,48 @@ func TestLoadRejectsOTLPScheme(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadObjectStorage(t *testing.T) {
+	full := map[string]string{
+		"R2_ENDPOINT": "http://localhost:9000", "R2_BUCKET": "cf-media-dev", "R2_ACCESS_KEY_ID": "minioadmin", "R2_SECRET_ACCESS_KEY": "s3cr3t-storage-key",
+	}
+	c, err := Load(env(full))
+	if err != nil || !c.ObjectStorageConfigured() || c.R2Bucket != "cf-media-dev" || c.R2Jurisdiction != "" {
+		t.Fatalf("full settings: %+v, %v", c, err)
+	}
+	if s := c.String() + " " + c.GoString(); strings.Contains(s, "s3cr3t-storage-key") || !strings.Contains(s, "storage=true") {
+		t.Errorf("String() = %s", s)
+	}
+	// None at all is fine: the assets API then answers 503.
+	if c, err := Load(env(nil)); err != nil || c.ObjectStorageConfigured() {
+		t.Errorf("no settings: %+v, %v", c, err)
+	}
+	// R2 in the cloud names its jurisdiction.
+	eu := map[string]string{}
+	for k, v := range full {
+		eu[k] = v
+	}
+	eu["R2_ENDPOINT"], eu["R2_JURISDICTION"] = "https://acct.eu.r2.cloudflarestorage.com", " EU "
+	if c, err := Load(env(eu)); err != nil || c.R2Jurisdiction != "eu" {
+		t.Errorf("eu: %+v, %v", c, err)
+	}
+
+	for name, mutate := range map[string]func(map[string]string){
+		"a missing bucket":   func(m map[string]string) { delete(m, "R2_BUCKET") },
+		"a missing secret":   func(m map[string]string) { delete(m, "R2_SECRET_ACCESS_KEY") },
+		"a bad endpoint":     func(m map[string]string) { m["R2_ENDPOINT"] = "localhost:9000" },
+		"a bad jurisdiction": func(m map[string]string) { m["R2_JURISDICTION"] = "us" },
+	} {
+		m := map[string]string{}
+		for k, v := range full {
+			m[k] = v
+		}
+		mutate(m)
+		_, err := Load(env(m))
+		if err == nil || !strings.Contains(err.Error(), "R2_") {
+			t.Errorf("%s: err = %v, want an R2_ error", name, err)
+		} else if strings.Contains(err.Error(), "s3cr3t-storage-key") {
+			t.Errorf("%s: the error repeats the secret: %v", name, err)
+		}
+	}
+}

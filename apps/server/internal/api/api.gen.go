@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/oapi-codegen/runtime"
 )
 
 // Defines values for AiBilling.
@@ -42,25 +44,84 @@ func (e AiBilling) Valid() bool {
 	}
 }
 
+// Defines values for AssetKind.
+const (
+	AssetKindAudio AssetKind = "audio"
+	AssetKindImage AssetKind = "image"
+	AssetKindVideo AssetKind = "video"
+)
+
+// Valid indicates whether the value is a known member of the AssetKind enum.
+func (e AssetKind) Valid() bool {
+	switch e {
+	case AssetKindAudio:
+		return true
+	case AssetKindImage:
+		return true
+	case AssetKindVideo:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AssetStatus.
+const (
+	AssetStatusFailed     AssetStatus = "failed"
+	AssetStatusProcessing AssetStatus = "processing"
+	AssetStatusReady      AssetStatus = "ready"
+	AssetStatusUploaded   AssetStatus = "uploaded"
+	AssetStatusUploading  AssetStatus = "uploading"
+)
+
+// Valid indicates whether the value is a known member of the AssetStatus enum.
+func (e AssetStatus) Valid() bool {
+	switch e {
+	case AssetStatusFailed:
+		return true
+	case AssetStatusProcessing:
+		return true
+	case AssetStatusReady:
+		return true
+	case AssetStatusUploaded:
+		return true
+	case AssetStatusUploading:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ErrorCode.
 const (
-	ErrorCodeAuthNotConfigured    ErrorCode = "auth_not_configured"
-	ErrorCodeIdentityUnavailable  ErrorCode = "identity_unavailable"
-	ErrorCodeInternalError        ErrorCode = "internal_error"
-	ErrorCodeInvalidEvent         ErrorCode = "invalid_event"
-	ErrorCodeInvalidRequest       ErrorCode = "invalid_request"
-	ErrorCodeInvalidSignature     ErrorCode = "invalid_signature"
-	ErrorCodeInvalidToken         ErrorCode = "invalid_token"
-	ErrorCodeNoActiveWorkspace    ErrorCode = "no_active_workspace"
-	ErrorCodeNotAMember           ErrorCode = "not_a_member"
-	ErrorCodeOriginNotAllowed     ErrorCode = "origin_not_allowed"
-	ErrorCodePayloadTooLarge      ErrorCode = "payload_too_large"
-	ErrorCodePlanRequired         ErrorCode = "plan_required"
-	ErrorCodeQueueNotMigrated     ErrorCode = "queue_not_migrated"
-	ErrorCodeUnauthenticated      ErrorCode = "unauthenticated"
-	ErrorCodeUserDeleted          ErrorCode = "user_deleted"
-	ErrorCodeWebhookNotConfigured ErrorCode = "webhook_not_configured"
-	ErrorCodeWorkspaceDeleted     ErrorCode = "workspace_deleted"
+	ErrorCodeAuthNotConfigured      ErrorCode = "auth_not_configured"
+	ErrorCodeFileTooLarge           ErrorCode = "file_too_large"
+	ErrorCodeIdentityUnavailable    ErrorCode = "identity_unavailable"
+	ErrorCodeInsufficientRole       ErrorCode = "insufficient_role"
+	ErrorCodeInternalError          ErrorCode = "internal_error"
+	ErrorCodeInvalidEvent           ErrorCode = "invalid_event"
+	ErrorCodeInvalidRequest         ErrorCode = "invalid_request"
+	ErrorCodeInvalidSignature       ErrorCode = "invalid_signature"
+	ErrorCodeInvalidToken           ErrorCode = "invalid_token"
+	ErrorCodeNoActiveWorkspace      ErrorCode = "no_active_workspace"
+	ErrorCodeNotAMember             ErrorCode = "not_a_member"
+	ErrorCodeNotFound               ErrorCode = "not_found"
+	ErrorCodeOriginNotAllowed       ErrorCode = "origin_not_allowed"
+	ErrorCodePartsMismatch          ErrorCode = "parts_mismatch"
+	ErrorCodePayloadTooLarge        ErrorCode = "payload_too_large"
+	ErrorCodePlanRequired           ErrorCode = "plan_required"
+	ErrorCodeQueueNotMigrated       ErrorCode = "queue_not_migrated"
+	ErrorCodeSizeMismatch           ErrorCode = "size_mismatch"
+	ErrorCodeStorageNotConfigured   ErrorCode = "storage_not_configured"
+	ErrorCodeStorageUnavailable     ErrorCode = "storage_unavailable"
+	ErrorCodeTooManyUploads         ErrorCode = "too_many_uploads"
+	ErrorCodeUnauthenticated        ErrorCode = "unauthenticated"
+	ErrorCodeUnsupportedContentType ErrorCode = "unsupported_content_type"
+	ErrorCodeUploadExpired          ErrorCode = "upload_expired"
+	ErrorCodeUploadNotActive        ErrorCode = "upload_not_active"
+	ErrorCodeUserDeleted            ErrorCode = "user_deleted"
+	ErrorCodeWebhookNotConfigured   ErrorCode = "webhook_not_configured"
+	ErrorCodeWorkspaceDeleted       ErrorCode = "workspace_deleted"
 )
 
 // Valid indicates whether the value is a known member of the ErrorCode enum.
@@ -68,7 +129,11 @@ func (e ErrorCode) Valid() bool {
 	switch e {
 	case ErrorCodeAuthNotConfigured:
 		return true
+	case ErrorCodeFileTooLarge:
+		return true
 	case ErrorCodeIdentityUnavailable:
+		return true
+	case ErrorCodeInsufficientRole:
 		return true
 	case ErrorCodeInternalError:
 		return true
@@ -84,7 +149,11 @@ func (e ErrorCode) Valid() bool {
 		return true
 	case ErrorCodeNotAMember:
 		return true
+	case ErrorCodeNotFound:
+		return true
 	case ErrorCodeOriginNotAllowed:
+		return true
+	case ErrorCodePartsMismatch:
 		return true
 	case ErrorCodePayloadTooLarge:
 		return true
@@ -92,7 +161,21 @@ func (e ErrorCode) Valid() bool {
 		return true
 	case ErrorCodeQueueNotMigrated:
 		return true
+	case ErrorCodeSizeMismatch:
+		return true
+	case ErrorCodeStorageNotConfigured:
+		return true
+	case ErrorCodeStorageUnavailable:
+		return true
+	case ErrorCodeTooManyUploads:
+		return true
 	case ErrorCodeUnauthenticated:
+		return true
+	case ErrorCodeUnsupportedContentType:
+		return true
+	case ErrorCodeUploadExpired:
+		return true
+	case ErrorCodeUploadNotActive:
 		return true
 	case ErrorCodeUserDeleted:
 		return true
@@ -201,9 +284,105 @@ func (e Role) Valid() bool {
 	}
 }
 
+// Defines values for UploadStatus.
+const (
+	UploadStatusAborted   UploadStatus = "aborted"
+	UploadStatusActive    UploadStatus = "active"
+	UploadStatusCompleted UploadStatus = "completed"
+	UploadStatusExpired   UploadStatus = "expired"
+)
+
+// Valid indicates whether the value is a known member of the UploadStatus enum.
+func (e UploadStatus) Valid() bool {
+	switch e {
+	case UploadStatusAborted:
+		return true
+	case UploadStatusActive:
+		return true
+	case UploadStatusCompleted:
+		return true
+	case UploadStatusExpired:
+		return true
+	default:
+		return false
+	}
+}
+
 // AiBilling Who pays for the model calls (D-18): `managed` (we do) or `byok` (the creator's own key). Empty when the workspace
 // has no active plan.
 type AiBilling string
+
+// Asset defines model for Asset.
+type Asset struct {
+	ContentType string    `json:"content_type"`
+	CreatedAt   time.Time `json:"created_at"`
+	Description string    `json:"description"`
+
+	// FailureReason Why the asset is `failed` (`upload_expired`, `size_mismatch`, `upload_aborted`). Null otherwise.
+	FailureReason *string `json:"failure_reason"`
+
+	// Filename The file's name as the server stored it (a path and control characters removed, at most 255 bytes).
+	Filename string    `json:"filename"`
+	Id       AssetId   `json:"id"`
+	Kind     AssetKind `json:"kind"`
+
+	// Sha256 The SHA-256 (lowercase hex) the client claimed when it started the upload. Null when it did not say. Not verified by the upload itself.
+	Sha256    *string `json:"sha256"`
+	SizeBytes int64   `json:"size_bytes"`
+
+	// Status `uploading` (the multipart upload is in progress), `uploaded` (the object is complete; ingest is queued),
+	// `processing`, `ready`, or `failed` (see `failure_reason`).
+	Status AssetStatus `json:"status"`
+	Tags   []string    `json:"tags"`
+
+	// Title Editable. Starts as the file name without its extension.
+	Title     string    `json:"title"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// AssetId defines model for AssetId.
+type AssetId = string
+
+// AssetKind defines model for AssetKind.
+type AssetKind string
+
+// AssetStatus `uploading` (the multipart upload is in progress), `uploaded` (the object is complete; ingest is queued),
+// `processing`, `ready`, or `failed` (see `failure_reason`).
+type AssetStatus string
+
+// CompleteAssetRequest defines model for CompleteAssetRequest.
+type CompleteAssetRequest struct {
+	Parts []CompletedPartRef `json:"parts"`
+}
+
+// CompletedPartRef defines model for CompletedPartRef.
+type CompletedPartRef struct {
+	Etag       string `json:"etag"`
+	PartNumber int    `json:"part_number"`
+}
+
+// CreateAssetRequest defines model for CreateAssetRequest.
+type CreateAssetRequest struct {
+	// ContentType `video/mp4`, `video/quicktime`, `video/webm`, `audio/*`, `image/jpeg`, `image/png` or `image/heic`.
+	ContentType string `json:"content_type"`
+	Filename    string `json:"filename"`
+
+	// Sha256 Optional SHA-256 of the file, in hex.
+	Sha256 *string `json:"sha256,omitempty"`
+
+	// SizeBytes The exact size of the file. At most 20 GB. The upload only completes when the stored object has exactly this size.
+	SizeBytes int64 `json:"size_bytes"`
+}
+
+// CreateAssetResponse defines model for CreateAssetResponse.
+type CreateAssetResponse struct {
+	Asset Asset `json:"asset"`
+
+	// Parts Presigned URLs for the first parts (up to 20).
+	Parts        []PartUrl  `json:"parts"`
+	Upload       UploadInfo `json:"upload"`
+	UrlsExpireAt time.Time  `json:"urls_expire_at"`
+}
 
 // Entitlements The plan of the workspace as the API shows it.
 type Entitlements struct {
@@ -246,6 +425,14 @@ type LibrarySummaryResponse struct {
 	Projects int `json:"projects"`
 }
 
+// ListAssetsResponse defines model for ListAssetsResponse.
+type ListAssetsResponse struct {
+	Items []Asset `json:"items"`
+
+	// NextCursor Pass it as `cursor` for the next page. Null on the last page.
+	NextCursor *string `json:"next_cursor"`
+}
+
 // MeResponse defines model for MeResponse.
 type MeResponse struct {
 	// Entitlements The plan of the workspace as the API shows it.
@@ -276,6 +463,17 @@ type MeWorkspace struct {
 	Role Role `json:"role"`
 }
 
+// PartUrl defines model for PartUrl.
+type PartUrl struct {
+	PartNumber int `json:"part_number"`
+
+	// SizeBytes The exact Content-Length the URL is signed for.
+	SizeBytes int64 `json:"size_bytes"`
+
+	// Url A presigned URL. `PUT` exactly `size_bytes` bytes to it; the `ETag` response header is the part's ETag. Treat it as a secret.
+	Url string `json:"url"`
+}
+
 // PlanLimits What the plan includes. A zero number means "not included"; all zero without an active plan.
 type PlanLimits struct {
 	// AiBilling Who pays for the model calls (D-18): `managed` (we do) or `byok` (the creator's own key). Empty when the workspace
@@ -297,8 +495,58 @@ type PlanSource string
 // could not read it (never active).
 type PlanStatus string
 
+// PresignPartsRequest defines model for PresignPartsRequest.
+type PresignPartsRequest struct {
+	PartNumbers []int `json:"part_numbers"`
+}
+
+// PresignPartsResponse defines model for PresignPartsResponse.
+type PresignPartsResponse struct {
+	Parts        []PartUrl `json:"parts"`
+	UrlsExpireAt time.Time `json:"urls_expire_at"`
+}
+
 // Role The caller's role in the workspace. Clerk's `org:admin` is `owner`, `org:member` is `editor`, any other role is `viewer`.
 type Role string
+
+// UploadId defines model for UploadId.
+type UploadId = string
+
+// UploadInfo defines model for UploadInfo.
+type UploadInfo struct {
+	AssetId AssetId `json:"asset_id"`
+
+	// ExpiresAt After this the upload can no longer be completed, and it is aborted.
+	ExpiresAt time.Time `json:"expires_at"`
+	Id        UploadId  `json:"id"`
+
+	// PartCount Part numbers run from 1 to this.
+	PartCount int `json:"part_count"`
+
+	// PartSize Bytes in every part but the last, which holds the rest.
+	PartSize int64 `json:"part_size"`
+
+	// Status `active` (parts can be uploaded), `completed`, `aborted` (by the client or by the clean-up job) or `expired` (past
+	// `expires_at`, not cleaned up yet).
+	Status UploadStatus `json:"status"`
+}
+
+// UploadStateResponse defines model for UploadStateResponse.
+type UploadStateResponse struct {
+	CompletedParts []UploadedPart `json:"completed_parts"`
+	Upload         UploadInfo     `json:"upload"`
+}
+
+// UploadStatus `active` (parts can be uploaded), `completed`, `aborted` (by the client or by the clean-up job) or `expired` (past
+// `expires_at`, not cleaned up yet).
+type UploadStatus string
+
+// UploadedPart A part object storage holds.
+type UploadedPart struct {
+	Etag       string `json:"etag"`
+	PartNumber int    `json:"part_number"`
+	SizeBytes  int64  `json:"size_bytes"`
+}
 
 // UserId Examples: usr_01j9z3x7m8c4v6n2q5r0t1y8ab
 type UserId = string
@@ -328,11 +576,20 @@ type WorkspacePlanResponse struct {
 	Status PlanStatus `json:"status"`
 }
 
+// AssetIdPath defines model for AssetIdPath.
+type AssetIdPath = AssetId
+
+// BadRequest The error body of every endpoint.
+type BadRequest = Error
+
 // Forbidden The error body of every endpoint.
 type Forbidden = Error
 
 // InternalError The error body of every endpoint.
 type InternalError = Error
+
+// NotFound The error body of every endpoint.
+type NotFound = Error
 
 // PlanRequired The error body of every endpoint.
 type PlanRequired = Error
@@ -343,8 +600,53 @@ type Unauthenticated = Error
 // Unavailable The error body of every endpoint.
 type Unavailable = Error
 
+// UploadConflict The error body of every endpoint.
+type UploadConflict = Error
+
+// ListAssetsParams defines parameters for ListAssets.
+type ListAssetsParams struct {
+	// Limit How many assets to return (default 50).
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor The `next_cursor` of the previous page. Opaque.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// CreateAssetJSONRequestBody defines body for CreateAsset for application/json ContentType.
+type CreateAssetJSONRequestBody = CreateAssetRequest
+
+// CompleteAssetUploadJSONRequestBody defines body for CompleteAssetUpload for application/json ContentType.
+type CompleteAssetUploadJSONRequestBody = CompleteAssetRequest
+
+// PresignAssetPartsJSONRequestBody defines body for PresignAssetParts for application/json ContentType.
+type PresignAssetPartsJSONRequestBody = PresignPartsRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// ListAssets List the workspace's assets, newest first
+	// (GET /v1/assets)
+	ListAssets(w http.ResponseWriter, r *http.Request, params ListAssetsParams)
+	// CreateAsset Start an upload
+	// (POST /v1/assets)
+	CreateAsset(w http.ResponseWriter, r *http.Request)
+	// DeleteAsset Delete an asset
+	// (DELETE /v1/assets/{id})
+	DeleteAsset(w http.ResponseWriter, r *http.Request, id AssetIdPath)
+	// GetAsset One asset
+	// (GET /v1/assets/{id})
+	GetAsset(w http.ResponseWriter, r *http.Request, id AssetIdPath)
+	// CompleteAssetUpload Finish an upload
+	// (POST /v1/assets/{id}/complete)
+	CompleteAssetUpload(w http.ResponseWriter, r *http.Request, id AssetIdPath)
+	// PresignAssetParts Presigned URLs for more parts
+	// (POST /v1/assets/{id}/parts)
+	PresignAssetParts(w http.ResponseWriter, r *http.Request, id AssetIdPath)
+	// AbortAssetUpload Abort an upload
+	// (DELETE /v1/assets/{id}/upload)
+	AbortAssetUpload(w http.ResponseWriter, r *http.Request, id AssetIdPath)
+	// GetAssetUpload The state of an upload, to resume it
+	// (GET /v1/assets/{id}/upload)
+	GetAssetUpload(w http.ResponseWriter, r *http.Request, id AssetIdPath)
 	// GetLibrarySummary Counts of the workspace's library
 	// (GET /v1/library/summary)
 	GetLibrarySummary(w http.ResponseWriter, r *http.Request)
@@ -364,6 +666,222 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ListAssets operation middleware
+func (siw *ServerInterfaceWrapper) ListAssets(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAssetsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAssets(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateAsset operation middleware
+func (siw *ServerInterfaceWrapper) CreateAsset(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateAsset(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteAsset operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAsset(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id AssetIdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteAsset(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAsset operation middleware
+func (siw *ServerInterfaceWrapper) GetAsset(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id AssetIdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAsset(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CompleteAssetUpload operation middleware
+func (siw *ServerInterfaceWrapper) CompleteAssetUpload(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id AssetIdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CompleteAssetUpload(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PresignAssetParts operation middleware
+func (siw *ServerInterfaceWrapper) PresignAssetParts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id AssetIdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PresignAssetParts(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AbortAssetUpload operation middleware
+func (siw *ServerInterfaceWrapper) AbortAssetUpload(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id AssetIdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AbortAssetUpload(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAssetUpload operation middleware
+func (siw *ServerInterfaceWrapper) GetAssetUpload(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id AssetIdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAssetUpload(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // GetLibrarySummary operation middleware
 func (siw *ServerInterfaceWrapper) GetLibrarySummary(w http.ResponseWriter, r *http.Request) {
@@ -530,19 +1048,1053 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me", wrapper.GetMe)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/workspace/plan", wrapper.GetWorkspacePlan)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/library/summary", wrapper.GetLibrarySummary)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/assets", wrapper.ListAssets)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/assets", wrapper.CreateAsset)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/assets/{id}", wrapper.DeleteAsset)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/assets/{id}", wrapper.GetAsset)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/assets/{id}/upload", wrapper.AbortAssetUpload)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/assets/{id}/upload", wrapper.GetAssetUpload)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/assets/{id}/parts", wrapper.PresignAssetParts)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/assets/{id}/complete", wrapper.CompleteAssetUpload)
 
 	return m
 }
 
+type BadRequestJSONResponse Error
+
 type ForbiddenJSONResponse Error
 
 type InternalErrorJSONResponse Error
+
+type NotFoundJSONResponse Error
 
 type PlanRequiredJSONResponse Error
 
 type UnauthenticatedJSONResponse Error
 
 type UnavailableJSONResponse Error
+
+type UploadConflictJSONResponse Error
+
+type ListAssetsRequestObject struct {
+	Params ListAssetsParams
+}
+
+type ListAssetsResponseObject interface {
+	VisitListAssetsResponse(w http.ResponseWriter) error
+}
+
+type ListAssets200JSONResponse ListAssetsResponse
+
+func (response ListAssets200JSONResponse) VisitListAssetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAssets400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListAssets400JSONResponse) VisitListAssetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAssets401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListAssets401JSONResponse) VisitListAssetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAssets402JSONResponse struct{ PlanRequiredJSONResponse }
+
+func (response ListAssets402JSONResponse) VisitListAssetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAssets403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListAssets403JSONResponse) VisitListAssetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAssets500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response ListAssets500JSONResponse) VisitListAssetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAssets503JSONResponse struct{ UnavailableJSONResponse }
+
+func (response ListAssets503JSONResponse) VisitListAssetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAssetRequestObject struct {
+	Body *CreateAssetJSONRequestBody
+}
+
+type CreateAssetResponseObject interface {
+	VisitCreateAssetResponse(w http.ResponseWriter) error
+}
+
+type CreateAsset201JSONResponse CreateAssetResponse
+
+func (response CreateAsset201JSONResponse) VisitCreateAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAsset400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateAsset400JSONResponse) VisitCreateAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAsset401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateAsset401JSONResponse) VisitCreateAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAsset402JSONResponse struct{ PlanRequiredJSONResponse }
+
+func (response CreateAsset402JSONResponse) VisitCreateAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAsset403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateAsset403JSONResponse) VisitCreateAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAsset413JSONResponse Error
+
+func (response CreateAsset413JSONResponse) VisitCreateAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAsset415JSONResponse Error
+
+func (response CreateAsset415JSONResponse) VisitCreateAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(415)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAsset429JSONResponse Error
+
+func (response CreateAsset429JSONResponse) VisitCreateAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAsset500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response CreateAsset500JSONResponse) VisitCreateAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAsset503JSONResponse struct{ UnavailableJSONResponse }
+
+func (response CreateAsset503JSONResponse) VisitCreateAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteAssetRequestObject struct {
+	Id AssetIdPath `json:"id"`
+}
+
+type DeleteAssetResponseObject interface {
+	VisitDeleteAssetResponse(w http.ResponseWriter) error
+}
+
+type DeleteAsset204Response struct {
+}
+
+func (response DeleteAsset204Response) VisitDeleteAssetResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteAsset400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response DeleteAsset400JSONResponse) VisitDeleteAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteAsset401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteAsset401JSONResponse) VisitDeleteAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteAsset402JSONResponse struct{ PlanRequiredJSONResponse }
+
+func (response DeleteAsset402JSONResponse) VisitDeleteAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteAsset403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteAsset403JSONResponse) VisitDeleteAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteAsset404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteAsset404JSONResponse) VisitDeleteAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteAsset500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response DeleteAsset500JSONResponse) VisitDeleteAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteAsset503JSONResponse struct{ UnavailableJSONResponse }
+
+func (response DeleteAsset503JSONResponse) VisitDeleteAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAssetRequestObject struct {
+	Id AssetIdPath `json:"id"`
+}
+
+type GetAssetResponseObject interface {
+	VisitGetAssetResponse(w http.ResponseWriter) error
+}
+
+type GetAsset200JSONResponse Asset
+
+func (response GetAsset200JSONResponse) VisitGetAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAsset400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response GetAsset400JSONResponse) VisitGetAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAsset401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetAsset401JSONResponse) VisitGetAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAsset402JSONResponse struct{ PlanRequiredJSONResponse }
+
+func (response GetAsset402JSONResponse) VisitGetAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAsset403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetAsset403JSONResponse) VisitGetAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAsset404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetAsset404JSONResponse) VisitGetAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAsset500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response GetAsset500JSONResponse) VisitGetAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAsset503JSONResponse struct{ UnavailableJSONResponse }
+
+func (response GetAsset503JSONResponse) VisitGetAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteAssetUploadRequestObject struct {
+	Id   AssetIdPath `json:"id"`
+	Body *CompleteAssetUploadJSONRequestBody
+}
+
+type CompleteAssetUploadResponseObject interface {
+	VisitCompleteAssetUploadResponse(w http.ResponseWriter) error
+}
+
+type CompleteAssetUpload200JSONResponse Asset
+
+func (response CompleteAssetUpload200JSONResponse) VisitCompleteAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteAssetUpload400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CompleteAssetUpload400JSONResponse) VisitCompleteAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteAssetUpload401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CompleteAssetUpload401JSONResponse) VisitCompleteAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteAssetUpload402JSONResponse struct{ PlanRequiredJSONResponse }
+
+func (response CompleteAssetUpload402JSONResponse) VisitCompleteAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteAssetUpload403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CompleteAssetUpload403JSONResponse) VisitCompleteAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteAssetUpload404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CompleteAssetUpload404JSONResponse) VisitCompleteAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteAssetUpload409JSONResponse struct{ UploadConflictJSONResponse }
+
+func (response CompleteAssetUpload409JSONResponse) VisitCompleteAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteAssetUpload422JSONResponse Error
+
+func (response CompleteAssetUpload422JSONResponse) VisitCompleteAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteAssetUpload500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response CompleteAssetUpload500JSONResponse) VisitCompleteAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteAssetUpload503JSONResponse struct{ UnavailableJSONResponse }
+
+func (response CompleteAssetUpload503JSONResponse) VisitCompleteAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PresignAssetPartsRequestObject struct {
+	Id   AssetIdPath `json:"id"`
+	Body *PresignAssetPartsJSONRequestBody
+}
+
+type PresignAssetPartsResponseObject interface {
+	VisitPresignAssetPartsResponse(w http.ResponseWriter) error
+}
+
+type PresignAssetParts200JSONResponse PresignPartsResponse
+
+func (response PresignAssetParts200JSONResponse) VisitPresignAssetPartsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PresignAssetParts400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response PresignAssetParts400JSONResponse) VisitPresignAssetPartsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PresignAssetParts401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response PresignAssetParts401JSONResponse) VisitPresignAssetPartsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PresignAssetParts402JSONResponse struct{ PlanRequiredJSONResponse }
+
+func (response PresignAssetParts402JSONResponse) VisitPresignAssetPartsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PresignAssetParts403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response PresignAssetParts403JSONResponse) VisitPresignAssetPartsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PresignAssetParts404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response PresignAssetParts404JSONResponse) VisitPresignAssetPartsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PresignAssetParts409JSONResponse struct{ UploadConflictJSONResponse }
+
+func (response PresignAssetParts409JSONResponse) VisitPresignAssetPartsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PresignAssetParts500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response PresignAssetParts500JSONResponse) VisitPresignAssetPartsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PresignAssetParts503JSONResponse struct{ UnavailableJSONResponse }
+
+func (response PresignAssetParts503JSONResponse) VisitPresignAssetPartsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AbortAssetUploadRequestObject struct {
+	Id AssetIdPath `json:"id"`
+}
+
+type AbortAssetUploadResponseObject interface {
+	VisitAbortAssetUploadResponse(w http.ResponseWriter) error
+}
+
+type AbortAssetUpload204Response struct {
+}
+
+func (response AbortAssetUpload204Response) VisitAbortAssetUploadResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type AbortAssetUpload400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response AbortAssetUpload400JSONResponse) VisitAbortAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AbortAssetUpload401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response AbortAssetUpload401JSONResponse) VisitAbortAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AbortAssetUpload402JSONResponse struct{ PlanRequiredJSONResponse }
+
+func (response AbortAssetUpload402JSONResponse) VisitAbortAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AbortAssetUpload403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response AbortAssetUpload403JSONResponse) VisitAbortAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AbortAssetUpload404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response AbortAssetUpload404JSONResponse) VisitAbortAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AbortAssetUpload409JSONResponse struct{ UploadConflictJSONResponse }
+
+func (response AbortAssetUpload409JSONResponse) VisitAbortAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AbortAssetUpload500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response AbortAssetUpload500JSONResponse) VisitAbortAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AbortAssetUpload503JSONResponse struct{ UnavailableJSONResponse }
+
+func (response AbortAssetUpload503JSONResponse) VisitAbortAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAssetUploadRequestObject struct {
+	Id AssetIdPath `json:"id"`
+}
+
+type GetAssetUploadResponseObject interface {
+	VisitGetAssetUploadResponse(w http.ResponseWriter) error
+}
+
+type GetAssetUpload200JSONResponse UploadStateResponse
+
+func (response GetAssetUpload200JSONResponse) VisitGetAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAssetUpload400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response GetAssetUpload400JSONResponse) VisitGetAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAssetUpload401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetAssetUpload401JSONResponse) VisitGetAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAssetUpload402JSONResponse struct{ PlanRequiredJSONResponse }
+
+func (response GetAssetUpload402JSONResponse) VisitGetAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAssetUpload403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetAssetUpload403JSONResponse) VisitGetAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAssetUpload404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetAssetUpload404JSONResponse) VisitGetAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAssetUpload500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response GetAssetUpload500JSONResponse) VisitGetAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAssetUpload503JSONResponse struct{ UnavailableJSONResponse }
+
+func (response GetAssetUpload503JSONResponse) VisitGetAssetUploadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
 
 type GetLibrarySummaryRequestObject struct {
 }
@@ -791,6 +2343,30 @@ func (response GetWorkspacePlan503JSONResponse) VisitGetWorkspacePlanResponse(w 
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// ListAssets List the workspace's assets, newest first
+	// (GET /v1/assets)
+	ListAssets(ctx context.Context, request ListAssetsRequestObject) (ListAssetsResponseObject, error)
+	// CreateAsset Start an upload
+	// (POST /v1/assets)
+	CreateAsset(ctx context.Context, request CreateAssetRequestObject) (CreateAssetResponseObject, error)
+	// DeleteAsset Delete an asset
+	// (DELETE /v1/assets/{id})
+	DeleteAsset(ctx context.Context, request DeleteAssetRequestObject) (DeleteAssetResponseObject, error)
+	// GetAsset One asset
+	// (GET /v1/assets/{id})
+	GetAsset(ctx context.Context, request GetAssetRequestObject) (GetAssetResponseObject, error)
+	// CompleteAssetUpload Finish an upload
+	// (POST /v1/assets/{id}/complete)
+	CompleteAssetUpload(ctx context.Context, request CompleteAssetUploadRequestObject) (CompleteAssetUploadResponseObject, error)
+	// PresignAssetParts Presigned URLs for more parts
+	// (POST /v1/assets/{id}/parts)
+	PresignAssetParts(ctx context.Context, request PresignAssetPartsRequestObject) (PresignAssetPartsResponseObject, error)
+	// AbortAssetUpload Abort an upload
+	// (DELETE /v1/assets/{id}/upload)
+	AbortAssetUpload(ctx context.Context, request AbortAssetUploadRequestObject) (AbortAssetUploadResponseObject, error)
+	// GetAssetUpload The state of an upload, to resume it
+	// (GET /v1/assets/{id}/upload)
+	GetAssetUpload(ctx context.Context, request GetAssetUploadRequestObject) (GetAssetUploadResponseObject, error)
 	// GetLibrarySummary Counts of the workspace's library
 	// (GET /v1/library/summary)
 	GetLibrarySummary(ctx context.Context, request GetLibrarySummaryRequestObject) (GetLibrarySummaryResponseObject, error)
@@ -839,6 +2415,233 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// ListAssets operation middleware
+func (sh *strictHandler) ListAssets(w http.ResponseWriter, r *http.Request, params ListAssetsParams) {
+	var request ListAssetsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAssets(ctx, request.(ListAssetsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAssets")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAssetsResponseObject); ok {
+		if err := validResponse.VisitListAssetsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateAsset operation middleware
+func (sh *strictHandler) CreateAsset(w http.ResponseWriter, r *http.Request) {
+	var request CreateAssetRequestObject
+
+	var body CreateAssetJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateAsset(ctx, request.(CreateAssetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateAsset")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateAssetResponseObject); ok {
+		if err := validResponse.VisitCreateAssetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteAsset operation middleware
+func (sh *strictHandler) DeleteAsset(w http.ResponseWriter, r *http.Request, id AssetIdPath) {
+	var request DeleteAssetRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteAsset(ctx, request.(DeleteAssetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteAsset")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteAssetResponseObject); ok {
+		if err := validResponse.VisitDeleteAssetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAsset operation middleware
+func (sh *strictHandler) GetAsset(w http.ResponseWriter, r *http.Request, id AssetIdPath) {
+	var request GetAssetRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAsset(ctx, request.(GetAssetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAsset")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAssetResponseObject); ok {
+		if err := validResponse.VisitGetAssetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CompleteAssetUpload operation middleware
+func (sh *strictHandler) CompleteAssetUpload(w http.ResponseWriter, r *http.Request, id AssetIdPath) {
+	var request CompleteAssetUploadRequestObject
+
+	request.Id = id
+
+	var body CompleteAssetUploadJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CompleteAssetUpload(ctx, request.(CompleteAssetUploadRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CompleteAssetUpload")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CompleteAssetUploadResponseObject); ok {
+		if err := validResponse.VisitCompleteAssetUploadResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PresignAssetParts operation middleware
+func (sh *strictHandler) PresignAssetParts(w http.ResponseWriter, r *http.Request, id AssetIdPath) {
+	var request PresignAssetPartsRequestObject
+
+	request.Id = id
+
+	var body PresignAssetPartsJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PresignAssetParts(ctx, request.(PresignAssetPartsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PresignAssetParts")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PresignAssetPartsResponseObject); ok {
+		if err := validResponse.VisitPresignAssetPartsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AbortAssetUpload operation middleware
+func (sh *strictHandler) AbortAssetUpload(w http.ResponseWriter, r *http.Request, id AssetIdPath) {
+	var request AbortAssetUploadRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AbortAssetUpload(ctx, request.(AbortAssetUploadRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AbortAssetUpload")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AbortAssetUploadResponseObject); ok {
+		if err := validResponse.VisitAbortAssetUploadResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAssetUpload operation middleware
+func (sh *strictHandler) GetAssetUpload(w http.ResponseWriter, r *http.Request, id AssetIdPath) {
+	var request GetAssetUploadRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAssetUpload(ctx, request.(GetAssetUploadRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAssetUpload")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAssetUploadResponseObject); ok {
+		if err := validResponse.VisitGetAssetUploadResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // GetLibrarySummary operation middleware
@@ -918,56 +2721,108 @@ func (sh *strictHandler) GetWorkspacePlan(w http.ResponseWriter, r *http.Request
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,
