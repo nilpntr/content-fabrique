@@ -20,7 +20,7 @@ func TestRepoProfiles(t *testing.T) {
 	}
 	tests := map[string][]string{
 		"dev-cheap": {"claude-haiku-5-5"},
-		"dev-mid":   {"claude-sonnet-5-5"},
+		"dev-mid":   {"claude-haiku-5-5", "claude-sonnet-5-5"}, // haiku for the quick look (P1-04b)
 		"v1-start":  {"claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5"},
 	}
 	for name, want := range tests {

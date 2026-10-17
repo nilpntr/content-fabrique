@@ -34,12 +34,15 @@ WHERE workspace_id = @workspace_id AND id = @id;
 SELECT * FROM uploads
 WHERE workspace_id = @workspace_id AND asset_id = @asset_id;
 
--- The library page: newest first (UUIDv7 ids sort by creation time), after the cursor when there is one.
+-- The library page: newest first (UUIDv7 ids sort by creation time), after the cursor when there is one. With a search
+-- query (a tsquery the caller built from plain words, see store.SearchQuery) only the assets whose title, description, tags
+-- or file name match it.
 -- name: ListAssets :many
 SELECT * FROM assets
 WHERE workspace_id = @workspace_id
   AND deleted_at IS NULL
   AND (sqlc.narg('before')::uuid IS NULL OR id < sqlc.narg('before')::uuid)
+  AND (sqlc.narg('search')::text IS NULL OR search @@ to_tsquery('english', sqlc.narg('search')::text))
 ORDER BY id DESC
 LIMIT @row_limit;
 

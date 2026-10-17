@@ -15,6 +15,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
+	"github.com/nilpntr/content-fabrique/internal/quicklook"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/telemetry"
@@ -46,7 +47,9 @@ func run(args []string) error {
 			var (
 				objects  jobs.ObjectStore
 				ingester jobs.AssetIngester // nil without storage: asset_ingest jobs then wait (snoozed)
+				looker   *quicklook.Service // nil without storage or model access: quick_look jobs then wait (snoozed)
 			)
+			models := newModelAccess(st, logger)
 			if cfg.ObjectStorageConfigured() {
 				client, err := storage.New(cfg.Storage())
 				if err != nil {
@@ -59,10 +62,17 @@ func run(args []string) error {
 					return nil, err
 				}
 				ingester = pipeline
+				if looker, err = newQuickLookService(cfg, st, client, models, logger); err != nil {
+					return nil, err
+				}
 				logger.Info("media pipeline ready", "sandbox", cfg.MediaSandboxProvider, "image", cfg.MediaToolsImage, "temp_dir", cfg.MediaTempDir, "concurrency", cfg.MediaConcurrency)
 				warnIfImageMissing(ctx, cfg, logger)
 			} else {
 				logger.Warn("R2_* is not set: the jobs that delete objects, clean up uploads or ingest assets wait (snoozed, no attempt used) until a worker has it")
+			}
+			var quickLooker jobs.QuickLooker // a nil *Service in the interface would not be nil
+			if looker != nil {
+				quickLooker = looker
 			}
 			queues := jobs.DefaultConfig()
 			for i := range queues.Queues {
@@ -76,7 +86,8 @@ func run(args []string) error {
 				Store:      st,
 				Objects:    objects,
 				Ingest:     ingester,
-				Register:   runtime.Register(newAgentRunner(st, logger)),
+				Register:   runtime.Register(newAgentRunner(st, logger, models)),
+				QuickLook:  quickLooker,
 				Logger:     logger,
 				UIAddr:     *riverUIAddr,
 				UIPassword: cfg.RiverUIPassword,

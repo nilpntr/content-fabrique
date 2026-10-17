@@ -129,7 +129,11 @@ func (s *Store) FinishAssetIngest(ctx context.Context, ws ids.WorkspaceID, id id
 			}
 			keep = append(keep, d.Kind)
 		}
-		return mapErr(tx.q.DeleteStaleAssetDerivatives(ctx, db.DeleteStaleAssetDerivativesParams{WorkspaceID: ws, AssetID: id, Keep: keep}))
+		if err := mapErr(tx.q.DeleteStaleAssetDerivatives(ctx, db.DeleteStaleAssetDerivativesParams{WorkspaceID: ws, AssetID: id, Keep: keep})); err != nil {
+			return err
+		}
+		a, err = tx.quickLookDue(ctx, a)
+		return err
 	})
 	if err != nil {
 		return Asset{}, err

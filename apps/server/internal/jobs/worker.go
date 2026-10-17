@@ -36,6 +36,8 @@ type WorkerOptions struct {
 	Objects ObjectStore
 	// Ingest is the media pipeline, for the jobs that ingest assets. Nil when the sandbox or object storage is not set up.
 	Ingest AssetIngester
+	// QuickLook is the quick look, for the quick_look job. Nil when the sandbox, object storage or model access is not set up.
+	QuickLook QuickLooker
 	// UIAddr is the listen address of River UI, such as "127.0.0.1:8082". Empty turns River UI off.
 	UIAddr string
 	// UIPassword is RIVER_UI_PASSWORD. River UI refuses to start without it.
@@ -100,10 +102,14 @@ func StartWorker(ctx context.Context, opts WorkerOptions) (*Worker, error) {
 		}
 	}
 
-	client, err := NewWorkerClient(pool, cfg, Deps{Store: opts.Store, Logger: logger, Objects: opts.Objects, Ingest: opts.Ingest, Register: opts.Register})
+	client, err := NewWorkerClient(pool, cfg, Deps{Store: opts.Store, Logger: logger, Objects: opts.Objects, Ingest: opts.Ingest, QuickLook: opts.QuickLook, Register: opts.Register})
 	if err != nil {
 		pool.Close()
 		return nil, err
+	}
+	// The ingest marks a video ready through this Store; the same transaction enqueues its quick look (P1-04b).
+	if opts.Store != nil {
+		opts.Store.SetQuickLookHook(NewEnqueuer(client, logger).EnqueueQuickLook)
 	}
 	w := &Worker{runner: NewRunner(client, pool, logger), pool: pool, direct: direct, logger: logger}
 

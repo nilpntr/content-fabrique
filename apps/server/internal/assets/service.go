@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -30,6 +31,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/jobs"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
+	"github.com/nilpntr/content-fabrique/internal/textclean"
 )
 
 // UploadTTL is how long an upload can be completed after it started; the clean-up job aborts it after that.
@@ -578,6 +580,30 @@ func (s *Service) Get(ctx context.Context, who Actor, id ids.AssetID) (View, *Er
 	return vs[0], nil
 }
 
+// Rename sets the asset's title to what a person typed (PATCH /v1/assets/{id}). The text is cleaned like every title and
+// must leave 1 to MaxTitleChars characters; the title is then the user's, and the quick look never overwrites it.
+func (s *Service) Rename(ctx context.Context, who Actor, id ids.AssetID, title string) (View, *Error) {
+	clean, ok := textclean.Clean(title, 4*MaxTitleChars)
+	if !ok {
+		return View{}, invalid("title must contain some text")
+	}
+	if utf8.RuneCountInString(clean) > MaxTitleChars {
+		return View{}, invalid("title can have at most 255 characters")
+	}
+	a, err := s.store.UpdateAssetTitle(ctx, who.Workspace, id, clean)
+	if errors.Is(err, store.ErrNotFound) {
+		return View{}, errNotFound
+	}
+	if err != nil {
+		return View{}, s.internal(ctx, "update asset title", err)
+	}
+	vs, e := s.views(ctx, who.Workspace, []store.Asset{a})
+	if e != nil {
+		return View{}, e
+	}
+	return vs[0], nil
+}
+
 // DefaultPageSize and MaxPageSize bound a list page.
 const (
 	DefaultPageSize = 50
@@ -585,13 +611,20 @@ const (
 )
 
 // List returns a page of the workspace's assets, newest first, and the cursor of the next page ("" on the last one). The
-// cursor is the id of the last asset of the page.
-func (s *Service) List(ctx context.Context, who Actor, limit int, cursor string) ([]View, string, *Error) {
+// cursor is the id of the last asset of the page. With a non-empty query only the assets that match the search words are
+// listed (store.SearchQuery says how the text becomes words).
+func (s *Service) List(ctx context.Context, who Actor, query string, limit int, cursor string) ([]View, string, *Error) {
 	if limit == 0 {
 		limit = DefaultPageSize
 	}
 	if limit < 1 || limit > MaxPageSize {
 		return nil, "", invalid("limit must be between 1 and 100")
+	}
+	if utf8.RuneCountInString(query) > store.MaxSearchQueryChars {
+		return nil, "", invalid("q can have at most 100 characters")
+	}
+	if !utf8.ValidString(query) {
+		return nil, "", invalid("q is not valid text")
 	}
 	var before *ids.AssetID
 	if cursor != "" {
@@ -601,7 +634,7 @@ func (s *Service) List(ctx context.Context, who Actor, limit int, cursor string)
 		}
 		before = &id
 	}
-	rows, err := s.store.ListAssets(ctx, who.Workspace, before, limit+1)
+	rows, err := s.store.SearchAssets(ctx, who.Workspace, store.SearchQuery(query), before, limit+1)
 	if err != nil {
 		return nil, "", s.internal(ctx, "list assets", err)
 	}

@@ -55,3 +55,44 @@ ORDER BY asset_id, kind;
 -- A failed asset has no derivatives: the rows go with the failure (the ingest removes the objects).
 -- name: DeleteAssetDerivatives :exec
 DELETE FROM asset_derivatives WHERE workspace_id = @workspace_id AND asset_id = @asset_id;
+
+-- The quick look (P1-04b). EVERY query filters by workspace_id like the rest.
+
+-- Inside the transaction that marks a video ready: the quick look is now owed. No row: it is not a video, or the quick look
+-- has run already (succeeded or failed), so no job is enqueued.
+-- name: MarkQuickLookPending :one
+UPDATE assets SET quick_look_status = 'pending'
+WHERE workspace_id = @workspace_id AND id = @id AND kind = 'video' AND deleted_at IS NULL
+  AND (quick_look_status IS NULL OR quick_look_status = 'pending')
+RETURNING *;
+
+-- The quick look succeeded. The title changes only while it is not the user's; the description and tags are the quick look's.
+-- One statement, so a title edited at the same moment wins: the CASE sees the row as it is when the update applies.
+-- name: ApplyQuickLook :one
+UPDATE assets
+SET title = CASE WHEN title_source = 'user' THEN title ELSE @title::text END,
+    title_source = CASE WHEN title_source = 'user' THEN title_source ELSE 'quicklook' END,
+    description = @description::text, tags = @tags::text[],
+    quick_look_status = 'succeeded', quick_look = @detail::jsonb, quick_look_at = now()
+WHERE workspace_id = @workspace_id AND id = @id AND status = 'ready' AND deleted_at IS NULL
+RETURNING *;
+
+-- The quick look failed: nothing but the status and the detail (an error code, the frames if they were cut) is written.
+-- name: FailQuickLook :one
+UPDATE assets SET quick_look_status = 'failed', quick_look = @detail::jsonb, quick_look_at = now()
+WHERE workspace_id = @workspace_id AND id = @id AND status = 'ready' AND deleted_at IS NULL
+RETURNING *;
+
+-- PATCH /v1/assets/{id}: a person edited the title, which the quick look never overwrites after this.
+-- name: UpdateAssetTitle :one
+UPDATE assets SET title = @title::text, title_source = 'user'
+WHERE workspace_id = @workspace_id AND id = @id AND deleted_at IS NULL
+RETURNING *;
+
+-- The ready videos of a workspace for cfctl's backfill, oldest first; only those without a successful quick look unless include_done.
+-- name: ListAssetsForQuickLook :many
+SELECT * FROM assets
+WHERE workspace_id = @workspace_id AND kind = 'video' AND status = 'ready' AND deleted_at IS NULL
+  AND (@include_done::boolean OR quick_look_status IS DISTINCT FROM 'succeeded')
+ORDER BY id
+LIMIT @row_limit;

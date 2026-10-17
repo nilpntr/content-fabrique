@@ -11,7 +11,9 @@ import (
 
 	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/ingest"
+	"github.com/nilpntr/content-fabrique/internal/jobs"
 	"github.com/nilpntr/content-fabrique/internal/media"
+	"github.com/nilpntr/content-fabrique/internal/quicklook"
 	"github.com/nilpntr/content-fabrique/internal/sandbox"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
@@ -62,6 +64,38 @@ func newIngestPipeline(cfg config.Config, st *store.Store, objects *storage.Clie
 		TempDir: filepath.Join(root, "ingest"),
 		Logger:  logger,
 	})
+}
+
+// newQuickLookService builds the quick look (P1-04b): the same sandbox provider and media-tools image as the ingest (it cuts
+// frames from the proxy with ffmpeg), its own job directory next to the ingest's, object storage, and the worker's model
+// access. It returns nil, with a warning, when the model access or its routing is off: quick_look jobs then wait, snoozed.
+func newQuickLookService(cfg config.Config, st *store.Store, objects *storage.Client, ma *modelAccess, logger *slog.Logger) (*quicklook.Service, error) {
+	if ma == nil || ma.router == nil {
+		logger.Warn("quick looks are off: there is no model access; quick_look jobs wait (snoozed) until a worker has it")
+		return nil, nil
+	}
+	if err := os.MkdirAll(cfg.MediaTempDir, 0o750); err != nil {
+		return nil, fmt.Errorf("MEDIA_TEMP_DIR: %w", err)
+	}
+	root, err := filepath.EvalSymlinks(cfg.MediaTempDir)
+	if err != nil {
+		return nil, fmt.Errorf("MEDIA_TEMP_DIR: %w", err)
+	}
+	provider, err := newSandboxProvider(cfg, root)
+	if err != nil {
+		return nil, err
+	}
+	svc, err := quicklook.New(quicklook.Config{
+		Store: st, Objects: objects,
+		Runner:  &media.SandboxRunner{Provider: provider, Image: cfg.MediaToolsImage, Limits: ingestLimits()},
+		TempDir: filepath.Join(root, "quicklook"),
+		Models:  ma.factory, Router: ma.router, Logger: logger,
+	})
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("quick look ready", "llm_mode", ma.settings.Mode, "profile", ma.router.DefaultProfile(), "concurrency", jobs.DefaultQuickLookConcurrency)
+	return svc, nil
 }
 
 // warnIfImageMissing logs when a container provider is selected and the media-tools image is not on this machine: the

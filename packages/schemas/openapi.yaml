@@ -186,7 +186,18 @@ paths:
       description: |
         Cursor pagination. Deleted assets are not listed. A `ready` asset carries its `media` facts and short-lived
         `derivatives` URLs, as in `getAsset`.
+        With `q` only the assets that match the search are listed (still newest first, same cursor): every word of `q`
+        must occur, as the start of a word, in the asset's title, description, tags or file name, with English stemming
+        (`row` finds "Barbell rows"). Characters other than letters and digits only separate words; a `q` without any
+        word lists everything.
       parameters:
+        - name: q
+          in: query
+          required: false
+          description: Search words, at most 100 characters. At most the first 8 words are used.
+          schema:
+            type: string
+            maxLength: 100
         - name: limit
           in: query
           required: false
@@ -238,6 +249,41 @@ paths:
       responses:
         "200":
           description: The asset.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Asset"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    patch:
+      operationId: updateAsset
+      tags: [assets]
+      summary: Edit an asset's title
+      description: |
+        Sets the title. The title is cleaned like every title (control characters, markup characters and extra spaces
+        removed) and must have 1 to 255 characters left. From then on the asset's `title_source` is `user` and the quick
+        look never overwrites the title again. Only owners and editors may edit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAssetRequest"
+      responses:
+        "200":
+          description: The asset as it is now.
           content:
             application/json:
               schema:
@@ -1159,6 +1205,30 @@ components:
         (see `failure_reason`).
       enum: [uploading, uploaded, processing, ready, failed]
 
+    TitleSource:
+      type: string
+      description: |
+        Where the title came from: `filename` (the file name without its extension, what the upload made), `quicklook`
+        (written by the quick look) or `user` (edited with `updateAsset`; never overwritten).
+      enum: [filename, quicklook, user]
+
+    QuickLookStatus:
+      type: string
+      description: |
+        `pending` (the clip is ready and its quick look has not finished), `succeeded` (title, description and tags were
+        written) or `failed` (the clip is usable but has no description or tags; the title is still the file name).
+      enum: [pending, succeeded, failed]
+
+    UpdateAssetRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: The new title. Cleaned by the server; 1 to 255 characters must remain.
+
     Asset:
       type: object
       required: [id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, failure_reason, ingest_progress, ingest_stage, created_at, updated_at]
@@ -1182,13 +1252,21 @@ components:
           description: The SHA-256 (lowercase hex) the client claimed when it started the upload. Null when it did not say. Not verified by the upload itself.
         title:
           type: string
-          description: Editable. Starts as the file name without its extension.
+          description: Editable with `updateAsset`. Starts as the file name without its extension; the quick look replaces it unless it was edited.
+        title_source:
+          $ref: "#/components/schemas/TitleSource"
+          description: Present on every asset the server returns (optional in the schema only so older clients and fixtures still type-check).
         description:
           type: string
+          description: A one-line description written by the quick look (at most 160 characters). Empty until then.
         tags:
           type: array
           items:
             type: string
+          description: At most 8 lowercase tags of one to three words, written by the quick look. Empty until then.
+        quick_look_status:
+          $ref: "#/components/schemas/QuickLookStatus"
+          description: The state of the quick look (the title, description and tags a video gets right after its ingest). Absent for an asset it does not apply to (audio, images, and videos from before it existed).
         failure_reason:
           type: [string, "null"]
           description: |
