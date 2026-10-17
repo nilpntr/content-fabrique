@@ -24,28 +24,41 @@ type CreatorProfile struct {
 }
 
 type User struct {
-	ID          ids.UserID
-	ClerkUserID string
-	Email       string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID             ids.UserID
+	ClerkUserID    string
+	Email          string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	DeletedAt      *time.Time
+	ClerkUpdatedAt int64
+}
+
+type WebhookEvent struct {
+	SvixID       string
+	EventType    string
+	Subject      string
+	ClerkEventAt int64
+	ReceivedAt   time.Time
 }
 
 type Workspace struct {
-	ID          ids.WorkspaceID
-	ClerkOrgID  string
-	Name        string
-	Plan        string
-	Region      string
-	BillingMode string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID             ids.WorkspaceID
+	ClerkOrgID     string
+	Name           string
+	Plan           string
+	Region         string
+	BillingMode    string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	DeletedAt      *time.Time
+	ClerkUpdatedAt int64
 }
 
 type WorkspaceMember struct {
-	WorkspaceID ids.WorkspaceID
-	UserID      ids.UserID
-	Role        string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	WorkspaceID    ids.WorkspaceID
+	UserID         ids.UserID
+	Role           string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	ClerkUpdatedAt int64
 }

@@ -25,8 +25,12 @@ type Options struct {
 	// Addr picks the listen address from the loaded config.
 	Addr func(config.Config) string
 	// Routes optionally registers extra routes and readiness checks before the server starts. st is the process's
-	// Postgres store (the app role, over DATABASE_URL), already registered as the "postgres" readiness check.
-	Routes func(mux *http.ServeMux, health *httpapi.Health, logger *slog.Logger, st *store.Store)
+	// Postgres store (the app role, over DATABASE_URL), already registered as the "postgres" readiness check. An error
+	// stops the process before it listens.
+	Routes func(cfg config.Config, mux *http.ServeMux, health *httpapi.Health, logger *slog.Logger, st *store.Store) error
+	// Middleware optionally wraps the whole mux (CORS, for the api), inside tracing and the access log and outside
+	// the routes, so it also covers the 404s and 405s of the mux.
+	Middleware func(cfg config.Config) func(http.Handler) http.Handler
 }
 
 // Run loads config, sets up telemetry, serves HTTP until SIGINT or SIGTERM, then shuts down gracefully
@@ -78,9 +82,15 @@ func Run(opts Options) error {
 	health := httpapi.NewHealth(logger, httpapi.Check{Name: "postgres", Fn: postgresCheck(st, cfg.Env, logger)})
 	mux := httpapi.NewMux(health)
 	if opts.Routes != nil {
-		opts.Routes(mux, health, logger, st)
+		if err := opts.Routes(cfg, mux, health, logger, st); err != nil {
+			return fmt.Errorf("routes: %w", err)
+		}
 	}
-	srv := httpapi.NewServer(addr, httpapi.Handler(mux, logger))
+	var handler http.Handler = mux
+	if opts.Middleware != nil {
+		handler = opts.Middleware(cfg)(handler)
+	}
+	srv := httpapi.NewServer(addr, httpapi.Handler(handler, logger))
 
 	// After the first signal, restore default handling so a second one terminates immediately.
 	go func() {

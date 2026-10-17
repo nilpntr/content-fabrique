@@ -112,7 +112,9 @@ func (s *Store) UpsertUserByClerkID(ctx context.Context, clerkUserID, email stri
 	return u, mapErr(err)
 }
 
-// AddMember makes the user a member of the workspace with the role, or changes the role of an existing member.
+// AddMember makes the user a member of the workspace with the role, or changes the role of an existing member, with no
+// check of the order of events. That makes it a way to change a role, so no request handler calls it: the roles come
+// from Clerk, through SyncMember (the webhook and just-in-time paths of internal/auth). It stays for seeding and tests.
 func (s *Store) AddMember(ctx context.Context, ws ids.WorkspaceID, user ids.UserID, role Role) (Member, error) {
 	switch role {
 	case RoleOwner, RoleEditor, RoleViewer:
