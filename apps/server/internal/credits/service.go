@@ -130,15 +130,15 @@ func (s *Service) QuoteEdit(ctx context.Context, tx *store.Store, ws ids.Workspa
 	q.BillingMode = s.List.Plans[ent.Plan].BillingMode
 	// A run that is cancelled before it made anything, finds nothing to change, or fails for the creator's own reason is released, not
 	// charged, but it has spent model money. A workspace may have only so many of them per UTC day.
-	cap := s.List.Plans[ent.Plan].UnchargedRunsPerDay
+	limit := s.List.Plans[ent.Plan].UnchargedRunsPerDay
 	now := s.now().UTC()
 	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	n, err := tx.CountUnchargedRuns(ctx, ws, EditorAgent, day, UnchargedFailureReasons)
 	if err != nil {
 		return Quote{}, err
 	}
-	if n >= cap {
-		return Quote{}, &TooManyUnchargedError{Cap: cap}
+	if n >= limit {
+		return Quote{}, &TooManyUnchargedError{Cap: limit}
 	}
 	q.Credits = s.List.Credits[action]
 	q.BudgetMicros = s.List.Plans[ent.Plan].COGSBudgetMicros[action]
