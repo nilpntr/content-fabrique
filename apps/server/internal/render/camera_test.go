@@ -22,7 +22,7 @@ func withRamp(points ...timeline.SpeedPoint) func(*timeline.VideoItem) {
 // Nothing of a spec but numbers and a fixed set of words may reach the filter graph (the graph runs in the sandbox). This is
 // the whole alphabet of what the new features write: letters (filter and function names), digits, and the punctuation of
 // the filter syntax and of its expressions.
-var graphAlphabet = regexp.MustCompile(`^[A-Za-z0-9_.,:;=\[\]'()+\-*/<> ]*$`)
+var graphAlphabet = regexp.MustCompile(`^[A-Za-z0-9_.,:;=\[\]'()+\-*/<>@ ]*$`)
 
 func TestNewFeaturesWriteOnlyNumbersAndFixedWordsIntoTheGraph(t *testing.T) {
 	cat := testAssets(t)

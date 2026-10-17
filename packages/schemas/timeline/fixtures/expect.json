@@ -259,5 +259,15 @@
     "code": "schema",
     "path": "/tracks/0/items/0/look/match",
     "keyword": "type"
+  },
+  "i68_schema_sfx_variant_of_another_category.json": {
+    "code": "schema",
+    "path": "/tracks/1/items/0/variant",
+    "keyword": "enum"
+  },
+  "i69_schema_sfx_hostile_variant.json": {
+    "code": "schema",
+    "path": "/tracks/1/items/0/variant",
+    "keyword": "enum"
   }
 }

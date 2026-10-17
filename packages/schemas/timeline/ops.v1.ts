@@ -1235,17 +1235,36 @@ export type Op20 = "set_speed_ramp";
  */
 export type ClipId9 = string;
 /**
+ * Add a generated sound effect to the audio track (created when there is none). Categories: whoosh (an air pass-by for a whip or a cut; variants air 0.6 s, fast 0.35 s, heavy 1.0 s with weight), swish (a quick thin air pass for small moves; thin 0.3 s, blade 0.2 s, cloth 0.4 s), impact (a low hit with a crack for a punch-in or the drop; punch 0.8 s, deep 1.4 s with a long sub, crack 0.5 s bright, metal 1.2 s), riser (a rising tension build that peaks at its end, so start it that long before the moment it leads to; tension 1.5 s, sweep 1.0 s filter sweep, pitch 2.0 s tonal, long 3.0 s), downlifter (a falling release after a hit or on the new section; fall 1.2 s, short 0.6 s, tape 0.8 s tape stop), sub_drop (a pitch-dropping sine under a hit; boom 1.0 s, quick 0.5 s, long 2.0 s), pop (a small bubble for an element appearing; bubble 0.3 s, tick 0.15 s, double 0.35 s), click (a UI click on the frame of an on-screen press; ui 80 ms, soft 100 ms, tonal 120 ms, mech 180 ms), glitch (a digital stutter for a glitchy cut; stutter 0.3 s, crush 0.25 s, chirp 0.4 s), shimmer (a sparkle for something magical or new; sparkle 1.2 s, wash 1.5 s, rise 1.0 s), sting (a logo or reveal hit with a tonal bloom; hit 2.5 s, bright 2.0 s, dark 3.0 s). Use few: the music and the voice carry most of the edit, effects are accents on the moments that matter (a whoosh on a whip or a cut, an impact or sting on the reveal or the drop, a riser started its length before the moment it leads to, a click on an on-screen press, a pop for an element appearing). A timeline holds about 30 effects at most (more is refused as too_many_effects). The effect is synthesised by us, needs no asset or licence and is always in the render and the export. It starts at at_ms (inside the timeline; it is cut at the end) and is mixed after the loudness normalisation at a level matched to its category plus gain_db, so it stays an accent; where it overlaps speech from a clip's own sound the programme is ducked a few dB around it. Without id it gets the next free "s<n>". Without variant the category's first variant is used; "auto" varies it by the item id. Move it with move_item (at_ms) and remove it with remove_sound.
+ */
+export type AddSfx = AddSfx1;
+/**
  * "add_sfx".
  */
 export type Op21 = "add_sfx";
 /**
- * Optional id for the new effect. Without it the next free "s<n>" is used. It must not be in use anywhere in the timeline.
+ * Optional id for the new effect. Without it the next free "s<n>" is used. It must not be in use anywhere in the timeline. The id also drives the effect's jitter and the "auto" variant.
  */
 export type SoundId5 = string;
 /**
- * whoosh, impact, riser or swish.
+ * The effect category: whoosh, swish, impact, riser, downlifter, sub_drop, pop, click, glitch, shimmer, sting.
  */
-export type Effect = "whoosh" | "impact" | "riser" | "swish";
+export type Effect =
+  | "whoosh"
+  | "swish"
+  | "impact"
+  | "riser"
+  | "downlifter"
+  | "sub_drop"
+  | "pop"
+  | "click"
+  | "glitch"
+  | "shimmer"
+  | "sting";
+/**
+ * Optional variant of the effect, one of the variants of its category: whoosh: air, fast, heavy; swish: thin, blade, cloth; impact: punch, deep, crack, metal; riser: tension, sweep, pitch, long; downlifter: fall, short, tape; sub_drop: boom, quick, long; pop: bubble, tick, double; click: ui, soft, tonal, mech; glitch: stutter, crush, chirp; shimmer: sparkle, wash, rise; sting: hit, bright, dark. Without it the category's first variant is used, which is what the effects were before variants existed. "auto" picks one of the category's variants from a hash of the item id, so repeats of one effect differ. Every item also gets a small, deterministic jitter of pitch, length and filter from its id, so two items of the same variant are never exactly the same sample.
+ */
+export type Variant = string;
 /**
  * When the effect starts in the output, in ms.
  */
@@ -1548,13 +1567,11 @@ export interface SetSpeedRamp {
   id: ClipId9;
   points: SpeedRamp;
 }
-/**
- * Add a generated sound effect to the audio track (created when there is none): whoosh (0.6 s pass-by, for a whip or a cut), impact (0.8 s low hit, for a punch-in or the drop), riser (1.5 s rising build that peaks at its end, so start it 1.5 s before the moment it leads to) or swish (0.3 s quick air pass). The effect is synthesised by us, needs no asset or licence and is always in the render and the export. It starts at at_ms (inside the timeline; it is cut at the end) and is mixed after the loudness normalisation at a fixed level plus gain_db, so it stays an accent. Without id it gets the next free "s<n>". Move it with move_item (at_ms) and remove it with remove_sound.
- */
-export interface AddSfx {
+export interface AddSfx1 {
   op: Op21;
   id?: SoundId5;
   sfx: Effect;
+  variant?: Variant;
   at_ms: Start6;
   gain_db?: GainInDB2;
 }

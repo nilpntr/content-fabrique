@@ -34,6 +34,16 @@ func TestPreviewRendererAnswersTheEditor(t *testing.T) {
 	if _, _, err := call(&fakeRequester{states: []Render{{Status: store.RenderFailed, FailureReason: &reason}}}, time.Second); !errors.As(err, &te) || !strings.Contains(te.Msg, ReasonRenderFailed) {
 		t.Errorf("failed: %v", err)
 	}
+	// A graph too long for one process argument and an invalid timeline tell the editor what to do about it.
+	for reason, want := range map[string]string{ReasonGraphTooLong: "remove_sound", ReasonInvalidTimeline: "get_timeline"} {
+		r := reason
+		if _, _, err := call(&fakeRequester{states: []Render{{Status: store.RenderFailed, FailureReason: &r}}}, time.Second); !errors.As(err, &te) || !strings.Contains(te.Msg, want) {
+			t.Errorf("%s: %v", reason, err)
+		}
+	}
+	if len(ReasonGraphTooLong) > 64 {
+		t.Errorf("the failure reason %q is over the 64 characters the table holds", ReasonGraphTooLong)
+	}
 	for _, status := range []int{422, 429} {
 		if _, _, err := call(&fakeRequester{req: &Error{Status: status, Code: api.ErrorCodeTimelineInvalid, Message: "nope"}}, time.Second); !errors.As(err, &te) || !strings.Contains(te.Msg, "nope") {
 			t.Errorf("refused with %d: %v", status, err)

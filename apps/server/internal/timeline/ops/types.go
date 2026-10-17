@@ -248,10 +248,11 @@ type SetMotion struct {
 // AddSFX adds a generated sound effect to the audio track.
 type AddSFX struct {
 	// ID is optional; without it the next free "s<n>" is used.
-	ID     string   `json:"id,omitempty"`
-	Sfx    string   `json:"sfx"`
-	AtMs   int64    `json:"at_ms"`
-	GainDB *float64 `json:"gain_db,omitempty"`
+	ID      string   `json:"id,omitempty"`
+	Sfx     string   `json:"sfx"`
+	Variant string   `json:"variant,omitempty"`
+	AtMs    int64    `json:"at_ms"`
+	GainDB  *float64 `json:"gain_db,omitempty"`
 }
 
 // SetSpeedRamp gives a clip a speed ramp, which replaces its speed.

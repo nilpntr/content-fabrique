@@ -231,6 +231,7 @@ type audioAux struct {
 	AssetID   *string `json:"asset_id"`
 	LicenseID *string `json:"license_id"`
 	Sfx       *string `json:"sfx"`
+	Variant   *string `json:"variant"`
 }
 
 func decodeAudioItem(raw json.RawMessage) (AudioItem, error) {
@@ -250,6 +251,9 @@ func decodeAudioItem(raw json.RawMessage) (AudioItem, error) {
 	if a.Kind != AudioSFX && a.Sfx != nil {
 		return nil, notAllowed("sfx")
 	}
+	if a.Kind != AudioSFX && a.Variant != nil {
+		return nil, notAllowed("variant")
+	}
 	switch a.Kind {
 	case AudioSFX:
 		for _, f := range []struct {
@@ -263,7 +267,7 @@ func decodeAudioItem(raw json.RawMessage) (AudioItem, error) {
 				return nil, notAllowed(f.name)
 			}
 		}
-		return &SFX{ID: a.ID, Sfx: str(a.Sfx), AtMs: a.AtMs, Export: a.Export, GainDB: a.GainDB}, nil
+		return &SFX{ID: a.ID, Sfx: str(a.Sfx), Variant: str(a.Variant), AtMs: a.AtMs, Export: a.Export, GainDB: a.GainDB}, nil
 	case AudioTrendSound:
 		if a.AssetID != nil {
 			return nil, notAllowed("asset_id")

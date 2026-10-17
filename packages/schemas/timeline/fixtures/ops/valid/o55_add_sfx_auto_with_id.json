@@ -1,0 +1,8 @@
+{
+  "op": "add_sfx",
+  "id": "hit1",
+  "sfx": "click",
+  "variant": "auto",
+  "at_ms": 300,
+  "gain_db": -4
+}

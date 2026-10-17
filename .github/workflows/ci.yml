@@ -94,6 +94,9 @@ jobs:
             # module files (a dependency bump can change what the tests build).
             render:
               - 'apps/server/internal/render/**'
+              # The sound check (P3-11) measures with ffmpeg and its tests generate their fixtures with it.
+              - 'apps/server/internal/audiocheck/**'
+              - 'apps/server/cmd/cfctl/**'
               - 'apps/server/internal/timeline/**'
               - 'apps/server/internal/sandbox/**'
               - 'apps/server/internal/media/**'
@@ -463,6 +466,13 @@ jobs:
         env:
           CF_RENDER_REQUIRE_FFMPEG: n8.
         run: go test -race -count=1 -v ./internal/render/...
+      # The sound check and the cfctl commands that use ffmpeg (the sound effects gallery, audio check) generate their fixtures with it.
+      - name: Audio check and the ffmpeg commands of cfctl
+        env:
+          CF_RENDER_REQUIRE_FFMPEG: n8.
+        run: |
+          go test -race -count=1 -v ./internal/audiocheck/...
+          go test -race -count=1 -v ./cmd/cfctl -run 'TestSFXGallery|TestAudioCheck|TestAudioSheet'
 
   # The media-tools image (P1-03): build it, check its shape and its licences. The licence check fails on anything outside
   # packages/media-tools/licenses/policy.json, the allowlist D-16 (as amended) asks for: permissive licences, plus the named
