@@ -76,6 +76,11 @@ var periodicRegistry = []periodic{
 		schedule: dailyAt{hour: pruneHour, minute: pruneMinute},
 		args:     func() river.JobArgs { return WebhookEventsPruneArgs{} },
 	},
+	{
+		id:       uploadsExpireID,
+		schedule: river.PeriodicInterval(UploadsExpireInterval),
+		args:     func() river.JobArgs { return UploadsExpireArgs{} },
+	},
 }
 
 // PeriodicJobs builds the River periodic jobs of the registry.

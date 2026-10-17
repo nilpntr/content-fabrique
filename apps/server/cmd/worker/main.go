@@ -14,6 +14,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
+	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/telemetry"
 )
@@ -40,9 +41,22 @@ func run(args []string) error {
 		Service: telemetry.ServiceWorker,
 		Addr:    func(config.Config) string { return *healthAddr },
 		Background: func(ctx context.Context, cfg config.Config, logger *slog.Logger, st *store.Store, health *httpapi.Health) (func(context.Context) error, error) {
+			// Object storage for the jobs that remove objects. Without the R2_* settings those jobs fail and are retried.
+			var objects jobs.ObjectStore
+			if cfg.ObjectStorageConfigured() {
+				client, err := storage.New(storage.FromConfig(cfg))
+				if err != nil {
+					return nil, err
+				}
+				objects = client
+				health.AddCheck(httpapi.Check{Name: "object-storage", Fn: client.Ready})
+			} else {
+				logger.Warn("R2_* is not set: jobs that delete objects will fail until it is")
+			}
 			w, err := jobs.StartWorker(ctx, jobs.WorkerOptions{
 				DirectURL:  cfg.DatabaseDirectURL,
 				Store:      st,
+				Objects:    objects,
 				Logger:     logger,
 				UIAddr:     *riverUIAddr,
 				UIPassword: cfg.RiverUIPassword,

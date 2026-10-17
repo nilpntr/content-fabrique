@@ -38,6 +38,8 @@ tags:
     description: The active workspace and its plan.
   - name: library
     description: The creator's library (paid-only).
+  - name: assets
+    description: Footage, audio and images, and their resumable multipart upload to object storage (paid-only).
   - name: webhooks
     description: Called by other services, not by the web app. Not part of the generated TypeScript client or of the generated Go server interface.
 
@@ -114,6 +116,307 @@ paths:
           $ref: "#/components/responses/PlanRequired"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/assets:
+    post:
+      operationId: createAsset
+      tags: [assets]
+      summary: Start an upload
+      description: |
+        Creates the asset (status `uploading`) and its multipart upload, and returns presigned `PUT` URLs for the first
+        parts. The server picks the part size (`upload.part_size`, at least 8 MiB, at most 10,000 parts) and the object key;
+        the client never names a key. The client uploads each part with a plain `PUT` of exactly `size_bytes` bytes to its
+        URL (no other header is needed), keeps the `ETag` response header of every part, asks for more URLs with
+        `POST /v1/assets/{id}/parts`, and finishes with `POST /v1/assets/{id}/complete`. A part URL is valid for 15 minutes;
+        the upload as a whole for 24 hours.
+        Only owners and editors may upload. At most 25 uploads can be in progress per workspace.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAssetRequest"
+      responses:
+        "201":
+          description: The asset and the first batch of part URLs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateAssetResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          description: "`file_too_large`: more than 20 GB."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "415":
+          description: "`unsupported_content_type`: not one of the accepted media types."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: "`too_many_uploads`: the workspace already has 25 uploads in progress."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    get:
+      operationId: listAssets
+      tags: [assets]
+      summary: List the workspace's assets, newest first
+      description: Cursor pagination. Deleted assets are not listed.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: How many assets to return (default 50).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          description: The `next_cursor` of the previous page. Opaque.
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        "200":
+          description: A page of assets.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListAssetsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/assets/{id}:
+    parameters:
+      - $ref: "#/components/parameters/AssetIdPath"
+    get:
+      operationId: getAsset
+      tags: [assets]
+      summary: One asset
+      description: An asset of another workspace, or one that does not exist, is `404 not_found`.
+      responses:
+        "200":
+          description: The asset.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Asset"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    delete:
+      operationId: deleteAsset
+      tags: [assets]
+      summary: Delete an asset
+      description: |
+        Soft-deletes the asset and enqueues the deletion of its objects. An asset whose upload is still in progress is
+        aborted as well. Only owners and editors may delete.
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/assets/{id}/upload:
+    parameters:
+      - $ref: "#/components/parameters/AssetIdPath"
+    get:
+      operationId: getAssetUpload
+      tags: [assets]
+      summary: The state of an upload, to resume it
+      description: |
+        What a client needs after a reload: the part size and count, and the parts object storage already holds
+        (`completed_parts`, from `ListParts`: number, ETag and size). Upload the parts that are not listed, then complete.
+        The state stays readable after the upload is completed, aborted or expired (`upload.status`); then
+        `completed_parts` is empty.
+      responses:
+        "200":
+          description: The upload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadStateResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    delete:
+      operationId: abortAssetUpload
+      tags: [assets]
+      summary: Abort an upload
+      description: |
+        Aborts the multipart upload (its parts are discarded) and removes the asset. Only owners and editors may abort.
+        Aborting twice is `404 not_found`; an upload that is already completed is `409 upload_not_active`.
+      responses:
+        "204":
+          description: Aborted.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/UploadConflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/assets/{id}/parts:
+    parameters:
+      - $ref: "#/components/parameters/AssetIdPath"
+    post:
+      operationId: presignAssetParts
+      tags: [assets]
+      summary: Presigned URLs for more parts
+      description: Up to 100 part numbers at a time, each between 1 and `upload.part_count`. Only for an upload that is in progress.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PresignPartsRequest"
+      responses:
+        "200":
+          description: The URLs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PresignPartsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/UploadConflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/assets/{id}/complete:
+    parameters:
+      - $ref: "#/components/parameters/AssetIdPath"
+    post:
+      operationId: completeAssetUpload
+      tags: [assets]
+      summary: Finish an upload
+      description: |
+        Sends every part with its ETag. The server checks them against what object storage holds (all `part_count` parts,
+        the right sizes), completes the multipart upload, checks that the object is exactly `size_bytes` long, marks the
+        asset `uploaded` and enqueues its ingest job. Completing an upload that was already completed answers 200 again.
+        Only owners and editors may complete.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteAssetRequest"
+      responses:
+        "200":
+          description: The asset, now `uploaded`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Asset"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/UploadConflict"
+        "422":
+          description: |
+            `parts_mismatch` (a part is missing, or its ETag or size is not what object storage holds: upload it again and
+            complete again) or `size_mismatch` (the stored object is not `size_bytes` long; the upload failed and the asset
+            is `failed`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "500":
           $ref: "#/components/responses/InternalError"
         "503":
@@ -196,6 +499,15 @@ components:
         verify against the instance's keys, be unexpired, and have `azp` equal to the web app's origin. The workspace id is
         taken from the token's organization and never from request input.
 
+  parameters:
+    AssetIdPath:
+      name: id
+      in: path
+      required: true
+      description: The asset's TypeID.
+      schema:
+        $ref: "#/components/schemas/AssetId"
+
   responses:
     Unauthenticated:
       description: |
@@ -213,8 +525,29 @@ components:
             $ref: "#/components/schemas/Error"
     Forbidden:
       description: |
-        Signed in, but not allowed: `no_active_workspace` (no organization is active), `user_deleted`, `workspace_deleted`
-        or `not_a_member` (removed from the workspace).
+        Signed in, but not allowed: `no_active_workspace` (no organization is active), `user_deleted`, `workspace_deleted`,
+        `not_a_member` (removed from the workspace) or `insufficient_role` (a viewer tried to change something).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    BadRequest:
+      description: "`invalid_request`: the body, a parameter or an id is not valid."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: |
+        `not_found`: no such thing in this workspace. An id that belongs to another workspace is indistinguishable from one
+        that does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    UploadConflict:
+      description: |
+        `upload_not_active` (the upload is already completed, aborted or failed) or `upload_expired` (its 24 hours are up).
       content:
         application/json:
           schema:
@@ -228,7 +561,8 @@ components:
     Unavailable:
       description: |
         `identity_unavailable` (Clerk's API or key set did not answer), `auth_not_configured` (no CLERK_SECRET_KEY on the
-        server) or `queue_not_migrated` (River's tables are missing, so a new workspace cannot be created). Try again later.
+        server) or `queue_not_migrated` (River's tables are missing, so a new workspace cannot be created), `storage_not_configured` (no
+        R2_* settings on the server) or `storage_unavailable` (object storage did not answer). Try again later.
       content:
         application/json:
           schema:
@@ -243,7 +577,7 @@ components:
         The stable error codes of the API. The web client branches on these; new ones may be added, so treat an unknown
         code as a generic failure of its HTTP status.
       enum:
-        - invalid_request # 400: the server could not bind the request (a malformed parameter); no endpoint takes parameters yet
+        - invalid_request # 400: the server could not bind the request, or a body, parameter or id is not valid
         - unauthenticated # 401: no token
         - invalid_token # 401: the token failed verification (signature, expiry, issuer, azp)
         - plan_required # 402: the workspace has no active plan
@@ -260,6 +594,17 @@ components:
         - auth_not_configured # 503: no CLERK_SECRET_KEY
         - queue_not_migrated # 503: River's tables are missing
         - webhook_not_configured # 503: no CLERK_WEBHOOK_SECRET
+        - insufficient_role # 403: a viewer tried to change something
+        - not_found # 404: no such thing in this workspace
+        - upload_not_active # 409: the upload is completed, aborted or failed
+        - upload_expired # 409: the upload's 24 hours are up
+        - file_too_large # 413
+        - unsupported_content_type # 415
+        - parts_mismatch # 422: the parts sent do not match what object storage holds
+        - size_mismatch # 422: the stored object is not the declared size
+        - too_many_uploads # 429: 25 uploads are already in progress
+        - storage_unavailable # 503: object storage did not answer
+        - storage_not_configured # 503: no R2_* settings
 
     ErrorDetail:
       type: object
@@ -456,6 +801,227 @@ components:
         projects:
           type: integer
           minimum: 0
+
+    # ── Assets and uploads ──────────────────────────────────────────────────────
+
+    AssetKind:
+      type: string
+      enum: [video, audio, image]
+    AssetStatus:
+      type: string
+      description: |
+        `uploading` (the multipart upload is in progress), `uploaded` (the object is complete; ingest is queued),
+        `processing`, `ready`, or `failed` (see `failure_reason`).
+      enum: [uploading, uploaded, processing, ready, failed]
+
+    Asset:
+      type: object
+      required: [id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, failure_reason, created_at, updated_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/AssetId"
+        kind:
+          $ref: "#/components/schemas/AssetKind"
+        status:
+          $ref: "#/components/schemas/AssetStatus"
+        filename:
+          type: string
+          description: The file's name as the server stored it (a path and control characters removed, at most 255 bytes).
+        content_type:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+        sha256:
+          type: [string, "null"]
+          description: The SHA-256 (lowercase hex) the client claimed when it started the upload. Null when it did not say. Not verified by the upload itself.
+        title:
+          type: string
+          description: Editable. Starts as the file name without its extension.
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        failure_reason:
+          type: [string, "null"]
+          description: Why the asset is `failed` (`upload_expired`, `size_mismatch`, `upload_aborted`). Null otherwise.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateAssetRequest:
+      type: object
+      required: [filename, size_bytes, content_type]
+      properties:
+        filename:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 21474836480
+          description: The exact size of the file. At most 20 GB. The upload only completes when the stored object has exactly this size.
+        content_type:
+          type: string
+          maxLength: 255
+          description: "`video/mp4`, `video/quicktime`, `video/webm`, `audio/*`, `image/jpeg`, `image/png` or `image/heic`."
+        sha256:
+          type: string
+          pattern: "^[0-9a-fA-F]{64}$"
+          description: Optional SHA-256 of the file, in hex.
+
+    UploadStatus:
+      type: string
+      description: |
+        `active` (parts can be uploaded), `completed`, `aborted` (by the client or by the clean-up job) or `expired` (past
+        `expires_at`, not cleaned up yet).
+      enum: [active, completed, aborted, expired]
+
+    UploadInfo:
+      type: object
+      required: [id, asset_id, status, part_size, part_count, expires_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/UploadId"
+        asset_id:
+          $ref: "#/components/schemas/AssetId"
+        status:
+          $ref: "#/components/schemas/UploadStatus"
+        part_size:
+          type: integer
+          format: int64
+          description: Bytes in every part but the last, which holds the rest.
+        part_count:
+          type: integer
+          description: Part numbers run from 1 to this.
+        expires_at:
+          type: string
+          format: date-time
+          description: After this the upload can no longer be completed, and it is aborted.
+
+    PartUrl:
+      type: object
+      required: [part_number, url, size_bytes]
+      properties:
+        part_number:
+          type: integer
+          minimum: 1
+        url:
+          type: string
+          description: A presigned URL. `PUT` exactly `size_bytes` bytes to it; the `ETag` response header is the part's ETag. Treat it as a secret.
+        size_bytes:
+          type: integer
+          format: int64
+          description: The exact Content-Length the URL is signed for.
+
+    CreateAssetResponse:
+      type: object
+      required: [asset, upload, parts, urls_expire_at]
+      properties:
+        asset:
+          $ref: "#/components/schemas/Asset"
+        upload:
+          $ref: "#/components/schemas/UploadInfo"
+        parts:
+          type: array
+          description: Presigned URLs for the first parts (up to 20).
+          items:
+            $ref: "#/components/schemas/PartUrl"
+        urls_expire_at:
+          type: string
+          format: date-time
+
+    PresignPartsRequest:
+      type: object
+      required: [part_numbers]
+      properties:
+        part_numbers:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: integer
+            minimum: 1
+            maximum: 10000
+
+    PresignPartsResponse:
+      type: object
+      required: [parts, urls_expire_at]
+      properties:
+        parts:
+          type: array
+          items:
+            $ref: "#/components/schemas/PartUrl"
+        urls_expire_at:
+          type: string
+          format: date-time
+
+    UploadedPart:
+      type: object
+      description: A part object storage holds.
+      required: [part_number, etag, size_bytes]
+      properties:
+        part_number:
+          type: integer
+          minimum: 1
+        etag:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+
+    UploadStateResponse:
+      type: object
+      required: [upload, completed_parts]
+      properties:
+        upload:
+          $ref: "#/components/schemas/UploadInfo"
+        completed_parts:
+          type: array
+          items:
+            $ref: "#/components/schemas/UploadedPart"
+
+    CompletedPartRef:
+      type: object
+      required: [part_number, etag]
+      properties:
+        part_number:
+          type: integer
+          minimum: 1
+          maximum: 10000
+        etag:
+          type: string
+          maxLength: 128
+
+    CompleteAssetRequest:
+      type: object
+      required: [parts]
+      properties:
+        parts:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items:
+            $ref: "#/components/schemas/CompletedPartRef"
+
+    ListAssetsResponse:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Asset"
+        next_cursor:
+          type: [string, "null"]
+          description: Pass it as `cursor` for the next page. Null on the last page.
 
     # ── Webhooks ────────────────────────────────────────────────────────────────
 

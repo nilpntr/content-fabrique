@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nilpntr/content-fabrique/internal/config"
+	"github.com/nilpntr/content-fabrique/internal/storage/storagetest"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/store/storetest"
 )
@@ -21,7 +22,11 @@ func deps(st *store.Store, webhookSecret string) Deps {
 	}
 }
 
-func TestMain(m *testing.M) { os.Exit(storetest.Run(m)) }
+func TestMain(m *testing.M) {
+	code := storetest.Run(m)
+	storagetest.Stop() // the MinIO of the assets tests, if one was started
+	os.Exit(code)
+}
 
 // newStore returns a Store over a fresh, migrated database of the shared test container.
 func newStore(t *testing.T) *store.Store {

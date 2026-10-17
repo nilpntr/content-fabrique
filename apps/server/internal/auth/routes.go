@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/clerk/clerk-sdk-go/v2/jwks"
+	"github.com/nilpntr/content-fabrique/internal/assets"
 	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
@@ -20,6 +21,9 @@ type Deps struct {
 	Directory Directory
 	// JWKSClient replaces the JWKS client of the middleware (tests). Nil means the real one.
 	JWKSClient *jwks.Client
+	// Assets is the assets service (object storage and the job enqueuer behind it). Nil means object storage is not
+	// configured: the assets operations answer 503 storage_not_configured.
+	Assets *assets.Service
 }
 
 // V1 is the router of the paid-only API. Every route added with Handle sits behind the authentication middleware and
@@ -94,7 +98,9 @@ func Mount(mux *http.ServeMux, d Deps) (*V1, error) {
 		return nil, err
 	}
 	v1 := &V1{mux: http.NewServeMux()}
-	for pattern, h := range apiRoutes(newAPIServer(d.Store, logger), logger) {
+	srv := newAPIServer(d.Store, logger)
+	srv.Handler = assets.NewHandler(d.Assets, callerOf, logger)
+	for pattern, h := range apiRoutes(srv, logger) {
 		if open[pattern] {
 			mux.Handle(pattern, mw(h))
 		} else {

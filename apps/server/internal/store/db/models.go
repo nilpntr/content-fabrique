@@ -11,6 +11,26 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/ids"
 )
 
+type Asset struct {
+	ID            ids.AssetID
+	WorkspaceID   ids.WorkspaceID
+	Kind          string
+	Status        string
+	Filename      string
+	ContentType   string
+	SizeBytes     int64
+	Sha256        *string
+	Title         string
+	Description   string
+	Tags          []string
+	R2Key         string
+	FailureReason *string
+	CreatedBy     ids.UserID
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	DeletedAt     *time.Time
+}
+
 type CreatorProfile struct {
 	WorkspaceID     ids.WorkspaceID
 	Niche           json.RawMessage
@@ -21,6 +41,20 @@ type CreatorProfile struct {
 	Defaults        json.RawMessage
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+type Upload struct {
+	ID          ids.UploadID
+	WorkspaceID ids.WorkspaceID
+	AssetID     ids.AssetID
+	R2UploadID  string
+	PartSize    int64
+	PartCount   int32
+	ExpiresAt   time.Time
+	CompletedAt *time.Time
+	AbortedAt   *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type User struct {

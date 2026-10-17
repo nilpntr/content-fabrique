@@ -9,14 +9,17 @@ import (
 	"sync"
 
 	"github.com/nilpntr/content-fabrique/internal/api"
+	"github.com/nilpntr/content-fabrique/internal/assets"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
 )
 
 // apiServer implements api.StrictServerInterface, the generated interface of the OpenAPI contract
 // (packages/schemas/openapi.yaml). The handlers live next to what they report: GetMe in me.go, GetWorkspacePlan and
-// GetLibrarySummary in entitlements.go. The Clerk webhook is not here: it reads the raw body and the Svix headers
+// GetLibrarySummary in entitlements.go, and the assets operations come from the embedded *assets.Handler (package assets,
+// which reads the workspace from the Principal through callerOf). The Clerk webhook is not here: it reads the raw body and the Svix headers
 // itself (webhook.go), so the spec documents it and the generator leaves it out.
 type apiServer struct {
+	*assets.Handler
 	ents   EntitlementReader
 	logger *slog.Logger
 }
@@ -27,8 +30,24 @@ func newAPIServer(ents EntitlementReader, logger *slog.Logger) *apiServer {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &apiServer{ents: ents, logger: logger}
+	// Without a configured object store the assets operations answer 503 storage_not_configured (Mount replaces this
+	// handler when it is given a service).
+	return &apiServer{Handler: assets.NewHandler(nil, callerOf, logger), ents: ents, logger: logger}
 }
+
+// callerOf is how the assets package learns who is calling: the Principal the authentication middleware resolved from the
+// verified token. Nothing else names the workspace.
+func callerOf(ctx context.Context) (assets.Caller, bool) {
+	p, ok := PrincipalFromContext(ctx)
+	if !ok {
+		return assets.Caller{}, false
+	}
+	return assets.Caller{Workspace: p.WorkspaceID, User: p.UserID, Role: p.Role}, true
+}
+
+// maxBodyBytes caps the body of every API request. The largest legitimate one is the completion of a 10,000 part upload
+// (about 0.7 MB); a bigger body is refused (the generated binder answers 400 invalid_request) before it is buffered.
+const maxBodyBytes = 2 << 20
 
 // routeTable collects what the generated code registers, so Mount decides which middleware each route sits behind. It
 // is the api.ServeMux the generated HandlerWithOptions registers on; nothing is ever served from the table itself.
@@ -38,6 +57,7 @@ type routeTable map[string]http.Handler
 func (t routeTable) HandleFunc(pattern string, h func(http.ResponseWriter, *http.Request)) {
 	t[pattern] = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 		h(w, r)
 	})
 }

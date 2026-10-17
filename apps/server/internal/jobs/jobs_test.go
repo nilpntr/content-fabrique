@@ -23,11 +23,16 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
 	"github.com/nilpntr/content-fabrique/internal/jobs/jobstest"
+	"github.com/nilpntr/content-fabrique/internal/storage/storagetest"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/store/storetest"
 )
 
-func TestMain(m *testing.M) { os.Exit(storetest.Run(m)) }
+func TestMain(m *testing.M) {
+	code := storetest.Run(m)
+	storagetest.Stop() // the MinIO of the assets job tests, if one was started
+	os.Exit(code)
+}
 
 var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))
 
@@ -302,7 +307,7 @@ func TestNewWorkspaceIsWelcomedByTheWorker(t *testing.T) {
 // ── periodic jobs and the prune ─────────────────────────────────────────────────────────────────────────────────
 
 func TestPeriodicJobsAreRegistered(t *testing.T) {
-	if got, want := jobs.PeriodicJobIDs(), []string{"webhook_events_prune"}; !slices.Equal(got, want) {
+	if got, want := jobs.PeriodicJobIDs(), []string{"webhook_events_prune", "uploads_expire"}; !slices.Equal(got, want) {
 		t.Fatalf("PeriodicJobIDs = %v, want %v", got, want)
 	}
 	if n := len(jobs.PeriodicJobs()); n != len(jobs.PeriodicJobIDs()) {

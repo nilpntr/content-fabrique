@@ -59,6 +59,21 @@ type Config struct {
 	// RiverUIPassword is RIVER_UI_PASSWORD, the HTTP Basic password of River UI (worker flag -river-ui-addr). A secret:
 	// never logged. The worker refuses to serve River UI when it is empty.
 	RiverUIPassword string
+
+	// The object storage settings (R2_*): MinIO locally, Cloudflare R2 in staging and production. All four of the
+	// endpoint, bucket and key pair are set or none is: without them the assets API answers 503 storage_not_configured
+	// instead of the process refusing to start (the ci environment holds no storage). The secret is never logged.
+	R2Endpoint        string
+	R2Bucket          string
+	R2AccessKeyID     string
+	R2SecretAccessKey string
+	// R2Jurisdiction is "eu" for real R2 and empty for MinIO.
+	R2Jurisdiction string
+}
+
+// ObjectStorageConfigured reports whether the R2_* settings are present.
+func (c Config) ObjectStorageConfigured() bool {
+	return c.R2Endpoint != "" && c.R2Bucket != "" && c.R2AccessKeyID != "" && c.R2SecretAccessKey != ""
 }
 
 // Getenv looks up an environment variable, like os.Getenv.
@@ -80,6 +95,12 @@ func Load(getenv Getenv) (Config, error) {
 		AppBaseURL:         strings.TrimSpace(getenv("APP_BASE_URL")),
 		ClerkSecretKey:     strings.TrimSpace(getenv("CLERK_SECRET_KEY")),
 		ClerkWebhookSecret: strings.TrimSpace(getenv("CLERK_WEBHOOK_SECRET")),
+
+		R2Endpoint:        strings.TrimSpace(getenv("R2_ENDPOINT")),
+		R2Bucket:          strings.TrimSpace(getenv("R2_BUCKET")),
+		R2AccessKeyID:     strings.TrimSpace(getenv("R2_ACCESS_KEY_ID")),
+		R2SecretAccessKey: strings.TrimSpace(getenv("R2_SECRET_ACCESS_KEY")),
+		R2Jurisdiction:    strings.ToLower(strings.TrimSpace(getenv("R2_JURISDICTION"))),
 	}
 
 	if c.Env == "" {
@@ -119,6 +140,19 @@ func Load(getenv Getenv) (Config, error) {
 		errs = append(errs, errors.New("CLERK_WEBHOOK_SECRET: must be a Svix signing secret (whsec_...)"))
 	}
 
+	// All or none of the storage settings. The messages name the variables and never repeat the values.
+	if set := countSet(c.R2Endpoint, c.R2Bucket, c.R2AccessKeyID, c.R2SecretAccessKey); set != 0 && set != 4 {
+		errs = append(errs, errors.New("R2_ENDPOINT, R2_BUCKET, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY must be set together"))
+	}
+	if c.R2Endpoint != "" {
+		if u, err := url.Parse(c.R2Endpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			errs = append(errs, errors.New("R2_ENDPOINT: must be an absolute http(s) URL"))
+		}
+	}
+	if c.R2Jurisdiction != "" && c.R2Jurisdiction != "eu" {
+		errs = append(errs, errors.New(`R2_JURISDICTION: must be empty (MinIO) or "eu"`))
+	}
+
 	if c.OTLPEndpoint != "" {
 		if u, err := url.Parse(c.OTLPEndpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			errs = append(errs, errors.New("OTEL_EXPORTER_OTLP_ENDPOINT: must be an absolute http(s) URL"))
@@ -142,6 +176,16 @@ func Load(getenv Getenv) (Config, error) {
 		return Config{}, errors.Join(errs...)
 	}
 	return c, nil
+}
+
+func countSet(values ...string) int {
+	n := 0
+	for _, v := range values {
+		if v != "" {
+			n++
+		}
+	}
+	return n
 }
 
 // ValidatePostgresURL checks that raw is a postgres:// or postgresql:// URL with a host. The error never contains
@@ -201,8 +245,8 @@ func originOf(base, env string) (string, error) {
 
 // String describes the config without its secrets (database URL, Clerk keys), so a stray %v or %+v cannot leak them.
 func (c Config) String() string {
-	return fmt.Sprintf("config{env=%s api=%s app=%s clerk_secret=%t clerk_webhook_secret=%t river_ui_password=%t otlp=%t}",
-		c.Env, c.APIBaseURL, c.AppOrigin, c.ClerkSecretKey != "", c.ClerkWebhookSecret != "", c.RiverUIPassword != "", c.OTLPEndpoint != "")
+	return fmt.Sprintf("config{env=%s api=%s app=%s clerk_secret=%t clerk_webhook_secret=%t river_ui_password=%t otlp=%t storage=%t}",
+		c.Env, c.APIBaseURL, c.AppOrigin, c.ClerkSecretKey != "", c.ClerkWebhookSecret != "", c.RiverUIPassword != "", c.OTLPEndpoint != "", c.ObjectStorageConfigured())
 }
 
 // GoString makes %#v print the same redacted form.

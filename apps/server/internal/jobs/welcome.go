@@ -18,6 +18,9 @@ type Deps struct {
 	// Store is the app role's store (DATABASE_URL). Workers read and write rows through it like the api does.
 	Store  *store.Store
 	Logger *slog.Logger
+	// Objects is object storage (R2 or MinIO), for the jobs that remove objects. Nil when storage is not configured: those
+	// jobs then fail and are retried, so a worker started later (with the settings) finishes them.
+	Objects ObjectStore
 	// Now replaces time.Now (tests).
 	Now func() time.Time
 	// Register optionally adds more workers to the bundle (tests, and packages with jobs of their own later).
@@ -48,6 +51,15 @@ func Workers(deps Deps) (*river.Workers, error) {
 		return nil, err
 	}
 	if err := river.AddWorkerSafely(w, &WebhookEventsPruneWorker{deps: deps}); err != nil {
+		return nil, err
+	}
+	if err := river.AddWorkerSafely(w, &AssetIngestWorker{deps: deps}); err != nil {
+		return nil, err
+	}
+	if err := river.AddWorkerSafely(w, &AssetObjectDeleteWorker{deps: deps}); err != nil {
+		return nil, err
+	}
+	if err := river.AddWorkerSafely(w, &UploadsExpireWorker{deps: deps}); err != nil {
 		return nil, err
 	}
 	if deps.Register != nil {

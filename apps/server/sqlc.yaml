@@ -23,6 +23,14 @@ sql:
             go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "UserID" }
           - column: "*.user_id"
             go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "UserID" }
+          - column: "assets.id"
+            go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "AssetID" }
+          - column: "*.asset_id"
+            go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "AssetID" }
+          - column: "uploads.id"
+            go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "UploadID" }
+          - column: "assets.created_by"
+            go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "UserID" }
           # Any other uuid is a plain google/uuid.
           - db_type: "uuid"
             go_type: "github.com/google/uuid.UUID"
