@@ -31,12 +31,6 @@ func (f *fakeQuickLook) RunJob(context.Context, ids.WorkspaceID, ids.AssetID) (a
 	return f.outcome(n)
 }
 
-func (f *fakeQuickLook) count() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.runs
-}
-
 // finishedVideo takes a video through the ingest's transaction the way the pipeline does, with the worker's hook in place
 // (StartWorker sets it), and returns it ready with its quick look pending.
 func (e *assetsEnv) finishedVideo(t *testing.T, w store.Workspace, name string) store.Asset {
