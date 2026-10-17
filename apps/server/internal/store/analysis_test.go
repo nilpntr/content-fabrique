@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -55,9 +56,9 @@ func analysisSuite(t *testing.T, st *store.Store, suffix string) {
 	wa, ua := mk("a")
 	wb, ub := mk("b")
 
-	result := func(reps int) store.AnalysisResult {
+	result := func(a store.Asset, reps int) store.AnalysisResult {
 		r := store.AnalysisResult{
-			Version: 1, StepMs: 100, DurationMs: 60000, Series: store.PackedSeries{Scales: []byte(`{"scale":{}}`), Motion: []byte{1, 0, 2, 0, 3, 0}, Luma: []byte{1, 2, 3}, Contrast: []byte{1, 2, 3}, High: []byte{1, 2, 3}, Sharp: []byte{1, 0, 2, 0, 3, 0}, Scene: []byte{0, 0, 0, 0, 0, 0}}, Summary: []byte(`{"reps":3}`),
+			Version: 1, SourceIngestedAt: a.IngestedAt, StepMs: 100, DurationMs: 60000, Series: store.PackedSeries{Scales: []byte(`{"scale":{}}`), Motion: []byte{1, 0, 2, 0, 3, 0}, Luma: []byte{1, 2, 3}, Contrast: []byte{1, 2, 3}, High: []byte{1, 2, 3}, Sharp: []byte{1, 0, 2, 0, 3, 0}, Scene: []byte{0, 0, 0, 0, 0, 0}}, Summary: []byte(`{"reps":3}`),
 			Shots: []store.NewShot{{Idx: 0, StartMs: 0, EndMs: 60000, Signals: []byte(`{"exposure":{"level":"dark"}}`)}},
 			Moments: []store.NewMoment{
 				{Kind: store.MomentShot, StartMs: 0, EndMs: 60000, Score: 0.5, Attrs: []byte(`{}`), Description: "shot 1"},
@@ -76,7 +77,7 @@ func analysisSuite(t *testing.T, st *store.Store, suffix string) {
 
 	t.Run("save, read, replace", func(t *testing.T) {
 		a := ready(wa, ua, "analysis-clip")
-		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, result(3)); err != nil {
+		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, result(a, 3)); err != nil {
 			t.Fatal(err)
 		}
 		sig, err := st.GetAssetSignals(ctx, wa.ID, a.ID)
@@ -107,7 +108,7 @@ func analysisSuite(t *testing.T, st *store.Store, suffix string) {
 		}
 
 		// a re-run replaces the shots and the moments and keeps one signals row
-		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, result(1)); err != nil {
+		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, result(a, 1)); err != nil {
 			t.Fatal(err)
 		}
 		if shots, _ = st.ListAssetShots(ctx, wa.ID, a.ID); len(shots) != 1 {
@@ -120,10 +121,10 @@ func analysisSuite(t *testing.T, st *store.Store, suffix string) {
 
 	t.Run("tenancy", func(t *testing.T) {
 		a := ready(wa, ua, "analysis-tenancy")
-		if err := st.SaveAnalysis(ctx, wb.ID, a.ID, result(2)); !errors.Is(err, store.ErrNotFound) {
+		if err := st.SaveAnalysis(ctx, wb.ID, a.ID, result(a, 2)); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("workspace B saved an analysis on A's asset: %v", err)
 		}
-		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, result(2)); err != nil {
+		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, result(a, 2)); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := st.GetAssetSignals(ctx, wb.ID, a.ID); !errors.Is(err, store.ErrNotFound) {
@@ -146,14 +147,14 @@ func analysisSuite(t *testing.T, st *store.Store, suffix string) {
 		if _, err := st.SoftDeleteAsset(ctx, wa.ID, a.ID); err != nil {
 			t.Fatal(err)
 		}
-		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, result(1)); !errors.Is(err, store.ErrNotFound) {
+		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, result(a, 1)); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("an analysis was saved on a deleted asset: %v", err)
 		}
 	})
 
 	t.Run("labels follow the quick look, dead spans are limited per asset, candidates rank below", func(t *testing.T) {
 		a := ready(wa, ua, "labels-clip")
-		r := result(2)
+		r := result(a, 2)
 		for i := 0; i < 8; i++ { // eight dead spans of different lengths
 			r.Moments = append(r.Moments, store.NewMoment{Kind: store.MomentDead, StartMs: 1000 + i*5000, EndMs: 1000 + i*5000 + 1000 + i*100, Attrs: []byte(`{}`), Description: "dead"})
 		}
@@ -220,11 +221,98 @@ func analysisSuite(t *testing.T, st *store.Store, suffix string) {
 		}
 	})
 
+	t.Run("a stale or not ready analysis is refused and changes nothing", func(t *testing.T) {
+		a := ready(wa, ua, "stale-clip")
+		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, result(a, 3)); err != nil {
+			t.Fatal(err)
+		}
+		before, _ := st.ListAssetMoments(ctx, wa.ID, a.ID)
+		// an analysis made from another proxy (an older ingest) is refused
+		old := result(a, 1)
+		older := a.IngestedAt.Add(-time.Minute)
+		old.SourceIngestedAt = &older
+		old.Moments[0].Description = "from the old proxy"
+		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, old); !errors.Is(err, store.ErrStaleAnalysis) {
+			t.Fatalf("a stale save = %v", err)
+		}
+		after, _ := st.ListAssetMoments(ctx, wa.ID, a.ID)
+		if len(after) != len(before) || after[0].Description != before[0].Description {
+			t.Fatalf("a stale save changed the moments: %d -> %d", len(before), len(after))
+		}
+		meta, _ := st.GetAssetSignalsMeta(ctx, wa.ID, a.ID)
+		if meta.SourceIngestedAt == nil || !meta.SourceIngestedAt.Equal(*a.IngestedAt) {
+			t.Fatalf("a stale save changed the signals: %v", meta.SourceIngestedAt)
+		}
+		// an asset that is processing again (a re-ingest under way) takes no analysis either
+		if _, err := st.ClaimAssetForIngest(ctx, wa.ID, a.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, result(a, 3)); !errors.Is(err, store.ErrStaleAnalysis) {
+			t.Fatalf("a save while processing = %v", err)
+		}
+	})
+
+	t.Run("two analyses of one asset: the one from the old proxy loses, whichever saves first", func(t *testing.T) {
+		a := ready(wa, ua, "race-clip")
+		// the asset is ingested again: a new generation
+		if _, err := st.ClaimAssetForIngest(ctx, wa.ID, a.ID); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(5 * time.Millisecond)
+		b, err := st.FinishAssetIngest(ctx, wa.ID, a.ID, store.IngestResult{DurationMs: 60000, Width: 720, Height: 1280})
+		if err != nil {
+			t.Fatal(err)
+		}
+		stale, fresh := result(a, 2), result(b, 5)
+		stale.Moments[0].Description = "stale"
+		fresh.Moments[0].Description = "fresh"
+		for round := 0; round < 4; round++ {
+			var wg sync.WaitGroup
+			errs := make([]error, 2)
+			for i, r := range []store.AnalysisResult{stale, fresh} {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					errs[i] = st.SaveAnalysis(ctx, wa.ID, a.ID, r)
+				}()
+			}
+			wg.Wait()
+			if !errors.Is(errs[0], store.ErrStaleAnalysis) || errs[1] != nil {
+				t.Fatalf("round %d: stale save = %v, fresh save = %v", round, errs[0], errs[1])
+			}
+			ms, _ := st.ListAssetMoments(ctx, wa.ID, a.ID)
+			if len(ms) != 8 || ms[0].Description == "stale" {
+				t.Fatalf("round %d: the stale analysis won: %d moments", round, len(ms))
+			}
+		}
+	})
+
+	t.Run("tags are the ones the locked row holds", func(t *testing.T) {
+		a := ready(wa, ua, "tags-clip")
+		if _, err := st.ApplyQuickLook(ctx, wa.ID, a.ID, store.QuickLookResult{Title: "T", Description: "d", Tags: []string{"lat", "pulldown"}, Detail: []byte(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+		// the caller's copy of the asset predates the quick look; the moments still get the tags of the row
+		r := result(a, 1)
+		for i := range r.Moments {
+			r.Moments[i].Labels = nil
+		}
+		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, r); err != nil {
+			t.Fatal(err)
+		}
+		ms, _ := st.ListAssetMoments(ctx, wa.ID, a.ID)
+		for _, m := range ms {
+			if len(m.Labels) != 2 || m.Labels[0] != "lat" {
+				t.Fatalf("labels %v", m.Labels)
+			}
+		}
+	})
+
 	t.Run("backfill list", func(t *testing.T) {
 		wc, uc := mk("c")
 		plain := ready(wc, uc, "needs-analysis")
 		done := ready(wc, uc, "analysed")
-		if err := st.SaveAnalysis(ctx, wc.ID, done.ID, result(1)); err != nil {
+		if err := st.SaveAnalysis(ctx, wc.ID, done.ID, result(done, 1)); err != nil {
 			t.Fatal(err)
 		}
 		todo, err := st.ListAssetsForAnalysis(ctx, wc.ID, 1, false, 10)
@@ -236,6 +324,16 @@ func analysisSuite(t *testing.T, st *store.Store, suffix string) {
 		}
 		if todo, _ = st.ListAssetsForAnalysis(ctx, wc.ID, 1, true, 10); len(todo) != 2 {
 			t.Fatalf("include_done must list both: %d", len(todo))
+		}
+		// an asset that was ingested again after its analysis (a different proxy) is listed even at the current version
+		if _, err := st.ClaimAssetForIngest(ctx, wc.ID, done.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.FinishAssetIngest(ctx, wc.ID, done.ID, store.IngestResult{DurationMs: 60000, Width: 720, Height: 1280}); err != nil {
+			t.Fatal(err)
+		}
+		if todo, _ = st.ListAssetsForAnalysis(ctx, wc.ID, 1, false, 10); len(todo) != 2 {
+			t.Fatalf("an asset analysed from an older proxy must be listed: %d", len(todo))
 		}
 	})
 

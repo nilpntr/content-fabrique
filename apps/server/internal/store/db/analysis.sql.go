@@ -43,6 +43,65 @@ func (q *Queries) DeleteAssetShots(ctx context.Context, arg DeleteAssetShotsPara
 	return err
 }
 
+const getAssetForAnalysisSave = `-- name: GetAssetForAnalysisSave :one
+
+SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search FROM assets
+WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL
+FOR UPDATE
+`
+
+type GetAssetForAnalysisSaveParams struct {
+	WorkspaceID ids.WorkspaceID
+	ID          ids.AssetID
+}
+
+// Clip analysis (P2-02, P2-03, P2-09). EVERY query filters by workspace_id, like the other asset queries: the job acts with the
+// workspace of its arguments, and a row of another workspace is no row.
+// SaveAnalysis locks the asset row first: two analyses of one asset (an old ingest's and a new one's) save one after the other, and
+// the one made from a proxy that is no longer the asset's is refused.
+func (q *Queries) GetAssetForAnalysisSave(ctx context.Context, arg GetAssetForAnalysisSaveParams) (Asset, error) {
+	row := q.db.QueryRow(ctx, getAssetForAnalysisSave, arg.WorkspaceID, arg.ID)
+	var i Asset
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Kind,
+		&i.Status,
+		&i.Filename,
+		&i.ContentType,
+		&i.SizeBytes,
+		&i.Sha256,
+		&i.Title,
+		&i.Description,
+		&i.Tags,
+		&i.R2Key,
+		&i.FailureReason,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DurationMs,
+		&i.Width,
+		&i.Height,
+		&i.Fps,
+		&i.Rotation,
+		&i.VideoCodec,
+		&i.AudioCodec,
+		&i.HasAudio,
+		&i.Hdr,
+		&i.Probe,
+		&i.IngestProgress,
+		&i.IngestStage,
+		&i.IngestedAt,
+		&i.TitleSource,
+		&i.QuickLookStatus,
+		&i.QuickLook,
+		&i.QuickLookAt,
+		&i.Search,
+	)
+	return i, err
+}
+
 const getAssetSignals = `-- name: GetAssetSignals :one
 SELECT workspace_id, asset_id, version, step_ms, duration_ms, source_ingested_at, scales, motion, luma, contrast, high, sharp, scene, summary, created_at, updated_at FROM asset_signals WHERE workspace_id = $1 AND asset_id = $2
 `
@@ -292,7 +351,7 @@ const listAssetsForAnalysis = `-- name: ListAssetsForAnalysis :many
 SELECT a.id, a.workspace_id, a.kind, a.status, a.filename, a.content_type, a.size_bytes, a.sha256, a.title, a.description, a.tags, a.r2_key, a.failure_reason, a.created_by, a.created_at, a.updated_at, a.deleted_at, a.duration_ms, a.width, a.height, a.fps, a.rotation, a.video_codec, a.audio_codec, a.has_audio, a.hdr, a.probe, a.ingest_progress, a.ingest_stage, a.ingested_at, a.title_source, a.quick_look_status, a.quick_look, a.quick_look_at, a.search FROM assets a
 LEFT JOIN asset_signals s ON s.workspace_id = a.workspace_id AND s.asset_id = a.id
 WHERE a.workspace_id = $1 AND a.kind = 'video' AND a.status = 'ready' AND a.deleted_at IS NULL
-  AND ($2::boolean OR s.asset_id IS NULL OR s.version < $3::integer)
+  AND ($2::boolean OR s.asset_id IS NULL OR s.version < $3::integer OR s.source_ingested_at IS DISTINCT FROM a.ingested_at)
 ORDER BY a.id
 LIMIT $4
 `
@@ -494,7 +553,6 @@ func (q *Queries) RelabelAssetMoments(ctx context.Context, arg RelabelAssetMomen
 }
 
 const upsertAssetSignals = `-- name: UpsertAssetSignals :one
-
 INSERT INTO asset_signals (workspace_id, asset_id, version, source_ingested_at, step_ms, duration_ms, scales, motion, luma, contrast, high, sharp, scene, summary)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT (asset_id) DO UPDATE
@@ -522,8 +580,6 @@ type UpsertAssetSignalsParams struct {
 	Summary          json.RawMessage
 }
 
-// Clip analysis (P2-02, P2-03, P2-09). EVERY query filters by workspace_id, like the other asset queries: the job acts with the
-// workspace of its arguments, and a row of another workspace is no row.
 func (q *Queries) UpsertAssetSignals(ctx context.Context, arg UpsertAssetSignalsParams) (ids.AssetID, error) {
 	row := q.db.QueryRow(ctx, upsertAssetSignals,
 		arg.WorkspaceID,

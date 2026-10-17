@@ -1,6 +1,13 @@
 -- Clip analysis (P2-02, P2-03, P2-09). EVERY query filters by workspace_id, like the other asset queries: the job acts with the
 -- workspace of its arguments, and a row of another workspace is no row.
 
+-- SaveAnalysis locks the asset row first: two analyses of one asset (an old ingest's and a new one's) save one after the other, and
+-- the one made from a proxy that is no longer the asset's is refused.
+-- name: GetAssetForAnalysisSave :one
+SELECT * FROM assets
+WHERE workspace_id = @workspace_id AND id = @id AND deleted_at IS NULL
+FOR UPDATE;
+
 -- name: UpsertAssetSignals :one
 INSERT INTO asset_signals (workspace_id, asset_id, version, source_ingested_at, step_ms, duration_ms, scales, motion, luma, contrast, high, sharp, scene, summary)
 VALUES (@workspace_id, @asset_id, @version, @source_ingested_at, @step_ms, @duration_ms, @scales, @motion, @luma, @contrast, @high, @sharp, @scene, @summary)
@@ -79,6 +86,6 @@ SELECT * FROM moments WHERE workspace_id = @workspace_id AND asset_id = @asset_i
 SELECT a.* FROM assets a
 LEFT JOIN asset_signals s ON s.workspace_id = a.workspace_id AND s.asset_id = a.id
 WHERE a.workspace_id = @workspace_id AND a.kind = 'video' AND a.status = 'ready' AND a.deleted_at IS NULL
-  AND (@include_done::boolean OR s.asset_id IS NULL OR s.version < @version::integer)
+  AND (@include_done::boolean OR s.asset_id IS NULL OR s.version < @version::integer OR s.source_ingested_at IS DISTINCT FROM a.ingested_at)
 ORDER BY a.id
 LIMIT @row_limit;

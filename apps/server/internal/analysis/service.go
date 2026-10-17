@@ -88,6 +88,9 @@ const (
 	OutcomeSkipped Outcome = "skipped"
 	// OutcomeGone: the asset is not a ready video of the workspace any more.
 	OutcomeGone Outcome = "gone"
+	// OutcomeStale: the asset was ingested again while this ran, so the result belongs to a proxy that is gone and was not stored; the
+	// new ingest has its own analysis job.
+	OutcomeStale Outcome = "stale"
 	// OutcomeNoProxy: the asset has no proxy to analyse (nothing more to do; the ingest will make one).
 	OutcomeNoProxy Outcome = "no_proxy"
 )
@@ -175,6 +178,10 @@ func (s *Service) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, o
 	if err := s.cfg.Store.SaveAnalysis(ctx, ws, id, res); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return Result{Outcome: OutcomeGone}, nil
+		}
+		if errors.Is(err, store.ErrStaleAnalysis) {
+			log.InfoContext(ctx, "analysis is stale: the asset was ingested again while it ran; not stored")
+			return Result{Outcome: OutcomeStale}, nil
 		}
 		return Result{}, fmt.Errorf("store the analysis: %w", err)
 	}

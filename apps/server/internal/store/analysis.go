@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -103,13 +104,24 @@ type AnalysisResult struct {
 	Moments []NewMoment
 }
 
+// ErrStaleAnalysis is returned by SaveAnalysis when the analysis was made from a proxy that is no longer the asset's (it was ingested
+// again meanwhile) or the asset is not ready: nothing is written, and the job treats it as a clean no-op (the newer ingest has its
+// own analysis job).
+var ErrStaleAnalysis = errors.New("store: the analysis is out of date")
+
 // SaveAnalysis stores the analysis of a ready asset and replaces the shots and the analysis moments an earlier run left, all in
-// one transaction. ErrNotFound when the asset is not in this workspace (or is deleted): nothing is written then.
+// one transaction that starts by locking the asset row, so two analyses of one asset save one after the other, and the tags the
+// moments get are the ones the row holds when they are written (an ApplyQuickLook cannot commit in between).
+// ErrNotFound when the asset is not in this workspace (or is deleted); ErrStaleAnalysis when it is not ready or its proxy is not the
+// one the analysis came from (r.SourceIngestedAt). Nothing is written then.
 func (s *Store) SaveAnalysis(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, r AnalysisResult) error {
 	return s.inTx(ctx, func(tx *Store) error {
-		a, err := tx.GetAsset(ctx, ws, id)
+		a, err := tx.q.GetAssetForAnalysisSave(ctx, db.GetAssetForAnalysisSaveParams{WorkspaceID: ws, ID: id})
 		if err != nil {
-			return err
+			return mapErr(err)
+		}
+		if a.Status != AssetReady || !sameInstant(a.IngestedAt, r.SourceIngestedAt) {
+			return ErrStaleAnalysis
 		}
 		if _, err := tx.q.UpsertAssetSignals(ctx, db.UpsertAssetSignalsParams{
 			WorkspaceID: ws, AssetID: id, Version: int32(r.Version), SourceIngestedAt: r.SourceIngestedAt, StepMs: int32(r.StepMs), DurationMs: int32(r.DurationMs), //nolint:gosec // bounded by the analysis
@@ -148,6 +160,14 @@ func (s *Store) SaveAnalysis(ctx context.Context, ws ids.WorkspaceID, id ids.Ass
 		}
 		return nil
 	})
+}
+
+// sameInstant reports whether two instants are the same to the microsecond (both unset counts).
+func sameInstant(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Truncate(time.Microsecond).Equal(b.Truncate(time.Microsecond))
 }
 
 func nonNil(b []byte) []byte {

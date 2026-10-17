@@ -244,6 +244,13 @@ func TestRunOutcomes(t *testing.T) {
 			t.Fatalf("%+v %v", res, err)
 		}
 	})
+	t.Run("ingested again while it ran: a clean no-op, not an error", func(t *testing.T) {
+		svc, st, _ := fixture(t)
+		st.saveErr = store.ErrStaleAnalysis
+		if res, err := svc.Run(ctx, st.asset.WorkspaceID, st.asset.ID, Options{}); err != nil || res.Outcome != OutcomeStale || len(st.saved) != 0 {
+			t.Fatalf("%+v %v", res, err)
+		}
+	})
 	t.Run("ffmpeg fails", func(t *testing.T) {
 		svc, st, run := fixture(t)
 		run.exit = 1
