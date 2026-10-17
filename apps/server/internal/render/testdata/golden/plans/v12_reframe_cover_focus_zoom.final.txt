@@ -1,0 +1,127 @@
+fixture: v12_reframe_cover_focus_zoom
+profile: final
+output: 1080x1920 at 30 fps, 156 frames, 5200 ms
+
+args:
+  -protocol_whitelist
+  file,http,https,tcp,tls,crypto
+  -ss
+  3.200
+  -t
+  2.200
+  -i
+  /assets/original/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4
+  -protocol_whitelist
+  file,http,https,tcp,tls,crypto
+  -ss
+  9.000
+  -t
+  3.000
+  -i
+  /assets/original/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4
+  -filter_complex
+  <filter_complex>
+  -map
+  [vout]
+  -map
+  [aout]
+  -c:v
+  libx264
+  -preset
+  medium
+  -crf
+  18
+  -profile:v
+  high
+  -pix_fmt
+  yuv420p
+  -c:a
+  aac
+  -b:a
+  192k
+  -ar
+  48000
+  -ac
+  2
+  -map_metadata
+  -1
+  -map_chapters
+  -1
+  -fflags
+  +bitexact
+  -flags:v
+  +bitexact
+  -flags:a
+  +bitexact
+  -movflags
+  +faststart
+
+filter_complex:
+  [0:v]trim=end=2.200,setpts=PTS-STARTPTS,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=66,setpts=PTS-STARTPTS,scale=1080:1920:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=1080:1920:x='clip(0.52*iw-540,0,iw-1080)':y='clip(0.4*ih-960,0,ih-1920)',setsar=1,crop=998:1776,scale=1080:1920:flags=bicubic,format=yuv420p,setsar=1,fps=30,settb=AVTB[v0];
+  [1:v]trim=end=3.000,setpts=PTS-STARTPTS,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=90,setpts=PTS-STARTPTS,scale=1080:1920:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=1080:1920:x='clip(0.2*iw-540,0,iw-1080)':y='clip(0.8*ih-960,0,ih-1920)',setsar=1,crop=432:768,scale=1080:1920:flags=bicubic,format=yuv420p,setsar=1,fps=30,settb=AVTB[v1];
+  [v0][v1]concat=n=2:v=1:a=0[vout];
+  anullsrc=r=48000:cl=stereo:d=5.200[abed];
+  [abed]anull[aout]
+
+inputs:
+[
+  {
+    "index": 0,
+    "role": "clip",
+    "item_id": "c1",
+    "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+    "location": "/assets/original/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4",
+    "seek_ms": 3200,
+    "duration_ms": 2200
+  },
+  {
+    "index": 1,
+    "role": "clip",
+    "item_id": "c2",
+    "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+    "location": "/assets/original/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4",
+    "seek_ms": 9000,
+    "duration_ms": 3000
+  }
+]
+
+cut_list:
+[
+  {
+    "index": 1,
+    "item_id": "c2",
+    "frame": 66,
+    "at_ms": 2200,
+    "transition": "cut",
+    "transition_frames": 0
+  }
+]
+
+time_map:
+[
+  {
+    "out_start_ms": 0,
+    "out_end_ms": 2200,
+    "item_id": "c1",
+    "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+    "source_in_ms": 3200,
+    "speed": 1
+  },
+  {
+    "out_start_ms": 2200,
+    "out_end_ms": 5200,
+    "item_id": "c2",
+    "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+    "source_in_ms": 9000,
+    "speed": 1
+  }
+]
+
+sound_cues:
+[]
+
+pending_text:
+[]
+
+pending_captions: false
+pending_watermark: false

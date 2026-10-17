@@ -1,0 +1,174 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"sort"
+	"strings"
+	"syscall"
+
+	"github.com/nilpntr/content-fabrique/internal/render"
+	"github.com/nilpntr/content-fabrique/internal/timeline"
+)
+
+const renderUsage = `Usage:
+  cfctl render <spec.json> --assets <dir> -o <out.mp4> [--profile preview|final] [--dry-run]
+
+Renders a timeline spec with ffmpeg, for local manual runs (the platform renders through its jobs, P3-06). The spec is
+decoded strictly (unknown fields are errors) and compiled by internal/render; it is not checked against an asset catalog,
+so run it through the validator first if it did not come from one.
+
+  --assets     a directory with one file per asset, named <asset id> plus any extension (ast_01j3er3kw....mp4). The same
+               file is used for both profiles: there is no proxy locally.
+  -o           the MP4 to write (replaced if it exists)
+  --profile    preview (half size, fast, with the beat guide; the default) or final (full size, two-pass loudness)
+  --ffmpeg     the ffmpeg binary (default: ffmpeg from PATH). ffprobe is used from the same directory or PATH
+  --dry-run    print the ffmpeg command line and the filter graph, and do not run it
+
+Prints the sound cues (cue_only sounds are never mixed in) and progress while it runs.
+`
+
+func cmdRender(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("render", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	flags.Usage = func() { _, _ = fmt.Fprint(stderr, renderUsage) }
+	assetsArg := flags.String("assets", "", "directory with the assets")
+	outArg := flags.String("o", "", "output MP4")
+	profileArg := flags.String("profile", "preview", "preview or final")
+	ffmpegArg := flags.String("ffmpeg", "ffmpeg", "ffmpeg binary")
+	dryRun := flags.Bool("dry-run", false, "print the command and do not run it")
+
+	// The spec path may come before or after the flags.
+	var positional []string
+	rest := args
+	for {
+		if err := flags.Parse(rest); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return 0
+			}
+			return 2
+		}
+		if flags.NArg() == 0 {
+			break
+		}
+		positional = append(positional, flags.Arg(0))
+		rest = flags.Args()[1:]
+	}
+	if len(positional) == 0 && len(args) > 0 && (args[0] == "help" || args[0] == "-h") {
+		_, _ = fmt.Fprint(stdout, renderUsage)
+		return 0
+	}
+	if len(positional) != 1 || *assetsArg == "" || (*outArg == "" && !*dryRun) {
+		_, _ = fmt.Fprint(stderr, renderUsage)
+		return 2
+	}
+	profile, err := render.ParseProfile(*profileArg)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "cfctl render: %v\n", err)
+		return 2
+	}
+
+	data, err := os.ReadFile(positional[0])
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "cfctl render: %v\n", err)
+		return 1
+	}
+	spec, err := timeline.Parse(data)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "cfctl render: %s: %v\n", positional[0], err)
+		return 1
+	}
+	plan, err := render.Compile(spec, profile, &dirResolver{dir: *assetsArg, ffmpeg: *ffmpegArg})
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "cfctl render: %v\n", err)
+		return 1
+	}
+	for _, c := range plan.SoundCues {
+		_, _ = fmt.Fprintf(stderr, "sound cue (not mixed in): %s trend %s at %d ms, offset %d ms\n", c.ItemID, c.TrendID, c.AtMs, c.SourceOffsetMs)
+	}
+	if len(plan.PendingText) > 0 || plan.PendingCaptions {
+		_, _ = fmt.Fprintf(stderr, "note: text and captions are not drawn yet (%d text items pending)\n", len(plan.PendingText))
+	}
+
+	if *dryRun {
+		out := *outArg
+		if out == "" {
+			out = "<out.mp4>"
+		}
+		_, _ = fmt.Fprintf(stdout, "%s %s\n\nfilter_complex:\n%s\n", *ffmpegArg, strings.Join(quoteAll(plan.OutputArgs(out)), " "), render.PrettyFilter(plan.FilterComplex))
+		return 0
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	lastTenth := -1
+	err = render.Execute(ctx, plan, render.LocalRunner{Binary: *ffmpegArg}, render.ExecuteOptions{
+		Output: *outArg,
+		Progress: func(p render.Progress) {
+			if tenth := int(p.Fraction * 10); tenth != lastTenth || p.Done {
+				lastTenth = tenth
+				_, _ = fmt.Fprintf(stderr, "%s: %3d%%  (%d frames, %.1fx)\n", p.Stage, int(p.Fraction*100), p.Frame, p.Speed)
+			}
+		},
+	})
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "cfctl render: %v\n", err)
+		return 1
+	}
+	_, _ = fmt.Fprintf(stdout, "wrote %s (%dx%d, %.1f s, %s profile)\n", *outArg, plan.OutputSize.Width, plan.OutputSize.Height, float64(plan.DurationMs)/1000, plan.Profile.Name)
+	return 0
+}
+
+// quoteAll quotes the arguments that a shell would split, for the dry run's printout.
+func quoteAll(args []string) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		if a == "" || strings.ContainsAny(a, " \t\n'\"[]();|&$<>*?\\") {
+			a = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
+		}
+		out[i] = a
+	}
+	return out
+}
+
+// dirResolver resolves an asset id to the file in a directory that starts with it, and asks ffprobe whether it has audio.
+type dirResolver struct {
+	dir    string
+	ffmpeg string
+}
+
+func (r *dirResolver) Resolve(assetID string, _ render.Variant) (render.ResolvedAsset, error) {
+	// The id comes from a spec: refuse anything that could leave the directory.
+	if assetID == "" || strings.ContainsAny(assetID, `/\`) || strings.Contains(assetID, "..") {
+		return render.ResolvedAsset{}, fmt.Errorf("invalid asset id %q", assetID)
+	}
+	matches, err := filepath.Glob(filepath.Join(r.dir, assetID+".*"))
+	if err != nil {
+		return render.ResolvedAsset{}, err
+	}
+	sort.Strings(matches)
+	if len(matches) == 0 {
+		return render.ResolvedAsset{}, fmt.Errorf("no file for asset %s in %s (want %s.<ext>)", assetID, r.dir, assetID)
+	}
+	return render.ResolvedAsset{Location: matches[0], HasAudio: r.hasAudio(matches[0])}, nil
+}
+
+// hasAudio runs ffprobe; when it cannot, it assumes the file has audio and lets ffmpeg report the problem.
+func (r *dirResolver) hasAudio(path string) bool {
+	probe := "ffprobe"
+	if dir := filepath.Dir(r.ffmpeg); dir != "." && r.ffmpeg != "ffmpeg" {
+		probe = filepath.Join(dir, "ffprobe")
+	}
+	out, err := exec.CommandContext(context.Background(), probe, "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", path).Output() //nolint:gosec // a local developer tool; path is a file in the assets directory
+	if err != nil {
+		return true
+	}
+	return strings.TrimSpace(string(out)) != ""
+}

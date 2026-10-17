@@ -1,0 +1,86 @@
+fixture: v04_minimal_16x9
+profile: preview
+output: 960x540 at 30 fps, 90 frames, 3000 ms
+
+args:
+  -protocol_whitelist
+  file,http,https,tcp,tls,crypto
+  -t
+  3.000
+  -i
+  /assets/proxy/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4
+  -filter_complex
+  <filter_complex>
+  -map
+  [vout]
+  -map
+  [aout]
+  -c:v
+  libx264
+  -preset
+  veryfast
+  -crf
+  28
+  -pix_fmt
+  yuv420p
+  -c:a
+  aac
+  -b:a
+  128k
+  -ar
+  48000
+  -ac
+  2
+  -map_metadata
+  -1
+  -map_chapters
+  -1
+  -fflags
+  +bitexact
+  -flags:v
+  +bitexact
+  -flags:a
+  +bitexact
+
+filter_complex:
+  [0:v]trim=end=3.000,setpts=PTS-STARTPTS,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=90,setpts=PTS-STARTPTS,scale=960:540:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=960:540:x='clip(0.5*iw-480,0,iw-960)':y='clip(0.5*ih-270,0,ih-540)',setsar=1,format=yuv420p,setsar=1,fps=30,settb=AVTB[v0];
+  [v0]null[vout];
+  anullsrc=r=48000:cl=stereo:d=3.000[abed];
+  [abed]anull[aout]
+
+inputs:
+[
+  {
+    "index": 0,
+    "role": "clip",
+    "item_id": "c1",
+    "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+    "location": "/assets/proxy/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4",
+    "seek_ms": 0,
+    "duration_ms": 3000
+  }
+]
+
+cut_list:
+[]
+
+time_map:
+[
+  {
+    "out_start_ms": 0,
+    "out_end_ms": 3000,
+    "item_id": "c1",
+    "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+    "source_in_ms": 0,
+    "speed": 1
+  }
+]
+
+sound_cues:
+[]
+
+pending_text:
+[]
+
+pending_captions: false
+pending_watermark: true

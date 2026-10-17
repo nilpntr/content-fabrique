@@ -18,6 +18,7 @@ Commands:
   doctor     check the environment's variables and services (cfctl doctor --help)
   migrate    apply the database migrations as the schema-owning role (cfctl migrate help)
   plan       grant, revoke or show the plan of a person's workspace, until billing exists (cfctl plan help)
+  render     render a timeline spec with ffmpeg, for local manual runs (cfctl render --help)
   env        init: create .env and generate secrets. lint: check variable reads against .env.example
   version    print the build version
   help       show this help
@@ -45,6 +46,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdMigrate(args[1:], stdout, stderr, os.LookupEnv)
 	case "plan":
 		return cmdPlan(args[1:], stdout, stderr, os.LookupEnv)
+	case "render":
+		return cmdRender(args[1:], stdout, stderr)
 	case "help", "-h", "-help", "--help":
 		_, _ = fmt.Fprint(stdout, usage)
 		return 0
