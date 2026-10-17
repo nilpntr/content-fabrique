@@ -1,0 +1,17 @@
+{
+  "op": "snap_cuts_to_beats",
+  "sound_id": "s1",
+  "grid": {
+    "bpm": 128.5,
+    "first_beat_ms": 215.5,
+    "beats_per_bar": 3,
+    "downbeat_offset": 1
+  },
+  "options": {
+    "max_shift_ms": 150,
+    "max_shift_beats": 0.25,
+    "prefer_downbeats": true,
+    "min_shot_ms": 400,
+    "write_markers": true
+  }
+}

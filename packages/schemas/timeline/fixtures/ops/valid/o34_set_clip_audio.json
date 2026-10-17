@@ -1,0 +1,6 @@
+{
+  "op": "set_clip_audio",
+  "id": "c1",
+  "use_source": true,
+  "gain_db": 6
+}

@@ -1,0 +1,8 @@
+{
+  "op": "snap_cuts_to_beats",
+  "grid": {
+    "beats_ms": [
+      0
+    ]
+  }
+}

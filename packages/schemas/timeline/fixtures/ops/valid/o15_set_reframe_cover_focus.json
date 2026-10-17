@@ -1,0 +1,10 @@
+{
+  "op": "set_reframe",
+  "id": "c1",
+  "mode": "cover",
+  "focus": {
+    "x": 0,
+    "y": 1
+  },
+  "zoom": 3
+}

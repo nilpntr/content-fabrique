@@ -1,6 +1,6 @@
 # @cf/schemas
 
-JSON Schemas shared by the Go server and the web app. Today that is the timeline spec v1 (P3-01); `openapi.yaml` (P0-08) and the edit-op schemas (`ops.v1.schema.json`, P3-02) land here later.
+JSON Schemas shared by the Go server and the web app. Today that is the timeline spec v1 (P3-01) and its edit ops (P3-02); `openapi.yaml` (P0-08) lands here later.
 
 The rules of the spec are in the [timeline design note](../../docs/design/timeline-v1.md). The schema is the source of truth for structure; read its `title` and `description` fields, because the editor agent will use them as tool documentation.
 
@@ -11,6 +11,12 @@ timeline/
   v1.schema.json        JSON Schema draft 2020-12, $id https://contentfabrique.app/schemas/timeline/v1.json
   v1.ts                 generated TypeScript types (committed, do not edit)
   v1.test.ts            Ajv tests: every fixture, the render-fixture coverage and the edge rules
+  ops.v1.schema.json    the edit ops (one definition per op, discriminated on "op"; $defs/opBatch is a batch), $id https://contentfabrique.app/schemas/timeline/ops.v1.json
+  ops.v1.ts             generated TypeScript types of the ops (committed, do not edit)
+  ops.v1.test.ts        Ajv tests: the ops fixtures, the definitions shared with v1.schema.json, batch limits
+  fixtures/ops/
+    valid/*.json        35 single ops that pass the schema (every op at least once)
+    invalid/*.json      42 single ops that fail it
   fixtures/
     valid/*.json        31 specs that pass the schema (and the Go semantic checks, given assets.json)
     invalid/*.json      46 specs, each of which must raise exactly one issue code (named in expect.json)
@@ -18,7 +24,7 @@ timeline/
     render.txt          the 20 valid fixtures that are also render fixtures (P3-03)
     assets.json         the asset catalog the semantic fixtures assume (asset_id -> duration_ms)
 scripts/
-  gen.ts                writes timeline/v1.ts
+  gen.ts                writes timeline/v1.ts and timeline/ops.v1.ts
   gen-check.sh          the CI drift check
 ```
 
@@ -30,10 +36,10 @@ Run from the repo root (or `cd packages/schemas`).
 |---|---|
 | `bun run --filter @cf/schemas test` | Validates every fixture with Ajv (2020-12, strict mode) |
 | `bun run --filter @cf/schemas typecheck` | Type-checks the tests, the scripts and the generated types |
-| `bun run --filter @cf/schemas gen` or `task gen:schemas` | Regenerates `timeline/v1.ts` from the schema with `json-schema-to-typescript` |
-| `bun run --filter @cf/schemas gen:check` | Regenerates, then fails if `timeline/v1.ts` differs from what is committed (CI runs this) |
+| `bun run --filter @cf/schemas gen` or `task gen:schemas` | Regenerates `timeline/v1.ts` and `timeline/ops.v1.ts` from the schemas with `json-schema-to-typescript` |
+| `bun run --filter @cf/schemas gen:check` | Regenerates, then fails if either generated file differs from what is committed (CI runs this) |
 
-After you change `v1.schema.json`, run `gen` and commit `v1.ts` with it.
+After you change `v1.schema.json` or `ops.v1.schema.json`, run `gen` and commit `v1.ts` / `ops.v1.ts` with it; for the ops schema also run `task gen:timeline` (or `go generate ./internal/timeline/...` in apps/server) to refresh the copy the Go package embeds, and commit that too. The ops definitions repeat the shared ones of `v1.schema.json`; `ops.v1.test.ts` fails if they drift apart.
 
 ## Structure here, semantics in Go
 
