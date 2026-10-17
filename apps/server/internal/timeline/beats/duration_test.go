@@ -230,3 +230,60 @@ func TestFitDurationProperty(t *testing.T) {
 		}
 	}
 }
+
+func TestFitDurationFindsBeatsOutsideTheBracket(t *testing.T) {
+	// Beats at 0, 505, 1006 and 1500. At 30 fps, 505 aligns to frame 15 = 500
+	// ms, below the 505 ms minimum, although the exact beat is not. The target
+	// (300 ms) clamps to 505, whose bracket beat (505) is invalid after
+	// alignment; only 1006 (frame 30 = 1000 ms) fits.
+	g := mustList(t, ListSpec{BeatsMs: []float64{0, 505, 1006, 1500}})
+	f, err := FitDuration(g, 0, 300, FitOpts{FPS: 30, MinMs: 505, MaxMs: 1006})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.EndMs != 1000 || f.DurationMs != 1000 || f.EndBeat.AtMs != 1006 {
+		t.Errorf("%+v, want the 1006 beat aligned to 1000", f)
+	}
+	// No beat in the bounds is still ErrNoFit.
+	if _, err := FitDuration(g, 0, 300, FitOpts{FPS: 30, MinMs: 505, MaxMs: 999}); !errors.Is(err, ErrNoFit) {
+		t.Errorf("err = %v", err)
+	}
+	// 1006 is inside 999 or less only before alignment; after it (1000) it is out.
+	if _, err := FitDuration(g, 0, 900, FitOpts{FPS: 30, MaxMs: 999, MinMs: 600}); !errors.Is(err, ErrNoFit) {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestFitDurationSearchesFarFromTheTarget(t *testing.T) {
+	// A bar fit whose nearest downbeats are out of bounds finds one further out.
+	g := mustConstant(t, ConstantSpec{BPM: 120}) // downbeats every 2000 ms
+	f, err := FitDuration(g, 0, 3000, FitOpts{FPS: 30, Unit: UnitBar, MinMs: 4500, MaxMs: 9000})
+	if err != nil || f.EndMs != 6000 {
+		t.Errorf("%+v, %v; want 6000", f, err)
+	}
+	f, err = FitDuration(g, 0, 20000, FitOpts{FPS: 30, Unit: UnitBar, MaxMs: 7000})
+	if err != nil || f.EndMs != 6000 {
+		t.Errorf("%+v, %v; want 6000", f, err)
+	}
+}
+
+func TestDurationForBeatsEdgeCases(t *testing.T) {
+	g := mustConstant(t, ConstantSpec{BPM: 120})
+	if _, err := DurationForBeats(g, 0, 0.0005); err == nil { // 0.25 ms rounds to 0
+		t.Error("a span that rounds to 0 ms should be an error")
+	}
+	if _, err := DurationForBeats(g, -1, 1); err == nil {
+		t.Error("negative start")
+	}
+	h := mustConstant(t, ConstantSpec{BPM: 120, FirstBeatMs: 300})
+	empty, _ := h.Place(Placement{AtMs: 0, SourceOffsetMs: 0, DurationMs: 100})
+	if !empty.Empty() {
+		t.Fatal("expected an empty placed grid")
+	}
+	if _, err := DurationForBeats(empty, 0, 1); !errors.Is(err, ErrInvalidGrid) {
+		t.Errorf("empty placed grid: %v", err)
+	}
+	if _, err := DurationForBeats(g, 0, 1e300); err == nil {
+		t.Error("absurd span")
+	}
+}

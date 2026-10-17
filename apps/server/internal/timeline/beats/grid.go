@@ -18,6 +18,10 @@ const (
 	// beat at MaxBPM.
 	MinBeatGapMs = 60000.0 / MaxBPM
 
+	// MaxTimeMs is the largest time the package accepts: the schema's limit of
+	// 24 hours. It keeps the integer frame arithmetic far from overflow.
+	MaxTimeMs = 86_400_000
+
 	// maxIndex caps a constant-tempo grid: it has beats up to this index
 	// (about 16.7 million, far beyond any timeline).
 	maxIndex = 1 << 24
@@ -192,15 +196,21 @@ func NewList(spec ListSpec) (Grid, error) {
 // IsConstant reports whether the grid has a constant tempo.
 func (g Grid) IsConstant() bool { return !g.list && g.bpm > 0 }
 
-// BPM returns the tempo of a constant grid, or the mean tempo of a list.
+// BPM returns the tempo of a constant grid, or the mean tempo of the audible
+// beats of a list (after Place, only the beats still on the timeline count; a
+// single audible beat uses the gap around it). It is 0 for an empty grid.
 func (g Grid) BPM() float64 {
 	if !g.list {
 		return g.bpm
 	}
-	if len(g.times) < 2 {
+	n := g.hi - g.lo + 1
+	switch {
+	case g.Empty():
 		return 0
+	case n == 1:
+		return 60000 / g.localInterval(g.at(g.lo))
 	}
-	return 60000 * float64(len(g.times)-1) / (g.times[len(g.times)-1] - g.times[0])
+	return 60000 * float64(n-1) / (g.at(g.hi) - g.at(g.lo))
 }
 
 // BeatsPerBar returns the bar length in beats.
@@ -306,8 +316,7 @@ func (g Grid) nearest(t float64) (Beat, bool) {
 // NearestDownbeat is Nearest restricted to downbeats.
 func (g Grid) NearestDownbeat(ms int64) (b Beat, ok bool) {
 	t := float64(ms)
-	before, okB := g.scanDown(g.lowerBound(t)-1, -1)
-	after, okA := g.scanDown(g.lowerBound(t), +1)
+	before, after, okB, okA := g.around(t, true)
 	switch {
 	case okB && okA:
 		if t-before.ExactMs <= after.ExactMs-t {
@@ -322,14 +331,26 @@ func (g Grid) NearestDownbeat(ms int64) (b Beat, ok bool) {
 	return Beat{}, false
 }
 
-// scanDown walks from index i in direction dir to the first downbeat.
-func (g Grid) scanDown(i, dir int) (Beat, bool) {
+// walk calls fn for the beats from index i in direction dir (+1 or -1), only
+// downbeats when down is set, until fn returns false or the grid ends.
+func (g Grid) walk(i, dir int, down bool, fn func(Beat) bool) {
 	for ; i >= g.lo && i <= g.hi; i += dir {
-		if g.isDown(i) {
-			return g.beat(i), true
+		if down && !g.isDown(i) {
+			continue
+		}
+		if !fn(g.beat(i)) {
+			return
 		}
 	}
-	return Beat{}, false
+}
+
+// around returns the closest beat strictly before t (exact time < t) and the
+// closest at or after t, with one search. With down set only downbeats count.
+func (g Grid) around(t float64, down bool) (before, after Beat, okB, okA bool) {
+	j := g.lowerBound(t)
+	g.walk(j-1, -1, down, func(b Beat) bool { before, okB = b, true; return false })
+	g.walk(j, +1, down, func(b Beat) bool { after, okA = b, true; return false })
+	return before, after, okB, okA
 }
 
 // Next returns the first beat strictly after ms (by rounded time).
@@ -353,19 +374,20 @@ func (g Grid) Prev(ms int64) (b Beat, ok bool) {
 }
 
 // localInterval is the gap between the beats around t, used to turn a shift in
-// beats into milliseconds. It is 0 when the grid has fewer than two beats.
+// beats into milliseconds. Like pos and timeAt it looks at the underlying grid,
+// not at the audible window, so a placed sound with a single audible beat still
+// has a beat length. It is 0 for an empty grid.
 func (g Grid) localInterval(t float64) float64 {
-	if g.Empty() || g.hi-g.lo < 1 {
+	if g.Empty() {
 		return 0
 	}
-	j := g.lowerBound(t)
-	switch {
-	case j <= g.lo:
-		return g.at(g.lo+1) - g.at(g.lo)
-	case j > g.hi:
-		return g.at(g.hi) - g.at(g.hi-1)
+	if !g.list {
+		return 60000 / g.bpm
 	}
-	return g.at(j) - g.at(j-1)
+	n := len(g.times)
+	k := sort.Search(n, func(i int) bool { return g.times[i]+g.shift >= t }) // first beat at or after t
+	k = max(1, min(k, n-1))
+	return g.times[k] - g.times[k-1]
 }
 
 // pos converts a time to a fractional beat position in the underlying index

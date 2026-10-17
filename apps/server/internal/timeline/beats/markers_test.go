@@ -111,3 +111,17 @@ func TestMarkersOfPlacedSound(t *testing.T) {
 		}
 	}
 }
+
+func TestMarkersHugeRangeDoesNotOverflow(t *testing.T) {
+	g := mustConstant(t, ConstantSpec{BPM: 120})
+	ms, err := g.Markers(0, math.MaxInt64, MarkerOpts{FPS: 30, DropsMs: []int64{math.MaxInt64, 1000}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ms) < 1000 || ms[len(ms)-1].AtMs >= MaxTimeMs {
+		t.Errorf("%d markers, last %+v", len(ms), ms[len(ms)-1])
+	}
+	if _, err := g.Markers(math.MaxInt64-10, math.MaxInt64, MarkerOpts{}); err != nil {
+		t.Error(err)
+	}
+}

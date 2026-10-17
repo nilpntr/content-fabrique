@@ -312,3 +312,27 @@ func TestPlaceTwice(t *testing.T) {
 		t.Errorf("beats = %v", got)
 	}
 }
+
+func TestBPMOfPlacedList(t *testing.T) {
+	// 120 bpm for the first beats, then 60 bpm.
+	l := mustList(t, ListSpec{BeatsMs: []float64{0, 500, 1000, 1500, 2500, 3500, 4500}})
+	if got := l.BPM(); math.Abs(got-60000*6/4500.0) > 1e-9 {
+		t.Errorf("whole list = %v", got)
+	}
+	// Only the slow part is audible: 2500 .. 4500.
+	slow, _ := l.Place(Placement{AtMs: 0, SourceOffsetMs: 2000})
+	if got := slow.BPM(); math.Abs(got-60) > 1e-9 {
+		t.Errorf("audible window = %v, want 60", got)
+	}
+	one, _ := l.Place(Placement{AtMs: 0, SourceOffsetMs: 4400})
+	if got := one.BPM(); math.Abs(got-60) > 1e-9 { // one audible beat: the gap around it
+		t.Errorf("single beat = %v, want 60", got)
+	}
+	empty, _ := l.Place(Placement{AtMs: 0, SourceOffsetMs: 9000})
+	if got := empty.BPM(); got != 0 {
+		t.Errorf("empty = %v", got)
+	}
+	if got := mustConstant(t, ConstantSpec{BPM: 97.5}).BPM(); got != 97.5 {
+		t.Errorf("constant = %v", got)
+	}
+}

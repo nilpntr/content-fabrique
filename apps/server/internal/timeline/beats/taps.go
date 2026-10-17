@@ -19,7 +19,8 @@ type TapFit struct {
 // Tap k is modelled as t_k = first + k × period and the two parameters come
 // from an ordinary least-squares line through (k, t_k), which averages out
 // human jitter. The first beat is moved forward by whole periods until it is
-// >= 0. The tempo must land inside [MinBPM, MaxBPM].
+// >= 0 (see normalizeFirst) and the downbeat is tap 0. The tempo must land
+// inside [MinBPM, MaxBPM].
 func EstimateFromTaps(tapsMs []float64) (TapFit, error) {
 	n := len(tapsMs)
 	if n < 4 {
@@ -53,10 +54,8 @@ func EstimateFromTaps(tapsMs []float64) (TapFit, error) {
 	if bpm < MinBPM || bpm > MaxBPM {
 		return TapFit{}, invalidf("taps give %.1f bpm, outside %v to %v", bpm, MinBPM, MaxBPM)
 	}
-	if first < 0 {
-		first += period * math.Ceil(-first/period)
-	}
-	return TapFit{Spec: ConstantSpec{BPM: bpm, FirstBeatMs: first}, MaxResidualMs: residual(tapsMs, first, period)}, nil
+	first, downOffset := normalizeFirst(first, period, DefaultBeatsPerBar)
+	return TapFit{Spec: ConstantSpec{BPM: bpm, FirstBeatMs: first, DownbeatOffset: downOffset}, MaxResidualMs: residual(tapsMs, first, period)}, nil
 }
 
 // residual is the largest |tap - nearest fitted beat|. The fitted beats are
@@ -69,4 +68,30 @@ func residual(taps []float64, first, period float64) float64 {
 		worst = math.Max(worst, math.Abs(t-(first+j*period)))
 	}
 	return worst
+}
+
+// firstBeatClampMs is how far before 0 a fitted first beat may be and still be
+// taken to be at 0: the first tap is >= 0, so a fitted beat 0 slightly before
+// it is jitter (or float noise), not a beat that was tapped before the start.
+const firstBeatClampMs = 25
+
+// normalizeFirst makes a fitted first beat valid (>= 0) without losing the
+// downbeat. Tap 0 is meant to be a downbeat. A first beat within
+// firstBeatClampMs before 0 becomes 0, so the beat stays at the first tap. A
+// first beat further back moves forward by m whole periods; the beat that was
+// at index 0 is now at index -m, so the downbeat offset becomes -m mod
+// beatsPerBar and tap 0 is still a downbeat of the grid.
+func normalizeFirst(first, period float64, beatsPerBar int) (float64, int) {
+	if first >= 0 {
+		return first, 0
+	}
+	if -first <= firstBeatClampMs {
+		return 0, 0
+	}
+	m := int(math.Ceil(-first / period))
+	first += float64(m) * period
+	if first < 0 { // float noise: never return a negative
+		first = 0
+	}
+	return first, ((-m)%beatsPerBar + beatsPerBar) % beatsPerBar
 }

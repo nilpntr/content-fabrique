@@ -135,15 +135,15 @@ func SnapCuts(cuts []int64, grid Grid, opts SnapOpts) ([]Snap, error) {
 	reasons := make([]Reason, len(cuts))
 
 	for pass := 0; pass <= len(cuts)+1; pass++ {
-		next, ch := s.pass(cur)
+		next, ch := s.pass(cur, done)
 		changed := false
-		for i := range cur {
+		for i, c := range cuts {
 			if next[i] != cur[i] {
 				changed = true
 			}
 			if ch[i].ok && !done[i] {
 				done[i] = true
-				rec[i] = s.snapped(cuts[i], next[i], ch[i].beat)
+				rec[i] = s.snapped(c, next[i], ch[i].beat)
 			}
 			if !ch[i].ok {
 				reasons[i] = ch[i].reason
@@ -195,6 +195,9 @@ func newSnapper(g Grid, o SnapOpts, cuts []int64) (*snapper, error) {
 	if o.MinShotMs < 0 || o.StartMs < 0 || o.EndMs < 0 {
 		return nil, bad("min shot, start and end must be >= 0")
 	}
+	if o.MinShotMs > MaxTimeMs || o.StartMs > MaxTimeMs || o.EndMs > MaxTimeMs {
+		return nil, bad("min shot, start and end must be at most %d ms", MaxTimeMs)
+	}
 	if o.EndMs != 0 && o.EndMs <= o.StartMs {
 		return nil, bad("end %d must be after start %d", o.EndMs, o.StartMs)
 	}
@@ -213,8 +216,8 @@ func newSnapper(g Grid, o SnapOpts, cuts []int64) (*snapper, error) {
 	}
 	prev := s.start
 	for i, c := range cuts {
-		if c <= prev {
-			return nil, bad("cut %d (%d ms) must be after %d ms", i, c, prev)
+		if c <= prev || c > MaxTimeMs {
+			return nil, bad("cut %d (%d ms) must be after %d ms and at most %d ms", i, c, prev, MaxTimeMs)
 		}
 		prev = c
 	}
@@ -234,17 +237,23 @@ type choice struct {
 func (s *snapper) req(a, b int64) int64 { return min(s.minShot, b-a) }
 
 // pass runs one left-to-right sweep over cur and returns the new positions and
-// what happened to each cut.
+// what happened to each cut. Cuts already snapped (done) are on their beat and
+// stay: they are not searched again, but they still bound their neighbours.
 //
 // The bounds for cut i are L = (new previous cut) + the shot rule and
 // U = (next cut as it is now) - the shot rule. U leaves the next cut a place it
 // can always stay at, and cur[i] itself is always inside [L, U]: so "stay put"
 // is always a valid answer and the sweep can't paint itself into a corner.
-func (s *snapper) pass(cur []int64) ([]int64, []choice) {
+func (s *snapper) pass(cur []int64, done []bool) ([]int64, []choice) {
 	n := len(cur)
 	next := make([]int64, n)
 	ch := make([]choice, n)
 	for i := range cur {
+		if done[i] {
+			next[i] = cur[i]
+			ch[i] = choice{ok: true}
+			continue
+		}
 		prevCur, prevNew := s.start, s.start
 		if i > 0 {
 			prevCur, prevNew = cur[i-1], next[i-1]
@@ -294,15 +303,12 @@ func (s *snapper) window(t float64) float64 {
 	return min(max(w, s.frameMs), maxShiftCapMs)
 }
 
-// candidates lists the beats a cut at t may snap to, best first.
+// candidates lists the beats a cut at t may snap to, best first: a beat within
+// one frame of t comes first (so a cut that is already on a beat stays on it,
+// which keeps the result stable), then the beats within the maximum shift,
+// downbeats before the others when PreferDownbeats is set, each group nearest
+// first. The caller takes the first one that fits the shot rule.
 func (s *snapper) candidates(t float64) []Beat {
-	near, ok := s.g.nearest(t)
-	if !ok {
-		return nil
-	}
-	if math.Abs(near.ExactMs-t) <= s.frameMs {
-		return []Beat{near}
-	}
 	w := s.window(t)
 	a, b := s.g.lowerBound(t-w), s.g.upperBound(t+w)
 	if b <= a {
@@ -313,11 +319,16 @@ func (s *snapper) candidates(t float64) []Beat {
 		cands = append(cands, s.g.beat(i))
 	}
 	dist := func(x Beat) float64 { return math.Abs(x.ExactMs - t) }
+	onBeat := func(x Beat) bool { return dist(x) <= s.frameMs }
 	sort.SliceStable(cands, func(x, y int) bool {
-		if s.o.PreferDownbeats && cands[x].Downbeat != cands[y].Downbeat {
-			return cands[x].Downbeat
+		cx, cy := cands[x], cands[y]
+		if ox, oy := onBeat(cx), onBeat(cy); ox != oy {
+			return ox
 		}
-		return dist(cands[x]) < dist(cands[y])
+		if s.o.PreferDownbeats && cx.Downbeat != cy.Downbeat {
+			return cx.Downbeat
+		}
+		return dist(cx) < dist(cy)
 	})
 	return cands
 }

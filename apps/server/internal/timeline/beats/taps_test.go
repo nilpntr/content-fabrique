@@ -67,3 +67,65 @@ func TestEstimateFromTapsErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeFirst(t *testing.T) {
+	tests := []struct {
+		name       string
+		first      float64
+		period     float64
+		wantFirst  float64
+		wantOffset int
+	}{
+		{"already valid", 130, 500, 130, 0},
+		{"float noise", -1e-13, 500, 0, 0},
+		{"jitter before 0 stays on the first tap", -20, 500, 0, 0},
+		{"one period", -100, 500, 400, 3},
+		{"exactly one period", -500, 500, 0, 3},
+		{"three periods", -1200, 500, 300, 1},
+		{"four periods wrap", -1700, 500, 300, 0},
+	}
+	for _, tc := range tests {
+		first, off := normalizeFirst(tc.first, tc.period, 4)
+		if math.Abs(first-tc.wantFirst) > 1e-9 || off != tc.wantOffset {
+			t.Errorf("%s: got %v, %d; want %v, %d", tc.name, first, off, tc.wantFirst, tc.wantOffset)
+		}
+		if first < 0 {
+			t.Errorf("%s: negative first beat %v", tc.name, first)
+		}
+		// The beat at the original position (tap 0) is still a downbeat.
+		g, err := NewConstant(ConstantSpec{BPM: 120, FirstBeatMs: first, DownbeatOffset: off})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tc.first < -firstBeatClampMs {
+			// original index 0 sits at tc.first = first - m*period
+			m := int(math.Round((first - tc.first) / tc.period))
+			if !g.isDown(-m) {
+				t.Errorf("%s: the original first beat (index %d) lost its downbeat", tc.name, -m)
+			}
+		}
+	}
+}
+
+func TestEstimateFromTapsKeepsFirstTapAsDownbeat(t *testing.T) {
+	// The first tap is late and the rest are early: the fitted first beat is
+	// before 0, and the spec must still be valid with a beat near every tap.
+	taps := []float64{60, 460, 960, 1460, 1960, 2460}
+	fit, err := EstimateFromTaps(taps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fit.Spec.FirstBeatMs < 0 || fit.Spec.DownbeatOffset < 0 || fit.Spec.DownbeatOffset >= DefaultBeatsPerBar {
+		t.Fatalf("%+v", fit.Spec)
+	}
+	g, err := NewConstant(fit.Spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tap := range taps {
+		b, _ := g.Nearest(int64(tap))
+		if math.Abs(b.ExactMs-tap) > fit.MaxResidualMs+1e-9 {
+			t.Errorf("no beat near tap %v: nearest %v", tap, b.ExactMs)
+		}
+	}
+}

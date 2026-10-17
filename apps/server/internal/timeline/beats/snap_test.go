@@ -585,3 +585,59 @@ func FuzzSnapCuts(f *testing.F) {
 		checkIdempotent(t, tc, s)
 	})
 }
+
+func TestSnapNextBestBeatWhenClosestBreaksMinShot(t *testing.T) {
+	g := mustConstant(t, ConstantSpec{BPM: 120})
+	// Cut 1 (1020) is within a frame of beat 1000, but cut 0 sits on 1000 and
+	// the first shot is only 20 ms, so it may not shrink: the closest beat is
+	// out. The next best in range, 1500 (480 ms away), is taken.
+	s := snap(t, []int64{1000, 1020}, g, SnapOpts{FPS: 30, MaxShiftMs: 500})
+	if got := ats(s); !slices.Equal(got, []int64{1000, 1500}) {
+		t.Fatalf("cuts = %v, want [1000 1500]", got)
+	}
+	if !s[1].Snapped || s[1].BeatMs != 1500 || s[1].ShiftMs != 480 {
+		t.Errorf("%+v", s[1])
+	}
+	again := snap(t, ats(s), g, SnapOpts{FPS: 30, MaxShiftMs: 500})
+	if !slices.Equal(ats(again), ats(s)) {
+		t.Errorf("not idempotent: %v", ats(again))
+	}
+	// Without the room (default half-beat window) it is refused and stays put.
+	s = snap(t, []int64{1000, 1020}, g, SnapOpts{FPS: 30})
+	if s[1].Snapped || s[1].Reason != ReasonMinShot || s[1].AtMs != 1020 {
+		t.Errorf("%+v", s[1])
+	}
+}
+
+func TestSnapSinglePlacedBeatUsesUnderlyingGap(t *testing.T) {
+	l := mustList(t, ListSpec{BeatsMs: []float64{0, 500, 1000, 1500}})
+	placed, err := l.Place(Placement{AtMs: 450, SourceOffsetMs: 0, DurationMs: 100}) // only the beat at 450 is audible
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := times(placed.Beats(0, 5000)); !slices.Equal(got, []int64{450}) {
+		t.Fatalf("audible beats = %v", got)
+	}
+	if got := placed.localInterval(450); got != 500 {
+		t.Errorf("localInterval = %v, want 500", got)
+	}
+	// 250 ms away with a limit of half a beat: needs a beat length.
+	s := snap(t, []int64{700}, placed, SnapOpts{FPS: 30})
+	if !s[0].Snapped || s[0].BeatMs != 450 {
+		t.Errorf("%+v", s[0])
+	}
+	s = snap(t, []int64{701}, placed, SnapOpts{FPS: 30})
+	if s[0].Snapped {
+		t.Errorf("251 ms is past half a beat: %+v", s[0])
+	}
+}
+
+func TestSnapRejectsHugeTimes(t *testing.T) {
+	g := mustConstant(t, ConstantSpec{BPM: 120})
+	if _, err := SnapCuts([]int64{math.MaxInt64 / 2}, g, SnapOpts{FPS: 30}); !errors.Is(err, ErrInvalidSnap) {
+		t.Errorf("err = %v", err)
+	}
+	if _, err := SnapCuts([]int64{1000}, g, SnapOpts{FPS: 30, EndMs: math.MaxInt64}); !errors.Is(err, ErrInvalidSnap) {
+		t.Errorf("err = %v", err)
+	}
+}

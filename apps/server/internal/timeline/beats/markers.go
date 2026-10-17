@@ -55,6 +55,10 @@ func (g Grid) Markers(fromMs, toMs int64, o MarkerOpts) ([]Marker, error) {
 	if fromMs < 0 || toMs < fromMs {
 		return nil, fmt.Errorf("beats: marker range [%d, %d) is invalid", fromMs, toMs)
 	}
+	// Nothing on a timeline is past MaxTimeMs; clamping keeps the arithmetic
+	// below far from overflow for a caller that passes math.MaxInt64.
+	fromMs = min(fromMs, MaxTimeMs)
+	toMs = min(toMs, MaxTimeMs)
 	place := func(ms int64) int64 {
 		if o.FPS != 0 {
 			return AlignMs(ms, o.FPS)
@@ -82,6 +86,9 @@ func (g Grid) Markers(fromMs, toMs int64, o MarkerOpts) ([]Marker, error) {
 		out = append(out, m)
 	}
 	for _, d := range o.DropsMs {
+		if d < fromMs-margin || d > toMs+margin {
+			continue // far outside; also keeps AlignMs away from overflow
+		}
 		ms := place(d)
 		if ms < fromMs || ms >= toMs {
 			continue
