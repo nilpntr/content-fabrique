@@ -283,7 +283,11 @@ func optText(s string) *string {
 	return &s
 }
 
-func optUUID(u uuid.UUID) pgtype.UUID { return pgtype.UUID{Bytes: u, Valid: u != uuid.Nil} }
+// The longest actor and reason the ledger takes (the table checks the same, in characters).
+const (
+	maxActorLen  = 200
+	maxReasonLen = 1000
+)
 
 // HoldCredits sets the credits of an action aside, in one transaction that locks the workspace's account, or returns an
 // *InsufficientCreditsError. Nothing is set aside on an error. Called from inside the transaction that creates the run, so the hold
@@ -327,7 +331,7 @@ func (s *Store) HoldCredits(ctx context.Context, p HoldCreditsParams) (CreditHol
 		}
 		row, err := tx.q.InsertCreditHold(ctx, db.InsertCreditHoldParams{
 			WorkspaceID: p.Workspace, Action: p.Action, ActionID: p.ActionID, Credits: int32(p.Credits), //nolint:gosec // a price list value
-			ProjectID: optUUID(p.Project.UUID), MemberUserID: optUUID(p.Member.UUID), Plan: optText(p.Plan), PlanListVersion: optText(p.ListVersion),
+			ProjectID: pgUUID(p.Project.UUID), MemberUserID: pgUUID(p.Member.UUID), Plan: optText(p.Plan), PlanListVersion: optText(p.ListVersion),
 			ExpiresAt: now.Add(p.TTL), IdempotencyKey: "hold:" + p.ActionID.String(),
 		})
 		if err != nil {
@@ -418,7 +422,7 @@ func (s *Store) SettleCredits(ctx context.Context, ws ids.WorkspaceID, actionID 
 			return err
 		}
 		res.Held = true
-		charged, err := tx.q.ListCreditChargesOfAction(ctx, db.ListCreditChargesOfActionParams{WorkspaceID: ws, ActionID: optUUID(actionID)})
+		charged, err := tx.q.ListCreditChargesOfAction(ctx, db.ListCreditChargesOfActionParams{WorkspaceID: ws, ActionID: pgUUID(actionID)})
 		if err != nil {
 			return err
 		}
@@ -488,7 +492,7 @@ func (s *Store) chargeHold(ctx context.Context, hold db.CreditHold, now time.Tim
 	}
 	insert := func(i int, credits int32, grant pgtype.UUID) error {
 		_, err := s.q.InsertCreditLedger(ctx, db.InsertCreditLedgerParams{
-			WorkspaceID: hold.WorkspaceID, Kind: CreditCharge, Credits: credits, GrantID: grant, Action: &hold.Action, ActionID: optUUID(hold.ActionID),
+			WorkspaceID: hold.WorkspaceID, Kind: CreditCharge, Credits: credits, GrantID: grant, Action: &hold.Action, ActionID: pgUUID(hold.ActionID),
 			ProjectID: hold.ProjectID, MemberUserID: hold.MemberUserID, Plan: hold.Plan, PlanListVersion: hold.PlanListVersion, TimelineVersion: version,
 			Reason: reason, IdempotencyKey: fmt.Sprintf("charge:%s:%d", hold.ActionID, i), CreatedAt: now,
 		})
@@ -546,6 +550,8 @@ func (s *Store) GrantTopUp(ctx context.Context, p GrantTopUpParams) (uuid.UUID, 
 		return uuid.Nil, false, fmt.Errorf("%w: a top-up needs a positive number of credits", ErrInvalid)
 	case p.Now.IsZero() || !p.ExpiresAt.After(p.Now):
 		return uuid.Nil, false, fmt.Errorf("%w: a top-up needs an expiry in the future", ErrInvalid)
+	case len(p.Actor) > maxActorLen || len(p.Reason) > maxReasonLen:
+		return uuid.Nil, false, fmt.Errorf("%w: an actor of at most %d and a reason of at most %d bytes", ErrInvalid, maxActorLen, maxReasonLen)
 	}
 	key := p.Key
 	if key == "" {
@@ -609,6 +615,8 @@ func (s *Store) AdjustCredits(ctx context.Context, p AdjustCreditsParams) (int, 
 		return 0, fmt.Errorf("%w: an adjustment of zero credits", ErrInvalid)
 	case actor == "" || reason == "":
 		return 0, fmt.Errorf("%w: an adjustment needs an actor and a reason", ErrInvalid)
+	case len(actor) > maxActorLen || len(reason) > maxReasonLen:
+		return 0, fmt.Errorf("%w: an actor of at most %d and a reason of at most %d bytes", ErrInvalid, maxActorLen, maxReasonLen)
 	case p.Now.IsZero():
 		return 0, fmt.Errorf("%w: an adjustment needs a time", ErrInvalid)
 	case p.Credits > 0 && !p.ExpiresAt.After(p.Now):
@@ -691,8 +699,8 @@ func (s *Store) AdjustCredits(ctx context.Context, p AdjustCreditsParams) (int, 
 // could not be because their source had expired.
 func (s *Store) RefundAction(ctx context.Context, ws ids.WorkspaceID, actionID uuid.UUID, actor, reason string, now time.Time) (refunded, lost int, err error) {
 	actor, reason = strings.TrimSpace(actor), strings.TrimSpace(reason)
-	if ws.IsZero() || actionID == uuid.Nil || actor == "" || reason == "" || now.IsZero() {
-		return 0, 0, fmt.Errorf("%w: a refund needs a workspace, an action, an actor, a reason and a time", ErrInvalid)
+	if ws.IsZero() || actionID == uuid.Nil || actor == "" || reason == "" || now.IsZero() || len(actor) > maxActorLen || len(reason) > maxReasonLen {
+		return 0, 0, fmt.Errorf("%w: a refund needs a workspace, an action, an actor (at most %d bytes), a reason (at most %d) and a time", ErrInvalid, maxActorLen, maxReasonLen)
 	}
 	now = now.UTC()
 	err = s.inTx(ctx, func(tx *Store) error {
@@ -700,7 +708,7 @@ func (s *Store) RefundAction(ctx context.Context, ws ids.WorkspaceID, actionID u
 		if _, err := tx.lockCreditAccount(ctx, ws); err != nil {
 			return err
 		}
-		charges, err := tx.q.ListCreditChargesOfAction(ctx, db.ListCreditChargesOfActionParams{WorkspaceID: ws, ActionID: optUUID(actionID)})
+		charges, err := tx.q.ListCreditChargesOfAction(ctx, db.ListCreditChargesOfActionParams{WorkspaceID: ws, ActionID: pgUUID(actionID)})
 		if err != nil {
 			return err
 		}
@@ -756,14 +764,14 @@ func (s *Store) VersionCovered(ctx context.Context, ws ids.WorkspaceID, project 
 	if err != nil {
 		return false, nil // an agent author that is not a run id: nothing paid for it, fail closed
 	}
-	charged, err := s.q.ActionIsCharged(ctx, db.ActionIsChargedParams{WorkspaceID: ws, ActionID: optUUID(run)})
+	charged, err := s.q.ActionIsCharged(ctx, db.ActionIsChargedParams{WorkspaceID: ws, ActionID: pgUUID(run)})
 	return charged, mapErr(err)
 }
 
 // ProjectHasChargedEdit says whether the project has an edit that was charged and not refunded: the first edit, or a revision. A run that
 // failed was released, not charged, so it does not count. This decides first or revision, and whether a final export may be made.
 func (s *Store) ProjectHasChargedEdit(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID) (bool, error) {
-	ok, err := s.q.ProjectHasChargedEdit(ctx, db.ProjectHasChargedEditParams{WorkspaceID: ws, ProjectID: optUUID(project.UUID)})
+	ok, err := s.q.ProjectHasChargedEdit(ctx, db.ProjectHasChargedEditParams{WorkspaceID: ws, ProjectID: pgUUID(project.UUID)})
 	return ok, mapErr(err)
 }
 
@@ -785,8 +793,8 @@ func (s *Store) RecordFreeCreditAction(ctx context.Context, p RecordCreditAction
 		return fmt.Errorf("%w: a free action needs a workspace, a known action, an action id and a time", ErrInvalid)
 	}
 	_, err := s.q.InsertCreditLedger(ctx, db.InsertCreditLedgerParams{
-		WorkspaceID: p.Workspace, Kind: CreditCharge, Credits: 0, Action: &p.Action, ActionID: optUUID(p.ActionID),
-		ProjectID: optUUID(p.Project.UUID), MemberUserID: optUUID(p.Member.UUID), Plan: optText(p.Plan), PlanListVersion: optText(p.ListVersion),
+		WorkspaceID: p.Workspace, Kind: CreditCharge, Credits: 0, Action: &p.Action, ActionID: pgUUID(p.ActionID),
+		ProjectID: pgUUID(p.Project.UUID), MemberUserID: pgUUID(p.Member.UUID), Plan: optText(p.Plan), PlanListVersion: optText(p.ListVersion),
 		IdempotencyKey: fmt.Sprintf("charge:%s:0", p.ActionID), CreatedAt: p.Now.UTC(),
 	})
 	if errors.Is(err, errNoRows) {
@@ -842,6 +850,10 @@ func ManualPeriod(anchor, now time.Time) (start, end time.Time) {
 	n = max(n, 0)
 	return AddMonths(anchor, n), AddMonths(anchor, n+1)
 }
+
+// merchantRenewalGap is how far the end of a merchant plan's period must move for it to count as a renewal (a new period with a new
+// allowance) rather than the same billing period with a changed end.
+const merchantRenewalGap = 15 * 24 * time.Hour
 
 // SyncAllowance grants the workspace's allowance for the period that contains now, if it has not been granted. It is idempotent: the
 // grant's key names the workspace, the plan and the period, so a second call, or a second worker, adds nothing.
@@ -899,10 +911,11 @@ func (s *Store) SyncAllowance(ctx context.Context, ws ids.WorkspaceID, specs map
 		}
 
 		var (
-			anchor  = acct.PeriodAnchor
-			until   *time.Time
-			keyTail string
-			expires *time.Time
+			anchor            = acct.PeriodAnchor
+			until             *time.Time
+			keyTail           string
+			expires           *time.Time
+			sameBillingPeriod bool
 		)
 		switch {
 		case !spec.Refill:
@@ -911,6 +924,11 @@ func (s *Store) SyncAllowance(ctx context.Context, ws ids.WorkspaceID, specs map
 			end := wp.CurrentPeriodEnd.UTC()
 			res.PeriodStart, res.PeriodEnd = AddMonths(end, -1), end
 			until, expires, keyTail = &end, &end, "until:"+end.Format(time.RFC3339)
+			// The period end moved by less than a renewal (a billing-date change, a proration, a pause and resume): still the billing
+			// period that was granted, not a new one. A second allowance for it would double the credits of one payment.
+			if !changed && acct.Plan == string(plan) && acct.AllowanceUntil != nil && end.Sub(*acct.AllowanceUntil) < merchantRenewalGap {
+				sameBillingPeriod = true
+			}
 		default:
 			if anchor == nil || changed {
 				a := now
@@ -927,17 +945,19 @@ func (s *Store) SyncAllowance(ctx context.Context, ws ids.WorkspaceID, specs map
 		}
 		p := string(plan)
 		version := spec.ListVersion
-		_, err = tx.q.InsertCreditLedger(ctx, db.InsertCreditLedgerParams{
-			WorkspaceID: ws, Kind: CreditGrantAllowance, Credits: int32(spec.Credits), //nolint:gosec // a price list value
-			Plan: &p, PlanListVersion: &version, ExpiresAt: expires,
-			IdempotencyKey: fmt.Sprintf("allowance:%s:%s:%s", ws.UUID, plan, keyTail), CreatedAt: now,
-		})
-		switch {
-		case err == nil:
-			res.Granted = spec.Credits
-		case errors.Is(err, errNoRows): // this period was granted already
-		default:
-			return err
+		if !sameBillingPeriod {
+			_, err = tx.q.InsertCreditLedger(ctx, db.InsertCreditLedgerParams{
+				WorkspaceID: ws, Kind: CreditGrantAllowance, Credits: int32(spec.Credits), //nolint:gosec // a price list value
+				Plan: &p, PlanListVersion: &version, ExpiresAt: expires,
+				IdempotencyKey: fmt.Sprintf("allowance:%s:%s:%s", ws.UUID, plan, keyTail), CreatedAt: now,
+			})
+			switch {
+			case err == nil:
+				res.Granted = spec.Credits
+			case errors.Is(err, errNoRows): // this period was granted already
+			default:
+				return err
+			}
 		}
 		return tx.q.SetCreditAccountPeriod(ctx, db.SetCreditAccountPeriodParams{WorkspaceID: ws, Plan: p, PeriodAnchor: anchor, AllowanceUntil: until, PlanGeneration: generation})
 	})

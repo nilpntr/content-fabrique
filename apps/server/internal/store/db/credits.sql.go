@@ -663,7 +663,7 @@ WHERE wp.plan <> 'none' AND wp.status = 'active' AND (wp.current_period_end IS N
   AND (ca.workspace_id IS NULL
        OR ca.plan <> wp.plan
        OR (ca.allowance_until IS NOT NULL AND ca.allowance_until <= $1)
-       OR (wp.source = 'merchant' AND wp.plan <> 'trial' AND wp.current_period_end IS DISTINCT FROM ca.allowance_until))
+       OR (wp.source = 'merchant' AND wp.plan <> 'trial' AND wp.current_period_end IS NOT NULL AND wp.current_period_end IS DISTINCT FROM ca.allowance_until))
   AND wp.workspace_id > $2
 ORDER BY wp.workspace_id
 LIMIT $3

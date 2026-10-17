@@ -1584,3 +1584,63 @@ func TestCreditsWorkspacesNeedingAllowanceArePaged(t *testing.T) {
 		t.Fatalf("paged list = %v, want %v", got, all)
 	}
 }
+
+// A merchant plan whose period end moves by less than a renewal (a billing-date change, a proration, a pause) is the same billing period:
+// it gets no second allowance. A real renewal does.
+func TestCreditsMerchantPeriodEndShiftIsNotARenewal(t *testing.T) {
+	rig := newSpendRig(t)
+	ctx := context.Background()
+	list, _ := credits.LoadDefault()
+	specs := list.AllowanceSpecs()
+	ws := rig.workspace(t, "shift")
+	end := creditDay.AddDate(0, 0, 20)
+	setEnd := func(e time.Time) {
+		t.Helper()
+		if _, err := rig.a.GrantPlan(ctx, store.GrantInput{WorkspaceID: ws.ID, Plan: plans.Creator, PeriodEnd: &e, Source: store.SourceMerchant, GrantedBy: "paddle", Force: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setEnd(end)
+	if res, err := rig.a.SyncAllowance(ctx, ws.ID, specs, creditDay); err != nil || res.Granted != 150 {
+		t.Fatalf("first period: %+v, %v", res, err)
+	}
+	for _, shifted := range []time.Time{end.AddDate(0, 0, 3), end.AddDate(0, 0, -4), end.AddDate(0, 0, 9)} {
+		setEnd(shifted)
+		now := creditDay.Add(time.Hour)
+		if due, _ := rig.a.WorkspacesNeedingAllowance(ctx, now, ids.WorkspaceID{}, 10); len(due) != 1 {
+			t.Fatalf("a shifted end should list the workspace once: %v", due)
+		}
+		if res, err := rig.a.SyncAllowance(ctx, ws.ID, specs, now); err != nil || res.Granted != 0 {
+			t.Fatalf("end moved to %v: %+v, %v", shifted, res, err)
+		}
+		if due, _ := rig.a.WorkspacesNeedingAllowance(ctx, now, ids.WorkspaceID{}, 10); len(due) != 0 {
+			t.Fatalf("the shifted end is recorded, but the workspace is still listed: %v", due)
+		}
+		end = shifted
+	}
+	if got := available(t, rig.a, ws, creditDay.Add(time.Hour)); got != 150 {
+		t.Fatalf("available = %d, want one allowance of 150", got)
+	}
+	// The renewal, a month on, is a new period.
+	setEnd(store.AddMonths(end, 1))
+	if res, err := rig.a.SyncAllowance(ctx, ws.ID, specs, creditDay.AddDate(0, 0, 25)); err != nil || res.Granted != 150 {
+		t.Fatalf("renewal: %+v, %v", res, err)
+	}
+	// A merchant plan with no period end is not listed again and again.
+	ws2 := rig.workspace(t, "noend")
+	if _, err := rig.a.GrantPlan(ctx, store.GrantInput{WorkspaceID: ws2.ID, Plan: plans.Creator, Source: store.SourceMerchant, GrantedBy: "paddle", Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.a.SyncAllowance(ctx, ws2.ID, specs, creditDay); err != nil {
+		t.Fatal(err)
+	}
+	due, _ := rig.a.WorkspacesNeedingAllowance(ctx, creditDay.Add(time.Hour), ids.WorkspaceID{}, 10)
+	if slices.Contains(due, ws2.ID) {
+		t.Fatalf("a merchant plan without an end is listed again: %v", due)
+	}
+	// Long texts are refused with ErrInvalid, not with a database error.
+	long := string(make([]byte, 1001))
+	if _, _, err := rig.a.GrantTopUp(ctx, store.GrantTopUpParams{Workspace: ws.ID, Credits: 1, ExpiresAt: creditDay.AddDate(1, 0, 0), Actor: "t", Reason: long, Now: creditDay}); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("a reason of 1001 bytes: %v", err)
+	}
+}
