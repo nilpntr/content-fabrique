@@ -197,21 +197,9 @@ func galleryEntries() []galleryEntry {
 }
 
 func newGalleryRunner(name, dockerBin, image, dir string) (media.Runner, error) {
-	pol := sandbox.Policy{AllowedRoots: []string{dir}}
-	var p sandbox.Provider
-	switch name {
-	case "local":
-		p = sandbox.NewLocal(pol)
-	case "docker":
-		d := sandbox.NewDocker(pol)
-		d.Binary = dockerBin
-		p = d
-	case "hardened":
-		h := sandbox.NewHardened(pol)
-		h.Binary = dockerBin
-		p = h
-	default:
-		return nil, fmt.Errorf("unknown provider %q (use local, docker or hardened)", name)
+	p, err := newSandboxProvider(name, dockerBin, dir)
+	if err != nil {
+		return nil, err
 	}
 	return &media.SandboxRunner{Provider: p, Image: image, Limits: render.DefaultLimits(), Labels: map[string]string{"kind": "sfx_gallery"}}, nil
 }

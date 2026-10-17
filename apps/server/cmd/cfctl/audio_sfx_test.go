@@ -11,8 +11,18 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nilpntr/content-fabrique/internal/audiocheck"
+	"github.com/nilpntr/content-fabrique/internal/renderjobs"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
+
+// The sheet of the sound marks the contact sheet's tiles at the times of their frames: the two offsets must stay equal (audiocheck
+// cannot import renderjobs).
+func TestAudioSheetTileOffsetMatchesTheContactSheet(t *testing.T) {
+	if audiocheck.TileOffsetMs != renderjobs.SheetOffsetMs {
+		t.Errorf("audiocheck.TileOffsetMs = %d, renderjobs.SheetOffsetMs = %d", audiocheck.TileOffsetMs, renderjobs.SheetOffsetMs)
+	}
+}
 
 func needFFmpeg(t *testing.T) string {
 	t.Helper()

@@ -45,8 +45,14 @@ func envelopeDB(pcm []float32) []float64 {
 // frameMs is the time in ms of the middle of window i.
 func frameMs(i int) int64 { return int64(i*hopMs + hopMs) }
 
-// detectOnsets finds the onsets of an envelope, in time order.
+// detectOnsets finds the onsets of an envelope, in time order. The sound before the first window is taken to be silence, so a sound
+// that starts on the very first sample (an effect on frame 0, a track that opens at once) has an onset at the start.
 func detectOnsets(env []float64) []Onset {
+	pad := make([]float64, lookback, lookback+len(env))
+	for i := range pad {
+		pad[i] = -120
+	}
+	env = append(pad, env...)
 	n := len(env)
 	flux := make([]float64, n)
 	lowAt := make([]int, n)
@@ -87,7 +93,7 @@ func detectOnsets(env []float64) []Onset {
 		for j < i && env[j] < thr {
 			j++
 		}
-		out = append(out, Onset{TimeMs: frameMs(j), RiseDB: math.Round(flux[i]*10) / 10})
+		out = append(out, Onset{TimeMs: max(frameMs(j-lookback), 0), RiseDB: math.Round(flux[i]*10) / 10})
 	}
 	return out
 }

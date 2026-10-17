@@ -133,7 +133,7 @@ func checklist(r Report, cfg config) []CheckItem {
 	}
 
 	// Density.
-	if len(cfg.sfx) == 0 {
+	if r.Density.SFXCount == 0 {
 		add(CheckItem{ID: "sfx_density", Title: "Sound effects per 10 s", Status: StatusInfo, Value: "0", Target: "-", Source: srcEstimate, Estimate: true})
 	} else {
 		d := r.Density.SFXPer10s

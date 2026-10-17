@@ -428,8 +428,8 @@ func (s *summarizer) addedItem(typ string, v any) {
 	case "audio":
 		ref := str(m["trend_id"])
 		if sfx := str(m["sfx"]); sfx != "" {
-			if v := str(m["variant"]); v != "" {
-				sfx += " " + v
+			if variant := str(m["variant"]); variant != "" {
+				sfx += " " + variant
 			}
 			ref = sfx + " at " + secs(intOf(m["at_ms"]))
 		} else if ref == "" {

@@ -16,18 +16,17 @@ import (
 // loudness and a band of 3 LU around it, an event lane (cuts white, effects magenta, onsets yellow) and the time axis. Silences are
 // shaded red across all of them. Drawn with image/png and the font of font.go: no dependency.
 const (
-	sheetW       = 1200
-	marginL      = 34
-	marginR      = 10
-	legendH      = 22
-	waveH        = 130
-	loudH        = 100
-	laneH        = 40
-	axisH        = 32
-	panelGap     = 6
-	loudTopLUFS  = -5.0
-	loudLowLUFS  = -50.0
-	tileOffsetMs = 100 // renderjobs.SheetOffsetMs: the contact sheet's frame is this long after each cut
+	sheetW      = 1200
+	marginL     = 34
+	marginR     = 10
+	legendH     = 22
+	waveH       = 130
+	loudH       = 100
+	laneH       = 40
+	axisH       = 32
+	panelGap    = 6
+	loudTopLUFS = -5.0
+	loudLowLUFS = -50.0
 )
 
 var (
@@ -47,6 +46,10 @@ var (
 	colText    = color.RGBA{220, 220, 230, 255}
 	colTextDim = color.RGBA{140, 140, 155, 255}
 )
+
+// TileOffsetMs is how long after each cut the contact sheet takes its frame (renderjobs.SheetOffsetMs: a test in cmd/cfctl keeps the
+// two equal; this package cannot import renderjobs, which imports the editor, which will import this package).
+const TileOffsetMs = 100
 
 // SheetSize is the size of every sheet in pixels.
 func SheetSize() (w, h int) {
@@ -175,7 +178,7 @@ func drawSheet(r Report, m measured, cuts []int64, cfg config) []byte {
 	tile := 0
 	starts := append([]int64{0}, cuts...)
 	for _, c := range starts {
-		px := x(float64(c + tileOffsetMs))
+		px := x(float64(c + TileOffsetMs))
 		for k := 0; k < 4; k++ {
 			fillRect(img, image.Rect(px-k, axisTop+axisH-1-k, px+k+1, axisTop+axisH-k), colTile)
 		}

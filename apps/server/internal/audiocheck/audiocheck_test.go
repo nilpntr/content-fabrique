@@ -369,3 +369,20 @@ func TestRejectsAFileThatIsNotMedia(t *testing.T) {
 		t.Error("a file with an odd name was not read")
 	}
 }
+
+// An effect on the very first frame is the loudest thing in the file from its first sample: it has no quiet before it, and it is
+// still heard. Effects planned after the end of the file are not counted at all.
+func TestAnEffectOnTheFirstFrameIsHeard(t *testing.T) {
+	dir, runner := fixtureDir(t)
+	mp4 := makeVideo(t, dir, "first.mp4", "aevalsrc='0.6*sin(2*PI*900*t)*exp(-t/0.08)':s=48000:d=2", 2, "-c:a", "aac", "-b:a", "192k")
+	r := check(t, runner, mp4, nil, WithFPS(30), WithSFX([]PlannedSFX{{ID: "s1", Sfx: "impact", AtMs: 0}, {ID: "s2", Sfx: "whoosh", AtMs: 5000}}))
+	if r.Sync.SFXPlanned != 1 || r.Sync.SFXFound != 1 || !r.Sync.SFX[0].WithinFrame {
+		t.Errorf("effects: %+v", r.Sync)
+	}
+	if r.Density.SFXCount != 1 || math.Abs(r.Density.SFXPer10s-5) > 0.01 {
+		t.Errorf("density counts an effect that is past the end: %+v", r.Density)
+	}
+	if c := find(r, "sfx_sync"); c.Status != StatusPass {
+		t.Errorf("sfx sync: %+v", c)
+	}
+}

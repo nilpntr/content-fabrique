@@ -64,7 +64,7 @@ var graph = "[0:a]asplit=4[a1][a2][a3][a4];" +
 func measure(ctx context.Context, runner media.Runner, mp4, dir string) (measured, error) {
 	args := []string{
 		"ffmpeg", "-hide_banner", "-nostdin", "-nostats", "-protocol_whitelist", "file", "-format_whitelist", media.UntrustedFormats,
-		"-i", media.InputPath(0), "-vn", "-filter_complex", graph, "-map", "[pcm]", "-f", "f32le", media.OutputPath("mono.f32"),
+		"-t", strconv.Itoa(MaxDurationS + 1), "-i", media.InputPath(0), "-vn", "-filter_complex", graph, "-map", "[pcm]", "-f", "f32le", media.OutputPath("mono.f32"),
 	}
 	res, err := runner.Run(ctx, media.Invocation{
 		Args: args, Inputs: []media.Input{{Host: mp4, Container: media.InputPath(0)}}, OutputDir: dir, Timeout: runTimeout,

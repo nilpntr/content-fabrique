@@ -70,9 +70,13 @@ func analyse(m measured, timeMap []render.TimeMapEntry, cfg config) Report {
 	r.Problems.ChannelRMSDB = []float64{}
 
 	cuts := cutTimes(timeMap)
-	r.Density.SFXCount = len(cfg.sfx)
+	for _, p := range cfg.sfx {
+		if p.AtMs < int64(math.Round(m.durationS*1000)) { // an effect that starts at or after the end plays nothing
+			r.Density.SFXCount++
+		}
+	}
 	if m.durationS > 0 {
-		r.Density.SFXPer10s = round(float64(len(cfg.sfx))/m.durationS*10, 2)
+		r.Density.SFXPer10s = round(float64(r.Density.SFXCount)/m.durationS*10, 2)
 	}
 	if !m.hasAudio {
 		r.Checklist = checklist(r, cfg)
@@ -227,10 +231,9 @@ func cutTimes(timeMap []render.TimeMapEntry) []int64 {
 		}
 	}
 	slices.Sort(starts)
-	if len(starts) > 0 {
-		starts = starts[1:]
-	}
-	return slices.Compact(starts)
+	starts = slices.Compact(starts)
+	// The first item starts the video: a start at 0 is not a cut.
+	return slices.DeleteFunc(starts, func(ms int64) bool { return ms <= 0 })
 }
 
 // chanceShare is the share of the cuts, moved by each of the chance offsets, that have an onset within 100 ms.

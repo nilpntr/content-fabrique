@@ -236,21 +236,9 @@ func readPlanned(path string) ([]audiocheck.PlannedSFX, error) {
 
 // newCheckRunner builds the sandbox runner for a check: it may read the directory of the MP4 and write the work directory.
 func newCheckRunner(name, dockerBin, image, inDir, workDir string) (media.Runner, error) {
-	pol := sandbox.Policy{AllowedRoots: []string{inDir, workDir}}
-	var p sandbox.Provider
-	switch name {
-	case "local":
-		p = sandbox.NewLocal(pol)
-	case "docker":
-		d := sandbox.NewDocker(pol)
-		d.Binary = dockerBin
-		p = d
-	case "hardened":
-		h := sandbox.NewHardened(pol)
-		h.Binary = dockerBin
-		p = h
-	default:
-		return nil, fmt.Errorf("unknown provider %q (use local, docker or hardened)", name)
+	p, err := newSandboxProvider(name, dockerBin, inDir, workDir)
+	if err != nil {
+		return nil, err
 	}
 	return &media.SandboxRunner{Provider: p, Image: image, Limits: render.DefaultLimits(), Labels: map[string]string{"kind": "audio_check"}}, nil
 }
@@ -387,7 +375,11 @@ func download(ctx context.Context, objects *storage.Client, key, path string, li
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(f, io.LimitReader(obj.Body, limit+1)); err != nil {
+	n, err := io.Copy(f, io.LimitReader(obj.Body, limit+1))
+	if err == nil && n > limit {
+		err = fmt.Errorf("the object is more than the limit of %d bytes", limit)
+	}
+	if err != nil {
 		_ = f.Close()
 		return err
 	}

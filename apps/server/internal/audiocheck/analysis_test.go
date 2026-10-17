@@ -129,11 +129,16 @@ func TestOnsetDetectorFindsABurstWhereItStarts(t *testing.T) {
 	for i, v := range pcmWith(4, 0.5, 2.0) {
 		bed[i] += v
 	}
+	// The bed itself starts on the first sample (an onset at the start); the burst on top of it is a second one.
 	on := detectOnsets(envelopeDB(bed))
-	if len(on) != 1 || on[0].TimeMs < 1990 || on[0].TimeMs > 2012 {
+	if len(on) != 2 || on[0].TimeMs > 12 || on[1].TimeMs < 1990 || on[1].TimeMs > 2012 {
 		t.Errorf("a burst on a bed: %+v", on)
 	}
-	// Steady sound, a slow fade-in and silence have no onsets.
+	// A sound that starts on the first sample has an onset at the start (an effect on frame 0 is heard).
+	if got := detectOnsets(envelopeDB(pcmWith(2, 0.5, 0))); len(got) != 1 || got[0].TimeMs > 12 {
+		t.Errorf("a burst on the first sample: %+v", got)
+	}
+	// Steady sound, a slow fade-in and silence have no onsets after the start.
 	steady := make([]float32, 4*PCMRate)
 	fade := make([]float32, 4*PCMRate)
 	for i := range steady {
@@ -141,7 +146,8 @@ func TestOnsetDetectorFindsABurstWhereItStarts(t *testing.T) {
 		fade[i] = float32(0.02+0.5*float64(i)/float64(len(fade))) * float32(math.Sin(2*math.Pi*440*float64(i)/PCMRate))
 	}
 	for name, pcm := range map[string][]float32{"steady": steady, "fade": fade, "silence": make([]float32, 4*PCMRate)} {
-		if got := detectOnsets(envelopeDB(pcm)); len(got) != 0 {
+		got := detectOnsets(envelopeDB(pcm))
+		if name == "silence" && len(got) != 0 || len(got) > 1 || len(got) == 1 && got[0].TimeMs > 12 {
 			t.Errorf("%s: onsets %+v", name, got)
 		}
 	}
@@ -236,6 +242,10 @@ func TestCutTimesAndChance(t *testing.T) {
 	}
 	if got := cutTimes(tm); len(got) != 2 || got[0] != 2000 || got[1] != 4000 {
 		t.Errorf("cuts %v", got)
+	}
+	two := []render.TimeMapEntry{{OutStartMs: 0, ItemID: "a", SourceInMs: &one, Speed: &sp}, {OutStartMs: 0, ItemID: "b", SourceInMs: &one, Speed: &sp}, {OutStartMs: 900, ItemID: "c", SourceInMs: &one, Speed: &sp}}
+	if got := cutTimes(two); len(got) != 1 || got[0] != 900 {
+		t.Errorf("two entries at 0: cuts %v", got)
 	}
 	if got := cutTimes(nil); len(got) != 0 {
 		t.Errorf("no time map, cuts %v", got)
