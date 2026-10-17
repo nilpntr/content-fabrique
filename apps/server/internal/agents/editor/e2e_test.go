@@ -125,14 +125,16 @@ func editInput() string {
 		clipOp(a, 6500, 8000, "") + `,` +
 		clipOp(b, 4000, 7000, "") + `,` +
 		`{"op":"set_transition","id":"c4","type":"flash","duration_ms":150},` +
-		`{"op":"snap_cuts_to_beats","grid":{"bpm":124,"first_beat_ms":0},"options":{"write_markers":true}},` +
+		`{"op":"snap_cuts_to_beats","grid":{"bpm":124,"first_beat_ms":0},"options":{"write_markers":true,"max_shift_ms":80}},` +
 		`{"op":"set_motion","id":"c1","preset":"punch_in","at_ms":484},` +
 		`{"op":"add_text","text":"HEAVY LAT DAY","style":"title_bold","at_ms":0,"duration_ms":2000,"anchor":"upper_third"}]}`
 }
 
-// reviseInput is the revision pass after the first check: a quick shake on the last pulldown rep.
+// reviseInput is the revision pass after the first check, which said the cuts slow down toward the end: the wide shot loses half of
+// its length and the cuts snap to the beat again.
 func reviseInput() string {
-	return `{"base_version":1,"ops":[{"op":"set_motion","id":"c5","preset":"shake","at_ms":0,"strength":0.08}]}`
+	return `{"base_version":1,"ops":[{"op":"trim_item","id":"c4","out_ms":4500},` +
+		`{"op":"snap_cuts_to_beats","grid":{"bpm":124,"first_beat_ms":0},"options":{"write_markers":true,"max_shift_ms":60}}]}`
 }
 
 // turn is the n-th answer.
@@ -420,15 +422,19 @@ func TestEditorRunInReplayMode(t *testing.T) {
 		t.Fatalf("run = %s %v %s (%d events)", r.Status, r.FailureReason, r.Output, len(events))
 	}
 	summary, version := runtime.OutputSummary(r.Output)
-	if !strings.HasPrefix(summary, "I cut a 17 second video") || version == nil || *version != 1 {
+	if !strings.HasPrefix(summary, "I cut a 12 second video") || version == nil || *version != 2 {
 		t.Fatalf("output: %s", r.Output)
 	}
-	if r.ToolCalls != 6 || r.BilledTo != "test" || r.Model != "claude-haiku-5-5" || r.ProjectID != x.prj {
+	if r.ToolCalls != int32(len(turnUsage)) || r.BilledTo != "test" || r.Model != "claude-haiku-5-5" || r.ProjectID != x.prj {
 		t.Fatalf("run: %+v", r)
 	}
 
 	// The cache numbers are in the run's totals and in every model call's event.
-	if r.InputTokens != 410+380+450+420+410+400 || r.CacheWriteTokens != 9200+900+2100+700+600+650 || r.CacheReadTokens != 9200+10100+12200+13500+14100 || r.OutputTokens != 61+74+301+58+40+92 {
+	var in, write, read, out int64
+	for _, u := range turnUsage {
+		in, write, read, out = in+int64(u[0]), write+int64(u[1]), read+int64(u[2]), out+int64(u[3])
+	}
+	if r.InputTokens != in || r.CacheWriteTokens != write || r.CacheReadTokens != read || r.OutputTokens != out {
 		t.Fatalf("token totals: in %d write %d read %d out %d", r.InputTokens, r.CacheWriteTokens, r.CacheReadTokens, r.OutputTokens)
 	}
 	var calls int
@@ -447,23 +453,23 @@ func TestEditorRunInReplayMode(t *testing.T) {
 			t.Errorf("call %d: no cache numbers in the event: %s", calls, ev.Payload)
 		}
 	}
-	if calls != 6 {
+	if calls != len(turnUsage) {
 		t.Fatalf("%d model calls", calls)
 	}
 	if r.CostMicros <= 0 || r.CostMicros >= r.BudgetMicros {
 		t.Fatalf("cost %d of budget %d", r.CostMicros, r.BudgetMicros)
 	}
 
-	// Version 1 exists, is valid, is in the project's format and uses only the project's footage.
+	// Version 2 (the revision) exists next to version 1, is valid, is in the project's format and uses only the project's footage.
 	var spec json.RawMessage
 	var count int
 	if err := x.pool.QueryRow(context.Background(), `SELECT count(*), max(spec::text)::jsonb FROM timeline_versions WHERE project_id = $1`, x.prj).Scan(&count, &spec); err != nil {
 		t.Fatal(err)
 	}
-	if count != 1 {
-		t.Fatalf("%d versions, want 1", count)
+	if count != 2 {
+		t.Fatalf("%d versions, want 2", count)
 	}
-	vd, perr := x.svc.Version(context.Background(), projects.Actor{Workspace: x.wsA.ID}, x.prj, 1)
+	vd, perr := x.svc.Version(context.Background(), projects.Actor{Workspace: x.wsA.ID}, x.prj, 2)
 	if perr != nil {
 		t.Fatal(perr)
 	}
@@ -480,8 +486,8 @@ func TestEditorRunInReplayMode(t *testing.T) {
 		t.Errorf("output: %+v", parsed.Output)
 	}
 	main, _, _ := timeline.MainTrack(parsed)
-	if len(main.Items) != 3 {
-		t.Fatalf("%d clips", len(main.Items))
+	if len(main.Items) != 6 {
+		t.Fatalf("%d clips, want 6", len(main.Items))
 	}
 	allowed := map[string]bool{clipA.String(): true, clipB.String(): true, clipC.String(): true}
 	for _, it := range main.Items {
@@ -489,7 +495,7 @@ func TestEditorRunInReplayMode(t *testing.T) {
 			t.Errorf("the timeline uses %s, which is not the project's footage", it.AssetID)
 		}
 	}
-	if d := timeline.TotalDuration(parsed); d != 17000 {
+	if d := timeline.TotalDuration(parsed); d != 10850 {
 		t.Errorf("duration %d ms", d)
 	}
 	if vd.Version.AuthorKind != "agent" || vd.Version.AuthorID != ids.Encode(ids.PrefixRun, x.run.ID) {
@@ -532,8 +538,8 @@ func TestEditorRunInReplayMode(t *testing.T) {
 	if sawFrames != 6 {
 		t.Errorf("%d frames in the events, want 6", sawFrames)
 	}
-	if sawSheet != 1 {
-		t.Errorf("%d contact sheets in the events, want 1", sawSheet)
+	if sawSheet != 2 {
+		t.Errorf("%d contact sheets in the events, want 2 (one per version)", sawSheet)
 	}
 	// And the artifact of the edit.
 	var artifacts int
@@ -551,6 +557,7 @@ func TestEditorRunInReplayMode(t *testing.T) {
 	if artifacts != 1 {
 		t.Errorf("%d timeline_version artifacts", artifacts)
 	}
+	checkPlanAndChecks(t, x)
 }
 
 func (x *e2e) events(run store.AgentRun) []store.AgentEvent {

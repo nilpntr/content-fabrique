@@ -42,10 +42,11 @@ gym footage after clip analysis had every cut on a rep boundary and no dead time
   half-way turning point of a rep as a legal cut.
 - **Effects with restraint** (new section, each part behind its feature): `set_motion` (punch_in on a beat hit, push_in, shake),
   `set_speed_ramp` (fast into slow at the peak, on a few shots at most), `set_transition` (whip_left, whip_right, zoom_through,
-  flash) with examples, about one effect per 3 or 4 cuts. Looks (`auto`, `gym_moody`) and sound effects (`add_sfx`) are written but
-  stay off until the schema has them.
+  flash) with examples, about one effect per 3 or 4 cuts. Looks (`auto`, `gym_moody`: one grade for all clips, never `exposure_ev` or
+  `match`) and sound effects (`add_sfx`: a whoosh on a whip, an impact on the drop, a riser into a big moment, one per effect) were
+  written ahead of part B of P3-10 behind their features and turned on when it merged.
 - **The order of the ops** (new): everything that changes a shot's length (speed, transitions, ramps) first, then
-  `snap_cuts_to_beats` with `write_markers`, then what does not change timing (motion, text, audio, looks). `snap_cuts_to_beats`
+  `snap_cuts_to_beats` once with `write_markers` and `max_shift_ms` 80, then what does not change timing (motion, text, audio, looks). `snap_cuts_to_beats`
   cannot move a cut next to a ramped clip, so a ramped shot is tuned to whole beats before the snap.
 - **Self-review.** Step 5 now ends with `check_edit` (new tool: objective checks computed from the timeline and the analysis), and
   step 6 is one revision pass at most. `finish` is refused until the newest version has a preview and a `check_edit`.
@@ -54,6 +55,7 @@ gym footage after clip analysis had every cut on a rep boundary and no dead time
   exposure correction" line is gone with the gain wording.
 - The result of `edit_timeline` and `get_timeline` now list where every clip plays (start, end, speed, motion, transition), which
   the beat arithmetic needs.
+- **Playbook for talking video** has a TODO: the transcripts (P2-05) exist, but the editor has no tool to read them yet.
 - Cassettes re-recorded (the prompt, the tool list and the run context changed).
 
 ## editor.v1.5 (2026-10-17)

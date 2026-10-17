@@ -23,8 +23,8 @@ import (
 //	sfx                generated sound effects: some op adds one (op:add_sfx)
 //	looks              the exposure-aware looks: look:auto or look:gym_moody
 //
-// Looks and sfx are written into the prompt and the playbooks already and stay off until the schema has them (part B of P3-10,
-// "p3-10-look-sfx"): that merge turns them on with no change here.
+// Looks and sound effects are sections of the prompt and the playbooks behind their features: they were written before part B of P3-10
+// (the `auto` and `gym_moody` looks, `add_sfx`) merged and turned on when the schema got them, with no change to the text.
 type Features struct{ set map[string]bool }
 
 // Has reports whether the feature exists.

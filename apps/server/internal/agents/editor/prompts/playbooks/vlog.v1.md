@@ -14,4 +14,6 @@ You chose this playbook because the footage is a day, a trip, a routine or a pla
 
 **Sound.** Keep the natural sound of a clip when it carries the place (waves, a street, a laugh) and the clip has sound. The pacing follows the beat grid, and the creator adds music in TikTok.
 
+{{if .Has "look:auto"}}**Look.** One mild grade for all shots: set_look with preset auto and no id, once, when the cuts are final. No exposure_ev, no match.
+{{end}}
 **Ending.** Come back to where it began: the same view at the end of the day, or the last smile, so the video can loop.

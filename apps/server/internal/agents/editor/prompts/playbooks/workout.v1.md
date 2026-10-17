@@ -19,8 +19,8 @@ You chose this playbook because the footage is training: lifts, sets, a pose, a 
 **Text.** One bold title for the hook. A short uppercase label (label_box) when a new exercise starts, 1 to 2 seconds, inside the safe zone and never over the lifter. Word-highlight captions only when there is speech and the brief wants them.
 
 **Sound.** Clip audio stays off unless someone is coaching or talking. The creator adds a trending sound in TikTok; the beat grid you write is only so the cuts will match it.
-{{if .Has "sfx"}}Add a generated sound effect with add_sfx on the hook's punch_in (impact) and on each whip or zoom_through (whoosh), at most one per effect.
+{{if .Has "sfx"}}Add generated sound effects with add_sfx, with restraint: a whoosh at the start of each whip or zoom_through, an impact on the hook's punch_in and on the drop (the flash), and a riser from the first frame when the hook's first cut is about 1.5 s in, so it peaks on that cut. At most one effect sound per visual effect.
 {{end}}{{if .Has "look:gym_moody"}}
-**Look.** One grade for every shot: set_look with gym_moody (deep blacks, warm skin, a slight vignette), and match true so the shots meet at one exposure. Do it once, for all clips, after the cuts are final.
+**Look.** One grade for every shot: set_look with preset gym_moody and no id (deep blacks, warm skin, a slight vignette), once, after the cuts are final. Do not set exposure_ev or match: the footage is low-key on purpose and the grade keeps it that way.
 {{end}}
 **Ending.** Loop back to the hook: end on a held pose or the same frame the video opened on, so the video replays smoothly.

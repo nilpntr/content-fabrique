@@ -9,6 +9,7 @@ You chose this playbook because a person speaks to the camera: an opinion, a tak
 - Shots are one or two sentences long, 2 to 6 seconds, and they vary. A jump cut that lands on the same framing looks like a mistake: change the framing a little between neighbouring shots with a punch_in on an emphasis word (strength 0.1 to 0.15).
 - Cover a jump with text or a cutaway when the footage has one.
 - The transcript is not available to you yet, so judge the speech by looking and by the clip's description. When you cannot tell where a sentence ends, prefer fewer, longer cuts to cuts in the middle of words, and say so in finish.
+- TODO (transcripts exist in the `transcripts` table, with sentences, filler words and pauses, but the editor has no tool to read them yet): when it has one, cut the filler words and the pauses the transcript lists, and start and end each shot on a sentence boundary.
 
 **Framing.** The speaker stays centred in 9:16: use cover with the focus on the face (x about 0.5, y about 0.35). A landscape clip gets blur_fill only when cropping would cut the speaker off.
 

@@ -121,9 +121,9 @@ type planArgs struct {
 type planArgsShot struct {
 	Role    string `json:"role"`
 	What    string `json:"what"`
-	AssetID string `json:"asset_id"`
+	AssetID string `json:"asset_id,omitempty"`
 	Beats   int    `json:"beats"`
-	Effect  string `json:"effect"`
+	Effect  string `json:"effect,omitempty"`
 }
 
 // BuildPlan checks a plan_edit call and works out its numbers. footage is the set of the project's clips (an asset id the plan names

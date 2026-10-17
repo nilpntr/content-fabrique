@@ -599,7 +599,7 @@ func (c *checker) beatSync() Check {
 	}
 	c.m.CutsOnBeat = on
 	if float64(on)/float64(cuts) < beatShareMin {
-		return c.fail(CheckBeatSync, "%d of %d cuts are on a beat (within %d ms); off: %s. Run snap_cuts_to_beats again (a cut next to a speed ramp stays where it is: tune the ramped shot's length to whole beats)", on, cuts, tol, strings.Join(off, "; "))
+		return c.fail(CheckBeatSync, "%d of %d cuts are on a beat (within %d ms); off: %s. Make each shot's length whole beats (set_speed to source ms / (beats x beat ms), a ramped shot by trim_item), then snap_cuts_to_beats once with max_shift_ms 80", on, cuts, tol, strings.Join(off, "; "))
 	}
 	return c.pass(CheckBeatSync, "%d of %d cuts are on a beat (within %d ms)", on, cuts, tol)
 }

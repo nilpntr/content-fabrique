@@ -108,4 +108,4 @@ func (e Exposure) Note() string {
 }
 
 // Jump is how far two exposures are apart in the lit part of the picture (the difference of the p90 values).
-func Jump(a, b Exposure) float64 { return math.Abs(a.P90 - b.P90) }
+func Jump(a, b Exposure) float64 { return round2(math.Abs(a.P90 - b.P90)) }

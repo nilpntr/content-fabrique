@@ -157,7 +157,7 @@ func (d Deps) checkEdit(ctx context.Context, rc runtime.RunContext, _ noArgs) (r
 	case fail == 0:
 		b.WriteString("All the checks that apply pass. Call finish.")
 	case nth == 1:
-		b.WriteString("Fix the failing checks in one batch (a change to a shot's length is followed by a new snap_cuts_to_beats), then render_preview and check_edit once more, and finish. This is your one revision pass: skip it if you are short of tool calls or time, or if the footage cannot fix a check, and say so in finish.")
+		b.WriteString("Fix the failing checks in one batch (after a change to a shot's length, snap again with a small max_shift_ms, 60 or less: a snap moves an edge each time it runs), then render_preview and check_edit once more, and finish. This is your one revision pass: skip it if you are short of tool calls or time, or if the footage cannot fix a check, and say so in finish.")
 	default:
 		b.WriteString("This was the check after your revision pass. Do not revise again: call finish, and say in your message what is still not as it should be and why.")
 	}
