@@ -4,6 +4,12 @@
 .env.*
 !.env.example
 
+# Wrangler / the Cloudflare Vite plugin read local Worker secrets from .dev.vars (and .dev.vars.<env>).
+.dev.vars
+.dev.vars.*
+**/.dev.vars
+**/.dev.vars.*
+
 apps/web/node_modules
 apps/web/.output
 apps/web/.nitro

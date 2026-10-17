@@ -43,4 +43,8 @@ Tokens live in `src/index.css`: surfaces and shadows (`--shadow-raised`, `--shad
 - Menus and lists get the same travelling highlight from `HighlightGlider`, placed first inside a `relative isolate` container.
 - The lens, gliders and popups animate only `transform` and `opacity`; the sidebar collapse still animates width. With `prefers-reduced-motion`, everything snaps.
 
-The user in the sidebar footer (`src/components/nav-user.tsx`) and its menu actions are placeholders to wire up.
+## Sign-in (Clerk)
+
+`@clerk/tanstack-react-start`. `src/start.ts` installs `clerkMiddleware()`; the root route's `beforeLoad` asks the server for the session (`src/lib/session.ts`, a server function over `auth()`) and applies `decideAccess` (`src/lib/auth-guard.ts`): every route is protected except `/sign-in/*` and `/sign-up/*`, a signed-out request is redirected on the server before anything renders, and a signed-in user without an active workspace is sent to `/workspace`. The sidebar has Clerk's `OrganizationSwitcher` and `UserButton`. `src/lib/api.ts` calls the Go API with `Authorization: Bearer <session token>` (`VITE_API_BASE_URL`); `useMe()` is `GET /v1/me`, shown on Settings and in the sidebar. Tests replace Clerk with the stubs in `src/test-clerk.tsx`.
+
+Needs `VITE_CLERK_PUBLISHABLE_KEY` (public) and `CLERK_SECRET_KEY` (server only) from `.env`. `bun run dev` reads the repository's `.env` and hands only `CLERK_SECRET_KEY` to the local Worker runtime (`vite.config.ts`); in production it is a Worker secret.

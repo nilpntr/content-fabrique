@@ -28,7 +28,11 @@ test("renders the shell with the sidebar nav and the current page", async () => 
   renderAt("/reports");
   expect(await screen.findByRole("heading", { name: "Reports" })).toBeTruthy();
   expect(screen.getByText("Content Fabrique")).toBeTruthy();
-  expect(screen.getByText("jane@example.com")).toBeTruthy();
+  // Clerk's controls sit in the sidebar, and the workspace line comes from the API (GET /v1/me).
+  expect(screen.getByTestId("clerk-organization-switcher")).toBeTruthy();
+  expect(screen.getByTestId("clerk-user-button")).toBeTruthy();
+  expect(screen.getByText("Ada Lovelace")).toBeTruthy();
+  expect((await screen.findByTestId("sidebar-workspace")).textContent).toBe("Fit Studio · owner");
 });
 
 test("the lens marks the current page and moves with navigation", async () => {
