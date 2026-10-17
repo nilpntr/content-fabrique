@@ -1,18 +1,27 @@
 package jobs_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/riverqueue/river"
 
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/ingest"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
+	"github.com/nilpntr/content-fabrique/internal/media"
+	"github.com/nilpntr/content-fabrique/internal/sandbox"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/storage/storagetest"
 	"github.com/nilpntr/content-fabrique/internal/store"
@@ -93,26 +102,252 @@ func (e *env) jobState(t *testing.T, kind string, args string) (state, output st
 	return state, output
 }
 
-func TestAssetIngestJobIsPendingUntilP104(t *testing.T) {
-	e := newAssetsEnv(t)
+// newUploadedAsset makes an asset in `uploaded` state whose original is a real object holding data, as a completed upload
+// leaves it.
+func (e *assetsEnv) newUploadedAsset(t *testing.T, w store.Workspace, kind, name string, data []byte) store.Asset {
+	t.Helper()
 	ctx := context.Background()
-	w := e.newWorkspace(t, "org_ingest")
-	a, _ := e.newAsset(t, w, "clip", time.Now().Add(time.Hour))
-	e.startWorker(t, jobs.WorkerOptions{})
+	id, err := e.api.NewAssetID(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := storage.OriginalKey(w.ID, id)
+	_, err = storagetest.S3(e.cfg).PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(e.cfg.Bucket), Key: aws.String(key), Body: bytes.NewReader(data)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.api.CreateAssetWithUpload(ctx, w.ID, store.NewAsset{
+		ID: id, Kind: kind, Filename: name, ContentType: "video/mp4", SizeBytes: int64(len(data)), Title: name, R2Key: key,
+		CreatedBy: e.user, R2UploadID: "done", PartSize: 16 << 20, PartCount: 1, ExpiresAt: time.Now().Add(time.Hour),
+	}, 0); err != nil {
+		t.Fatal(err)
+	}
+	a, err := e.api.CompleteUpload(ctx, w.ID, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
 
+func (e *assetsEnv) enqueueIngest(t *testing.T, a store.Asset, opts *river.InsertOpts) {
+	t.Helper()
+	ctx := context.Background()
 	err := e.api.InTx(ctx, func(tx *store.Store) error {
-		_, err := e.enq.InsertInStore(ctx, tx, jobs.AssetIngestArgs{WorkspaceID: w.ID, AssetID: a.ID}, nil)
+		_, err := e.enq.InsertInStore(ctx, tx, jobs.AssetIngestArgs{WorkspaceID: a.WorkspaceID, AssetID: a.ID}, opts)
 		return err
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "the ingest job to complete", func() bool {
-		state, _ := e.jobState(t, "asset_ingest", a.ID.String())
-		return state == "completed"
+}
+
+func (e *assetsEnv) jobIs(t *testing.T, a store.Asset, state string) func() bool {
+	return func() bool {
+		s, _ := e.jobState(t, "asset_ingest", a.ID.String())
+		return s == state
+	}
+}
+
+// A worker that has no pipeline (no sandbox or storage set up) leaves the ingest job waiting, snoozed, without using an
+// attempt, and the asset stays uploaded.
+func TestAssetIngestWaitsForAWorkerWithAPipeline(t *testing.T) {
+	e := newAssetsEnv(t)
+	w := e.newWorkspace(t, "org_ingest_wait")
+	a := e.newUploadedAsset(t, w, store.AssetKindVideo, "clip.mp4", []byte("data"))
+	e.startWorker(t, jobs.WorkerOptions{})
+	e.enqueueIngest(t, a, nil)
+	eventually(t, "the ingest job to be snoozed", e.jobIs(t, a, "scheduled"))
+	var attempts int
+	if err := e.super.QueryRow(context.Background(), `SELECT attempt FROM river_job WHERE kind = 'asset_ingest' AND args->>'asset_id' = $1`, a.ID.String()).Scan(&attempts); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.api.GetAsset(context.Background(), w.ID, a.ID)
+	if err != nil || got.Status != store.AssetUploaded || attempts > 1 {
+		t.Fatalf("asset %+v, attempts %d, err %v", got, attempts, err)
+	}
+}
+
+// pipeline builds the real media pipeline over the real store and MinIO, with the local sandbox provider (it needs ffmpeg).
+func (e *assetsEnv) pipeline(t *testing.T) *ingest.Pipeline {
+	t.Helper()
+	for _, tool := range []string{"ffmpeg", "ffprobe"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("skipping: %s is not installed", tool)
+		}
+	}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := ingest.New(ingest.Config{
+		Store: e.api, Objects: e.objs, TempDir: filepath.Join(root, "jobs"), Logger: quiet,
+		Runner: &media.SandboxRunner{
+			Provider: sandbox.NewLocal(sandbox.Policy{AllowedRoots: []string{root}}), Image: "unused",
+			Limits: sandbox.Limits{CPU: 2, MemoryMB: 1024, Timeout: 2 * time.Minute, PIDs: 256},
+		},
 	})
-	if _, out := e.jobState(t, "asset_ingest", a.ID.String()); !strings.Contains(out, "pending") {
-		t.Errorf("recorded output = %s, want it to say pending", out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// A completed upload becomes a ready asset with its derivatives, through the real queue, store and storage.
+func TestAssetIngestJobMakesTheAssetReady(t *testing.T) {
+	e := newAssetsEnv(t)
+	ctx := context.Background()
+	w := e.newWorkspace(t, "org_ingest")
+	pipe := e.pipeline(t)
+	clip := filepath.Join(t.TempDir(), "clip.mp4")
+	out, err := exec.Command("ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=3",
+		"-f", "lavfi", "-i", "sine=duration=3", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", clip).CombinedOutput()
+	if err != nil {
+		t.Skipf("skipping: ffmpeg cannot make the clip: %v %s", err, out)
+	}
+	data, err := os.ReadFile(clip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := e.newUploadedAsset(t, w, store.AssetKindVideo, "clip.mp4", data)
+	other := e.newWorkspace(t, "org_ingest_other")
+	e.startWorker(t, jobs.WorkerOptions{Objects: e.objs, Ingest: pipe})
+	e.enqueueIngest(t, a, nil)
+
+	eventually(t, "the ingest job to complete", e.jobIs(t, a, "completed"))
+	got, err := e.api.GetAsset(ctx, w.ID, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != store.AssetReady || got.IngestProgress != 100 || got.IngestStage != nil || got.FailureReason != nil ||
+		got.Width == nil || *got.Width != 640 || got.Height == nil || *got.Height != 360 || got.DurationMs == nil || *got.DurationMs < 2900 ||
+		got.HasAudio == nil || !*got.HasAudio || got.VideoCodec == nil || *got.VideoCodec != "h264" || got.Probe == nil {
+		t.Fatalf("asset %+v", got)
+	}
+	derivs, err := e.api.ListAssetDerivatives(ctx, w.ID, []ids.AssetID{a.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	for _, d := range derivs {
+		kinds = append(kinds, d.Kind)
+		if !strings.HasPrefix(d.R2Key, storage.AssetPrefix(w.ID, a.ID)) || !e.exists(t, d.R2Key) {
+			t.Errorf("derivative %s: key %s", d.Kind, d.R2Key)
+		}
+	}
+	if strings.Join(kinds, ",") != "audio_16k,hover_preview,poster,proxy_720,sprite,sprite_vtt,waveform" {
+		t.Fatalf("derivatives %v", kinds)
+	}
+	// Another workspace sees none of it.
+	if rows, err := e.api.ListAssetDerivatives(ctx, other.ID, []ids.AssetID{a.ID}); err != nil || len(rows) != 0 {
+		t.Fatalf("workspace B sees %v (%v)", rows, err)
+	}
+	if _, out := e.jobState(t, "asset_ingest", a.ID.String()); !strings.Contains(out, `"ready"`) {
+		t.Errorf("job output %s", out)
+	}
+}
+
+// A file that is not a video fails the asset with a reason; the job itself completes (it did its work) and is not retried.
+func TestAssetIngestJobFailsAnAssetThatIsNotAVideo(t *testing.T) {
+	e := newAssetsEnv(t)
+	w := e.newWorkspace(t, "org_ingest_bad")
+	pipe := e.pipeline(t)
+	a := e.newUploadedAsset(t, w, store.AssetKindVideo, "notes.mp4", bytes.Repeat([]byte("hello, I am a text file. "), 4000))
+	e.startWorker(t, jobs.WorkerOptions{Objects: e.objs, Ingest: pipe})
+	e.enqueueIngest(t, a, nil)
+	eventually(t, "the ingest job to complete", e.jobIs(t, a, "completed"))
+	got, err := e.api.GetAsset(context.Background(), w.ID, a.ID)
+	if err != nil || got.Status != store.AssetFailed || got.FailureReason == nil || *got.FailureReason == "" || got.DeletedAt != nil {
+		t.Fatalf("asset %+v (%v)", got, err)
+	}
+	if derivs, _ := e.api.ListAssetDerivatives(context.Background(), w.ID, []ids.AssetID{a.ID}); len(derivs) != 0 {
+		t.Fatalf("derivatives %v", derivs)
+	}
+}
+
+// A deleted asset ends the job (cancelled), and nothing is written for it.
+func TestAssetIngestJobSkipsADeletedAsset(t *testing.T) {
+	e := newAssetsEnv(t)
+	ctx := context.Background()
+	w := e.newWorkspace(t, "org_ingest_deleted")
+	pipe := e.pipeline(t)
+	a := e.newUploadedAsset(t, w, store.AssetKindVideo, "gone.mp4", []byte("x"))
+	if _, err := e.api.SoftDeleteAsset(ctx, w.ID, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.startWorker(t, jobs.WorkerOptions{Objects: e.objs, Ingest: pipe})
+	e.enqueueIngest(t, a, nil)
+	eventually(t, "the ingest job to be cancelled", e.jobIs(t, a, "cancelled"))
+	if derivs, _ := e.api.ListAssetDerivatives(ctx, w.ID, []ids.AssetID{a.ID}); len(derivs) != 0 {
+		t.Fatalf("derivatives %v", derivs)
+	}
+}
+
+// failingIngester fails every run with err and reports the reason of each Fail it gets.
+type failingIngester struct {
+	err    error
+	failed chan string
+}
+
+func (f failingIngester) Run(context.Context, ids.WorkspaceID, ids.AssetID) (ingest.Result, error) {
+	return ingest.Result{}, f.err
+}
+
+func (f failingIngester) Fail(_ context.Context, _ ids.WorkspaceID, id ids.AssetID, reason string) error {
+	f.failed <- id.String() + ":" + reason
+	return nil
+}
+
+// The last attempt of a job that keeps failing for infrastructure reasons marks the asset failed, so it does not stay
+// `processing` for ever, with a reason that says what ended it: a timeout, an interruption, or just a failure.
+func TestAssetIngestJobGivesUpOnTheLastAttempt(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		err    error
+		reason string
+	}{
+		{"an error", errors.New("the sandbox is down"), store.FailureProcessing},
+		{"the job timed out", fmt.Errorf("probe: %w", context.DeadlineExceeded), store.FailureTimeout},
+		{"a tool timed out", fmt.Errorf("ffmpeg: %w", sandbox.ErrTimeout), store.FailureTimeout},
+		{"the worker was stopped", fmt.Errorf("download: %w", context.Canceled), store.FailureInterrupted},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newAssetsEnv(t)
+			w := e.newWorkspace(t, "org_ingest_giveup")
+			a := e.newUploadedAsset(t, w, store.AssetKindVideo, "x.mp4", []byte("x"))
+			ing := failingIngester{err: c.err, failed: make(chan string, 4)}
+			e.startWorker(t, jobs.WorkerOptions{Objects: e.objs, Ingest: ing})
+			e.enqueueIngest(t, a, &river.InsertOpts{MaxAttempts: 1})
+			select {
+			case got := <-ing.failed:
+				if got != a.ID.String()+":"+c.reason {
+					t.Fatalf("got %s, want reason %s", got, c.reason)
+				}
+			case <-time.After(20 * time.Second):
+				t.Fatal("the asset was not marked failed")
+			}
+		})
+	}
+}
+
+// River must not hand a running ingest to a second worker: the job's own timeout ends it first, and the rescue comes later.
+func TestIngestIsNeverRescuedWhileItRuns(t *testing.T) {
+	if jobs.JobRescueAfter <= jobs.IngestTimeout {
+		t.Fatalf("River rescues a job after %v, an ingest may run %v", jobs.JobRescueAfter, jobs.IngestTimeout)
+	}
+	if jobs.IngestTimeout != ingest.JobTimeout || ingest.WorstCase(ingest.DefaultMaxDuration) > jobs.IngestTimeout {
+		t.Fatalf("the job timeout %v does not cover the longest accepted clip (%v)", jobs.IngestTimeout, ingest.WorstCase(ingest.DefaultMaxDuration))
+	}
+	rc, err := jobs.WorkerClientConfig(jobs.DefaultConfig(), jobs.Deps{Store: &store.Store{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rc.RescueStuckJobsAfter; got != jobs.JobRescueAfter {
+		t.Fatalf("RescueStuckJobsAfter = %v, want %v", got, jobs.JobRescueAfter)
+	}
+	// The worker declares its own timeout (River's default is a minute).
+	w := &jobs.AssetIngestWorker{}
+	if got := w.Timeout(&river.Job[jobs.AssetIngestArgs]{}); got != jobs.IngestTimeout {
+		t.Fatalf("Timeout = %v", got)
 	}
 }
 

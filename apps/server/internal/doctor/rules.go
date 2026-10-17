@@ -12,11 +12,14 @@ import (
 )
 
 // allowedEmpty are [AUTO] variables whose documented default is empty, so empty is a valid value: an empty
-// ANTHROPIC_BASE_URL means a direct call, and an empty R2_JURISDICTION means MinIO. The three generated secrets
-// are empty in .env.example too, but must be filled in, so they are not listed.
+// ANTHROPIC_BASE_URL means a direct call, an empty R2_JURISDICTION means MinIO, and the media settings fall back to
+// their defaults (docker or hardened, the system temp directory). The three generated secrets are empty in .env.example
+// too, but must be filled in, so they are not listed.
 var allowedEmpty = map[string]bool{
-	"ANTHROPIC_BASE_URL": true,
-	"R2_JURISDICTION":    true,
+	"ANTHROPIC_BASE_URL":     true,
+	"R2_JURISDICTION":        true,
+	"MEDIA_SANDBOX_PROVIDER": true,
+	"MEDIA_TEMP_DIR":         true,
 }
 
 const (
@@ -54,12 +57,13 @@ var appServer = map[string]string{
 // enums are the variables with a fixed set of documented values. A value inside the set is not secret, so the
 // Redactor leaves it alone and the report can say "profile dev-cheap".
 var enums = map[string][]string{
-	"CF_ENV":             {"local", "ci", "bench", "staging", "production"},
-	"ROUTING_PROFILE":    {"dev-cheap", "dev-mid", "v1-start"},
-	"LLM_MODE":           {"live", "record", "replay"},
-	"BILLING_PROVIDER":   {"paddle", "stripe"},
-	"PADDLE_ENVIRONMENT": {"sandbox", "production"},
-	"R2_JURISDICTION":    {"", "eu"},
+	"CF_ENV":                 {"local", "ci", "bench", "staging", "production"},
+	"MEDIA_SANDBOX_PROVIDER": {"docker", "hardened", "local"},
+	"ROUTING_PROFILE":        {"dev-cheap", "dev-mid", "v1-start"},
+	"LLM_MODE":               {"live", "record", "replay"},
+	"BILLING_PROVIDER":       {"paddle", "stripe"},
+	"PADDLE_ENVIRONMENT":     {"sandbox", "production"},
+	"R2_JURISDICTION":        {"", "eu"},
 }
 
 // A validator returns "" when the value is well formed, else a short reason. Reasons never contain the value.
@@ -154,6 +158,29 @@ var validators = map[string]validator{
 	"BILLING_PROVIDER":   oneOf("BILLING_PROVIDER"),
 	"PADDLE_ENVIRONMENT": oneOf("PADDLE_ENVIRONMENT"),
 	"R2_JURISDICTION":    oneOf("R2_JURISDICTION"),
+
+	// The local sandbox provider isolates nothing: staging and production refuse it (the worker and config.Load do too).
+	"MEDIA_SANDBOX_PROVIDER": func(r *run, val string) string {
+		if why := oneOf("MEDIA_SANDBOX_PROVIDER")(r, val); why != "" {
+			return why
+		}
+		if val == "local" && (r.opts.Env == "staging" || r.opts.Env == "production") {
+			return "local isolates nothing and is not allowed in " + r.opts.Env + " (use hardened)"
+		}
+		return ""
+	},
+	"MEDIA_TEMP_DIR": func(_ *run, val string) string {
+		if !strings.HasPrefix(val, "/") {
+			return "bad format (expected an absolute path)"
+		}
+		return ""
+	},
+	"MEDIA_CONCURRENCY": func(_ *run, val string) string {
+		if n, err := strconv.Atoi(val); err != nil || n < 1 || n > 32 {
+			return "bad format (expected a whole number from 1 to 32)"
+		}
+		return ""
+	},
 
 	"APP_BASE_URL":                urlOf("http", "https"),
 	"API_BASE_URL":                urlOf("http", "https"),

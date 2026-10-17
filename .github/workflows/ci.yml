@@ -83,6 +83,7 @@ jobs:
               - 'packages/media-tools/**'
               - 'apps/server/internal/sandbox/**'
               - 'apps/server/internal/media/**'
+              - 'apps/server/internal/ingest/**'
               - 'apps/server/cmd/cfctl/media*.go'
               - '.github/workflows/ci.yml'
             # The renderer and what it compiles: the Go timeline package and the fixtures (the 20 render fixtures and the
@@ -121,6 +122,7 @@ jobs:
               - 'packages/media-tools/**'
               - 'apps/server/internal/sandbox/**'
               - 'apps/server/internal/media/**'
+              - 'apps/server/internal/ingest/**'
               - 'apps/server/cmd/cfctl/media*.go'
               - '.github/workflows/ci.yml'
 
@@ -531,6 +533,16 @@ jobs:
       - name: Render integration test against the image
         working-directory: apps/server
         run: go test ./internal/render -run Integration -docker-image media-tools:ci -v
+
+      # P1-04: the ingest pipeline end to end with its tools running in the image. The test clips (portrait and rotated, HDR
+      # PQ and HLG, a second audio track with the 'apac' tag) are generated with the runner's own ffmpeg; the image does all
+      # the work under test.
+      - name: Ingest pipeline against the image
+        working-directory: apps/server
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          go test ./internal/ingest -docker-image media-tools:ci -v
 
   # gVisor overhead (D-08, P1-03): installs runsc (pinned and checksum-verified), registers it with Docker, then transcodes a
   # generated 1080p 30 s clip with the docker and hardened providers three times each and prints the table. It also runs the
