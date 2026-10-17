@@ -35,6 +35,7 @@
 | D-28 | The editor is content-aware across genres (talking, unboxing/product, workout, vlog, tutorial); fitness stays the launch niche for trends and marketing | Accepted (founder direction, 2026-10-17) |
 | D-29 | Content Fabrique runs in its own Dutch operating BV (werkmaatschappij) under the founder's holding; Paddle is the merchant of record | Proposed (founder direction 2026-10-17; confirm with the accountant) |
 | D-30 | Semantic search lives in Postgres with pgvector, hybrid with full-text search; no separate vector database | Proposed (director, 2026-10-17; founder asked) |
+| D-31 | Spend control: credits charged per action; every action's COGS budget is derived from its price (≤ 40 % of net credit value); caps hold across processes in the database; platform breaker | Accepted (director, 2026-10-17; founder asked) |
 
 ---
 
@@ -678,6 +679,43 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 - Search quality joins the evals.
 
 **Revisit** past tens of millions of vectors per region, or if pgvector latency misses the P2-12 target.
+
+## D-31 Spend control: credits per action, COGS budgets derived from price
+
+**Context.** The founder asked for spend control "so we still have profit in the end", with usage stats in the org, ready for production. Several pieces were missing:
+- Only LLM calls were metered.
+- The daily cap's reservations lived in one process's memory, so several workers could overspend it together.
+- An unpriced model could run whenever `LLM_ALLOW_UNPRICED` was set.
+- Paid transcription ran with no cap at all (found in the P2-05 security review).
+- There were no credits, no quotas beyond plans, and no usage view.
+
+**Decision** (details in [spend control v1](design/spend-control-v1.md)):
+- **Credits** are the customer's currency.
+  - **Prices are per action**, from a versioned price list in `config/plans`: a first edit is 6, a revision 2, an export 0. 10 credits make a "video".
+  - Each plan's allowance expires at the end of its period. Top-ups last 12 months.
+  - A credit **hold** is taken before an action starts, so the last credits can be raced safely.
+  - Credits are charged only on success. Failed runs are refunded and recorded as unbilled COGS.
+- **Profit by construction.** Each action's COGS budget for each plan is at most 40 % of the net revenue its credits earn: the plan price, minus the merchant-of-record fee, divided by the allowance. That budget is the run's hard budget. A test checks the rule for every plan and action, in every price-list file.
+- **Every cost is metered** in `usage_ledger` with a kind (llm, transcription, render, media, storage, egress), a quantity and unit, and attribution to project, member and action.
+  - On staging and production, a paid provider with no price refuses to run.
+  - Caps are enforced with database holds and counters, so they hold across processes. The cap levels are per run, per workspace per day, per workspace per period, and a **platform-wide daily breaker**.
+- **Visibility.**
+  - Creators see credits, usage by day, by project and by member, and their activity. BYOK creators also see the estimated cost on their own key. Managed creators never see our COGS or margin.
+  - The founder gets `cfctl spend report` (margin per workspace, plan and action, plus unbilled COGS), typed `spend.alert` events, and a daily reconciliation against the provider's usage report.
+- **Ledgers are append-only** for the app role. Money is stored as integers.
+
+**Alternatives.**
+- Pass-through token pricing to customers: unpredictable for creators, and it exposes our margin.
+- Caps from the ledger only, with no holds: they race across processes.
+- A billing SaaS for metering (Orb, Lago, Stripe meters): another processor of usage data, and the merchant of record still has to be wired in. We may revisit at scale.
+- Calendar-month allowances: they don't line up with merchant billing periods.
+
+**Consequences.**
+- The editor's budget now depends on the plan, so a tight plan can stop a long run early. The runtime's "finish now" warning and the budget backstop handle that.
+- Prices and allowances are data, so a new price list is a new YAML file and a test run.
+- The numbers above are starting hypotheses. Calibrate them from `cfctl spend report` after the beta.
+
+**Revisit** when real COGS per action is known (the beta), or when checkout (P7-01c) brings real prices and fees.
 
 ## Template for new decisions
 
