@@ -1,0 +1,231 @@
+# The one CI workflow (P0-03). It replaces web.yml and env.yml.
+#
+# Required checks and path filters do not mix: a required job that `paths:` skips stays "pending" and blocks the PR
+# forever. So this workflow always runs, `changes` decides which jobs have work to do, and the last job, `required`,
+# always runs and is the ONLY check to mark as required on `main`. It fails when any job failed or was cancelled, and
+# accepts skipped ones (a docs-only PR skips everything and passes).
+#
+# CI holds no secrets (D-21/D-22: replay mode), so permissions stay read-only.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same PR cancels the older run. Runs on main are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # On pull requests: which areas changed. On push to main and manual runs everything runs (the outputs default to
+  # 'true' because the filter step is skipped and an empty output falls through to the second operand).
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      # dorny/paths-filter lists a pull request's files through the API.
+      pull-requests: read
+    outputs:
+      go: ${{ steps.filter.outputs.go || 'true' }}
+      web: ${{ steps.filter.outputs.web || 'true' }}
+      env: ${{ steps.filter.outputs.env || 'true' }}
+    steps:
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        if: github.event_name == 'pull_request'
+        with:
+          filters: |
+            go:
+              - 'apps/server/**'
+              - 'go.work'
+              - 'go.work.sum'
+              - '.github/workflows/ci.yml'
+            web:
+              - 'apps/web/**'
+              - 'packages/**'
+              - 'package.json'
+              - 'bun.lock'
+              - '.github/workflows/ci.yml'
+            env:
+              - 'apps/**'
+              - 'packages/**'
+              - '.env.example'
+              - 'go.work'
+              - '.github/workflows/ci.yml'
+
+  # go vet and golangci-lint (apps/server/.golangci.yml).
+  go-lint:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/server
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: apps/server/go.mod
+          cache-dependency-path: apps/server/go.sum
+      - run: go vet ./...
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          # renovate: datasource=github-releases depName=golangci/golangci-lint
+          version: v2.15.0
+          working-directory: apps/server
+
+  # go test -race over every package. Docker is on the runner, so tests that start containers (testcontainers) run.
+  go-test:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/server
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: apps/server/go.mod
+          cache-dependency-path: apps/server/go.sum
+      - run: go test -race ./...
+
+  # typecheck, lint, test and build of @cf/web.
+  web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      # bun's global download cache, keyed on the lockfile. One bun.lock at the repo root covers the whole workspace.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - run: bun run --filter @cf/web typecheck
+      - run: bun run --filter @cf/web lint
+      - run: bun run --filter @cf/web test
+      - run: bun run --filter @cf/web build
+      # Start regenerates the route tree on build; a diff means the committed one is stale.
+      - run: git diff --exit-code -- apps/web/src/routeTree.gen.ts
+
+  # Fails when the code reads a variable that .env.example does not list.
+  env-lint:
+    needs: changes
+    if: needs.changes.outputs.env == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: apps/server/go.mod
+          cache-dependency-path: apps/server/go.sum
+      - name: cfctl env lint
+        working-directory: apps/server
+        run: go run ./cmd/cfctl env lint
+
+  # Runs `cfctl doctor --env ci` against a Postgres service container and MinIO, with the .env.example local
+  # defaults. CI holds no secrets: Anthropic and Clerk are not used in ci (replay mode, D-22), so doctor skips them.
+  doctor:
+    needs: changes
+    if: needs.changes.outputs.env == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: cf
+          POSTGRES_PASSWORD: cf
+          POSTGRES_DB: cf
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cf -d cf"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: apps/server/go.mod
+          cache-dependency-path: apps/server/go.sum
+
+      # MinIO is started here, not as a service container, because a service container cannot pass `server /data`.
+      # The root user and password and the bucket are the R2_* defaults in .env.example. MinIO no longer publishes
+      # public images on Docker Hub or quay.io, so this is Chainguard's build, pinned by digest. The digest is what
+      # the tag `latest` pointed to on 2026-10-16; its entrypoint is /usr/bin/minio, so the args are `server /data`.
+      # The bucket is made with the AWS CLI that ubuntu-latest ships, so no mc image is needed.
+      - name: Start MinIO and create the bucket
+        env:
+          AWS_ACCESS_KEY_ID: minioadmin
+          AWS_SECRET_ACCESS_KEY: minioadmin
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          docker run -d --name minio --network host \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            cgr.dev/chainguard/minio@sha256:2136d593beacf4461187035eca949fe49abd589d5079735025c711ca58fee0c8 \
+            server /data
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:9000/minio/health/ready && break
+            sleep 1
+          done
+          out=$(aws --endpoint-url http://localhost:9000 s3 mb s3://cf-media-dev 2>&1) || {
+            echo "$out" | grep -Eq "BucketAlreadyOwnedByYou|BucketAlreadyExists" || { echo "$out"; exit 1; }
+          }
+
+      - name: Build cfctl
+        working-directory: apps/server
+        run: go build -o "$RUNNER_TEMP/cfctl" ./cmd/cfctl
+
+      # The values are .env.example's local defaults plus the secrets `env init` generates. CF_ENV is appended
+      # because a later assignment of a name wins.
+      - name: Generate the CI env file
+        run: |
+          "$RUNNER_TEMP/cfctl" env init --env-file "$RUNNER_TEMP/ci.env"
+          echo "CF_ENV=ci" >> "$RUNNER_TEMP/ci.env"
+
+      - name: cfctl doctor --env ci
+        run: '"$RUNNER_TEMP/cfctl" doctor --env ci --env-file "$RUNNER_TEMP/ci.env"'
+
+  # The single required check. It runs even when needed jobs are skipped or failed (`if: always()`), passes when every
+  # needed job succeeded or was skipped, and fails on any failure or cancellation. Add every new job to `needs`.
+  required:
+    if: always()
+    needs: [changes, go-lint, go-test, web, env-lint, doctor]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Every job succeeded or was skipped
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e 'all(.[]; .result == "success" or .result == "skipped")' > /dev/null

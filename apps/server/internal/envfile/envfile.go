@@ -172,7 +172,7 @@ func Parse(r io.Reader) (map[string]string, error) {
 
 // ParseFile is Parse on a file path. The error never contains file contents.
 func ParseFile(path string) (map[string]string, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // G304: the path comes from the operator (--env-file or the repo root), not from a request
 	if err != nil {
 		return nil, err
 	}

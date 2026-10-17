@@ -64,6 +64,24 @@ tasks:
       - bun run --filter @cf/web test
       - cd apps/server && go test ./...
 
+  lint:
+    desc: Lint the Go code (golangci-lint, if installed) and the web code (Biome)
+    cmds:
+      - task: lint:go
+      - bun run --filter @cf/web lint
+
+  # CI pins golangci-lint v2 (.github/workflows/ci.yml); install the same major locally with `brew install golangci-lint`.
+  lint:go:
+    internal: true
+    dir: apps/server
+    cmds:
+      - cmd: |
+          if command -v golangci-lint >/dev/null 2>&1; then
+            golangci-lint run
+          else
+            echo "golangci-lint is not installed, so the Go lint is skipped. Install it with 'brew install golangci-lint' (CI runs v2)." >&2
+          fi
+
   # ── Environment ─────────────────────────────────────────────────────────────
 
   env:init:

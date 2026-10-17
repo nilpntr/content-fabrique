@@ -162,7 +162,7 @@ func isEnvReader(fun ast.Expr) bool {
 }
 
 func scanWeb(rel, path string, report func(file string, line int, name string)) error {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: walks the repo checkout the operator pointed at, not request input
 	if err != nil {
 		return fmt.Errorf("envlint: read %s: %w", rel, err)
 	}

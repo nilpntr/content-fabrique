@@ -54,11 +54,11 @@ func Init(examplePath, envPath string, random io.Reader) (InitResult, error) {
 	}
 	var res InitResult
 
-	content, err := os.ReadFile(envPath)
+	content, err := os.ReadFile(envPath) //nolint:gosec // G304: operator-supplied path, see ParseFile
 	switch {
 	case err == nil:
 	case errors.Is(err, fs.ErrNotExist):
-		content, err = os.ReadFile(examplePath)
+		content, err = os.ReadFile(examplePath) //nolint:gosec // G304: operator-supplied path, see ParseFile
 		if err != nil {
 			return res, fmt.Errorf("read %s: %w", examplePath, err)
 		}

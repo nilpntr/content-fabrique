@@ -95,7 +95,8 @@ Tokens. Apart from the tunnel token, which `cfctl bootstrap` makes, you create e
 
 - **EU servers** ([D-09](05-decisions.md#d-09-hosting)). You order one for staging and one for production and create an SSH user with Docker access. The agent installs Docker and `cloudflared` over SSH. The research priced a Hetzner AX102 at about $115 a month for production. Staging is a smaller box and wasn't priced. Values: `DEPLOY_HOST`, `DEPLOY_SSH_USER` and `DEPLOY_SSH_PRIVATE_KEY`, an ed25519 key pair made only for deploys ([§3.9](#39-scopes-and-permissions-per-token)).
 - **GitHub** → Settings → Environments: create `staging` and `production`, with a required reviewer on `production`. Secrets per environment: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` and the `DEPLOY_*` values. Images go to GitHub Container Registry with the built-in `GITHUB_TOKEN`, so they need no extra secret.
-- **Renovate:** install the Renovate GitHub App on the repository (P0-03).
+- **Renovate (your step, once):** install the [Renovate GitHub App](https://github.com/apps/renovate) on this repository only. `renovate.json` at the root is the config ([§6, CI](#ci-p0-03)). Renovate then opens a "Dependency Dashboard" issue and its first pull requests on the next Monday run.
+- **Branch protection (your step, once CI has run on `main`):** Settings → Branches → rule for `main` → require status checks → add only **`required`**. See [§6, CI](#ci-p0-03) for why it is the one check.
 
 ### 3.6 Observability
 
@@ -190,11 +191,11 @@ task down                # stop Postgres and MinIO (the data stays); `task reset
 | MinIO | S3 API `R2_ENDPOINT` (http://localhost:9000), console http://localhost:9001 | `compose.yaml`, volume `minio-data` |
 
 - **`task dev` steps:** `task install`, `.env` creation if it is missing (`task env:init`: copies `.env.example`, fills the generated secrets; run it yourself to fill them in an existing file), `task up` (`docker compose up --wait` for Postgres and MinIO, then the one-shot `minio-init` that creates the `R2_BUCKET` bucket and is safe to run again), then `scripts/dev.sh`, which reads `.env`, builds the api and worker into `.dev/bin/` and runs the three processes. If one of them exits, the script stops the other two.
-- **MinIO.** MinIO no longer publishes public images, so `compose.yaml` uses Chainguard's `cgr.dev/chainguard/minio`, pinned by the same digest as `.github/workflows/env.yml` (change both together). Its root user and password are `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`, and the console accepts the same pair. The bucket is created with the AWS CLI image (`amazon/aws-cli`, pinned by digest), not `mc`.
+- **MinIO.** MinIO no longer publishes public images, so `compose.yaml` uses Chainguard's `cgr.dev/chainguard/minio`, pinned by the same digest as `.github/workflows/ci.yml` (change both together). Its root user and password are `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`, and the console accepts the same pair. The bucket is created with the AWS CLI image (`amazon/aws-cli`, pinned by digest), not `mc`.
 - **Which value wins.** Compose lets a variable exported in your shell override `.env`, while `scripts/dev.sh` lets a non-empty `.env` value win (the same rule as `cfctl doctor`). So do not export `POSTGRES_*`, `R2_*` or the other names from `.env.example` in your shell: the services and the processes would disagree. `DATABASE_URL` and the two other database URLs repeat the `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` values, so change them together.
 - Compose publishes the ports on `127.0.0.1` only, since the default credentials are `cf:cf` and `minioadmin`. A Postgres already running on your machine's port 5432 has to be stopped first, because `DATABASE_URL` in `.env.example` points there.
 - With the services up, `task doctor` reports Postgres and object storage as ok; Anthropic and Clerk stay missing until you fill the `[YOU-now]` lines.
-- Other tasks: `task build`, `task test`, `task install`, `task up`. `task` alone lists them.
+- Other tasks: `task build`, `task test`, `task lint`, `task install`, `task up`. `task` alone lists them. `task lint` runs `golangci-lint` (skipped with a message when it isn't installed: `brew install golangci-lint`, CI runs v2) and Biome for the web app.
 
 ## 6. Checking it
 
@@ -219,7 +220,7 @@ It prints nothing when the three start values are present.
 - **The AI Gateway is authenticated** ([D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)), so when `ANTHROPIC_BASE_URL` is set, `CF_AIG_TOKEN` is required in every environment. `OTEL_EXPORTER_OTLP_HEADERS` is not needed for the observability check: a local collector without authentication is valid.
 - **`ci` holds no Anthropic or Clerk secrets** (CI runs in replay mode, [D-22](05-decisions.md#d-22-cheap-first-testing-ladder)). For `--env ci`, `ANTHROPIC_API_KEY`, `VITE_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` are not required, and the Anthropic, AI Gateway and Clerk checks report `skipped`. If they are set anyway, they are checked like any other environment.
 - **Run it** with `task doctor` (`--env local`) or `task doctor -- --env staging --phase P4`. `task env:init` creates `.env` and fills the three generated secrets without printing them, and a second run changes nothing.
-- **`cfctl env lint`** (`task env:lint`, and the `env` workflow in CI) fails when the Go or web code reads a variable that `.env.example` doesn't list. Names the platform sets (Vite's `MODE`, `DEV`, `PROD`, `SSR`, `BASE_URL`, plus `NODE_ENV` and `CI`) are on a short allowlist in `internal/envlint`.
+- **`cfctl env lint`** (`task env:lint`, and the `env-lint` job in CI) fails when the Go or web code reads a variable that `.env.example` doesn't list. Names the platform sets (Vite's `MODE`, `DEV`, `PROD`, `SSR`, `BASE_URL`, plus `NODE_ENV` and `CI`) are on a short allowlist in `internal/envlint`.
 
 | Service | Call |
 |---|---|
@@ -234,6 +235,25 @@ It prints nothing when the three start values are present.
 | TikTok, billing | format checks only until their phase |
 
 **`cfctl bootstrap cloudflare --env <dev|staging|production>`** (P0-15) is idempotent. For `staging` and `production` it creates the EU R2 bucket with CORS and the lifecycle rule, the AI Gateway with the D-19 settings, the tunnel and the DNS records. For `dev` it creates only the `cf-dev` gateway. It then prints which values to add to `.env.<env>`, and which scoped tokens you create by hand next (the R2 credentials and the gateway token) with the permission to pick for each ([§3.9](#39-scopes-and-permissions-per-token)). It never prints the token, and running it twice changes nothing.
+
+### CI (P0-03)
+
+All of CI is one workflow, `.github/workflows/ci.yml`. It runs on every pull request, on every push to `main`, and by hand (`gh workflow run ci.yml`). It holds no secrets (replay mode, [D-22](05-decisions.md#d-22-cheap-first-testing-ladder)) and its token is read-only.
+
+| Job | Runs | When |
+|---|---|---|
+| `changes` | decides which of the jobs below have work (`dorny/paths-filter`) | always |
+| `go-lint` | `go vet ./...` and `golangci-lint` v2 with `apps/server/.golangci.yml` (errcheck, govet, staticcheck, unused, ineffassign, gosec, revive, bodyclose, errorlint, misspell) | `apps/server`, `go.work` changed |
+| `go-test` | `go test -race ./...` (Docker is on the runner, so testcontainers tests run) | same |
+| `web` | `bun install --frozen-lockfile`, then `@cf/web` typecheck, lint (Biome, `apps/web/biome.jsonc`), test, build, and a check that `routeTree.gen.ts` is up to date | `apps/web`, `packages`, `package.json`, `bun.lock` changed |
+| `env-lint`, `doctor` | `cfctl env lint`, and `cfctl doctor --env ci` against Postgres and MinIO | `apps`, `packages`, `.env.example` changed |
+| `required` | passes when every job above succeeded or was skipped, fails on any failure or cancellation | always |
+
+- **Mark only `required` as a required check on `main`.** A required job that a path filter skips stays "pending" and blocks the pull request for good. `required` always runs, so a docs-only pull request skips the rest and still goes green. A new job must be added to `required`'s `needs:` list, or its failure won't block merging.
+- **On `main` and manual runs every job runs.** Path filtering applies to pull requests only.
+- **Speed.** The jobs run in parallel, Go modules and the build cache are cached on `go.sum` and bun's download cache on `bun.lock`, and a newer push to the same pull request cancels the older run. The target is under 10 minutes on a cold cache.
+- **Actions and images are pinned by digest**, with the version in a trailing comment. Renovate keeps them current. The `golangci-lint` version is pinned in `ci.yml`; use the same major locally.
+- **Renovate** (`renovate.json`): runs Monday before 06:00 Europe/Amsterdam, opens one pull request per ecosystem for minor and patch updates (Go modules, bun packages, GitHub Actions, Docker images), one pull request per major update, and separate pull requests for the Go toolchain (`go` directive) and the bun version (`packageManager`). It runs `go mod tidy` after Go updates, never automerges, and keeps a Dependency Dashboard issue. Install the app first ([§3.5](#35-servers-ci-and-github)).
 
 ## 7. Prompt for the implementing agent
 

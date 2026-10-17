@@ -6,7 +6,7 @@
 name: content-fabrique
 
 services:
-  # System of record and, from P0-06, the River job queue. The same image the CI doctor job uses (.github/workflows/env.yml).
+  # System of record and, from P0-06, the River job queue. The same image the CI doctor job uses (.github/workflows/ci.yml).
   postgres:
     image: pgvector/pgvector:pg17
     environment:
@@ -25,7 +25,7 @@ services:
       start_period: 5s
 
   # Stands in for R2. MinIO no longer publishes public images, so this is Chainguard's build, pinned by the same digest as
-  # .github/workflows/env.yml (what `latest` pointed to on 2026-10-16). Change both together. The root user and password
+  # .github/workflows/ci.yml (what `latest` pointed to on 2026-10-16). Change both together. The root user and password
   # are R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY, which is also what the Go code signs requests with.
   minio:
     image: cgr.dev/chainguard/minio@sha256:2136d593beacf4461187035eca949fe49abd589d5079735025c711ca58fee0c8
