@@ -10,7 +10,7 @@ const (
 )
 
 // checklist builds the pass/fail list. A check that does not apply to the edit (no cuts, no effects) is info, never a failure.
-func checklist(r Report, cfg config) []CheckItem {
+func checklist(r Report) []CheckItem {
 	var cs []CheckItem
 	add := func(c CheckItem) { cs = append(cs, c) }
 	st := func(ok, warn bool) string {

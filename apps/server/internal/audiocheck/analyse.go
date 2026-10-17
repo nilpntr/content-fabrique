@@ -79,7 +79,7 @@ func analyse(m measured, timeMap []render.TimeMapEntry, cfg config) Report {
 		r.Density.SFXPer10s = round(float64(r.Density.SFXCount)/m.durationS*10, 2)
 	}
 	if !m.hasAudio {
-		r.Checklist = checklist(r, cfg)
+		r.Checklist = checklist(r)
 		r.Summary = summarise(r)
 		r.Sheet = drawSheet(r, m, cuts, cfg)
 		return r
@@ -200,7 +200,7 @@ func analyse(m measured, timeMap []render.TimeMapEntry, cfg config) Report {
 	// Problems.
 	r.Problems = problems(m)
 
-	r.Checklist = checklist(r, cfg)
+	r.Checklist = checklist(r)
 	r.Summary = summarise(r)
 	r.Sheet = drawSheet(r, m, cuts, cfg)
 	return r

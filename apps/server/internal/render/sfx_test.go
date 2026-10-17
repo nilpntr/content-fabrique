@@ -302,23 +302,49 @@ func TestCompileRefusesHostileSoundEffects(t *testing.T) {
 	if strings.Contains(g, "passwd") || !graphAlphabet.MatchString(g) {
 		t.Errorf("the item id reached the graph: %q", regexpOutside.FindString(g))
 	}
-	// The graph holds only the allowed alphabet, with every category and every variant (and the old spelling, and auto).
-	var items []timeline.AudioItem
+	// The graph holds only the allowed alphabet, with every category and every variant, then the round-robin and the old spelling
+	// (two timelines: one graph of all of them together is over the limit of one process argument).
+	var variants, rest []timeline.AudioItem
 	at := int64(0)
 	for _, cv := range sfxVariants() {
-		items = append(items, sfxVariantItem(fmt.Sprintf("s%d", len(items)+1), cv[0], cv[1], at))
+		variants = append(variants, sfxVariantItem(fmt.Sprintf("s%d", len(variants)+1), cv[0], cv[1], at))
 		at += 90
 	}
 	for _, c := range timeline.SFXCategories() {
-		items = append(items, sfxVariantItem(fmt.Sprintf("s%d", len(items)+1), c, timeline.SFXVariantAuto, at), sfxItem(fmt.Sprintf("s%d", len(items)+2), c, at, nil))
+		rest = append(rest, sfxVariantItem(fmt.Sprintf("a%d", len(rest)+1), c, timeline.SFXVariantAuto, at), sfxItem(fmt.Sprintf("a%d", len(rest)+2), c, at, nil))
 		at += 20
 	}
-	all := sfxSpec(30, items...)
-	for _, prof := range Profiles() {
-		g := mustCompile(t, all, prof).FilterComplex
-		if !graphAlphabet.MatchString(g) {
-			t.Errorf("%s: a character outside the alphabet: %q", prof.Name, regexpOutside.FindString(g))
+	for _, items := range [][]timeline.AudioItem{variants, rest} {
+		for _, prof := range Profiles() {
+			g := mustCompile(t, sfxSpec(30, items...), prof).FilterComplex
+			if !graphAlphabet.MatchString(g) {
+				t.Errorf("%s: a character outside the alphabet: %q", prof.Name, regexpOutside.FindString(g))
+			}
+			if len(g) > MaxFilterGraphBytes {
+				t.Errorf("%s: the graph is %d bytes", prof.Name, len(g))
+			}
 		}
+	}
+}
+
+// One argument of a process holds 128 KiB on Linux: a graph past MaxFilterGraphBytes is refused at compile time, with a message,
+// and not by the sandbox with "argument list too long".
+func TestCompileRefusesAGraphTooLongForAnArgument(t *testing.T) {
+	var items []timeline.AudioItem
+	for i := range 60 {
+		items = append(items, sfxVariantItem(fmt.Sprintf("s%d", i+1), timeline.SFXShimmer, "sparkle", int64(i)*50))
+	}
+	_, err := Compile(sfxSpec(30, items...), Final, plainResolver())
+	if !errors.Is(err, ErrInvalidSpec) || !strings.Contains(err.Error(), "filter graph") {
+		t.Errorf("60 shimmers: err = %v", err)
+	}
+	// Thirty mixed effects, a lot for a 4 s clip, compile.
+	items = items[:0]
+	for i, cv := range sfxVariants()[:30] {
+		items = append(items, sfxVariantItem(fmt.Sprintf("s%d", i+1), cv[0], cv[1], int64(i)*100))
+	}
+	if plan, err := Compile(sfxSpec(30, items...), Final, plainResolver()); err != nil || len(plan.FilterComplex) > MaxFilterGraphBytes {
+		t.Errorf("30 effects: %v", err)
 	}
 }
 

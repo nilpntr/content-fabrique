@@ -27,6 +27,9 @@ const sfxRate = AudioSampleRate
 // f formats a float for a filter string: at most six decimals, no exponent.
 func f(x float64) string { return num(math.Round(x*1e6) / 1e6) }
 
+// f1 is f with one decimal: enough for the centre of a swept filter in Hz, and the sweep commands are most of a graph's length.
+func f1(x float64) string { return num(math.Round(x*10) / 10) }
+
 // jitter is the per-item variation: a hash of the item id gives a small, deterministic change of pitch, length, filter centres,
 // level and noise seed, so six whooshes on one timeline are six slightly different samples and a re-render of the same spec
 // gives the same ones. Earshot's round-robin ranges: pitch +-0.3 to 1 semitone, level +-1 to 2 dB, timing and decay +-10 %.
@@ -122,9 +125,9 @@ func (b *sfxBuilder) sweep(name, id string, dur float64, steps int, q float64, h
 		if i > 0 {
 			cmds.WriteString(";")
 		}
-		fmt.Fprintf(&cmds, "%s %s@%s frequency %s", f(dur*float64(i)/float64(steps)), name, id, f(hz(x)*b.j.filter))
+		fmt.Fprintf(&cmds, "%s %s@%s frequency %s", f(dur*float64(i)/float64(steps)), name, id, f1(hz(x)*b.j.filter))
 	}
-	filter := fmt.Sprintf("%s@%s=f=%s", name, id, f(hz(0)*b.j.filter))
+	filter := fmt.Sprintf("%s@%s=f=%s", name, id, f1(hz(0)*b.j.filter))
 	if name == "bandpass" {
 		filter += fmt.Sprintf(":width_type=q:width=%s", f(q))
 	}

@@ -16,6 +16,12 @@ import (
 // it expects a spec that timeline.Validate accepted, and only refuses what it cannot build a graph from.
 var ErrInvalidSpec = errors.New("render: spec cannot be compiled")
 
+// MaxFilterGraphBytes is the longest filter graph Compile writes. The graph is one argument of the ffmpeg process, and Linux limits
+// a single argument to 128 KiB (MAX_ARG_STRLEN): a longer graph would fail in the sandbox with "argument list too long" and
+// nothing to say why. A sound effect is 0.7 to 6 kB of it (about 3 kB on average), so the limit is some 40 effects on top of a
+// normal edit.
+const MaxFilterGraphBytes = 120_000
+
 // clip is a main-track item with everything the compiler derives from its position.
 type clip struct {
 	idx   int
@@ -97,6 +103,9 @@ func Compile(spec *timeline.Spec, profile Profile, resolver AssetResolver) (Plan
 	c.plan.Inputs = c.inputs
 	c.plan.Subtitles = subs
 	c.plan.FilterComplex = strings.Join(append(video, audio.statements...), ";")
+	if n := len(c.plan.FilterComplex); n > MaxFilterGraphBytes {
+		return Plan{}, fmt.Errorf("%w: the filter graph is %d bytes, over the %d bytes that one argument of a process can hold: use fewer sound effects or shorter edits", ErrInvalidSpec, n, MaxFilterGraphBytes)
+	}
 	c.plan.Loudnorm = audio.loudnorm
 	c.plan.Args = c.args()
 	if audio.loudnorm != nil {
