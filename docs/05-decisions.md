@@ -34,6 +34,7 @@
 | D-27 | Transcription: whisper.cpp in the media-tools sandbox locally; Workers AI `whisper-large-v3-turbo` through Cloudflare on staging and production; one provider interface | Accepted (founder decision, 2026-10-17) |
 | D-28 | The editor is content-aware across genres (talking, unboxing/product, workout, vlog, tutorial); fitness stays the launch niche for trends and marketing | Accepted (founder direction, 2026-10-17) |
 | D-29 | Content Fabrique runs in its own Dutch operating BV (werkmaatschappij) under the founder's holding; Paddle is the merchant of record | Proposed (founder direction 2026-10-17; confirm with the accountant) |
+| D-30 | Semantic search lives in Postgres with pgvector, hybrid with full-text search; no separate vector database | Proposed (director, 2026-10-17; founder asked) |
 
 ---
 
@@ -651,6 +652,32 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 - The company site on `contentfabrique.app` names the BV in its terms and privacy policy (P0-12).
 
 **Revisit** when an investor or a sale wants a different structure.
+
+## D-30 Semantic search: pgvector in Postgres, hybrid with full-text
+
+**Context.** Universal search (P2-12) and the editor's moment search should work by meaning ("explosive back pull", "him flexing in front of the mirror"), not only by tags. The founder asked whether this needs a vector database.
+
+**Decision** (proposed).
+- **Vectors live in the same Postgres** (the `pgvector` extension, already in our `pgvector/pgvector:pg18` image) next to the rows they describe. Every query keeps the `workspace_id` filter, so tenancy has one enforcement point.
+- **Hybrid ranking:** full-text (`tsvector`) and vector similarity (HNSW index), merged with reciprocal rank fusion. Exact words still win; meaning fills the gaps.
+- **What gets embedded:** per moment or shot, a **text embedding** of its description, tags and transcript chunk, and later an **image embedding** of its keyframe for visual search.
+- **Models:**
+  - **Text:**
+    - hosted environments use a multilingual embedding model on Workers AI (for example `bge-m3`), following [D-27](#d-27-transcription-whispercpp-locally-workers-ai-whisper-when-hosted)'s pattern and checks (EU processing, price in the price table, metered in `usage_ledger`);
+    - locally, a small open model runs in the sandbox.
+  - **Images:** an open image-text model (SigLIP or CLIP family, permissive licence per [D-16](#d-16-licensing-policy-for-ml-and-media-components)) in media-tools, or a hosted multimodal embedding later.
+  - The model name and its dimension are stored with each vector, so a model change triggers a re-embed job instead of mixing spaces.
+- **Staging check:** the PlanetScale Postgres database must support `pgvector`. This sits next to the Postgres 18 check in [setup guide §3.4](06-setup-and-credentials.md#34-postgres).
+
+**Alternatives.** A dedicated vector DB (Qdrant, Pinecone, Weaviate) adds a second system to sync, secure and back up, plus a second tenancy boundary, for scale we won't need for a long time.
+
+**Consequences.**
+- Embedding jobs after analysis.
+- An HNSW index per embedding kind.
+- `GET /v1/search` gains a semantic leg.
+- Search quality joins the evals.
+
+**Revisit** past tens of millions of vectors per region, or if pgvector latency misses the P2-12 target.
 
 ## Template for new decisions
 
