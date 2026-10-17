@@ -33,6 +33,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 	"github.com/nilpntr/content-fabrique/internal/timeline/ops"
+	"github.com/nilpntr/content-fabrique/internal/timeline/style"
 )
 
 // Projects is the part of projects.Service the tools use. *projects.Service is the real one.
@@ -214,7 +215,7 @@ func briefBlocks(format, brief, instructions string) []llm.Block {
 }
 
 func safeZoneText(f timeline.Format, w, h int) string {
-	z, ok := timeline.SafeZoneFor(f)
+	z, ok := style.ZoneFor(string(f), w, h)
 	if !ok {
 		return ""
 	}

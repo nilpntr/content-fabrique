@@ -1,6 +1,6 @@
 # Editor system prompt: changelog
 
-The editor agent's system prompt is `editor.v1.1.md`, embedded in the Go binary. The text the model receives is the runtime's
+The editor agent's system prompt is `editor.v1.2.md`, embedded in the Go binary. The text the model receives is the runtime's
 preamble (`runtime.SystemPreamble`, the untrusted-data rule) followed by this file. The prompt version (`PromptVersion` in
 `prompt.go`) is stored in every run's input, so a run can always be tied to the text it was given.
 
@@ -14,6 +14,15 @@ Rules for changing it:
 - The cache hit rate of a run is visible: `cfctl agent show <run>` prints the cache write and read tokens of every model call and
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
+
+## editor.v1.2 (2026-10-17)
+
+P3-04 (text styles, safe zones, captions) landed. The file is now `editor.v1.2.md`.
+
+- Text guidance lists the style registry (title_bold, title_outline, stat_big, label_box, subtitle_clean, caption_plain) and the
+  two new validator codes: `unsupported_character` (a glyph the font lacks, such as an emoji) and `text_overlaps_captions` (a
+  text over the captions band; keep texts to upper_third or center when captions are on).
+- The safe-zone numbers in `get_brief` now come from `internal/timeline/style` (`style.ZoneFor`).
 
 ## editor.v1.1 (2026-10-17)
 

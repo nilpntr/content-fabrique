@@ -64,7 +64,7 @@ func TestRunsStartEdit(t *testing.T) {
 	if err := e.pool.QueryRow(context.Background(), `SELECT input::text, workspace_id, project_id FROM agent_runs WHERE id = $1`, runID).Scan(&input, &ws, &project); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(input, "Open on the heaviest set.") || !strings.Contains(input, `"editor.v1.1"`) || ws != e.ws["ada"].UUID || project.String() == "" {
+	if !strings.Contains(input, "Open on the heaviest set.") || !strings.Contains(input, `"editor.v1.2"`) || ws != e.ws["ada"].UUID || project.String() == "" {
 		t.Errorf("input %s, workspace %s", input, ws)
 	}
 
