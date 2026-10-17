@@ -113,6 +113,18 @@ type AssetDerivative struct {
 	UpdatedAt   time.Time
 }
 
+type AssetSignal struct {
+	WorkspaceID ids.WorkspaceID
+	AssetID     ids.AssetID
+	Version     int32
+	StepMs      int32
+	DurationMs  int32
+	Series      json.RawMessage
+	Summary     json.RawMessage
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 type CreatorProfile struct {
 	WorkspaceID     ids.WorkspaceID
 	Niche           json.RawMessage
@@ -123,6 +135,21 @@ type CreatorProfile struct {
 	Defaults        json.RawMessage
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+type Moment struct {
+	ID          uuid.UUID
+	WorkspaceID ids.WorkspaceID
+	AssetID     ids.AssetID
+	Kind        string
+	Source      string
+	StartMs     int32
+	EndMs       int32
+	Score       float32
+	Labels      []string
+	Attrs       json.RawMessage
+	Description string
+	CreatedAt   time.Time
 }
 
 type Project struct {
@@ -177,6 +204,17 @@ type Render struct {
 	StartedAt         *time.Time
 	FinishedAt        *time.Time
 	ObjectsPurgedAt   *time.Time
+}
+
+type Shot struct {
+	ID          uuid.UUID
+	WorkspaceID ids.WorkspaceID
+	AssetID     ids.AssetID
+	Idx         int32
+	StartMs     int32
+	EndMs       int32
+	Signals     json.RawMessage
+	CreatedAt   time.Time
 }
 
 type TimelineVersion struct {
