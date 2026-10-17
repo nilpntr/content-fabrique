@@ -28,6 +28,8 @@ type (
 	AnalysisSummaryRow = db.ListAssetAnalysisSummariesRow
 	// SignalsMeta says which analysis an asset has (version and the proxy it was made from), without the series.
 	SignalsMeta = db.GetAssetSignalsMetaRow
+	// ExposureSeriesRow is the luma and 90th percentile luma series of one asset's analysis.
+	ExposureSeriesRow = db.ListAssetExposureSeriesRow
 	// DeadSpan is one of the longest dead spans of an asset, with the number of dead spans it has in all.
 	DeadSpan = db.ListDeadSpansRow
 )
@@ -190,6 +192,16 @@ func (s *Store) ListAssetAnalysisSummaries(ctx context.Context, ws ids.Workspace
 		return nil, nil
 	}
 	rows, err := s.q.ListAssetAnalysisSummaries(ctx, db.ListAssetAnalysisSummariesParams{WorkspaceID: ws, AssetIds: assetUUIDs(assets)})
+	return rows, mapErr(err)
+}
+
+// ListAssetExposureSeries returns the per-sample mean luma and 90th percentile luma of the analysed assets (packed as stored: one
+// uint8 per sample), for the percentile exposure. An asset that was not analysed is not in the result.
+func (s *Store) ListAssetExposureSeries(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]ExposureSeriesRow, error) {
+	if len(assets) == 0 {
+		return nil, nil
+	}
+	rows, err := s.q.ListAssetExposureSeries(ctx, db.ListAssetExposureSeriesParams{WorkspaceID: ws, AssetIds: assetUUIDs(assets)})
 	return rows, mapErr(err)
 }
 

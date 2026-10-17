@@ -195,10 +195,25 @@ func (d Deps) analysisSummaries(ctx context.Context, ws ids.WorkspaceID, rows []
 	if err != nil {
 		return nil, fmt.Errorf("analysis summaries: %w", err)
 	}
+	// The exposure is judged by the percentiles of the picture, which the stored series holds (the summary's own key brightness is a
+	// mean-based number that calls low-key footage dark). A clip whose series cannot be read keeps the cautious line.
+	series, err := d.Store.ListAssetExposureSeries(ctx, ws, assets)
+	if err != nil {
+		return nil, fmt.Errorf("analysis exposure: %w", err)
+	}
+	expo := make(map[ids.AssetID]analysis.Series, len(series))
+	for _, r := range series {
+		if len(r.Luma) > 0 && len(r.Luma) == len(r.High) && r.StepMs > 0 {
+			expo[r.AssetID] = analysis.ExposureSeries(int(r.StepMs), r.Luma, r.High)
+		}
+	}
 	out := make(map[ids.AssetID]analysis.Summary, len(got))
 	for _, g := range got {
 		var s analysis.Summary
 		if json.Unmarshal(g.Summary, &s) == nil {
+			if ser, ok := expo[g.AssetID]; ok {
+				s = s.WithSeries(ser)
+			}
 			out[g.AssetID] = s
 		}
 	}

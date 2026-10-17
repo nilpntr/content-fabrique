@@ -5,19 +5,35 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"unicode/utf8"
 )
 
 // PromptVersion names the system prompt below. It is stored in every run's input (Input.PromptVersion), so a run can be tied to
 // the text it was given. prompts/CHANGELOG.md says what each version changed.
-const PromptVersion = "editor.v1.5"
+const PromptVersion = "editor.v2.0"
 
-//go:embed prompts/editor.v1.5.md
-var systemPrompt string
+//go:embed prompts/editor.v2.0.md
+var systemPromptTemplate string
 
-// SystemPrompt is the editor's system prompt (the runtime puts its preamble in front). It is the same for every run, so the
-// prompt cache works across runs.
-func SystemPrompt() string { return strings.TrimSpace(systemPrompt) }
+// systemPrompt is the prompt for the features of this build, rendered once: the sections about an effect or a look that the build
+// does not have are cut out (features.go), and nothing else varies, so it is the same for every run and the prompt cache works
+// across runs and projects.
+var systemPrompt = sync.OnceValue(func() string {
+	s, err := SystemPromptFor(AvailableFeatures())
+	if err != nil {
+		panic(err) // the prompt is embedded and tested
+	}
+	return s
+})
+
+// SystemPrompt is the editor's system prompt (the runtime puts its preamble in front).
+func SystemPrompt() string { return systemPrompt() }
+
+// SystemPromptFor renders the prompt for a set of features (tests use it to see what turning a feature on adds).
+func SystemPromptFor(f Features) (string, error) {
+	return renderTemplate(PromptVersion, systemPromptTemplate, f)
+}
 
 // MaxInstructionsChars is the longest extra instruction a run may carry.
 const MaxInstructionsChars = 2000
