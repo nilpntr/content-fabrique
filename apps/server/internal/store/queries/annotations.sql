@@ -81,8 +81,8 @@ WHERE workspace_id = @workspace_id AND parent_id = @parent_id AND deleted_at IS 
 
 -- ---- The editor agent --------------------------------------------------------------------------------------------
 
--- The open comments of a project's renders and versions that an editor run has to deal with, oldest first: the top-level ones that
--- are open (a reply is part of its thread).
+-- The open comments of a project's renders and versions that an editor run may be handed, oldest first: the top-level ones that are
+-- open (a reply is part of its thread). A page of row_limit after row_offset.
 -- name: ListOpenAnnotationsForProject :many
 SELECT a.*
 FROM annotations a
@@ -90,7 +90,27 @@ JOIN projects p ON p.workspace_id = a.workspace_id AND p.id = a.project_id AND p
 WHERE a.workspace_id = @workspace_id AND a.project_id = @project_id AND a.deleted_at IS NULL
   AND a.parent_id IS NULL AND a.status = 'open'
 ORDER BY a.id
-LIMIT @row_limit;
+LIMIT @row_limit OFFSET @row_offset;
+
+-- How many there are, for "N more".
+-- name: CountOpenAnnotationsForProject :one
+SELECT count(*)::integer
+FROM annotations a
+JOIN projects p ON p.workspace_id = a.workspace_id AND p.id = a.project_id AND p.deleted_at IS NULL
+WHERE a.workspace_id = @workspace_id AND a.project_id = @project_id AND a.deleted_at IS NULL
+  AND a.parent_id IS NULL AND a.status = 'open';
+
+-- The run was handed these comments. Only the project's own open comments of this workspace are recorded; anything else in the list is
+-- ignored. Again is harmless.
+-- name: RecordAnnotationHandoffs :exec
+INSERT INTO annotation_handoffs (workspace_id, run_id, annotation_id)
+SELECT a.workspace_id, @run_id::uuid, a.id
+FROM annotations a
+JOIN projects p ON p.workspace_id = a.workspace_id AND p.id = a.project_id AND p.deleted_at IS NULL
+JOIN agent_runs r ON r.workspace_id = a.workspace_id AND r.id = @run_id::uuid AND r.project_id = a.project_id
+WHERE a.workspace_id = @workspace_id AND a.project_id = @project_id AND a.id = ANY(@annotation_ids::uuid[])
+  AND a.deleted_at IS NULL AND a.parent_id IS NULL
+ON CONFLICT DO NOTHING;
 
 -- The newest ready render of a version, whatever its profile (a preview and a final of one version have the same time map).
 -- name: GetReadyRenderOfVersion :one
@@ -101,16 +121,15 @@ WHERE r.workspace_id = @workspace_id AND r.project_id = @project_id AND r.timeli
 ORDER BY r.id DESC
 LIMIT 1;
 
--- An editor run finished: the revision requests (comments and instructions) that were open when the run started become applied,
--- by this run, in the version it made (null when it made none). A kind that states a standing constraint (include, exclude,
--- prefer) stays open. "When the run started" is the run's creation time, so a comment written during the run is not marked: the run
--- was not given it.
+-- An editor run ended well: the revision requests (comments and instructions) it was handed, and that are still open, become applied by
+-- this run, in the version it made (null when it made none). A kind that states a standing constraint (include, exclude, prefer) stays
+-- open. "Handed" is the run's rows in annotation_handoffs, so a comment the run never saw is never marked.
 -- name: MarkAnnotationsApplied :many
 UPDATE annotations a
 SET status = 'applied', applied_in_run_id = @run_id, addressed_in_version = sqlc.narg('version')::integer
 WHERE a.workspace_id = @workspace_id AND a.project_id = @project_id AND a.deleted_at IS NULL
   AND a.parent_id IS NULL AND a.status = 'open' AND a.kind IN ('comment', 'instruction')
-  AND a.created_at <= (SELECT r.created_at FROM agent_runs r WHERE r.workspace_id = @workspace_id AND r.id = @run_id)
+  AND EXISTS (SELECT 1 FROM annotation_handoffs h WHERE h.workspace_id = a.workspace_id AND h.run_id = @run_id AND h.annotation_id = a.id)
   AND EXISTS (SELECT 1 FROM projects p WHERE p.workspace_id = a.workspace_id AND p.id = a.project_id AND p.deleted_at IS NULL)
 RETURNING a.*;
 
@@ -120,3 +139,11 @@ INSERT INTO annotations (workspace_id, target_type, target_id, project_id, timel
 SELECT a.workspace_id, a.target_type, a.target_id, a.project_id, a.timeline_version, a.start_ms, a.end_ms, 'comment', @body::text, a.id, 'agent', @author_id::text
 FROM annotations a
 WHERE a.workspace_id = @workspace_id AND a.id = ANY(@parent_ids::uuid[]) AND a.deleted_at IS NULL;
+
+-- The run that ended, by its id alone: the end-of-run hook of the worker knows nothing but the id, and the workspace and project come
+-- from the run's own row. Only a run that succeeded and has a project. Not workspace-filtered by design (there is no caller whose
+-- workspace could be asked), and everything it leads to is then filtered by the workspace the row names.
+-- name: GetSucceededRunScope :one
+SELECT workspace_id, project_id
+FROM agent_runs
+WHERE id = @id AND status = 'succeeded' AND project_id IS NOT NULL;

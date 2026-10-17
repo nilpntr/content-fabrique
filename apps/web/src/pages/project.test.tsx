@@ -324,6 +324,46 @@ test("a comment the API refuses is taken back, with the reason; the others stay"
   expect(within(panel()).queryByRole("alert")).toBeNull();
 });
 
+test("a comment dragged past the end of the render stops at its last frame", async () => {
+  const { fake } = annotationsApi([], {
+    "GET /v1/projects/{id}/renders": { items: [render({ id: renderId(1), timeline_version: 3, status: "ready" })], next_cursor: null },
+    "GET /v1/renders/{id}": readyRender({ id: renderId(1), timeline_version: 3, duration_ms: 1000 }),
+    "GET /time-map.json": [],
+  });
+  page();
+  await waitFor(() => expect(document.querySelector("video")?.getAttribute("src")).toBe("https://files.test/preview.mp4"));
+  fireEvent.change(screen.getByRole("slider", { name: "Scrub" }), { target: { value: "3000" } });
+  saveComment("Past the end");
+  await waitFor(() => expect(fake.callsTo("POST /v1/annotations")).toHaveLength(1));
+  expect(fake.callsTo("POST /v1/annotations")[0]?.body).toMatchObject({ target_type: "render", start_ms: 1000, end_ms: 1000 });
+});
+
+test("a comment whose refetch overtook it is put back when it is saved, and a delete is not undone by a refetch that started before it", async () => {
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const { fake, stored } = annotationsApi([annotation(7, { body: "Old one" })]);
+  const { queryClient } = page();
+  await reviewUp();
+  await within(panel()).findByText("Old one");
+  fake.on("POST /v1/annotations", async (call: { body: unknown }) => {
+    await gate;
+    const body = call.body as { target_id: string; start_ms: number; end_ms: number; body: string };
+    const made = annotation(1, { id: annotationId(100), target_id: body.target_id, start_ms: body.start_ms, end_ms: body.end_ms, body: body.body });
+    stored.push(made);
+    return json(201, made);
+  });
+  saveComment("Raced");
+  await waitFor(() => expect(fake.callsTo("POST /v1/annotations")).toHaveLength(1));
+  // The list is fetched again before the POST has answered: the server does not have the comment yet.
+  fake.on("GET /v1/annotations", () => ({ items: stored.filter((a) => a.id !== annotationId(100)), next_cursor: null }));
+  await queryClient.invalidateQueries({ queryKey: ["annotations"] });
+  release?.();
+  await waitFor(() => expect(within(panel()).getByText("Raced").closest("li")?.getAttribute("data-comment-id")).toBe(annotationId(100)));
+  expect(within(panel()).getAllByRole("listitem")).toHaveLength(2);
+});
+
 test("resolving and reopening a comment goes through the API; a refusal puts it back", async () => {
   const { fake } = annotationsApi([annotation(1, { body: "Tighten this" }), annotation(2, { body: "Someone else's", author: { kind: "user", id: "usr_01other" } })]);
   page();

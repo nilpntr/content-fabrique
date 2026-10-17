@@ -38,11 +38,12 @@ type Span struct {
 // of each that falls inside. Items come in time order, a clip before the text over it.
 func Resolve(entries []render.TimeMapEntry, startMs, endMs int64) []Span {
 	var out []Span
+	end := lastEnd(entries)
 	for _, e := range entries {
 		var lo, hi int64
 		if endMs == startMs {
 			// A moment: on screen when start <= t < end; the final instant belongs to the item that ends there.
-			if startMs < e.OutStartMs || (startMs >= e.OutEndMs && (startMs != e.OutEndMs || e.OutEndMs != lastEnd(entries))) {
+			if startMs < e.OutStartMs || (startMs >= e.OutEndMs && (startMs != e.OutEndMs || e.OutEndMs != end)) {
 				continue
 			}
 			lo, hi = startMs, startMs
@@ -134,12 +135,14 @@ func (o ObjectTimeMaps) TimeMap(ctx context.Context, r store.Render) ([]render.T
 
 // EditorStore is what Source reads and writes. *store.Store is the real one.
 type EditorStore interface {
-	ListOpenAnnotationsForProject(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, limit int) ([]store.Annotation, error)
+	ListOpenAnnotationsForProject(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, offset, limit int) ([]store.Annotation, int, error)
+	RecordAnnotationHandoffs(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, run uuid.UUID, annotations []ids.AnnotationID) error
 	GetReadyRenderOfVersion(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, version int) (store.Render, error)
-	ApplyAnnotations(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, run uuid.UUID, version *int, reply string) ([]store.Annotation, error)
+	ApplyAnnotationsForRun(ctx context.Context, run uuid.UUID) (int, error)
 }
 
-// MaxEditorComments is how many open comments one run is handed. The oldest come first; the rest wait for the next run.
+// MaxEditorComments is how many open comments one read returns. The oldest come first; get_comments pages through the rest with an
+// offset, and a run is only ever handed (and so only marks applied) the comments it was shown.
 const MaxEditorComments = 50
 
 // Source is what the editor agent reads comments from and reports back to (editor.CommentSource).
@@ -150,20 +153,23 @@ type Source struct {
 	Logger   *slog.Logger
 }
 
-// OpenForProject returns the open comments on the project's renders and versions, oldest first, each resolved through the time map of
-// its version's newest ready render. A version without a ready render, or a time map that cannot be read, leaves the comment unmapped
-// (it is still handed to the editor, with its times): the failure is logged, not fatal.
-func (s *Source) OpenForProject(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID) ([]Comment, error) {
-	rows, err := s.Store.ListOpenAnnotationsForProject(ctx, ws, project, MaxEditorComments)
+// OpenForProject returns a page of the open comments on the project's renders and versions, oldest first (offset skips that many; at
+// most MaxEditorComments come back), and how many open comments there are in all. Each is resolved through the time map of its
+// version's newest ready render. A version without a ready render, or a time map that cannot be read, leaves the comment unmapped
+// (it is still handed to the editor, with its times); a pin that cannot be read is no pin. Both are logged, neither is fatal.
+// Reading hands nothing over: RecordHandoff does, for the comments the run is actually shown.
+func (s *Source) OpenForProject(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, offset int) ([]Comment, int, error) {
+	rows, total, err := s.Store.ListOpenAnnotationsForProject(ctx, ws, project, offset, MaxEditorComments)
 	if err != nil {
-		return nil, fmt.Errorf("list open comments: %w", err)
+		return nil, 0, fmt.Errorf("list open comments: %w", err)
 	}
 	maps := map[int32]*[]render.TimeMapEntry{} // by version; nil entry: no time map
 	out := make([]Comment, 0, len(rows))
 	for _, a := range rows {
 		pin, perr := ParsePin(a.Pin)
 		if perr != nil {
-			return nil, perr
+			s.logger().WarnContext(ctx, "annotations: a stored pin cannot be read; the comment is handed without one", "annotation", a.ID.String(), "error", perr)
+			pin = nil
 		}
 		c := Comment{Annotation: a, Pin: pin}
 		if a.TimelineVersion != nil {
@@ -179,17 +185,33 @@ func (s *Source) OpenForProject(ctx context.Context, ws ids.WorkspaceID, project
 		}
 		out = append(out, c)
 	}
-	return out, nil
+	return out, total, nil
+}
+
+// RecordHandoff notes that the run was shown these comments. Only these are marked applied when the run ends well.
+func (s *Source) RecordHandoff(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, run uuid.UUID, comments []Comment) error {
+	list := make([]ids.AnnotationID, len(comments))
+	for i, c := range comments {
+		list[i] = c.Annotation.ID
+	}
+	if err := s.Store.RecordAnnotationHandoffs(ctx, ws, project, run, list); err != nil {
+		return fmt.Errorf("record the comments handed to the run: %w", err)
+	}
+	return nil
+}
+
+func (s *Source) logger() *slog.Logger {
+	if s.Logger != nil {
+		return s.Logger
+	}
+	return slog.Default()
 }
 
 func (s *Source) timeMap(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, version int) *[]render.TimeMapEntry {
 	if s.TimeMaps == nil {
 		return nil
 	}
-	log := s.Logger
-	if log == nil {
-		log = slog.Default()
-	}
+	log := s.logger()
 	r, err := s.Store.GetReadyRenderOfVersion(ctx, ws, project, version)
 	if err != nil {
 		if !errors.Is(err, store.ErrNotFound) {
@@ -205,16 +227,14 @@ func (s *Source) timeMap(ctx context.Context, ws ids.WorkspaceID, project ids.Pr
 	return &entries
 }
 
-// MarkAddressed is the end of a successful editor run: the comments and instructions that were open when the run started are applied
-// by it, in the version it made (nil when it made none), and each gets the editor's short answer. It returns how many it marked.
-func (s *Source) MarkAddressed(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, run uuid.UUID, version *int) (int, error) {
-	reply := "Looked at this; no change was needed."
-	if version != nil {
-		reply = fmt.Sprintf("Addressed in v%d.", *version)
-	}
-	rows, err := s.Store.ApplyAnnotations(ctx, ws, project, run, version, reply)
+// RunEnded is what a worker calls when an editor run has ended and its result is stored: if the run succeeded, the comments and
+// instructions it was handed (RecordHandoff) and that are still open are applied by it, in the version it made (none when it made
+// none), and each gets the editor's short answer. A comment the run was never shown is never marked. It returns how many it marked;
+// asking again marks nothing more.
+func (s *Source) RunEnded(ctx context.Context, run uuid.UUID) (int, error) {
+	n, err := s.Store.ApplyAnnotationsForRun(ctx, run)
 	if err != nil {
-		return 0, fmt.Errorf("mark comments applied: %w", err)
+		return 0, fmt.Errorf("mark the comments of the run applied: %w", err)
 	}
-	return len(rows), nil
+	return n, nil
 }

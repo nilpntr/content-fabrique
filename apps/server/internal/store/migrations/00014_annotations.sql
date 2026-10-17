@@ -105,6 +105,32 @@ END
 $$;
 -- +goose StatementEnd
 
+-- annotation_handoffs: which comments an editor run was handed (named in its context, or listed by get_comments). Only these are
+-- marked applied when the run ends: a comment the run never saw is not "dealt with". Insert-only for the app role; a row goes
+-- with its run or its comment through the owner's cascade.
+CREATE TABLE annotation_handoffs (
+    workspace_id  uuid        NOT NULL,
+    run_id        uuid        NOT NULL,
+    annotation_id uuid        NOT NULL,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (run_id, annotation_id),
+    CONSTRAINT annotation_handoffs_run_fkey FOREIGN KEY (workspace_id, run_id)
+        REFERENCES agent_runs (workspace_id, id) ON DELETE CASCADE,
+    CONSTRAINT annotation_handoffs_annotation_fkey FOREIGN KEY (workspace_id, annotation_id)
+        REFERENCES annotations (workspace_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX annotation_handoffs_annotation_idx ON annotation_handoffs (workspace_id, annotation_id);
+
+-- +goose StatementBegin
+DO $$
+BEGIN
+    EXECUTE format('GRANT SELECT, INSERT ON TABLE annotation_handoffs TO %I', public.cf_app_role());
+END
+$$;
+-- +goose StatementEnd
+
 -- +goose Down
 
+DROP TABLE annotation_handoffs;
 DROP TABLE annotations;

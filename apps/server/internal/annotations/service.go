@@ -32,6 +32,9 @@ const (
 	MaxPageSize     = 500
 	// MaxMs is the largest time a comment may name: 24 hours. Nothing in the product is longer, and it keeps nonsense out.
 	MaxMs int64 = 24 * 60 * 60 * 1000
+	// FrameToleranceMs is how far past the end of a clip or render a comment may reach: one frame at 30 fps, rounded up. The last frame
+	// of a video spans past its duration in a player's clock.
+	FrameToleranceMs int64 = 34
 )
 
 // Annotation is a comment as the service hands it out.
@@ -282,7 +285,7 @@ func (s *Service) Create(ctx context.Context, who Actor, in CreateInput) (Annota
 		if in.Project != nil && *in.Project != target.Project {
 			return errProjectMissing // the same answer as a target that is not there: no hint about other projects
 		}
-		if target.DurationMs > 0 && end > target.DurationMs {
+		if target.DurationMs > 0 && end > target.DurationMs+FrameToleranceMs {
 			return invalid("the range is past the end of the clip or render")
 		}
 		created, err = tx.CreateAnnotation(ctx, who.Workspace, store.NewAnnotation{
@@ -430,7 +433,8 @@ func (a Actor) isAuthor(c Annotation) bool {
 	return c.AuthorKind == store.AuthorUser && c.AuthorID == a.authorID()
 }
 
-// Update edits a comment. The author may change anything; another owner or editor only the status.
+// Update edits a comment. The author may change anything; another owner or editor only the status. A new start_ms alone shifts the
+// range, keeping its length; a new end_ms alone changes the length.
 func (s *Service) Update(ctx context.Context, who Actor, id ids.AnnotationID, in UpdateInput) (Annotation, *Error) {
 	if !who.canWrite() {
 		return Annotation{}, forbidden("your role in this workspace cannot change comments")
@@ -483,8 +487,9 @@ func (s *Service) Update(ctx context.Context, who Actor, id ids.AnnotationID, in
 			}
 			if in.EndMs != nil {
 				next.EndMs = *in.EndMs
-			} else if in.StartMs != nil && cur.EndMs == cur.StartMs {
-				next.EndMs = next.StartMs // a moment stays a moment when only its start moves
+			} else if in.StartMs != nil {
+				// Moving only the start moves the range: it keeps its length (a moment stays a moment).
+				next.EndMs = next.StartMs + (cur.EndMs - cur.StartMs)
 			}
 			if e := checkRange(next.StartMs, next.EndMs); e != nil {
 				return e
@@ -493,7 +498,7 @@ func (s *Service) Update(ctx context.Context, who Actor, id ids.AnnotationID, in
 			if err != nil {
 				return err
 			}
-			if target.DurationMs > 0 && next.EndMs > target.DurationMs {
+			if target.DurationMs > 0 && next.EndMs > target.DurationMs+FrameToleranceMs {
 				return invalid("the range is past the end of the clip or render")
 			}
 		}

@@ -205,7 +205,7 @@ func annotationsSuite(t *testing.T, st *store.Store, suffix string) {
 		if rows, err := st.ListAnnotations(ctx, b.ws.ID, store.AnnotationFilter{TargetType: store.AnnotationOnRender, TargetID: a.render.ID.UUID}, 10); err != nil || len(rows) != 0 {
 			t.Errorf("A's render listed in B: %d, %v", len(rows), err)
 		}
-		if rows, err := st.ListOpenAnnotationsForProject(ctx, b.ws.ID, a.project.ID, 10); err != nil || len(rows) != 0 {
+		if rows, _, err := st.ListOpenAnnotationsForProject(ctx, b.ws.ID, a.project.ID, 0, 10); err != nil || len(rows) != 0 {
 			t.Errorf("A's open comments in B: %d, %v", len(rows), err)
 		}
 		// A write in B that names A's project, version, comment or run is refused by the composite foreign keys, whatever the service

@@ -24,7 +24,8 @@ function toPin(pin: Annotation["pin"]): Pin | undefined {
 export function toReviewAnnotation(a: Annotation, me?: string): ReviewAnnotation | undefined {
   if (a.timeline_version === null) return undefined;
   const agent = a.author.kind === "agent";
-  const own = !agent && me !== undefined && a.author.id === me;
+  // A placeholder (a comment this tab is still saving) was written by the signed-in user, whether or not /v1/me has answered yet.
+  const own = !agent && (isLocalCommentId(a.id) || (me !== undefined && a.author.id === me));
   const pin = toPin(a.pin);
   return {
     id: a.id,

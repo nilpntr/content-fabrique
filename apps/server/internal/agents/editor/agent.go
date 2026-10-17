@@ -40,6 +40,7 @@ func NewAgent(d Deps) (runtime.Agent, error) {
 		Tools:   tools,
 		Opening: opening,
 		Context: d.runContext,
+		OnEnd:   d.endRun,
 		Budgets: DefaultBudgets,
 	}, nil
 }
@@ -96,6 +97,7 @@ func (d Deps) runContext(ctx context.Context, rc runtime.RunContext) ([]llm.Bloc
 		return nil, fmt.Errorf("list footage: %w", err)
 	}
 	status := "Timeline: none yet (version 0)."
+	now := timelineItems{ids: map[string]bool{}}
 	if det.Project.CurrentTimelineVersion != nil {
 		v := int(*det.Project.CurrentTimelineVersion)
 		vd, perr := d.Projects.Version(ctx, actor(ws), pid, v)
@@ -107,22 +109,23 @@ func (d Deps) runContext(ctx context.Context, rc runtime.RunContext) ([]llm.Bloc
 			return nil, fmt.Errorf("parse stored spec: %w", err)
 		}
 		status = "Timeline: " + timelineLine(v, spec) + ". Call get_timeline to read it."
+		now = itemsOf(v, spec)
 	}
 	// The creator's open comments on earlier versions, when there are any (a first run has none, and its context is unchanged).
-	comments, err := d.openComments(ctx, ws, pid)
+	comments, total, err := d.openComments(ctx, ws, pid, 0)
 	if err != nil {
 		return nil, err
 	}
-	var now timelineItems
-	if len(comments) > 0 {
-		if now, err = d.currentItems(ctx, ws, pid, det.Project.CurrentTimelineVersion); err != nil {
-			return nil, err
-		}
-	}
 	for _, caps := range contextSteps {
 		blocks := contextBlocks(det.Project.Format, det.Project.Brief, rows, status, caps)
-		blocks = append(blocks, commentsIntro(comments, now, caps.comments, caps.commentChars)...)
+		blocks = append(blocks, commentsIntro(comments, total, now, caps.comments, caps.commentChars)...)
 		if encodedSize(blocks) <= maxContextBytes {
+			// Only the comments this context shows (the rest are for get_comments to list) are the run's to deal with.
+			if shown := min(caps.comments, len(comments)); shown > 0 {
+				if err := d.Comments.RecordHandoff(ctx, ws, pid, rc.RunID, comments[:shown]); err != nil {
+					return nil, err
+				}
+			}
 			return blocks, nil
 		}
 	}

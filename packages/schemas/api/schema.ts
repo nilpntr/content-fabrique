@@ -558,7 +558,8 @@ export interface paths {
          *     (an output, `ren_`) or `timeline_version` (a stored version, `tl_`, for a version that has no render yet). A comment on a render
          *     or a version carries the project and the version it was made on (`project_id`, `timeline_version`), which the server reads from the
          *     target; `project_id` in the request is optional, and when it is there it must be the target's project (`404` otherwise). A
-         *     point comment has `end_ms` equal to `start_ms`. `pin` is a point or a box on the frame, normalised to 0..1 from the top left.
+         *     point comment has `end_ms` equal to `start_ms`; a range may reach at most 34 ms (one frame) past the end of the clip or render
+         *     when its length is known. `pin` is a point or a box on the frame, normalised to 0..1 from the top left.
          *     `kind` is `comment` (the default), `instruction`, or one of the constraints `include`, `exclude` and `prefer`. With `parent_id` the
          *     comment is a reply to a comment: it takes the target and range of that comment, has kind `comment` and no pin, and a reply to a reply is
          *     refused. `body` is plain text of at most 2,000 characters (a bare marker may have none, except a `comment` or an `instruction`).
@@ -598,7 +599,9 @@ export interface paths {
          *     change `status` (to resolve or reopen it), and the editor's replies are never edited (`403 insufficient_role`). `status` takes `open`
          *     or `resolved`: `applied` is set by the editor agent when a run has dealt with the comment, and a person reopens it with `open`.
          *     Editing the text, kind, range or pin of an applied comment reopens it. `remove_pin` takes the pin off. The range of a reply
-         *     cannot be changed (it follows its comment). Editing a comment moves the range of its replies with it.
+         *     cannot be changed (it follows its comment). Editing a comment moves the range of its replies with it. Sending only `start_ms`
+         *     shifts the range and keeps its length (a moment stays a moment); sending only `end_ms` changes the length; send both to set the
+         *     range. A range may reach at most 34 ms (one frame) past the end of the clip or render.
          */
         patch: operations["updateAnnotation"];
         trace?: never;

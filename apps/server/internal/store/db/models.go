@@ -85,6 +85,13 @@ type Annotation struct {
 	DeletedAt          *time.Time
 }
 
+type AnnotationHandoff struct {
+	WorkspaceID  ids.WorkspaceID
+	RunID        uuid.UUID
+	AnnotationID uuid.UUID
+	CreatedAt    time.Time
+}
+
 type Asset struct {
 	ID              ids.AssetID
 	WorkspaceID     ids.WorkspaceID

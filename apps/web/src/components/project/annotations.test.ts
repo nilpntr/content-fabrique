@@ -14,6 +14,12 @@ test("a person's comment is theirs or a teammate's, and the editor's is the edit
   expect(toReviewAnnotation(annotation(1, { author: { kind: "agent", id: ME } }), ME)?.author.own).toBeUndefined();
 });
 
+test("a comment this tab is still saving is the signed-in user's, whether or not /v1/me has answered", () => {
+  const placeholder = annotation(1, { id: "ann_local_4", author: { kind: "user", id: "usr_pending" } });
+  expect(toReviewAnnotation(placeholder, undefined)?.author).toEqual({ kind: "creator", name: "You", own: true });
+  expect(toReviewAnnotation(placeholder, ME)?.author).toEqual({ kind: "creator", name: "You", own: true });
+});
+
 test("the fields of the screen come from the fields of the API", () => {
   const mapped = toReviewAnnotation(
     annotation(2, { timeline_version: 2, start_ms: 4000, end_ms: 6000, kind: "instruction", body: "Bigger", status: "applied", addressed_in_version: 3, parent_id: annotationId(1), pin: { x: 0.25, y: 0.5 } }),

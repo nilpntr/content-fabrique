@@ -80,10 +80,12 @@ export function ProjectReview({
     return summary ? { type: "timeline_version", id: summary.id } : undefined;
   };
   const onCommentCreate = async (comment: ReviewAnnotation) => {
-    const saved = await actions.create(
-      { tempId: comment.id, version: comment.version, start_ms: comment.start_ms, end_ms: comment.end_ms, pin: comment.pin, body: comment.body },
-      targetOf(comment.version),
-    );
+    const target = targetOf(comment.version);
+    // The API takes a range one frame past the end of a render and no more: a comment dragged to the very end stops at the last frame.
+    const length = target?.type === "render" ? readyRender?.duration_ms : undefined;
+    const end_ms = typeof length === "number" ? Math.min(comment.end_ms, length) : comment.end_ms;
+    const start_ms = Math.min(comment.start_ms, end_ms);
+    const saved = await actions.create({ tempId: comment.id, version: comment.version, start_ms, end_ms, pin: comment.pin, body: comment.body }, target);
     return saved ? toReviewAnnotation(saved, me) : undefined;
   };
   const commentsNote = annotations.isError ? "Your comments could not be loaded. Reload the page to try again." : undefined;

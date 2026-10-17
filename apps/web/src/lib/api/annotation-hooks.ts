@@ -45,6 +45,10 @@ export interface CommentPatch {
   status?: "open" | "resolved";
 }
 
+/** Put the saved comment where the placeholder was, or add it when a refetch has taken the placeholder away meanwhile. */
+const settle = (list: Annotation[], id: string, saved: Annotation) =>
+  list.some((a) => a.id === id) ? list.map((a) => (a.id === id ? saved : a)) : [...list.filter((a) => a.id !== saved.id), saved].sort(byId);
+
 const byId = (a: Annotation, b: Annotation) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /**
@@ -60,7 +64,15 @@ export function useCommentActions(projectId: string) {
   const key = useMemo(() => [ANNOTATIONS_QUERY_KEY, userId, orgId, projectId], [userId, orgId, projectId]);
   const [error, setError] = useState<string | undefined>();
 
-  const edit = useCallback((change: (list: Annotation[]) => Annotation[]) => queryClient.setQueryData<Annotation[]>(key, (old) => change(old ?? [])), [queryClient, key]);
+  // A refetch that is on its way was asked for before this change and would answer without it: it is cancelled first (synchronously,
+  // so the screen sees the change at once), and the cache is only ever changed by id.
+  const edit = useCallback(
+    (change: (list: Annotation[]) => Annotation[]) => {
+      void queryClient.cancelQueries({ queryKey: key });
+      return queryClient.setQueryData<Annotation[]>(key, (old) => change(old ?? []));
+    },
+    [queryClient, key],
+  );
   const current = useCallback(() => queryClient.getQueryData<Annotation[]>(key) ?? [], [queryClient, key]);
   const fail = useCallback((e: unknown) => setError(commentMessage(e)), []);
 
@@ -81,6 +93,7 @@ export function useCommentActions(projectId: string) {
         body: input.body,
         status: "open",
         parent_id: null,
+        // The real id once /v1/me has answered; until then the mapping shows a placeholder (a local id) as the signed-in user's own.
         author: { kind: "user", id: me ?? "usr_pending" },
         applied_in_run_id: null,
         addressed_in_version: null,
@@ -99,7 +112,7 @@ export function useCommentActions(projectId: string) {
           body: input.body,
           ...(input.pin ? { pin: { x: input.pin.x, y: input.pin.y } } : {}),
         });
-        edit((list) => list.map((a) => (a.id === input.tempId ? saved : a)));
+        edit((list) => settle(list, input.tempId, saved));
         return saved;
       } catch (e) {
         edit((list) => list.filter((a) => a.id !== input.tempId));
@@ -125,7 +138,7 @@ export function useCommentActions(projectId: string) {
       edit((list) => list.map((a) => (a.id === id ? guess : a)));
       try {
         const saved = await updateAnnotation(getClient(), id, patch);
-        edit((list) => list.map((a) => (a.id === id ? saved : a)));
+        edit((list) => settle(list, id, saved));
         return saved;
       } catch (e) {
         edit((list) => list.map((a) => (a.id === id ? before : a)));
@@ -145,6 +158,8 @@ export function useCommentActions(projectId: string) {
       edit((list) => list.filter((a) => a.id !== id && a.parent_id !== id));
       try {
         await deleteAnnotation(getClient(), id);
+        // A refetch that started before the delete finished may have brought it back: it is gone for good now.
+        edit((list) => list.filter((a) => a.id !== id && a.parent_id !== id));
         return true;
       } catch (e) {
         edit((list) => [...list, ...gone.filter((g) => !list.some((a) => a.id === g.id))].sort(byId));

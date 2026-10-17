@@ -3,7 +3,9 @@ package editor
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -26,10 +28,14 @@ const ToolGetComments = "get_comments"
 // CommentSource is where the editor reads the creator's open comments from, and where it reports that a run dealt with them.
 // *annotations.Source is the real one. Deps.Comments may be nil (a process without comments): the run then has none.
 type CommentSource interface {
-	// OpenForProject returns the open comments on the project's renders, resolved through their time maps.
-	OpenForProject(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID) ([]annotations.Comment, error)
-	// MarkAddressed marks the comments and instructions the run was handed as applied by the run, in the version it made (nil: none).
-	MarkAddressed(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, run uuid.UUID, version *int) (int, error)
+	// OpenForProject returns a page of the open comments on the project's renders (offset skips that many; a page is at most
+	// annotations.MaxEditorComments), resolved through their time maps, and how many open comments there are in all.
+	OpenForProject(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, offset int) ([]annotations.Comment, int, error)
+	// RecordHandoff notes that the run was shown these comments: only they are marked applied when the run ends well.
+	RecordHandoff(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, run uuid.UUID, comments []annotations.Comment) error
+	// RunEnded marks the comments the run was handed as applied by it, in the version it made, if the run succeeded. The worker calls
+	// it once the run's result is stored (Agent.OnEnd).
+	RunEnded(ctx context.Context, run uuid.UUID) (int, error)
 }
 
 // timelineItems is what the comments need to know about the current timeline: its version and the ids of its items.
@@ -59,6 +65,11 @@ func itemIDs(spec *timeline.Spec) map[string]bool {
 	return out
 }
 
+// itemsOf is what the comments need to know about a spec.
+func itemsOf(version int, spec *timeline.Spec) timelineItems {
+	return timelineItems{version: version, ids: itemIDs(spec)}
+}
+
 // currentItems reads the project's current version and the ids of its items; version 0 and no items before the first edit.
 func (d Deps) currentItems(ctx context.Context, ws ids.WorkspaceID, pid ids.ProjectID, current *int32) (timelineItems, error) {
 	if current == nil {
@@ -73,19 +84,19 @@ func (d Deps) currentItems(ctx context.Context, ws ids.WorkspaceID, pid ids.Proj
 	if err != nil {
 		return timelineItems{}, fmt.Errorf("parse stored spec: %w", err)
 	}
-	return timelineItems{version: v, ids: itemIDs(spec)}, nil
+	return itemsOf(v, spec), nil
 }
 
-// openComments reads the comments, or none without a source.
-func (d Deps) openComments(ctx context.Context, ws ids.WorkspaceID, pid ids.ProjectID) ([]annotations.Comment, error) {
+// openComments reads a page of the comments, or none without a source.
+func (d Deps) openComments(ctx context.Context, ws ids.WorkspaceID, pid ids.ProjectID, offset int) ([]annotations.Comment, int, error) {
 	if d.Comments == nil {
-		return nil, nil
+		return nil, 0, nil
 	}
-	cs, err := d.Comments.OpenForProject(ctx, ws, pid)
+	cs, total, err := d.Comments.OpenForProject(ctx, ws, pid, offset)
 	if err != nil {
-		return nil, fmt.Errorf("open comments: %w", err)
+		return nil, 0, fmt.Errorf("open comments: %w", err)
 	}
-	return cs, nil
+	return cs, total, nil
 }
 
 // pct formats a 0..1 position as a whole percent.
@@ -149,30 +160,29 @@ func standing(k string) bool {
 
 const commentsGuide = "Comments are the creator's requests for this revision. Make the edit each one asks for, using the items it points at; if one cannot be done, say so in finish. Comments of kind include, exclude and prefer are constraints on that range of the video that hold for every revision. A comment on an older version points at items by id: an item that is no longer in the timeline has been changed or removed since, so find what now plays where the creator meant."
 
-// commentsIntro is the run context's part about comments: a count, and the first few. get_comments has all of them.
-func commentsIntro(cs []annotations.Comment, now timelineItems, shown, bodyChars int) []llm.Block {
+// commentsIntro is the run context's part about comments: how many there are, and the first few (shown of them). get_comments has
+// all of them, a page at a time; only the ones the run is shown here, or that get_comments lists, are the run's to deal with.
+func commentsIntro(cs []annotations.Comment, total int, now timelineItems, shown, bodyChars int) []llm.Block {
 	if len(cs) == 0 {
 		return nil
 	}
+	shown = min(shown, len(cs))
 	requests := 0
 	for _, c := range cs {
 		if !standing(c.Annotation.Kind) {
 			requests++
 		}
 	}
-	head := fmt.Sprintf("The creator left %d open comments on earlier versions (%d requests, %d constraints). %s", len(cs), requests, len(cs)-requests, commentsGuide)
-	if shown >= len(cs) {
-		head += " They follow."
+	head := fmt.Sprintf("The creator left %d open comments on earlier versions. %s", total, commentsGuide)
+	if shown >= total {
+		head += fmt.Sprintf(" They follow (%d requests, %d constraints).", requests, len(cs)-requests)
 	} else {
-		head += " get_comments lists all of them."
+		head += fmt.Sprintf(" The first %d follow; %d more are not shown here. Call get_comments to read them: it lists %d at a time (offset 0 is the first page), and a comment you have not read is not one you will be taken to have dealt with.", shown, total-shown, annotations.MaxEditorComments)
 	}
 	blocks := []llm.Block{llm.TextBlock(head)}
 	if shown > 0 {
 		var b strings.Builder
-		for i, c := range cs {
-			if i >= shown {
-				break
-			}
+		for _, c := range cs[:shown] {
 			b.WriteString(commentText(c, now, bodyChars))
 		}
 		blocks = append(blocks, llm.TextBlock(strings.TrimRight(b.String(), "\n")))
@@ -182,7 +192,12 @@ func commentsIntro(cs []annotations.Comment, now timelineItems, shown, bodyChars
 
 // ---- get_comments -----------------------------------------------------------------------------------------------
 
-func (d Deps) getComments(ctx context.Context, rc runtime.RunContext, _ noArgs) (runtime.Result, error) {
+type getCommentsArgs struct {
+	// Offset is how many of the open comments to skip: 0 (or none) for the first page.
+	Offset int `json:"offset"`
+}
+
+func (d Deps) getComments(ctx context.Context, rc runtime.RunContext, in getCommentsArgs) (runtime.Result, error) {
 	pid, ws, err := project(rc)
 	if err != nil {
 		return runtime.Result{}, err
@@ -191,32 +206,49 @@ func (d Deps) getComments(ctx context.Context, rc runtime.RunContext, _ noArgs) 
 	if perr != nil {
 		return runtime.Result{}, projectErr(perr)
 	}
-	cs, err := d.openComments(ctx, ws, pid)
+	if in.Offset < 0 {
+		return runtime.Result{}, runtime.UserErrorf("offset cannot be negative")
+	}
+	cs, total, err := d.openComments(ctx, ws, pid, in.Offset)
 	if err != nil {
 		return runtime.Result{}, err
 	}
-	if len(cs) == 0 {
+	if total == 0 {
 		return runtime.Text("There are no open comments on this project."), nil
+	}
+	if len(cs) == 0 {
+		return runtime.Text(fmt.Sprintf("There are %d open comments and none starts at offset %d. Use an offset below %d.", total, in.Offset, total)), nil
 	}
 	now, err := d.currentItems(ctx, ws, pid, det.Project.CurrentTimelineVersion)
 	if err != nil {
 		return runtime.Result{}, err
 	}
+	// What this call lists is what the run has been handed.
+	if err := d.Comments.RecordHandoff(ctx, ws, pid, rc.RunID, cs); err != nil {
+		return runtime.Result{}, err
+	}
+	end := in.Offset + len(cs)
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d open comments, oldest first. The current timeline is version %d. %s\n\n", len(cs), now.version, commentsGuide)
+	fmt.Fprintf(&b, "Open comments %d to %d of %d, oldest first. The current timeline is version %d. %s\n", in.Offset+1, end, total, now.version, commentsGuide)
+	if end < total {
+		fmt.Fprintf(&b, "%d more remain: call get_comments again with offset %d for the next page.\n", total-end, end)
+	}
+	b.WriteByte('\n')
 	for _, c := range cs {
 		b.WriteString(commentText(c, now, 0))
 	}
 	return runtime.Text(strings.TrimRight(b.String(), "\n")), nil
 }
 
-// markCommentsAddressed is the end of a run that finished: the comments it was handed are applied by it.
-func (d Deps) markCommentsAddressed(ctx context.Context, rc runtime.RunContext, ws ids.WorkspaceID, pid ids.ProjectID, version *int) error {
+// endRun is the agent's OnEnd: the run has ended and its result is stored, so the comments it was handed are applied by it (if it
+// succeeded). It cannot fail the run, which is over; a failure is logged, and the comments stay open for the next run.
+func (d Deps) endRun(run uuid.UUID) {
 	if d.Comments == nil {
-		return nil
+		return
 	}
-	if _, err := d.Comments.MarkAddressed(ctx, ws, pid, rc.RunID, version); err != nil {
-		return fmt.Errorf("mark the comments addressed: %w", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := d.Comments.RunEnded(ctx, run); err != nil {
+		slog.ErrorContext(ctx, "editor: marking the comments of an ended run failed; they stay open", "run", run.String(), "error", err)
 	}
-	return nil
 }

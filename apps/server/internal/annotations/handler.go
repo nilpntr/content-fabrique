@@ -63,9 +63,10 @@ func targetPrefix(targetType string) string {
 	return ids.PrefixTimeline
 }
 
-// Of converts a stored comment to its API form.
-func Of(a Annotation) (api.Annotation, error) {
-	out := api.Annotation{
+// Of converts a stored comment to its API form. A pin that cannot be read is left out and pinOK is false: it is the caller's to log,
+// never a reason to fail a whole list.
+func Of(a Annotation) (out api.Annotation, pinOK bool) {
+	out = api.Annotation{
 		Id: a.ID.String(), TargetType: api.AnnotationTargetType(a.TargetType), TargetId: ids.Encode(targetPrefix(a.TargetType), a.TargetID),
 		StartMs: a.StartMs, EndMs: a.EndMs, Kind: api.AnnotationKind(a.Kind), Body: a.Body, Status: api.AnnotationStatus(a.Status),
 		Author:    api.AnnotationAuthor{Kind: api.AuthorKind(a.AuthorKind), Id: a.AuthorID},
@@ -92,13 +93,10 @@ func Of(a Annotation) (api.Annotation, error) {
 		out.AddressedInVersion = &v
 	}
 	pin, err := ParsePin(a.Pin)
-	if err != nil {
-		return api.Annotation{}, err
-	}
 	if pin != nil {
 		out.Pin = &api.AnnotationPin{X: pin.X, Y: pin.Y, W: pin.W, H: pin.H}
 	}
-	return out, nil
+	return out, err == nil
 }
 
 func pinOf(p *api.AnnotationPin) *Pin {
@@ -109,10 +107,9 @@ func pinOf(p *api.AnnotationPin) *Pin {
 }
 
 func (h *CommentAPI) convert(ctx context.Context, a Annotation) (api.Annotation, *Error) {
-	out, err := Of(a)
-	if err != nil {
-		h.logger.ErrorContext(ctx, "annotations: converting a stored comment failed", "error", err)
-		return api.Annotation{}, &Error{Status: 500, Code: api.ErrorCodeInternalError, Message: "something went wrong"}
+	out, pinOK := Of(a)
+	if !pinOK {
+		h.logger.WarnContext(ctx, "annotations: a stored pin cannot be read; the comment is shown without one", "annotation", a.ID.String())
 	}
 	return out, nil
 }

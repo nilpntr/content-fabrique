@@ -135,11 +135,11 @@ func TestCreateValidation(t *testing.T) {
 	bad("an end before the start", func(in *CreateInput) { in.EndMs = i64(999) })
 	bad("an end past 24 hours", func(in *CreateInput) { in.EndMs = i64(MaxMs + 1) })
 	bad("no start", func(in *CreateInput) { in.StartMs = nil })
-	bad("past the end of the render (30 s)", func(in *CreateInput) { in.StartMs, in.EndMs = i64(29000), i64(30001) })
+	bad("past the end of the render (30 s) by more than a frame", func(in *CreateInput) { in.StartMs, in.EndMs = i64(29000), i64(30000+FrameToleranceMs+1) })
 	good("up to the end of the render", func(in *CreateInput) { in.StartMs, in.EndMs = i64(29000), i64(30000) })
 	good("a moment at the very start", func(in *CreateInput) { in.StartMs = i64(0) })
 	bad("past the end of the clip (60 s)", func(in *CreateInput) {
-		in.TargetType, in.TargetID, in.EndMs = "asset", a.assetID(), i64(60001)
+		in.TargetType, in.TargetID, in.EndMs = "asset", a.assetID(), i64(60000+FrameToleranceMs+1)
 	})
 	good("a version has no known length", func(in *CreateInput) {
 		in.TargetType, in.TargetID, in.EndMs = "timeline_version", a.versionID(), i64(900000)
@@ -405,8 +405,7 @@ func TestUpdateRules(t *testing.T) {
 		"a long body":                {Body: str(strings.Repeat("a", 2001))},
 		"text that is not UTF-8":     {Body: str("a\xffb")},
 		"an end before the start":    {StartMs: i64(9000), EndMs: i64(8000)},
-		"a start past the old end":   {StartMs: i64(9000)},
-		"past the end of the render": {EndMs: i64(30001)},
+		"past the end of the render": {EndMs: i64(30000 + FrameToleranceMs + 1)},
 		"a pin off the frame":        {Pin: &Pin{X: 2, Y: 0}},
 		"pin and remove_pin":         {Pin: &Pin{X: 0.5, Y: 0.5}, RemovePin: true},
 		"kind exclude with no text":  {Kind: str("comment"), Body: str("")},
@@ -440,7 +439,7 @@ func TestEditingWhatTheEditorAppliedReopensIt(t *testing.T) {
 	a := e.a
 	c := e.comment(a.editor, a, CreateInput{})
 	run := e.run(a)
-	marked, err := e.st.ApplyAnnotations(ctx, a.ws.ID, a.project.ID, run, intp(3), "Addressed in v3.")
+	marked, err := e.applyHanded(a, run, intp(3), "Addressed in v3.")
 	if err != nil || len(marked) != 1 {
 		t.Fatalf("apply: %v, %v", marked, err)
 	}
@@ -456,7 +455,7 @@ func TestEditingWhatTheEditorAppliedReopensIt(t *testing.T) {
 	// Applied again, then the author changes the text: it is open again.
 	c2 := e.comment(a.editor, a, CreateInput{})
 	run2 := e.run(a)
-	if _, err := e.st.ApplyAnnotations(ctx, a.ws.ID, a.project.ID, run2, nil, "Looked at this."); err != nil {
+	if _, err := e.applyHanded(a, run2, nil, "Looked at this."); err != nil {
 		t.Fatal(err)
 	}
 	got, uerr := e.svc.Update(ctx, a.editor, c2.ID, UpdateInput{Body: str("actually, the other way")})
@@ -465,7 +464,7 @@ func TestEditingWhatTheEditorAppliedReopensIt(t *testing.T) {
 	}
 	// Reopened by hand too.
 	c3 := e.comment(a.editor, a, CreateInput{})
-	if _, err := e.st.ApplyAnnotations(ctx, a.ws.ID, a.project.ID, e.run(a), intp(2), "Addressed in v2."); err != nil {
+	if _, err := e.applyHanded(a, e.run(a), intp(2), "Addressed in v2."); err != nil {
 		t.Fatal(err)
 	}
 	if got, uerr = e.svc.Update(ctx, a.owner, c3.ID, UpdateInput{Status: str("open")}); uerr != nil || got.Status != "open" || got.AppliedInRunID.Valid {
@@ -480,7 +479,7 @@ func TestTheEditorsRepliesAreNotAPersonsToChange(t *testing.T) {
 	ctx := context.Background()
 	a := e.a
 	c := e.comment(a.editor, a, CreateInput{})
-	if _, err := e.st.ApplyAnnotations(ctx, a.ws.ID, a.project.ID, e.run(a), intp(2), "Addressed in v2."); err != nil {
+	if _, err := e.applyHanded(a, e.run(a), intp(2), "Addressed in v2."); err != nil {
 		t.Fatal(err)
 	}
 	rows, _, _ := e.svc.List(ctx, a.owner, ListQuery{Project: &a.project.ID})
@@ -571,9 +570,19 @@ func TestApplyAnnotations(t *testing.T) {
 		t.Fatal(err)
 	}
 	foreignOpen := e.comment(b.owner, b, CreateInput{})
+	// Older than the run, but the run was never shown it.
+	unseen := e.comment(a.owner, a, CreateInput{StartMs: i64(4500)})
 	run := e.run(a)
-	// Written after the run was created: not handed to it.
 	late := e.comment(a.owner, a, CreateInput{StartMs: i64(5000)})
+	// The run was shown these (and a comment of another workspace, and a resolved one, which are not recorded or not marked).
+	handed := []ids.AnnotationID{note.ID, instr.ID, exclude.ID, resolved.ID, foreignOpen.ID}
+	if err := e.st.RecordAnnotationHandoffs(ctx, a.ws.ID, a.project.ID, run, handed); err != nil {
+		t.Fatal(err)
+	}
+	var recorded int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM annotation_handoffs WHERE run_id = $1`, run).Scan(&recorded); err != nil || recorded != 4 {
+		t.Fatalf("handoffs recorded: %d, %v (the other workspace's comment must not be among them)", recorded, err)
+	}
 
 	marked, err := e.st.ApplyAnnotations(ctx, a.ws.ID, a.project.ID, run, intp(3), "Addressed in v3.")
 	if err != nil {
@@ -596,7 +605,7 @@ func TestApplyAnnotations(t *testing.T) {
 			t.Errorf("%s: %+v", c.Kind, got)
 		}
 	}
-	for name, c := range map[string]Annotation{"a standing constraint": exclude, "a resolved comment": resolved, "a comment written during the run": late} {
+	for name, c := range map[string]Annotation{"a standing constraint": exclude, "a resolved comment": resolved, "a comment the run was never shown": unseen, "a comment written during the run": late} {
 		if got := status(a.ws, c.ID); got.Status == "applied" || got.AppliedInRunID.Valid {
 			t.Errorf("%s was marked: %+v", name, got)
 		}
@@ -630,9 +639,17 @@ func TestApplyAnnotations(t *testing.T) {
 		t.Errorf("a foreign run changed A's comment: %+v", got)
 	}
 	// The open list for the editor: what is still open and not a reply.
-	open, err := e.st.ListOpenAnnotationsForProject(ctx, a.ws.ID, a.project.ID, 50)
-	if err != nil || len(open) != 2 || open[0].ID != exclude.ID || open[1].ID != late.ID {
-		t.Errorf("open for the editor: %+v, %v", open, err)
+	open, total, err := e.st.ListOpenAnnotationsForProject(ctx, a.ws.ID, a.project.ID, 0, 50)
+	if err != nil || total != 3 || len(open) != 3 || open[0].ID != exclude.ID || open[1].ID != unseen.ID || open[2].ID != late.ID {
+		t.Errorf("open for the editor: %d of %d, %v", len(open), total, err)
+	}
+	// Pages: the total is the whole, the page is a slice of it.
+	page, total, err := e.st.ListOpenAnnotationsForProject(ctx, a.ws.ID, a.project.ID, 1, 1)
+	if err != nil || total != 3 || len(page) != 1 || page[0].ID != unseen.ID {
+		t.Errorf("page: %+v of %d, %v", page, total, err)
+	}
+	if page, total, err = e.st.ListOpenAnnotationsForProject(ctx, a.ws.ID, a.project.ID, 9, 5); err != nil || total != 3 || len(page) != 0 {
+		t.Errorf("a page past the end: %d of %d, %v", len(page), total, err)
 	}
 }
 
@@ -647,4 +664,168 @@ func (e *env) run(tn *tenant) uuid.UUID {
 		e.t.Fatal(err)
 	}
 	return r.ID
+}
+
+// The worker's end-of-run hook knows only the run id: the run's own row says the workspace and project, and only a run that
+// succeeded marks anything.
+func TestApplyAnnotationsForRun(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	a := e.a
+	c := e.comment(a.owner, a, CreateInput{StartMs: i64(1000)})
+	handedOnly := e.comment(a.owner, a, CreateInput{StartMs: i64(2000)})
+	run, failed := e.run(a), e.run(a)
+	for _, r := range []uuid.UUID{run, failed} {
+		if err := e.st.RecordAnnotationHandoffs(ctx, a.ws.ID, a.project.ID, r, []ids.AnnotationID{c.ID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	end := func(id uuid.UUID, status string) {
+		t.Helper()
+		reason := ""
+		if status == "failed" {
+			reason = "budget"
+		}
+		if _, err := e.pool.Exec(ctx, `UPDATE agent_runs SET status = $2, failure_reason = NULLIF($3, ''), finished_at = now() WHERE id = $1`, id, status, reason); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// A run that is still going, or that failed, marks nothing.
+	if n, err := e.st.ApplyAnnotationsForRun(ctx, run); err != nil || n != 0 {
+		t.Errorf("a run that has not ended: %d, %v", n, err)
+	}
+	end(failed, "failed")
+	if n, err := e.st.ApplyAnnotationsForRun(ctx, failed); err != nil || n != 0 {
+		t.Errorf("a failed run: %d, %v", n, err)
+	}
+	if got, _ := e.st.GetAnnotation(ctx, a.ws.ID, c.ID); got.Status != "open" {
+		t.Fatalf("marked by a run that did not succeed: %+v", got)
+	}
+	// A run id that is nobody's.
+	if n, err := e.st.ApplyAnnotationsForRun(ctx, uuid.Must(uuid.NewV7())); err != nil || n != 0 {
+		t.Errorf("an unknown run: %d, %v", n, err)
+	}
+
+	// The run made version 3: the comment it was handed is addressed in it; the one it was not handed stays open.
+	if _, err := e.st.AddTimelineVersion(ctx, a.ws.ID, a.project.ID, store.NewTimelineVersion{
+		Version: 3, Parent: 2, Spec: json.RawMessage(`{"schema":"x"}`), AuthorKind: store.AuthorAgent, AuthorID: ids.Encode(ids.PrefixRun, run),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	end(run, "succeeded")
+	if n, err := e.st.ApplyAnnotationsForRun(ctx, run); err != nil || n != 1 {
+		t.Fatalf("the run that succeeded: %d, %v", n, err)
+	}
+	got, _ := e.st.GetAnnotation(ctx, a.ws.ID, c.ID)
+	if got.Status != "applied" || got.AppliedInRunID.Bytes != run || got.AddressedInVersion == nil || *got.AddressedInVersion != 3 {
+		t.Errorf("handed comment: %+v", got)
+	}
+	if got, _ := e.st.GetAnnotation(ctx, a.ws.ID, handedOnly.ID); got.Status != "open" {
+		t.Errorf("a comment the run never saw: %+v", got)
+	}
+	if n, err := e.st.ApplyAnnotationsForRun(ctx, run); err != nil || n != 0 {
+		t.Errorf("a second call: %d, %v", n, err)
+	}
+}
+
+func TestEditingARangeByItsStartShiftsIt(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	a := e.a
+	c := e.comment(a.owner, a, CreateInput{StartMs: i64(4000), EndMs: i64(6000)})
+	got, err := e.svc.Update(ctx, a.owner, c.ID, UpdateInput{StartMs: i64(10000)})
+	if err != nil || got.StartMs != 10000 || got.EndMs != 12000 {
+		t.Errorf("start only: %d-%d, %v", got.StartMs, got.EndMs, err)
+	}
+	if got, err = e.svc.Update(ctx, a.owner, c.ID, UpdateInput{EndMs: i64(15000)}); err != nil || got.StartMs != 10000 || got.EndMs != 15000 {
+		t.Errorf("end only: %d-%d, %v", got.StartMs, got.EndMs, err)
+	}
+	_, uerr := e.svc.Update(ctx, a.owner, c.ID, UpdateInput{EndMs: i64(5000)})
+	wantErr(t, "an end before the start", uerr, 400)
+	// A shift that pushes the end past the render (30 s) is refused, a frame of slack is not.
+	_, uerr = e.svc.Update(ctx, a.owner, c.ID, UpdateInput{StartMs: i64(28000)})
+	wantErr(t, "a shift past the end of the render", uerr, 400)
+	if got, err = e.svc.Update(ctx, a.owner, c.ID, UpdateInput{StartMs: i64(20000), EndMs: i64(30000 + FrameToleranceMs)}); err != nil {
+		t.Errorf("one frame past the end: %v", err)
+	}
+	_, uerr = e.svc.Update(ctx, a.owner, c.ID, UpdateInput{EndMs: i64(30000 + FrameToleranceMs + 1)})
+	wantErr(t, "more than a frame past the end", uerr, 400)
+	// The same tolerance when creating.
+	_, cerr := e.svc.Create(ctx, a.owner, CreateInput{TargetType: "render", TargetID: a.renderID(), StartMs: i64(29000), EndMs: i64(30000 + FrameToleranceMs), Body: "x"})
+	if cerr != nil {
+		t.Errorf("create one frame past the end: %v", cerr)
+	}
+	_, cerr = e.svc.Create(ctx, a.owner, CreateInput{TargetType: "render", TargetID: a.renderID(), StartMs: i64(29000), EndMs: i64(30000 + FrameToleranceMs + 1), Body: "x"})
+	wantErr(t, "create more than a frame past the end", cerr, 400)
+}
+
+// applyHanded ends a run that was shown every open comment of the project: they are recorded as handed, then marked.
+func (e *env) applyHanded(tn *tenant, run uuid.UUID, version *int, reply string) ([]store.Annotation, error) {
+	e.t.Helper()
+	ctx := context.Background()
+	open, _, err := e.st.ListOpenAnnotationsForProject(ctx, tn.ws.ID, tn.project.ID, 0, 500)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	list := make([]ids.AnnotationID, len(open))
+	for i, a := range open {
+		list[i] = a.ID
+	}
+	if err := e.st.RecordAnnotationHandoffs(ctx, tn.ws.ID, tn.project.ID, run, list); err != nil {
+		e.t.Fatal(err)
+	}
+	return e.st.ApplyAnnotations(ctx, tn.ws.ID, tn.project.ID, run, version, reply)
+}
+
+func TestTheEditorsSourcePagesAndToleratesABadPin(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	a := e.a
+	var first Annotation
+	for i := range MaxEditorComments + 5 {
+		c := e.comment(a.owner, a, CreateInput{StartMs: i64(int64(i) * 10)})
+		if i == 0 {
+			first = c
+		}
+	}
+	// A pin the table accepts (an object) that is not a pin.
+	if _, err := e.pool.Exec(ctx, `UPDATE annotations SET pin = '{"x": "nope"}' WHERE id = $1`, first.ID.UUID); err != nil {
+		t.Fatal(err)
+	}
+	src := &Source{Store: e.st, Logger: quiet}
+
+	page, total, err := src.OpenForProject(ctx, a.ws.ID, a.project.ID, 0)
+	if err != nil || total != MaxEditorComments+5 || len(page) != MaxEditorComments {
+		t.Fatalf("first page: %d of %d, %v", len(page), total, err)
+	}
+	if page[0].Annotation.ID != first.ID || page[0].Pin != nil {
+		t.Errorf("the comment with a bad pin: %+v", page[0])
+	}
+	rest, total, err := src.OpenForProject(ctx, a.ws.ID, a.project.ID, MaxEditorComments)
+	if err != nil || total != MaxEditorComments+5 || len(rest) != 5 {
+		t.Fatalf("second page: %d of %d, %v", len(rest), total, err)
+	}
+	// Reading hands nothing over; handing over is explicit, and only for what is named.
+	var handed int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM annotation_handoffs`).Scan(&handed); err != nil || handed != 0 {
+		t.Errorf("handoffs after reading: %d, %v", handed, err)
+	}
+	run := e.run(a)
+	if err := src.RecordHandoff(ctx, a.ws.ID, a.project.ID, run, rest); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM annotation_handoffs WHERE run_id = $1`, run).Scan(&handed); err != nil || handed != 5 {
+		t.Errorf("handoffs after recording the second page: %d, %v", handed, err)
+	}
+
+	// The API lists the comment, without the pin, instead of failing the list.
+	rows, _, lerr := e.svc.List(ctx, a.viewer, ListQuery{Project: &a.project.ID, Limit: 1})
+	if lerr != nil || len(rows) != 1 {
+		t.Fatal(lerr)
+	}
+	out, pinOK := Of(rows[0])
+	if pinOK || out.Pin != nil || out.Id != first.ID.String() {
+		t.Errorf("Of: pinOK %v, pin %v", pinOK, out.Pin)
+	}
 }

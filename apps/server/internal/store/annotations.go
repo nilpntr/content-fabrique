@@ -3,9 +3,11 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/nilpntr/content-fabrique/internal/ids"
@@ -209,13 +211,32 @@ func (s *Store) SoftDeleteAnnotation(ctx context.Context, ws ids.WorkspaceID, id
 }
 
 // ListOpenAnnotationsForProject returns up to limit open comments (not replies) on the renders and versions of a project, oldest
-// first: what an editor run is handed.
-func (s *Store) ListOpenAnnotationsForProject(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, limit int) ([]Annotation, error) {
-	if limit < 1 {
-		return nil, fmt.Errorf("%w: limit %d", ErrInvalid, limit)
+// first, after skipping offset of them: what an editor run may be handed. total is how many open comments there are.
+func (s *Store) ListOpenAnnotationsForProject(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, offset, limit int) (rows []Annotation, total int, err error) {
+	if limit < 1 || offset < 0 {
+		return nil, 0, fmt.Errorf("%w: limit %d, offset %d", ErrInvalid, limit, offset)
 	}
-	rows, err := s.q.ListOpenAnnotationsForProject(ctx, db.ListOpenAnnotationsForProjectParams{WorkspaceID: ws, ProjectID: project, RowLimit: int32(min(limit, maxAnnotationRowLimit))}) //nolint:gosec // capped
-	return rows, mapErr(err)
+	rows, err = s.q.ListOpenAnnotationsForProject(ctx, db.ListOpenAnnotationsForProjectParams{ //nolint:gosec // capped
+		WorkspaceID: ws, ProjectID: project, RowLimit: int32(min(limit, maxAnnotationRowLimit)), RowOffset: int32(min(offset, 1<<30)),
+	})
+	if err != nil {
+		return nil, 0, mapErr(err)
+	}
+	n, err := s.q.CountOpenAnnotationsForProject(ctx, db.CountOpenAnnotationsForProjectParams{WorkspaceID: ws, ProjectID: project})
+	return rows, int(n), mapErr(err)
+}
+
+// RecordAnnotationHandoffs notes that the run was handed these comments of the project. Only open comments of this project and
+// workspace count (and only for a run of that project); the rest of the list is ignored. Doing it twice is harmless.
+func (s *Store) RecordAnnotationHandoffs(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, run uuid.UUID, annotations []ids.AnnotationID) error {
+	if len(annotations) == 0 {
+		return nil
+	}
+	list := make([]uuid.UUID, len(annotations))
+	for i, a := range annotations {
+		list[i] = a.UUID
+	}
+	return mapErr(s.q.RecordAnnotationHandoffs(ctx, db.RecordAnnotationHandoffsParams{WorkspaceID: ws, ProjectID: project, RunID: run, AnnotationIds: list}))
 }
 
 // GetReadyRenderOfVersion returns the newest ready render of a version of a project (any profile), or ErrNotFound.
@@ -227,9 +248,9 @@ func (s *Store) GetReadyRenderOfVersion(ctx context.Context, ws ids.WorkspaceID,
 	return r, mapErr(err)
 }
 
-// ApplyAnnotations is the end of a successful editor run: the open comments and instructions of the project that existed when the run
-// started become applied by the run, in the version it made (nil when it made none), and the editor answers each with reply, in
-// the same transaction. Standing constraints (include, exclude, prefer) stay open. It returns the comments it marked.
+// ApplyAnnotations is the end of a successful editor run: the open comments and instructions of the project that the run was handed
+// (RecordAnnotationHandoffs) become applied by the run, in the version it made (nil when it made none), and the editor answers each
+// with reply, in the same transaction. Standing constraints (include, exclude, prefer) stay open. It returns the comments it marked.
 func (s *Store) ApplyAnnotations(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, run uuid.UUID, version *int, reply string) ([]Annotation, error) {
 	var marked []Annotation
 	err := s.InTx(ctx, func(tx *Store) error {
@@ -258,4 +279,33 @@ func (s *Store) ApplyAnnotations(ctx context.Context, ws ids.WorkspaceID, projec
 		return nil
 	})
 	return marked, mapErr(err)
+}
+
+// ApplyAnnotationsForRun is what a worker does when an editor run has ended: if the run succeeded, the comments it was handed become
+// applied by it (ApplyAnnotations), in the version it made, if any. The run's own row names the workspace and project, so the hook
+// needs nothing but the run id. A run that did not succeed, has no project, or was handed nothing marks nothing; asking again after it
+// worked marks nothing more. It returns how many comments it marked.
+func (s *Store) ApplyAnnotationsForRun(ctx context.Context, run uuid.UUID) (int, error) {
+	scope, err := s.q.GetSucceededRunScope(ctx, run)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, mapErr(err)
+	}
+	var version *int
+	made, err := s.GetTimelineVersionByAuthor(ctx, scope.WorkspaceID, scope.ProjectID, AuthorAgent, ids.Encode(ids.PrefixRun, run))
+	switch {
+	case err == nil:
+		v := int(made.Version)
+		version = &v
+	case !errors.Is(err, ErrNotFound):
+		return 0, err
+	}
+	reply := "Looked at this; no change was needed."
+	if version != nil {
+		reply = fmt.Sprintf("Addressed in v%d.", *version)
+	}
+	marked, err := s.ApplyAnnotations(ctx, scope.WorkspaceID, scope.ProjectID, run, version, reply)
+	return len(marked), err
 }
