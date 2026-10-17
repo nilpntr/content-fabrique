@@ -838,15 +838,21 @@ func (s *Store) VersionCovered(ctx context.Context, ws ids.WorkspaceID, project 
 // CountUnchargedRuns counts the runs of the agent that the workspace has in flight, plus those that finished since the given time having
 // spent money and ended without a charge: cancelled before they made anything, succeeded saying there was nothing to change, or failed
 // for one of failureReasons. A finished run that cost nothing (cancelled in the queue) and a run that was charged do not count. It is the
-// abuse control of credits.Service.CheckUncharged. Only runs created since the start of the period's day are looked at.
+// abuse control of credits.Service.CheckUncharged. Only runs created within unchargedLookback before the given time are looked at.
 func (s *Store) CountUnchargedRuns(ctx context.Context, ws ids.WorkspaceID, agent string, since time.Time, failureReasons []string) (int, error) {
 	t := since.UTC()
 	if failureReasons == nil {
 		failureReasons = []string{}
 	}
-	n, err := s.q.CountUnchargedRuns(ctx, db.CountUnchargedRunsParams{WorkspaceID: ws, Agent: agent, MinID: uuidV7Floor(t), Since: &t, Reasons: failureReasons})
+	n, err := s.q.CountUnchargedRuns(ctx, db.CountUnchargedRunsParams{WorkspaceID: ws, Agent: agent, MinID: uuidV7Floor(t.Add(-unchargedLookback)), Since: &t, Reasons: failureReasons})
 	return int(n), mapErr(err)
 }
+
+// unchargedLookback is how far before the day's start a run can have been created and still count: a run created yesterday that is still
+// in flight, or that finished today, belongs to today's count. It is longer than the longest a run can stay active (a run parked for its
+// creator's answer holds its credits for 7 days), and it also absorbs any difference between the app's clock and the database's, which
+// mints the run ids.
+const unchargedLookback = 8 * 24 * time.Hour
 
 // uuidV7Floor is the smallest UUIDv7 a row created at t can have: the 48-bit millisecond timestamp, the version, zeros. Row ids are
 // UUIDv7 (the database's uuidv7()), so they sort by creation time and a range on them is a range of time.

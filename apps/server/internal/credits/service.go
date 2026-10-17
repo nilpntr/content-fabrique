@@ -156,7 +156,8 @@ func (s *Service) Hold(ctx context.Context, tx *store.Store, q Quote, run store.
 // charged, but it has spent model money. The workspace's runs in flight count too (they may all end that way, and nothing else bounds how
 // many it can start at once), and so does the new run itself: the cap is the number of such runs per UTC day including this one. It is
 // checked after the hold, so a workspace that is out of credits is told so (402) rather than to wait for tomorrow (429). A free run has no
-// cap. The caller rolls the transaction back on an error.
+// cap. The caller rolls the transaction back on an error. It must run after Hold in the same transaction: the hold's lock on the credit
+// account is what serialises one workspace's concurrent starts, so that the count it reads includes the runs of the starts before it.
 func (s *Service) CheckUncharged(ctx context.Context, tx *store.Store, ws ids.WorkspaceID, q Quote) error {
 	if q.UnchargedCap <= 0 {
 		return nil

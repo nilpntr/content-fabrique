@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -584,5 +585,76 @@ func TestUnchargedRunsAreCountedAndCappedPerDay(t *testing.T) {
 	}
 	if _, _, err := r.run(ws, project, false); err != nil {
 		t.Fatalf("the next day: %v", err)
+	}
+}
+
+// Concurrent starts of one workspace cannot overshoot the cap: the hold's lock on the credit account serialises them, so each count sees
+// the runs of the starts before it.
+func TestUnchargedCapHoldsUnderConcurrentStarts(t *testing.T) {
+	r := newRig(t)
+	ws := r.workspace("burst")
+	creditstest.Fund(t, r.st, ws.ID, plans.Creator, 200)
+	r.svc = creditstest.ServiceWith(t, r.st, func(l *credits.PriceList) {
+		pl := l.Plans[plans.Creator]
+		pl.UnchargedRunsPerDay = 3
+		l.Plans[plans.Creator] = pl
+	})
+	const starts = 8
+	projects := make([]ids.ProjectID, starts)
+	for i := range projects {
+		projects[i] = r.project(ws)
+	}
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		started int
+		refused int
+	)
+	for _, p := range projects {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _, err := r.run(ws, p, false)
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case err == nil:
+				started++
+			case errors.Is(err, credits.ErrTooManyUncharged):
+				refused++
+			default:
+				t.Errorf("start: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	// Every run in flight counts as one that may end uncharged, so exactly the cap gets in.
+	if started != 3 || refused != starts-3 {
+		t.Fatalf("%d started and %d refused, want 3 and %d", started, refused, starts-3)
+	}
+}
+
+// A run created before the day's start that is still in flight counts for today, and the look-back is bounded.
+func TestUnchargedCountSpansMidnight(t *testing.T) {
+	r := newRig(t)
+	ws := r.workspace("midnight")
+	creditstest.Fund(t, r.st, ws.ID, plans.Creator, 50)
+	if _, _, err := r.run(ws, r.project(ws), false); err != nil {
+		t.Fatal(err)
+	}
+	count := func(since time.Time) int {
+		t.Helper()
+		n, err := r.st.CountUnchargedRuns(context.Background(), ws.ID, credits.EditorAgent, since, credits.UnchargedFailureReasons)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	// The run was created a moment ago; "today" starts a week after it. It is still counted (in flight), and eight days is the limit.
+	if n := count(time.Now().Add(7 * 24 * time.Hour)); n != 1 {
+		t.Fatalf("a run in flight from before the day started: %d, want 1", n)
+	}
+	if n := count(time.Now().Add(9 * 24 * time.Hour)); n != 0 {
+		t.Fatalf("a run from nine days before: %d, want 0", n)
 	}
 }
