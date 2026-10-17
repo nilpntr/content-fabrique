@@ -19,7 +19,7 @@ The Go types are written by hand rather than generated: generated Go from JSON S
 
 The shape in architecture §6 stands. These are the rules it leaves open.
 
-**Top level.** `schema` is the constant `contentfabrique.timeline/v1`. `output` has `width` and `height` (v1 accepts only 1080×1920), `fps` (one of 24, 25, 30, 60) and `background` (`#rrggbb`). `tracks` and `markers` are arrays, and `meta` is an optional object with `idea_id` and `concept_id`. Unknown properties are rejected everywhere (`additionalProperties: false`), so a typo from the agent fails loudly.
+**Top level.** `schema` is the constant `contentfabrique.timeline/v1`. `output` has `format` (`9:16`, `1:1`, `4:5` or `16:9`, [D-25](../05-decisions.md#d-25-output-formats-916-11-45-and-169-per-project)), `width` and `height` (which must equal the format's size: 1080×1920, 1080×1080, 1080×1350 or 1920×1080), `fps` (one of 24, 25, 30, 60) and `background` (`#rrggbb`). `tracks` and `markers` are arrays, and `meta` is an optional object with `idea_id` and `concept_id`. Unknown properties are rejected everywhere (`additionalProperties: false`), so a typo from the agent fails loudly.
 
 **Tracks.** Exactly one `video` track, and its id is `main`. At most one `text` track, at most one `captions` track and at most one `audio` track. Overlay video tracks come later.
 
@@ -90,7 +90,7 @@ Every audio item has `at_ms`, an optional `duration_ms` (default: to the end of 
 
 ## 5. Text, styles and safe zones (P3-04)
 
-- **The safe zone** for 1080×1920 follows [research §3.4](../02-research.md#34-captions-safe-zones-beat-snapping): keep out of the top 240 px, the bottom 660 px and 120 px on each side, and out of the right-hand action column (x > 900 for y > 840). It scales with the output size and is a Go value (`render.SafeZoneTikTok`), so a later profile can tighten it.
+- **Safe zones are per format** (D-25). For 9:16 the zone follows [research §3.4](../02-research.md#34-captions-safe-zones-beat-snapping): keep out of the top 240 px, the bottom 660 px and 120 px on each side, and out of the right-hand action column (x > 900 for y > 840). 1:1 and 4:5 keep a 5 % margin on every side; 16:9 keeps a 10 % title-safe margin and the bottom 15 % clear. They are Go values (`render.SafeZones[format]`), so a later profile can tighten them.
 - **During validation (P3-01)**, the three anchors are boxes inside the safe zone by construction. A `position` gets an estimated box: the style's line height × the line count, and a width of 0.6 em per character, capped at the safe width. P3-04 replaces the estimate with libass font metrics and keeps the same issue code.
 - **The style registry** (`render/styles`) maps a style id to a font file, size, colours, outline and animation defaults. Fonts come from an allow-list of OFL-licensed files vendored under `packages/media-tools/fonts` with their licence texts ([D-16](../05-decisions.md#d-16-licensing-policy-for-ml-and-media-components)). The spec can't name a font directly.
 - **Rendering:** all text and captions become one generated `.ass` file per render, burned in with the `ass` filter, with `fontsdir` pointing at the vendored fonts. Caption timing comes from the transcript's word timestamps, mapped through the time map to output time, and is snapped to frames.
@@ -128,8 +128,8 @@ It never runs ffmpeg. `render.Execute(ctx, plan, sandbox)` runs it later, throug
 
 | Profile | Size | Source | Video | Audio | Extras |
 |---|---|---|---|---|---|
-| `preview` | 540×960 | proxies (`proxy_720.mp4`) | x264 `veryfast`, CRF 28 | AAC 128k | Watermark, beat guide |
-| `final` | 1080×1920 | originals | x264 `medium`, CRF 18, `high` profile | AAC 192k, 48 kHz | `+faststart` |
+| `preview` | half the format's size (540×960 for 9:16) | proxies (`proxy_720.mp4`) | x264 `veryfast`, CRF 28 | AAC 128k | Watermark, beat guide |
+| `final` | the format's size | originals | x264 `medium`, CRF 18, `high` profile | AAC 192k, 48 kHz | `+faststart` |
 
 Both profiles write `yuv420p` and add `-map_metadata -1` and `-fflags +bitexact`, so the output is deterministic.
 
@@ -141,9 +141,9 @@ Both profiles write `yuv420p` and add `-map_metadata -1` and `-fflags +bitexact`
 
 ## 7. Tests
 
-**Fixtures (P3-01):** 30 valid and 30 invalid specs, covering every issue code at least once.
+**Fixtures (P3-01):** 30 valid and 30 invalid specs, covering every issue code and every format at least once.
 
-**Golden plans (P3-03):** 20 of the valid fixtures are also render fixtures (listed in `fixtures/render.txt`, covering every transition, reframe mode, look, speed range and audio kind). For each of them, the compiled argument list and ASS text are snapshot-tested as text files under `testdata/golden/`. `go test ./internal/render -update` rewrites the snapshots, and a reviewer reads the diff.
+**Golden plans (P3-03):** 20 of the valid fixtures are also render fixtures (listed in `fixtures/render.txt`, covering every format, transition, reframe mode, look, speed range and audio kind). For each of them, the compiled argument list and ASS text are snapshot-tested as text files under `testdata/golden/`. `go test ./internal/render -update` rewrites the snapshots, and a reviewer reads the diff.
 
 **Golden renders (P3-03):**
 - **Media:** the test media is generated when the tests run (`testsrc2`, `sine` and a coloured countdown with a burned-in frame number), so no binary fixtures are committed. It's cached in `testdata/.cache`.
