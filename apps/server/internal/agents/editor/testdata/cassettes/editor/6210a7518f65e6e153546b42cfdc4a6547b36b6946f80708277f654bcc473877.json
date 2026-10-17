@@ -1,17 +1,18 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "2b702685fd2215811c2efe87677b54e0f0dfea830ac167cdda12d3853d07fa2b",
-  "recorded_at": "2026-10-17T17:13:09Z",
+  "key": "6210a7518f65e6e153546b42cfdc4a6547b36b6946f80708277f654bcc473877",
+  "recorded_at": "2026-10-17T17:59:23Z",
   "request": {
     "model": "claude-haiku-5-5",
-    "max_tokens": 16000,
+    "max_tokens": 24000,
     "effort": "medium",
     "system_blocks": 1,
     "messages": [
       {
         "role": "user",
         "blocks": [
+          "text",
           "text",
           "text",
           "text",
@@ -28,10 +29,13 @@
       "list_footage",
       "view_clip",
       "find_moments",
+      "plan_edit",
       "get_timeline",
       "get_comments",
       "edit_timeline",
+      "match_exposure",
       "render_preview",
+      "check_edit",
       "finish"
     ]
   },

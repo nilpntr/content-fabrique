@@ -75,30 +75,43 @@ func TestTranscribeSettingsAreValidated(t *testing.T) {
 	}
 }
 
-// D-27: a hosted provider that is switched on must have a price, or its spend cannot be capped. Having no account yet is fine.
-func TestWorkersAIWithAnAccountNeedsAPriceInStagingAndProduction(t *testing.T) {
+// D-27, D-31: the price of hosted transcription lives in config/pricing, so an account in staging or production needs no price
+// variable; the override, when set, is still checked. (That an unpriced provider never runs is tested where it is built, in
+// transcribe/setup.)
+func TestWorkersAIPriceIsOptionalBecauseThePriceTableHasIt(t *testing.T) {
 	for _, env := range []string{EnvStaging, EnvProduction} {
 		base := map[string]string{"CF_ENV": env, "WORKERS_AI_ACCOUNT_ID": "acct", "WORKERS_AI_API_TOKEN": "tok"}
-		_, err := Load(mediaEnv(base))
-		if err == nil || !strings.Contains(err.Error(), "WORKERS_AI_PRICE_MICROS_PER_MINUTE") {
-			t.Errorf("%s without a price: %v", env, err)
+		if _, err := Load(mediaEnv(base)); err != nil {
+			t.Errorf("%s without an override: %v", env, err)
 		}
-		withPrice := map[string]string{"CF_ENV": env, "WORKERS_AI_ACCOUNT_ID": "acct", "WORKERS_AI_API_TOKEN": "tok", "WORKERS_AI_PRICE_MICROS_PER_MINUTE": "6000"}
-		if _, err := Load(mediaEnv(withPrice)); err != nil {
-			t.Errorf("%s with a price: %v", env, err)
+		base["WORKERS_AI_PRICE_MICROS_PER_MINUTE"] = "6000"
+		if _, err := Load(mediaEnv(base)); err != nil {
+			t.Errorf("%s with an override: %v", env, err)
 		}
 		// Not switched on yet (staging today has no account): the worker starts and the jobs wait.
 		if _, err := Load(mediaEnv(map[string]string{"CF_ENV": env})); err != nil {
 			t.Errorf("%s without an account: %v", env, err)
 		}
-		// A price of 0 is no price.
-		base["WORKERS_AI_PRICE_MICROS_PER_MINUTE"] = "0"
-		if _, err := Load(mediaEnv(base)); err == nil {
-			t.Errorf("%s with a price of 0", env)
+	}
+}
+
+// D-31: LLM_ALLOW_UNPRICED is honoured only in development and ci. Every other environment refuses to load the configuration.
+func TestAllowUnpricedIsRefusedOutsideDevelopmentAndCI(t *testing.T) {
+	for env, ok := range map[string]bool{EnvLocal: true, EnvCI: true, EnvBench: false, EnvStaging: false, EnvProduction: false} {
+		_, err := Load(mediaEnv(map[string]string{"CF_ENV": env, "LLM_ALLOW_UNPRICED": "1"}))
+		switch {
+		case ok && err != nil:
+			t.Errorf("%s: %v", env, err)
+		case !ok && (err == nil || !strings.Contains(err.Error(), "LLM_ALLOW_UNPRICED")):
+			t.Errorf("%s: err = %v, want a refusal naming LLM_ALLOW_UNPRICED", env, err)
 		}
 	}
-	// Development may run the provider unpriced.
-	if _, err := Load(mediaEnv(map[string]string{"TRANSCRIBE_PROVIDER": "workersai", "WORKERS_AI_ACCOUNT_ID": "acct", "WORKERS_AI_API_TOKEN": "tok"})); err != nil {
-		t.Errorf("local without a price: %v", err)
+	if _, err := Load(mediaEnv(map[string]string{"CF_ENV": EnvProduction, "LLM_ALLOW_UNPRICED": "0"})); err != nil {
+		t.Errorf("0 is off: %v", err)
+	}
+	for name, val := range map[string]string{"LLM_ALLOW_UNPRICED": "yes", "PLATFORM_DAILY_SPEND_CAP_MICROS": "0", "PLATFORM_SPEND_SMALL_CALL_MICROS": "0", "DAILY_SPEND_CAP_MICROS": "-5", "LLM_MAX_REQUEST_MICROS": "x"} {
+		if _, err := Load(mediaEnv(map[string]string{name: val})); err == nil || !strings.Contains(err.Error(), name) {
+			t.Errorf("%s=%s: %v", name, val, err)
+		}
 	}
 }

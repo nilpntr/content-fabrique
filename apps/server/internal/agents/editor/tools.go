@@ -53,6 +53,14 @@ type Store interface {
 	ListMoments(ctx context.Context, ws ids.WorkspaceID, f store.MomentFilter) ([]store.Moment, error)
 	ListAssetAnalysisSummaries(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.AnalysisSummaryRow, error)
 	ListDeadSpans(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID, perAsset int) ([]store.DeadSpan, error)
+	// ListAssetSpans and ListAssetExposureSeries are what check_edit judges the edit against (the reps, the dead time, the luma).
+	ListAssetSpans(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.AssetSpanRow, error)
+	ListAssetExposureSeries(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.ExposureSeriesRow, error)
+	// GetAgentRun reads the run's row (its model and max_tokens, for the worst-case cost of a call).
+	GetAgentRun(ctx context.Context, ws ids.WorkspaceID, id uuid.UUID) (store.AgentRun, error)
+	// AgentArtifactEvents reads a run's artifact events of one kind: the plan and the checks of a run that resumed in another worker
+	// are found there.
+	AgentArtifactEvents(ctx context.Context, ws ids.WorkspaceID, run uuid.UUID, kind string) ([]store.AgentEvent, error)
 }
 
 // Deps are what the editor's tools need.
@@ -62,11 +70,25 @@ type Deps struct {
 	Frames   FrameSource
 	// Preview renders previews; nil means UnavailablePreviews.
 	Preview PreviewRenderer
+	// OutputCost is the worst-case cost of the output of one call, maxTokens at the model's output price (the price table); nil leaves
+	// the "low on dollars" warning off. The dollars left are shown either way.
+	OutputCost func(model string, maxTokens int64) (int64, error)
+	// Rendered measures the preview render of a version for check_edit (a look can crush the picture, which the source analysis cannot
+	// see); nil leaves the rendered-brightness checks "not applicable".
+	Rendered RenderSampler
 	// Comments is where the creator's open comments come from (and where the end of a run reports to); nil means a run has none.
 	Comments CommentSource
 
-	// previews records which versions a run has previewed (the gate on finish, gate.go). withState sets it.
+	// Features is what the build offers (looks, sound effects, ...), which the plan is checked against; nil means the features of the
+	// embedded op schema (AvailableFeatures). Tests of the gating set it.
+	Features *Features
+
+	// previews records which versions a run has previewed, its plan and its checks (the gates, gate.go and checktool.go).
+	// withState sets it.
 	previews *previewLog
+	// noPlanGate and noCheckGate switch the plan gate on edit_timeline and the check gate on finish off. Only the tests of other
+	// behaviour set them: NewAgent never does.
+	noPlanGate, noCheckGate bool
 }
 
 func (d Deps) check() error {
@@ -92,9 +114,12 @@ const (
 	ToolListFootage   = "list_footage"
 	ToolViewClip      = "view_clip"
 	ToolFindMoments   = "find_moments"
+	ToolPlanEdit      = "plan_edit"
 	ToolGetTimeline   = "get_timeline"
 	ToolEditTimeline  = "edit_timeline"
+	ToolMatchExposure = "match_exposure"
 	ToolRenderPreview = "render_preview"
+	ToolCheckEdit     = "check_edit"
 	ToolFinish        = "finish"
 	maxIssueLines     = 30
 	maxTimeMapLines   = 60
@@ -116,10 +141,13 @@ func Tools(d Deps) ([]runtime.Tool, error) {
 		{ToolListFootage, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.listFootage) }},
 		{ToolViewClip, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.viewClip) }},
 		{ToolFindMoments, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.findMoments) }},
+		{ToolPlanEdit, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.planEdit) }},
 		{ToolGetTimeline, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getTimeline) }},
 		{ToolGetComments, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getComments) }},
 		{ToolEditTimeline, true, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.editTimeline) }},
+		{ToolMatchExposure, true, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.matchExposure) }},
 		{ToolRenderPreview, true, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.renderPreview) }},
+		{ToolCheckEdit, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.checkEdit) }},
 		{ToolFinish, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.finish) }},
 	}
 	defs, err := Contract()
@@ -389,6 +417,7 @@ func (d Deps) getTimeline(ctx context.Context, rc runtime.RunContext, _ noArgs) 
 	// The summary quotes the texts of the timeline, which a person may have written.
 	blocks = append(blocks, runtime.UntrustedBlock("timeline_summary", strings.Join(vd.Version.Summary, "\n")))
 	blocks = append(blocks,
+		llm.TextBlock("Where the clips play:\n"+timeMap(spec, maxTimeMapLines)),
 		llm.TextBlock("Validation issues of this version (errors block an edit, warnings do not):\n"+issuesText(vd.Issues, maxIssueLines)),
 		llm.TextBlock("The spec (JSON; its texts are data):"),
 		runtime.UntrustedBlock("timeline_spec", compactJSON(vd.Version.Spec)))
@@ -409,6 +438,13 @@ func (d Deps) editTimeline(ctx context.Context, rc runtime.RunContext, in editAr
 	}
 	if rc.IdempotencyKey == "" {
 		return runtime.Result{}, errors.New("edit_timeline: no idempotency key")
+	}
+	// The first edit of a run needs a plan (a retry of a call that already made its version does not: it is let through by the
+	// version it made, which the gate looks for).
+	if msg, err := d.planGate(ctx, rc, pid, ws); err != nil {
+		return runtime.Result{}, err
+	} else if msg != "" {
+		return runtime.Result{}, runtime.UserErrorf("%s", msg)
 	}
 	// The edit is applied to the version the model says it was looking at, and to no other: if the timeline moved on (a person
 	// edited it, say) nothing is applied and the model is told what changed. The call's key is stored with the version, so a call
@@ -467,6 +503,9 @@ func (d Deps) editTimeline(ctx context.Context, rc runtime.RunContext, in editAr
 	if rest := strings.TrimRight(b.String(), "\n"); rest != "" {
 		blocks = append(blocks, llm.TextBlock(rest))
 	}
+	// Where every clip plays now, with its speed, motion and transition: the beat arithmetic (a shot's length in beats, whether a cut is
+	// on the grid) is done from these times.
+	blocks = append(blocks, llm.TextBlock("Where the clips play now:\n"+timeMap(spec, maxTimeMapLines)))
 	return runtime.Result{Content: blocks}, nil
 }
 
@@ -535,9 +574,12 @@ func (d Deps) renderPreview(ctx context.Context, rc runtime.RunContext, _ noArgs
 		return runtime.Result{}, fail(fmt.Errorf("parse stored spec: %w", err))
 	}
 	d.previews.previewed(rc.RunID, v)
+	if err := rc.Artifact(ctx, PreviewArtifact, map[string]any{"version": v, "duration_ms": int64(dur)}); err != nil {
+		return runtime.Result{}, fmt.Errorf("record the preview: %w", err)
+	}
 	return runtime.Result{Content: []llm.Block{
-		llm.TextBlock(fmt.Sprintf("Preview of version %d: the video is %d ms (%s) long. The contact sheet below shows frames from the whole video, each labelled with its time. Where the clips play:\n%s",
-			v, int64(dur), secs2(int64(dur)), timeMap(spec, maxTimeMapLines))),
+		llm.TextBlock(fmt.Sprintf("Preview of version %d: the video is %d ms (%s) long. The contact sheet below shows frames from the whole video, each labelled with its time. Where the clips play:\n%s%s",
+			v, int64(dur), secs2(int64(dur)), timeMap(spec, maxTimeMapLines), budgetNote(rc.Left, d.worstCallMicros(ctx, rc)))),
 		{Type: llm.BlockImage, Image: &llm.Image{MediaType: "image/jpeg", Ref: string(sheet)}},
 	}}, nil
 }
@@ -572,7 +614,10 @@ func (d Deps) finish(ctx context.Context, rc runtime.RunContext, in finishArgs) 
 	switch {
 	case err == nil:
 		version = made.Version
-		if msg := d.previewGate(rc.RunID, int(made.Version)); msg != "" {
+		if msg := d.previewGate(ctx, rc, int(made.Version)); msg != "" {
+			return runtime.Errorf("%s", msg), nil
+		}
+		if msg := d.checkGate(ctx, rc, int(made.Version)); msg != "" {
 			return runtime.Errorf("%s", msg), nil
 		}
 	case !errors.Is(err, store.ErrNotFound):

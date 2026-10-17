@@ -4,10 +4,10 @@
 -- name: CreateAgentRun :one
 INSERT INTO agent_runs (
     workspace_id, agent, stage, parent_run_id, project_id, input, routing_profile, model, effort, max_tokens,
-    budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to
+    budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to, started_by
 ) VALUES (
     @workspace_id, @agent, @stage, @parent_run_id, NULLIF(@project_id::uuid, '00000000-0000-0000-0000-000000000000'::uuid), @input, @routing_profile, @model, @effort, @max_tokens,
-    @budget_micros, @budget_tokens, @budget_tool_calls, @budget_wall_clock_ms, @billed_to
+    @budget_micros, @budget_tokens, @budget_tool_calls, @budget_wall_clock_ms, @billed_to, @started_by
 )
 RETURNING *;
 
@@ -94,6 +94,12 @@ SELECT * FROM agent_events
 WHERE workspace_id = @workspace_id AND run_id = @run_id AND seq > @after_seq
 ORDER BY seq
 LIMIT @row_limit;
+
+-- The artifact events of a run with one kind (the payload's "kind"), oldest first: the editor reads back its plan and its checks.
+-- name: ListAgentArtifactEvents :many
+SELECT * FROM agent_events
+WHERE workspace_id = @workspace_id AND run_id = @run_id AND type = 'artifact' AND payload ->> 'kind' = @kind::text
+ORDER BY seq;
 
 -- name: GetLastAgentEvent :one
 SELECT * FROM agent_events

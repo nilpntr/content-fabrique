@@ -227,6 +227,15 @@ type RunInfo struct {
 	ID uuid.UUID
 	// Profile is the routing profile of the run, for the gateway metadata and the ledger log.
 	Profile string
+	// ProjectID and MemberUserID attribute the call in the ledger: the project the run edits and the member who started it (both
+	// optional; the zero value is none). The ledger's action_id is the run's ID until P7-01a introduces real actions.
+	ProjectID    ids.ProjectID
+	MemberUserID ids.UserID
+	// WaitOnBusy makes a call that the platform breaker's room could not take right now (spend_cap_busy: live holds near the cap stand in
+	// its way; not a trip) wait and try again with backoff, until the context ends. A busy refusal that holds do not explain (the request
+	// is too large for the room left) is returned at once. An agent run sets it: its context
+	// ends at the run's wall clock, which bounds the wait. Without it the refusal is returned at once.
+	WaitOnBusy bool
 	// Budget is the run's dollar budget: a call reserves its worst-case cost before it is sent and is refused when
 	// the run cannot cover it. Nil means no per-run limit.
 	Budget Budget

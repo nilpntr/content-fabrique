@@ -72,6 +72,90 @@
       }
     },
     {
+      "name": "plan_edit",
+      "description": "Write your creative plan before the first edit. It is the understand step: from the footage, the analysis and the brief, say what kind of video this is and what you will make of it. content_type is one of talking, unboxing_product, workout, vlog, tutorial or general (the genre of the footage); playbook is the playbook you will follow (usually the same, general when nothing fits well). story is the video in one line (at most 140 characters), hook what the first 1 to 2 seconds show (at most 140), arc how it builds (at most 240), ending how it ends (at most 140). target_length_s is the length you aim for in whole seconds, 5 to 120. tempo_bpm is the beat grid's tempo, 120 to 128 for a short video cut to music later, or 0 for a video that follows speech and has no beat grid (60 to 200 are allowed). pace is steady, building or fast. shots is the shot list, 1 to 16 shots in order: its role (hook, build, peak, detail, step, reveal, payoff, broll or ending), what it shows in a few words (at most 80 characters), optionally the clip it comes from (asset_id from list_footage), its length in beats (1 to 64; with tempo_bpm 0 a beat is half a second) and optionally the effect it gets (none, punch_in, push_in, pull_back, shake, speed_ramp, whip, zoom_through or flash). The plan is a short working note, not an essay: think briefly before you call it, and keep every field brief; a call that is too long is cut off at the output limit and you have to send it again. The creator sees the plan in the run feed. The answer gives you the playbook for the genre you chose, the length of a beat in milliseconds and what your shot list adds up to. You can call it again to change the plan; the last one counts. The first edit_timeline call is refused until you have a plan.",
+      "strict": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "content_type": {
+            "type": "string",
+            "enum": ["talking", "unboxing_product", "workout", "vlog", "tutorial", "general"],
+            "description": "The kind of video the footage is: talking, unboxing_product, workout, vlog, tutorial or general."
+          },
+          "story": {
+            "type": "string",
+            "description": "The video in one line, at most 140 characters."
+          },
+          "hook": {
+            "type": "string",
+            "description": "What the first 1 to 2 seconds show, at most 140 characters."
+          },
+          "arc": {
+            "type": "string",
+            "description": "How the video builds from hook to end, at most 240 characters."
+          },
+          "ending": {
+            "type": "string",
+            "description": "How the video ends, at most 140 characters."
+          },
+          "playbook": {
+            "type": "string",
+            "enum": ["talking", "unboxing_product", "workout", "vlog", "tutorial", "general"],
+            "description": "The playbook you will follow. Usually the same as content_type; general when the footage fits no genre well."
+          },
+          "target_length_s": {
+            "type": "integer",
+            "description": "The length you aim for, in whole seconds, 5 to 120."
+          },
+          "tempo_bpm": {
+            "type": "integer",
+            "description": "The beat grid's tempo: 120 to 128 for a short video that will get music later (60 to 200 are allowed), or 0 for a video that follows speech and has no beat grid."
+          },
+          "pace": {
+            "type": "string",
+            "enum": ["steady", "building", "fast"],
+            "description": "How the pace moves: steady, building (cuts speed up toward the end) or fast."
+          },
+          "shots": {
+            "type": "array",
+            "description": "The shot list, 1 to 16 shots, in the order they play.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "enum": ["hook", "build", "peak", "detail", "step", "reveal", "payoff", "broll", "ending"],
+                  "description": "What the shot is for."
+                },
+                "what": {
+                  "type": "string",
+                  "description": "What the shot shows, in a few words, at most 80 characters."
+                },
+                "asset_id": {
+                  "type": "string",
+                  "description": "Optional. The clip the shot comes from, an id from list_footage."
+                },
+                "beats": {
+                  "type": "integer",
+                  "description": "The shot's length in beats, 1 to 64. With tempo_bpm 0 a beat is half a second."
+                },
+                "effect": {
+                  "type": "string",
+                  "enum": ["none", "punch_in", "push_in", "pull_back", "shake", "speed_ramp", "whip", "zoom_through", "flash"],
+                  "description": "Optional. The effect the shot gets: none, punch_in, push_in, pull_back, shake, speed_ramp, whip, zoom_through or flash."
+                }
+              },
+              "required": ["role", "what", "beats"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["content_type", "story", "hook", "arc", "ending", "playbook", "target_length_s", "tempo_bpm", "pace", "shots"],
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "get_timeline",
       "description": "Get the current timeline: its version number (version 0 means there is no timeline yet), the full spec, what the last edit changed, its length, and the validation issues (errors block an edit, warnings do not). Use it to see where you stand and to check your work after an edit. It takes no arguments.",
       "strict": true,
@@ -120,6 +204,16 @@
       }
     },
     {
+      "name": "match_exposure",
+      "description": "Match the brightness of the clips at the cuts, computed from the clip analysis, so you never have to invent a number. It measures the lit part of each clip's used range (the p90 luma, never the mean: low-key footage is dark and correct), takes the brightness most of the timeline has as the target, and sets a bounded exposure hint (at most 0.7 stops, nothing under 0.15) on each clip that is brighter than that, which the render applies as a gentle darkening that keeps the blacks. Clips that are darker than the target are left alone, so low-key footage is never lifted. A clip keeps the look it has. Call it once the cuts are final, when check_edit or the analysis lines show that one clip is much brighter than the others (for example a posing clip among gym clips); it makes a new version. It does nothing when the clips already match. After it, render_preview and check_edit again: the checks measure the rendered picture. It takes no arguments.",
+      "strict": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "render_preview",
       "description": "Render a fast, low-resolution preview of the current version and get back a contact sheet (a grid of frames from the whole video, each labelled with its time) to check your work by eye, plus the length. It can take up to a minute, so use it when the timeline looks right, not after every edit. It may not be available; then check with get_timeline instead. It takes no arguments.",
       "strict": true,
@@ -130,8 +224,18 @@
       }
     },
     {
+      "name": "check_edit",
+      "description": "Measure the current version of the timeline against objective checks, computed from the timeline and the clip analysis (no picture, no model): the hook (the first shot at most 2 seconds, a title on screen by half a second), the shot lengths (the median, and never more than two of the same length in a row), whether the cuts speed up toward the end, whether the shot edges on lifts fall on rep boundaries (within 150 ms), the share of the screen time that is dead time, the effect density (about one per 3 or 4 cuts, a few speed ramps at most), whether the text stays inside the safe zones, the total length against your plan, the jump in brightness at each cut (judged by the lit part of the picture, so low-key footage is not penalised), and whether the cuts are on the beat grid. Each check passes, fails with a one-line reason that says what to change, or does not apply. Call it after render_preview. When checks fail, fix them in one batch, render_preview and check_edit again, then finish: one revision pass is the most there is. finish is refused until the newest version you made has been checked. It takes no arguments.",
+      "strict": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "finish",
-      "description": "End the task. Call it once the timeline is built and checked, with a short message for the creator: what the video is, how long it is, and anything they should know or decide. The creator reads it, so plain words, no ids or jargon. Nothing can be done after it. It is refused until this run has made a version of the timeline with edit_timeline; if the timeline already did what was asked and you changed nothing, say so with no_edit_needed.",
+      "description": "End the task. Call it once the timeline is built, previewed and checked with check_edit, with a short message for the creator: what the video is, how long it is, and anything they should know or decide. The creator reads it, so plain words, no ids or jargon. Nothing can be done after it. It is refused until this run has made a version of the timeline with edit_timeline; if the timeline already did what was asked and you changed nothing, say so with no_edit_needed.",
       "strict": true,
       "input_schema": {
         "type": "object",

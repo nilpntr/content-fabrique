@@ -45,6 +45,7 @@ func NewAgent(d Deps) (runtime.Agent, error) {
 		Opening: opening,
 		Context: d.runContext,
 		EndTurn: d.endTurn,
+		OnLimit: d.onLimit,
 		OnEnd: func(run uuid.UUID) {
 			d.previews.forget(run) // what the run kept in memory
 			d.endRun(run)          // and its comments, now that its result is stored
@@ -128,8 +129,12 @@ func (d Deps) runContext(ctx context.Context, rc runtime.RunContext) ([]llm.Bloc
 	if err != nil {
 		return nil, err
 	}
+	hint := contentTypeHint(det.Project.Brief, rows, sums)
 	for _, caps := range contextSteps {
 		blocks := contextBlocks(det.Project.Format, det.Project.Brief, rows, sums, status, caps)
+		if hint != "" {
+			blocks = append(blocks, llm.TextBlock(hint))
+		}
 		blocks = append(blocks, commentsIntro(comments, total, now, caps.comments, caps.commentChars)...)
 		if encodedSize(blocks) <= maxContextBytes {
 			// Only the comments this context shows (the rest are for get_comments to list) are the run's to deal with.
@@ -160,6 +165,30 @@ func contextBlocks(format, brief string, rows []store.ProjectFootageRow, sums ma
 	}
 	blocks = append(blocks, llm.TextBlock(footageText(rows, footageOpts{Detailed: caps.detailed, TitleChars: caps.titleChars, DescChars: caps.descChars, Analysis: sums})))
 	return append(blocks, llm.TextBlock(status))
+}
+
+// contentTypeHint is a one-line guess at the kind of video, from the words of the brief and the clips' titles and descriptions and
+// from what the analysis found (a clip with several reps is a workout). It is fixed for the run (the context is stored once), so it
+// does not disturb the prompt cache, and the model decides in plan_edit; "" when there is no clear winner.
+func contentTypeHint(brief string, rows []store.ProjectFootageRow, sums map[ids.AssetID]analysis.Summary) string {
+	var b strings.Builder
+	b.WriteString(brief)
+	for _, r := range rows {
+		// a new line between the fields: a phrase does not run from one clip's title into the next one's
+		b.WriteString("\n" + r.Title + "\n" + r.Description)
+	}
+	reps := 0
+	for _, s := range sums {
+		reps += s.Reps
+	}
+	if reps >= 4 {
+		b.WriteString(" workout workout")
+	}
+	t := LikelyContentType(b.String())
+	if t == "" {
+		return ""
+	}
+	return fmt.Sprintf("A guess at the kind of video, from the words of the brief and the clips and from the analysis (you decide: confirm or correct it in plan_edit): %s.", t)
 }
 
 // encodedSize is the size of the blocks as the run's event will hold them: JSON, without HTML escaping.

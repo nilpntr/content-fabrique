@@ -729,7 +729,7 @@ export type At = number;
  */
 export type Strength = number;
 /**
- * A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white), matte (lifted blacks), auto (a mild contrast curve that keeps blacks and whites where they are, plus the clip's exposure_ev nudge, so shots from different angles meet at one exposure without washing out low-key footage) or gym_moody (deep blacks, warm skin, a slight vignette).
+ * A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white), matte (lifted blacks), auto (a mild contrast curve that keeps blacks and whites where they are, plus the clip's exposure_ev nudge, so shots from different angles meet at one exposure without washing out low-key footage) or gym_moody (warm skin, a little contrast above the shadows, a soft vignette; dark shadows are left alone).
  */
 export type Preset1 = "none" | "punchy" | "warm" | "cool" | "bw" | "matte" | "auto" | "gym_moody";
 /**

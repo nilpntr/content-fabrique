@@ -40,9 +40,22 @@ type UsageEntry struct {
 	// Estimated marks a row written for a call whose usage never came back: ListCostMicros is the reserved worst case.
 	Estimated bool
 	// Provider and AudioMs describe a transcription row (Kind "transcription"): who transcribed, and how much audio was metered.
-	Provider  string
-	AudioMs   int64
-	CreatedAt time.Time
+	Provider string
+	AudioMs  int64
+	// Quantity and Unit say how much was metered, in the smallest whole unit (UnitTokens, UnitAudioMs, UnitVCPUMs, ...). Unit is
+	// derived for an llm row (tokens) and a transcription row (audio_ms) when empty; Quantity of an llm row is derived from its tokens.
+	Quantity int64
+	Unit     string
+	// ProjectID, MemberUserID and ActionID attribute the row (all optional): the project, the member who started the run or upload, and
+	// the action (the agent run's id until P7-01a).
+	ProjectID    ids.ProjectID
+	MemberUserID ids.UserID
+	ActionID     uuid.UUID
+	// IdempotencyKey is unique in the ledger: a row whose key is already there is skipped, and its cost is not counted again. The
+	// metering code builds it from the event ("llm:<hold id>", "transcribe:<job>:<attempt>:<chunk>", "render:<render id>"). Empty gets
+	// a fresh random one in InsertUsage only (a row nobody retries); SettleSpend refuses an empty key.
+	IdempotencyKey string
+	CreatedAt      time.Time
 }
 
 // UsageRow is a ledger row as read back.
@@ -51,16 +64,32 @@ type UsageRow struct {
 	UsageEntry
 }
 
-// InsertUsage appends a ledger row. A row whose RequestID is already in the ledger is ignored (the call is already
-// counted), so a retried insert is safe.
+// InsertUsage appends one ledger row and counts it in the spend counters, in one transaction, with no hold to remove: the path
+// for a cost that is only recorded (a tool run by hand, a test). A row whose IdempotencyKey (or RequestID) is already in the
+// ledger is ignored, so a retried insert is safe. An empty key becomes a random one, so a row nobody retries needs none. The
+// paid-call paths go through SettleSpend, which removes the hold in the same transaction.
 func (s *Store) InsertUsage(ctx context.Context, e UsageEntry) error {
+	if e.IdempotencyKey == "" {
+		e.IdempotencyKey = "adhoc:" + uuid.NewString()
+	}
+	_, _, err := s.SettleSpend(ctx, SettleSpendParams{Workspace: e.WorkspaceID, Rows: []UsageEntry{e}})
+	return err
+}
+
+func usageParams(e UsageEntry) db.InsertUsageLedgerParams {
 	if e.Kind == "" {
-		e.Kind = "llm"
+		e.Kind = KindLLM
 	}
 	if e.CreatedAt.IsZero() {
 		e.CreatedAt = time.Now().UTC()
 	}
-	err := s.q.InsertUsageLedger(ctx, db.InsertUsageLedgerParams{
+	if e.Kind == KindLLM && e.Quantity == 0 {
+		e.Quantity = e.InputTokens + e.CacheWriteTokens + e.CacheReadTokens + e.OutputTokens
+	}
+	if e.Kind == KindTranscription && e.Unit == UnitAudioMs && e.Quantity == 0 {
+		e.Quantity = e.AudioMs
+	}
+	return db.InsertUsageLedgerParams{
 		WorkspaceID:        e.WorkspaceID,
 		RunID:              pgUUID(e.RunID),
 		Stage:              e.Stage,
@@ -78,9 +107,14 @@ func (s *Store) InsertUsage(ctx context.Context, e UsageEntry) error {
 		Estimated:          e.Estimated,
 		Provider:           e.Provider,
 		AudioMs:            e.AudioMs,
+		Quantity:           e.Quantity,
+		Unit:               e.Unit,
+		ProjectID:          pgUUID(e.ProjectID.UUID),
+		MemberUserID:       pgUUID(e.MemberUserID.UUID),
+		ActionID:           pgUUID(e.ActionID),
+		IdempotencyKey:     e.IdempotencyKey,
 		CreatedAt:          e.CreatedAt,
-	})
-	return mapErr(err)
+	}
 }
 
 // UsageCostMicros returns what the workspace spent in [from, to) at list price, whoever pays.
@@ -121,7 +155,9 @@ func usageRows(rows []db.UsageLedger) []UsageRow {
 			WorkspaceID: r.WorkspaceID, RunID: run, Stage: r.Stage, Kind: r.Kind, Model: r.Model,
 			InputTokens: r.InputTokens, CacheWriteTokens: r.CacheWriteTokens, CacheWrite1hTokens: r.CacheWrite1hTokens,
 			CacheReadTokens: r.CacheReadTokens, OutputTokens: r.OutputTokens, ListCostMicros: r.ListCostMicros,
-			PriceTableVersion: r.PriceTableVersion, BilledTo: r.BilledTo, RequestID: r.RequestID, Estimated: r.Estimated, Provider: r.Provider, AudioMs: r.AudioMs, CreatedAt: r.CreatedAt,
+			PriceTableVersion: r.PriceTableVersion, BilledTo: r.BilledTo, RequestID: r.RequestID, Estimated: r.Estimated, Provider: r.Provider, AudioMs: r.AudioMs,
+			Quantity: r.Quantity, Unit: r.Unit, ProjectID: ids.ProjectID{UUID: r.ProjectID.Bytes}, MemberUserID: ids.UserID{UUID: r.MemberUserID.Bytes},
+			ActionID: r.ActionID.Bytes, IdempotencyKey: r.IdempotencyKey, CreatedAt: r.CreatedAt,
 		}})
 	}
 	return out

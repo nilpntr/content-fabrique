@@ -7,6 +7,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/nilpntr/content-fabrique/internal/config"
+	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
 // Mode is LLM_MODE.
@@ -28,6 +31,9 @@ const (
 	DefaultMaxRequestMicros int64 = 2_000_000
 	// DefaultDailySpendCapMicros is $20.
 	DefaultDailySpendCapMicros int64 = 20_000_000
+	// DefaultPlatformDailySpendCapMicros is $100: the breaker over all platform-billed cost per UTC day. Staging and production should
+	// set their own on purpose (cfctl doctor requires it); the default only keeps an unset one from meaning "no breaker".
+	DefaultPlatformDailySpendCapMicros int64 = 100_000_000
 	// DefaultConcurrency is the per-key limit on requests in flight.
 	DefaultConcurrency = 4
 	// DefaultCassetteDir is relative to the working directory, which is the package directory under `go test`.
@@ -51,12 +57,25 @@ type Settings struct {
 	MaxRequestMicros int64
 	// DailySpendCapMicros is DAILY_SPEND_CAP_MICROS: per workspace, per UTC day.
 	DailySpendCapMicros int64
+	// PlatformDailySpendCapMicros is PLATFORM_DAILY_SPEND_CAP_MICROS: the breaker over every billed_to=platform cost (all workspaces, all
+	// kinds) per UTC day. When it trips, managed paid calls are refused until the next UTC day.
+	PlatformDailySpendCapMicros int64
+	// PlatformSmallCallMicros is PLATFORM_SPEND_SMALL_CALL_MICROS: the size of a normal small call in the breaker's trip rule. The breaker
+	// is tripped (alert, platform_spend_paused) when the committed platform spend plus this no longer fits under the cap; a refusal
+	// while it still fits is only spend_cap_busy. Default $0.10.
+	PlatformSmallCallMicros int64
 	// Concurrency is LLM_KEY_CONCURRENCY: requests in flight per API key.
 	Concurrency int
 	// AllowUnpriced is LLM_ALLOW_UNPRICED=1: run a model that has no price (cost recorded as 0).
 	AllowUnpriced bool
 	// CassetteDir is LLM_CASSETTE_DIR.
 	CassetteDir string
+}
+
+// SpendCaps are the money caps the settings say, for the spend gate: the workspace's daily cap and the platform breaker. The audio cap
+// (TRANSCRIBE_DAILY_MINUTES) is the transcription pipeline's to add.
+func (s Settings) SpendCaps() store.SpendCaps {
+	return store.SpendCaps{WorkspaceDailyMicros: s.DailySpendCapMicros, PlatformDailyMicros: s.PlatformDailySpendCapMicros, PlatformSmallCallMicros: s.PlatformSmallCallMicros}
 }
 
 // LoadSettings parses the settings from environment variables, returning every problem found. Messages name the
@@ -103,6 +122,12 @@ func LoadSettings(getenv func(string) string) (Settings, error) {
 	if s.DailySpendCapMicros, err = positiveInt(get("DAILY_SPEND_CAP_MICROS"), DefaultDailySpendCapMicros); err != nil {
 		errs = append(errs, fmt.Errorf("DAILY_SPEND_CAP_MICROS: %w", err))
 	}
+	if s.PlatformDailySpendCapMicros, err = positiveInt(get("PLATFORM_DAILY_SPEND_CAP_MICROS"), DefaultPlatformDailySpendCapMicros); err != nil {
+		errs = append(errs, fmt.Errorf("PLATFORM_DAILY_SPEND_CAP_MICROS: %w", err))
+	}
+	if s.PlatformSmallCallMicros, err = positiveInt(get("PLATFORM_SPEND_SMALL_CALL_MICROS"), store.DefaultPlatformSmallCallMicros); err != nil {
+		errs = append(errs, fmt.Errorf("PLATFORM_SPEND_SMALL_CALL_MICROS: %w", err))
+	}
 	conc, err := positiveInt(get("LLM_KEY_CONCURRENCY"), DefaultConcurrency)
 	if err != nil || conc > 64 {
 		errs = append(errs, errors.New("LLM_KEY_CONCURRENCY: must be an integer from 1 to 64"))
@@ -111,6 +136,10 @@ func LoadSettings(getenv func(string) string) (Settings, error) {
 	switch v := get("LLM_ALLOW_UNPRICED"); v {
 	case "", "0":
 	case "1":
+		// An unpriced paid call cannot be capped or metered: only development and ci may run one (D-31). config.Load refuses it too.
+		if !config.UnpricedAllowedIn(s.Env) {
+			errs = append(errs, errors.New("LLM_ALLOW_UNPRICED: honoured only in local and ci; staging, production and bench refuse an unpriced paid provider"))
+		}
 		s.AllowUnpriced = true
 	default:
 		errs = append(errs, errors.New("LLM_ALLOW_UNPRICED: must be 1 or empty"))

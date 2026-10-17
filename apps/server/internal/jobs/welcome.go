@@ -10,6 +10,7 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/spend"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
@@ -36,6 +37,9 @@ type Deps struct {
 	// Transcribe is the transcription pipeline for the transcribe job. Nil when the worker has no object storage or sandbox set up:
 	// transcribe jobs then wait (snoozed) until a worker that has them picks them up.
 	Transcribe Transcriber
+	// Meter writes the ledger rows of the media jobs' compute (ingest, quick look, analysis: kind media, wall time times vCPUs). Nil
+	// records nothing.
+	Meter *spend.ComputeMeter
 	// Now replaces time.Now (tests).
 	Now func() time.Time
 	// Register optionally adds more workers to the bundle (tests, and packages with jobs of their own later).
@@ -47,6 +51,27 @@ func (d Deps) logger() *slog.Logger {
 		return d.Logger
 	}
 	return slog.Default()
+}
+
+// meterMedia records the compute of one attempt of a media job (P7-09a): its wall time on the stage's vCPUs, attributed to the member
+// who uploaded the asset. It runs whatever the attempt came to (the CPU was spent), and never fails the job.
+func (d Deps) meterMedia(ctx context.Context, ws ids.WorkspaceID, asset ids.AssetID, stage string, jobID int64, attempt int, began time.Time) {
+	if d.Meter == nil {
+		return
+	}
+	u := spend.ComputeUse{
+		Workspace: ws, Kind: store.KindMedia, Stage: stage, VCPUMs: d.Meter.VCPUMsOfWall(stage, d.now().Sub(began)),
+		// River does not count a snoozed run as an attempt, so the run's start time is part of the key: a snooze and the run after it are
+		// two rows, never one.
+		Key: fmt.Sprintf("media:%s:%d:%d:%d", stage, jobID, attempt, began.UnixMilli()), Action: asset.UUID,
+	}
+	// The job's own context may be what ended (a timeout, a shutdown); the lookup and the row are for work that was done anyway.
+	lctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if a, err := d.Store.GetAsset(lctx, ws, asset); err == nil {
+		u.Member = a.CreatedBy
+	}
+	d.Meter.Record(ctx, u)
 }
 
 func (d Deps) now() time.Time {
@@ -93,6 +118,9 @@ func Workers(deps Deps) (*river.Workers, error) {
 		return nil, err
 	}
 	if err := river.AddWorkerSafely(w, &RendersSweepWorker{deps: deps}); err != nil {
+		return nil, err
+	}
+	if err := river.AddWorkerSafely(w, &SpendHoldsSweepWorker{deps: deps}); err != nil {
 		return nil, err
 	}
 	if deps.Register != nil {

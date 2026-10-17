@@ -435,13 +435,15 @@ func TestOtherModelErrorsFailTheRun(t *testing.T) {
 		err    error
 		reason string
 	}{
-		"bad request":  {&llm.APIError{Status: 400, Type: "invalid_request_error", Message: "nope"}, FailModelError},
-		"bad key":      {&llm.APIError{Status: 401, Type: "authentication_error"}, FailModelAccess},
-		"no key":       {&llm.NoKeyError{Variable: "ANTHROPIC_API_KEY", Mode: llm.ModeLive}, FailModelAccess},
-		"rate limited": {errors.Join(llm.ErrRateLimited, errors.New("still 429")), FailModelError},
-		"daily cap":    {&llm.CapError{Kind: llm.CapDaily, EstimateMicros: 5, LimitMicros: 1}, FailDailyCap},
-		"request cap":  {&llm.CapError{Kind: llm.CapRequest, EstimateMicros: 5, LimitMicros: 1}, FailRequestCap},
-		"replay miss":  {&llm.ReplayMissError{Stage: "ideation", Key: "abc", Path: "p"}, FailReplayMiss},
+		"bad request":      {&llm.APIError{Status: 400, Type: "invalid_request_error", Message: "nope"}, FailModelError},
+		"bad key":          {&llm.APIError{Status: 401, Type: "authentication_error"}, FailModelAccess},
+		"no key":           {&llm.NoKeyError{Variable: "ANTHROPIC_API_KEY", Mode: llm.ModeLive}, FailModelAccess},
+		"rate limited":     {errors.Join(llm.ErrRateLimited, errors.New("still 429")), FailModelError},
+		"daily cap":        {&llm.CapError{Kind: llm.CapDaily, EstimateMicros: 5, LimitMicros: 1}, FailDailyCap},
+		"platform breaker": {&llm.CapError{Kind: llm.CapPlatform, EstimateMicros: 5, LimitMicros: 1}, FailPlatformSpendPaused},
+		"breaker busy":     {&llm.CapError{Kind: llm.CapPlatformBusy, EstimateMicros: 5, LimitMicros: 1}, FailSpendCapBusy},
+		"request cap":      {&llm.CapError{Kind: llm.CapRequest, EstimateMicros: 5, LimitMicros: 1}, FailRequestCap},
+		"replay miss":      {&llm.ReplayMissError{Stage: "ideation", Key: "abc", Path: "p"}, FailReplayMiss},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -456,7 +458,12 @@ func TestOtherModelErrorsFailTheRun(t *testing.T) {
 	}
 	t.Run("max_tokens and refusal", func(t *testing.T) {
 		for stop, reason := range map[string]string{"max_tokens": FailMaxTokens, "refusal": FailRefusal} {
-			e := newEnv(t, newScripted(say(stop, llm.TextBlock("..."))))
+			// A cut-off answer is recovered from twice; the third fails the run.
+			steps := []scriptStep{say(stop, llm.TextBlock("..."))}
+			if stop == "max_tokens" {
+				steps = append(steps, steps[0], steps[0])
+			}
+			e := newEnv(t, newScripted(steps...))
 			run := e.create("echo", "hello", Budgets{})
 			e.execute(run)
 			if r := e.get(run); r.Status != store.AgentFailed || *r.FailureReason != reason {

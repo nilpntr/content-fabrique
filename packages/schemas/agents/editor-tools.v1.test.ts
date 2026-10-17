@@ -38,10 +38,13 @@ describe("editor tools contract", () => {
       "list_footage",
       "view_clip",
       "find_moments",
+      "plan_edit",
       "get_timeline",
       "get_comments",
       "edit_timeline",
+      "match_exposure",
       "render_preview",
+      "check_edit",
       "finish",
     ]);
   });
@@ -101,7 +104,7 @@ describe("editor tools contract", () => {
 
 describe("tool arguments", () => {
   it("accepts no arguments for the tools that take none, and nothing else", () => {
-    for (const name of ["get_brief", "list_footage", "get_timeline", "render_preview"]) {
+    for (const name of ["get_brief", "list_footage", "get_timeline", "match_exposure", "render_preview", "check_edit"]) {
       expect(check(name, {}), name).toBe(true);
       expect(check(name, { x: 1 }), name).toBe(false);
     }
@@ -126,6 +129,35 @@ describe("tool arguments", () => {
     expect(check("find_moments", { limit: 1.5 })).toBe(false);
     expect(check("find_moments", { min_score: "high" })).toBe(false);
     expect(check("find_moments", { query: "row" })).toBe(false);
+  });
+
+  it("plan_edit takes the creative plan, with closed enums", () => {
+    const plan = {
+      content_type: "workout",
+      story: "A heavy back day.",
+      hook: "The heaviest rep.",
+      arc: "Hook, build, payoff.",
+      ending: "Back to the hook.",
+      playbook: "workout",
+      target_length_s: 20,
+      tempo_bpm: 124,
+      pace: "building",
+      shots: [
+        { role: "hook", what: "Heaviest rep", asset_id: ASSET, beats: 3, effect: "punch_in" },
+        { role: "payoff", what: "Last rep", beats: 4 },
+      ],
+    };
+    expect(check("plan_edit", plan)).toBe(true);
+    expect(check("plan_edit", { ...plan, content_type: "cooking" })).toBe(false);
+    expect(check("plan_edit", { ...plan, playbook: "podcast" })).toBe(false);
+    expect(check("plan_edit", { ...plan, pace: "frantic" })).toBe(false);
+    expect(check("plan_edit", { ...plan, target_length_s: 12.5 })).toBe(false);
+    expect(check("plan_edit", { ...plan, shots: [{ role: "intro", what: "x", beats: 1 }] })).toBe(false);
+    expect(check("plan_edit", { ...plan, shots: [{ role: "hook", what: "x", beats: 1, effect: "glitch" }] })).toBe(false);
+    expect(check("plan_edit", { ...plan, shots: [{ role: "hook", what: "x" }] })).toBe(false);
+    expect(check("plan_edit", { ...plan, extra: 1 })).toBe(false);
+    const { story: _story, ...without } = plan;
+    expect(check("plan_edit", without)).toBe(false);
   });
 
   it("finish takes a summary", () => {

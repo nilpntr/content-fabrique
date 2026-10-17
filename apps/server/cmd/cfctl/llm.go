@@ -21,6 +21,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/doctor"
 	"github.com/nilpntr/content-fabrique/internal/envfile"
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/spend"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
@@ -79,15 +80,21 @@ func cmdLLM(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps llmD
 // usd formats micro-dollars as dollars.
 func usd(micros int64) string { return fmt.Sprintf("$%.6f", float64(micros)/1e6) }
 
-// noLedger backs a count-only ping: nothing in it may write or read the ledger.
+// noLedger backs a count-only ping: nothing in it may write or read the ledger, the holds or the counters.
 type noLedger struct{}
 
-func (noLedger) InsertUsage(context.Context, store.UsageEntry) error {
-	return errors.New("llm ping without --live must not write the ledger")
+var errNoLedger = errors.New("llm ping without --live must not touch the ledger")
+
+func (noLedger) ReserveSpend(context.Context, store.ReserveSpendParams) (store.SpendHold, []store.SpendAlert, error) {
+	return store.SpendHold{}, nil, errNoLedger
 }
 
-func (noLedger) UsageCostMicros(context.Context, ids.WorkspaceID, time.Time, time.Time) (int64, error) {
-	return 0, errors.New("llm ping without --live must not read the ledger")
+func (noLedger) SettleSpend(context.Context, store.SettleSpendParams) (int, []store.SpendAlert, error) {
+	return 0, nil, errNoLedger
+}
+
+func (noLedger) ReleaseSpend(context.Context, ids.WorkspaceID, string) error {
+	return errNoLedger
 }
 
 func cmdLLMPing(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps llmDeps) int {
@@ -185,7 +192,7 @@ func cmdLLMPing(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps 
 	ctx, stop := signalContext()
 	defer stop()
 
-	var ledger llm.Ledger = noLedger{}
+	var ledger spend.Backend = noLedger{}
 	var st *store.Store
 	if *live {
 		dsn := vars["DATABASE_URL"]
@@ -281,4 +288,12 @@ func pricedWord(p *llm.PriceTable, model string) string {
 		return "model priced"
 	}
 	return "model UNPRICED: live calls are refused unless LLM_ALLOW_UNPRICED=1"
+}
+
+func (noLedger) RetainSpend(context.Context, ids.WorkspaceID, string, time.Time) error {
+	return errNoLedger
+}
+
+func (noLedger) ExtendSpend(context.Context, ids.WorkspaceID, string, time.Time) error {
+	return errNoLedger
 }

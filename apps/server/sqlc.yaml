@@ -14,6 +14,13 @@ sql:
         sql_package: pgx/v5
         emit_pointers_for_null_types: true
         overrides:
+          # Nullable ids stay pgtype.UUID: ids.ID writes the nil UUID, not NULL, for its zero value.
+          - column: "usage_ledger.project_id"
+            go_type: { import: "github.com/jackc/pgx/v5/pgtype", type: "UUID" }
+          - column: "spend_holds.workspace_id"
+            go_type: { import: "github.com/jackc/pgx/v5/pgtype", type: "UUID" }
+          - column: "spend_counters.workspace_id"
+            go_type: { import: "github.com/jackc/pgx/v5/pgtype", type: "UUID" }
           # Primary and foreign keys use the typed IDs of internal/ids, so a UserID cannot be passed as a WorkspaceID.
           - column: "workspaces.id"
             go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "WorkspaceID" }

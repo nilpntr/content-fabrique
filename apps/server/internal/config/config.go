@@ -224,6 +224,7 @@ func Load(getenv Getenv) (Config, error) {
 
 	errs = append(errs, c.loadMedia(getenv)...)
 	errs = append(errs, c.loadTranscribe(getenv)...)
+	errs = append(errs, c.loadSpend(getenv)...)
 
 	if c.OTLPEndpoint != "" {
 		if u, err := url.Parse(c.OTLPEndpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {

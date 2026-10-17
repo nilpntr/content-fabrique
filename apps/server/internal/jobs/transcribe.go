@@ -72,6 +72,18 @@ var (
 	ErrTranscribeGone = errors.New("jobs: the asset to transcribe is gone")
 	// ErrTranscribeNotConfigured: the provider is switched off (Workers AI without an account, say). The job waits.
 	ErrTranscribeNotConfigured = errors.New("jobs: the transcription provider is not configured")
+	// ErrTranscribePaused: the platform's daily spend breaker is open (D-31). Nothing was sent; the job waits, snoozed, without using an
+	// attempt, and the next UTC day it passes.
+	ErrTranscribePaused = errors.New("jobs: the platform spend breaker is open")
+	// ErrTranscribeBusy: the platform breaker has no room for this transcription right now, but is not tripped. The job waits a short
+	// while, without using an attempt.
+	ErrTranscribeBusy = errors.New("jobs: the platform spend cap is busy")
+)
+
+// pausedSnooze is how long a transcription waits when the platform breaker is open; busySnooze when it is only busy.
+const (
+	pausedSnooze = 15 * time.Minute
+	busySnooze   = 2 * time.Minute
 )
 
 // Transcriber is the transcription pipeline (package transcribe) as the worker sees it.
@@ -103,8 +115,12 @@ func (w *TranscribeWorker) Work(ctx context.Context, job *river.Job[TranscribeAr
 	if w.deps.Transcribe == nil {
 		return w.snooze(ctx, job, "this worker cannot transcribe (no object storage or sandbox)")
 	}
-	out, err := w.deps.Transcribe.Run(ctx, ws, id, job.Args.Generation)
+	out, err := w.deps.Transcribe.Run(WithJobInfo(ctx, JobInfo{ID: job.ID, Attempt: job.Attempt}), ws, id, job.Args.Generation)
 	switch {
+	case errors.Is(err, ErrTranscribeBusy):
+		return w.snoozeFor(ctx, job, busySnooze, err.Error())
+	case errors.Is(err, ErrTranscribePaused):
+		return w.snoozeFor(ctx, job, pausedSnooze, err.Error())
 	case errors.Is(err, ErrTranscribeGone):
 		return river.JobCancel(fmt.Errorf("asset %s is gone from workspace %s", id, ws))
 	case errors.Is(err, ErrTranscribeNotConfigured):
@@ -120,6 +136,10 @@ func (w *TranscribeWorker) Work(ctx context.Context, job *river.Job[TranscribeAr
 }
 
 func (w *TranscribeWorker) snooze(ctx context.Context, job *river.Job[TranscribeArgs], why string) error {
+	return w.snoozeFor(ctx, job, noTranscribeSnooze, why)
+}
+
+func (w *TranscribeWorker) snoozeFor(ctx context.Context, job *river.Job[TranscribeArgs], wait time.Duration, why string) error {
 	ws, id := job.Args.WorkspaceID, job.Args.AssetID
 	age := w.deps.now().Sub(job.CreatedAt)
 	if age >= TranscribeMaxAge {
@@ -127,8 +147,8 @@ func (w *TranscribeWorker) snooze(ctx context.Context, job *river.Job[Transcribe
 		w.giveUp(ctx, ws, id, job.Args.Generation)
 		return river.JobCancel(fmt.Errorf("transcribe gave up after %s: %s", age.Round(time.Minute), why))
 	}
-	w.deps.logger().WarnContext(ctx, "transcribe waits", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "retry_in", noTranscribeSnooze, "age", age.Round(time.Minute), "detail", why)
-	return river.JobSnooze(noTranscribeSnooze)
+	w.deps.logger().WarnContext(ctx, "transcribe waits", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "retry_in", wait, "age", age.Round(time.Minute), "detail", why)
+	return river.JobSnooze(wait)
 }
 
 // giveUp marks the transcript failed with a fresh context (the job's may be what ended).

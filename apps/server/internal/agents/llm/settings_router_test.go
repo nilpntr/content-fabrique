@@ -83,7 +83,7 @@ func TestRouter(t *testing.T) {
 	}
 	// The environment default is dev-cheap: Haiku for the editor.
 	got, err := r.Resolve("", "editor")
-	if err != nil || got.Model != "claude-haiku-5-5" || got.Effort != "medium" || got.MaxTokens != DefaultMaxTokens || got.Profile != "dev-cheap" {
+	if err != nil || got.Model != "claude-haiku-5-5" || got.Effort != "medium" || got.MaxTokens != 24000 || got.Profile != "dev-cheap" {
 		t.Fatalf("dev-cheap editor = %+v, %v", got, err)
 	}
 	// A run overrides the profile: v1-start puts Opus 5.5 on the editor while the default stays dev-cheap.

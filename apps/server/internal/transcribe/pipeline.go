@@ -9,14 +9,24 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
-	"github.com/nilpntr/content-fabrique/internal/agents/llm"
+	"github.com/google/uuid"
+
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/spend"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
+
+// ErrPlatformPaused is returned, wrapping spend.ErrPlatformPaused, when the platform's daily spend breaker is open: nothing was sent, the
+// transcript is not failed, and the job waits (a retry the same day meets the same breaker; the next UTC day it passes).
+var ErrPlatformPaused = fmt.Errorf("transcribe: %w", spend.ErrPlatformPaused)
+
+// ErrPlatformBusy is returned, wrapping spend.ErrSpendCapBusy, when the platform breaker has no room for this transcription right now
+// while it is not tripped (live holds are in the way, or the audio is large for the room left): the job waits a short while and tries
+// again.
+var ErrPlatformBusy = fmt.Errorf("transcribe: %w", spend.ErrSpendCapBusy)
 
 // ErrAssetGone is returned when there is nothing to transcribe any more: the asset was deleted or is not in the workspace.
 var ErrAssetGone = errors.New("transcribe: the asset is deleted or not in this workspace")
@@ -33,19 +43,33 @@ type Store interface {
 	SetTranscriptStatus(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, status string) error
 	FailTranscript(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, reason string, source *time.Time) error
 	SaveTranscript(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, t store.NewTranscript) (store.Transcript, error)
+	// InsertUsage writes a ledger row without a hold; only the pipeline of a provider that costs nothing and has no spend gate uses it.
 	InsertUsage(ctx context.Context, e store.UsageEntry) error
-	TranscribedMs(ctx context.Context, ws ids.WorkspaceID, from, to time.Time) (int64, error)
 }
 
-// SpendGuard is the workspace's daily spend cap. *llm.DailyGuard is the real one: the same cap, ledger and reservation algorithm
-// the model client uses, so a day of transcription and a day of editing draw on one budget.
-type SpendGuard interface {
-	// Reserve sets the worst-case cost aside, or returns a *llm.CapError when the cap cannot cover it. release is called once the
-	// call's ledger rows are written.
-	Reserve(ctx context.Context, ws ids.WorkspaceID, est int64) (release func(), err error)
+// jobKey identifies the River job attempt a run belongs to, for the idempotency keys of its ledger rows
+// ("transcribe:<job id>:<attempt>:<chunk>"). The worker's adapter puts it in the context (WithJob).
+type jobKey struct{}
+
+// JobRef names a job attempt.
+type JobRef struct {
+	ID      int64
+	Attempt int
 }
 
-var _ SpendGuard = (*llm.DailyGuard)(nil)
+// WithJob returns a context that tells Run which job attempt it works for.
+func WithJob(ctx context.Context, ref JobRef) context.Context {
+	return context.WithValue(ctx, jobKey{}, ref)
+}
+
+// jobOf reads the job attempt; a run outside a job (cfctl transcribe run) gets a fresh, unique one, so its rows are never mistaken for
+// a retry of another run.
+func jobOf(ctx context.Context) (ref JobRef, adhoc string) {
+	if r, ok := ctx.Value(jobKey{}).(JobRef); ok && r.ID > 0 {
+		return r, ""
+	}
+	return JobRef{Attempt: 1}, "adhoc-" + uuid.NewString()
+}
 
 // Config builds a Pipeline.
 type Config struct {
@@ -53,12 +77,10 @@ type Config struct {
 	Objects  Objects
 	Provider Provider
 	Detector Detector
-	// Spend is the daily spend cap. Required whenever the provider has a price: a call that costs money is never made without
-	// reserving its worst case first.
-	Spend SpendGuard
-	// DailyMinutes is the most audio a workspace may have transcribed per UTC day (TRANSCRIBE_DAILY_MINUTES), whoever transcribes
-	// it; 0 turns the limit off (tests). A transcription that would pass it fails with minutes_cap.
-	DailyMinutes int
+	// Gate reserves the worst case of a transcription against the caps in the database before anything is sent: the workspace's daily
+	// spend, the platform breaker, and the transcribed minutes (TRANSCRIBE_DAILY_MINUTES, whoever transcribes). Required whenever
+	// the provider has a price: a call that costs money is never made without reserving its worst case first.
+	Gate *spend.Gate
 	// Language is the language to ask for; empty detects it per clip.
 	Language string
 	// BilledTo is the ledger's billed_to: platform, or test in local, ci and bench.
@@ -73,9 +95,6 @@ type Config struct {
 // Pipeline transcribes assets. It holds no per-job state beyond the audio in flight, so one Pipeline serves all the workers.
 type Pipeline struct {
 	cfg Config
-
-	mu       sync.Mutex
-	inflight map[ids.WorkspaceID]int64 // audio ms of the calls in flight, per workspace
 }
 
 // New returns a Pipeline.
@@ -85,8 +104,6 @@ func New(cfg Config) (*Pipeline, error) {
 		return nil, errors.New("transcribe: a store, object storage, a provider and a detector are required")
 	case !filepath.IsAbs(cfg.TempDir) || filepath.Clean(cfg.TempDir) != cfg.TempDir:
 		return nil, fmt.Errorf("transcribe: the temp dir %q must be an absolute, clean path", cfg.TempDir)
-	case cfg.DailyMinutes < 0:
-		return nil, errors.New("transcribe: DailyMinutes must not be negative")
 	case cfg.BilledTo == "":
 		cfg.BilledTo = store.BilledToPlatform
 	}
@@ -99,7 +116,7 @@ func New(cfg Config) (*Pipeline, error) {
 	if err := os.MkdirAll(cfg.TempDir, 0o750); err != nil {
 		return nil, fmt.Errorf("transcribe: temp dir: %w", err)
 	}
-	return &Pipeline{cfg: cfg, inflight: map[ids.WorkspaceID]int64{}}, nil
+	return &Pipeline{cfg: cfg}, nil
 }
 
 // Result is the outcome of a run that ended normally.
@@ -209,37 +226,68 @@ func (p *Pipeline) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, 
 		return p.save(ctx, ws, id, res, p.noSpeech(source, audio, speechMs))
 	}
 
-	// The limits come before anything that costs: minutes, then money.
-	releaseMinutes, reason, err := p.reserveMinutes(ctx, ws, audio.DurationMs)
-	if err != nil {
-		return Result{}, err
-	}
-	if reason != "" {
-		return p.blocked(ctx, ws, id, source, reason, res, log)
-	}
-	defer releaseMinutes()
+	// The limits come before anything that costs: the daily minutes, the workspace's daily spend and the platform breaker, all in one
+	// reservation in the database that every worker sees. It is held until the ledger rows replace it.
 	est, _ := p.cfg.Provider.CostMicros(audio.DurationMs)
-	if est > 0 {
-		if p.cfg.Spend == nil {
-			return Result{}, errors.New("transcribe: the provider costs money and no spend guard is configured")
-		}
-		release, err := p.cfg.Spend.Reserve(ctx, ws, est)
-		var ce *llm.CapError
+	job, adhoc := jobOf(ctx)
+	var hold *spend.Hold
+	if p.cfg.Gate != nil {
+		var err error
+		hold, err = p.cfg.Gate.Reserve(ctx, spend.Request{
+			Workspace: ws, BilledTo: p.cfg.BilledTo, Kind: store.KindTranscription, Micros: est, AudioMs: audio.DurationMs,
+			Key: p.holdKey(job, adhoc),
+		})
+		var ce *spend.CapError
 		switch {
+		case errors.As(err, &ce) && ce.Cap == store.CapPlatformDaily:
+			log.WarnContext(ctx, "transcription waits: the platform spend breaker is open", "audio_ms", audio.DurationMs)
+			return Result{}, fmt.Errorf("%w: %w", ErrPlatformPaused, err)
+		case errors.As(err, &ce) && ce.Cap == store.CapPlatformBusy:
+			log.WarnContext(ctx, "transcription waits: the platform spend cap has no room for it right now", "audio_ms", audio.DurationMs)
+			return Result{}, fmt.Errorf("%w: %w", ErrPlatformBusy, err)
+		case errors.As(err, &ce) && ce.Cap == store.CapWorkspaceAudio:
+			return p.blocked(ctx, ws, id, source, store.TranscriptMinutesCap, res, log)
 		case errors.As(err, &ce):
 			return p.blocked(ctx, ws, id, source, store.TranscriptSpendCap, res, log)
 		case err != nil:
-			return Result{}, fmt.Errorf("spend cap: %w", err)
+			return Result{}, fmt.Errorf("spend cap: %w", err) // fail closed
 		}
-		defer release() // after the ledger rows below: a concurrent call sees this one as a reservation or as rows, never neither
+	} else if est > 0 {
+		return Result{}, errors.New("transcribe: the provider costs money and no spend gate is configured")
 	}
+	settled, keep := false, false
+	// The hold lives as long as the provider works (a heartbeat extends it); a worker that dies stops extending it and it expires.
+	stopBeat := func() {}
+	if hold != nil {
+		stopBeat = hold.KeepAlive(ctx)
+	}
+	defer func() {
+		stopBeat()
+		// A hold that no ledger row replaced goes back (nothing was sent, or nothing billed); one whose rows could not be written stays
+		// until it expires, so the caps stay conservative.
+		if hold != nil && !settled && !keep {
+			rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer cancel()
+			if err := hold.Release(rctx); err != nil {
+				log.WarnContext(ctx, "could not release a spend hold; it will expire", "error", err)
+			}
+		}
+	}()
 
 	tr, terr := p.cfg.Provider.Transcribe(ctx, audio, Options{Language: p.cfg.Language})
 	calls := tr.Calls
 	if terr == nil && len(calls) == 0 {
 		calls = []Call{{AudioMs: audio.DurationMs}}
 	}
-	p.meter(ctx, ws, calls)
+	settled, keep = p.meter(ctx, ws, asset, hold, job, adhoc, calls)
+	if keep && hold != nil {
+		stopBeat() // the rows could not be written: keep the hold to the end of the day instead of letting it lapse
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		if err := hold.Retain(rctx); err != nil {
+			log.ErrorContext(ctx, "could not retain the spend hold of an unrecorded transcription", "error", err)
+		}
+		cancel()
+	}
 	switch {
 	case errors.Is(terr, ErrUnusableAudio):
 		return p.unusable(ctx, ws, id, source, terr, log)
@@ -283,75 +331,81 @@ func (p *Pipeline) noSpeech(source *time.Time, audio Audio, speechMs int64) stor
 	}
 }
 
-// utcDay is the UTC day that contains t.
-func utcDay(t time.Time) (from, to time.Time) {
-	t = t.UTC()
-	from = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
-	return from, from.Add(24 * time.Hour)
-}
-
-// reserveMinutes checks the workspace's daily minutes of transcription: what the ledger holds for today, what other runs of this
-// process have in flight, and this audio, against TRANSCRIBE_DAILY_MINUTES. It returns a reason (minutes_cap) when the limit is
-// passed, or the function that gives the audio back once the run's ledger rows exist.
-func (p *Pipeline) reserveMinutes(ctx context.Context, ws ids.WorkspaceID, ms int64) (release func(), reason string, err error) {
-	if p.cfg.DailyMinutes == 0 {
-		return func() {}, "", nil
+// holdKey identifies the reservation of one job attempt; a retry of the attempt's reserve finds the same hold.
+func (p *Pipeline) holdKey(job JobRef, adhoc string) string {
+	if adhoc != "" {
+		return "hold:transcribe:" + adhoc
 	}
-	from, to := utcDay(p.cfg.now())
-	p.mu.Lock()
-	before := p.inflight[ws]
-	p.inflight[ws] = before + ms
-	p.mu.Unlock()
-	give := func() {
-		p.mu.Lock()
-		if left := p.inflight[ws] - ms; left > 0 {
-			p.inflight[ws] = left
-		} else {
-			delete(p.inflight, ws)
-		}
-		p.mu.Unlock()
-	}
-	used, err := p.cfg.Store.TranscribedMs(ctx, ws, from, to)
-	if err != nil {
-		give()
-		return nil, "", fmt.Errorf("reading today's transcription: %w", err) // fail closed
-	}
-	if used+before+ms > int64(p.cfg.DailyMinutes)*60_000 {
-		give()
-		return nil, store.TranscriptMinutesCap, nil
-	}
-	return give, "", nil
+	return fmt.Sprintf("hold:transcribe:%d:%d", job.ID, job.Attempt)
 }
 
 // meter writes the ledger row of every billed call, in the order they were made, with a fresh context: the calls are already paid
-// for. A row that cannot be written is retried a few times and then logged in full for reconciliation (the llm client does the
-// same): failing the run would only send the audio to the provider, and bill it, a second time. The transcript the call produced is
-// kept and saved.
-func (p *Pipeline) meter(ctx context.Context, ws ids.WorkspaceID, calls []Call) {
+// for. The rows settle the reservation in one transaction; their idempotency keys ("transcribe:<job>:<attempt>:<chunk>") make a retried
+// write a no-op, so a settle whose answer was lost cannot double count. A write that still fails after a few tries is logged in full
+// for reconciliation (the llm client does the same) and the hold is kept until it expires: failing the run would only send the audio
+// to the provider, and bill it, a second time. The transcript the call produced is kept and saved.
+//
+// settled says the rows are in the ledger and replaced the hold; keep says the write failed and the hold must stay. Neither: there
+// was nothing to write (no call was billed) and the caller releases the hold.
+func (p *Pipeline) meter(ctx context.Context, ws ids.WorkspaceID, asset store.Asset, hold *spend.Hold, job JobRef, adhoc string, calls []Call) (settled, keep bool) {
+	if len(calls) == 0 {
+		return false, false
+	}
 	mctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	for _, c := range calls {
+	prefix := fmt.Sprintf("transcribe:%d:%d", job.ID, job.Attempt)
+	if adhoc != "" {
+		prefix = "transcribe:" + adhoc
+	}
+	rows := make([]store.UsageEntry, len(calls))
+	for i, c := range calls {
 		cost, version := p.cfg.Provider.CostMicros(c.AudioMs)
-		e := store.UsageEntry{
+		unit, quantity := store.UnitAudioMs, c.AudioMs
+		if q, ok := p.cfg.Provider.(quantifier); ok {
+			unit, quantity = q.Quantity(c.AudioMs)
+		}
+		rows[i] = store.UsageEntry{
 			WorkspaceID: ws, Stage: "transcription", Kind: store.KindTranscription, Model: p.cfg.Provider.Model(), Provider: p.cfg.Provider.Name(),
-			AudioMs: c.AudioMs, ListCostMicros: cost, PriceTableVersion: version, BilledTo: p.cfg.BilledTo, CreatedAt: p.cfg.now().UTC(),
-		}
-		var err error
-		for attempt := 1; attempt <= 3; attempt++ {
-			if err = p.cfg.Store.InsertUsage(mctx, e); err == nil {
-				break
-			}
-			select {
-			case <-time.After(time.Duration(attempt) * 200 * time.Millisecond):
-			case <-mctx.Done():
-			}
-		}
-		if err != nil {
-			p.cfg.Logger.Error("transcribe: usage ledger write failed; reconcile this row by hand", "error", err, "workspace_id", ws.String(),
-				"provider", e.Provider, "model", e.Model, "audio_ms", e.AudioMs, "list_cost_micros", e.ListCostMicros,
-				"price_table_version", e.PriceTableVersion, "billed_to", e.BilledTo, "created_at", e.CreatedAt)
+			AudioMs: c.AudioMs, Quantity: quantity, Unit: unit, ListCostMicros: cost, PriceTableVersion: version, BilledTo: p.cfg.BilledTo,
+			// A chunk whose outcome is unknown after it was sent may have been billed: it is recorded at the price reserved for its audio.
+			Estimated: c.Estimated, MemberUserID: asset.CreatedBy,
+			IdempotencyKey: fmt.Sprintf("%s:%d", prefix, i), CreatedAt: p.cfg.now().UTC(),
 		}
 	}
+	var err error
+	for attempt := 1; attempt <= 3; attempt++ {
+		switch {
+		case hold != nil:
+			err = hold.Settle(mctx, rows...)
+		case p.cfg.Gate != nil:
+			err = p.cfg.Gate.Record(mctx, ws, rows...)
+		default:
+			err = nil
+			for _, r := range rows {
+				if err = p.cfg.Store.InsertUsage(mctx, r); err != nil {
+					break
+				}
+			}
+		}
+		if err == nil {
+			return true, false
+		}
+		select {
+		case <-time.After(time.Duration(attempt) * 200 * time.Millisecond):
+		case <-mctx.Done():
+		}
+	}
+	for _, e := range rows {
+		p.cfg.Logger.Error("transcribe: usage ledger write failed; reconcile this row by hand", "error", err, "workspace_id", ws.String(),
+			"provider", e.Provider, "model", e.Model, "audio_ms", e.AudioMs, "list_cost_micros", e.ListCostMicros,
+			"price_table_version", e.PriceTableVersion, "billed_to", e.BilledTo, "estimated", e.Estimated, "idempotency_key", e.IdempotencyKey, "created_at", e.CreatedAt)
+	}
+	return false, true
+}
+
+// quantifier is implemented by a provider whose ledger rows are not in audio milliseconds (local whisper.cpp is compute: vCPU time).
+type quantifier interface {
+	Quantity(audioMs int64) (unit string, quantity int64)
 }
 
 // save writes the transcript with a fresh context: the work is done and paid for. A transcript made from an ingest that is no
