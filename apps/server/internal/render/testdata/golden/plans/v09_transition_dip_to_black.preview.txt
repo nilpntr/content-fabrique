@@ -1,0 +1,125 @@
+fixture: v09_transition_dip_to_black
+profile: preview
+output: 540x960 at 30 fps, 147 frames, 4900 ms
+
+args:
+  -protocol_whitelist
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
+  -t
+  2.500
+  -i
+  /assets/proxy/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4
+  -protocol_whitelist
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
+  -ss
+  2.000
+  -t
+  3.000
+  -i
+  /assets/proxy/ast_01jex6xx15ayjx8epfhfjj9s11.mp4
+  -filter_complex
+  <filter_complex>
+  -map
+  [vout]
+  -map
+  [aout]
+  -c:v
+  libx264
+  -preset
+  veryfast
+  -crf
+  28
+  -pix_fmt
+  yuv420p
+  -c:a
+  aac
+  -b:a
+  128k
+  -ar
+  48000
+  -ac
+  2
+  -map_metadata
+  -1
+  -map_chapters
+  -1
+  -fflags
+  +bitexact
+  -flags:v
+  +bitexact
+  -flags:a
+  +bitexact
+
+filter_complex:
+  [0:v]trim=end=2.500,setpts=PTS-STARTPTS,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=75,setpts=PTS-STARTPTS,scale=540:960:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=540:960:x='clip(0.5*iw-270,0,iw-540)':y='clip(0.5*ih-480,0,ih-960)',setsar=1,format=yuv420p,setsar=1,fps=30,settb=AVTB[v0];
+  [1:v]trim=end=3.000,setpts=PTS-STARTPTS,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=90,setpts=PTS-STARTPTS,scale=540:960:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=540:960:x='clip(0.5*iw-270,0,iw-540)':y='clip(0.5*ih-480,0,ih-960)',setsar=1,format=yuv420p,setsar=1,fps=30,settb=AVTB[v1];
+  [v0][v1]xfade=transition=fadeblack:duration=0.600000:offset=1.900000[vout];
+  anullsrc=r=48000:cl=stereo:d=4.900[abed];
+  [abed]anull[aout]
+
+inputs:
+[
+  {
+    "index": 0,
+    "role": "clip",
+    "item_id": "c1",
+    "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+    "location": "/assets/proxy/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4",
+    "seek_ms": 0,
+    "duration_ms": 2500
+  },
+  {
+    "index": 1,
+    "role": "clip",
+    "item_id": "c2",
+    "asset_id": "ast_01jex6xx15ayjx8epfhfjj9s11",
+    "location": "/assets/proxy/ast_01jex6xx15ayjx8epfhfjj9s11.mp4",
+    "seek_ms": 2000,
+    "duration_ms": 3000
+  }
+]
+
+cut_list:
+[
+  {
+    "index": 1,
+    "item_id": "c2",
+    "frame": 57,
+    "at_ms": 1900,
+    "transition": "dip_to_black",
+    "transition_frames": 18
+  }
+]
+
+time_map:
+[
+  {
+    "out_start_ms": 0,
+    "out_end_ms": 1900,
+    "item_id": "c1",
+    "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+    "source_in_ms": 0,
+    "speed": 1
+  },
+  {
+    "out_start_ms": 1900,
+    "out_end_ms": 4900,
+    "item_id": "c2",
+    "asset_id": "ast_01jex6xx15ayjx8epfhfjj9s11",
+    "source_in_ms": 2000,
+    "speed": 1
+  }
+]
+
+sound_cues:
+[]
+
+pending_text:
+[]
+
+pending_captions: false
+pending_watermark: true
