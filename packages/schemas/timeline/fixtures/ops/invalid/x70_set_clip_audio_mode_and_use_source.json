@@ -1,0 +1,6 @@
+{
+  "op": "set_clip_audio",
+  "id": "c1",
+  "mode": "bed",
+  "use_source": true
+}

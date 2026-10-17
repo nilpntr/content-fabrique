@@ -42,6 +42,8 @@ contact sheet's time axis.
                settings in the env file, and the media sandbox settings
   --render     with --project: a render id (ren_...) instead of the newest ready one
   --workspace  with --project: the workspace
+  --profile    what the sound is held to: auto (default: from the timeline of --spec or --project: sound_ready when no clip is in full mode and
+               there is no music or creator audio; without a spec it is programme), programme or sound_ready (P3-12)
   --fps        the frame rate "within a frame" is measured against (default: read from the file)
   --sheet      write the sheet PNG here
   --json       write the structured report here ("-" for standard output, after the summary)
@@ -78,6 +80,7 @@ func cmdAudioCheck(args []string, stdout, stderr io.Writer, lookup lookupEnv, de
 	projectArg := flags.String("project", "", "project id")
 	renderArg := flags.String("render", "", "render id")
 	workspaceArg := flags.String("workspace", "", "workspace id")
+	profileArg := flags.String("profile", "auto", "auto, programme or sound_ready")
 	fpsArg := flags.Int("fps", 0, "frame rate")
 	sheetArg := flags.String("sheet", "", "sheet PNG to write")
 	jsonArg := flags.String("json", "", "report JSON to write (- for stdout)")
@@ -95,6 +98,12 @@ func cmdAudioCheck(args []string, stdout, stderr io.Writer, lookup lookupEnv, de
 		_, _ = fmt.Fprint(stderr, audioUsage)
 		return 2
 	}
+	switch *profileArg {
+	case "auto", audiocheck.ProfileProgramme, audiocheck.ProfileSoundReady:
+	default:
+		_, _ = fmt.Fprintf(stderr, "cfctl %s: --profile is auto, programme or sound_ready\n", name)
+		return 2
+	}
 	ctx, stop := signalContext()
 	defer stop()
 
@@ -102,6 +111,7 @@ func cmdAudioCheck(args []string, stdout, stderr io.Writer, lookup lookupEnv, de
 		mp4     string
 		tm      []render.TimeMapEntry
 		planned []audiocheck.PlannedSFX
+		spec    *timeline.Spec
 		runner  media.Runner
 		workDir string
 		cleanup = func() {}
@@ -122,7 +132,7 @@ func cmdAudioCheck(args []string, stdout, stderr io.Writer, lookup lookupEnv, de
 			return 1
 		}
 		if *specArg != "" {
-			if planned, err = readPlanned(*specArg); err != nil {
+			if spec, err = readSpec(*specArg); err != nil {
 				_, _ = fmt.Fprintf(stderr, "cfctl %s: %v\n", name, err)
 				return 1
 			}
@@ -158,7 +168,7 @@ func cmdAudioCheck(args []string, stdout, stderr io.Writer, lookup lookupEnv, de
 		workDir = work
 	} else {
 		var code int
-		mp4, tm, planned, runner, workDir, cleanup, fps, code = loadProjectRender(ctx, name, *projectArg, *workspaceArg, *renderArg, *envFileArg, fps, stdout, stderr, lookup, deps)
+		mp4, tm, planned, spec, runner, workDir, cleanup, fps, code = loadProjectRender(ctx, name, *projectArg, *workspaceArg, *renderArg, *envFileArg, fps, stdout, stderr, lookup, deps)
 		if code != 0 {
 			return code
 		}
@@ -166,8 +176,19 @@ func cmdAudioCheck(args []string, stdout, stderr io.Writer, lookup lookupEnv, de
 	defer cleanup()
 
 	opts := []audiocheck.Option{audiocheck.WithSFX(planned), audiocheck.WithWorkDir(workDir)}
+	if spec != nil { // the planned effects, the frame rate and the profile (sound-ready when no programme sound is exported)
+		opts = []audiocheck.Option{audiocheck.WithSpec(spec), audiocheck.WithWorkDir(workDir)}
+	}
 	if fps > 0 {
 		opts = append(opts, audiocheck.WithFPS(fps))
+	}
+	switch *profileArg {
+	case "auto":
+		if spec == nil {
+			_, _ = fmt.Fprintf(stderr, "cfctl %s: no timeline spec (--spec), so the profile cannot be chosen from it: the programme profile is used; pass --profile sound_ready for an export that is a bed and effects\n", name)
+		}
+	default:
+		opts = append(opts, audiocheck.WithProfile(*profileArg))
 	}
 	report, err := audiocheck.Check(ctx, runner, mp4, tm, opts...)
 	if err != nil {
@@ -221,8 +242,8 @@ func readTimeMap(path string) ([]render.TimeMapEntry, error) {
 	return tm, nil
 }
 
-// readPlanned reads the sound effects of a timeline spec file.
-func readPlanned(path string) ([]audiocheck.PlannedSFX, error) {
+// readSpec reads a timeline spec file.
+func readSpec(path string) (*timeline.Spec, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // a developer tool reading the file it was told to
 	if err != nil {
 		return nil, err
@@ -231,7 +252,7 @@ func readPlanned(path string) ([]audiocheck.PlannedSFX, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	return audiocheck.PlannedSFXFromSpec(spec), nil
+	return spec, nil
 }
 
 // newCheckRunner builds the sandbox runner for a check: it may read the directory of the MP4 and write the work directory.
@@ -245,54 +266,54 @@ func newCheckRunner(name, dockerBin, image, inDir, workDir string) (media.Runner
 
 // loadProjectRender downloads a project's render (its MP4 and time map) and the spec it was rendered from, and builds the sandbox
 // runner from the env file's media settings. The caller removes workDir.
-func loadProjectRender(ctx context.Context, name, projectArg, workspaceArg, renderArg, envFileArg string, fps int, stdout, stderr io.Writer, lookup lookupEnv, deps agentDeps) (mp4 string, tm []render.TimeMapEntry, planned []audiocheck.PlannedSFX, runner media.Runner, workDir string, cleanup func(), outFPS, code int) {
+func loadProjectRender(ctx context.Context, name, projectArg, workspaceArg, renderArg, envFileArg string, fps int, stdout, stderr io.Writer, lookup lookupEnv, deps agentDeps) (mp4 string, tm []render.TimeMapEntry, planned []audiocheck.PlannedSFX, specOut *timeline.Spec, runner media.Runner, workDir string, cleanup func(), outFPS, code int) {
 	pid, err := ids.ParseProjectID(projectArg)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "cfctl %s: %q is not a project id like prj_01...\n", name, projectArg)
-		return "", nil, nil, nil, "", nil, 0, 2
+		return "", nil, nil, nil, nil, "", nil, 0, 2
 	}
 	wantWS, wantOrg, ok := parseWorkspaceRef(name, workspaceArg, stderr)
 	if !ok {
-		return "", nil, nil, nil, "", nil, 0, 2
+		return "", nil, nil, nil, nil, "", nil, 0, 2
 	}
 	env, code := guardDevCommand(name, envFileArg, false, false, stdout, stderr, lookup)
 	if code != 0 {
-		return "", nil, nil, nil, "", nil, 0, code
+		return "", nil, nil, nil, nil, "", nil, 0, code
 	}
 	cfg, err := config.Load(env.get)
 	if err != nil {
 		_, _ = fmt.Fprintf(env.err, "cfctl %s: %v\n", name, err)
-		return "", nil, nil, nil, "", nil, 0, 2
+		return "", nil, nil, nil, nil, "", nil, 0, 2
 	}
 	if !cfg.ObjectStorageConfigured() {
 		_, _ = fmt.Fprintf(env.err, "cfctl %s: the R2_* settings are not set in %s or the environment\n", name, displayPath(env.root, env.path))
-		return "", nil, nil, nil, "", nil, 0, 2
+		return "", nil, nil, nil, nil, "", nil, 0, 2
 	}
 	st, code := env.openDB(ctx, name, deps)
 	if code != 0 {
-		return "", nil, nil, nil, "", nil, 0, code
+		return "", nil, nil, nil, nil, "", nil, 0, code
 	}
 	defer st.Close()
 	ws, code := findWorkspace(ctx, st, name, wantWS, wantOrg, env.err)
 	if code != 0 {
-		return "", nil, nil, nil, "", nil, 0, code
+		return "", nil, nil, nil, nil, "", nil, 0, code
 	}
 	var row store.Render
 	if renderArg != "" {
 		rid, err := ids.ParseRenderID(renderArg)
 		if err != nil {
 			_, _ = fmt.Fprintf(env.err, "cfctl %s: %q is not a render id like ren_01...\n", name, renderArg)
-			return "", nil, nil, nil, "", nil, 0, 2
+			return "", nil, nil, nil, nil, "", nil, 0, 2
 		}
 		if row, err = st.GetRender(ctx, ws.ID, rid); err != nil {
 			_, _ = fmt.Fprintf(env.err, "cfctl %s: no such render in this workspace: %v\n", name, err)
-			return "", nil, nil, nil, "", nil, 0, 1
+			return "", nil, nil, nil, nil, "", nil, 0, 1
 		}
 	} else {
 		rows, err := st.ListRenders(ctx, ws.ID, pid, store.RenderFilter{}, 20)
 		if err != nil {
 			_, _ = fmt.Fprintf(env.err, "cfctl %s: listing the renders: %v\n", name, err)
-			return "", nil, nil, nil, "", nil, 0, 1
+			return "", nil, nil, nil, nil, "", nil, 0, 1
 		}
 		found := false
 		for _, r := range rows {
@@ -303,50 +324,63 @@ func loadProjectRender(ctx context.Context, name, projectArg, workspaceArg, rend
 		}
 		if !found {
 			_, _ = fmt.Fprintf(env.err, "cfctl %s: the project has no ready render (render it first)\n", name)
-			return "", nil, nil, nil, "", nil, 0, 1
+			return "", nil, nil, nil, nil, "", nil, 0, 1
 		}
 	}
 	if row.ProjectID != pid || row.Status != "ready" || row.Mp4Key == nil || row.TimeMapKey == nil {
 		_, _ = fmt.Fprintf(env.err, "cfctl %s: render %s is not a ready render of project %s\n", name, ids.Encode(ids.PrefixRender, row.ID.UUID), projectArg)
-		return "", nil, nil, nil, "", nil, 0, 1
+		return "", nil, nil, nil, nil, "", nil, 0, 1
 	}
 	objects, err := storage.New(cfg.Storage())
 	if err != nil {
 		_, _ = fmt.Fprintf(env.err, "cfctl %s: object storage: %v\n", name, err)
-		return "", nil, nil, nil, "", nil, 0, 1
+		return "", nil, nil, nil, nil, "", nil, 0, 1
 	}
 	runnerOut, root, err := agentset.NewFrameRunner(cfg.MediaSandboxProvider, cfg.MediaToolsImage, cmp.Or(cfg.MediaTempDir, filepath.Join(os.TempDir(), "cf-media")), cfg.Env)
 	if err != nil {
 		_, _ = fmt.Fprintf(env.err, "cfctl %s: the sandbox: %v\n", name, err)
-		return "", nil, nil, nil, "", nil, 0, 2
+		return "", nil, nil, nil, nil, "", nil, 0, 2
 	}
 	work, err := os.MkdirTemp(root, "audiocheck-")
 	if err != nil {
 		_, _ = fmt.Fprintf(env.err, "cfctl %s: %v\n", name, err)
-		return "", nil, nil, nil, "", nil, 0, 1
+		return "", nil, nil, nil, nil, "", nil, 0, 1
 	}
 	// The MP4 goes in the work directory's parent (the sandbox reads it read-only), the sandbox writes in its own subdirectory.
 	mp4 = filepath.Join(work, "render.mp4")
 	if err := download(ctx, objects, *row.Mp4Key, mp4, 2<<30); err != nil {
 		_ = os.RemoveAll(work)
 		_, _ = fmt.Fprintf(env.err, "cfctl %s: downloading the render: %v\n", name, err)
-		return "", nil, nil, nil, "", nil, 0, 1
+		return "", nil, nil, nil, nil, "", nil, 0, 1
+	}
+	// A preview with a beat guide has the mix without the guide next to it (the audio stem): that is the export's sound, so it is what is
+	// measured. Without one the video's own sound is.
+	usedStem := false
+	if stemKey, kerr := storage.RenderKey(ws.ID, pid, row.ID, storage.RenderAudioStemName); kerr == nil {
+		stem := filepath.Join(work, storage.RenderAudioStemName)
+		switch derr := download(ctx, objects, stemKey, stem, 256<<20); {
+		case derr == nil:
+			mp4, usedStem = stem, true
+			_, _ = fmt.Fprintf(stdout, "cfctl %s: measuring the audio stem (the mix without the beat guide)\n", name)
+		case !errors.Is(derr, storage.ErrNotFound):
+			_, _ = fmt.Fprintf(env.err, "cfctl %s: warning: the audio stem could not be downloaded, so the video's sound (with its beat guide) is measured: %v\n", name, derr)
+		}
 	}
 	tmPath := filepath.Join(work, "time_map.json")
 	if err := download(ctx, objects, *row.TimeMapKey, tmPath, 8<<20); err != nil {
 		_ = os.RemoveAll(work)
 		_, _ = fmt.Fprintf(env.err, "cfctl %s: downloading the time map: %v\n", name, err)
-		return "", nil, nil, nil, "", nil, 0, 1
+		return "", nil, nil, nil, nil, "", nil, 0, 1
 	}
 	if tm, err = readTimeMap(tmPath); err != nil {
 		_ = os.RemoveAll(work)
 		_, _ = fmt.Fprintf(env.err, "cfctl %s: %v\n", name, err)
-		return "", nil, nil, nil, "", nil, 0, 1
+		return "", nil, nil, nil, nil, "", nil, 0, 1
 	}
 	out := filepath.Join(work, "out")
 	if err := os.Mkdir(out, 0o750); err != nil {
 		_ = os.RemoveAll(work)
-		return "", nil, nil, nil, "", nil, 0, 1
+		return "", nil, nil, nil, nil, "", nil, 0, 1
 	}
 	// The planned effects and the frame rate come from the timeline version the render was made of.
 	// Without it the check still runs, but it cannot say where the effects were planned: say so.
@@ -354,7 +388,10 @@ func loadProjectRender(ctx context.Context, name, projectArg, workspaceArg, rend
 	if err == nil {
 		var spec *timeline.Spec
 		if spec, err = timeline.Parse(tv.Spec); err == nil {
-			planned = audiocheck.PlannedSFXFromSpec(spec)
+			planned, specOut = audiocheck.PlannedSFXFromSpec(spec), spec
+			if !usedStem && row.Profile == store.ProfilePreview && hasGuideMarkers(spec) {
+				_, _ = fmt.Fprintf(env.err, "cfctl %s: WARNING: this preview has no audio stem and its timeline has beat markers, so the video's sound includes the generated beat guide (a click on every beat, -12 dB under full scale): the loudness, onsets, sync and bed checks below measure the guide as well. Render the preview again (it writes the stem) or check a final render.\n", name)
+			}
 			if fps == 0 {
 				fps = spec.Output.FPS
 			}
@@ -364,7 +401,7 @@ func loadProjectRender(ctx context.Context, name, projectArg, workspaceArg, rend
 		_, _ = fmt.Fprintf(env.err, "cfctl %s: warning: could not read the timeline version %d the render was made from, so the planned sound effects and the frame rate are unknown: %v\n", name, row.TimelineVersion, err)
 	}
 	_, _ = fmt.Fprintf(stdout, "cfctl %s: render %s (version %d, %s profile)\n", name, ids.Encode(ids.PrefixRender, row.ID.UUID), row.TimelineVersion, row.Profile)
-	return mp4, tm, planned, runnerOut, out, func() { _ = os.RemoveAll(work) }, fps, 0
+	return mp4, tm, planned, specOut, runnerOut, out, func() { _ = os.RemoveAll(work) }, fps, 0
 }
 
 // download copies an object to a file, refusing more than limit bytes.
@@ -390,4 +427,20 @@ func download(ctx context.Context, objects *storage.Client, key, path string, li
 		return err
 	}
 	return f.Close()
+}
+
+// hasGuideMarkers says the preview of this timeline carries the generated beat guide: it has beat, downbeat or drop markers inside the
+// video (the renderer puts no click at or past the end).
+func hasGuideMarkers(spec *timeline.Spec) bool {
+	total := timeline.TotalDuration(spec)
+	for _, m := range spec.Markers {
+		if m.AtMs >= total {
+			continue
+		}
+		switch m.Kind {
+		case timeline.MarkerBeat, timeline.MarkerDownbeat, timeline.MarkerDrop:
+			return true
+		}
+	}
+	return false
 }

@@ -42,7 +42,7 @@ func cloneVideoAudio(v *timeline.VideoAudio) *timeline.VideoAudio {
 	if v == nil {
 		return nil
 	}
-	return &timeline.VideoAudio{UseSource: copyPtr(v.UseSource), GainDB: copyPtr(v.GainDB)}
+	return &timeline.VideoAudio{UseSource: copyPtr(v.UseSource), GainDB: copyPtr(v.GainDB), Mode: v.Mode}
 }
 
 // ---- add_clip, remove_item, move_item ---------------------------------------------------------------------------
@@ -392,26 +392,45 @@ func (a *applier) setLook(o *SetLook) bool {
 }
 
 func (a *applier) setClipAudio(o *SetClipAudio) bool {
-	if o.UseSource == nil && o.GainDB == nil {
-		return a.errf(CodeBadArgument, "give at least one of use_source and gain_db")
+	if o.UseSource == nil && o.GainDB == nil && o.Mode == "" {
+		return a.errf(CodeBadArgument, "give at least one of mode, use_source and gain_db")
+	}
+	if o.Mode != "" && o.UseSource != nil {
+		return a.errf(CodeBadArgument, "give mode or use_source, not both: mode is bed, full or mute, and use_source is the old spelling of full and mute")
+	}
+	switch o.Mode {
+	case "", timeline.AudioModeMute, timeline.AudioModeBed, timeline.AudioModeFull:
+	default:
+		return a.errf(CodeBadArgument, "mode %q is not one of mute, bed and full", o.Mode)
+	}
+	apply := func(it *timeline.VideoItem) {
+		audio := cloneVideoAudio(it.Audio)
+		if audio == nil {
+			audio = &timeline.VideoAudio{}
+		}
+		if o.Mode != "" {
+			audio.Mode, audio.UseSource = o.Mode, nil
+		}
+		if o.UseSource != nil {
+			audio.UseSource, audio.Mode = copyPtr(o.UseSource), ""
+		}
+		if o.GainDB != nil {
+			audio.GainDB = copyPtr(o.GainDB)
+		}
+		it.Audio = audio
+		a.touch(it.ID)
+	}
+	if o.ID == "" {
+		for i := range a.main.Items {
+			apply(&a.main.Items[i])
+		}
+		return true
 	}
 	i, ok := a.clip(o.ID)
 	if !ok {
 		return false
 	}
-	it := &a.main.Items[i]
-	audio := cloneVideoAudio(it.Audio)
-	if audio == nil {
-		audio = &timeline.VideoAudio{}
-	}
-	if o.UseSource != nil {
-		audio.UseSource = copyPtr(o.UseSource)
-	}
-	if o.GainDB != nil {
-		audio.GainDB = copyPtr(o.GainDB)
-	}
-	it.Audio = audio
-	a.touch(o.ID)
+	apply(&a.main.Items[i])
 	return true
 }
 

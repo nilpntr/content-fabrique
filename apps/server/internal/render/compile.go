@@ -52,6 +52,8 @@ type compiler struct {
 	// inputs are the ffmpeg inputs: one per clip, then one per audio track item.
 	inputs []Input
 	plan   Plan
+	// sfxBoostDB is added to the level of every sound effect (SoundReadyEffectGainDB in a sound-ready edit, otherwise 0).
+	sfxBoostDB float64
 }
 
 // Compile builds the Plan for rendering spec with profile. It is pure and deterministic: no process is started and
@@ -251,6 +253,12 @@ func (c *compiler) args() []string {
 // pass1Args is the loudness measuring pass: the audio graph only, to a null muxer, with only the inputs whose audio it
 // uses. The graph (built with the clips' and items' own input numbers) is renumbered to match.
 func (c *compiler) pass1Args(graph string) []string {
+	return c.audioOnlyArgs(graph, []string{"[aout]"})
+}
+
+// audioOnlyArgs is an ffmpeg command over the audio part of the graph that opens only the inputs the graph uses (renumbering their
+// labels): the loudness pass and the bed's evening pass. It maps the given pads and stops before the output.
+func (c *compiler) audioOnlyArgs(graph string, maps []string) []string {
 	used := map[int]int{}
 	for _, st := range splitStatements(graph) {
 		if m := audioInputRe.FindStringSubmatch(st); m != nil {
@@ -276,7 +284,11 @@ func (c *compiler) pass1Args(graph string) []string {
 		}
 	}
 	args := c.inputArgs(keep)
-	return append(args, "-filter_complex", strings.Join(stmts, ";"), "-map", "[aout]", "-vn")
+	args = append(args, "-filter_complex", strings.Join(stmts, ";"))
+	for _, m := range maps {
+		args = append(args, "-map", m)
+	}
+	return append(args, "-vn")
 }
 
 // audioInputRe matches the input label that starts a statement of the audio graph.

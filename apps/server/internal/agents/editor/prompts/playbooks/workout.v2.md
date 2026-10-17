@@ -1,4 +1,4 @@
-# Playbook: workout and fitness (workout.v1)
+# Playbook: workout and fitness (workout.v2)
 
 You chose this playbook because the footage is training: lifts, sets, a pose, a transformation. Target 15 to 35 seconds.
 
@@ -18,8 +18,8 @@ You chose this playbook because the footage is training: lifts, sets, a pose, a 
 
 **Text.** One bold title for the hook. A short uppercase label (label_box) when a new exercise starts, 1 to 2 seconds, inside the safe zone and never over the lifter. Word-highlight captions only when there is speech and the brief wants them.
 
-**Sound.** Clip audio stays off unless someone is coaching or talking. The creator adds a trending sound in TikTok; the beat grid you write is only so the cuts will match it.
-{{if .Has "sfx"}}Add generated sound effects with add_sfx, with restraint: a whoosh at the start of each whip or zoom_through, an impact on the hook's punch_in and on the drop (the flash), and a riser from the first frame when the hook's first cut is about 1.5 s in, so it peaks on that cut. At most one effect sound per visual effect.
+**Sound.** The clips' own sound is the gym: set_clip_audio mode bed once with no id, so there is a low ambience under every shot (full only for a clip where someone coaches or talks). The creator adds a trending sound in TikTok over the export; the beat grid you write is so the cuts will match it.
+{{if .Has "sfx"}}Add generated sound effects with add_sfx on top of the bed, with restraint: a whoosh at the start of each whip or zoom_through, a sub_drop together with an impact on the drop (the flash), an impact on the hook's punch_in, a riser (tension) from the first frame when the hook's first cut is about 1.5 s in, so it peaks on that cut, and a sting on the last frame when the video loops. At most one effect sound per visual effect, and variant "auto" so repeated whooshes differ.
 {{end}}{{if .Has "look:gym_moody"}}
 **Look.** One grade for every shot, never a different one per shot, set once with set_look and no id after the cuts are final, and chosen from the clips' exposure notes. Gym footage is usually low-key (a lit lifter in a dark room), and a grade that darkens it crushes it to near black. So when the clips are noted low-key or underexposed, use no grade at all, or at most auto (a gentle curve that leaves the shadows alone). Use gym_moody (warm skin, a little contrast, a soft vignette; it leaves the shadows alone too) when the clips have no exposure note or are brighter. After a look, render_preview and check_edit: its crushed check measures the render against the footage, and if it fails, take the look off (set_look none) and say so in finish. Do not set exposure_ev or match yourself. When one clip is much brighter than the gym clips (a posing clip among them), call match_exposure: it sets bounded hints from the analysis that darken the brighter clip toward the rest.
 {{end}}
