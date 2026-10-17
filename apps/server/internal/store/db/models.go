@@ -28,7 +28,7 @@ type AgentRun struct {
 	Agent             string
 	Stage             string
 	ParentRunID       pgtype.UUID
-	ProjectID         pgtype.UUID
+	ProjectID         ids.ProjectID
 	Status            string
 	Input             json.RawMessage
 	Output            []byte

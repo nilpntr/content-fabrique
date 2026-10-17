@@ -148,7 +148,7 @@ INSERT INTO agent_runs (
     workspace_id, agent, stage, parent_run_id, project_id, input, routing_profile, model, effort, max_tokens,
     budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+    $1, $2, $3, $4, NULLIF($5::uuid, '00000000-0000-0000-0000-000000000000'::uuid), $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15
 )
 RETURNING id, workspace_id, agent, stage, parent_run_id, project_id, status, input, output, routing_profile, model, effort, max_tokens, escalated, input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, tool_calls, cost_micros, active_ms, budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to, failure_reason, cancel_requested_at, heartbeat_at, epoch, last_seq, started_at, finished_at, created_at, updated_at
@@ -159,7 +159,7 @@ type CreateAgentRunParams struct {
 	Agent             string
 	Stage             string
 	ParentRunID       pgtype.UUID
-	ProjectID         pgtype.UUID
+	ProjectID         uuid.UUID
 	Input             json.RawMessage
 	RoutingProfile    string
 	Model             string

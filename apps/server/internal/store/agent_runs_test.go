@@ -259,6 +259,18 @@ func agentRunsSuite(t *testing.T, st *store.Store, suffix string) {
 			t.Fatalf("a zero token budget = %v", err)
 		}
 
+		// No project is a null, not a zero uuid; a project that does not exist is refused.
+		var nullProject bool
+		if err := st.Pool().QueryRow(ctx, `SELECT project_id IS NULL FROM agent_runs WHERE id = $1`, r.ID).Scan(&nullProject); err != nil || !nullProject {
+			t.Fatalf("project_id of a run without a project: null=%v, %v", nullProject, err)
+		}
+		if _, err := st.CreateAgentRun(ctx, wa.ID, store.NewAgentRun{
+			Agent: "echo", Stage: "ideation", ProjectID: uuid.New(), RoutingProfile: "p", Model: "m", MaxTokens: 1,
+			BudgetMicros: 1, BudgetTokens: 1, BudgetToolCalls: 1, BudgetWallClockMs: 1, BilledTo: store.BilledToTest,
+		}); err == nil {
+			t.Fatal("a run took a project that does not exist")
+		}
+
 		// A fresh heartbeat is not stale; a zero threshold lists every running run, ours included.
 		fresh, err := st.StaleAgentRuns(ctx, time.Hour, 100)
 		if err != nil {

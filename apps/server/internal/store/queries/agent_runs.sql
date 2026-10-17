@@ -6,7 +6,7 @@ INSERT INTO agent_runs (
     workspace_id, agent, stage, parent_run_id, project_id, input, routing_profile, model, effort, max_tokens,
     budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to
 ) VALUES (
-    @workspace_id, @agent, @stage, @parent_run_id, @project_id, @input, @routing_profile, @model, @effort, @max_tokens,
+    @workspace_id, @agent, @stage, @parent_run_id, NULLIF(@project_id::uuid, '00000000-0000-0000-0000-000000000000'::uuid), @input, @routing_profile, @model, @effort, @max_tokens,
     @budget_micros, @budget_tokens, @budget_tool_calls, @budget_wall_clock_ms, @billed_to
 )
 RETURNING *;

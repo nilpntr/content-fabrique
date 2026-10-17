@@ -370,12 +370,8 @@ func (l *loop) storeContext(ctx context.Context) (Outcome, bool, error) {
 }
 
 func (l *loop) toolContext(toolUseID string, resumed bool) RunContext {
-	var project uuid.UUID
-	if l.run.ProjectID.Valid {
-		project = l.run.ProjectID.Bytes
-	}
 	rc := RunContext{
-		WorkspaceID: l.ws, RunID: l.run.ID, ProjectID: project, Agent: l.run.Agent,
+		WorkspaceID: l.ws, RunID: l.run.ID, ProjectID: l.run.ProjectID.UUID, Agent: l.run.Agent,
 		ToolUseID: toolUseID, Resumed: resumed, Input: l.run.Input,
 		Logger: l.log.With("tool_use_id", toolUseID),
 	}

@@ -14,7 +14,7 @@
 --   epoch:      incremented every time a worker claims the run. The loop's writes carry the epoch they claimed, so a
 --               worker that lost the run (River rescued its job as stuck, and another worker took over) can no longer write.
 --   last_seq:   the sequence number of the latest event; the next event takes last_seq + 1 under the row lock.
---   project_id: no foreign key yet, because projects do not exist at the time of this migration.
+--   project_id: null for a run without a project; the foreign key keeps it inside the workspace.
 --   cancel_requested_at: set by a cancel request; the loop looks at it between steps.
 --   heartbeat_at: touched every few seconds while a worker holds the run. A running run whose heartbeat is stale lost its
 --               worker; a periodic job enqueues it again and the new worker resumes it from the events.
@@ -71,6 +71,7 @@ CREATE TABLE agent_runs (
     updated_at           timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT agent_runs_workspace_id_id_key UNIQUE (workspace_id, id),
     CONSTRAINT agent_runs_parent_fkey FOREIGN KEY (workspace_id, parent_run_id) REFERENCES agent_runs (workspace_id, id),
+    CONSTRAINT agent_runs_project_fkey FOREIGN KEY (workspace_id, project_id) REFERENCES projects (workspace_id, id),
     CONSTRAINT agent_runs_status_check CHECK (status IN ('queued', 'running', 'waiting_input', 'succeeded', 'failed', 'cancelled')),
     CONSTRAINT agent_runs_agent_check CHECK (char_length(agent) BETWEEN 1 AND 100),
     CONSTRAINT agent_runs_stage_check CHECK (char_length(stage) BETWEEN 1 AND 100),
