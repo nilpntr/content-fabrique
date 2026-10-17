@@ -451,6 +451,7 @@ func (a *applier) addText(o *AddText) bool {
 	tt.Items = append(tt.Items, timeline.TextItem{
 		ID: id, AtMs: o.AtMs, DurationMs: o.DurationMs, Text: o.Text, Style: o.Style,
 		Anchor: o.Anchor, Position: copyPtr(o.Position), Animation: o.Animation,
+		Fill: o.Fill, Scale: copyPtr(o.Scale), Shadow: o.Shadow, Align: o.Align,
 	})
 	a.touch(id)
 	a.created = append(a.created, Created{OpIndex: a.idx, Kind: "text", ID: id})
@@ -458,7 +459,8 @@ func (a *applier) addText(o *AddText) bool {
 }
 
 func (a *applier) updateText(o *UpdateText) bool {
-	if o.AtMs == nil && o.DurationMs == nil && o.Text == nil && o.Style == "" && o.Anchor == "" && o.Position == nil && o.Animation == "" {
+	if o.AtMs == nil && o.DurationMs == nil && o.Text == nil && o.Style == "" && o.Anchor == "" && o.Position == nil && o.Animation == "" &&
+		o.Fill == "" && o.Scale == nil && o.Shadow == "" && o.Align == "" {
 		return a.errf(CodeBadArgument, "give at least one field to change on the text item %q", o.ID)
 	}
 	if o.Anchor != "" && o.Position != nil {
@@ -478,6 +480,11 @@ func (a *applier) updateText(o *UpdateText) bool {
 		ti.Text = *o.Text
 	}
 	if o.Style != "" {
+		if o.Style != ti.Style {
+			// The fill, size, shadow and alignment were chosen for the old style: the new one starts from its own (the op may set them
+			// again below).
+			ti.Fill, ti.Scale, ti.Shadow, ti.Align = "", nil, "", ""
+		}
 		ti.Style = o.Style
 	}
 	if o.Anchor != "" {
@@ -488,6 +495,18 @@ func (a *applier) updateText(o *UpdateText) bool {
 	}
 	if o.Animation != "" {
 		ti.Animation = o.Animation
+	}
+	if o.Fill != "" {
+		ti.Fill = o.Fill
+	}
+	if o.Scale != nil {
+		ti.Scale = copyPtr(o.Scale)
+	}
+	if o.Shadow != "" {
+		ti.Shadow = o.Shadow
+	}
+	if o.Align != "" {
+		ti.Align = o.Align
 	}
 	a.touch(o.ID)
 	return true

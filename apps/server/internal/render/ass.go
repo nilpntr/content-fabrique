@@ -90,13 +90,29 @@ func centre(box style.Rect) (x, y float64) {
 	return float64(box.Left+box.Right) / 2, float64(box.Top+box.Bottom) / 2
 }
 
-// addText adds a text item (or the watermark) at a box: the animation tags, then the lines.
-func (b *builder) addText(layer int, start, end int64, lay style.Layout, zone style.Zone, box style.Rect, anim string) {
+// anchorOf is the ASS alignment tag and the x the \pos uses for the lines of a text in a box: \an5 at the centre of the box, or \an4 at
+// the left edge of the ink (the box less its padding) or \an6 at the right edge, so the lines line up against that edge. Only the
+// three fixed tags are ever written; the alignment itself comes from an enum the validator has checked.
+func anchorOf(box style.Rect, pad int, align string) (an string, x float64) {
+	cx, _ := centre(box)
+	switch align {
+	case style.AlignLeft:
+		return `\an4`, float64(box.Left + pad)
+	case style.AlignRight:
+		return `\an6`, float64(box.Right - pad)
+	}
+	return `\an5`, cx
+}
+
+// addText adds a text item (or the watermark) at a box: the animation tags, then the lines. align is left, center or right ("" is
+// centre): how the lines sit against each other.
+func (b *builder) addText(layer int, start, end int64, lay style.Layout, zone style.Zone, box style.Rect, anim, align string) {
 	st := lay.Style
-	cx, cy := centre(box)
+	an, cx := anchorOf(box, lay.Pad, align)
+	_, cy := centre(box)
 	durMs := frameMs(end, b.fps) - frameMs(start, b.fps)
 	var tags strings.Builder
-	fmt.Fprintf(&tags, `\an5`)
+	tags.WriteString(an)
 	pos := fmt.Sprintf(`\pos(%s,%s)`, num(cx), num(cy))
 	body := escapeLines(lay.Lines)
 	switch anim {

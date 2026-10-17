@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -32,7 +33,7 @@ import (
 const VisionStage = "stylevision"
 
 // VisionPromptVersion names the prompt and the tool; it is stored with the read.
-const VisionPromptVersion = "stylevision.v1"
+const VisionPromptVersion = "stylevision.v2"
 
 // VisionToolName is the one tool the model is made to call.
 const VisionToolName = "describe_title_style"
@@ -61,6 +62,8 @@ alignment: left, center or right: how the lines of the title line up with each o
 weight: regular or bold; none when there is no title.
 condensed: true when the letters are tall and narrow (a condensed display face).
 lines: how many lines the title has.
+text_height_pct: the height of the capital letters of the title as a percentage of the height of the frame, a number from 0.5 to 20 (on a 1920 px tall frame, letters 77 px tall are 4); 0 when there is no title.
+shadow: none (flat letters with nothing behind them), soft (a faint shadow) or strong (a heavy dark shadow that makes the letters look raised); none when there is no title.
 exercise_labels: true when there are small labels besides the title that name an exercise, a muscle or a tag.
 captions: true when spoken-word captions are shown.
 
@@ -83,10 +86,12 @@ var visionSchema = json.RawMessage(`{
     "weight": {"type": "string", "enum": ["regular", "bold", "none"], "description": "The weight of the letters."},
     "condensed": {"type": "boolean", "description": "True when the letters are tall and narrow."},
     "lines": {"type": "integer", "description": "How many lines the title has, 0 for none."},
+    "text_height_pct": {"type": "number", "description": "The height of the capital letters as a percentage of the frame height, 0.5 to 20; 0 for none."},
+    "shadow": {"type": "string", "enum": ["none", "soft", "strong"], "description": "The drop shadow behind the letters."},
     "exercise_labels": {"type": "boolean", "description": "True when small labels name an exercise or a tag."},
     "captions": {"type": "boolean", "description": "True when spoken-word captions are shown."}
   },
-  "required": ["title_present", "text", "case", "colour", "position", "alignment", "weight", "condensed", "lines", "exercise_labels", "captions"],
+  "required": ["title_present", "text", "case", "colour", "position", "alignment", "weight", "condensed", "lines", "text_height_pct", "shadow", "exercise_labels", "captions"],
   "additionalProperties": false
 }`)
 
@@ -136,17 +141,19 @@ var hexColour = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
 // enums are checked again.
 func ValidateTitleStyle(raw json.RawMessage) (TextStyle, error) {
 	var in struct {
-		TitlePresent   *bool   `json:"title_present"`
-		Text           *string `json:"text"`
-		Case           *string `json:"case"`
-		Colour         *string `json:"colour"`
-		Position       *string `json:"position"`
-		Alignment      *string `json:"alignment"`
-		Weight         *string `json:"weight"`
-		Condensed      *bool   `json:"condensed"`
-		Lines          *int    `json:"lines"`
-		ExerciseLabels *bool   `json:"exercise_labels"`
-		Captions       *bool   `json:"captions"`
+		TitlePresent   *bool    `json:"title_present"`
+		Text           *string  `json:"text"`
+		Case           *string  `json:"case"`
+		Colour         *string  `json:"colour"`
+		Position       *string  `json:"position"`
+		Alignment      *string  `json:"alignment"`
+		Weight         *string  `json:"weight"`
+		Condensed      *bool    `json:"condensed"`
+		Lines          *int     `json:"lines"`
+		TextHeightPct  *float64 `json:"text_height_pct"`
+		Shadow         *string  `json:"shadow"`
+		ExerciseLabels *bool    `json:"exercise_labels"`
+		Captions       *bool    `json:"captions"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
@@ -157,7 +164,7 @@ func ValidateTitleStyle(raw json.RawMessage) (TextStyle, error) {
 		return TextStyle{}, reject("trailing data")
 	}
 	if in.TitlePresent == nil || in.Text == nil || in.Case == nil || in.Colour == nil || in.Position == nil || in.Alignment == nil ||
-		in.Weight == nil || in.Condensed == nil || in.Lines == nil || in.ExerciseLabels == nil || in.Captions == nil {
+		in.Weight == nil || in.Condensed == nil || in.Lines == nil || in.TextHeightPct == nil || in.Shadow == nil || in.ExerciseLabels == nil || in.Captions == nil {
 		return TextStyle{}, reject("a field is missing")
 	}
 	oneOf := func(name, v string, allowed ...string) error {
@@ -176,6 +183,7 @@ func ValidateTitleStyle(raw json.RawMessage) (TextStyle, error) {
 		{"position", *in.Position, []string{"upper_third", "center", "lower_third", "none"}},
 		{"alignment", *in.Alignment, []string{"left", "center", "right", "none"}},
 		{"weight", *in.Weight, []string{"regular", "bold", "none"}},
+		{"shadow", *in.Shadow, []string{"none", "soft", "strong"}},
 	} {
 		if err := oneOf(c.name, c.v, c.allowed...); err != nil {
 			return TextStyle{}, err
@@ -195,12 +203,16 @@ func ValidateTitleStyle(raw json.RawMessage) (TextStyle, error) {
 	if *in.Lines < 0 || *in.Lines > 6 {
 		return TextStyle{}, reject("lines is %d", *in.Lines)
 	}
+	if h := *in.TextHeightPct; math.IsNaN(h) || math.IsInf(h, 0) || h < 0 || h > 30 {
+		return TextStyle{}, reject("text_height_pct is %v", h)
+	}
 	t := TextStyle{TitlePresent: *in.TitlePresent, ExerciseLabels: *in.ExerciseLabels, Captions: *in.Captions}
 	if !t.TitlePresent {
 		return t, nil
 	}
 	t.Text, t.Case, t.Colour, t.Position, t.Alignment, t.Weight = text, *in.Case, strings.ToUpper(colour), *in.Position, *in.Alignment, *in.Weight
 	t.Condensed, t.Lines = *in.Condensed, *in.Lines
+	t.TextHeightPct, t.Shadow = math.Round(*in.TextHeightPct*10)/10, *in.Shadow
 	for _, v := range []*string{&t.Case, &t.Position, &t.Alignment, &t.Weight} {
 		if *v == "none" {
 			*v = ""

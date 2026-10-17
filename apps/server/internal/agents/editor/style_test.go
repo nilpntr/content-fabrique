@@ -43,8 +43,36 @@ func buildingLats(t *testing.T) *timeline.Spec {
 		{asset: assetA, in: 0, out: 2000}, {asset: assetA, in: 3000, out: 4300}, {asset: assetA, in: 5000, out: 5500},
 		{asset: assetA, in: 6000, out: 14000}, {asset: assetB, in: 0, out: 3000},
 	}
-	titles := []timeline.TextItem{{ID: "t1", AtMs: 0, DurationMs: 2000, Text: "BUILDING LATS 101", Style: "title_series", Anchor: "upper_third"}}
-	return specOf(t, shots, titles, nil)
+	return specOf(t, shots, []timeline.TextItem{recipeTitle(t, ginoProfile(t), "BUILDING LATS 101")}, nil)
+}
+
+// recipeTitle is the title the editor writes for the profile: the style and the overrides of the profile's title recipe.
+func recipeTitle(t *testing.T, p *styleprofile.Profile, text string) timeline.TextItem {
+	t.Helper()
+	r := p.TitleRecipe()
+	if r == nil {
+		t.Fatal("the profile has no title recipe")
+	}
+	it := timeline.TextItem{ID: "t1", AtMs: 0, DurationMs: 2000, Text: text, Style: r.Style, Anchor: r.Anchor, Fill: r.Fill, Shadow: r.Shadow}
+	if r.Scale != 0 {
+		it.Scale = &r.Scale
+	}
+	if r.Align != "center" {
+		it.Align = r.Align
+	}
+	return it
+}
+
+// buildingLatsDefaultTitle is the same edit with the title as the style has it, with no overrides.
+func buildingLatsDefaultTitle(t *testing.T) *timeline.Spec {
+	t.Helper()
+	spec := buildingLats(t)
+	for _, tr := range spec.Tracks {
+		if tt, ok := tr.(*timeline.TextTrack); ok {
+			tt.Items[0] = timeline.TextItem{ID: "t1", AtMs: 0, DurationMs: 2000, Text: "BUILDING LATS 101", Style: "title_series", Anchor: "upper_third"}
+		}
+	}
+	return spec
 }
 
 // A workout plan as plan_edit would record it from the generic playbook: a beat grid, a target of 20 s.
@@ -61,7 +89,7 @@ func TestBuildingLatsPassesWithTheProfileAndFailsWithout(t *testing.T) {
 		t.Fatalf("with the profile the edit fails %v:\n%s", f, with.Text())
 	}
 	c := wantStatus(t, with, CheckStyleMatch, CheckPass)
-	if !strings.Contains(c.Detail, "all 11 style dimensions") || with.Style == nil || with.Style.Score != 1 || with.Metrics.StyleScore != 1 {
+	if !strings.Contains(c.Detail, "all 14 style dimensions") || with.Style == nil || with.Style.Score != 1 || with.Metrics.StyleScore != 1 {
 		t.Errorf("style match: %s / %+v", c.Detail, with.Style)
 	}
 
@@ -267,6 +295,51 @@ func TestTheEarliestTitleIsJudged(t *testing.T) {
 	for _, d := range r.Style.Dimensions {
 		if d.ID == "title_case" && !d.OK {
 			t.Errorf("the case of the wrong title was judged: %+v", d)
+		}
+	}
+}
+
+// The title's look is held to the profile: the style as it is (cream, a light shadow) is not the creator's pale yellow with no shadow, and
+// the fix says what to set; the title the recipe writes is.
+func TestStyleMatchHoldsTheTitleLook(t *testing.T) {
+	p := ginoProfile(t)
+	p.Text.OneLineShare = 1 // a creator whose titles are one line
+	r := p.TitleRecipe()
+	if r == nil || r.Style != "title_series" || r.Fill != "#F2E9A0" || r.Shadow != "none" || r.Anchor != "upper_third" || !r.OneLine || r.Scale != 0 {
+		t.Fatalf("recipe: %+v", r)
+	}
+	plain := RunChecks(CheckInput{Spec: buildingLatsDefaultTitle(t), Plan: workoutPlan(), Style: p})
+	c := wantStatus(t, plain, CheckStyleMatch, CheckFail)
+	for _, want := range []string{"title_colour", "title_shadow", "set the title's fill to", "set the title's shadow to none"} {
+		if !strings.Contains(c.Detail, want) {
+			t.Errorf("style_match lacks %q: %s", want, c.Detail)
+		}
+	}
+	good := RunChecks(CheckInput{Spec: buildingLats(t), Plan: workoutPlan(), Style: p})
+	wantStatus(t, good, CheckStyleMatch, CheckPass)
+	dims := map[string]styleprofile.Dimension{}
+	for _, d := range good.Style.Dimensions {
+		dims[d.ID] = d
+	}
+	for _, id := range []string{"title_colour", "title_lines", "title_size", "title_shadow"} {
+		if d, ok := dims[id]; !ok || !d.OK {
+			t.Errorf("%s: %+v", id, d)
+		}
+	}
+	// Too big and on two lines: the size and the lines are out, with fixes.
+	big := buildingLats(t)
+	for _, tr := range big.Tracks {
+		if tt, ok := tr.(*timeline.TextTrack); ok {
+			s := 1.4
+			tt.Items[0].Scale = &s
+			tt.Items[0].Text = "BUILDING LATS 101 AND SOME MORE WORDS HERE"
+		}
+	}
+	r2 := RunChecks(CheckInput{Spec: big, Plan: workoutPlan(), Style: p})
+	c2 := wantStatus(t, r2, CheckStyleMatch, CheckFail)
+	for _, want := range []string{"title_size", "title_lines"} {
+		if !strings.Contains(c2.Detail, want) {
+			t.Errorf("style_match lacks %q: %s", want, c2.Detail)
 		}
 	}
 }

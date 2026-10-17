@@ -82,7 +82,7 @@ func toolAnswer(input string) llm.Response {
 	}
 }
 
-const goodAnswer = `{"title_present":true,"text":"BUILDING LATS 101","case":"upper","colour":"#fff0b0","position":"upper_third","alignment":"center","weight":"bold","condensed":true,"lines":1,"exercise_labels":false,"captions":false}`
+const goodAnswer = `{"title_present":true,"text":"BUILDING LATS 101","case":"upper","colour":"#fff0b0","position":"upper_third","alignment":"center","weight":"bold","condensed":true,"lines":1,"text_height_pct":4.0,"shadow":"none","exercise_labels":false,"captions":false}`
 
 func newReader(t *testing.T, m *fakeModel, r *jpegRunner) *Reader {
 	t.Helper()
@@ -241,10 +241,10 @@ func TestFramesFailures(t *testing.T) {
 
 func TestValidateTitleStyle(t *testing.T) {
 	ok, err := ValidateTitleStyle(json.RawMessage(goodAnswer))
-	if err != nil || ok.Colour != "#FFF0B0" || ok.Position != "upper_third" {
+	if err != nil || ok.Colour != "#FFF0B0" || ok.Position != "upper_third" || ok.TextHeightPct != 4.0 || ok.Shadow != "none" {
 		t.Fatalf("%v %+v", err, ok)
 	}
-	none, err := ValidateTitleStyle(json.RawMessage(`{"title_present":false,"text":"","case":"none","colour":"","position":"none","alignment":"none","weight":"none","condensed":false,"lines":0,"exercise_labels":true,"captions":false}`))
+	none, err := ValidateTitleStyle(json.RawMessage(`{"title_present":false,"text":"","case":"none","colour":"","position":"none","alignment":"none","weight":"none","condensed":false,"lines":0,"text_height_pct":0,"shadow":"none","exercise_labels":true,"captions":false}`))
 	if err != nil || none.TitlePresent || none.Text != "" || !none.ExerciseLabels {
 		t.Fatalf("%v %+v", err, none)
 	}
@@ -260,6 +260,10 @@ func TestValidateTitleStyle(t *testing.T) {
 		"bad position":     with(`"upper_third"`, `"top"`),
 		"bad colour":       with(`#fff0b0`, `red`),
 		"lines":            with(`"lines":1`, `"lines":99`),
+		"height negative":  with(`"text_height_pct":4.0`, `"text_height_pct":-1`),
+		"height huge":      with(`"text_height_pct":4.0`, `"text_height_pct":300`),
+		"shadow":           with(`"shadow":"none"`, `"shadow":"glow"`),
+		"no height":        json.RawMessage(strings.Replace(goodAnswer, `"text_height_pct":4.0,`, ``, 1)),
 		"long title":       with("BUILDING LATS 101", strings.Repeat("A", 121)),
 		"url":              with("BUILDING LATS 101", "go to https://x.test"),
 		"domain":           with("BUILDING LATS 101", "lats.com"),

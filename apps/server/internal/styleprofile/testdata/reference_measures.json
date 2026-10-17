@@ -68,12 +68,14 @@
    "title_present": true,
    "text": "BUILDING LATS 101",
    "case": "upper",
-   "colour": "#FFF0B0",
+   "colour": "#F2E9A0",
    "position": "upper_third",
    "alignment": "center",
    "weight": "bold",
    "condensed": true,
-   "lines": 1
+   "lines": 1,
+   "text_height_pct": 4.0,
+   "shadow": "none"
   }
  },
  {
@@ -199,11 +201,13 @@
    "title_present": true,
    "text": "how to bake a croissant tricep",
    "case": "lower",
-   "colour": "#FFFAC8",
+   "colour": "#F2E9A0",
    "position": "upper_third",
    "alignment": "center",
    "weight": "regular",
-   "lines": 2
+   "lines": 2,
+   "text_height_pct": 3.2,
+   "shadow": "soft"
   }
  },
  {
@@ -259,12 +263,14 @@
    "title_present": true,
    "text": "BRACHIORADIALIS BUILDER 101",
    "case": "upper",
-   "colour": "#FFF0B0",
+   "colour": "#F2E9A0",
    "position": "upper_third",
    "alignment": "left",
    "weight": "bold",
    "condensed": true,
-   "lines": 2
+   "lines": 2,
+   "text_height_pct": 4.0,
+   "shadow": "none"
   }
  },
  {

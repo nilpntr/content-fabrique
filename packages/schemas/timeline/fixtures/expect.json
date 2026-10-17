@@ -279,5 +279,25 @@
     "code": "schema",
     "path": "/tracks/0/items/0/audio/mode",
     "keyword": "enum"
+  },
+  "i72_schema_text_fill_not_hex.json": {
+    "code": "schema",
+    "path": "/tracks/1/items/0/fill",
+    "keyword": "pattern"
+  },
+  "i73_schema_text_scale_out_of_range.json": {
+    "code": "schema",
+    "path": "/tracks/1/items/0/scale",
+    "keyword": "maximum"
+  },
+  "i74_schema_text_shadow_unknown.json": {
+    "code": "schema",
+    "path": "/tracks/1/items/0/shadow",
+    "keyword": "enum"
+  },
+  "i75_schema_text_align_unknown.json": {
+    "code": "schema",
+    "path": "/tracks/1/items/0/align",
+    "keyword": "enum"
   }
 }

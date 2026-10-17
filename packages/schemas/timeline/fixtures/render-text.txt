@@ -3,3 +3,4 @@ v33_text_titles_16x9.json
 v34_captions_speed_cut_9x16.json
 v35_captions_highlight_16x9.json
 v36_text_positions_4x5.json
+v47_text_overrides_9x16.json

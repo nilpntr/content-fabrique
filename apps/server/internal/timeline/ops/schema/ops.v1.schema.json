@@ -355,6 +355,37 @@
       "title": "Text",
       "description": "The words to show: 1 to 120 characters and at most 3 lines. Lines are separated by a newline (\\n). No other control character is allowed, and neither are the line and paragraph separators U+2028 and U+2029."
     },
+    "textFill": {
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{6}$",
+      "title": "Fill colour",
+      "description": "The colour of the letters as #RRGGBB, for this text only (for example #F2E9A0). Without it the style's own colour is used."
+    },
+    "textScale": {
+      "type": "number",
+      "minimum": 0.6,
+      "maximum": 1.4,
+      "title": "Size scale",
+      "description": "The size of the text relative to its style's size, from 0.6 to 1.4 (kept to a hundredth). Without it the style's own size (1) is used."
+    },
+    "textShadow": {
+      "enum": [
+        "none",
+        "soft",
+        "strong"
+      ],
+      "title": "Shadow",
+      "description": "The drop shadow of the letters: none, soft (a light one) or strong (a heavy one). Without it the style's own shadow is used."
+    },
+    "textAlign": {
+      "enum": [
+        "left",
+        "center",
+        "right"
+      ],
+      "title": "Alignment",
+      "description": "How the lines of a text of more than one line sit against each other in its box: left, center or right. Default center."
+    },
     "textAnimation": {
       "enum": [
         "none",
@@ -818,6 +849,18 @@
         },
         "animation": {
           "$ref": "#/$defs/textAnimation"
+        },
+        "fill": {
+          "$ref": "#/$defs/textFill"
+        },
+        "scale": {
+          "$ref": "#/$defs/textScale"
+        },
+        "shadow": {
+          "$ref": "#/$defs/textShadow"
+        },
+        "align": {
+          "$ref": "#/$defs/textAlign"
         }
       },
       "oneOf": [
@@ -842,7 +885,7 @@
     "update_text": {
       "type": "object",
       "title": "update_text",
-      "description": "Change fields of a text item; the fields you leave out stay as they are. Setting anchor removes the position and the other way round. Give at least one field.",
+      "description": "Change fields of a text item; the fields you leave out stay as they are, except that changing the style resets fill, scale, shadow and align to the new style's own: restate the ones you want to keep. Setting anchor removes the position and the other way round. Give at least one field.",
       "additionalProperties": false,
       "required": [
         "op",
@@ -881,6 +924,18 @@
         },
         "animation": {
           "$ref": "#/$defs/textAnimation"
+        },
+        "fill": {
+          "$ref": "#/$defs/textFill"
+        },
+        "scale": {
+          "$ref": "#/$defs/textScale"
+        },
+        "shadow": {
+          "$ref": "#/$defs/textShadow"
+        },
+        "align": {
+          "$ref": "#/$defs/textAlign"
         }
       },
       "anyOf": [
@@ -938,6 +993,38 @@
           ],
           "properties": {
             "animation": {}
+          }
+        },
+        {
+          "required": [
+            "fill"
+          ],
+          "properties": {
+            "fill": {}
+          }
+        },
+        {
+          "required": [
+            "scale"
+          ],
+          "properties": {
+            "scale": {}
+          }
+        },
+        {
+          "required": [
+            "shadow"
+          ],
+          "properties": {
+            "shadow": {}
+          }
+        },
+        {
+          "required": [
+            "align"
+          ],
+          "properties": {
+            "align": {}
           }
         }
       ],

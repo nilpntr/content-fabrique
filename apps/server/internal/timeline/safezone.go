@@ -14,6 +14,8 @@ type TextPlacement struct {
 	Zone   style.Zone
 	// Box is the box before any clamping: centred on the item's position, or the box of its anchor.
 	Box style.Rect
+	// Align is how the lines sit in the box: left, center or right.
+	Align string
 }
 
 // ShortSide is the shorter side of an output, which text sizes scale with (1080 px on every format).
@@ -33,6 +35,13 @@ func PlaceText(out Output, it TextItem) (TextPlacement, error) {
 	if !ok {
 		return TextPlacement{}, fmt.Errorf("unknown style %q", it.Style)
 	}
+	if err := alignErr(it.Align); err != nil {
+		return TextPlacement{}, err
+	}
+	st, err := st.With(it.StyleOverrides())
+	if err != nil {
+		return TextPlacement{}, err
+	}
 	zone, ok := out.Zone()
 	if !ok {
 		return TextPlacement{}, fmt.Errorf("unknown format %q", out.Format)
@@ -45,5 +54,9 @@ func PlaceText(out Output, it TextItem) (TextPlacement, error) {
 	} else {
 		box = style.PlaceAnchor(zone, it.Anchor, out.Width, out.Height, w, h)
 	}
-	return TextPlacement{Style: st, Layout: lay, Zone: zone, Box: box}, nil
+	align := it.Align
+	if align == "" {
+		align = style.AlignCenter
+	}
+	return TextPlacement{Style: st, Layout: lay, Zone: zone, Box: box, Align: align}, nil
 }

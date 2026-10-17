@@ -15,6 +15,8 @@
 // ...), so the compiler and the validator never repeat the defaults. The defaults are the Default* constants below.
 package timeline
 
+import "github.com/nilpntr/content-fabrique/internal/timeline/style"
+
 // SchemaVersion is the constant value of the top-level "schema" field.
 const SchemaVersion = "contentfabrique.timeline/v1"
 
@@ -454,6 +456,18 @@ type TextItem struct {
 	Anchor     string `json:"anchor,omitempty"`
 	Position   *Point `json:"position,omitempty"`
 	Animation  string `json:"animation,omitempty"`
+	// Fill, Scale, Shadow and Align change the style for this item (P6-05): a #RRGGBB fill colour, a scale of the style's size
+	// (0.6 to 1.4), a shadow (none, soft or strong) and the alignment of the lines (left, center or right). Each is left out to keep
+	// the style's own.
+	Fill   string   `json:"fill,omitempty"`
+	Scale  *float64 `json:"scale,omitempty"`
+	Shadow string   `json:"shadow,omitempty"`
+	Align  string   `json:"align,omitempty"`
+}
+
+// StyleOverrides are the item's per-item style changes.
+func (t TextItem) StyleOverrides() style.Overrides {
+	return style.Overrides{Fill: t.Fill, Scale: t.Scale, Shadow: t.Shadow}
 }
 
 // AnimationOrDefault is the text animation, or "none" when the spec leaves it out.

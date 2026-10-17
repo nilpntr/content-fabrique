@@ -1,0 +1,97 @@
+{
+  "schema": "contentfabrique.timeline/v1",
+  "output": {
+    "format": "9:16",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000"
+  },
+  "tracks": [
+    {
+      "id": "main",
+      "type": "video",
+      "items": [
+        {
+          "id": "c1",
+          "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+          "source": {
+            "in_ms": 0,
+            "out_ms": 8000
+          },
+          "at_ms": 0
+        }
+      ]
+    },
+    {
+      "id": "text",
+      "type": "text",
+      "items": [
+        {
+          "id": "t1",
+          "at_ms": 0,
+          "duration_ms": 1100,
+          "text": "Never skip leg day",
+          "style": "title_bold",
+          "anchor": "upper_third",
+          "scale": 2.5
+        },
+        {
+          "id": "t2",
+          "at_ms": 1100,
+          "duration_ms": 1100,
+          "text": "SQUAT DEEP",
+          "style": "title_outline",
+          "anchor": "center",
+          "animation": "fade"
+        },
+        {
+          "id": "t3",
+          "at_ms": 2200,
+          "duration_ms": 1100,
+          "text": "Barbell back squat",
+          "style": "label_box",
+          "anchor": "lower_third",
+          "animation": "fade"
+        },
+        {
+          "id": "t4",
+          "at_ms": 3300,
+          "duration_ms": 1100,
+          "text": "Keep your chest up",
+          "style": "caption_plain",
+          "anchor": "center",
+          "animation": "none"
+        },
+        {
+          "id": "t5",
+          "at_ms": 4400,
+          "duration_ms": 1100,
+          "text": "Drive through\nyour heels",
+          "style": "caption_highlight",
+          "anchor": "center",
+          "animation": "typewriter"
+        },
+        {
+          "id": "t6",
+          "at_ms": 5500,
+          "duration_ms": 1100,
+          "text": "5x5",
+          "style": "stat_big",
+          "anchor": "center",
+          "animation": "pop_in"
+        },
+        {
+          "id": "t7",
+          "at_ms": 6600,
+          "duration_ms": 1400,
+          "text": "Rest 90 seconds between sets",
+          "style": "subtitle_clean",
+          "anchor": "lower_third",
+          "animation": "slide_up"
+        }
+      ]
+    }
+  ],
+  "markers": []
+}

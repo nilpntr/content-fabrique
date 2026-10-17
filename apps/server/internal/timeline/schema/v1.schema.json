@@ -492,6 +492,30 @@
           "default": "none",
           "title": "Animation",
           "description": "How the text enters: none, pop_in, fade, typewriter or slide_up. Default none."
+        },
+        "fill": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "title": "Fill colour",
+          "description": "The colour of the letters as #RRGGBB, for this text only (for example #F2E9A0). Without it the style's own colour is used."
+        },
+        "scale": {
+          "type": "number",
+          "minimum": 0.6,
+          "maximum": 1.4,
+          "title": "Size scale",
+          "description": "The size of the text relative to its style's size, from 0.6 to 1.4 (kept to a hundredth). Without it the style's own size (1) is used."
+        },
+        "shadow": {
+          "enum": ["none", "soft", "strong"],
+          "title": "Shadow",
+          "description": "The drop shadow of the letters: none, soft (a light one) or strong (a heavy one). Without it the style's own shadow is used."
+        },
+        "align": {
+          "enum": ["left", "center", "right"],
+          "default": "center",
+          "title": "Alignment",
+          "description": "How the lines of a text of more than one line sit against each other in its box: left, center or right. Default center."
         }
       },
       "oneOf": [
