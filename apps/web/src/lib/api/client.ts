@@ -8,7 +8,6 @@
  */
 import type { components, paths } from "@cf/schemas/api";
 import createClient from "openapi-fetch";
-import type * as Contract from "./renders-contract";
 
 /** Returns a fresh session token, or null when nobody is signed in. Clerk's `useAuth().getToken`. */
 export type GetToken = () => Promise<string | null>;
@@ -70,10 +69,10 @@ export type RunEvent = components["schemas"]["RunEvent"];
 /** An agent run, with its cost, budgets and a summary of its events. */
 export type Run = components["schemas"]["Run"];
 
-// The renders of P3-06. Written by hand until `task gen` brings them (see renders-contract.ts).
-export type RenderProfile = Contract.RenderProfile;
-export type RenderStatus = Contract.RenderStatus;
-export type Render = Contract.Render;
+export type RenderProfile = components["schemas"]["RenderProfile"];
+export type RenderStatus = components["schemas"]["RenderStatus"];
+/** A render of a timeline version. In a list it has no presigned URLs (`files` is null): fetch it with GET /v1/renders/{id}. */
+export type Render = components["schemas"]["Render"];
 
 export interface ApiClientOptions {
   getToken: GetToken;
@@ -100,7 +99,7 @@ export function createApiClient(options: ApiClientOptions) {
       throw new ApiError(0, "network_error", "The server could not be reached.");
     }
   };
-  return createClient<paths & Contract.RenderPaths>({
+  return createClient<paths>({
     baseUrl: options.baseUrl ?? apiBaseUrl(),
     fetch: authenticatedFetch,
     headers: { Accept: "application/json" },

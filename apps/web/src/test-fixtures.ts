@@ -143,6 +143,8 @@ export function render(over: Partial<Render> = {}): Render {
     progress: 0,
     stage: null,
     duration_ms: null,
+    width: null,
+    height: null,
     size_bytes: null,
     contact_sheet: null,
     sound_cues: [],
