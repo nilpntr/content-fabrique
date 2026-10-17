@@ -79,8 +79,8 @@ type CountUnchargedRunsParams struct {
 // spent money (cost_micros > 0) and ended without a charge: cancelled (a cancel that made a version is charged, so none is left here),
 // succeeded having said there was nothing to change, or failed for one of the given reasons (the creator's own, not ours). A run that
 // cost nothing, such as one cancelled in the queue, does not count once it is over. The runs in flight count because they may all end
-// uncharged, and nothing else bounds how many a workspace can start at once. min_id is the first run id (UUIDv7: time-ordered) that can
-// have finished in the period, which keeps the scan to the workspace's recent runs on the (workspace_id, id) index.
+// uncharged, and nothing else bounds how many a workspace can start at once. min_id is the first run id (UUIDv7: time-ordered) worth looking
+// at, eight days back, which keeps the scan to the workspace's recent runs on the (workspace_id, id) index.
 func (q *Queries) CountUnchargedRuns(ctx context.Context, arg CountUnchargedRunsParams) (int32, error) {
 	row := q.db.QueryRow(ctx, countUnchargedRuns,
 		arg.WorkspaceID,
