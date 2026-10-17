@@ -586,7 +586,7 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 - **Staging and production call Workers AI `@cf/openai/whisper-large-v3-turbo`** through the environment's Cloudflare account. It is enabled by config once P0-09 exists.
 - **Transcription runs only on clips where speech is detected**, using a cheap voice-activity check first.
 - **Two checks come before production uses Workers AI:**
-  1. Where inference runs, and whether EU-only processing is available (D-15). If it isn't, production falls back to whisper.cpp on our EU servers, or this decision is revisited.
+  1. Where inference runs, and whether EU-only processing is available (D-15). If it isn't, production falls back to whisper.cpp on our EU servers, or this decision is revisited. The founder's alternative is OpenRouter; before choosing it, check whether it serves a Whisper-class model with word timestamps, and note that it adds a US processor. Workers AI also offers batch mode for this model, which fits a job that isn't time-critical.
   2. The per-minute price. It goes into the price table, and usage is metered in `usage_ledger` with kind `transcription`.
 
 **Alternatives.**
