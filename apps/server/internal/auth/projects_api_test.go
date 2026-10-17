@@ -118,7 +118,7 @@ func TestProjectsCreateValidation(t *testing.T) {
 	}
 	bad := func(name string, body map[string]any, status int, code api.ErrorCode) {
 		t.Helper()
-		t.Run(name, func(t *testing.T) { e.fail(http.MethodPost, "/v1/projects", "ada", body, status, code) })
+		t.Run(name, func(*testing.T) { e.fail(http.MethodPost, "/v1/projects", "ada", body, status, code) })
 	}
 	bad("no assets", map[string]any{"format": "9:16", "asset_ids": []string{}}, 400, api.ErrorCodeInvalidRequest)
 	bad("more than 50 assets", map[string]any{"format": "9:16", "asset_ids": many}, 400, api.ErrorCodeInvalidRequest)

@@ -100,11 +100,11 @@ func (r *importRig) clip(name string) string {
 	path := filepath.Join(r.dir, name)
 	if ff, err := exec.LookPath("ffmpeg"); err == nil {
 		cmd := exec.Command(ff, "-v", "error", "-f", "lavfi", "-i", "testsrc=duration=1:size=160x120:rate=15", "-pix_fmt", "yuv420p", "-y", path) //nolint:gosec // a test helper with fixed arguments
-		if out, err := cmd.CombinedOutput(); err == nil {
+		out, err := cmd.CombinedOutput()
+		if err == nil {
 			return path
-		} else {
-			r.t.Logf("ffmpeg failed (%v): %s; using plain bytes", err, out)
 		}
+		r.t.Logf("ffmpeg failed (%v): %s; using plain bytes", err, out)
 	}
 	if err := os.WriteFile(path, bytes.Repeat([]byte("clip"), 1000), 0o600); err != nil {
 		r.t.Fatal(err)

@@ -365,7 +365,7 @@ func (im *importer) importFile(ctx context.Context, p importPlan) (a store.Asset
 		actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		if e := im.svc.Abort(actx, im.who, id); e != nil && e.Status != http.StatusNotFound {
-			err = fmt.Errorf("%w (and the upload could not be aborted: %v)", err, e)
+			err = fmt.Errorf("%w (and the upload could not be aborted: %w)", err, e)
 		}
 	}()
 
