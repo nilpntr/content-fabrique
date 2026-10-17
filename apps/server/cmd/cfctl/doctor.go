@@ -159,7 +159,7 @@ func displayPath(root, path string) string {
 // ---- cfctl env -------------------------------------------------------------------------------------------------
 
 const envUsage = `Usage:
-  cfctl env init [--env-file PATH]   copy .env.example to .env if missing and generate the empty [AUTO] secrets
+  cfctl env init [--env-file PATH] [--quiet] copy .env.example to .env if missing, generate the empty [AUTO] secrets and add the [AUTO] defaults it lacks
   cfctl env lint                     fail if code reads a variable that .env.example does not list
 `
 
@@ -181,11 +181,12 @@ func cmdEnv(args []string, stdout, stderr io.Writer) int {
 	return 2
 }
 
-// cmdEnvInit creates the env file and fills the generated secrets. It prints names only, never values.
+// cmdEnvInit creates the env file, fills the generated secrets and adds the missing [AUTO] defaults. It prints names only, never values.
 func cmdEnvInit(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("env init", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	envFileArg := flags.String("env-file", "", "env file to create or fill (default .env at the repository root)")
+	quiet := flags.Bool("quiet", false, "print nothing when the file needed no change")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -206,16 +207,25 @@ func cmdEnvInit(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "cfctl env init: failed for %s\n", shown)
 		return 1
 	}
+	if *quiet && !res.Created && len(res.Generated) == 0 && len(res.Added) == 0 && len(res.Filled) == 0 {
+		return 0
+	}
 	if res.Created {
 		_, _ = fmt.Fprintf(stdout, "created %s from %s\n", shown, envfile.ExampleFile)
 	}
 	if len(res.Generated) > 0 {
 		_, _ = fmt.Fprintf(stdout, "generated: %s\n", strings.Join(res.Generated, ", "))
 	}
+	if len(res.Added) > 0 {
+		_, _ = fmt.Fprintf(stdout, "added: %s\n", strings.Join(res.Added, ", "))
+	}
+	if len(res.Filled) > 0 {
+		_, _ = fmt.Fprintf(stdout, "filled: %s\n", strings.Join(res.Filled, ", "))
+	}
 	if len(res.AlreadySet) > 0 {
 		_, _ = fmt.Fprintf(stdout, "already set: %s\n", strings.Join(res.AlreadySet, ", "))
 	}
-	if !res.Created && len(res.Generated) == 0 {
+	if !res.Created && len(res.Generated) == 0 && len(res.Added) == 0 && len(res.Filled) == 0 {
 		_, _ = fmt.Fprintf(stdout, "%s is up to date, nothing changed\n", shown)
 	}
 	return 0

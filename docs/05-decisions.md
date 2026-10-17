@@ -30,6 +30,7 @@
 | D-23 | Product domain `contentfabrique.app`: the apex serves the landing page and the app, `api.` the API, `staging.` and `api-staging.` for staging | Accepted (the founder bought the domain) |
 | D-24 | Public IDs are TypeIDs (a type prefix plus a base32 UUIDv7); Postgres stores the plain `uuid` | Accepted (engineering, 2026-10-16) |
 | D-25 | Four output formats in v1: 9:16, 1:1, 4:5 and 16:9, chosen per project; TikTok stays the only publishing target | Accepted (founder decision, 2026-10-17) |
+| D-26 | Video effects are curated presets (camera moves, transitions, graphic templates) the agent and the creator pick; bespoke effects only through the flagged sandbox | Accepted (director, 2026-10-17; founder to confirm the first templates) |
 
 ---
 
@@ -534,6 +535,33 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 - Format is chosen up front, so changing it later means a new project.
 
 **Revisit** when we add a second publishing platform, or when creators ask for one edit in several formats.
+
+## D-26 Video effects are presets
+
+**Context.** Creators want the effects popular on short-form video: digital zoom, zoom-through cuts, checklists, chart grows, magazine covers, phone mockups and green screen. Claude can write such effects as code. But [D-02](#d-02-edit-representation-declarative-timeline-json--deterministic-renderer) keeps edits as validated timeline JSON with a deterministic renderer.
+
+**Decision.**
+- **Effects are a curated preset library.** Each preset has an id, typed parameters (text lines, numbers, which clips) and a looping preview for the picker. The editor agent chooses presets through edit ops, and the creator picks them from cards.
+- **The library is built in three tiers:**
+
+  | Tier | Presets | How they render | Task |
+  |---|---|---|---|
+  | Camera moves and transitions | digital zoom, zoom-through cut, pull-back reveal, vertigo | ffmpeg in the compiler: a `motion` preset on clips and extra transition types | P3-10 |
+  | Graphic templates | First five: **checklist, chart grow, cover story, headline wall, phone mockup**. Later: glass type, ui world, couch wall, paper cut, doodle boil | An HTML template per preset rendered to video frames (HyperFrames, Apache-2.0), composited by the compiler | P4-11 |
+  | Needs person segmentation | green screen, frame break, orbit | A permissively licensed matting model ([D-16](#d-16-licensing-policy-for-ml-and-media-components)), after a spike | P2-11 |
+
+- **Bespoke, one-off effects written by Claude** stay behind the flagged sandbox escape hatch (P4-08), and their output comes back as an asset.
+
+**Alternatives.**
+- Letting the agent write effect code per video: unvalidated, slow, and impossible to golden-test.
+- Licensing a template marketplace: not needed for v1.
+
+**Consequences.**
+- Timeline v1 gains additive fields: `motion` on video items, new transition types, and a `graphics` track whose items reference a template.
+- Every preset gets golden tests in every format ([D-25](#d-25-output-formats-916-11-45-and-169-per-project)).
+- The style registry also covers templates.
+
+**Revisit** when creators ask for presets we don't have, or when a template marketplace becomes worth integrating.
 
 ## Template for new decisions
 
