@@ -11,7 +11,7 @@ name: ci
 on:
   pull_request:
   push:
-    branches: [main, p0-03-ci] # TEMP p0-03-ci
+    branches: [main]
   workflow_dispatch:
 
 permissions:
