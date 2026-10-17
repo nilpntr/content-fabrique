@@ -1,0 +1,13 @@
+{
+  "op": "add_text",
+  "id": "t9",
+  "at_ms": 500,
+  "duration_ms": 300,
+  "text": "Two\nlines",
+  "style": "caption_plain",
+  "position": {
+    "x": 0.5,
+    "y": 0.4
+  },
+  "animation": "pop_in"
+}

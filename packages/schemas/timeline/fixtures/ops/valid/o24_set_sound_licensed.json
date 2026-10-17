@@ -1,0 +1,11 @@
+{
+  "op": "set_sound",
+  "kind": "licensed_track",
+  "id": "s1",
+  "asset_id": "ast_01j0h9rew727hk2pt0v5b31h44",
+  "license_id": "lic_01jg1bfdc146rw2b0vngmx6p6f",
+  "duration_ms": 8000,
+  "gain_db": -12,
+  "fade_in_ms": 500,
+  "fade_out_ms": 1000
+}

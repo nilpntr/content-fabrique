@@ -1,0 +1,9 @@
+{
+  "op": "update_text",
+  "id": "t1",
+  "anchor": "center",
+  "position": {
+    "x": 0.1,
+    "y": 0.1
+  }
+}
