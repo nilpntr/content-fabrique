@@ -9,6 +9,9 @@ export const PLAN_QUERY_KEY = "workspace-plan";
 /** The query key prefix of GET /v1/library/summary (see lib/api/hooks.ts). */
 export const LIBRARY_SUMMARY_QUERY_KEY = "library-summary";
 
+/** The query key prefix of GET /v1/assets (see lib/api/hooks.ts). */
+export const ASSETS_QUERY_KEY = "assets";
+
 /** Whether an error is the API's 402: the workspace's plan lapsed (or was revoked) since `me` was fetched. */
 export function isPlanRequired(error: unknown): boolean {
   return error instanceof ApiError && error.status === 402 && error.code === PLAN_REQUIRED_CODE;

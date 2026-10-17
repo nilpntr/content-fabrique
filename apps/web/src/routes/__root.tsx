@@ -8,7 +8,9 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { THEME_SCRIPT } from "@/hooks/use-theme";
 import { decideAccess, isBarePath, SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/auth-guard";
 import { getAppOrigin } from "@/lib/app-origin";
+import { UploadsTray } from "@/components/uploads/uploads-tray";
 import { ApiClientProvider } from "@/lib/api/provider";
+import { UploadProvider } from "@/lib/upload/provider";
 import { resolveSession } from "@/lib/client-session";
 import { getSidebarOpen } from "@/lib/sidebar-open";
 import { NotFound } from "@/pages/not-found";
@@ -79,11 +81,14 @@ function RootComponent() {
       allowedRedirectOrigins={[appOrigin]}
     >
       <ApiClientProvider>
-        <TooltipProvider>
-          <ToastProvider>
-            {isBarePath(pathname) ? <BareLayout /> : <AppShell defaultSidebarOpen={sidebarOpen} />}
-          </ToastProvider>
-        </TooltipProvider>
+        <UploadProvider>
+          <TooltipProvider>
+            <ToastProvider>
+              {isBarePath(pathname) ? <BareLayout /> : <AppShell defaultSidebarOpen={sidebarOpen} />}
+              {isBarePath(pathname) ? null : <UploadsTray />}
+            </ToastProvider>
+          </TooltipProvider>
+        </UploadProvider>
       </ApiClientProvider>
     </ClerkProvider>
   );

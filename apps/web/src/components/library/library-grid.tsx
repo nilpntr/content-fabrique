@@ -48,12 +48,14 @@ export interface LibraryGridProps {
   onOpen?: (asset: Asset) => void;
   onDelete?: (asset: Asset) => void;
   onRetry?: (asset: Asset) => void;
+  /** A clip's picture or video did not load (an expired URL, say). */
+  onMediaError?: (asset: Asset) => void;
   /** Shows an upload button in the empty state. */
   onUpload?: () => void;
   className?: string;
 }
 
-export function LibraryGrid({ assets, loading = false, onOpen, onDelete, onRetry, onUpload, className }: LibraryGridProps) {
+export function LibraryGrid({ assets, loading = false, onOpen, onDelete, onRetry, onMediaError, onUpload, className }: LibraryGridProps) {
   const [sort, setSort] = React.useState<SortId>("newest");
   const [filter, setFilter] = React.useState<FilterId>("all");
   const sortId = React.useId();
@@ -159,7 +161,7 @@ export function LibraryGrid({ assets, loading = false, onOpen, onDelete, onRetry
         <ul className={GRID}>
           {visible.map((asset) => (
             <li key={asset.id} className="animate-rise">
-              <ClipCard asset={asset} onOpen={onOpen} onDelete={onDelete} onRetry={onRetry} />
+              <ClipCard asset={asset} onOpen={onOpen} onDelete={onDelete} onRetry={onRetry} onMediaError={onMediaError} />
             </li>
           ))}
         </ul>

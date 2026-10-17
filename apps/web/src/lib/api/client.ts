@@ -44,6 +44,10 @@ export type Me = components["schemas"]["MeResponse"];
 export type WorkspacePlan = components["schemas"]["WorkspacePlanResponse"];
 /** GET /v1/library/summary. */
 export type LibrarySummary = components["schemas"]["LibrarySummaryResponse"];
+/** An asset of the library, as the API has it. */
+export type ApiAsset = components["schemas"]["Asset"];
+/** GET /v1/assets: a page of assets, newest first. */
+export type AssetsPage = components["schemas"]["ListAssetsResponse"];
 
 export interface ApiClientOptions {
   getToken: GetToken;
@@ -108,3 +112,16 @@ export const fetchWorkspacePlan = async (client: ApiClient, signal?: AbortSignal
 
 export const fetchLibrarySummary = async (client: ApiClient, signal?: AbortSignal): Promise<LibrarySummary> =>
   unwrap(await client.GET("/v1/library/summary", { signal }));
+
+/** One page of the workspace's assets (newest first). `cursor` is the previous page's `next_cursor`. */
+export const fetchAssets = async (client: ApiClient, cursor?: string, signal?: AbortSignal): Promise<AssetsPage> =>
+  unwrap(await client.GET("/v1/assets", { params: { query: { limit: 100, cursor } }, signal }));
+
+/** Deletes an asset (aborting its upload if it is still in progress). */
+export const deleteAsset = async (client: ApiClient, id: string): Promise<void> => {
+  unwrap(await client.DELETE("/v1/assets/{id}", { params: { path: { id: id as ApiAsset["id"] } } }));
+};
+
+/** The hover-scrub track of a ready video as WebVTT text, every cue pointing at the sprite sheet through a fresh URL. It needs the bearer token, so it cannot be a plain `<track src>`. */
+export const fetchSpriteVtt = async (client: ApiClient, id: string, signal?: AbortSignal): Promise<string> =>
+  unwrap(await client.GET("/v1/assets/{id}/sprite.vtt", { params: { path: { id: id as ApiAsset["id"] } }, parseAs: "text", signal }));
