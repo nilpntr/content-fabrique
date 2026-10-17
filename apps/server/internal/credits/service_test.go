@@ -91,8 +91,10 @@ func (r *rig) run(ws store.Workspace, project ids.ProjectID, free bool) (store.A
 		}); err != nil {
 			return err
 		}
-		_, err = r.svc.Hold(ctx, tx, q, run)
-		return err
+		if _, err = r.svc.Hold(ctx, tx, q, run); err != nil {
+			return err
+		}
+		return r.svc.CheckUncharged(ctx, tx, ws.ID, q)
 	})
 	return run, q, err
 }
@@ -488,6 +490,7 @@ func (r *rig) endRun(ws store.Workspace, run store.AgentRun, cost int64, end sto
 
 func (r *rig) uncharged(ws store.Workspace) int {
 	r.t.Helper()
+	// Runs in flight count too: the helper above ends every run it starts, so none is left.
 	n, err := r.st.CountUnchargedRuns(context.Background(), ws.ID, credits.EditorAgent, time.Now().UTC().Truncate(24*time.Hour), credits.UnchargedFailureReasons)
 	if err != nil {
 		r.t.Fatal(err)

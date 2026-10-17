@@ -212,7 +212,7 @@ func (h *Runs) startEdit(ctx context.Context, req api.StartEditRequestObject) (s
 		var tm *credits.TooManyUnchargedError
 		msg := "too many editor runs today ended with nothing to keep"
 		if errors.As(err, &tm) {
-			msg = fmt.Sprintf("this workspace has had %d editor runs today that were cancelled before they made anything, found nothing to change or failed, which is the most per day; try again tomorrow", tm.Cap)
+			msg = fmt.Sprintf("this workspace has %d editor runs in progress or ended today that were cancelled before they made anything, found nothing to change or failed, which is the most per day; try again tomorrow", tm.Cap)
 		}
 		return store.AgentRun{}, &failure{http.StatusTooManyRequests, api.ErrorCodeTooManyUnchargedRuns, msg}
 	case errors.Is(err, runtime.ErrBYOKKeyRequired):

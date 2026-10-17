@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -247,7 +248,7 @@ func TestStartEditIsRefusedAfterTheDaysUnchargedRuns(t *testing.T) {
 	rec := e.do(http.MethodPost, editPath(p), "ada", nil)
 	wantError(t, rec, http.StatusTooManyRequests, string(api.ErrorCodeTooManyUnchargedRuns))
 	var body api.Error
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || !strings.Contains(body.Error.Message, "5 editor runs today") {
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || !strings.Contains(body.Error.Message, "5 editor runs in progress or ended today") {
 		t.Fatalf("body = %s", rec.Body)
 	}
 	var runs int
@@ -257,4 +258,20 @@ func TestStartEditIsRefusedAfterTheDaysUnchargedRuns(t *testing.T) {
 	// Another workspace is not affected.
 	bp := e.newProjectAs("bob", "9:16")
 	e.startEdit("bob", bp, nil)
+}
+
+// Runs in flight count: a workspace with many projects cannot start dozens of runs at once and cancel them all.
+func TestStartEditCountsTheRunsInFlight(t *testing.T) {
+	e := newAssetsEnv(t, func(o *assetsEnvOptions) { o.runs = true; o.credits = 300 })
+	for i := range 5 {
+		p := e.newProject("ada", "9:16", e.readyAsset("ada", fmt.Sprintf("clip%d.mp4", i)))
+		e.startEdit("ada", p, nil)
+	}
+	p := e.newProject("ada", "9:16", e.readyAsset("ada", "clip5.mp4"))
+	wantError(t, e.do(http.MethodPost, editPath(p), "ada", nil), http.StatusTooManyRequests, string(api.ErrorCodeTooManyUnchargedRuns))
+	// Out of credits is told first: a workspace with nothing left gets 402, not 429.
+	if _, err := e.st.AdjustCredits(context.Background(), store.AdjustCreditsParams{Workspace: e.ws["ada"], Credits: -(300 - 5*6), Actor: "test", Reason: "test", Now: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	wantError(t, e.do(http.MethodPost, editPath(p), "ada", nil), http.StatusPaymentRequired, string(api.ErrorCodeCreditsExhausted))
 }

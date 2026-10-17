@@ -58,27 +58,34 @@ func (q *Queries) AgentRunTimelineVersion(ctx context.Context, arg AgentRunTimel
 const countUnchargedRuns = `-- name: CountUnchargedRuns :one
 SELECT count(*)::integer AS runs
 FROM agent_runs r
-WHERE r.workspace_id = $1 AND r.agent = $2 AND r.finished_at >= $3 AND r.cost_micros > 0
-  AND (r.status = 'cancelled'
-       OR (r.status = 'succeeded' AND r.output ->> 'no_edit_needed' = 'true')
-       OR (r.status = 'failed' AND r.failure_reason = ANY($4::text[])))
-  AND NOT EXISTS (SELECT 1 FROM credit_ledger c WHERE c.workspace_id = r.workspace_id AND c.action_id = r.id AND c.kind = 'charge')
+WHERE r.workspace_id = $1 AND r.agent = $2 AND r.id >= $3
+  AND (r.status IN ('queued', 'running', 'waiting_input')
+       OR (r.finished_at >= $4 AND r.cost_micros > 0
+           AND (r.status = 'cancelled'
+                OR (r.status = 'succeeded' AND r.output ->> 'no_edit_needed' = 'true')
+                OR (r.status = 'failed' AND r.failure_reason = ANY($5::text[])))
+           AND NOT EXISTS (SELECT 1 FROM credit_ledger c WHERE c.workspace_id = r.workspace_id AND c.action_id = r.id AND c.kind = 'charge')))
 `
 
 type CountUnchargedRunsParams struct {
 	WorkspaceID ids.WorkspaceID
 	Agent       string
+	MinID       uuid.UUID
 	Since       *time.Time
 	Reasons     []string
 }
 
-// How many runs of the agent the workspace has had finish since the given time that spent money (cost_micros > 0) and ended without a
-// charge: cancelled (a cancel that made a version is charged, so none is left here), succeeded having said there was nothing to change,
-// or failed for one of the given reasons (the creator's own, not ours). Runs that cost nothing, such as one cancelled in the queue, do not count.
+// How many runs of the agent the workspace has in flight (queued, running, waiting), plus those that finished since the given time having
+// spent money (cost_micros > 0) and ended without a charge: cancelled (a cancel that made a version is charged, so none is left here),
+// succeeded having said there was nothing to change, or failed for one of the given reasons (the creator's own, not ours). A run that
+// cost nothing, such as one cancelled in the queue, does not count once it is over. The runs in flight count because they may all end
+// uncharged, and nothing else bounds how many a workspace can start at once. min_id is the first run id (UUIDv7: time-ordered) that can
+// have finished in the period, which keeps the scan to the workspace's recent runs on the (workspace_id, id) index.
 func (q *Queries) CountUnchargedRuns(ctx context.Context, arg CountUnchargedRunsParams) (int32, error) {
 	row := q.db.QueryRow(ctx, countUnchargedRuns,
 		arg.WorkspaceID,
 		arg.Agent,
+		arg.MinID,
 		arg.Since,
 		arg.Reasons,
 	)

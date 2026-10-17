@@ -160,6 +160,10 @@ func (s *Service) Create(ctx context.Context, tx *store.Store, p StartParams) (s
 		if _, err := s.Credits.Hold(ctx, tx, *quote, run); err != nil {
 			return store.AgentRun{}, err
 		}
+		// After the hold, so that "no credits" (402) wins over "too many runs that ended without a charge today" (429).
+		if err := s.Credits.CheckUncharged(ctx, tx, p.WorkspaceID, *quote); err != nil {
+			return store.AgentRun{}, err
+		}
 	}
 	return run, nil
 }

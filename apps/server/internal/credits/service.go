@@ -84,6 +84,8 @@ type Quote struct {
 	// Plan is the workspace's plan at the time of the quote ("" when there is none and the run is free).
 	Plan        plans.Plan
 	ListVersion string
+	// UnchargedCap is the plan's cap on runs that end without a charge per UTC day (CheckUncharged); 0 for a free run, which has none.
+	UnchargedCap int
 	// BillingMode is the plan's mode ("" for a free run): a BYOK run must be billed to the workspace's own key (RequiredBilling).
 	BillingMode BillingMode
 	// Free is true for a run started without credits: it still gets a hold (of zero credits), so that it is recorded as a charged edit.
@@ -128,18 +130,7 @@ func (s *Service) QuoteEdit(ctx context.Context, tx *store.Store, ws ids.Workspa
 		return q, nil
 	}
 	q.BillingMode = s.List.Plans[ent.Plan].BillingMode
-	// A run that is cancelled before it made anything, finds nothing to change, or fails for the creator's own reason is released, not
-	// charged, but it has spent model money. A workspace may have only so many of them per UTC day.
-	limit := s.List.Plans[ent.Plan].UnchargedRunsPerDay
-	now := s.now().UTC()
-	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	n, err := tx.CountUnchargedRuns(ctx, ws, EditorAgent, day, UnchargedFailureReasons)
-	if err != nil {
-		return Quote{}, err
-	}
-	if n >= limit {
-		return Quote{}, &TooManyUnchargedError{Cap: limit}
-	}
+	q.UnchargedCap = s.List.Plans[ent.Plan].UnchargedRunsPerDay
 	q.Credits = s.List.Credits[action]
 	q.BudgetMicros = s.List.Plans[ent.Plan].COGSBudgetMicros[action]
 	return q, nil
@@ -157,6 +148,28 @@ func (s *Service) Hold(ctx context.Context, tx *store.Store, q Quote, run store.
 		Project: run.ProjectID, Member: member, Plan: string(q.Plan), ListVersion: q.ListVersion,
 		Now: s.now(), TTL: store.CreditHoldQueuedTTL,
 	})
+}
+
+// CheckUncharged refuses the run that was just created (and has its hold) when the workspace has too many runs that end without a charge.
+// A run that is cancelled before it made anything, finds nothing to change, or fails for the creator's own reason is released, not
+// charged, but it has spent model money. The workspace's runs in flight count too (they may all end that way, and nothing else bounds how
+// many it can start at once), and so does the new run itself: the cap is the number of such runs per UTC day including this one. It is
+// checked after the hold, so a workspace that is out of credits is told so (402) rather than to wait for tomorrow (429). A free run has no
+// cap. The caller rolls the transaction back on an error.
+func (s *Service) CheckUncharged(ctx context.Context, tx *store.Store, ws ids.WorkspaceID, q Quote) error {
+	if q.UnchargedCap <= 0 {
+		return nil
+	}
+	now := s.now().UTC()
+	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	n, err := tx.CountUnchargedRuns(ctx, ws, EditorAgent, day, UnchargedFailureReasons)
+	if err != nil {
+		return err
+	}
+	if n > q.UnchargedCap {
+		return &TooManyUnchargedError{Cap: q.UnchargedCap}
+	}
+	return nil
 }
 
 // Errors of RecordFinalExport.

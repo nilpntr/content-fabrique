@@ -434,9 +434,10 @@ export interface paths {
          *
          *     A run that is cancelled before it made anything, finds nothing to change, or fails for a reason of the creator's own (it used
          *     its whole budget without anything usable, the model declined the content, the project no longer fits the model) is released:
-         *     no credits are charged, but it has used model time. A workspace may have 5 such runs per UTC day on every plan; the next start
-         *     is refused with `429 too_many_uncharged_runs` until the next UTC day. Runs that cost nothing, runs that are charged, and
-         *     failures on our side do not count.
+         *     no credits are charged, but it has used model time. A workspace may have 5 such runs per UTC day on every plan, counting the runs
+         *     it has in progress and the new one; the next start is refused with `429 too_many_uncharged_runs` until the next UTC day. Runs
+         *     that cost nothing, runs that are charged, and failures on our side do not count. (A workspace that is out of credits is told
+         *     that first, with `402 credits_exhausted`.)
          *     The credits are charged when the run succeeds and released when it fails. When the creator cancels it they are charged if the
          *     run had already made a timeline version (the work is in the project), and released if it had not. `GET /v1/me` has the balance.
          *

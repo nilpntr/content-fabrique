@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -834,16 +835,29 @@ func (s *Store) VersionCovered(ctx context.Context, ws ids.WorkspaceID, project 
 	return charged, mapErr(err)
 }
 
-// CountUnchargedRuns counts the runs of the agent that the workspace had finish since the given time that spent money and ended without a
-// charge: cancelled before they made anything, succeeded saying there was nothing to change, or failed for one of failureReasons. A run
-// that cost nothing (cancelled in the queue) and a run that was charged do not count. It is the abuse control of credits.Service.QuoteEdit.
+// CountUnchargedRuns counts the runs of the agent that the workspace has in flight, plus those that finished since the given time having
+// spent money and ended without a charge: cancelled before they made anything, succeeded saying there was nothing to change, or failed
+// for one of failureReasons. A finished run that cost nothing (cancelled in the queue) and a run that was charged do not count. It is the
+// abuse control of credits.Service.CheckUncharged. Only runs created since the start of the period's day are looked at.
 func (s *Store) CountUnchargedRuns(ctx context.Context, ws ids.WorkspaceID, agent string, since time.Time, failureReasons []string) (int, error) {
 	t := since.UTC()
 	if failureReasons == nil {
 		failureReasons = []string{}
 	}
-	n, err := s.q.CountUnchargedRuns(ctx, db.CountUnchargedRunsParams{WorkspaceID: ws, Agent: agent, Since: &t, Reasons: failureReasons})
+	n, err := s.q.CountUnchargedRuns(ctx, db.CountUnchargedRunsParams{WorkspaceID: ws, Agent: agent, MinID: uuidV7Floor(t), Since: &t, Reasons: failureReasons})
 	return int(n), mapErr(err)
+}
+
+// uuidV7Floor is the smallest UUIDv7 a row created at t can have: the 48-bit millisecond timestamp, the version, zeros. Row ids are
+// UUIDv7 (the database's uuidv7()), so they sort by creation time and a range on them is a range of time.
+func uuidV7Floor(t time.Time) uuid.UUID {
+	ms := uint64(max(t.UnixMilli(), 0)) //nolint:gosec // non-negative above
+	var u uuid.UUID
+	var b [8]byte
+	binary.BigEndian.PutUint64(b[:], ms)
+	copy(u[:6], b[2:])
+	u[6], u[8] = 0x70, 0x80
+	return u
 }
 
 // ProjectHasChargedEdit says whether the project has an edit that was charged and not refunded: the first edit, or a revision. A run that
