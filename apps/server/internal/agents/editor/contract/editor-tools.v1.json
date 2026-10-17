@@ -44,6 +44,34 @@
       }
     },
     {
+      "name": "find_moments",
+      "description": "Find the best moments in the clips: the reps of a set, the still holds of a pose, ranked by score. The analysis is computed from the picture, without a model: it finds where each rep starts and ends (the turning points of the movement, so a cut there never lands mid-rep), how clean and how well lit it is, and which stretches are dead time (resting between sets, walking about). Each moment has its clip id, start_ms and end_ms (use them as the in and out points of a shot), its kind, a score from 0 to 1 (0.7 and above is clean) and a short reason such as \"rep 3 of 8, clean, full range\". The answer also lists the dead time to skip. Leave asset_id out to search all the project's clips. At most 20 moments come back. Use it before view_clip to choose what to look at, and to cut on rep boundaries.",
+      "strict": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "asset_id": {
+            "type": "string",
+            "description": "Optional. The id of one clip from list_footage. Leave it out to search every clip of the project."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["rep", "hold", "any"],
+            "description": "Optional. rep for the reps of a set, hold for a pose or a steady shot held still, any (the default) for both."
+          },
+          "min_score": {
+            "type": "number",
+            "description": "Optional. Only moments scoring at least this, from 0 to 1. 0.7 keeps the clean ones."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Optional. How many moments to return, from 1 to 20. The default is 10."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "get_timeline",
       "description": "Get the current timeline: its version number (version 0 means there is no timeline yet), the full spec, what the last edit changed, its length, and the validation issues (errors block an edit, warnings do not). Use it to see where you stand and to check your work after an edit. It takes no arguments.",
       "strict": true,

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"strings"
+	"slices"
 )
 
 // Rep segmentation (the deterministic slice of P2-09).
@@ -63,22 +63,6 @@ func DefaultParams() Params {
 
 func (p Params) samples(ms int) int { return max(ms/StepMs, 1) }
 
-var debugOn = false
-
-var debugf = func(string, ...any) {}
-
-func dbgSpark(x []float64, per int) string {
-	lo, hi := quantile(x, 0), quantile(x, 1)
-	bars := []rune("▁▂▃▄▅▆▇█")
-	var b strings.Builder
-	for i := 0; i < len(x); i += per {
-		m := mean(x[i:min(i+per, len(x))])
-		k := int((m - lo) / math.Max(hi-lo, 1e-9) * 7.99)
-		b.WriteRune(bars[max(0, min(k, 7))])
-	}
-	return b.String()
-}
-
 // Rep is one repetition: from one turning point to the next of the same kind.
 type Rep struct {
 	// StartIdx, PeakIdx and EndIdx are sample indexes: the rep starts and ends at a turning point where the movement pauses
@@ -134,6 +118,7 @@ func FindRepsIn(raw Raw, s Series, from, to int, p Params) RepsResult {
 		b := min(a+win, to)
 		a = b - win // the last window ends at the end of the shot
 		wc := scanWindow(raw, a, b, minLag, maxLagWin, p)
+		wc.strong = wc.strength >= p.MinStrength
 		ws = append(ws, wc)
 		res.Windows = append(res.Windows, WindowInfo{From: a, To: b, Strength: wc.strength, Period: wc.lag})
 		if b == to {
@@ -148,16 +133,15 @@ func FindRepsIn(raw Raw, s Series, from, to int, p Params) RepsResult {
 	for i, w := range ws {
 		ok[i] = w.strength >= p.MinStrength
 	}
-	for changed := true; changed; {
-		changed = false
+	// at most two windows (5 s) beyond the clearly periodic ones, so a still stretch's noise never carries a run on
+	for reach := 0; reach < 2; reach++ {
+		next := append([]bool(nil), ok...)
 		for i := range ws {
-			if ok[i] || ws[i].strength < weak {
-				continue
-			}
-			if (i > 0 && ok[i-1]) || (i+1 < len(ws) && ok[i+1]) {
-				ok[i], changed = true, true
+			if !ok[i] && ws[i].strength >= weak && ((i > 0 && ok[i-1]) || (i+1 < len(ws) && ok[i+1])) {
+				next[i] = true
 			}
 		}
+		ok = next
 	}
 	for i := 0; i < len(ws); {
 		if !ok[i] {
@@ -200,6 +184,7 @@ type windowCourses struct {
 	best     int
 	lag      float64 // samples
 	strength float64
+	strong   bool // periodic on its own, not only by the reach of its neighbours
 }
 
 func scanWindow(raw Raw, a, b, minLag, maxLag int, p Params) windowCourses {
@@ -270,8 +255,6 @@ func stitchRun(ws []windowCourses, hop int) []signal {
 			}
 			if bestC < 0 || math.Abs(bestCorr) < 0.5 {
 				flush()
-				k--
-				_ = k
 				aligned = append([]float64(nil), w.courses[w.best]...)
 				cur = &signal{from: w.from}
 				prevFrom = w.from
@@ -304,7 +287,9 @@ func stitchRun(ws []windowCourses, hop int) []signal {
 		}
 		prev, prevFrom = aligned, w.from
 		cur.strength = math.Max(cur.strength, w.strength)
-		cur.lags = append(cur.lags, w.lag)
+		if w.strong {
+			cur.lags = append(cur.lags, w.lag)
+		}
 	}
 	flush()
 	return out
@@ -418,14 +403,6 @@ func detrend(x []float64) []float64 {
 // the movement pauses at, and cuts the reps between them.
 func repsOf(s Series, x []float64, a int, period float64, p Params) (Set, bool) {
 	tp := turningPoints(x, p.ZigzagFraction)
-	debugf("signal %.1f-%.1fs: %d turning points, period %.1fs\n", float64(a)/10, float64(a+len(x))/10, len(tp), period/10)
-	if debugOn {
-		var parts []string
-		for _, t := range tp {
-			parts = append(parts, fmt.Sprintf("%.1f:%.2f", float64(a+t)/10, x[t]))
-		}
-		debugf("  tp %s\n  x: %s\n", strings.Join(parts, " "), dbgSpark(x, 5))
-	}
 	if len(tp) < p.MinReps+1 || period <= 0 {
 		return Set{}, false
 	}
@@ -468,7 +445,6 @@ func repsOf(s Series, x []float64, a int, period float64, p Params) (Set, bool) 
 		pick = 1
 	}
 	bounds := kinds[pick]
-	debugf("  tops/bottoms: kinds %d/%d, motion %.2f/%.2f, irregularity %.2f/%.2f, pick %d\n", len(kinds[0]), len(kinds[1]), s0, s1, i0, i1, pick)
 	if len(bounds) < p.MinReps+1 {
 		return Set{}, false
 	}
@@ -490,6 +466,9 @@ func repsOf(s Series, x []float64, a int, period float64, p Params) (Set, bool) 
 		amps[i], durs[i] = r.Amplitude, float64(r.EndIdx-r.StartIdx)
 	}
 	medAmp, medDur := quantile(amps, 0.5), quantile(durs, 0.5)
+	if math.Abs(medDur/period-1) > 0.35 {
+		return Set{}, false // the reps are not at the rhythm the scan heard: not a set
+	}
 	for i := range reps {
 		reps[i].Range = reps[i].Amplitude / math.Max(medAmp, 1e-9)
 		reps[i].Regularity = clamp01(1 - math.Abs(durs[i]-medDur)/math.Max(medDur, 1)/0.4)
@@ -498,7 +477,7 @@ func repsOf(s Series, x []float64, a int, period float64, p Params) (Set, bool) 
 	// the weight down: strip edges while they are off.
 	off := func(r Rep) bool {
 		d := float64(r.EndIdx - r.StartIdx)
-		return r.Range < 0.4 || d < 0.5*medDur || d > 1.8*medDur
+		return r.Range < 0.4 || r.Regularity < 0.25 || d < 0.6*medDur || d > 1.5*medDur
 	}
 	for len(reps) > 0 && off(reps[0]) {
 		reps = reps[1:]
@@ -558,16 +537,8 @@ func spread(x []float64, pts []int, dist float64) []int {
 			kept = append(kept, i)
 		}
 	}
-	sortInts(kept)
+	slices.Sort(kept)
 	return kept
-}
-
-func sortInts(a []int) {
-	for i := 1; i < len(a); i++ {
-		for j := i; j > 0 && a[j] < a[j-1]; j-- {
-			a[j], a[j-1] = a[j-1], a[j]
-		}
-	}
 }
 
 // turningPoints returns the indexes of the tops and bottoms of x, alternating, found with a zigzag: a reversal counts when the

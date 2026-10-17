@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "ea4d8b7a2161f7e1f43940c96a02584e1c88f6e62a2d7041a64144c51d5db935",
-  "recorded_at": "2026-10-17T12:35:15Z",
+  "key": "cf8f34dc0342f8e3a4cafa8d6ff2befdef0b3d741e8b9697941a5d90b4546128",
+  "recorded_at": "2026-10-17T14:09:09Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 16000,
@@ -45,24 +45,13 @@
         "blocks": [
           "tool_result"
         ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
       }
     ],
     "tools": [
       "get_brief",
       "list_footage",
       "view_clip",
+      "find_moments",
       "get_timeline",
       "edit_timeline",
       "render_preview",
@@ -108,17 +97,57 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_4",
-        "name": "get_timeline",
-        "input": {}
+        "id": "toolu_ed_3",
+        "name": "edit_timeline",
+        "input": {
+          "base_version": 0,
+          "ops": [
+            {
+              "op": "add_clip",
+              "asset_id": "ast_01jc000000e00800000000000a",
+              "source": {
+                "in_ms": 2000,
+                "out_ms": 8000
+              },
+              "why": "The heaviest set of the lat pulldown, so it opens the video."
+            },
+            {
+              "op": "add_clip",
+              "asset_id": "ast_01jc000000e00800000000000b",
+              "source": {
+                "in_ms": 1000,
+                "out_ms": 6000
+              }
+            },
+            {
+              "op": "add_clip",
+              "asset_id": "ast_01jc000000e00800000000000c",
+              "source": {
+                "in_ms": 3000,
+                "out_ms": 9000
+              },
+              "reframe": {
+                "mode": "blur_fill"
+              }
+            },
+            {
+              "op": "add_text",
+              "text": "HEAVY LAT DAY",
+              "style": "title_bold",
+              "at_ms": 0,
+              "duration_ms": 2000,
+              "anchor": "upper_third"
+            }
+          ]
+        }
       }
     ],
     "usage": {
-      "input_tokens": 420,
-      "cache_write_tokens": 700,
+      "input_tokens": 450,
+      "cache_write_tokens": 2100,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 12200,
-      "output_tokens": 58
+      "cache_read_tokens": 10100,
+      "output_tokens": 301
     }
   },
   "count_tokens": 9000

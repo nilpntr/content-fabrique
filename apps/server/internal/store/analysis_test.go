@@ -1,0 +1,210 @@
+package store_test
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/store"
+)
+
+// analysisSuite is part of repositorySuite (superuser and app role): the shots, moments and signals of an analysis are stored as
+// a whole, replaced by a re-run, ranked for the editor, and never cross a workspace.
+func analysisSuite(t *testing.T, st *store.Store, suffix string) {
+	ctx := context.Background()
+	mk := func(name string) (store.Workspace, ids.UserID) {
+		t.Helper()
+		w, err := st.CreateWorkspace(ctx, store.NewWorkspace{ClerkOrgID: "org_analysis_" + name + "_" + suffix, Name: name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		u, err := st.UpsertUserByClerkID(ctx, "user_analysis_"+name+"_"+suffix, name+"-analysis@example.com")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return w, u.ID
+	}
+	ready := func(w store.Workspace, user ids.UserID, name string) store.Asset {
+		t.Helper()
+		id, err := st.NewAssetID(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, _, err := st.CreateAssetWithUpload(ctx, w.ID, store.NewAsset{
+			ID: id, Kind: store.AssetKindVideo, Filename: name + ".mp4", ContentType: "video/mp4", SizeBytes: 40 << 20,
+			Title: name, R2Key: "ws/" + w.ID.String() + "/assets/" + id.String() + "/original", CreatedBy: user,
+			R2UploadID: "r2-" + id.String(), PartSize: 16 << 20, PartCount: 3, ExpiresAt: time.Now().Add(time.Hour),
+		}, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.InTx(ctx, func(tx *store.Store) error { _, err := tx.CompleteUpload(ctx, w.ID, a.ID); return err }); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.ClaimAssetForIngest(ctx, w.ID, a.ID); err != nil {
+			t.Fatal(err)
+		}
+		done, err := st.FinishAssetIngest(ctx, w.ID, a.ID, store.IngestResult{DurationMs: 60000, Width: 720, Height: 1280})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return done
+	}
+	wa, ua := mk("a")
+	wb, ub := mk("b")
+
+	result := func(reps int) store.AnalysisResult {
+		r := store.AnalysisResult{
+			Version: 1, StepMs: 100, DurationMs: 60000, Series: []byte(`{"motion":[1,2,3]}`), Summary: []byte(`{"reps":3}`),
+			Shots: []store.NewShot{{Idx: 0, StartMs: 0, EndMs: 60000, Signals: []byte(`{"exposure":{"level":"dark"}}`)}},
+			Moments: []store.NewMoment{
+				{Kind: store.MomentShot, StartMs: 0, EndMs: 60000, Score: 0.5, Attrs: []byte(`{}`), Description: "shot 1"},
+				{Kind: store.MomentDead, StartMs: 0, EndMs: 5000, Score: 0, Attrs: []byte(`{"reason":"rest"}`), Description: "dead time"},
+				{Kind: store.MomentHold, StartMs: 50000, EndMs: 58000, Score: 0.6, Labels: []string{"pose"}, Description: "hold"},
+			},
+		}
+		for i := 0; i < reps; i++ {
+			r.Moments = append(r.Moments, store.NewMoment{
+				Kind: store.MomentRep, StartMs: 6000 + i*3000, EndMs: 9000 + i*3000, Score: 0.5 + float64(i)/10,
+				Labels: []string{"row"}, Attrs: []byte(`{"rep":1}`), Description: "a rep",
+			})
+		}
+		return r
+	}
+
+	t.Run("save, read, replace", func(t *testing.T) {
+		a := ready(wa, ua, "analysis-clip")
+		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, result(3)); err != nil {
+			t.Fatal(err)
+		}
+		sig, err := st.GetAssetSignals(ctx, wa.ID, a.ID)
+		if err != nil || sig.Version != 1 || sig.StepMs != 100 || sig.DurationMs != 60000 {
+			t.Fatalf("signals %+v %v", sig, err)
+		}
+		shots, _ := st.ListAssetShots(ctx, wa.ID, a.ID)
+		moments, _ := st.ListAssetMoments(ctx, wa.ID, a.ID)
+		if len(shots) != 1 || len(moments) != 6 {
+			t.Fatalf("%d shots, %d moments", len(shots), len(moments))
+		}
+		sums, err := st.ListAssetAnalysisSummaries(ctx, wa.ID, []ids.AssetID{a.ID})
+		if err != nil || len(sums) != 1 || string(sums[0].Summary) != `{"reps": 3}` {
+			t.Fatalf("summaries %+v %v", sums, err)
+		}
+
+		// ranked: reps and holds by default, best first; kinds, min score and limit filter
+		top, err := st.ListMoments(ctx, wa.ID, store.MomentFilter{Assets: []ids.AssetID{a.ID}, Limit: 10})
+		if err != nil || len(top) != 4 || top[0].Score < top[1].Score || top[0].Kind == store.MomentDead || top[0].Kind == store.MomentShot {
+			t.Fatalf("top %+v %v", top, err)
+		}
+		reps, _ := st.ListMoments(ctx, wa.ID, store.MomentFilter{Assets: []ids.AssetID{a.ID}, Kinds: []string{store.MomentRep}, MinScore: 0.65, Limit: 1})
+		if len(reps) != 1 || reps[0].Kind != store.MomentRep || reps[0].Score < 0.65 {
+			t.Fatalf("reps %+v", reps)
+		}
+		if _, err := st.ListMoments(ctx, wa.ID, store.MomentFilter{Assets: []ids.AssetID{a.ID}, Limit: 0}); !errors.Is(err, store.ErrInvalid) {
+			t.Fatalf("limit 0: %v", err)
+		}
+
+		// a re-run replaces the shots and the moments and keeps one signals row
+		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, result(1)); err != nil {
+			t.Fatal(err)
+		}
+		if shots, _ = st.ListAssetShots(ctx, wa.ID, a.ID); len(shots) != 1 {
+			t.Fatalf("%d shots after a re-run", len(shots))
+		}
+		if moments, _ = st.ListAssetMoments(ctx, wa.ID, a.ID); len(moments) != 4 {
+			t.Fatalf("%d moments after a re-run, want 4", len(moments))
+		}
+	})
+
+	t.Run("tenancy", func(t *testing.T) {
+		a := ready(wa, ua, "analysis-tenancy")
+		if err := st.SaveAnalysis(ctx, wb.ID, a.ID, result(2)); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("workspace B saved an analysis on A's asset: %v", err)
+		}
+		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, result(2)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.GetAssetSignals(ctx, wb.ID, a.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("B read A's signals: %v", err)
+		}
+		if m, _ := st.ListAssetMoments(ctx, wb.ID, a.ID); len(m) != 0 {
+			t.Fatalf("B read A's moments: %v", m)
+		}
+		if m, _ := st.ListMoments(ctx, wb.ID, store.MomentFilter{Assets: []ids.AssetID{a.ID}, Limit: 10}); len(m) != 0 {
+			t.Fatalf("B searched A's moments: %v", m)
+		}
+		if s, _ := st.ListAssetAnalysisSummaries(ctx, wb.ID, []ids.AssetID{a.ID}); len(s) != 0 {
+			t.Fatalf("B read A's summary: %v", s)
+		}
+		// B's own asset stays empty, and a deleted asset takes no analysis
+		b := ready(wb, ub, "analysis-b")
+		if m, _ := st.ListMoments(ctx, wa.ID, store.MomentFilter{Assets: []ids.AssetID{b.ID}, Limit: 10}); len(m) != 0 {
+			t.Fatalf("A searched B's moments: %v", m)
+		}
+		if _, err := st.SoftDeleteAsset(ctx, wa.ID, a.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, result(1)); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("an analysis was saved on a deleted asset: %v", err)
+		}
+	})
+
+	t.Run("backfill list", func(t *testing.T) {
+		wc, uc := mk("c")
+		plain := ready(wc, uc, "needs-analysis")
+		done := ready(wc, uc, "analysed")
+		if err := st.SaveAnalysis(ctx, wc.ID, done.ID, result(1)); err != nil {
+			t.Fatal(err)
+		}
+		todo, err := st.ListAssetsForAnalysis(ctx, wc.ID, 1, false, 10)
+		if err != nil || len(todo) != 1 || todo[0].ID != plain.ID {
+			t.Fatalf("todo %v %v", todo, err)
+		}
+		if todo, _ = st.ListAssetsForAnalysis(ctx, wc.ID, 2, false, 10); len(todo) != 2 {
+			t.Fatalf("a newer version must list both: %d", len(todo))
+		}
+		if todo, _ = st.ListAssetsForAnalysis(ctx, wc.ID, 1, true, 10); len(todo) != 2 {
+			t.Fatalf("include_done must list both: %d", len(todo))
+		}
+	})
+
+	t.Run("hook runs in the ingest transaction", func(t *testing.T) {
+		var seen []ids.AssetID
+		st.SetAnalysisHook(func(_ context.Context, tx *store.Store, a store.Asset) error {
+			if _, err := tx.Tx(); err != nil {
+				return err
+			}
+			seen = append(seen, a.ID)
+			return nil
+		})
+		defer st.SetAnalysisHook(nil)
+		a := ready(wa, ua, "hooked")
+		if len(seen) != 1 || seen[0] != a.ID {
+			t.Fatalf("hook saw %v", seen)
+		}
+		st.SetAnalysisHook(func(context.Context, *store.Store, store.Asset) error { return errors.New("queue down") })
+		id, _ := st.NewAssetID(ctx)
+		b, _, err := st.CreateAssetWithUpload(ctx, wa.ID, store.NewAsset{
+			ID: id, Kind: store.AssetKindVideo, Filename: "x.mp4", ContentType: "video/mp4", SizeBytes: 1 << 20, Title: "x",
+			R2Key: "ws/" + wa.ID.String() + "/assets/" + id.String() + "/original", CreatedBy: ua, R2UploadID: "r2-" + id.String(),
+			PartSize: 16 << 20, PartCount: 1, ExpiresAt: time.Now().Add(time.Hour),
+		}, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.InTx(ctx, func(tx *store.Store) error { _, err := tx.CompleteUpload(ctx, wa.ID, b.ID); return err }); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.ClaimAssetForIngest(ctx, wa.ID, b.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.FinishAssetIngest(ctx, wa.ID, b.ID, store.IngestResult{DurationMs: 1, Width: 2, Height: 2}); err == nil {
+			t.Fatal("a failing hook did not fail the finish")
+		}
+		if got, _ := st.GetAsset(ctx, wa.ID, b.ID); got.Status != store.AssetProcessing {
+			t.Fatalf("a failed hook must roll the ingest back, status %s", got.Status)
+		}
+	})
+}

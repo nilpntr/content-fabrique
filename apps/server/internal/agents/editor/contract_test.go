@@ -42,7 +42,7 @@ func TestRegisteredToolsAreTheContract(t *testing.T) {
 	if len(got) != len(defs) {
 		t.Fatalf("the agent registers %d tools, the contract lists %d", len(got), len(defs))
 	}
-	wantNames := []string{"get_brief", "list_footage", "view_clip", "get_timeline", "edit_timeline", "render_preview", "finish"}
+	wantNames := []string{"get_brief", "list_footage", "view_clip", "find_moments", "get_timeline", "edit_timeline", "render_preview", "finish"}
 	for i, d := range defs {
 		g := got[i]
 		if g.Name != d.Name || g.Description != d.Description || g.Strict != d.Strict {
@@ -245,6 +245,9 @@ func TestToolSchemasAcceptAndRefuse(t *testing.T) {
 		{ToolViewClip,
 			[]string{`{"asset_id":"` + asset + `"}`, `{"asset_id":"` + asset + `","at_ms":[0,1500]}`},
 			[]string{`{}`, `{"asset_id":1}`, `{"asset_id":"` + asset + `","at_ms":["1"]}`, `{"asset_id":"` + asset + `","at_ms":[1.5]}`, `{"asset_id":"` + asset + `","extra":1}`}},
+		{ToolFindMoments,
+			[]string{`{}`, `{"asset_id":"` + asset + `"}`, `{"kind":"rep"}`, `{"kind":"hold","min_score":0.7,"limit":5}`, `{"kind":"any","asset_id":"` + asset + `","min_score":0,"limit":20}`},
+			[]string{`{"kind":"pose"}`, `{"asset_id":1}`, `{"min_score":"high"}`, `{"limit":1.5}`, `{"limit":"5"}`, `{"query":"row"}`}},
 		{ToolFinish, []string{`{"summary":"Done."}`, `{"summary":"Done.","no_edit_needed":true}`}, []string{`{}`, `{"summary":3}`, `{"summary":"x","open_questions":[]}`, `{"summary":"x","no_edit_needed":"yes"}`}},
 	}
 	for _, c := range cases {
@@ -359,7 +362,7 @@ func TestNewAgentChecksItsTools(t *testing.T) {
 	}
 	sorted := slices.Clone(names)
 	sort.Strings(sorted)
-	if len(names) != 7 {
+	if len(names) != 8 {
 		t.Fatalf("tools: %v", names)
 	}
 	if _, err := runtime.NewAgents(a); err != nil {

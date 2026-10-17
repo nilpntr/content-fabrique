@@ -9,6 +9,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
+	"github.com/nilpntr/content-fabrique/internal/analysis"
+	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 	"github.com/nilpntr/content-fabrique/internal/timeline/ops"
@@ -52,6 +54,9 @@ type footageOpts struct {
 	// Otherwise the first Detailed clips get their title (cut to TitleChars runes, none if 0) and description (cut to DescChars,
 	// none if 0); the others get their facts only.
 	Detailed, TitleChars, DescChars int
+	// Analysis holds the one-line summary of each analysed clip (reps, dead time, exposure). It is computed from the picture, not
+	// written by a person, so it is printed as it is.
+	Analysis map[ids.AssetID]analysis.Summary
 }
 
 // footageText lists the clips.
@@ -82,6 +87,9 @@ func footageText(rows []store.ProjectFootageRow, o footageOpts) string {
 			sound = "yes"
 		}
 		fmt.Fprintf(&b, "\n- id %s | %d ms (%s) | %s%s | sound: %s | kind: %s\n", r.AssetID, dur, secs(dur), orientation(w, h), size, sound, r.Kind)
+		if sum, ok := o.Analysis[r.AssetID]; ok {
+			fmt.Fprintf(&b, "  analysis: %s\n", sum.Line())
+		}
 		if !o.Full && n >= o.Detailed {
 			continue
 		}
@@ -98,10 +106,26 @@ func footageText(rows []store.ProjectFootageRow, o footageOpts) string {
 			fmt.Fprintf(&b, "  description: %s\n", runtime.Untrusted("clip_description", d))
 		}
 	}
+	if o.Analysis != nil {
+		if n := unanalysed(rows, o.Analysis); n > 0 {
+			fmt.Fprintf(&b, "\nThe analysis of %d video clip(s) is not ready yet, so find_moments knows nothing about them (it runs shortly after an upload).\n", n)
+		}
+	}
 	if !o.Full && len(rows) > o.Detailed {
 		b.WriteString("\nTitles and descriptions are shortened or left out here to keep this overview small; list_footage has them whole.")
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// unanalysed counts the video clips that have no analysis yet.
+func unanalysed(rows []store.ProjectFootageRow, got map[ids.AssetID]analysis.Summary) int {
+	n := 0
+	for _, r := range rows {
+		if _, ok := got[r.AssetID]; !ok && r.Kind == store.AssetKindVideo {
+			n++
+		}
+	}
+	return n
 }
 
 // specStats are the numbers of a spec the model needs at a glance.
