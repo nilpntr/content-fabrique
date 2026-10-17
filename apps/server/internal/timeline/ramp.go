@@ -166,25 +166,10 @@ func (v VideoItem) AverageSpeed() float64 {
 	if !v.HasRamp() {
 		return v.SpeedOrDefault()
 	}
-	span := float64(v.Source.OutMs - v.Source.InMs)
-	out := v.OutOffsetMs(span)
+	// The rounded output duration, which is what the clip plays for, so that speed times duration is the source span.
+	span, out := float64(v.Source.OutMs-v.Source.InMs), float64(OutputDuration(v))
 	if span <= 0 || out <= 0 {
 		return 1
 	}
 	return span / out
-}
-
-// MinSpeedOf is the lowest speed the clip plays at: its speed, or the lowest point of its ramp.
-func (v VideoItem) MinSpeedOf() float64 {
-	if !v.HasRamp() {
-		return v.SpeedOrDefault()
-	}
-	lo := math.Inf(1)
-	for _, p := range v.SpeedRamp {
-		lo = math.Min(lo, p.Speed)
-	}
-	if math.IsInf(lo, 1) {
-		return 1
-	}
-	return lo
 }

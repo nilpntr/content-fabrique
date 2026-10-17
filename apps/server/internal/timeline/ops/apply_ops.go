@@ -178,6 +178,10 @@ func (a *applier) trimItem(o *TrimItem) bool {
 		i, _ := a.clip(o.ID)
 		it := &a.main.Items[i]
 		if o.InMs != nil {
+			if it.HasRamp() {
+				// The ramp's points count from the in point: move them with it, so the ramp stays on the same footage.
+				shiftRamp(it, *o.InMs-it.Source.InMs)
+			}
 			it.Source.InMs = *o.InMs
 		}
 		if o.OutMs != nil {
@@ -203,6 +207,54 @@ func (a *applier) trimItem(o *TrimItem) bool {
 	}
 	a.touch(o.ID)
 	return true
+}
+
+// shiftRamp moves the speed ramp of a clip whose in point moves by delta ms (positive: later), so that every point stays on
+// the footage it was set for. The points are offsets from the in point, so each moves by -delta. A point that falls before the
+// new in point is dropped and the ramp starts there at the speed it had (linear between the points on either side of it); if
+// every point is gone the clip plays at the speed the ramp ended with, as a plain speed. Moving the in point earlier needs
+// nothing: the clip plays at the first point's speed before it.
+func shiftRamp(it *timeline.VideoItem, delta int64) {
+	if delta <= 0 {
+		for i := range it.SpeedRamp {
+			it.SpeedRamp[i].AtMs -= delta
+		}
+		return
+	}
+	pts := it.SpeedRamp
+	first := 0 // the index of the first point that stays (at or after the new in point)
+	for first < len(pts) && pts[first].AtMs-delta < 0 {
+		first++
+	}
+	if first == 0 {
+		for i := range pts {
+			pts[i].AtMs -= delta
+		}
+		return
+	}
+	if first == len(pts) { // all of the ramp is behind the new in point
+		v := pts[len(pts)-1].Speed
+		it.SpeedRamp, it.Speed = nil, &v
+		return
+	}
+	prev, next := pts[first-1], pts[first]
+	speedAt0 := prev.Speed
+	if span := float64(next.AtMs - prev.AtMs); span > 0 {
+		speedAt0 = prev.Speed + (next.Speed-prev.Speed)*float64(delta-prev.AtMs)/span
+	}
+	out := make([]timeline.SpeedPoint, 0, len(pts)-first+1)
+	if next.AtMs-delta > 0 {
+		out = append(out, timeline.SpeedPoint{AtMs: 0, Speed: speedAt0})
+	}
+	for _, p := range pts[first:] {
+		out = append(out, timeline.SpeedPoint{AtMs: p.AtMs - delta, Speed: p.Speed})
+	}
+	if len(out) < timeline.MinRampPoints { // the tail of the ramp is one point: a constant speed
+		v := out[0].Speed
+		it.SpeedRamp, it.Speed = nil, &v
+		return
+	}
+	it.SpeedRamp = out
 }
 
 func (a *applier) replaceSource(o *ReplaceSource) bool {

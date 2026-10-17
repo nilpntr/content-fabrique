@@ -117,7 +117,7 @@ func TestOutputDurationOfARamp(t *testing.T) {
 	if OutputDuration(both) != OutputDuration(flat) {
 		t.Error("speed and speed_ramp: the ramp must win")
 	}
-	if avg := it.AverageSpeed(); math.Abs(avg-2000/1854.5177) > 1e-4 {
+	if avg := it.AverageSpeed(); math.Abs(avg-2000.0/1855) > 1e-9 {
 		t.Errorf("AverageSpeed = %v", avg)
 	}
 }

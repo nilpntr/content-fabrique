@@ -225,7 +225,7 @@ func TestSpeedRampInTheTimeMapAndAudio(t *testing.T) {
 	if len(e.SpeedRamp) != 3 || e.Speed == nil {
 		t.Fatalf("entry: %+v", e)
 	}
-	if want := 2000 / 1854.5177444; math.Abs(*e.Speed-want) > 1e-6 {
+	if want := 2000.0 / 1855; math.Abs(*e.Speed-want) > 1e-9 { // the rounded duration
 		t.Errorf("the average speed is %v, want %v", *e.Speed, want)
 	}
 	if plan.TimeMap[0].SpeedRamp != nil || plan.TimeMap[2].SpeedRamp != nil {

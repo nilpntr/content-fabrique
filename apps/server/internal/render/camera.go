@@ -157,15 +157,16 @@ func (c *compiler) addShake(k *camera, cl clip, strength float64, start int64) e
 	zoom := fmt.Sprintf("1+%s*%s", num(strength), env)
 	k.zooms = append(k.zooms, zoom)
 
-	h := fnv.New64a()
-	_, _ = h.Write([]byte("cf-shake:" + cl.item.ID))
-	seed := h.Sum64()
-	next := func(lo, hi float64) float64 { // the next 16 bits of the seed, as a number in [lo, hi)
-		v := float64(seed&0xffff) / 65536
-		seed >>= 16
-		return lo + v*(hi-lo)
-	}
-	axis := func() string {
+	axis := func(name string) string {
+		// Each axis has its own 64-bit seed, a hash of the clip's id and the axis; four 16-bit draws use it up.
+		h := fnv.New64a()
+		_, _ = h.Write([]byte("cf-shake:" + cl.item.ID + ":" + name))
+		seed := h.Sum64()
+		next := func(lo, hi float64) float64 { // the next 16 bits of the seed, as a number in [lo, hi)
+			v := float64(seed&0xffff) / 65536
+			seed >>= 16
+			return lo + v*(hi-lo)
+		}
 		w1 := 2 * math.Pi * next(11, 17) / float64(c.fps) // radians per frame, at 11 to 17 Hz and 19 to 27 Hz
 		w2 := 2 * math.Pi * next(19, 27) / float64(c.fps)
 		p1, p2 := next(0, 2*math.Pi), next(0, 2*math.Pi)
@@ -174,7 +175,7 @@ func (c *compiler) addShake(k *camera, cl clip, strength float64, start int64) e
 	room := func(dim string) string { // the room the shake's own zoom leaves at each edge, times shakeRoom
 		return fmt.Sprintf("%s*%s*(1-1/(%s))/2", num(shakeRoom), dim, zoom)
 	}
-	k.dx = fmt.Sprintf("%s*(%s)", room("W"), axis())
-	k.dy = fmt.Sprintf("%s*(%s)", room("H"), axis())
+	k.dx = fmt.Sprintf("%s*(%s)", room("W"), axis("x"))
+	k.dy = fmt.Sprintf("%s*(%s)", room("H"), axis("y"))
 	return nil
 }

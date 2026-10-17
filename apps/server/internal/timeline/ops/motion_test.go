@@ -134,6 +134,31 @@ func TestSetSpeedRamp(t *testing.T) {
 		// Trimming the end by less than the last point is fine.
 		mustApply(t, spec, `[{"op":"trim_item","id":"c1","out_ms":2300}]`)
 	})
+	t.Run("a new in point moves the ramp with the footage", func(t *testing.T) {
+		spec := mustApply(t, base, `[{"op":"trim_item","id":"c2","in_ms":1000,"out_ms":5000},
+			{"op":"set_speed_ramp","id":"c2","points":[{"at_ms":0,"speed":1},{"at_ms":1000,"speed":3},{"at_ms":2000,"speed":0.5}]}]`)
+		pts := func(js string) []timeline.SpeedPoint {
+			return clips(t, mustApply(t, spec, js))[1].SpeedRamp
+		}
+		// An earlier in point: the same footage is 400 ms later in the clip.
+		if got := pts(`[{"op":"trim_item","id":"c2","in_ms":600}]`); len(got) != 3 || got[0].AtMs != 400 || got[2].AtMs != 2400 || got[1].Speed != 3 {
+			t.Errorf("earlier: %+v", got)
+		}
+		// A later one by 500: the first point is gone and the ramp starts at the speed it had there, half way from 1 to 3.
+		got := pts(`[{"op":"trim_item","id":"c2","in_ms":1500}]`)
+		if len(got) != 3 || got[0] != (timeline.SpeedPoint{AtMs: 0, Speed: 2}) || got[1] != (timeline.SpeedPoint{AtMs: 500, Speed: 3}) || got[2].AtMs != 1500 {
+			t.Errorf("later: %+v", got)
+		}
+		// Later by exactly a point: no extra point at 0.
+		if got := pts(`[{"op":"trim_item","id":"c2","in_ms":2000}]`); len(got) != 2 || got[0] != (timeline.SpeedPoint{AtMs: 0, Speed: 3}) {
+			t.Errorf("on a point: %+v", got)
+		}
+		// Past the whole ramp: it becomes the plain speed it ended with.
+		out := mustApply(t, spec, `[{"op":"trim_item","id":"c2","in_ms":3200,"out_ms":5000}]`)
+		if c := clips(t, out)[1]; c.SpeedRamp != nil || c.Speed == nil || *c.Speed != 0.5 {
+			t.Errorf("past the ramp: %+v", c)
+		}
+	})
 	t.Run("source audio of a ramped clip is a warning, not an error", func(t *testing.T) {
 		spec := mustApply(t, base, `[{"op":"set_clip_audio","id":"c1","use_source":true}]`)
 		out, res := apply(t, spec, ramp)
