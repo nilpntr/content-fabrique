@@ -101,7 +101,7 @@ export function RunView({ run, assetTitles, onCancel, cancelling = false, cancel
         ) : null}
       </div>
 
-      <p role="status" className="text-[13.5px] text-muted-foreground">
+      <p role="status" className={cn("text-[13.5px] text-muted-foreground", !active && "sr-only")}>
         {activity}
       </p>
       {cancelError ? (

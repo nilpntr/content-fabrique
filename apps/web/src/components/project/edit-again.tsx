@@ -71,7 +71,7 @@ export function EditAgain({
           <Wand2 aria-hidden />
           {label}
         </Button>
-        {busy ? <p className="text-[13px] text-muted-foreground">The editor is working. You can edit again when it has finished.</p> : null}
+        {busy ? <p className="text-[13px] text-muted-foreground">The editor is still on this project. You can edit again when it has finished or you stop it.</p> : null}
       </div>
     );
   }
