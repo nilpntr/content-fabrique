@@ -30,7 +30,7 @@ func newGate(caps store.SpendCaps) (*spend.Gate, *spendtest.Memory, *bytes.Buffe
 func ws() ids.WorkspaceID { return ids.WorkspaceID{UUID: uuid.New()} }
 
 func TestReserveSettleRelease(t *testing.T) {
-	g, mem, _ := newGate(store.SpendCaps{WorkspaceDailyMicros: 10_000, PlatformDailyMicros: 10_000})
+	g, mem, _ := newGate(store.SpendCaps{WorkspaceDailyMicros: 100_000, PlatformDailyMicros: 10_000})
 	w := ws()
 	ctx := context.Background()
 	h, err := g.Reserve(ctx, spend.Request{Workspace: w, BilledTo: store.BilledToPlatform, Kind: store.KindLLM, Micros: 6_000})
@@ -40,7 +40,7 @@ func TestReserveSettleRelease(t *testing.T) {
 	// 6,000 are held: another 6,000 does not fit, and the refusal is typed.
 	_, err = g.Reserve(ctx, spend.Request{Workspace: w, BilledTo: store.BilledToPlatform, Kind: store.KindLLM, Micros: 6_000})
 	var ce *spend.CapError
-	if !errors.As(err, &ce) || ce.Cap != store.CapPlatformDaily || ce.Room != 4_000 || !errors.Is(err, spend.ErrCapExceeded) || !errors.Is(err, spend.ErrPlatformPaused) {
+	if !errors.As(err, &ce) || ce.Cap != store.CapPlatformBusy || ce.Room != 4_000 || !ce.HoldsInTheWay || !errors.Is(err, spend.ErrCapExceeded) || !errors.Is(err, spend.ErrSpendCapBusy) || errors.Is(err, spend.ErrPlatformPaused) {
 		t.Fatalf("second reserve: %#v", err)
 	}
 	row := store.UsageEntry{WorkspaceID: w, Stage: "editor", Model: "m", ListCostMicros: 2_500, PriceTableVersion: "v", BilledTo: store.BilledToPlatform, IdempotencyKey: "llm:" + h.Key()}
@@ -76,8 +76,8 @@ func TestAlertsAreLoggedOnceAsSpendAlert(t *testing.T) {
 	g, mem, logs := newGate(store.SpendCaps{WorkspaceDailyMicros: 1 << 40, PlatformDailyMicros: 1_000})
 	ctx := context.Background()
 	w := ws()
-	// 850 spent: past 80 %.
-	if err := g.Record(ctx, w, store.UsageEntry{WorkspaceID: w, Kind: store.KindRender, Stage: "render", Model: "render-vcpu", Unit: store.UnitVCPUMs, Quantity: 1, ListCostMicros: 850, PriceTableVersion: "v", BilledTo: store.BilledToPlatform, IdempotencyKey: "render:1", CreatedAt: day}); err != nil {
+	// 950 spent of 1,000: past 80 %, and a small call (a tenth of the cap, 100) no longer fits: the breaker trips as the cost lands.
+	if err := g.Record(ctx, w, store.UsageEntry{WorkspaceID: w, Kind: store.KindRender, Stage: "render", Model: "render-vcpu", Unit: store.UnitVCPUMs, Quantity: 1, ListCostMicros: 950, PriceTableVersion: "v", BilledTo: store.BilledToPlatform, IdempotencyKey: "render:1", CreatedAt: day}); err != nil {
 		t.Fatal(err)
 	}
 	for range 3 {
@@ -170,22 +170,10 @@ func TestComputeMeterRecordsOnceAndPricesFromTheTable(t *testing.T) {
 	}
 }
 
-type clock struct {
-	mu sync.Mutex
-	t  time.Time
-}
-
-func (c *clock) Now() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
-func (c *clock) advance(d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.t = c.t.Add(d)
-}
-
 // A hold is short and a heartbeat extends it while its call is in flight: it keeps counting however long the call lives, and a caller
 // that dies (stops beating) stops blocking the caps one TTL after its last beat.
 func TestKeepAliveOutlivesLongCallsAndACrashedCallersHoldExpires(t *testing.T) {
-	clk := &clock{t: day}
+	clk := &spendtest.Clock{T: day}
 	mem := &spendtest.Memory{}
 	g := spend.NewGate(mem, spend.Options{
 		Caps: store.SpendCaps{WorkspaceDailyMicros: 1_000, PlatformDailyMicros: 1_000}, Now: clk.Now,
@@ -206,7 +194,7 @@ func TestKeepAliveOutlivesLongCallsAndACrashedCallersHoldExpires(t *testing.T) {
 	}
 	stop := h.KeepAlive(ctx)
 	for range 10 {
-		clk.advance(4 * time.Minute)
+		clk.Advance(4 * time.Minute)
 		deadline := time.Now().Add(5 * time.Second)
 		for len(mem.Holds()) == 1 && !mem.Holds()[0].ExpiresAt.After(clk.Now().Add(3*time.Minute)) {
 			if time.Now().After(deadline) {
@@ -220,11 +208,11 @@ func TestKeepAliveOutlivesLongCallsAndACrashedCallersHoldExpires(t *testing.T) {
 	}
 	stop()
 	// The caller crashes: it never settles and never beats again. The hold counts until its TTL after the last beat, then it does not.
-	clk.advance(2 * time.Minute)
+	clk.Advance(2 * time.Minute)
 	if !blocked() {
 		t.Fatal("the hold lapsed before its TTL")
 	}
-	clk.advance(4 * time.Minute)
+	clk.Advance(4 * time.Minute)
 	if blocked() {
 		t.Fatal("a crashed caller's hold still blocks the caps after its TTL")
 	}
@@ -245,3 +233,61 @@ func TestKeepAliveOutlivesLongCallsAndACrashedCallersHoldExpires(t *testing.T) {
 	}
 	free.KeepAlive(ctx)()
 }
+
+// A beat that cannot get through for a whole TTL means the hold has lapsed while its call is still in flight: that is logged as an
+// error, once per outage, and a beat that works again resets it.
+func TestKeepAliveSaysSoWhenTheHoldHasLapsed(t *testing.T) {
+	clk := &spendtest.Clock{T: day}
+	mem := &spendtest.Memory{}
+	logs := &syncBuf{}
+	g := spend.NewGate(mem, spend.Options{
+		Caps: store.SpendCaps{WorkspaceDailyMicros: 1_000, PlatformDailyMicros: 1_000}, Now: clk.Now, Logger: slog.New(slog.NewTextHandler(logs, nil)),
+		HoldTTL: 5 * time.Minute, Heartbeat: 5 * time.Millisecond,
+	})
+	h, err := g.Reserve(context.Background(), spend.Request{Workspace: ws(), BilledTo: store.BilledToPlatform, Kind: store.KindLLM, Micros: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mem.FailExtend = spendtest.ErrDown
+	stop := h.KeepAlive(context.Background())
+	time.Sleep(30 * time.Millisecond)
+	if strings.Contains(logs.String(), "lapsed") {
+		t.Fatal("escalated before a whole TTL had passed")
+	}
+	clk.Advance(6 * time.Minute)
+	deadline := time.Now().Add(5 * time.Second)
+	for strings.Count(logs.String(), "lapsed") == 0 && time.Now().Before(deadline) {
+		time.Sleep(2 * time.Millisecond)
+	}
+	time.Sleep(30 * time.Millisecond)
+	stop()
+	if n := strings.Count(logs.String(), "lapsed"); n != 1 || !strings.Contains(logs.String(), "level=ERROR") {
+		t.Errorf("escalation logged %d times (want once, as an error):\n%s", n, logs.String())
+	}
+}
+
+// A hold whose ledger row could not be written is kept to the end of the UTC day.
+func TestRetainKeepsAnUnrecordedCallsHoldToTheEndOfTheDay(t *testing.T) {
+	clk := &spendtest.Clock{T: day}
+	mem := &spendtest.Memory{}
+	g := spend.NewGate(mem, spend.Options{Caps: store.SpendCaps{WorkspaceDailyMicros: 1_000, PlatformDailyMicros: 1_000}, Now: clk.Now})
+	h, err := g.Reserve(context.Background(), spend.Request{Workspace: ws(), BilledTo: store.BilledToPlatform, Kind: store.KindLLM, Micros: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Retain(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := mem.Holds()[0].ExpiresAt, time.Date(2026, 10, 18, 0, 0, 0, 0, time.UTC); !got.Equal(want) {
+		t.Errorf("expires at %v, want %v", got, want)
+	}
+}
+
+// syncBuf is a log sink the heartbeat's goroutine and the test can both touch.
+type syncBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) { s.mu.Lock(); defer s.mu.Unlock(); return s.b.Write(p) }
+func (s *syncBuf) String() string              { s.mu.Lock(); defer s.mu.Unlock(); return s.b.String() }

@@ -73,11 +73,14 @@ const DefaultPlatformSmallCallMicros int64 = 100_000
 
 // BreakerTripped is the breaker's definition of a real crossing: the committed (settled) platform spend plus a small normal call no
 // longer fits under the cap. Live holds do not count, and neither does the size of one request, so a burst of in-flight calls or a
-// single large estimate near the cap is "busy", not "tripped". small <= 0 means DefaultPlatformSmallCallMicros.
+// single large estimate near the cap is "busy", not "tripped". small <= 0 means DefaultPlatformSmallCallMicros; it is at most a tenth
+// of the cap, so a small cap is not "tripped" from the first call. Calls smaller than that still fit after a trip; "tripped" means no
+// normal-sized call does.
 func BreakerTripped(committed, limit, small int64) bool {
 	if small <= 0 {
 		small = DefaultPlatformSmallCallMicros
 	}
+	small = max(min(small, limit/10), 1)
 	return committed+small > limit
 }
 
@@ -95,6 +98,9 @@ type SpendCapError struct {
 	Requested int64
 	// Room is what was left under the cap, counting the live holds.
 	Room int64
+	// HoldsInTheWay is set on a CapPlatformBusy refusal that waiting can cure: the request fits next to the settled spend, and only
+	// live holds stand in its way. A busy refusal without it is a request that is too large for the room left; waiting will not help.
+	HoldsInTheWay bool
 }
 
 func (e *SpendCapError) Error() string {
@@ -338,13 +344,16 @@ type SpendState struct {
 // daily cap, the transcription minutes. Each is "spent + held + asked <= cap". It returns the first cap that would be passed,
 // nil when the reservation fits. ReserveSpend does it under the counter locks; the in-memory fake of the tests does it under a mutex.
 func CheckSpendCaps(p ReserveSpendParams, st SpendState) *SpendCapError {
+	var busy *SpendCapError
 	if p.BilledTo == BilledToPlatform && p.Micros > 0 {
 		if limit := p.Caps.PlatformDailyMicros; st.PlatformSpent+st.PlatformHeld+p.Micros > limit {
-			which := CapPlatformBusy
+			e := &SpendCapError{Cap: CapPlatformBusy, Requested: p.Micros, Room: max(limit-st.PlatformSpent-st.PlatformHeld, 0),
+				HoldsInTheWay: st.PlatformHeld > 0 && st.PlatformSpent+p.Micros <= limit}
 			if BreakerTripped(st.PlatformSpent, limit, p.Caps.PlatformSmallCallMicros) {
-				which = CapPlatformDaily
+				e.Cap = CapPlatformDaily
+				return e
 			}
-			return &SpendCapError{Cap: which, Requested: p.Micros, Room: max(limit-st.PlatformSpent-st.PlatformHeld, 0)}
+			busy = e // retryable: a cap that cannot be cured by waiting (below) takes precedence over it
 		}
 	}
 	if p.BilledTo != BilledToWorkspaceKey && p.Micros > 0 {
@@ -357,7 +366,7 @@ func CheckSpendCaps(p ReserveSpendParams, st SpendState) *SpendCapError {
 			return &SpendCapError{Cap: CapWorkspaceAudio, Requested: p.AudioMs, Room: max(limit-st.WorkspaceAudio-st.WorkspaceHeldAudio, 0)}
 		}
 	}
-	return nil
+	return busy
 }
 
 // SettleSpendParams settles a call: its ledger rows, the counters, and the removal of its hold.

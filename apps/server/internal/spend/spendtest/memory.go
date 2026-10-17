@@ -46,6 +46,18 @@ type Memory struct {
 	Reserves, Settles, Releases, Extends int
 }
 
+// Clock is a clock a test moves, safe to read from the goroutines of the gate (the heartbeat).
+type Clock struct {
+	mu sync.Mutex
+	T  time.Time
+}
+
+// Now returns the clock's time.
+func (c *Clock) Now() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.T }
+
+// Advance moves the clock forward.
+func (c *Clock) Advance(d time.Duration) { c.mu.Lock(); defer c.mu.Unlock(); c.T = c.T.Add(d) }
+
 // Seed adds rows as if they had been settled earlier. A row without a key gets one.
 func (m *Memory) Seed(rows ...store.UsageEntry) {
 	m.mu.Lock()
@@ -213,11 +225,35 @@ func (m *Memory) SettleSpend(_ context.Context, p store.SettleSpendParams) (int,
 	if p.HoldKey != "" {
 		delete(m.holds, p.HoldKey)
 	}
+	var alerts []store.SpendAlert
+	if limit := p.PlatformCapMicros; limit > 0 && inserted > 0 {
+		// The settle-time alerts, by the same rules as the database: 80 % of the cap, and the trip (the committed spend plus a small call).
+		seen := map[string]bool{}
+		for _, r := range p.Rows {
+			period := store.DayPeriod(r.CreatedAt)
+			if r.BilledTo != store.BilledToPlatform || seen[period] {
+				continue
+			}
+			seen[period] = true
+			if m.alerted80 == nil {
+				m.alerted80, m.tripped = map[string]bool{}, map[string]bool{}
+			}
+			c := m.counter(ids.WorkspaceID{}, period)
+			if c.PlatformMicros*100 >= limit*80 && !m.alerted80[period] {
+				m.alerted80[period] = true
+				alerts = append(alerts, store.SpendAlert{Type: store.AlertPlatformBreaker, Pct: 80, Period: period, SpentMicros: c.PlatformMicros, CapMicros: limit})
+			}
+			if store.BreakerTripped(c.PlatformMicros, limit, p.PlatformSmallCallMicros) && !m.tripped[period] {
+				m.tripped[period] = true
+				alerts = append(alerts, store.SpendAlert{Type: store.AlertPlatformBreaker, Pct: 100, Period: period, SpentMicros: c.PlatformMicros, CapMicros: limit})
+			}
+		}
+	}
 	if m.FailSettleAfterWrite > 0 {
 		m.FailSettleAfterWrite--
 		return 0, nil, ErrDown
 	}
-	return inserted, nil, nil
+	return inserted, alerts, nil
 }
 
 // ReleaseAll drops every hold, as if their callers had all settled or released.

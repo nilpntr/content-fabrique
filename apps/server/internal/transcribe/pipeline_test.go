@@ -376,7 +376,7 @@ func TestRunWaitsWhileThePlatformBreakerIsOpen(t *testing.T) {
 	r := newRig(t)
 	r.prov.pricePerMinute = 6_000_000 // a 4 s clip reserves $0.40
 	r.platCap = 100_000
-	r.mem.Seed(store.UsageEntry{WorkspaceID: ids.WorkspaceID{UUID: uuid.New()}, ListCostMicros: 90_000, BilledTo: store.BilledToPlatform, CreatedAt: testNow.Add(-time.Hour)})
+	r.mem.Seed(store.UsageEntry{WorkspaceID: ids.WorkspaceID{UUID: uuid.New()}, ListCostMicros: 95_000, BilledTo: store.BilledToPlatform, CreatedAt: testNow.Add(-time.Hour)})
 	r.spendCap = 1 << 40
 	p, err := New(Config{Store: r.st, Objects: r.obj, Provider: r.prov, Detector: r.det, Gate: r.gate(), BilledTo: store.BilledToPlatform, TempDir: t.TempDir(), now: func() time.Time { return testNow }})
 	if err != nil {
@@ -573,5 +573,26 @@ func TestNewChecksItsConfig(t *testing.T) {
 		if _, err := New(cfg); err == nil {
 			t.Errorf("%s accepted", name)
 		}
+	}
+}
+
+// A transcription that does not fit under the platform cap while the breaker is not tripped is busy: the job waits a short while
+// (ErrPlatformBusy), nothing is sent and the transcript is not failed.
+func TestRunWaitsABriefWhileWhenThePlatformCapIsOnlyBusy(t *testing.T) {
+	r := newRig(t)
+	r.prov.pricePerMinute = 6_000_000 // a 4 s clip reserves $0.40
+	r.platCap = 1_000_000
+	other, err := r.gate().Reserve(context.Background(), spend.Request{Workspace: ids.WorkspaceID{UUID: uuid.New()}, BilledTo: store.BilledToPlatform, Kind: store.KindLLM, Micros: 700_000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = other.Release(context.Background()) }()
+	p, err := New(Config{Store: r.st, Objects: r.obj, Provider: r.prov, Detector: r.det, Gate: r.gate(), BilledTo: store.BilledToPlatform, TempDir: t.TempDir(), now: func() time.Time { return testNow }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Run(context.Background(), r.ws, r.id, r.gen)
+	if !errors.Is(err, ErrPlatformBusy) || !errors.Is(err, spend.ErrSpendCapBusy) || errors.Is(err, ErrPlatformPaused) || r.prov.runs != 0 || len(r.st.failures) != 0 {
+		t.Fatalf("err %v, provider runs %d, failures %+v", err, r.prov.runs, r.st.failures)
 	}
 }

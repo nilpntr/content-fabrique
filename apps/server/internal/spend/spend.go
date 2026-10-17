@@ -138,7 +138,7 @@ func (g *Gate) Reserve(ctx context.Context, r Request) (*Hold, error) {
 	if err != nil {
 		var ce *store.SpendCapError
 		if errors.As(err, &ce) {
-			return nil, &CapError{Cap: ce.Cap, Requested: ce.Requested, Room: ce.Room}
+			return nil, &CapError{Cap: ce.Cap, Requested: ce.Requested, Room: ce.Room, HoldsInTheWay: ce.HoldsInTheWay}
 		}
 		return nil, fmt.Errorf("spend: reserving: %w", err)
 	}
@@ -160,20 +160,46 @@ func (h *Hold) KeepAlive(ctx context.Context) (stop func()) {
 		defer close(done)
 		t := time.NewTicker(h.g.beat)
 		defer t.Stop()
+		lastOK, escalated := h.g.now(), false
 		for {
 			select {
 			case <-bctx.Done():
 				return
 			case <-t.C:
 				ectx, ecancel := context.WithTimeout(bctx, 10*time.Second)
-				if err := h.g.b.ExtendSpend(ectx, h.h.Workspace, h.h.Key, h.g.now().Add(h.g.ttl)); err != nil && bctx.Err() == nil {
+				err := h.g.b.ExtendSpend(ectx, h.h.Workspace, h.h.Key, h.g.now().Add(h.g.ttl))
+				ecancel()
+				switch {
+				case err == nil:
+					lastOK, escalated = h.g.now(), false
+				case bctx.Err() != nil:
+				case h.g.now().Sub(lastOK) >= h.g.ttl && !escalated:
+					// No beat has got through for a whole TTL: the hold has lapsed (or is about to), and the call still counts for
+					// nothing against the caps. Say so loudly, once per outage.
+					escalated = true
+					h.g.log.ErrorContext(bctx, "spend: a hold could not be extended for a whole TTL and has lapsed while its call is in flight; the caps may be overshot until it settles",
+						"error", err, "workspace_id", h.h.Workspace.String(), "key", h.h.Key)
+				default:
 					h.g.log.WarnContext(bctx, "spend: could not extend a hold; trying again at the next beat", "error", err, "workspace_id", h.h.Workspace.String())
 				}
-				ecancel()
 			}
 		}
 	}()
 	return func() { cancel(); <-done }
+}
+
+// Retain keeps a hold whose ledger row could not be written (the cost is paid and not recorded) until the end of the UTC day, so the
+// caps stay conservative until someone reconciles the row from the log line. The heartbeat must be stopped first.
+func (h *Hold) Retain(ctx context.Context) error {
+	if h.h.ID == uuid.Nil {
+		return nil
+	}
+	now := h.g.now().UTC()
+	endOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).Add(24 * time.Hour)
+	if err := h.g.b.ExtendSpend(ctx, h.h.Workspace, h.h.Key, endOfDay); err != nil {
+		return fmt.Errorf("spend: retaining: %w", err)
+	}
+	return nil
 }
 
 // Settle writes the ledger rows, adds their cost to the counters and removes the hold, in one transaction. It is idempotent on the
@@ -202,7 +228,8 @@ func (g *Gate) Record(ctx context.Context, ws ids.WorkspaceID, rows ...store.Usa
 
 func (g *Gate) settle(ctx context.Context, ws ids.WorkspaceID, holdKey string, rows []store.UsageEntry) error {
 	_, alerts, err := g.b.SettleSpend(ctx, store.SettleSpendParams{
-		HoldKey: holdKey, Workspace: ws, Rows: rows, PlatformCapMicros: g.caps.PlatformDailyMicros, Now: g.now(),
+		HoldKey: holdKey, Workspace: ws, Rows: rows, PlatformCapMicros: g.caps.PlatformDailyMicros,
+		PlatformSmallCallMicros: g.caps.PlatformSmallCallMicros, Now: g.now(),
 	})
 	g.alert(ctx, alerts)
 	if err != nil {
@@ -242,6 +269,8 @@ type CapError struct {
 	Cap store.SpendCap
 	// Requested is the amount asked for (micro-dollars, or milliseconds for the minutes cap); Room what was left.
 	Requested, Room int64
+	// HoldsInTheWay: a spend_cap_busy refusal that waiting can cure (see store.SpendCapError).
+	HoldsInTheWay bool
 }
 
 func (e *CapError) Error() string {

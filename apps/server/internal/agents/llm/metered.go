@@ -202,6 +202,13 @@ func (m *metered) writeLedger(ctx context.Context, r *reservation, e store.Usage
 		}
 	}
 	r.keepHold = true
+	if r.hold != nil {
+		// The cost is paid and not recorded: keep the hold until the end of the UTC day, so the caps stay conservative until the row is
+		// reconciled from the log line below. (The heartbeat is stopped by done.)
+		if rerr := r.hold.Retain(ctx); rerr != nil {
+			m.log.Error("llm: could not retain the spend hold of an unrecorded call", "error", rerr, "workspace_id", e.WorkspaceID.String())
+		}
+	}
 	// The row's content is not secret (no key, no prompt): log it so the ledger can be reconciled by hand.
 	m.log.Error("llm: usage ledger write failed", "error", err, "workspace_id", e.WorkspaceID.String(), "run_id", e.RunID.String(),
 		"stage", e.Stage, "model", e.Model, "input_tokens", e.InputTokens, "cache_write_tokens", e.CacheWriteTokens,
@@ -271,6 +278,7 @@ func (m *metered) reserveCaps(ctx context.Context, req Request, rsv *reservation
 			return nil, err
 		}
 	}
+	waits := 0
 	for {
 		if est > m.maxRequest {
 			return nil, &CapError{Kind: CapRequest, EstimateMicros: est, LimitMicros: m.maxRequest}
@@ -280,16 +288,30 @@ func (m *metered) reserveCaps(ctx context.Context, req Request, rsv *reservation
 			return got, nil
 		}
 		var ce *CapError
-		if !errors.As(err, &ce) || counted || ctx.Err() != nil {
+		if !errors.As(err, &ce) || ctx.Err() != nil {
 			return nil, err
 		}
-		// The inflated bound did not fit under the budget or the daily cap; the exact count may.
-		if err := count(); err != nil {
+		if !counted {
+			// The inflated bound did not fit under the budget or the daily cap; the exact count may.
+			if err := count(); err != nil {
+				return nil, err
+			}
+			if est, err = estimate(); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		// The exact worst case does not fit next to the live holds near the platform cap, and holds are all that stands in its way: an
+		// agent run (WaitOnBusy) waits for them to settle, until its context (the run's wall clock) ends. Anything else, such as a
+		// request too large for the room that is left, is refused at once.
+		var sce *spend.CapError
+		if ce.Kind != CapPlatformBusy || !req.Run.WaitOnBusy || !errors.As(err, &sce) || !sce.HoldsInTheWay {
 			return nil, err
 		}
-		if est, err = estimate(); err != nil {
+		if sleepCtx(ctx, busyBackoff(waits)) != nil {
 			return nil, err
 		}
+		waits++
 	}
 }
 
@@ -321,23 +343,9 @@ func (m *metered) take(ctx context.Context, req Request, rsv *reservation, est, 
 	}
 	// The hold is short and a heartbeat extends it for as long as the call is in flight (queued for the key's slot, cooling down after a
 	// 429, retrying: no fixed lifetime covers that), so a crashed caller's hold expires within spend.DefaultHoldTTL of its last beat.
-	var (
-		hold *spend.Hold
-		err  error
-	)
-	for attempt := 0; ; attempt++ {
-		hold, err = m.gate.Reserve(ctx, spend.Request{
-			Workspace: m.ws, BilledTo: string(m.billing), Kind: store.KindLLM, Micros: est, Key: "hold:" + rsv.ledgerKey(),
-		})
-		var sce *spend.CapError
-		if err == nil || !req.Run.WaitOnBusy || !errors.As(err, &sce) || sce.Cap != store.CapPlatformBusy {
-			break
-		}
-		// Busy, not tripped: wait for the live holds to settle and try again, until the context (the run's wall clock) ends.
-		if sleepCtx(ctx, busyBackoff(attempt)) != nil {
-			break
-		}
-	}
+	hold, err := m.gate.Reserve(ctx, spend.Request{
+		Workspace: m.ws, BilledTo: string(m.billing), Kind: store.KindLLM, Micros: est, Key: "hold:" + rsv.ledgerKey(),
+	})
 	if err != nil {
 		if release != nil {
 			release(0) // nothing stays reserved on an error

@@ -23,6 +23,11 @@ import (
 // transcript is not failed, and the job waits (a retry the same day meets the same breaker; the next UTC day it passes).
 var ErrPlatformPaused = fmt.Errorf("transcribe: %w", spend.ErrPlatformPaused)
 
+// ErrPlatformBusy is returned, wrapping spend.ErrSpendCapBusy, when the platform breaker has no room for this transcription right now
+// while it is not tripped (live holds are in the way, or the audio is large for the room left): the job waits a short while and tries
+// again.
+var ErrPlatformBusy = fmt.Errorf("transcribe: %w", spend.ErrSpendCapBusy)
+
 // ErrAssetGone is returned when there is nothing to transcribe any more: the asset was deleted or is not in the workspace.
 var ErrAssetGone = errors.New("transcribe: the asset is deleted or not in this workspace")
 
@@ -234,9 +239,12 @@ func (p *Pipeline) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, 
 		})
 		var ce *spend.CapError
 		switch {
-		case errors.As(err, &ce) && (ce.Cap == store.CapPlatformDaily || ce.Cap == store.CapPlatformBusy):
-			log.WarnContext(ctx, "transcription waits: the platform spend breaker has no room for it", "audio_ms", audio.DurationMs, "cap", string(ce.Cap))
+		case errors.As(err, &ce) && ce.Cap == store.CapPlatformDaily:
+			log.WarnContext(ctx, "transcription waits: the platform spend breaker is open", "audio_ms", audio.DurationMs)
 			return Result{}, fmt.Errorf("%w: %w", ErrPlatformPaused, err)
+		case errors.As(err, &ce) && ce.Cap == store.CapPlatformBusy:
+			log.WarnContext(ctx, "transcription waits: the platform spend cap has no room for it right now", "audio_ms", audio.DurationMs)
+			return Result{}, fmt.Errorf("%w: %w", ErrPlatformBusy, err)
 		case errors.As(err, &ce) && ce.Cap == store.CapWorkspaceAudio:
 			return p.blocked(ctx, ws, id, source, store.TranscriptMinutesCap, res, log)
 		case errors.As(err, &ce):
@@ -272,6 +280,14 @@ func (p *Pipeline) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, 
 		calls = []Call{{AudioMs: audio.DurationMs}}
 	}
 	settled, keep = p.meter(ctx, ws, asset, hold, job, adhoc, calls)
+	if keep && hold != nil {
+		stopBeat() // the rows could not be written: keep the hold to the end of the day instead of letting it lapse
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		if err := hold.Retain(rctx); err != nil {
+			log.ErrorContext(ctx, "could not retain the spend hold of an unrecorded transcription", "error", err)
+		}
+		cancel()
+	}
 	switch {
 	case errors.Is(terr, ErrUnusableAudio):
 		return p.unusable(ctx, ws, id, source, terr, log)

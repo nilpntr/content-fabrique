@@ -194,7 +194,8 @@ func TestSpendReserveRefusesNamingTheCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, err = rig.b.ReserveSpend(ctx, reserve("p2", w, store.BilledToPlatform, 4_001, store.SpendCaps{WorkspaceDailyMicros: 50_000, PlatformDailyMicros: 8_000}, spendDay))
-	if !errors.As(err, &capErr) || capErr.Cap != store.CapPlatformDaily || capErr.Room != 4_000 {
+	// 4,000 are held by another workspace's call and nothing is spent: a busy refusal that waiting can cure, not a trip.
+	if !errors.As(err, &capErr) || capErr.Cap != store.CapPlatformBusy || capErr.Room != 4_000 || !capErr.HoldsInTheWay {
 		t.Fatalf("over the platform cap: %v", err)
 	}
 	// Audio.
@@ -804,5 +805,42 @@ func TestSpendExtendKeepsAHoldAliveAndNeverRevivesOne(t *testing.T) {
 	}
 	if err := probe("p5", spendDay.Add(time.Hour+time.Minute)); err != nil {
 		t.Fatalf("a swept hold came back: %v", err)
+	}
+}
+
+// The caps that waiting cannot cure take precedence over a busy platform refusal, and a busy refusal says whether live holds are what
+// stands in the way.
+func TestCheckSpendCapsClassifiesRefusals(t *testing.T) {
+	caps := store.SpendCaps{WorkspaceDailyMicros: 1 << 40, PlatformDailyMicros: 10_000, PlatformSmallCallMicros: 100, WorkspaceDailyAudioMs: 60_000}
+	p := store.ReserveSpendParams{BilledTo: store.BilledToPlatform, Micros: 500, Caps: caps}
+	// Holds in the way.
+	e := store.CheckSpendCaps(p, store.SpendState{PlatformSpent: 5_000, PlatformHeld: 4_800})
+	if e == nil || e.Cap != store.CapPlatformBusy || !e.HoldsInTheWay {
+		t.Fatalf("holds in the way: %+v", e)
+	}
+	// Too large for the room left, nothing held: busy, but waiting will not help.
+	p.Micros = 5_500
+	e = store.CheckSpendCaps(p, store.SpendState{PlatformSpent: 5_000})
+	if e == nil || e.Cap != store.CapPlatformBusy || e.HoldsInTheWay {
+		t.Fatalf("too large: %+v", e)
+	}
+	p.Micros = 500
+	// The real crossing, however little is held.
+	if e = store.CheckSpendCaps(p, store.SpendState{PlatformSpent: 9_950}); e == nil || e.Cap != store.CapPlatformDaily {
+		t.Fatalf("crossing: %+v", e)
+	}
+	// A workspace over its own cap fails with that cap, not with the retryable platform one.
+	p.Caps.WorkspaceDailyMicros = 1_000
+	if e = store.CheckSpendCaps(p, store.SpendState{PlatformSpent: 5_000, PlatformHeld: 4_800, WorkspaceSpent: 900, WorkspaceHeld: 400}); e == nil || e.Cap != store.CapWorkspaceDaily {
+		t.Fatalf("workspace cap behind a busy platform: %+v", e)
+	}
+	// So does the transcribed-minutes cap.
+	p.Micros, p.AudioMs = 0, 30_000
+	if e = store.CheckSpendCaps(p, store.SpendState{WorkspaceAudio: 40_000}); e == nil || e.Cap != store.CapWorkspaceAudio {
+		t.Fatalf("minutes: %+v", e)
+	}
+	// A small cap is not tripped from the first call: the small call is at most a tenth of the cap.
+	if store.BreakerTripped(0, 1_500, 0) || !store.BreakerTripped(1_400, 1_500, 0) {
+		t.Error("the small call must be clamped to a tenth of the cap")
 	}
 }

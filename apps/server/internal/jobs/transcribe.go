@@ -75,10 +75,16 @@ var (
 	// ErrTranscribePaused: the platform's daily spend breaker is open (D-31). Nothing was sent; the job waits, snoozed, without using an
 	// attempt, and the next UTC day it passes.
 	ErrTranscribePaused = errors.New("jobs: the platform spend breaker is open")
+	// ErrTranscribeBusy: the platform breaker has no room for this transcription right now, but is not tripped. The job waits a short
+	// while, without using an attempt.
+	ErrTranscribeBusy = errors.New("jobs: the platform spend cap is busy")
 )
 
-// pausedSnooze is how long a transcription waits when the platform breaker is open.
-const pausedSnooze = 15 * time.Minute
+// pausedSnooze is how long a transcription waits when the platform breaker is open; busySnooze when it is only busy.
+const (
+	pausedSnooze = 15 * time.Minute
+	busySnooze   = 2 * time.Minute
+)
 
 // Transcriber is the transcription pipeline (package transcribe) as the worker sees it.
 type Transcriber interface {
@@ -111,6 +117,8 @@ func (w *TranscribeWorker) Work(ctx context.Context, job *river.Job[TranscribeAr
 	}
 	out, err := w.deps.Transcribe.Run(WithJobInfo(ctx, JobInfo{ID: job.ID, Attempt: job.Attempt}), ws, id, job.Args.Generation)
 	switch {
+	case errors.Is(err, ErrTranscribeBusy):
+		return w.snoozeFor(ctx, job, busySnooze, err.Error())
 	case errors.Is(err, ErrTranscribePaused):
 		return w.snoozeFor(ctx, job, pausedSnooze, err.Error())
 	case errors.Is(err, ErrTranscribeGone):

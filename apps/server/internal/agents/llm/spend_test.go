@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/spend"
+	"github.com/nilpntr/content-fabrique/internal/spend/spendtest"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
@@ -18,8 +18,8 @@ import (
 func TestPlatformBreakerRefusesManagedCallsAndAlertsOnce(t *testing.T) {
 	rg := newRig(t, map[string]string{"CF_ENV": "staging", "PLATFORM_DAILY_SPEND_CAP_MICROS": "1500", "DAILY_SPEND_CAP_MICROS": "100000000"})
 	ws, other := newWorkspaceID(), newWorkspaceID()
-	// Another workspace spent 1,300 of the 1,500 today: past 80 %, and no room for a 600 worst case.
-	rg.ledger.Seed(store.UsageEntry{WorkspaceID: other, ListCostMicros: 1_300, BilledTo: "platform", CreatedAt: rg.now.Add(-time.Hour)})
+	// Another workspace spent 1,400 of the 1,500 today: past 80 %, and a small call (a tenth of the cap, 150) no longer fits.
+	rg.ledger.Seed(store.UsageEntry{WorkspaceID: other, ListCostMicros: 1_400, BilledTo: "platform", CreatedAt: rg.now.Add(-time.Hour)})
 	c, billing := rg.client(t, ws, "editor")
 	if billing != BilledToPlatform {
 		t.Fatalf("billing = %s", billing)
@@ -27,7 +27,7 @@ func TestPlatformBreakerRefusesManagedCallsAndAlertsOnce(t *testing.T) {
 	for i := range 3 {
 		_, err := c.Messages(context.Background(), simpleRequest())
 		var ce *CapError
-		if !errors.As(err, &ce) || ce.Kind != CapPlatform || ce.LimitMicros != 200 || !errors.Is(err, ErrCapExceeded) || !errors.Is(err, spend.ErrPlatformPaused) {
+		if !errors.As(err, &ce) || ce.Kind != CapPlatform || ce.LimitMicros != 100 || !errors.Is(err, ErrCapExceeded) || !errors.Is(err, spend.ErrPlatformPaused) {
 			t.Fatalf("call %d: %#v", i, err)
 		}
 	}
@@ -161,24 +161,11 @@ func TestUnpricedFailsClosedOutsideDevelopmentAndCI(t *testing.T) {
 
 func env2(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
 
-// fakeClock is a clock the test moves; the spend gate and the heartbeat read it from other goroutines.
-type fakeClock struct {
-	mu sync.Mutex
-	t  time.Time
-}
-
-func (c *fakeClock) Now() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
-func (c *fakeClock) advance(d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.t = c.t.Add(d)
-}
-
 // A call can be queued for its key's slot, cooled down by a rate limit and retried for far longer than any fixed guess of its
 // duration. Its hold is short and a heartbeat extends it while the call is in flight, so it keeps counting against the caps for as long
 // as the call lives, and is gone once the call is over.
 func TestHoldOutlivesALongQueueWait(t *testing.T) {
-	clock := &fakeClock{t: time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)}
+	clock := &spendtest.Clock{T: time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)}
 	rg := newRig(t, nil, func(o *FactoryOptions) { o.now, o.heartbeat = clock.Now, 5*time.Millisecond })
 	started, release := make(chan struct{}), make(chan struct{})
 	rg.api.messages = func(n int, _ recordedCall) fakeReply {
@@ -198,7 +185,7 @@ func TestHoldOutlivesALongQueueWait(t *testing.T) {
 	// 24 minutes pass with the call still in flight (a hold with a fixed lifetime of its estimate would have lapsed after the first
 	// 17): after every 4-minute step the heartbeat has pushed the expiry past the new time.
 	for range 6 {
-		clock.advance(4 * time.Minute)
+		clock.Advance(4 * time.Minute)
 		deadline := time.Now().Add(5 * time.Second)
 		for {
 			h := rg.ledger.Holds()
@@ -229,9 +216,10 @@ func TestHoldOutlivesALongQueueWait(t *testing.T) {
 	}
 }
 
-// A call whose ledger row could not be written keeps its hold, but no longer extends it: it expires on its own.
-func TestUnrecordedCallsHoldStopsBeingExtended(t *testing.T) {
-	clock := &fakeClock{t: time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)}
+// A call whose ledger row could not be written (the cost is paid and in no counter) keeps its hold to the end of the UTC day, so the
+// caps stay conservative until the row is reconciled from the log line; nothing extends it any more.
+func TestUnrecordedCallsHoldIsRetainedToTheEndOfTheDay(t *testing.T) {
+	clock := &spendtest.Clock{T: time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)}
 	rg := newRig(t, nil, func(o *FactoryOptions) { o.now, o.heartbeat = clock.Now, 5*time.Millisecond })
 	rg.ledger.FailSettle = 100
 	c, _ := rg.client(t, newWorkspaceID(), "editor")
@@ -239,14 +227,13 @@ func TestUnrecordedCallsHoldStopsBeingExtended(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 	h := rg.ledger.Holds()
-	if len(h) != 1 {
-		t.Fatalf("holds = %+v", h)
+	if len(h) != 1 || !h[0].ExpiresAt.Equal(time.Date(2026, 10, 18, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("holds = %+v, want one that lasts to the end of the day", h)
 	}
-	expires := h[0].ExpiresAt
 	n := rg.ledger.Extends
-	clock.advance(time.Hour)
+	clock.Advance(time.Hour)
 	time.Sleep(30 * time.Millisecond)
-	if rg.ledger.Extends != n || !rg.ledger.Holds()[0].ExpiresAt.Equal(expires) {
+	if rg.ledger.Extends != n {
 		t.Error("an abandoned hold was still being extended")
 	}
 }
@@ -304,6 +291,45 @@ func TestBreakerBusyIsRetryableAndNotATrip(t *testing.T) {
 		}
 		if len(rg.api.messageCalls()) != 1 {
 			t.Errorf("message calls = %d", len(rg.api.messageCalls()))
+		}
+	})
+
+	t.Run("a request that is too large for the room left is not waited for", func(t *testing.T) {
+		rg := newRig(t, vars)
+		// 99,500 spent and nothing held: the 600 worst case can never fit, whatever settles; waiting is pointless.
+		rg.ledger.Seed(store.UsageEntry{WorkspaceID: newWorkspaceID(), ListCostMicros: 99_500, BilledTo: "platform", CreatedAt: rg.now.Add(-time.Hour)})
+		c, _ := rg.client(t, newWorkspaceID(), "editor")
+		req := simpleRequest()
+		req.Run = RunInfo{WaitOnBusy: true}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		began := time.Now()
+		_, err := c.Messages(ctx, req)
+		var ce *CapError
+		if !errors.As(err, &ce) || ce.Kind != CapPlatformBusy || time.Since(began) > 2*time.Second {
+			t.Fatalf("err = %v after %v, want the busy refusal at once", err, time.Since(began))
+		}
+	})
+
+	t.Run("the exact count is tried before the run waits", func(t *testing.T) {
+		rg := newRig(t, vars)
+		// 650 of room: the local upper bound (about 713) does not fit, the exact worst case (600) does.
+		if _, _, err := rg.ledger.ReserveSpend(context.Background(), store.ReserveSpendParams{
+			Key: "other", Workspace: newWorkspaceID(), BilledTo: store.BilledToPlatform, Kind: store.KindLLM, Micros: 99_350,
+			Caps: store.SpendCaps{WorkspaceDailyMicros: 1 << 40, PlatformDailyMicros: 100_000, PlatformSmallCallMicros: 100}, Now: *rg.now, TTL: time.Hour,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		c, _ := rg.client(t, newWorkspaceID(), "editor")
+		req := simpleRequest()
+		req.Run = RunInfo{WaitOnBusy: true}
+		prev := busyBackoff
+		busyBackoff = func(int) time.Duration { return time.Hour } // waiting would hang the test
+		defer func() { busyBackoff = prev }()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if _, err := c.Messages(ctx, req); err != nil {
+			t.Fatalf("the call that fits by its exact count was made to wait: %v", err)
 		}
 	})
 

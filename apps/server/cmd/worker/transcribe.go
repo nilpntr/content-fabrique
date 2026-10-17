@@ -29,6 +29,8 @@ func (t transcriber) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID
 	}
 	res, err := t.p.Run(ctx, ws, id, generation)
 	switch {
+	case errors.Is(err, transcribe.ErrPlatformBusy):
+		return nil, errors.Join(jobs.ErrTranscribeBusy, err)
 	case errors.Is(err, transcribe.ErrPlatformPaused):
 		return nil, errors.Join(jobs.ErrTranscribePaused, err)
 	case errors.Is(err, transcribe.ErrAssetGone):
