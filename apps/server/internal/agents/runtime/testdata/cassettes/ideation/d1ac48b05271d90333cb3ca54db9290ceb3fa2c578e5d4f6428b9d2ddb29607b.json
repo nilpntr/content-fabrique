@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "stage": "ideation",
+  "key": "d1ac48b05271d90333cb3ca54db9290ceb3fa2c578e5d4f6428b9d2ddb29607b",
+  "recorded_at": "2026-10-17T10:54:39Z",
+  "request": {
+    "model": "claude-haiku-5-5",
+    "max_tokens": 16000,
+    "effort": "medium",
+    "system_blocks": 1,
+    "messages": [
+      {
+        "role": "user",
+        "blocks": [
+          "text"
+        ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
+        ]
+      }
+    ],
+    "tools": [
+      "note",
+      "finish"
+    ]
+  },
+  "response": {
+    "id": "msg_fake",
+    "model": "claude-haiku-5-5",
+    "stop_reason": "tool_use",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_echo_finish",
+        "name": "finish",
+        "input": {
+          "summary": "Noted: hello cassette"
+        }
+      }
+    ],
+    "usage": {
+      "input_tokens": 220,
+      "cache_write_tokens": 0,
+      "cache_write_1h_tokens": 0,
+      "cache_read_tokens": 300,
+      "output_tokens": 41
+    }
+  }
+}

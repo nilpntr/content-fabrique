@@ -24,6 +24,7 @@ Commands:
   assets     import local media files into a workspace's library, development only (cfctl assets help)
   render     render a timeline spec with ffmpeg, for local manual runs (cfctl render --help)
   media      probe a file's metadata, benchmark the sandbox providers (cfctl media help)
+  agent      run an agent in this process and show a run's events and costs, development only (cfctl agent help)
   llm        check model access for a routing stage: count tokens, or send one tiny message (cfctl llm help)
   env        init: create .env and generate secrets. lint: check variable reads against .env.example
   version    print the build version
@@ -58,6 +59,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdRender(args[1:], stdout, stderr)
 	case "media":
 		return cmdMedia(args[1:], stdout, stderr, defaultMediaDeps())
+	case "agent":
+		return cmdAgent(args[1:], stdout, stderr, os.LookupEnv, defaultAgentDeps())
 	case "llm":
 		return cmdLLM(args[1:], stdout, stderr, os.LookupEnv, defaultLLMDeps())
 	case "help", "-h", "-help", "--help":
