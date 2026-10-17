@@ -32,6 +32,9 @@
 | D-25 | Four output formats in v1: 9:16, 1:1, 4:5 and 16:9, chosen per project; TikTok stays the only publishing target | Accepted (founder decision, 2026-10-17) |
 | D-26 | Video effects are curated presets (camera moves, transitions, graphic templates) the agent and the creator pick; bespoke effects only through the flagged sandbox | Accepted (director, 2026-10-17; founder to confirm the first templates) |
 | D-27 | Transcription: whisper.cpp in the media-tools sandbox locally; Workers AI `whisper-large-v3-turbo` through Cloudflare on staging and production; one provider interface | Accepted (founder decision, 2026-10-17) |
+| D-28 | The editor is content-aware across genres (talking, unboxing/product, workout, vlog, tutorial); fitness stays the launch niche for trends and marketing | Accepted (founder direction, 2026-10-17) |
+| D-29 | Content Fabrique runs in its own Dutch operating BV (werkmaatschappij) under the founder's holding; Paddle is the merchant of record | Proposed (founder direction 2026-10-17; confirm with the accountant) |
+| D-30 | Semantic search lives in Postgres with pgvector, hybrid with full-text search; no separate vector database | Proposed (director, 2026-10-17; founder asked) |
 
 ---
 
@@ -598,6 +601,83 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 - Transcripts are comparable across environments because the same model family is used everywhere.
 
 **Revisit** if quality on gym audio (music, noise) is poor; if Workers AI can't stay in the EU; or if a cheaper, better hosted model appears.
+
+## D-28 Content-aware editing across genres
+
+**Context.** v1 was scoped to fitness creators. After the first live edits, the founder wants the editor to *understand* whatever people upload (unboxings, talking-to-camera videos, vlogs, tutorials, workouts) and edit each one the way a good editor of that genre would. "It needs to get that feeling that it understands content."
+
+**Decision.**
+- **The editor is genre-aware.** Every run starts with an **understand step**: from the quick look, the transcript, the analysis signals and the brief, it decides the content type and the story. It writes a short creative plan (hook, arc, ending) and picks a **genre playbook**. The plan is shown to the creator in the run feed.
+- **Genre playbooks** live in the repo as versioned prompt modules, next to the base editor prompt:
+  - talking/opinion
+  - unboxing/product
+  - workout/fitness
+  - vlog/lifestyle
+  - tutorial/how-to
+  - a general fallback
+- **Perception is genre-neutral.** It needs:
+  - **transcripts with word timings** (P2-05, so its priority rises);
+  - **speech structure**: sentence boundaries, filler words and pauses for jump cuts;
+  - **faces and subjects**, for 9:16 reframing that keeps the speaker or the product centred;
+  - **motion and scene signals** (already in progress);
+  - **generic visual tags** from the quick look (already generic, not fitness-only);
+  - **audio events** (laughs, impacts) later.
+- **Fitness stays the launch niche** for the trend board, marketing and the first beta creators ([product plan](01-product-plan.md)). The editor doesn't assume fitness.
+
+**Alternatives.** A fitness-only editor would be simpler but would feel dumb on the first unboxing. Separate products per genre would split the work.
+
+**Consequences.**
+- The eval set (P4-07) gets scenarios per genre.
+- Face and subject detection needs a permissively licensed model ([D-16](#d-16-licensing-policy-for-ml-and-media-components)); MediaPipe face detection (Apache-2.0) is the default candidate.
+- Transcription moves up the queue.
+
+**Revisit** when a genre's results lag the others in the evals, or when the beta shows which genres creators actually upload.
+
+## D-29 Legal entity: an operating BV under the holding; Paddle as merchant of record
+
+**Context.** Several things need a legal entity: the merchant-of-record account, the TikTok developer app, Anthropic's commercial terms, the data processing agreements and the domain registrant. Content Fabrique also carries risks: creators' personal data (GDPR), copyright and takedown claims, and AI-output disputes. Open question 4 in the plan asked which company operates it.
+
+**Decision** (proposed, to confirm with the accountant).
+- **Content Fabrique gets its own operating BV** (werkmaatschappij), owned by the founder's holding BV. Other ventures get their own operating BVs, so each one's liabilities stay in its own company.
+- **Everything is contracted in the operating BV's name from day one:** Paddle, the TikTok developer app, the Anthropic organisation for production, the DPAs with Cloudflare, Clerk and the database host, and the domain registrant.
+- **Paddle is the merchant of record** ([D-13](#d-13-billing)). It handles EU VAT (OSS), worldwide sales tax, invoices, refunds and chargebacks. It supports both subscriptions and credit top-ups. Stripe's merchant-of-record offering stays the alternative to compare at signup.
+- **Keep the holding protected.** Avoid personal or holding guarantees for the operating BV. Decide on a fiscal unity with the accountant, because it makes the holding jointly liable for the group's corporate tax. Respect the distribution test (uitkeringstoets) before moving money up.
+
+**Alternatives.**
+- Start in the holding: fast, but it exposes the holding's assets, and moving accounts and customers later is painful.
+- One operating BV for all ventures: cheaper, but each venture's risks reach the others.
+
+**Consequences.**
+- A notary and KvK step before Paddle onboarding and the TikTok app review.
+- The company site on `contentfabrique.app` names the BV in its terms and privacy policy (P0-12).
+
+**Revisit** when an investor or a sale wants a different structure.
+
+## D-30 Semantic search: pgvector in Postgres, hybrid with full-text
+
+**Context.** Universal search (P2-12) and the editor's moment search should work by meaning ("explosive back pull", "him flexing in front of the mirror"), not only by tags. The founder asked whether this needs a vector database.
+
+**Decision** (proposed).
+- **Vectors live in the same Postgres** (the `pgvector` extension, already in our `pgvector/pgvector:pg18` image) next to the rows they describe. Every query keeps the `workspace_id` filter, so tenancy has one enforcement point.
+- **Hybrid ranking:** full-text (`tsvector`) and vector similarity (HNSW index), merged with reciprocal rank fusion. Exact words still win; meaning fills the gaps.
+- **What gets embedded:** per moment or shot, a **text embedding** of its description, tags and transcript chunk, and later an **image embedding** of its keyframe for visual search.
+- **Models:**
+  - **Text:**
+    - hosted environments use a multilingual embedding model on Workers AI (for example `bge-m3`), following [D-27](#d-27-transcription-whispercpp-locally-workers-ai-whisper-when-hosted)'s pattern and checks (EU processing, price in the price table, metered in `usage_ledger`);
+    - locally, a small open model runs in the sandbox.
+  - **Images:** an open image-text model (SigLIP or CLIP family, permissive licence per [D-16](#d-16-licensing-policy-for-ml-and-media-components)) in media-tools, or a hosted multimodal embedding later.
+  - The model name and its dimension are stored with each vector, so a model change triggers a re-embed job instead of mixing spaces.
+- **Staging check:** the PlanetScale Postgres database must support `pgvector`. This sits next to the Postgres 18 check in [setup guide §3.4](06-setup-and-credentials.md#34-postgres).
+
+**Alternatives.** A dedicated vector DB (Qdrant, Pinecone, Weaviate) adds a second system to sync, secure and back up, plus a second tenancy boundary, for scale we won't need for a long time.
+
+**Consequences.**
+- Embedding jobs after analysis.
+- An HNSW index per embedding kind.
+- `GET /v1/search` gains a semantic leg.
+- Search quality joins the evals.
+
+**Revisit** past tens of millions of vectors per region, or if pgvector latency misses the P2-12 target.
 
 ## Template for new decisions
 
