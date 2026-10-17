@@ -19,6 +19,8 @@ type checker struct {
 	clips []clip
 	// skipped counts the clips left out of the length checks because in_ms >= out_ms.
 	skipped int
+	// tooLong holds the array index of every clip whose transition_in already raised transition_too_long.
+	tooLong map[int]bool
 }
 
 type clip struct {
@@ -128,6 +130,7 @@ func (c *checker) checkMain(main *VideoTrack) {
 	})
 	c.total = PlayableEnd(main.Items)
 	c.checkContiguity()
+	c.checkTransitionFit()
 }
 
 // checkClipAsset looks the clip's asset up once. It raises unknown_asset when the catalog does not know the asset and
@@ -188,10 +191,54 @@ func (c *checker) checkContiguity() {
 			}
 		}
 		if tr > 0 && (tr >= cl.dur || tr >= prev.dur) {
+			if c.tooLong == nil {
+				c.tooLong = map[int]bool{}
+			}
+			c.tooLong[cl.index] = true
 			c.add(CodeTransitionTooLong, c.mainPath(cl.index)+"/transition_in/duration_ms",
 				"the %s into item %s is %d ms, but a transition must be shorter than both clips it joins (item %s plays %d ms, item %s plays %d ms); shorten it to under %d ms",
 				it.TransitionIn.Type, it.ID, tr, prev.item.ID, prev.dur, it.ID, cl.dur, min(cl.dur, prev.dur))
 		}
+	}
+}
+
+// checkTransitionFit checks what the renderer needs after snapping to frames, which the millisecond check above cannot
+// see: a transition must overlap fewer frames than either clip it joins, and the transition into a clip and the one out of
+// it must together leave at least one frame of the clip on its own. render.Compile refuses the same specs.
+func (c *checker) checkTransitionFit() {
+	fps := c.spec.Output.FPS
+	if fps <= 0 {
+		return
+	}
+	frames := func(ms int64) int64 { return Frame(ms, fps) }
+	for n, cl := range c.clips {
+		own := frames(cl.end) - frames(cl.item.AtMs)
+		var in, out int64
+		if n > 0 && cl.item.TransitionDurationMs() > 0 {
+			in = frames(c.clips[n-1].end) - frames(cl.item.AtMs)
+		}
+		var next clip
+		if n+1 < len(c.clips) && c.clips[n+1].item.TransitionDurationMs() > 0 {
+			next = c.clips[n+1]
+			out = frames(cl.end) - frames(next.item.AtMs)
+		}
+		if in == 0 && out == 0 {
+			continue
+		}
+		if in+out < own && in < own && out < own {
+			continue
+		}
+		// Blame the later transition: the one out of this clip if it has one, else the one into it.
+		blame := cl
+		if out > 0 {
+			blame = next
+		}
+		if c.tooLong[blame.index] {
+			continue
+		}
+		c.add(CodeTransitionTooLong, c.mainPath(blame.index)+"/transition_in/duration_ms",
+			"item %s plays %d frames at %d fps, but the transitions into and out of it take %d and %d frames: together they must leave at least one frame of the clip, and each must be shorter than the clips it joins. Shorten the %s into item %s",
+			cl.item.ID, own, fps, in, out, blame.item.TransitionIn.Type, blame.item.ID)
 	}
 }
 

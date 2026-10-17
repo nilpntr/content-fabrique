@@ -1,0 +1,228 @@
+fixture: v30_full_edit
+profile: final
+output: 1080x1920 at 30 fps, 303 frames, 10100 ms
+
+args:
+  -protocol_whitelist
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
+  -ss
+  3.200
+  -t
+  2.200
+  -i
+  /assets/original/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4
+  -protocol_whitelist
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
+  -ss
+  12.000
+  -t
+  3.000
+  -i
+  /assets/original/ast_01jex6xx15ayjx8epfhfjj9s11.mp4
+  -protocol_whitelist
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
+  -ss
+  1.000
+  -t
+  3.000
+  -i
+  /assets/original/ast_01jfbemsc6way7dnfebdf8tf3g.mp4
+  -filter_complex
+  <filter_complex>
+  -map
+  [vout]
+  -map
+  [aout]
+  -c:v
+  libx264
+  -preset
+  medium
+  -crf
+  18
+  -profile:v
+  high
+  -pix_fmt
+  yuv420p
+  -c:a
+  aac
+  -b:a
+  192k
+  -ar
+  48000
+  -ac
+  2
+  -map_metadata
+  -1
+  -map_chapters
+  -1
+  -fflags
+  +bitexact
+  -flags:v
+  +bitexact
+  -flags:a
+  +bitexact
+  -movflags
+  +faststart
+
+filter_complex:
+  [0:v]trim=end=2.200,setpts=PTS-STARTPTS,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=66,setpts=PTS-STARTPTS,scale=1080:1920:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=1080:1920:x='clip(0.52*iw-540,0,iw-1080)':y='clip(0.4*ih-960,0,ih-1920)',setsar=1,crop=998:1776,scale=1080:1920:flags=bicubic,eq=contrast=1.12:saturation=1.25:gamma=0.97,format=yuv420p,setsar=1,fps=30,settb=AVTB[v0];
+  [1:v]trim=end=3.000,setpts=PTS-STARTPTS,setpts=PTS/1.25,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=72,setpts=PTS-STARTPTS,setsar=1,split=2[b1a][b1b];
+  [b1b]scale=1080:1920:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=1080:1920,scale=90:160:flags=bicubic,gblur=sigma=2,scale=1080:1920:flags=bicubic[b1bg];
+  [b1a]scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=bicubic[b1fg];
+  [b1bg][b1fg]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2,format=gbrp,curves=r='0/0 0.5/0.56 1/1':b='0/0 0.5/0.44 1/1',format=yuv420p,eq=saturation=1.05,format=yuv420p,setsar=1,fps=30,settb=AVTB[v1];
+  [2:v]trim=end=3.000,setpts=PTS-STARTPTS,setpts=PTS/0.5,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=180,setpts=PTS-STARTPTS,scale=1080:1920:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=1080:1920:x='clip(0.5*iw-540,0,iw-1080)':y='clip(0.5*ih-960,0,ih-1920)',setsar=1,format=gbrp,curves=all='0/0.07 1/0.93',format=yuv420p,eq=saturation=0.85:contrast=0.95,format=yuv420p,setsar=1,fps=30,settb=AVTB[v2];
+  [v0][v1]xfade=transition=fade:duration=0.300000:offset=1.900000[j1];
+  [j1][v2]xfade=transition=slideleft:duration=0.200000:offset=4.100000[w2];
+  [w2]gblur=sigma=12:enable='gte(t,4.100000)*lt(t,4.300000)'[vout];
+  anullsrc=r=48000:cl=stereo:d=10.100[abed];
+  [1:a]atrim=end=3.000,asetpts=PTS-STARTPTS,atempo=1.25,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=-2dB,afade=t=in:st=0:d=0.300000,afade=t=out:st=2.200000:d=0.200000,atrim=end=2.400,asetpts=PTS-STARTPTS,adelay=1900:all=1[as1];
+  [abed][as1]amix=inputs=2:duration=first:normalize=0:dropout_transition=0,loudnorm=I=-14:TP=-1:LRA=11,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[aout]
+
+loudnorm:
+  filter: loudnorm=I=-14:TP=-1:LRA=11
+  two_pass: true
+  pass1_args:
+    -protocol_whitelist
+    file
+    -format_whitelist
+    mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
+    -ss
+    12.000
+    -t
+    3.000
+    -i
+    /assets/original/ast_01jex6xx15ayjx8epfhfjj9s11.mp4
+    -filter_complex
+    <filter_complex of the measuring pass>
+      anullsrc=r=48000:cl=stereo:d=10.100[abed];
+      [0:a]atrim=end=3.000,asetpts=PTS-STARTPTS,atempo=1.25,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=-2dB,afade=t=in:st=0:d=0.300000,afade=t=out:st=2.200000:d=0.200000,atrim=end=2.400,asetpts=PTS-STARTPTS,adelay=1900:all=1[as1];
+      [abed][as1]amix=inputs=2:duration=first:normalize=0:dropout_transition=0,loudnorm=I=-14:TP=-1:LRA=11:print_format=json[aout]
+    -map
+    [aout]
+    -vn
+
+inputs:
+[
+  {
+    "index": 0,
+    "role": "clip",
+    "item_id": "c1",
+    "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+    "location": "/assets/original/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4",
+    "seek_ms": 3200,
+    "duration_ms": 2200
+  },
+  {
+    "index": 1,
+    "role": "clip",
+    "item_id": "c2",
+    "asset_id": "ast_01jex6xx15ayjx8epfhfjj9s11",
+    "location": "/assets/original/ast_01jex6xx15ayjx8epfhfjj9s11.mp4",
+    "seek_ms": 12000,
+    "duration_ms": 3000
+  },
+  {
+    "index": 2,
+    "role": "clip",
+    "item_id": "c3",
+    "asset_id": "ast_01jfbemsc6way7dnfebdf8tf3g",
+    "location": "/assets/original/ast_01jfbemsc6way7dnfebdf8tf3g.mp4",
+    "seek_ms": 1000,
+    "duration_ms": 3000
+  }
+]
+
+cut_list:
+[
+  {
+    "index": 1,
+    "item_id": "c2",
+    "frame": 57,
+    "at_ms": 1900,
+    "transition": "crossfade",
+    "transition_frames": 9
+  },
+  {
+    "index": 2,
+    "item_id": "c3",
+    "frame": 123,
+    "at_ms": 4100,
+    "transition": "whip",
+    "transition_frames": 6
+  }
+]
+
+time_map:
+[
+  {
+    "out_start_ms": 0,
+    "out_end_ms": 1900,
+    "item_id": "c1",
+    "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+    "source_in_ms": 3200,
+    "speed": 1
+  },
+  {
+    "out_start_ms": 1900,
+    "out_end_ms": 4100,
+    "item_id": "c2",
+    "asset_id": "ast_01jex6xx15ayjx8epfhfjj9s11",
+    "source_in_ms": 12000,
+    "speed": 1.25
+  },
+  {
+    "out_start_ms": 4100,
+    "out_end_ms": 10100,
+    "item_id": "c3",
+    "asset_id": "ast_01jfbemsc6way7dnfebdf8tf3g",
+    "source_in_ms": 1000,
+    "speed": 0.5
+  },
+  {
+    "out_start_ms": 0,
+    "out_end_ms": 2200,
+    "item_id": "t1"
+  },
+  {
+    "out_start_ms": 3000,
+    "out_end_ms": 4500,
+    "item_id": "t2"
+  }
+]
+
+sound_cues:
+[
+  {
+    "item_id": "s1",
+    "trend_id": "trd_01jcmevy4tr3fffvjc82eh7rjm",
+    "at_ms": 0,
+    "source_offset_ms": 12000,
+    "duration_ms": 10100,
+    "gain_db": -3
+  }
+]
+
+pending_text:
+[
+  {
+    "item_id": "t1",
+    "at_ms": 0,
+    "duration_ms": 2200,
+    "style": "title_bold"
+  },
+  {
+    "item_id": "t2",
+    "at_ms": 3000,
+    "duration_ms": 1500,
+    "style": "title_bold"
+  }
+]
+
+pending_captions: false
+pending_watermark: false
