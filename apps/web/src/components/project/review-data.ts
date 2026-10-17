@@ -1,7 +1,7 @@
 import type { Render, TimelineVersion, TimelineVersionSummary } from "@/lib/api/client";
 import { buildTimeMap, isMainEntry, itemOutputDurationMs } from "@/components/editor/lib/time-map";
 import { rampOutMs, type SpeedPoint } from "@/components/editor/lib/speed-ramp";
-import type { OutputFormat, ReviewVersion, TimeMapEntry, TransitionIn, VideoItem } from "@/components/editor/types";
+import type { BeatMarker, ClipAudio, LookSpec, MotionSpec, OutputFormat, ReviewVersion, SfxItem, TimeMapEntry, TransitionIn, VideoItem } from "@/components/editor/types";
 
 /**
  * From the API's timeline versions (and renders) to what the review screen shows. The spec is read defensively: it comes from
@@ -56,9 +56,86 @@ export function mainItems(spec: unknown): VideoItem[] {
     // A ramp replaces the speed; `speed` then holds the average, which is what readers that know nothing of ramps use.
     const rampMs = ramp ? rampOutMs(ramp, outMs - inMs) : 0;
     const speed = ramp && rampMs > 0 ? (outMs - inMs) / rampMs : (num(raw.speed) ?? 1);
-    items.push({ id: raw.id, asset_id: raw.asset_id, at_ms: at, source: { in_ms: inMs, out_ms: outMs }, speed, ...(ramp ? { speed_ramp: ramp } : {}), ...(transition ? { transition_in: transition } : {}) });
+    const motion = motionOf(raw.motion);
+    const look = lookOf(raw.look);
+    const why = typeof raw.why === "string" && raw.why.trim() !== "" ? raw.why.trim() : undefined;
+    items.push({
+      id: raw.id,
+      asset_id: raw.asset_id,
+      at_ms: at,
+      source: { in_ms: inMs, out_ms: outMs },
+      speed,
+      ...(ramp ? { speed_ramp: ramp } : {}),
+      ...(transition ? { transition_in: transition } : {}),
+      ...(motion ? { motion } : {}),
+      ...(look ? { look } : {}),
+      audio: audioOf(raw.audio),
+      ...(why ? { why } : {}),
+    });
   }
   return items.sort((a, b) => a.at_ms - b.at_ms);
+}
+
+/** A camera move, or undefined for none (`preset: "none"` is no move). */
+function motionOf(value: unknown): MotionSpec | undefined {
+  if (!isRecord(value) || typeof value.preset !== "string" || value.preset === "none") return undefined;
+  const at = num(value.at_ms);
+  const strength = num(value.strength);
+  return { preset: value.preset, ...(at !== undefined ? { at_ms: at } : {}), ...(strength !== undefined ? { strength } : {}) };
+}
+
+/** A colour grade, or undefined for none. A clip with `match` and no preset still has a look (the exposure match). */
+function lookOf(value: unknown): LookSpec | undefined {
+  if (!isRecord(value) || typeof value.preset !== "string") return undefined;
+  const match = value.match === true;
+  if (value.preset === "none" && !match) return undefined;
+  return { preset: value.preset, ...(match ? { match } : {}) };
+}
+
+/**
+ * What the clip's own sound does. `audio.mode` is `mute`, `bed` or `full`; the older spelling is `use_source` (true is `full`).
+ * A clip with no audio settings is silent.
+ */
+function audioOf(value: unknown): ClipAudio {
+  if (!isRecord(value)) return { mode: "mute" };
+  const gain = num(value.gain_db);
+  const mode = value.mode === "mute" || value.mode === "bed" || value.mode === "full" ? value.mode : value.use_source === true ? "full" : "mute";
+  return { mode, ...(gain !== undefined && gain !== 0 ? { gain_db: gain } : {}) };
+}
+
+/** The generated sound effects of the audio track, in time order. Other kinds of audio (a trend sound, a track) are not drawn. */
+export function sfxItems(spec: unknown): SfxItem[] {
+  if (!isRecord(spec) || !Array.isArray(spec.tracks)) return [];
+  const out: SfxItem[] = [];
+  for (const track of spec.tracks) {
+    if (!isRecord(track) || track.type !== "audio" || !Array.isArray(track.items)) continue;
+    for (const raw of track.items) {
+      if (!isRecord(raw) || raw.kind !== "sfx" || typeof raw.id !== "string" || typeof raw.sfx !== "string") continue;
+      const at = num(raw.at_ms);
+      if (at === undefined) continue;
+      const gain = num(raw.gain_db);
+      out.push({ id: raw.id, sfx: raw.sfx, at_ms: at, ...(typeof raw.variant === "string" ? { variant: raw.variant } : {}), ...(gain !== undefined ? { gain_db: gain } : {}) });
+    }
+  }
+  return out.sort((a, b) => a.at_ms - b.at_ms);
+}
+
+const MARKER_KINDS: ReadonlySet<string> = new Set(["beat", "downbeat", "drop", "section"]);
+
+/** The markers of the spec (the beat grid and the rest), in time order. */
+export function markersOf(spec: unknown): BeatMarker[] {
+  if (!isRecord(spec) || !Array.isArray(spec.markers)) return [];
+  const out: BeatMarker[] = [];
+  for (const raw of spec.markers) {
+    if (!isRecord(raw) || typeof raw.kind !== "string" || !MARKER_KINDS.has(raw.kind)) continue;
+    const at = num(raw.at_ms);
+    if (at === undefined) continue;
+    const strength = num(raw.strength);
+    // One marker of a kind at a time: a duplicate would be drawn twice.
+    if (out.some((marker) => marker.at_ms === at && marker.kind === raw.kind)) continue;
+    out.push({ at_ms: at, kind: raw.kind as BeatMarker["kind"], ...(strength !== undefined ? { strength } : {}) });
+  }
+  return out.sort((a, b) => a.at_ms - b.at_ms);
 }
 
 /** Where the last clip ends: the length of the video. */
@@ -142,6 +219,8 @@ export function toReviewVersion(input: VersionInputs, projectFormat: OutputForma
     output: outputOf(input.version.spec, projectFormat),
     duration_ms: Math.max(duration, 1),
     items,
+    sfx: sfxItems(input.version.spec),
+    markers: markersOf(input.version.spec),
     time_map: timeMap,
     ...(input.previewUrl ? { preview_url: input.previewUrl } : {}),
   };

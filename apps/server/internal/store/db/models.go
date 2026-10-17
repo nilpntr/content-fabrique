@@ -61,6 +61,7 @@ type AgentRun struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	StartedBy         pgtype.UUID
+	MinOutputTokens   int32
 }
 
 type Annotation struct {
@@ -185,6 +186,53 @@ type CreatorStyleProfile struct {
 	ReferencesCount int32
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+type CreditAccount struct {
+	WorkspaceID    ids.WorkspaceID
+	Plan           string
+	PeriodAnchor   *time.Time
+	AllowanceUntil *time.Time
+	PlanGeneration int32
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+type CreditHold struct {
+	ID              uuid.UUID
+	WorkspaceID     ids.WorkspaceID
+	Action          string
+	ActionID        uuid.UUID
+	Credits         int32
+	ProjectID       pgtype.UUID
+	MemberUserID    pgtype.UUID
+	Plan            *string
+	PlanListVersion *string
+	ExpiresAt       time.Time
+	IdempotencyKey  string
+	CreatedAt       time.Time
+	FrozenSourceID  pgtype.UUID
+	FrozenCredits   int32
+}
+
+type CreditLedger struct {
+	ID              uuid.UUID
+	WorkspaceID     ids.WorkspaceID
+	Kind            string
+	Credits         int32
+	GrantID         pgtype.UUID
+	Action          *string
+	ActionID        pgtype.UUID
+	ProjectID       pgtype.UUID
+	MemberUserID    pgtype.UUID
+	Plan            *string
+	PlanListVersion *string
+	TimelineVersion *int32
+	ExpiresAt       *time.Time
+	Actor           *string
+	Reason          *string
+	IdempotencyKey  string
+	CreatedAt       time.Time
 }
 
 type Moment struct {

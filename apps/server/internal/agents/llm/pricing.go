@@ -281,4 +281,29 @@ func (t *PriceTable) EstimateMax(model string, inputTokens int64, maxTokens int6
 	return ceilDiv(inputTokens*rate+maxTokens*p.Output, 1_000_000), nil
 }
 
+// FitOutputTokens returns the largest max_tokens, at most want, for which the worst case of a call with inputTokens of input (EstimateMax)
+// is no more than room micro-dollars, and 0 when not even one token fits. EstimateMax only grows with max_tokens, so a binary search finds
+// it exactly, including where a long-prompt tier starts to apply.
+func (t *PriceTable) FitOutputTokens(model string, inputTokens, want int64, marks CacheMarks, room int64) (int64, error) {
+	lo, hi := int64(0), want // the answer is in [lo, hi]; lo always fits (0 tokens of output is the input alone, checked below)
+	if c, err := t.EstimateMax(model, inputTokens, 0, marks); err != nil {
+		return 0, err
+	} else if c > room {
+		return 0, nil
+	}
+	for lo < hi {
+		mid := lo + (hi-lo+1)/2
+		c, err := t.EstimateMax(model, inputTokens, mid, marks)
+		if err != nil {
+			return 0, err
+		}
+		if c <= room {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return lo, nil
+}
+
 func ceilDiv(a, b int64) int64 { return (a + b - 1) / b }

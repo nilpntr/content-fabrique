@@ -286,6 +286,8 @@ jobs:
       - run: bun run --filter @cf/web lint
       - run: bun run --filter @cf/web test
       - run: bun run --filter @cf/web build
+      # The build must hold nothing of the test kit (the Clerk stand-in) or the fixtures viewer.
+      - run: bun run --filter @cf/web check:dist
       # Start regenerates the route tree on build; a diff means the committed one is stale.
       - run: git diff --exit-code -- apps/web/src/routeTree.gen.ts
 

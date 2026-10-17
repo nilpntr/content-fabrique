@@ -178,6 +178,17 @@ type Budget interface {
 	Reserve(micros int64) (release func(actual int64), err error)
 }
 
+// RemainingBudget is a Budget that can say how much it has left (what is not spent and not reserved). The metered client uses it to
+// shorten a call's max_tokens to what the run can still pay for (see Request.MinOutputTokens). RunBudget implements it.
+type RemainingBudget interface {
+	Budget
+	Remaining() int64
+}
+
+// DefaultMinOutputTokens is the smallest max_tokens the client will shorten a call to: below it a call is refused with the run-budget
+// error instead, because an answer that small cannot hold a tool call worth making.
+const DefaultMinOutputTokens = 2048
+
 // RunBudget is a Budget over a fixed limit, safe for concurrent use.
 type RunBudget struct {
 	mu       sync.Mutex
@@ -250,8 +261,13 @@ type Request struct {
 	Tools    []Tool
 	// ToolChoice is optional.
 	ToolChoice *ToolChoice
-	// MaxTokens caps the output, thinking included. Required.
+	// MaxTokens caps the output, thinking included. Required. When the request belongs to a run with a RemainingBudget and the worst case of
+	// a call with this many output tokens does not fit in what the run has left, the client sends fewer (as many as fit), provided that
+	// is at least MinOutputTokens; otherwise it refuses the call with the run-budget error. Response.Shortened says it did.
 	MaxTokens int
+	// MinOutputTokens is the smallest max_tokens the client will shorten MaxTokens to; 0 means DefaultMinOutputTokens. Set from the
+	// routing entry's min_output_tokens.
+	MinOutputTokens int
 	// Effort is low, medium, high, xhigh or max (output_config.effort); empty leaves the model's default.
 	Effort string
 	// Thinking is optional.
@@ -295,6 +311,9 @@ type Response struct {
 	// StopReason is end_turn, max_tokens, stop_sequence, tool_use, pause_turn or refusal.
 	StopReason string
 	Usage      Usage
+	// Shortened says the client sent fewer output tokens than the request asked for, because the run's budget could not pay for the worst
+	// case of a full-size call. An answer that stopped at max_tokens with this set stopped at the budget, not at the stage's own limit.
+	Shortened bool
 }
 
 // Text returns the concatenated text blocks of the reply.

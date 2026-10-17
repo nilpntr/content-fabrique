@@ -155,6 +155,10 @@ export const deleteAsset = async (client: ApiClient, id: string): Promise<void> 
   unwrap(await client.DELETE("/v1/assets/{id}", { params: { path: { id: id as ApiAsset["id"] } } }));
 };
 
+/** Renames an asset (`PATCH /v1/assets/{id}`). From then on the quick look never overwrites the title. */
+export const updateAsset = async (client: ApiClient, id: string, title: string): Promise<ApiAsset> =>
+  unwrap(await client.PATCH("/v1/assets/{id}", { params: { path: { id: id as ApiAsset["id"] } }, body: { title } }));
+
 /** The hover-scrub track of a ready video as WebVTT text, every cue pointing at the sprite sheet through a fresh URL. It needs the bearer token, so it cannot be a plain `<track src>`. */
 export const fetchSpriteVtt = async (client: ApiClient, id: string, signal?: AbortSignal): Promise<string> =>
   unwrap(await client.GET("/v1/assets/{id}/sprite.vtt", { params: { path: { id: id as ApiAsset["id"] } }, parseAs: "text", signal }));

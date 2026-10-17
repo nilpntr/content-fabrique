@@ -11,6 +11,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
+	"github.com/nilpntr/content-fabrique/internal/agents/llm/routing"
+	"github.com/nilpntr/content-fabrique/internal/credits"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
 	"github.com/nilpntr/content-fabrique/internal/store"
@@ -23,6 +25,10 @@ type Service struct {
 	Router   *llm.Router
 	Factory  llm.ClientFactory
 	Agents   *Agents
+	// Credits prices the runs of the agents that cost credits (the editor): it decides first edit or revision, sets the credits aside in
+	// the transaction that creates the run, and gives the run its budget. Nil refuses to start such a run (ErrNoCredits): no editor run
+	// is ever started without a hold.
+	Credits *credits.Service
 	// Inline is for the dev CLI, which runs the loop itself: Reply then does not enqueue a job.
 	Inline bool
 }
@@ -40,6 +46,9 @@ type StartParams struct {
 	Profile string
 	// Budgets override the agent's defaults field by field; zero fields keep them.
 	Budgets Budgets
+	// NoCredits starts an editor run that costs no credits (cfctl agent run --no-credits, development and ci only; the callers refuse it
+	// elsewhere). The run still gets a hold, of zero credits, and its budget is the caller's.
+	NoCredits bool
 	// StartedBy is the member who started the run, for the usage ledger's member_user_id; the zero value when nobody did (cfctl).
 	StartedBy ids.UserID
 }
@@ -50,10 +59,18 @@ var (
 	ErrUnknownAgent = errors.New("runtime: unknown agent")
 	// ErrInvalidInput is returned, wrapped, when the run's input does not suit the agent or a budget is out of range.
 	ErrInvalidInput = errors.New("runtime: invalid run input")
+	// ErrBYOKKeyRequired is returned when the workspace is on a plan whose model calls its own Anthropic key must pay for and the run would
+	// be billed to another key (ours): the API answers 402 byok_key_required.
+	ErrBYOKKeyRequired = errors.New("runtime: this plan uses the workspace's own Anthropic key, and the run would not be billed to it")
+	// ErrNoCredits is returned when a run that costs credits is started by a Service that has no credits service.
+	ErrNoCredits = errors.New("runtime: this service has no credits service, so a run that costs credits cannot be started")
 	// ErrEmptyReply and ErrReplyTooLong are returned by Reply.
 	ErrEmptyReply   = errors.New("runtime: the reply is empty")
 	ErrReplyTooLong = errors.New("runtime: the reply is too long")
 )
+
+// RevisionStage is the routing stage that a revision of an editor run resolves its model and limits from (config/routing).
+const RevisionStage = "revision"
 
 // MaxReplyBytes is the longest reply to an ask_user.
 const MaxReplyBytes = 16 * 1024
@@ -69,6 +86,25 @@ func (s *Service) Create(ctx context.Context, tx *store.Store, p StartParams) (s
 	if _, err := agent.opening(p.Input); err != nil {
 		return store.AgentRun{}, fmt.Errorf("%w: %w", ErrInvalidInput, err)
 	}
+	// An editor run is an edit that costs credits: the server decides which kind (first or revision) from the project, takes the price and
+	// the budget from the plan's price list, never from the caller, and sets the credits aside below, in this transaction.
+	var quote *credits.Quote
+	if credits.BillsEdits(agent.Name) {
+		if s.Credits == nil {
+			return store.AgentRun{}, ErrNoCredits
+		}
+		if p.ProjectID == uuid.Nil {
+			return store.AgentRun{}, fmt.Errorf("%w: an editor run needs a project", ErrInvalidInput)
+		}
+		q, err := s.Credits.QuoteEdit(ctx, tx, p.WorkspaceID, ids.ProjectID{UUID: p.ProjectID}, p.NoCredits)
+		if err != nil {
+			return store.AgentRun{}, err
+		}
+		quote = &q
+		if q.BudgetMicros > 0 {
+			p.Budgets.Micros = q.BudgetMicros
+		}
+	}
 	budgets := DefaultBudgets.over(agent.Budgets).over(p.Budgets)
 	if err := budgets.validate(); err != nil {
 		return store.AgentRun{}, fmt.Errorf("%w: %w", ErrInvalidInput, err)
@@ -77,24 +113,59 @@ func (s *Service) Create(ctx context.Context, tx *store.Store, p StartParams) (s
 	if err != nil {
 		return store.AgentRun{}, err
 	}
+	// A revision is cheaper than a first edit, so it runs on the profile's `revision` entry (a smaller max_tokens: its budget is a third of
+	// a first edit's). The run keeps the agent's stage for the ledger and the cassettes; only the model, effort and limits come from the
+	// revision entry. A profile without one keeps the editor's.
+	if quote != nil && quote.Action == credits.EditRevision {
+		rev, err := s.Router.Resolve(p.Profile, RevisionStage)
+		var noStage *routing.NoStageError
+		switch {
+		case err == nil:
+			route = rev
+		case errors.As(err, &noStage):
+			// the profile has no revision entry: the editor's stands
+		default:
+			return store.AgentRun{}, err // a revision entry that is there and cannot be used (a typo'd model, a disabled stage) is loud
+		}
+	}
 	// Asking the factory now fails fast when there is no key for the workspace (a missing key would otherwise show up
 	// in the worker), and says who pays.
 	_, billing, err := s.Factory.For(ctx, p.WorkspaceID, agent.Stage)
 	if err != nil {
 		return store.AgentRun{}, err
 	}
+	// A BYOK plan's run budget ($2) is not counted as our cost because the creator's own key pays for it. Until a workspace's own key can be
+	// used (P4-00b) the factory bills our key, and such a run would cost us up to its budget for a fraction of its price: refuse it.
+	if quote != nil {
+		if want := credits.RequiredBilling(quote.BillingMode); want != "" && string(billing) != want {
+			return store.AgentRun{}, ErrBYOKKeyRequired
+		}
+	}
 	input := p.Input
 	if len(input) == 0 {
 		input = json.RawMessage("{}")
 	}
-	return tx.CreateAgentRun(ctx, p.WorkspaceID, store.NewAgentRun{
+	run, err := tx.CreateAgentRun(ctx, p.WorkspaceID, store.NewAgentRun{
 		Agent: agent.Name, Stage: agent.Stage, ParentRunID: p.ParentRunID, ProjectID: p.ProjectID, Input: input,
 		RoutingProfile: route.Profile, Model: route.Model,
 		// Effort is always set explicitly: a stage whose profile says nothing runs at medium.
-		Effort: cmp.Or(route.Effort, "medium"), MaxTokens: route.MaxTokens,
+		Effort: cmp.Or(route.Effort, "medium"), MaxTokens: route.MaxTokens, MinOutputTokens: route.MinOutputTokens,
 		BudgetMicros: budgets.Micros, BudgetTokens: budgets.Tokens, BudgetToolCalls: budgets.ToolCalls,
 		BudgetWallClockMs: budgets.WallClock.Milliseconds(), BilledTo: string(billing), StartedBy: p.StartedBy,
 	})
+	if err != nil {
+		return store.AgentRun{}, err
+	}
+	if quote != nil {
+		if _, err := s.Credits.Hold(ctx, tx, *quote, run); err != nil {
+			return store.AgentRun{}, err
+		}
+		// After the hold, so that "no credits" (402) wins over "too many runs that ended without a charge today" (429).
+		if err := s.Credits.CheckUncharged(ctx, tx, p.WorkspaceID, *quote); err != nil {
+			return store.AgentRun{}, err
+		}
+	}
+	return run, nil
 }
 
 // Start creates a run and enqueues its agent_run job in one transaction.

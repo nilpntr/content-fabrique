@@ -30,8 +30,10 @@ type apiServer struct {
 	*runapi.Runs
 	*renderjobs.RenderAPI
 	*annotations.CommentAPI
-	ents   EntitlementReader
-	logger *slog.Logger
+	ents EntitlementReader
+	// credits reads the credit balance for GET /v1/me; nil leaves it out.
+	credits CreditReader
+	logger  *slog.Logger
 }
 
 var _ api.StrictServerInterface = (*apiServer)(nil)
@@ -42,8 +44,12 @@ func newAPIServer(ents EntitlementReader, logger *slog.Logger) *apiServer {
 	}
 	// Without a configured object store the assets operations answer 503 storage_not_configured (Mount replaces this
 	// handler when it is given a service).
-	return &apiServer{Handler: assets.NewHandler(nil, callerOf, logger), API: projects.NewAPI(nil, callerOf, logger),
-		Runs: runapi.New(nil, callerOf, runapi.Options{}, logger), RenderAPI: renderjobs.NewAPI(nil, callerOf, logger), CommentAPI: annotations.NewAPI(nil, callerOf, logger), ents: ents, logger: logger}
+	srv := &apiServer{Handler: assets.NewHandler(nil, callerOf, logger), API: projects.NewAPI(nil, callerOf, logger),
+		Runs: runapi.New(nil, callerOf, logger), RenderAPI: renderjobs.NewAPI(nil, callerOf, logger), CommentAPI: annotations.NewAPI(nil, callerOf, logger), ents: ents, logger: logger}
+	if cr, ok := ents.(CreditReader); ok {
+		srv.credits = cr
+	}
+	return srv
 }
 
 // callerOf is how the handlers learn who is calling: the Principal the authentication middleware resolved from the verified

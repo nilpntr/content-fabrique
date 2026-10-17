@@ -630,7 +630,8 @@ func (d Deps) finish(ctx context.Context, rc runtime.RunContext, in finishArgs) 
 		return runtime.Errorf("you cannot finish yet: this run has not changed the timeline. Make your edit with edit_timeline first. If the timeline already does what the creator asked and nothing needs to change, call finish again with no_edit_needed set to true"), nil
 	}
 	summary = cutRunes(summary, maxSummaryChars)
-	out, _ := json.Marshal(map[string]any{"summary": summary, "timeline_version": version})
+	// no_edit_needed marks a run that changed nothing because there was nothing to change: its credits are not charged.
+	out, _ := json.Marshal(map[string]any{"summary": summary, "timeline_version": version, "no_edit_needed": version == nil})
 	res := runtime.Text(summary)
 	res.Final, res.Output = true, out
 	return res, nil

@@ -29,7 +29,7 @@ async function openPalette() {
   act(() => root?.render(<RouterProvider router={router} />));
   await screen.findByRole("heading", { name: "Reports" });
   fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-  return (await screen.findByPlaceholderText("Search pages and actions…")) as HTMLInputElement;
+  return (await screen.findByPlaceholderText("Search projects, clips and pages…")) as HTMLInputElement;
 }
 
 const options = () => screen.queryAllByRole("option").map((option) => option.textContent);
@@ -47,10 +47,10 @@ test("the list keeps its filter while the palette fades out, and is reset once i
   expect(options()).toEqual(["Go to Settings"]);
 
   await act(async () => finishExit());
-  await waitFor(() => expect(screen.queryByPlaceholderText("Search pages and actions…")).toBeNull());
+  await waitFor(() => expect(screen.queryByPlaceholderText("Search projects, clips and pages…")).toBeNull());
 
   fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-  const reopened = (await screen.findByPlaceholderText("Search pages and actions…")) as HTMLInputElement;
+  const reopened = (await screen.findByPlaceholderText("Search projects, clips and pages…")) as HTMLInputElement;
   expect(reopened.value).toBe("");
   expect(within(document.body).queryAllByRole("option")).toHaveLength(NAV_ITEMS.length + 1);
 });
@@ -65,5 +65,5 @@ test("reopening during the exit animation starts with an empty query", async () 
   fireEvent.keyDown(window, { key: "k", ctrlKey: true });
 
   await waitFor(() => expect(options()).toHaveLength(NAV_ITEMS.length + 1));
-  expect((screen.getByPlaceholderText("Search pages and actions…") as HTMLInputElement).value).toBe("");
+  expect((screen.getByPlaceholderText("Search projects, clips and pages…") as HTMLInputElement).value).toBe("");
 });

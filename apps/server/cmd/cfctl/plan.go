@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/config"
+	"github.com/nilpntr/content-fabrique/internal/credits"
 	"github.com/nilpntr/content-fabrique/internal/doctor"
 	"github.com/nilpntr/content-fabrique/internal/envfile"
 	"github.com/nilpntr/content-fabrique/internal/ids"
@@ -26,7 +27,9 @@ const planUsage = `Usage:
   cfctl plan show   --user <email or Clerk user id> [flags]
 
 Sets, removes or shows the plan of a person's workspace, until billing exists (P7-01). Without a plan the workspace sees
-the paywall and the API answers 402 plan_required to its paid endpoints. The person must have signed in once, because that
+the paywall and the API answers 402 plan_required to its paid endpoints. grant also grants the plan's allowance of credits
+for the current period at once (150 credits for creator, 400 for pro, 600 for studio; a trial gets 20, once). The worker grants the
+next periods, monthly from the day of the grant. Use cfctl credits to see or change the balance. The person must have signed in once, because that
 is what creates their workspace. It reads DATABASE_URL (the app's own role: it needs DML only) and prints the workspace
 name, its id, the plan, status and end of the period. Never prints the URL or a secret.
 
@@ -243,6 +246,21 @@ func cmdPlan(args []string, stdout, stderr io.Writer, lookup lookupEnv) int {
 	if command == "grant" && until != nil && !ent.Active {
 		_, _ = fmt.Fprintln(out, "note: that end has already passed, so the plan is not active")
 	}
+	if command == "grant" {
+		// The first allowance now, not at the worker's next minute: the person can start an edit at once. Idempotent, so granting the same
+		// plan again (to move --until, say) adds nothing.
+		list, lerr := credits.LoadDefault()
+		if lerr != nil {
+			_, _ = fmt.Fprintf(errOut, "cfctl plan grant: the plan was granted, but the price list does not load: %v\n", lerr)
+			return 1
+		}
+		res, serr := credits.NewService(st, list).SyncAllowance(ctx, ws.ID)
+		if serr != nil {
+			_, _ = fmt.Fprintf(errOut, "cfctl plan grant: the plan was granted, but its credits were not (the worker grants them within a minute): %v\n", serr)
+			return 1
+		}
+		printAllowance(out, res)
+	}
 	return 0
 }
 
@@ -321,6 +339,25 @@ func pluralMembers(n int) string {
 		return "member"
 	}
 	return "members"
+}
+
+// printAllowance says what the allowance grant of `plan grant` did.
+func printAllowance(w io.Writer, res store.AllowanceResult) {
+	switch {
+	case res.Plan == "":
+		_, _ = fmt.Fprintln(w, "  credits     none granted: the plan is not active")
+	case res.Granted > 0:
+		_, _ = fmt.Fprintf(w, "  credits     %d granted (allowance of %s)", res.Granted, res.Plan)
+		if !res.PeriodEnd.IsZero() {
+			_, _ = fmt.Fprintf(w, ", for the period ending %s", res.PeriodEnd.UTC().Format(time.RFC3339))
+		}
+		_, _ = fmt.Fprintln(w)
+	default:
+		_, _ = fmt.Fprintf(w, "  credits     0 granted: the allowance of %s for this period was granted already (or a trial's, which is once)\n", res.Plan)
+	}
+	if res.Replaced > 0 {
+		_, _ = fmt.Fprintf(w, "  credits     %d left of the previous plan's allowance expired\n", res.Replaced)
+	}
 }
 
 func printEntitlements(w io.Writer, ws store.WorkspaceRef, e store.Entitlements) {

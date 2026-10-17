@@ -1,5 +1,6 @@
 import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api";
+import { announceCreditsExhausted, isCreditsExhausted } from "@/lib/credits";
 import { PLAN_REQUIRED_CODE } from "@/lib/paywall";
 
 /** The query key prefix of GET /v1/me (see use-me.ts), which carries the entitlements the paywall is decided from. */
@@ -35,27 +36,28 @@ export function isPlanRequired(error: unknown): boolean {
 /**
  * The query client of the app. Any call that the API refuses with 402 `plan_required` means the plan the page was
  * rendered with is out of date, so `me` (and the plan query) is fetched again and the paywall appears without a reload.
+ * Any call refused with 402 `credits_exhausted` opens the "out of credits" dialog (by its code, so a new call that spends
+ * credits needs no code of its own) and fetches `me` again, which has the balance.
  */
 export function createQueryClient(): QueryClient {
   const invalidatePlan = () => {
     void client.invalidateQueries({ queryKey: [ME_QUERY_KEY] });
     void client.invalidateQueries({ queryKey: [PLAN_QUERY_KEY] });
   };
+  const onError = (error: unknown) => {
+    if (isPlanRequired(error)) invalidatePlan();
+    if (isCreditsExhausted(error)) {
+      announceCreditsExhausted();
+      void client.invalidateQueries({ queryKey: [ME_QUERY_KEY] });
+    }
+  };
   const client: QueryClient = new QueryClient({
     defaultOptions: {
       // Data fetched on the server is sent to the browser; a staleTime keeps it from being refetched at once.
       queries: { staleTime: 30_000 },
     },
-    queryCache: new QueryCache({
-      onError: (error) => {
-        if (isPlanRequired(error)) invalidatePlan();
-      },
-    }),
-    mutationCache: new MutationCache({
-      onError: (error) => {
-        if (isPlanRequired(error)) invalidatePlan();
-      },
-    }),
+    queryCache: new QueryCache({ onError }),
+    mutationCache: new MutationCache({ onError }),
   });
   return client;
 }

@@ -200,3 +200,223 @@ export function annotation(n = 1, over: Partial<Annotation> = {}): Annotation {
     ...over,
   };
 }
+
+// ---- An editor v2 run ------------------------------------------------------------------------------------------------------
+// What `GET /v1/runs/{id}` returns for a run of the v2 editor (docs/design/edit-style-v1.md sections 6 and 7): the plan, two rounds
+// of self-review with a brightness match between them, the finish. The texts are written as the server writes them (the tools'
+// answers) and cut as the server cuts them (one line, 400 bytes, "…"), so the readers are tested on what the API really carries.
+
+/** The server's summary of an event text: white space collapsed, at most 400 bytes, an ellipsis when it cut (runtime/summary.go). */
+export function summarize(text: string, max = 400): string {
+  const line = text.split(/\s+/).filter(Boolean).join(" ");
+  if (new TextEncoder().encode(line).length <= max) return line;
+  let out = "";
+  for (const char of line) {
+    if (new TextEncoder().encode(out + char).length > max) break;
+    out += char;
+  }
+  return `${out}…`;
+}
+
+/** The `data` of the plan's `creative_plan` artifact, as the design note documents it. */
+export const PLAN_PAYLOAD = {
+  version: 1,
+  content_type: "workout",
+  story: "Gino's back day in 25 seconds: three pulls, one posing finish.",
+  hook: "The heaviest lat pulldown lockout, punched in on the first beat.",
+  arc: "Hook on the lockout, build through the rows, peak on the pulldown, end on the pose.",
+  ending: "Hold the pose and loop back to the lockout.",
+  playbook: "workout",
+  playbook_version: "workout.v1",
+  target_length_s: 25,
+  tempo_bpm: 124,
+  pace: "building",
+  beat_ms: 484,
+  estimated_length_ms: 24_200,
+  shots: [
+    { role: "hook", what: "Heaviest lat pulldown lockout", asset_id: assetId(1), beats: 3, effect: "punch_in", length_ms: 1452 },
+    { role: "build", what: "Seated row, full rep", asset_id: assetId(2), beats: 4, effect: "none", length_ms: 1936 },
+    { role: "build", what: "Cable row, squeeze", asset_id: assetId(3), beats: 4, effect: "speed_ramp", length_ms: 1936 },
+    { role: "peak", what: "Pulldown, top of the rep", asset_id: assetId(1), beats: 2, effect: "whip", length_ms: 968 },
+    { role: "detail", what: "Chalked hands", asset_id: assetId(2), beats: 6, effect: "none", length_ms: 2904 },
+    { role: "ending", what: "Back pose, held", asset_id: assetId(3), beats: 8, effect: "flash", length_ms: 3872 },
+  ],
+  prompt_version: "editor.v2.1",
+};
+
+/** The `data` of the two `edit_check` artifacts: 12 of 13 pass, then 13 of 13 after the brightness match. */
+export const CHECKS_ROUND_1 = {
+  record_version: 1,
+  version: 1,
+  content_type: "workout",
+  target_length_s: 25,
+  checks: [
+    { id: "hook_length", status: "pass", detail: "the first shot is 1.47 s long (at most 2.00 s)" },
+    { id: "hook_title", status: "pass", detail: "a text starts at 0.30 s" },
+    { id: "shot_pacing", status: "pass", detail: "the median shot is 2.40 s (at most 3.00 s)" },
+    { id: "shot_variety", status: "pass", detail: "no more than two shots in a row have the same length" },
+    { id: "pace_builds", status: "pass", detail: "the second half's median shot is 12 % shorter than the first half's" },
+    { id: "rep_boundaries", status: "pass", detail: "6 of 6 shot edges are on a rep boundary" },
+    { id: "dead_time", status: "pass", detail: "2 % of the screen time is dead time" },
+    { id: "effect_density", status: "pass", detail: "0.40 effects per cut" },
+    { id: "text_safe_zone", status: "pass", detail: "all text is inside the safe zones" },
+    { id: "duration", status: "pass", detail: "24.2 s, the plan said 25 s" },
+    { id: "brightness_jump", status: "fail", detail: "the cut from c3 to c4 jumps 0.31 in brightness: call match_exposure" },
+    { id: "crushed", status: "pass", detail: "every shot keeps at least 70 % of its source's brightness" },
+    { id: "beat_sync", status: "pass", detail: "5 of 5 cuts are on a beat (within 2 frames)" },
+  ],
+  passed: 12,
+  failed: 1,
+  skipped: 0,
+  nth: 1,
+};
+export const CHECKS_ROUND_2 = {
+  ...CHECKS_ROUND_1,
+  version: 2,
+  checks: CHECKS_ROUND_1.checks.map((check) => (check.id === "brightness_jump" ? { id: check.id, status: "pass", detail: "the largest jump at a cut is 0.09 in brightness" } : check)),
+  passed: 13,
+  failed: 0,
+  nth: 2,
+};
+
+const PLAN_CALL = `plan_edit ${JSON.stringify({
+  content_type: PLAN_PAYLOAD.content_type,
+  story: PLAN_PAYLOAD.story,
+  hook: PLAN_PAYLOAD.hook,
+  arc: PLAN_PAYLOAD.arc,
+  ending: PLAN_PAYLOAD.ending,
+  playbook: PLAN_PAYLOAD.playbook,
+  target_length_s: PLAN_PAYLOAD.target_length_s,
+  tempo_bpm: PLAN_PAYLOAD.tempo_bpm,
+  pace: PLAN_PAYLOAD.pace,
+  shots: PLAN_PAYLOAD.shots.map(({ role, what, asset_id, beats, effect }) => ({ role, what, asset_id, beats, effect })),
+})}`;
+
+const PLAN_RESULT = [
+  "Plan saved (it is shown to the creator). Content type workout, playbook workout.v1.",
+  'Tempo: 124 BPM, one beat is 484 ms (2 beats 0.97 s, 4 beats 1.94 s, 8 beats 3.87 s). Write the grid as {"bpm":124,"first_beat_ms":0} in snap_cuts_to_beats with write_markers true.',
+  "Shot list, 6 shots, 24.2 s in all (target 25 s):",
+  "1. hook: 3 beats = 1.45 s, punch_in",
+  "2. build: 4 beats = 1.94 s",
+  "3. build: 4 beats = 1.94 s, speed_ramp",
+  "4. peak: 2 beats = 0.97 s, whip",
+  "5. detail: 6 beats = 2.90 s",
+  "6. ending: 8 beats = 3.87 s, flash",
+  "",
+  "The playbook for this kind of video. Follow it; it is the craft of the genre, and check_edit will measure your edit against it.",
+].join("\n");
+
+/** The text of a `check_edit` answer for a round, as `Report.Text` writes it. */
+export function checkText(round: typeof CHECKS_ROUND_1): string {
+  const total = round.passed + round.failed;
+  const lines = [`check_edit for version ${round.version} (${round.content_type}, target ${round.target_length_s} s): ${round.passed} of ${total} checks pass, ${round.failed} fail, ${round.skipped} do not apply.`];
+  for (const check of round.checks) lines.push(`${check.status === "pass" ? "PASS" : check.status === "fail" ? "FAIL" : "n/a "} ${check.id}: ${check.detail}`);
+  return lines.join("\n");
+}
+
+const MATCH_RESULT = [
+  "Matched the brightness of 2 clips toward p90 luma 0.20 (the median of the timeline's shots; only the brighter ones are darkened, by at most 0.7 stops, and a clip is left alone under 0.15 stops):",
+  "- c4: p90 0.37, exposure_ev 0.70",
+  "- c5: p90 0.31, exposure_ev 0.40",
+  "Render a preview and check_edit again: it measures the picture.",
+].join("\n");
+
+export const V2_SUMMARY = [
+  "A 24 second vertical cut of Gino's back day, cut to 124 BPM.",
+  "",
+  "- Opens on the heaviest pulldown lockout with a punch-in on the first beat.",
+  "- Rows build in rising energy, with a speed ramp on the cable row and a whip into the peak.",
+  "- The posing clip was darker than the gym clips, so I evened out its brightness; the second check passed 13 of 13.",
+].join("\n");
+
+const call = (seq: number, tool: string, input: string) => event(seq, "tool_call", summarize(`${tool} ${input}`), { tool });
+const answer = (seq: number, tool: string, text: string, over: Partial<RunEvent> = {}) => event(seq, "tool_result", summarize(text), { tool, ...over });
+
+/** The events of a finished v2 run, oldest first (see the header of this section). */
+export function v2RunEvents(): RunEvent[] {
+  const view = (seq: number, n: number) => [call(seq, "view_clip", `{"asset_id":"${assetId(n)}"}`), answer(seq + 1, "view_clip", "[1 images]")];
+  return [
+    event(1, "status", "running"),
+    call(2, "get_brief", "{}"),
+    answer(3, "get_brief", "The creator's instructions: open on the heaviest pulldown."),
+    call(4, "list_footage", "{}"),
+    answer(5, "list_footage", "3 clips"),
+    call(6, "find_moments", '{"query":"heaviest lockout"}'),
+    answer(7, "find_moments", "4 moments"),
+    ...view(8, 1),
+    ...view(10, 2),
+    ...view(12, 3),
+    call(14, "plan_edit", PLAN_CALL.slice("plan_edit ".length)),
+    answer(15, "plan_edit", PLAN_RESULT),
+    event(16, "artifact", "creative_plan"),
+    call(17, "edit_timeline", '{"base_version":0,"ops":[{"op":"add_clip"}]}'),
+    answer(18, "edit_timeline", "v1 made"),
+    call(19, "render_preview", "{}"),
+    answer(20, "render_preview", "preview of v1 is ready"),
+    call(21, "check_edit", "{}"),
+    answer(22, "check_edit", checkText(CHECKS_ROUND_1)),
+    event(23, "artifact", "edit_check"),
+    call(24, "match_exposure", "{}"),
+    answer(25, "match_exposure", MATCH_RESULT),
+    call(26, "render_preview", "{}"),
+    answer(27, "render_preview", "preview of v2 is ready"),
+    call(28, "check_edit", "{}"),
+    answer(29, "check_edit", checkText(CHECKS_ROUND_2)),
+    event(30, "artifact", "edit_check"),
+    call(31, "finish", JSON.stringify({ summary: V2_SUMMARY, no_edit_needed: false })),
+    answer(32, "finish", V2_SUMMARY),
+    event(33, "status", "succeeded"),
+  ];
+}
+
+/** A finished v2 run with its plan, two rounds of checks and a finish. */
+export function v2Run(over: Partial<Run> = {}): Run {
+  const events = v2RunEvents();
+  return run({
+    status: "succeeded",
+    model: "claude-opus-5-5",
+    cost_micros: 224_000,
+    active_ms: 98_000,
+    tool_calls: 16,
+    summary: V2_SUMMARY,
+    timeline_version: 2,
+    events,
+    last_seq: events.length,
+    ...over,
+  });
+}
+
+/** The spec of an edit with a motion preset, a speed ramp, five kinds of transition, sound effects, a look, the three sound modes and a beat grid. */
+export function v2Spec(): unknown {
+  const items = [
+    { id: "c1", asset_id: assetId(1), at_ms: 0, source: { in_ms: 1000, out_ms: 2450 }, speed: 1, motion: { preset: "punch_in", at_ms: 100, strength: 0.15 }, look: { preset: "gym_moody" }, audio: { mode: "bed" }, why: "The heaviest lockout of the set, so the video opens on its best frame." },
+    { id: "c2", asset_id: assetId(2), at_ms: 1200, source: { in_ms: 0, out_ms: 2000 }, speed: 1, transition_in: { type: "whip_left", duration_ms: 250 }, look: { preset: "gym_moody" }, audio: { mode: "bed" } },
+    { id: "c3", asset_id: assetId(3), at_ms: 2900, source: { in_ms: 500, out_ms: 2500 }, speed_ramp: [{ at_ms: 0, speed: 2 }, { at_ms: 2000, speed: 0.5 }], transition_in: { type: "zoom_through", duration_ms: 300 }, look: { preset: "gym_moody" }, audio: { mode: "bed" }, why: "Fast into slow at the peak of the contraction." },
+    { id: "c4", asset_id: assetId(1), at_ms: 4598, source: { in_ms: 3000, out_ms: 5000 }, speed: 1, motion: { preset: "shake", at_ms: 0 }, transition_in: { type: "flash", duration_ms: 150 }, look: { preset: "gym_moody", match: true }, audio: { mode: "full", gain_db: -3 } },
+    { id: "c5", asset_id: assetId(2), at_ms: 6198, source: { in_ms: 2000, out_ms: 4500 }, speed: 1, motion: { preset: "push_in" }, transition_in: { type: "crossfade", duration_ms: 400 }, audio: { mode: "mute" } },
+    { id: "c6", asset_id: assetId(3), at_ms: 8398, source: { in_ms: 0, out_ms: 2500 }, speed: 1, motion: { preset: "pull_back" }, transition_in: { type: "dip_to_black", duration_ms: 300 }, audio: { mode: "mute" } },
+  ];
+  const beats = Array.from({ length: 23 }, (_, i) => ({ at_ms: Math.round(i * 484), kind: i % 4 === 0 ? "downbeat" : "beat", strength: 1 }));
+  return {
+    schema: "contentfabrique.timeline/v1",
+    output: { format: "9:16", width: 1080, height: 1920, fps: 30, background: "#000000" },
+    tracks: [
+      { id: "main", type: "video", items },
+      {
+        id: "sound",
+        type: "audio",
+        items: [
+          { id: "s1", kind: "sfx", sfx: "riser", variant: "tension", at_ms: 0, export: "licensed" },
+          { id: "s2", kind: "sfx", sfx: "impact", variant: "punch", at_ms: 100, export: "licensed", gain_db: 2 },
+          { id: "s3", kind: "sfx", sfx: "whoosh", variant: "fast", at_ms: 950, export: "licensed" },
+          { id: "s4", kind: "sfx", sfx: "whoosh", variant: "heavy", at_ms: 2650, export: "licensed" },
+          { id: "s5", kind: "sfx", sfx: "impact", variant: "crack", at_ms: 4598, export: "licensed" },
+          { id: "s6", kind: "sfx", sfx: "sub_drop", variant: "boom", at_ms: 4608, export: "licensed" },
+          { id: "s7", kind: "sfx", sfx: "click", at_ms: 8000, export: "licensed" },
+          { id: "s8", kind: "trend_sound", trend_id: "trd_01jh6m00000000000000000000", at_ms: 0, source_offset_ms: 0, export: "cue_only" },
+        ],
+      },
+    ],
+    markers: beats,
+  };
+}

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,11 +23,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nilpntr/content-fabrique/internal/agents/agentset"
-	"github.com/nilpntr/content-fabrique/internal/agents/runapi"
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/api"
 	"github.com/nilpntr/content-fabrique/internal/assets"
 	"github.com/nilpntr/content-fabrique/internal/config"
+	"github.com/nilpntr/content-fabrique/internal/credits/creditstest"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
 	"github.com/nilpntr/content-fabrique/internal/jobs/jobstest"
@@ -63,7 +64,7 @@ type assetsEnvOptions struct {
 	noStorage   bool                                // Mount without an assets service
 	wrapObjects func(assets.Objects) assets.Objects // sits between the service and the S3 client
 	runs        bool                                // Mount with the agent runs service (the editor agent, definition only, replay mode)
-	runOptions  runapi.Options
+	credits     int                                 // credits each workspace starts with when runs is set; 0 means 100 (a first edit costs 6)
 }
 
 func newAssetsEnv(t *testing.T, opts ...func(*assetsEnvOptions)) *assetsEnv {
@@ -128,7 +129,6 @@ func newAssetsEnv(t *testing.T, opts ...func(*assetsEnvOptions)) *assetsEnv {
 		JWKSClient: &jwks.Client{Backend: e.f.backend},
 		Assets:     e.svc,
 		Runs:       runs,
-		RunOptions: o.runOptions,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -150,6 +150,10 @@ func newAssetsEnv(t *testing.T, opts ...func(*assetsEnvOptions)) *assetsEnv {
 		e.ws[who] = w.ID
 		if _, err := st.GrantPlan(context.Background(), store.GrantInput{WorkspaceID: w.ID, Plan: plans.Creator}); err != nil {
 			t.Fatal(err)
+		}
+		if o.runs {
+			// An editor run is never started without a hold, so the workspaces that start runs have credits.
+			creditstest.Fund(t, st, w.ID, plans.Creator, cmp.Or(o.credits, 100))
 		}
 	}
 	e.ws["viewer"], e.ws["editor"] = e.ws["ada"], e.ws["ada"]

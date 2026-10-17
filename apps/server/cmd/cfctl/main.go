@@ -21,6 +21,7 @@ Commands:
   doctor     check the environment's variables and services (cfctl doctor --help)
   migrate    apply the database migrations as the schema-owning role (cfctl migrate help)
   plan       grant, revoke or show the plan of a person's workspace, until billing exists (cfctl plan help)
+  credits    show a workspace's credits, grant a top-up, adjust the balance (cfctl credits help)
   assets     import local media files into a workspace's library, development only (cfctl assets help)
   project    create a project for the editor, show a project's versions, development only (cfctl project help)
   render     render a timeline spec with ffmpeg, for local manual runs (cfctl render --help)
@@ -59,6 +60,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdMigrate(args[1:], stdout, stderr, os.LookupEnv)
 	case "plan":
 		return cmdPlan(args[1:], stdout, stderr, os.LookupEnv)
+	case "credits":
+		return cmdCredits(args[1:], stdout, stderr, os.LookupEnv, defaultAgentDeps())
 	case "assets":
 		return cmdAssets(args[1:], stdout, stderr, os.LookupEnv)
 	case "project":

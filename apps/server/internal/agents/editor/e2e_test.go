@@ -12,13 +12,17 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
 	configfiles "github.com/nilpntr/content-fabrique/config"
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
+	"github.com/nilpntr/content-fabrique/internal/credits"
+	"github.com/nilpntr/content-fabrique/internal/credits/creditstest"
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/plans"
 	"github.com/nilpntr/content-fabrique/internal/projects"
 	"github.com/nilpntr/content-fabrique/internal/spend/spendtest"
 	"github.com/nilpntr/content-fabrique/internal/store"
@@ -38,7 +42,9 @@ import (
 
 const (
 	cassetteDir = "testdata/cassettes"
-	editorStage = "editor"
+	// cassetteRunBudget is the dollar budget (in micro-dollars) of the run the cassettes were recorded with: the editor's own default.
+	cassetteRunBudget = 5_000_000
+	editorStage       = "editor"
 )
 
 // The generated project: three clips with fixed ids (the ids are part of what the model reads, so the cassettes need them fixed).
@@ -56,6 +62,11 @@ type fakeAnthropic struct {
 	messages int
 	requests []map[string]any
 	bodies   []string
+	// scale multiplies the cache and output tokens of every turn (0 and 1: as scripted), to make a scripted run cost what a real Opus run
+	// does; an answer never has more output tokens than the max_tokens the request allowed.
+	scale int
+	// lastMax is the max_tokens of the newest request.
+	lastMax int
 }
 
 func (f *fakeAnthropic) client() *http.Client { return &http.Client{Transport: f} }
@@ -74,6 +85,10 @@ func (f *fakeAnthropic) RoundTrip(r *http.Request) (*http.Response, error) {
 		_ = json.Unmarshal(raw, &req)
 		f.requests = append(f.requests, req)
 		f.bodies = append(f.bodies, string(raw))
+		f.lastMax, _ = req["max_tokens"].(int)
+		if mt, ok := req["max_tokens"].(float64); ok {
+			f.lastMax = int(mt)
+		}
 		body = f.turn(f.messages)
 	}
 	f.mu.Unlock()
@@ -141,6 +156,12 @@ func reviseInput() string {
 func (f *fakeAnthropic) turn(n int) string {
 	asset := func(a ids.AssetID) string { return `"` + a.String() + `"` }
 	u := turnUsage[min(n, len(turnUsage))-1]
+	if f.scale > 1 {
+		u[1], u[2], u[3] = u[1]*f.scale, u[2]*f.scale, u[3]*f.scale
+	}
+	if f.lastMax > 0 {
+		u[3] = min(u[3], f.lastMax)
+	}
 	m := func(block string) string { return message(block, u[0], u[1], u[2], u[3]) }
 	switch n {
 	case 1:
@@ -180,9 +201,25 @@ type e2e struct {
 	api    *fakeAnthropic
 }
 
+// e2eOption changes how newE2E starts the run.
+type e2eOption func(*e2eConfig)
+
+type e2eConfig struct {
+	// profile is the routing profile of the run ("" the default, dev-cheap).
+	profile string
+	// planBudgets starts the run with the plan's real budgets (no pin to the cassettes' $5.00).
+	planBudgets bool
+	// charged gives the project an edit that was charged first, so that the run is a revision.
+	charged bool
+}
+
 // newE2E seeds the project and builds the runtime over the real llm layer in the mode the variables name.
-func newE2E(t *testing.T, vars map[string]string, api *fakeAnthropic) *e2e {
+func newE2E(t *testing.T, vars map[string]string, api *fakeAnthropic, options ...e2eOption) *e2e {
 	t.Helper()
+	var cfg e2eConfig
+	for _, o := range options {
+		o(&cfg)
+	}
 	e := newEnv(t)
 	e.asset(e.wsA, clip{id: clipA, title: "Lat pulldown", desc: "Top set, 8 reps, heavy.", durMs: 12000})
 	e.asset(e.wsA, clip{id: clipB, title: "Cable row", desc: "Two sets of 10.", durMs: 9000})
@@ -246,12 +283,34 @@ func newE2E(t *testing.T, vars map[string]string, api *fakeAnthropic) *e2e {
 	if x.runner, err = runtime.NewRunner(runtime.Deps{Store: e.st, Factory: factory, Agents: agents, Logger: quiet}); err != nil {
 		t.Fatal(err)
 	}
-	svc := &runtime.Service{Store: e.st, Router: router, Factory: factory, Agents: agents, Inline: true}
+	// An editor run is never started without a hold: the workspace has a plan and credits, as it would in production.
+	creditstest.Fund(t, e.st, e.wsA.ID, plans.Creator, 50)
+	// The cassettes were recorded with a run budget of $5.00 (the editor's default, before the plan set it), and the tool answers say how
+	// much of it is left, so the budget is part of every cassette's key: the creator plan's first edit is pinned to it here, and the
+	// credits and the hold are the real ones.
+	creditsSvc := creditstest.ServiceWith(t, e.st, func(l *credits.PriceList) {
+		if !cfg.planBudgets {
+			l.Plans[plans.Creator].COGSBudgetMicros[credits.EditFirst] = cassetteRunBudget
+		}
+	})
+	svc := &runtime.Service{Store: e.st, Router: router, Factory: factory, Agents: agents, Inline: true, Credits: creditsSvc}
+	if cfg.charged {
+		// An earlier edit of the project that was charged (a zero-credit hold, settled), so that this run is the project's revision.
+		earlier := uuid.Must(uuid.NewV7())
+		if _, err := e.st.HoldCredits(context.Background(), store.HoldCreditsParams{
+			Workspace: e.wsA.ID, Action: store.ActionEditFirst, ActionID: earlier, Credits: 0, Project: x.prj, ListVersion: "test", Now: time.Now(), TTL: time.Hour,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.st.SettleCredits(context.Background(), e.wsA.ID, earlier, true, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
 	input, err := NewInput("Lead with the heaviest set.")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if x.run, err = svc.Create(context.Background(), e.st, runtime.StartParams{Agent: Name, WorkspaceID: e.wsA.ID, ProjectID: x.prj.UUID, Input: input}); err != nil {
+	if x.run, err = svc.Create(context.Background(), e.st, runtime.StartParams{Agent: Name, WorkspaceID: e.wsA.ID, ProjectID: x.prj.UUID, Input: input, Profile: cfg.profile}); err != nil {
 		t.Fatal(err)
 	}
 	return x
@@ -452,6 +511,17 @@ func TestEditorRunInReplayMode(t *testing.T) {
 	if r.CostMicros <= 0 || r.CostMicros >= r.BudgetMicros {
 		t.Fatalf("cost %d of budget %d", r.CostMicros, r.BudgetMicros)
 	}
+	// The run was a first edit on a creator plan: its budget is the plan's, and its 6 credits were charged when it succeeded.
+	if r.BudgetMicros != cassetteRunBudget {
+		t.Fatalf("the run's budget is %d, want the creator plan's budget for a first edit, %d", r.BudgetMicros, cassetteRunBudget)
+	}
+	bal, err := x.st.CreditBalance(context.Background(), x.wsA.ID, time.Now())
+	if err != nil || bal.Available != 44 || bal.Held != 0 {
+		t.Fatalf("credits after the run = %+v, %v; want 44 left of 50 and nothing held", bal, err)
+	}
+	if charged, err := x.st.ProjectHasChargedEdit(context.Background(), x.wsA.ID, x.prj); err != nil || !charged {
+		t.Fatalf("the project's edit was not charged: %v %v", charged, err)
+	}
 
 	// Version 2 (the revision) exists next to version 1, is valid, is in the project's format and uses only the project's footage.
 	var spec json.RawMessage
@@ -560,4 +630,11 @@ func (x *e2e) events(run store.AgentRun) []store.AgentEvent {
 		x.t.Fatal(err)
 	}
 	return ev
+}
+
+// The credits package prices the runs of the agent it calls "editor"; the two names are one.
+func TestTheEditorIsTheAgentThatCostsCredits(t *testing.T) {
+	if credits.EditorAgent != Name || !credits.BillsEdits(Name) {
+		t.Fatalf("credits.EditorAgent = %q, editor.Name = %q", credits.EditorAgent, Name)
+	}
 }

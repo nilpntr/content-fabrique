@@ -21,16 +21,10 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/api"
+	"github.com/nilpntr/content-fabrique/internal/credits"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
-)
-
-// The run budget of an edit, in micro-dollars: what a run gets when the request names none, and the most any request may ask
-// for. A larger request is cut to the maximum, not refused.
-const (
-	DefaultBudgetMicros int64 = 5_000_000
-	MaxBudgetMicros     int64 = 5_000_000
 )
 
 // Event paging of GET /v1/runs/{id}.
@@ -42,35 +36,20 @@ const (
 // Profiles are the routing profiles a request may name.
 var Profiles = []string{"dev-cheap", "dev-mid", "v1-start"}
 
-// Options tune the API. The zero value gives the defaults above.
-type Options struct {
-	// DefaultBudgetMicros and MaxBudgetMicros override the constants.
-	DefaultBudgetMicros int64
-	MaxBudgetMicros     int64
-}
-
 // Runs implements the runs operations.
 type Runs struct {
 	svc    *runtime.Service
 	caller httpapi.CallerFunc
-	opts   Options
 	logger *slog.Logger
 }
 
 // New returns the handler. With a nil service (a server wired without model access) every operation answers 503 after the
 // checks of authentication and role.
-func New(svc *runtime.Service, caller httpapi.CallerFunc, opts Options, logger *slog.Logger) *Runs {
+func New(svc *runtime.Service, caller httpapi.CallerFunc, logger *slog.Logger) *Runs {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if opts.DefaultBudgetMicros <= 0 {
-		opts.DefaultBudgetMicros = DefaultBudgetMicros
-	}
-	if opts.MaxBudgetMicros <= 0 {
-		opts.MaxBudgetMicros = MaxBudgetMicros
-	}
-	opts.DefaultBudgetMicros = min(opts.DefaultBudgetMicros, opts.MaxBudgetMicros)
-	return &Runs{svc: svc, caller: caller, opts: opts, logger: logger}
+	return &Runs{svc: svc, caller: caller, logger: logger}
 }
 
 // failure is an answer to give: the status, the code and a message that never contains request data.
@@ -135,10 +114,14 @@ func (h *Runs) StartEdit(ctx context.Context, req api.StartEditRequestObject) (a
 			return api.StartEdit401JSONResponse{UnauthenticatedJSONResponse: api.UnauthenticatedJSONResponse(body(f))}, nil
 		case 403:
 			return api.StartEdit403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(body(f))}, nil
+		case 402:
+			return api.StartEdit402JSONResponse{PlanRequiredJSONResponse: api.PlanRequiredJSONResponse(body(f))}, nil
 		case 404:
 			return api.StartEdit404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(body(f))}, nil
 		case 409:
 			return api.StartEdit409JSONResponse(body(f)), nil
+		case 429:
+			return api.StartEdit429JSONResponse(body(f)), nil
 		case 422:
 			return api.StartEdit422JSONResponse(body(f)), nil
 		case 500:
@@ -178,13 +161,12 @@ func (h *Runs) startEdit(ctx context.Context, req api.StartEditRequestObject) (s
 			return store.AgentRun{}, bad("profile must be one of " + fmt.Sprint(Profiles))
 		}
 	}
-	budget := h.opts.DefaultBudgetMicros
+	// The run's budget is not the caller's to set: the server takes it from the plan's price list for the action it decides this run is
+	// (credits.QuoteEdit). budget_usd is still validated, so a client that sends nonsense is told, but its value is ignored.
 	if in.BudgetUsd != nil {
-		usd := float64(*in.BudgetUsd)
-		if math.IsNaN(usd) || math.IsInf(usd, 0) || usd <= 0 {
+		if usd := float64(*in.BudgetUsd); math.IsNaN(usd) || math.IsInf(usd, 0) || usd <= 0 {
 			return store.AgentRun{}, bad("budget_usd must be a positive number")
 		}
-		budget = min(max(int64(math.Round(usd*1e6)), 1), h.opts.MaxBudgetMicros)
 	}
 
 	// One unfinished editor run per project, decided under the project's lock together with creating the run, so two requests
@@ -212,7 +194,7 @@ func (h *Runs) startEdit(ctx context.Context, req api.StartEditRequestObject) (s
 	}
 	run, err := h.svc.StartGuarded(ctx, runtime.StartParams{
 		Agent: editor.Name, WorkspaceID: who.Workspace, ProjectID: project.UUID, Input: input, Profile: profile,
-		Budgets: runtime.Budgets{Micros: budget}, StartedBy: who.User,
+		StartedBy: who.User,
 	}, guard)
 	switch {
 	case err == nil:
@@ -223,6 +205,20 @@ func (h *Runs) startEdit(ctx context.Context, req api.StartEditRequestObject) (s
 		return store.AgentRun{}, &failure{http.StatusUnprocessableEntity, api.ErrorCodeAssetsNotUsable, "the project has no ready video clip to edit"}
 	case errors.Is(err, errActive):
 		return store.AgentRun{}, &failure{http.StatusConflict, api.ErrorCodeRunInProgress, "the project already has an editor run that has not finished"}
+	case errors.Is(err, store.ErrInsufficientCredits):
+		// The stable code the web app opens its upgrade dialog on. The message carries no numbers: the balance is in GET /v1/me.
+		return store.AgentRun{}, &failure{http.StatusPaymentRequired, api.ErrorCodeCreditsExhausted, "this workspace does not have enough credits for this edit"}
+	case errors.Is(err, credits.ErrTooManyUncharged):
+		var tm *credits.TooManyUnchargedError
+		msg := "too many editor runs today ended with nothing to keep"
+		if errors.As(err, &tm) {
+			msg = fmt.Sprintf("this workspace has %d editor runs in progress or ended today that were cancelled before they made anything, found nothing to change or failed, which is the most per day; try again after 00:00 UTC", tm.Cap)
+		}
+		return store.AgentRun{}, &failure{http.StatusTooManyRequests, api.ErrorCodeTooManyUnchargedRuns, msg}
+	case errors.Is(err, runtime.ErrBYOKKeyRequired):
+		return store.AgentRun{}, &failure{http.StatusPaymentRequired, api.ErrorCodeByokKeyRequired, "this plan uses your own Anthropic key; add it in settings"}
+	case errors.Is(err, credits.ErrNoPlan):
+		return store.AgentRun{}, &failure{http.StatusPaymentRequired, api.ErrorCodePlanRequired, "this workspace has no active plan"}
 	case errors.Is(err, runtime.ErrInvalidInput):
 		return store.AgentRun{}, bad("the run cannot be started with this input")
 	case errors.Is(err, runtime.ErrUnknownAgent), errors.Is(err, llm.ErrNoKey), errors.Is(err, llm.ErrStageDisabled):

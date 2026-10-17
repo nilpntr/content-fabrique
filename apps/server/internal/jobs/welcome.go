@@ -9,6 +9,7 @@ import (
 
 	"github.com/riverqueue/river"
 
+	"github.com/nilpntr/content-fabrique/internal/credits"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/spend"
 	"github.com/nilpntr/content-fabrique/internal/store"
@@ -40,6 +41,8 @@ type Deps struct {
 	// Meter writes the ledger rows of the media jobs' compute (ingest, quick look, analysis: kind media, wall time times vCPUs). Nil
 	// records nothing.
 	Meter *spend.ComputeMeter
+	// Credits is the price list the credits jobs grant allowances from. Nil means the embedded one (config/plans, credits.ListFile).
+	Credits *credits.PriceList
 	// Now replaces time.Now (tests).
 	Now func() time.Time
 	// Register optionally adds more workers to the bundle (tests, and packages with jobs of their own later).
@@ -121,6 +124,12 @@ func Workers(deps Deps) (*river.Workers, error) {
 		return nil, err
 	}
 	if err := river.AddWorkerSafely(w, &SpendHoldsSweepWorker{deps: deps}); err != nil {
+		return nil, err
+	}
+	if err := river.AddWorkerSafely(w, &CreditsPeriodsWorker{deps: deps}); err != nil {
+		return nil, err
+	}
+	if err := river.AddWorkerSafely(w, &CreditHoldsSweepWorker{deps: deps}); err != nil {
 		return nil, err
 	}
 	if deps.Register != nil {

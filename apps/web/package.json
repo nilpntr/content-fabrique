@@ -8,6 +8,8 @@
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
+    "fixtures": "vite --config vite.fixtures.config.ts",
+    "check:dist": "bun scripts/check-dist-clean.ts",
     "typecheck": "tsc -b",
     "lint": "biome lint .",
     "test": "vitest run",
