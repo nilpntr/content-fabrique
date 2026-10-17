@@ -66,6 +66,17 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
   const projects = useProjects({ enabled: asked });
   // The palette only reads the list: it does not poll for clips that are still processing (the library does that), whatever it holds.
   const assets = useAssets({ enabled: asked, isOwned: () => true });
+  // While the palette is open, the older pages come in one after another; after a failure it stops and the label below stays.
+  const { hasNextPage: moreProjects, isFetchingNextPage: loadingProjects, isFetchNextPageError: projectsFailed, fetchNextPage: nextProjects } = projects;
+  const { hasNextPage: moreClips, isFetchingNextPage: loadingClips, isFetchNextPageError: clipsFailed, fetchNextPage: nextClips } = assets;
+  useEffect(() => {
+    if (open && moreProjects && !loadingProjects && !projectsFailed) void nextProjects();
+  }, [open, moreProjects, loadingProjects, projectsFailed, nextProjects]);
+  useEffect(() => {
+    if (open && moreClips && !loadingClips && !clipsFailed) void nextClips();
+  }, [open, moreClips, loadingClips, clipsFailed, nextClips]);
+  /** Some projects or clips are not searched (yet): the first pages are, the rest are on their way or could not be loaded. */
+  const partial = moreProjects || moreClips;
   const projectItems: PaletteItem[] = searchProjects(projects.data ?? [], query).map((project) => ({
     id: `project:${project.id}`,
     label: project.title,
@@ -84,7 +95,8 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
     thumb: asset.derivatives?.poster?.url,
     run: () => {
       close();
-      void navigate({ to: "/library", search: { state: undefined, samples: undefined } });
+      // The library opens that clip's sheet.
+      void navigate({ to: "/library", search: { state: undefined, samples: undefined, open: asset.id } });
     },
   }));
 
@@ -171,7 +183,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
             </Autocomplete.List>
 
             <Autocomplete.Empty className="px-4 py-10 text-center text-[13.5px] text-muted-foreground empty:hidden">
-              No results for “{query.trim()}”.
+              No results for “{query.trim()}”{partial ? " in your recent projects and clips" : ""}.
             </Autocomplete.Empty>
           </Autocomplete.Root>
 
@@ -183,6 +195,11 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
             <span className="inline-flex items-center gap-1.5">
               <Kbd>↵</Kbd> select
             </span>
+            {partial ? (
+              <span data-testid="palette-scope" className="ml-auto truncate">
+                Searching your recent projects and clips
+              </span>
+            ) : null}
           </div>
         </DialogPrimitive.Popup>
       </DialogPrimitive.Portal>

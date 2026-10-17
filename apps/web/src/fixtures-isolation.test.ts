@@ -1,6 +1,8 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test } from "vitest";
+import { findLeaks } from "../scripts/check-dist-clean";
 
 /**
  * The fixtures viewer (`bun run fixtures`, the dev-fixtures folder) signs in with a stand-in and answers the API with canned data. It
@@ -24,6 +26,40 @@ test("nothing in the product imports or names the fixtures viewer", () => {
     .filter((file) => !file.endsWith("fixtures-isolation.test.ts"))
     .filter((file) => /dev-fixtures|vite\.fixtures/.test(readFileSync(file, "utf8")));
   expect(offenders).toEqual([]);
+});
+
+test("no file of the product imports the test kit (the Clerk stand-in, the fixtures, the fake API)", () => {
+  // The kit's own files, the test setup and the tests may use it; nothing else under src may.
+  const kit = new Set(["test-api.tsx", "test-clerk.tsx", "test-fixtures.ts", "test-setup.ts"]);
+  const offenders = sources(path.join(web, "src"))
+    .filter((file) => !kit.has(path.basename(file)) && !/\.test\.[tj]sx?$/.test(file))
+    .filter((file) => /["'][^"'\n]*\btest-(clerk|fixtures|api)["']/.test(readFileSync(file, "utf8")))
+    .map((file) => path.relative(web, file));
+  expect(offenders).toEqual([]);
+});
+
+test("the leak check of the build finds the kit's names in any text file and refuses an empty build", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "cf-dist-"));
+  try {
+    expect(() => findLeaks(dir)).toThrow(/no files to check/);
+    mkdirSync(path.join(dir, "assets"));
+    writeFileSync(path.join(dir, "assets", "app.js"), "export const a = 1;");
+    expect(findLeaks(dir)).toEqual([]);
+    writeFileSync(path.join(dir, "assets", "leak.js"), 'const t = "test-token"; window.clerkMock = 1; fetch("http://api.fixtures/v1/me");');
+    expect(findLeaks(dir).map((leak) => leak.needle).sort()).toEqual(["api.fixtures", "clerkMock", "test-token"]);
+    // The binary files of a build are not read.
+    writeFileSync(path.join(dir, "font.woff2"), "clerkMock");
+    expect(findLeaks(dir).some((leak) => leak.file.endsWith("font.woff2"))).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CI runs the leak check after the build", () => {
+  const ci = readFileSync(path.resolve(web, "../../.github/workflows/ci.yml"), "utf8");
+  expect(ci.indexOf("@cf/web build")).toBeGreaterThan(-1);
+  expect(ci.indexOf("@cf/web check:dist")).toBeGreaterThan(ci.indexOf("@cf/web build"));
+  expect((JSON.parse(read("package.json")) as { scripts: Record<string, string> }).scripts["check:dist"]).toBe("bun scripts/check-dist-clean.ts");
 });
 
 test("the product's build config, its routes, its deploy config and its scripts do not know the viewer", () => {

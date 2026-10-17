@@ -11,7 +11,18 @@ import { useUploadSelector } from "@/lib/upload/provider";
  * (or when the API cannot be asked), it shows the sample clips with a notice, so that the page is never an empty box.
  * `?state=` and `?samples=local` always show the samples: they are for trying the grid by hand.
  */
-export function LibraryPage({ state, localSamples }: { state?: DemoState; localSamples?: boolean }) {
+export function LibraryPage({
+  state,
+  localSamples,
+  openAssetId,
+  onOpenAsset,
+}: {
+  state?: DemoState;
+  localSamples?: boolean;
+  /** The clip whose sheet is open (`?open=`), and how to change it. Without them the page keeps this itself. */
+  openAssetId?: string | undefined;
+  onOpenAsset?: (assetId: string | null) => void;
+}) {
   const forceSamples = state !== undefined || Boolean(localSamples);
   // Assets that this browser is uploading report their own progress: the list does not poll for them.
   const owned = useUploadSelector((snapshot) => snapshot.items.flatMap((item) => (item.assetId && item.status !== "done" ? [item.assetId] : [])).join(","));
@@ -37,6 +48,8 @@ export function LibraryPage({ state, localSamples }: { state?: DemoState; localS
         <RealLibrary
           assets={assets.data ?? []}
           loading={loading}
+          openId={onOpenAsset ? (openAssetId ?? null) : undefined}
+          onOpenChange={onOpenAsset}
           hasMore={assets.hasNextPage}
           loadingMore={assets.isFetchingNextPage}
           onLoadMore={() => void assets.fetchNextPage()}

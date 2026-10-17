@@ -267,33 +267,66 @@ function ClipDetails({ item, title, aspect }: { item: VideoItem; title?: string;
   );
 }
 
+/** What a mark is, as one sentence for a screen reader. */
+function spokenFocus(focus: Focus | null, items: readonly VideoItem[], sfx: readonly SfxItem[], assetNames?: Record<string, string>): string {
+  if (!focus) return "";
+  if (focus.kind === "sfx") {
+    const effect = sfx.find((candidate) => candidate.id === focus.id);
+    return effect ? `${effectName(SFX, effect.sfx)}${effect.variant ? `, ${effect.variant.replaceAll("_", " ")} variant` : ""}, at ${sec(effect.at_ms)}` : "";
+  }
+  const index = items.findIndex((candidate) => candidate.id === focus.id);
+  const item = items[index];
+  if (!item) return "";
+  if (focus.kind === "transition") {
+    const transition = item.transition_in;
+    if (!transition || transition.type === "cut") return "";
+    const previous = items[index - 1];
+    return `${effectName(TRANSITIONS, transition.type)}, ${transition.duration_ms} milliseconds${previous ? `, between ${previous.id} and ${item.id}` : ""}`;
+  }
+  const parts = [`${item.id} ${assetNames?.[item.asset_id] ?? ""}`.trim(), `sound ${AUDIO_MODES[item.audio?.mode ?? "mute"].label.toLowerCase()}`];
+  if (item.motion) parts.push(effectName(MOTION, item.motion.preset));
+  if (item.speed_ramp) parts.push("speed ramp");
+  if (item.look) parts.push(`look ${lookName(item.look.preset)}`);
+  if (item.why) parts.push(`why: ${item.why}`);
+  return parts.join(", ");
+}
+
 /**
- * The line under the timeline that says what a mark is. Hovering or focusing a mark shows it here; a click keeps it. Its height is
- * reserved, so showing a mark does not push the page down.
+ * The line under the timeline that says what a mark is. Hovering or focusing a mark shows it here; a click keeps it (`pinnedFocus`).
+ * Its height is reserved, so showing a mark does not push the page down. A screen reader is told about the kept mark only: pointing
+ * at marks along the timeline must not talk.
  */
 export function TimelineDetails({
   focus,
+  pinnedFocus,
   items,
   sfx,
   assetNames,
   onClose,
-  pinned,
 }: {
+  /** What is shown: the mark under the pointer, else the one that was kept. */
   focus: Focus | null;
+  pinnedFocus: Focus | null;
   items: readonly VideoItem[];
   sfx: readonly SfxItem[];
   assetNames?: Record<string, string>;
   onClose: () => void;
-  pinned: boolean;
 }) {
   const item = focus && focus.kind !== "sfx" ? items.find((candidate) => candidate.id === focus.id) : undefined;
   const effect = focus?.kind === "sfx" ? sfx.find((candidate) => candidate.id === focus.id) : undefined;
   const index = item ? items.indexOf(item) : -1;
   const transition = focus?.kind === "transition" && item?.transition_in && item.transition_in.type !== "cut" ? item.transition_in : undefined;
   const previous = index > 0 ? items[index - 1] : undefined;
+  // The close button is for the kept mark, whenever that is the one shown.
+  const pinned = pinnedFocus !== null && sameFocus(focus, pinnedFocus);
+  const spoken = spokenFocus(pinnedFocus, items, sfx, assetNames);
 
   return (
-    <section aria-label="Details" aria-live="polite" data-testid="timeline-details" className="relative min-h-[76px] rounded-lg bg-well px-3 py-2 text-[12.5px] leading-[1.45] shadow-well sm:min-h-[68px]">
+    <>
+      <p role="status" className="sr-only" data-testid="timeline-announcement">
+        {spoken}
+      </p>
+    <section aria-label="Details" data-testid="timeline-details" className="relative min-h-[76px] rounded-lg bg-well px-3 py-2 text-[12.5px] leading-[1.45] shadow-well sm:min-h-[68px]">
       {focus && (item || effect) ? (
         <>
           {focus.kind === "clip" && item ? <ClipDetails item={item} title={assetNames?.[item.asset_id]} aspect={focus.aspect} /> : null}
@@ -337,5 +370,6 @@ export function TimelineDetails({
         </p>
       )}
     </section>
+    </>
   );
 }

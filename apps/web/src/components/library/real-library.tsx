@@ -108,7 +108,24 @@ const selectLocalUploads = (snapshot: { items: readonly UploadItem[] }): LocalUp
 const EXPIRY_MARGIN_MS = 60_000;
 
 /** The library on the workspace's real assets. */
-export function RealLibrary({ assets, loading, hasMore, loadingMore, onLoadMore }: { assets: readonly ApiAsset[]; loading?: boolean; hasMore?: boolean; loadingMore?: boolean; onLoadMore?: () => void }) {
+export function RealLibrary({
+  assets,
+  loading,
+  hasMore,
+  loadingMore,
+  onLoadMore,
+  openId: controlledOpenId,
+  onOpenChange,
+}: {
+  assets: readonly ApiAsset[];
+  loading?: boolean;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
+  /** The clip whose sheet is open, when the page keeps it (in the address). Without `onOpenChange` the library keeps it itself. */
+  openId?: string | null;
+  onOpenChange?: (id: string | null) => void;
+}) {
   const { cancel, retry } = useUploadCommands();
   const uploads = useUploadSelector(selectLocalUploads, sameUploads);
   const deleteAsset = useDeleteAsset();
@@ -137,7 +154,9 @@ export function RealLibrary({ assets, loading, hasMore, loadingMore, onLoadMore 
     return () => clearTimeout(timer);
   }, [assets, refresh, resetRefresh]);
 
-  const [openId, setOpenId] = React.useState<string | null>(null);
+  const [ownOpenId, setOwnOpenId] = React.useState<string | null>(null);
+  const openId = onOpenChange ? (controlledOpenId ?? null) : ownOpenId;
+  const setOpenId = onOpenChange ?? setOwnOpenId;
   const rename = useRenameAsset();
   const opened = openId ? (shown.find((asset) => asset.id === openId) ?? null) : null;
 

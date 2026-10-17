@@ -238,6 +238,31 @@ test("pointing at a mark peeks at it and going away puts back what was picked; C
   expect(details().getByText(/Point at an effect/)).toBeTruthy();
 });
 
+test("a screen reader is told about a mark that was picked, not about every mark that was pointed at", () => {
+  screenWith(version());
+  const announcement = () => screen.getByTestId("timeline-announcement").textContent;
+  // The details line itself is not a live region.
+  expect(screen.getByTestId("timeline-details").getAttribute("aria-live")).toBeNull();
+  expect(announcement()).toBe("");
+
+  fireEvent.pointerEnter(screen.getByRole("button", { name: /^Whoosh \(fast\)/ }));
+  fireEvent.pointerEnter(screen.getByRole("button", { name: "Flash into c4" }));
+  expect(details().getByText("150 ms")).toBeTruthy();
+  expect(announcement()).toBe("");
+
+  fireEvent.click(screen.getByRole("button", { name: "Flash into c4" }));
+  expect(announcement()).toBe("Flash, 150 milliseconds, between c3 and c4");
+  fireEvent.pointerLeave(screen.getByRole("button", { name: "Flash into c4" }));
+  expect(announcement()).toBe("Flash, 150 milliseconds, between c3 and c4");
+
+  fireEvent.click(screen.getByRole("button", { name: "Details of c1" }));
+  expect(announcement()).toMatch(/^c1 Lat pulldown, sound bed, Punch-in, look Gym moody, why: The heaviest lockout/);
+  fireEvent.click(screen.getByRole("button", { name: /^Impact \(punch\)/ }));
+  expect(announcement()).toBe("Impact, punch variant, at 00:00.1");
+  fireEvent.click(screen.getByRole("button", { name: "Close details" }));
+  expect(announcement()).toBe("");
+});
+
 test("pressing on a mark does not start a comment selection under it", () => {
   screenWith(version());
   const mark = screen.getByRole("button", { name: "c1: Punch-in" });

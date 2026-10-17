@@ -370,7 +370,7 @@ function ReviewTimelineView({
         <div className="mt-2">
           <TimelineDetails
             focus={peekFocus ?? pinnedFocus}
-            pinned={peekFocus === null && pinnedFocus !== null}
+            pinnedFocus={pinnedFocus}
             items={version.items}
             sfx={sfx}
             assetNames={assetNames}
