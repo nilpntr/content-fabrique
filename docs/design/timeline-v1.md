@@ -95,6 +95,11 @@ Every audio item has `at_ms`, an optional `duration_ms` (default: to the end of 
 - **New item ids.** `add_*` ops accept an optional `id`. Without one, the engine assigns the next free id for the kind (`c7`, `t3`, `s2`). Assignment is deterministic, which keeps replays and golden tests stable.
 - **Versions are immutable.** The timeline version table (P3-06 adds it with its migration) stores `version`, `parent_version`, `spec`, the applied `ops`, `diff`, `author_kind` (`agent` or `user`) and `author_id`.
 - **The diff is an RFC 6902 JSON Patch** from the parent to the child. The property test checks `patch(parent, diff) == child` and that a random op sequence never yields a spec that fails validation (it either applies cleanly or returns issues). `Summarize(diff)` gives a one-line human summary per change ("trimmed c3 by 400 ms at the end"), used by the run feed and the version list.
+- **Beat snapping (P3-09, `internal/timeline/beats`).** `snap_cuts_to_beats` calls `beats.SnapCuts(cuts, grid, opts)` with `StartMs` 0 and `EndMs` the total duration, on the grid from `Grid.Place({at_ms, source_offset_ms})` so beats are in timeline time. Behaviour the op relies on:
+  - A snapped cut sits at `FrameToMs(frame(beat))`: frame-aligned, and less than one frame from the exact beat (at most half a frame plus half a millisecond). The error is reported per cut, so the op can warn on it.
+  - A cut that can't be snapped stays exactly where it was (unaligned, since the renderer snaps it anyway) with a reason: `out_of_range` (no beat within the max shift; default half a beat) or `min_shot`. A cut already within one frame of a beat goes to that beat, never to a downbeat.
+  - Every shot stays at least 300 ms, or as long as it was if it started shorter. Cuts never cross or merge. When the best beat doesn't fit, the next-best in range is tried. The result is idempotent.
+  - `Markers` returns `beat` (strength 0.6) and `downbeat` (1.0) entries, plus `drop` (1.0) for given drop times, frame-aligned the same way, so a marker and a cut on the same beat have the same `at_ms`.
 
 ## 5. Text, styles and safe zones (P3-04)
 
