@@ -167,6 +167,47 @@ func (q *Queries) GetTimelineVersion(ctx context.Context, arg GetTimelineVersion
 	return i, err
 }
 
+const getTimelineVersionByAuthor = `-- name: GetTimelineVersionByAuthor :one
+SELECT id, workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id, created_at FROM timeline_versions
+WHERE workspace_id = $1 AND project_id = $2 AND author_kind = $3 AND author_id = $4
+ORDER BY version
+LIMIT 1
+`
+
+type GetTimelineVersionByAuthorParams struct {
+	WorkspaceID ids.WorkspaceID
+	ProjectID   ids.ProjectID
+	AuthorKind  string
+	AuthorID    string
+}
+
+// The version a given author made, if there is one: how an agent's edit finds out that it was applied already (the author id
+// of an agent version is the idempotency key of the tool call that made it).
+func (q *Queries) GetTimelineVersionByAuthor(ctx context.Context, arg GetTimelineVersionByAuthorParams) (TimelineVersion, error) {
+	row := q.db.QueryRow(ctx, getTimelineVersionByAuthor,
+		arg.WorkspaceID,
+		arg.ProjectID,
+		arg.AuthorKind,
+		arg.AuthorID,
+	)
+	var i TimelineVersion
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.Version,
+		&i.ParentVersion,
+		&i.Spec,
+		&i.Ops,
+		&i.Diff,
+		&i.Summary,
+		&i.AuthorKind,
+		&i.AuthorID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const insertTimelineVersion = `-- name: InsertTimelineVersion :one
 INSERT INTO timeline_versions (workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -363,6 +404,67 @@ func (q *Queries) ListProjectCatalogAssets(ctx context.Context, arg ListProjectC
 	for rows.Next() {
 		var i ListProjectCatalogAssetsRow
 		if err := rows.Scan(&i.AssetID, &i.Kind, &i.DurationMs); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjectFootage = `-- name: ListProjectFootage :many
+SELECT pa.position, a.id AS asset_id, a.kind, a.title, a.description, a.duration_ms, a.width, a.height, a.rotation, a.has_audio
+FROM project_assets pa
+JOIN assets a ON a.workspace_id = pa.workspace_id AND a.id = pa.asset_id
+WHERE pa.workspace_id = $1 AND pa.project_id = $2
+  AND a.status = 'ready' AND a.deleted_at IS NULL AND a.duration_ms IS NOT NULL
+ORDER BY pa.position
+`
+
+type ListProjectFootageParams struct {
+	WorkspaceID ids.WorkspaceID
+	ProjectID   ids.ProjectID
+}
+
+type ListProjectFootageRow struct {
+	Position    int32
+	AssetID     ids.AssetID
+	Kind        string
+	Title       string
+	Description string
+	DurationMs  *int64
+	Width       *int32
+	Height      *int32
+	Rotation    *int32
+	HasAudio    *bool
+}
+
+// The footage of a project as the editor agent sees it: the library's title and description (text a creator wrote, untrusted),
+// the probed size and rotation, and whether there is sound. Only ready, not deleted assets with a duration are returned, in
+// the creator's order: the same set the edit catalog holds.
+func (q *Queries) ListProjectFootage(ctx context.Context, arg ListProjectFootageParams) ([]ListProjectFootageRow, error) {
+	rows, err := q.db.Query(ctx, listProjectFootage, arg.WorkspaceID, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListProjectFootageRow
+	for rows.Next() {
+		var i ListProjectFootageRow
+		if err := rows.Scan(
+			&i.Position,
+			&i.AssetID,
+			&i.Kind,
+			&i.Title,
+			&i.Description,
+			&i.DurationMs,
+			&i.Width,
+			&i.Height,
+			&i.Rotation,
+			&i.HasAudio,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

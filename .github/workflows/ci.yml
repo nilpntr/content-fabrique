@@ -177,6 +177,12 @@ jobs:
           go generate ./internal/timeline/...
           git diff --exit-code -- internal/timeline/schema internal/timeline/ops/schema
           test -z "$(git status --porcelain -- internal/timeline/schema internal/timeline/ops/schema)" || { git status --porcelain -- internal/timeline/schema internal/timeline/ops/schema; exit 1; }
+      # internal/agents/editor embeds a copy of packages/schemas/agents/editor-tools.v1.json (the editor agent's tool contract).
+      - name: Editor tool contract copy drift check
+        run: |
+          go generate ./internal/agents/...
+          git diff --exit-code -- internal/agents/editor/contract
+          test -z "$(git status --porcelain -- internal/agents/editor/contract)" || { git status --porcelain -- internal/agents/editor/contract; exit 1; }
 
   # `cfctl migrate` against a real Postgres: up, down to 0, up again, redo. The sqlc output must match what is committed.
   # The repository, round-trip and role-split tests run in go-test (they start Postgres themselves).

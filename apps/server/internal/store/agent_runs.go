@@ -95,6 +95,13 @@ func (s *Store) GetAgentRun(ctx context.Context, ws ids.WorkspaceID, id uuid.UUI
 	return r, mapErr(err)
 }
 
+// ActiveAgentRunForProject returns the unfinished (queued, running or waiting) run of the agent on the project, or
+// ErrNotFound when there is none.
+func (s *Store) ActiveAgentRunForProject(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, agent string) (AgentRun, error) {
+	r, err := s.q.GetActiveAgentRunForProject(ctx, db.GetActiveAgentRunForProjectParams{WorkspaceID: ws, ProjectID: project, Agent: agent})
+	return r, mapErr(err)
+}
+
 // ClaimAgentRun is what a worker does first: a queued run, or a running one whose worker died (no heartbeat for
 // staleAfter), becomes running under a new epoch, which fences every older worker out. ErrNotFound: the run is waiting for
 // input, finished, held by a live worker, or not this workspace's (GetAgentRun tells which).

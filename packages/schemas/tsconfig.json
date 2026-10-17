@@ -18,6 +18,7 @@
   "include": [
     "api/**/*.ts",
     "timeline/**/*.ts",
+    "agents/**/*.ts",
     "scripts/**/*.ts"
   ]
 }

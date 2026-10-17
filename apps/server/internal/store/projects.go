@@ -19,6 +19,7 @@ type (
 	ProjectListRow       = db.ListProjectsRow
 	ProjectAssetRow      = db.ListProjectAssetsRow
 	ProjectCatalogRow    = db.ListProjectCatalogAssetsRow
+	ProjectFootageRow    = db.ListProjectFootageRow
 	TimelineVersion      = db.TimelineVersion
 	TimelineVersionBrief = db.ListTimelineVersionsRow
 )
@@ -235,4 +236,18 @@ func (s *Store) ListTimelineVersions(ctx context.Context, ws ids.WorkspaceID, pr
 	}
 	rows, err := s.q.ListTimelineVersions(ctx, db.ListTimelineVersionsParams{WorkspaceID: ws, ProjectID: project, Before: cursor, RowLimit: int32(min(limit, 1000))}) //nolint:gosec // capped
 	return rows, mapErr(err)
+}
+
+// ListProjectFootage returns the footage of a project as the editor agent sees it, in the creator's order: the ready, not
+// deleted assets with their library title and description, probed size and rotation, and whether they have sound.
+func (s *Store) ListProjectFootage(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID) ([]ProjectFootageRow, error) {
+	rows, err := s.q.ListProjectFootage(ctx, db.ListProjectFootageParams{WorkspaceID: ws, ProjectID: project})
+	return rows, mapErr(err)
+}
+
+// GetTimelineVersionByAuthor returns the first version of the project that the author made, or ErrNotFound. The editor
+// agent's author id is the idempotency key of the tool call, so this is how a retried call finds the version it made.
+func (s *Store) GetTimelineVersionByAuthor(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, authorKind, authorID string) (TimelineVersion, error) {
+	v, err := s.q.GetTimelineVersionByAuthor(ctx, db.GetTimelineVersionByAuthorParams{WorkspaceID: ws, ProjectID: project, AuthorKind: authorKind, AuthorID: authorID})
+	return v, mapErr(err)
 }

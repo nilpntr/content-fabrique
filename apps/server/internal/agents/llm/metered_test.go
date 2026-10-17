@@ -477,7 +477,8 @@ func TestLedgerWriteSurvivesACancelledContext(t *testing.T) {
 func TestImageReferencesAreResolvedBeforeSending(t *testing.T) {
 	res := &fakeResolver{data: map[string][]byte{"r2://k/1": []byte("frame-one")}}
 	rg := newRig(t, nil, func(o *FactoryOptions) { o.Images = res })
-	c, _ := rg.client(t, newWorkspaceID(), "editor")
+	ws := newWorkspaceID()
+	c, _ := rg.client(t, ws, "editor")
 	req := simpleRequest()
 	req.Messages[0].Content = append(req.Messages[0].Content,
 		Block{Type: BlockImage, Image: &Image{Ref: "r2://k/1"}},
@@ -488,6 +489,15 @@ func TestImageReferencesAreResolvedBeforeSending(t *testing.T) {
 	}
 	if req.Messages[0].Content[1].Image.Data != nil {
 		t.Error("the caller's request was changed")
+	}
+	// The resolver learns whose request it is working for, so that it can refuse a reference of another workspace.
+	if len(res.workspaces) == 0 {
+		t.Fatal("the resolver was not called")
+	}
+	for _, got := range res.workspaces {
+		if got != ws {
+			t.Errorf("the resolver saw workspace %v, want %v", got, ws)
+		}
 	}
 	// Both the token count and the message carry the bytes (the call above needed no count; ask for one).
 	if _, err := c.CountTokens(context.Background(), req); err != nil {
@@ -510,9 +520,17 @@ func TestImageReferencesAreResolvedBeforeSending(t *testing.T) {
 	}
 }
 
-type fakeResolver struct{ data map[string][]byte }
+type fakeResolver struct {
+	data       map[string][]byte
+	workspaces []ids.WorkspaceID
+}
 
-func (f *fakeResolver) ResolveImage(_ context.Context, ref string) (string, []byte, error) {
+func (f *fakeResolver) ResolveImage(ctx context.Context, ref string) (string, []byte, error) {
+	if ws, ok := WorkspaceFromContext(ctx); ok {
+		f.workspaces = append(f.workspaces, ws)
+	} else {
+		f.workspaces = append(f.workspaces, ids.WorkspaceID{})
+	}
 	d, ok := f.data[ref]
 	if !ok {
 		return "", nil, errors.New("not found")

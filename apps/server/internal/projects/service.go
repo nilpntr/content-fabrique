@@ -388,6 +388,9 @@ type Edit struct {
 	Created []ops.Created
 	// Warnings are the non-blocking issues of the batch.
 	Warnings []ops.Issue
+	// Replayed is set by ApplyOpsOnce when the author had made this version already: nothing was applied now, Created and
+	// Warnings are empty, and Version is the one stored earlier.
+	Replayed bool
 }
 
 // ApplyOps applies the batch of ops (a JSON array, see ops.ParseBatch) to version baseVersion of the project's timeline and
@@ -401,6 +404,20 @@ type Edit struct {
 //
 // The HTTP handler calls it with the user as author; the editor agent's edit_timeline tool calls it with the run as author.
 func (s *Service) ApplyOps(ctx context.Context, ws ids.WorkspaceID, id ids.ProjectID, baseVersion int, rawOps json.RawMessage, author ops.Author) (Edit, *Error) {
+	return s.applyOps(ctx, ws, id, baseVersion, rawOps, author, false)
+}
+
+// ApplyOpsOnce is ApplyOps for a caller that may repeat a call it cannot tell was made: the editor agent's tool call, which a
+// resumed run runs again when its worker died after the version was stored and before the result was. author.ID is the
+// idempotency key (run id and tool-use id, at most 128 characters) and must be unique to the call. Under the project's lock,
+// before anything else, it looks for a version that this author made: when there is one it is returned with Replayed set and
+// nothing is applied, whatever base_version the repeat names (the project has moved on since). The key lives in the version
+// itself (author_id), so the two cannot disagree.
+func (s *Service) ApplyOpsOnce(ctx context.Context, ws ids.WorkspaceID, id ids.ProjectID, baseVersion int, rawOps json.RawMessage, author ops.Author) (Edit, *Error) {
+	return s.applyOps(ctx, ws, id, baseVersion, rawOps, author, true)
+}
+
+func (s *Service) applyOps(ctx context.Context, ws ids.WorkspaceID, id ids.ProjectID, baseVersion int, rawOps json.RawMessage, author ops.Author, once bool) (Edit, *Error) {
 	if baseVersion < 0 || baseVersion > 1<<30 {
 		return Edit{}, invalid("base_version must be 0 or a version number")
 	}
@@ -414,6 +431,16 @@ func (s *Service) ApplyOps(ctx context.Context, ws ids.WorkspaceID, id ids.Proje
 		p, err := tx.GetProjectForUpdate(ctx, ws, id)
 		if err != nil {
 			return err
+		}
+		if once {
+			earlier, err := tx.GetTimelineVersionByAuthor(ctx, ws, id, string(author.Kind), author.ID)
+			switch {
+			case err == nil:
+				out.Version, out.Replayed = earlier, true
+				return nil
+			case !errors.Is(err, store.ErrNotFound):
+				return err
+			}
 		}
 		current := 0
 		if p.CurrentTimelineVersion != nil {

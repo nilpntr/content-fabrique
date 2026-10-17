@@ -45,6 +45,7 @@ func run(args []string) error {
 			// Object storage for the jobs that remove objects. Without the R2_* settings those jobs fail and are retried.
 			var (
 				objects  jobs.ObjectStore
+				storageC *storage.Client    // the same client, for the agents
 				ingester jobs.AssetIngester // nil without storage: asset_ingest jobs then wait (snoozed)
 			)
 			if cfg.ObjectStorageConfigured() {
@@ -52,7 +53,7 @@ func run(args []string) error {
 				if err != nil {
 					return nil, err
 				}
-				objects = client
+				objects, storageC = client, client
 				health.AddCheck(httpapi.Check{Name: "object-storage", Fn: client.Ready})
 				pipeline, err := newIngestPipeline(cfg, st, client, logger)
 				if err != nil {
@@ -76,7 +77,7 @@ func run(args []string) error {
 				Store:      st,
 				Objects:    objects,
 				Ingest:     ingester,
-				Register:   runtime.Register(newAgentRunner(st, logger)),
+				Register:   runtime.Register(newAgentRunner(cfg, st, storageC, logger)),
 				Logger:     logger,
 				UIAddr:     *riverUIAddr,
 				UIPassword: cfg.RiverUIPassword,

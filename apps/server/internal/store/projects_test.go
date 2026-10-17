@@ -328,4 +328,65 @@ func projectsSuite(t *testing.T, st *store.Store, suffix string) {
 			t.Errorf("GetTimelineVersion 3: err = %v, want ErrNotFound", err)
 		}
 	})
+
+	// P4-02a: what the editor agent reads and how it finds the version a repeated tool call made.
+	t.Run("the editor's queries are scoped", func(t *testing.T) {
+		p := newProject(wa, ua, a1, a2)
+		// Footage lists only ready assets; the suite's assets are still uploading, so there is none yet, in either workspace.
+		for _, w := range []store.Workspace{wa, wb} {
+			rows, err := st.ListProjectFootage(ctx, w.ID, p.ID)
+			if err != nil || len(rows) != 0 {
+				t.Fatalf("ListProjectFootage in %s = %+v, %v", w.Name, rows, err)
+			}
+		}
+		agentV := version(1, 0)
+		agentV.AuthorKind, agentV.AuthorID = store.AuthorAgent, "00000000-0000-7000-8000-000000000001:toolu_01"
+		if _, err := st.AddTimelineVersion(ctx, wa.ID, p.ID, agentV); err != nil {
+			t.Fatal(err)
+		}
+		got, err := st.GetTimelineVersionByAuthor(ctx, wa.ID, p.ID, store.AuthorAgent, agentV.AuthorID)
+		if err != nil || got.Version != 1 || got.AuthorID != agentV.AuthorID {
+			t.Fatalf("GetTimelineVersionByAuthor = %+v, %v", got, err)
+		}
+		for name, c := range map[string]struct {
+			ws           ids.WorkspaceID
+			kind, author string
+		}{
+			"another workspace": {wb.ID, store.AuthorAgent, agentV.AuthorID},
+			"another author":    {wa.ID, store.AuthorAgent, "00000000-0000-7000-8000-000000000001:toolu_02"},
+			"another kind":      {wa.ID, store.AuthorUser, agentV.AuthorID},
+		} {
+			if _, err := st.GetTimelineVersionByAuthor(ctx, c.ws, p.ID, c.kind, c.author); !errors.Is(err, store.ErrNotFound) {
+				t.Errorf("%s: err = %v, want ErrNotFound", name, err)
+			}
+		}
+
+		// The one unfinished editor run of a project.
+		if _, err := st.ActiveAgentRunForProject(ctx, wa.ID, p.ID, "editor"); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("before a run: err = %v", err)
+		}
+		run, err := st.CreateAgentRun(ctx, wa.ID, store.NewAgentRun{
+			Agent: "editor", Stage: "editor", ProjectID: p.ID.UUID, Input: json.RawMessage(`{}`), RoutingProfile: "dev-cheap",
+			Model: "claude-haiku-5-5", Effort: "medium", MaxTokens: 1000,
+			BudgetMicros: 100_000, BudgetTokens: 10_000, BudgetToolCalls: 5, BudgetWallClockMs: 60_000, BilledTo: store.BilledToTest,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := st.ActiveAgentRunForProject(ctx, wa.ID, p.ID, "editor"); err != nil || got.ID != run.ID {
+			t.Fatalf("active run = %+v, %v", got, err)
+		}
+		if _, err := st.ActiveAgentRunForProject(ctx, wb.ID, p.ID, "editor"); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("workspace B sees A's run: err = %v", err)
+		}
+		if _, err := st.ActiveAgentRunForProject(ctx, wa.ID, p.ID, "echo"); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("another agent: err = %v", err)
+		}
+		if _, err := st.RequestAgentRunCancel(ctx, wa.ID, run.ID, json.RawMessage(`{}`), json.RawMessage(`{"state":"cancelled"}`)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.ActiveAgentRunForProject(ctx, wa.ID, p.ID, "editor"); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("a cancelled run is still active: err = %v", err)
+		}
+	})
 }
