@@ -1,0 +1,70 @@
+{
+  "schema": "contentfabrique.timeline/v1",
+  "output": {
+    "format": "4:5",
+    "width": 1080,
+    "height": 1350,
+    "fps": 30,
+    "background": "#000000"
+  },
+  "tracks": [
+    {
+      "id": "main",
+      "type": "video",
+      "items": [
+        {
+          "id": "c1",
+          "asset_id": "ast_01jdsx72atvnb7ssgbc57zbxj9",
+          "source": {
+            "in_ms": 10000,
+            "out_ms": 16000
+          },
+          "at_ms": 0
+        }
+      ]
+    },
+    {
+      "id": "text",
+      "type": "text",
+      "items": [
+        {
+          "id": "t1",
+          "at_ms": 0,
+          "duration_ms": 2000,
+          "text": "HEAVY DAY",
+          "style": "title_outline",
+          "position": {
+            "x": 0.5,
+            "y": 0.2
+          },
+          "animation": "typewriter"
+        },
+        {
+          "id": "t2",
+          "at_ms": 2000,
+          "duration_ms": 2000,
+          "text": "Row 100 lb",
+          "style": "label_box",
+          "position": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "animation": "slide_up"
+        },
+        {
+          "id": "t3",
+          "at_ms": 4000,
+          "duration_ms": 2000,
+          "text": "8",
+          "style": "stat_big",
+          "position": {
+            "x": 0.7,
+            "y": 0.45
+          },
+          "animation": "pop_in"
+        }
+      ]
+    }
+  ],
+  "markers": []
+}

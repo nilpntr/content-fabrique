@@ -140,6 +140,30 @@ class CheckTest(unittest.TestCase):
             fails, _ = check.check(pol, comps, conf)
             self.assertTrue(any("source checksum" in f for f in fails), fails)
 
+    def test_font_component(self):
+        # A font is an inventory row of kind 'font': SIL OFL 1.1 is on the permissive list, the font file is pinned like a
+        # source tarball, and a changed licence text or font file fails.
+        ofl = "SIL OPEN FONT LICENSE Version 1.1\n"
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "doc" / "font-x").mkdir(parents=True)
+            (root / "doc" / "font-x" / "copyright").write_text(ofl)
+            (root / "media-tools").mkdir()
+            (root / "media-tools" / "inventory.tsv").write_text(
+                "kind\tname\tversion\tsource\tsha256\nfont\tfont-x\t1.0\tX (OFL-1.1)\tf00d\n")
+            (root / "media-tools" / "ffmpeg-configuration.txt").write_text(CONF)
+            comps, conf = check.load_components(root)
+            pol = policy_for({"font-x": ofl}, **{"font-x": {"binaryLicence": "OFL-1.1", "sourceSha256": "f00d"}})
+            fails, _ = check.check(pol, comps, conf)
+            self.assertEqual(fails, [])
+            pol["components"]["font-x"]["sourceSha256"] = "beef"
+            fails, _ = check.check(pol, comps, conf)
+            self.assertTrue(any("source checksum" in f for f in fails), fails)
+            pol["components"]["font-x"]["sourceSha256"] = "f00d"
+            pol["components"]["font-x"]["copyrightSha256"] = sha("an older licence text")
+            fails, _ = check.check(pol, comps, conf)
+            self.assertTrue(any("changed since the last review" in f for f in fails), fails)
+
     def test_tokens(self):
         t = "License: GPL-2+ with GCC exception or MIT\n\nLicense: BSD-3-clause\n Free text\n and more\n"
         self.assertEqual(check.tokens_of(t), ["BSD-3-clause", "GCC exception", "GPL-2+", "MIT"])

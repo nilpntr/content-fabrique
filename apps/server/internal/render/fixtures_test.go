@@ -17,28 +17,31 @@ const fixturesDir = "../../../../packages/schemas/timeline/fixtures"
 // update rewrites the golden plans and the golden frames: `go test ./internal/render -update`. A reviewer reads the diff.
 var update = flag.Bool("update", false, "rewrite the golden plans and golden frames")
 
-// renderFixtures returns the names of the render fixtures, from fixtures/render.txt.
+// renderFixtures returns the names of the render fixtures: the 20 of fixtures/render.txt (P3-03) and the 5 text and caption
+// fixtures of fixtures/render-text.txt (P3-04, a separate list so that the P3-01 fixture tests keep their count).
 func renderFixtures(t testing.TB) []string {
 	t.Helper()
-	f, err := os.Open(filepath.Join(fixturesDir, "render.txt")) //nolint:gosec // test fixture
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close() //nolint:errcheck // read-only
 	var names []string
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+	for _, list := range []string{"render.txt", "render-text.txt"} {
+		f, err := os.Open(filepath.Join(fixturesDir, list)) //nolint:gosec // test fixture
+		if err != nil {
+			t.Fatal(err)
 		}
-		names = append(names, strings.TrimSuffix(line, ".json"))
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			line := strings.TrimSpace(sc.Text())
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			names = append(names, strings.TrimSuffix(line, ".json"))
+		}
+		if err := sc.Err(); err != nil {
+			t.Fatal(err)
+		}
+		_ = f.Close()
 	}
-	if err := sc.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if len(names) != 20 {
-		t.Fatalf("want 20 render fixtures, have %d", len(names))
+	if len(names) != 25 {
+		t.Fatalf("want 25 render fixtures (20 in render.txt, 5 text and caption fixtures in render-text.txt), have %d", len(names))
 	}
 	return names
 }

@@ -458,9 +458,9 @@ func TestText(t *testing.T) {
 				t.Fatalf("%s: want %s, got %+v", js, code, res.Issues)
 			}
 		}
-		// An unknown style is only a warning until P3-04.
-		_, res := apply(t, base, `[{"op":"add_text","at_ms":0,"duration_ms":1000,"text":"x","style":"nope","anchor":"center"}]`)
-		if !res.OK() || len(res.Issues) != 1 || res.Issues[0].Code != timeline.CodeUnknownStyle || res.Issues[0].OpIndex != 0 {
+		// An unknown style is an error since P3-04 added the style registry: the version is refused and the op is named.
+		out, res := apply(t, base, `[{"op":"add_text","at_ms":0,"duration_ms":1000,"text":"x","style":"nope","anchor":"center"}]`)
+		if res.OK() || len(res.Issues) != 1 || res.Issues[0].Code != timeline.CodeUnknownStyle || res.Issues[0].OpIndex != 0 || !sameSpec(t, out, base) {
 			t.Fatalf("%+v", res.Issues)
 		}
 	})
@@ -667,13 +667,13 @@ func TestBatchSemantics(t *testing.T) {
 			t.Fatal("a typed nil op must fail, not panic")
 		}
 	})
-	t.Run("marks warnings of the result but still applies", func(t *testing.T) {
+	t.Run("an unknown style in the result blocks the batch", func(t *testing.T) {
 		out, res := apply(t, base, `[{"op":"update_text","id":"t1","style":"mystery"}]`)
-		if !res.OK() || len(res.Issues) != 1 || res.Issues[0].Severity != timeline.SeverityWarning {
+		if res.OK() || len(res.Issues) != 1 || res.Issues[0].Severity != timeline.SeverityError || res.Issues[0].Code != timeline.CodeUnknownStyle {
 			t.Fatalf("%+v", res.Issues)
 		}
-		if textItems(out)[0].Style != "mystery" {
-			t.Fatal("not applied")
+		if !sameSpec(t, out, base) {
+			t.Fatal("a refused batch must leave the spec as it was")
 		}
 	})
 }

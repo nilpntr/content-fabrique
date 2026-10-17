@@ -86,3 +86,27 @@ cat "$SRC/COPYING.GPLv2" "$SRC/COPYING.LGPLv2.1" >"$R/usr/share/doc/ffmpeg/copyr
 printf 'source\tffmpeg\t%s\thttps://ffmpeg.org/releases/ffmpeg-%s.tar.xz\t%s\n' \
   "$FFMPEG_VERSION" "$FFMPEG_VERSION" "$FFMPEG_SHA256" >>"$inv"
 /opt/ffmpeg/bin/ffmpeg -hide_banner -version | sed -n 's/^configuration: //p' >"$R/usr/share/media-tools/ffmpeg-configuration.txt"
+
+# The fonts (P3-04): the OFL-licensed families of fonts/manifest.tsv go to /usr/share/fonts/cf, which is the only directory
+# fontconfig reads, and each family's licence text goes to /usr/share/doc/font-<family>/copyright with a row in the inventory.
+# The build fails if a file differs from the SHA-256 in the manifest.
+fonts_src=/rootfs-src/fonts
+while IFS=$'\t' read -r kind family version spdx file want _; do
+  [ "$kind" = kind ] && continue
+  got=$(sha256sum "$fonts_src/$file" | cut -d' ' -f1)
+  if [ "$got" != "$want" ]; then
+    echo "$file: SHA-256 $got is not the $want of fonts/manifest.tsv" >&2
+    exit 1
+  fi
+  name="font-$(echo "$family" | tr 'A-Z ' 'a-z-')"
+  case "$kind" in
+    font)
+      cp "$fonts_src/$file" "$R/usr/share/fonts/cf/$file"
+      printf 'font\t%s\t%s\t%s\t%s\n' "$name" "$version" "$family ($spdx)" "$want" >>"$inv"
+      ;;
+    licence)
+      mkdir -p "$R/usr/share/doc/$name"
+      cp "$fonts_src/$file" "$R/usr/share/doc/$name/copyright"
+      ;;
+  esac
+done <"$fonts_src/manifest.tsv"

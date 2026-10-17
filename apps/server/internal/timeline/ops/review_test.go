@@ -66,7 +66,7 @@ func TestVersionRoundTripsThroughJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	batch := batchOf(t, `[{"op":"trim_item","id":"c3","out_ms":2600},
-		{"op":"add_text","at_ms":1000,"duration_ms":900,"text":"Hi","style":"title_bold","position":{"x":0.5,"y":0.4}},
+		{"op":"add_text","at_ms":1000,"duration_ms":900,"text":"Hi","style":"title_bold","position":{"x":0.5,"y":0.2}},
 		{"op":"set_sound","kind":"licensed_track","asset_id":"`+musicLicensed+`","license_id":"`+licence+`","gain_db":-9},
 		{"op":"snap_cuts_to_beats","grid":{"bpm":120,"first_beat_ms":0},"options":{"max_shift_ms":300,"write_markers":true}},
 		{"op":"set_captions","style":"chunk"}]`)

@@ -32,8 +32,9 @@ func xfadeName(transition string) string {
 	return ""
 }
 
-// videoGraph returns the statements of the video part of the filter_complex. Its output pad is [vout].
-func (c *compiler) videoGraph() ([]string, error) {
+// videoGraph returns the statements of the video part of the filter_complex. Its output pad is [vout]: the joined clips, with
+// the ass filter after the join when there is something to draw (text, captions, the preview watermark).
+func (c *compiler) videoGraph(subs *Subtitles) ([]string, error) {
 	var stmts []string
 	for _, cl := range c.clips {
 		s, err := c.clipGraph(cl)
@@ -42,7 +43,11 @@ func (c *compiler) videoGraph() ([]string, error) {
 		}
 		stmts = append(stmts, s...)
 	}
-	return append(stmts, c.joinGraph()...), nil
+	if subs == nil {
+		return append(stmts, c.joinGraph("vout")...), nil
+	}
+	stmts = append(stmts, c.joinGraph("vj")...)
+	return append(stmts, chain([]string{"vj"}, []string{subs.filter()}, "vout")), nil
 }
 
 // clipGraph is the graph of one clip, ending in the pad [v<idx>]: trim on the source, setpts to restart the clock,
@@ -148,10 +153,10 @@ func (c *compiler) clipGraph(cl clip) ([]string, error) {
 
 // joinGraph joins the clips into [vout]: a plain concat when every join is a cut, otherwise a chain that adds one clip
 // at a time, with xfade for a transition and concat for a cut. xfade offsets come from the snapped cut list.
-func (c *compiler) joinGraph() []string {
+func (c *compiler) joinGraph(final string) []string {
 	n := len(c.clips)
 	if n == 1 {
-		return []string{"[v0]null[vout]"}
+		return []string{"[v0]null[" + final + "]"}
 	}
 	allCuts := true
 	for _, cl := range c.clips[1:] {
@@ -164,7 +169,7 @@ func (c *compiler) joinGraph() []string {
 		for i := range c.clips {
 			fmt.Fprintf(&in, "[v%d]", i)
 		}
-		return []string{fmt.Sprintf("%sconcat=n=%d:v=1:a=0[vout]", in.String(), n)}
+		return []string{fmt.Sprintf("%sconcat=n=%d:v=1:a=0[%s]", in.String(), n, final)}
 	}
 
 	var stmts []string
@@ -173,7 +178,7 @@ func (c *compiler) joinGraph() []string {
 		cl := c.clips[i]
 		out := fmt.Sprintf("j%d", i)
 		if i == n-1 {
-			out = "vout"
+			out = final
 		}
 		pair := []string{acc, fmt.Sprintf("v%d", i)}
 		if cl.transition == timeline.TransitionCut {

@@ -45,11 +45,17 @@ To review a version bump, `--print-shas` prints each component's current copyrig
 
 ## Notes for reviewers
 
-- The final image is `FROM scratch`: ffmpeg, ffprobe, the shared libraries they load, fontconfig's config and an empty fonts
-  directory. No shell, no coreutils, no package manager.
+- The final image is `FROM scratch`: ffmpeg, ffprobe, the shared libraries they load, fontconfig's config and the title and
+  caption fonts (below). No shell, no coreutils, no package manager.
 - libzimg (WTFPL) is included for HDR to SDR tone mapping in P1-04. WTFPL is permissive but is not one of the four names in
   D-16, so it is listed explicitly.
-- Fonts: `/usr/share/fonts/cf` is empty. Licensed fonts for captions (P3-04) are added there with their own licence entry.
+- Fonts (P3-04): `/usr/share/fonts/cf` holds three OFL-1.1 fonts, Anton, Inter and Montserrat, each with its licence text in the
+  image (`/usr/share/doc/font-<family>/copyright`) and a row in the inventory. The fonts are vendored under
+  `packages/media-tools/fonts` with their licence texts and `manifest.tsv` (version, source URL and SHA-256 of each file);
+  `scripts/fetch-fonts.sh` downloads them from the official repositories at the pinned versions and checks every hash, and
+  `fetch-fonts.sh --check` (CI) verifies the committed files. Only OFL-1.1 fonts are allowed (D-16); the spec cannot name a font,
+  the style registry (`apps/server/internal/timeline/style`) picks one per style. The fonts are embedded unmodified, so the OFL
+  reserved font names stay with their authors. Adding a font means a manifest row, its licence text and an allowlist entry.
 - The sandbox, not the licence, is what contains ffmpeg's attack surface: see `apps/server/internal/sandbox`.
 
 ## Generated inventory
@@ -62,6 +68,9 @@ To review a version bump, `--print-shas` prints each component's current copyrig
 | Component | Version | Licence of what ships | Status | Licence tokens in its copyright file |
 |---|---|---|---|---|
 | ffmpeg | 8.1.3 | GPL-2.0-or-later | named exception | prose only |
+| font-anton | google/fonts@cee74d7ca45d | OFL-1.1 | permissive | prose only |
+| font-inter | 4.1 | OFL-1.1 | permissive | prose only |
+| font-montserrat | 7.222 | OFL-1.1 | permissive | prose only |
 | libass9 | 1:0.17.3-1+deb13u1 | ISC | permissive | BSD-2-clause, GPL-2+, ISC, NTP, Unlicense |
 | libatomic1 | 14.2.0-19 | GPL-3.0-or-later WITH GCC-exception-3.1 | named exception | prose only |
 | libbrotli1 | 1.1.0-2+b7 | MIT | permissive | MIT |

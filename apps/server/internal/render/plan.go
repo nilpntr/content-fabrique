@@ -35,11 +35,13 @@ type Plan struct {
 	// Loudnorm is nil when the mix has no signal to normalise (a silent timeline).
 	Loudnorm *LoudnormPlan `json:"loudnorm,omitempty"`
 
-	// PendingText lists the text items that are not drawn yet (P3-04), PendingCaptions says that an enabled captions
-	// track is not drawn yet, and PendingWatermark that the profile wants a watermark that is not drawn yet.
-	PendingText      []PendingText `json:"pending_text"`
-	PendingCaptions  bool          `json:"pending_captions"`
-	PendingWatermark bool          `json:"pending_watermark"`
+	// Subtitles is the generated ASS script for the text items, the captions and the preview watermark (P3-04), burned in
+	// by the ass filter that ends the video graph; nil when there is nothing to draw. Execute writes the script and the
+	// fonts it names into the work directory before ffmpeg runs.
+	Subtitles *Subtitles `json:"subtitles,omitempty"`
+	// Warnings lists what was left out because it could not be drawn safely: a text item or a caption whose box did not fit the
+	// safe zone (text_dropped, caption_dropped).
+	Warnings []Warning `json:"warnings,omitempty"`
 }
 
 // Size is a width and height in pixels.
@@ -102,14 +104,6 @@ type SoundCue struct {
 	// DurationMs is the effective duration: the item's duration_ms, or everything up to the end of the timeline.
 	DurationMs int64   `json:"duration_ms"`
 	GainDB     float64 `json:"gain_db"`
-}
-
-// PendingText is a text item that Compile left out because text is drawn by P3-04.
-type PendingText struct {
-	ItemID     string `json:"item_id"`
-	AtMs       int64  `json:"at_ms"`
-	DurationMs int64  `json:"duration_ms"`
-	Style      string `json:"style"`
 }
 
 // LoudnormPlan describes the loudness normalisation of the mix.

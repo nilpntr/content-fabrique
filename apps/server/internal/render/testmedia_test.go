@@ -315,6 +315,11 @@ func testRunner(t testing.TB) media.Runner {
 		}
 		roots = append(roots, r)
 	}
+	// -docker-image renders the golden fixtures through the media-tools image (the host ffmpeg still makes the test media and
+	// extracts the frames). libass differs a little between versions, so the committed text frames are made this way.
+	if *dockerImage != "" {
+		return &media.SandboxRunner{Provider: sandbox.NewDocker(sandbox.Policy{AllowedRoots: roots}), Image: *dockerImage, Limits: DefaultLimits()}
+	}
 	return &media.SandboxRunner{Provider: sandbox.NewLocal(sandbox.Policy{AllowedRoots: roots}), Limits: DefaultLimits()}
 }
 
@@ -329,6 +334,6 @@ func mediaResolver(dir string, cat timeline.MemoryCatalog) AssetResolver {
 		if a.Kind == timeline.AssetAudio {
 			ext = ".m4a"
 		}
-		return ResolvedAsset{Location: filepath.Join(dir, assetID+ext), HasAudio: true}, nil
+		return ResolvedAsset{Location: filepath.Join(dir, assetID+ext), HasAudio: true, Transcript: fixtureTranscript(assetID, a.DurationMs)}, nil
 	})
 }
