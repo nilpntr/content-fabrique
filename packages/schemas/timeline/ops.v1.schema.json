@@ -61,6 +61,9 @@
     },
     {
       "$ref": "#/$defs/set_speed_ramp"
+    },
+    {
+      "$ref": "#/$defs/add_sfx"
     }
   ],
   "$defs": {
@@ -187,10 +190,18 @@
             "warm",
             "cool",
             "bw",
-            "matte"
+            "matte",
+            "auto",
+            "gym_moody"
           ],
           "title": "Preset",
-          "description": "A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white) or matte (lifted blacks)."
+          "description": "A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white), matte (lifted blacks), auto (a mild contrast curve that keeps blacks and whites where they are, plus the clip's exposure_ev nudge, so shots from different angles meet at one exposure without washing out low-key footage) or gym_moody (deep blacks, warm skin, a slight vignette)."
+        },
+        "match": {
+          "type": "boolean",
+          "default": false,
+          "title": "Match exposure",
+          "description": "True to correct the clip's exposure by its exposure_ev hint (from the analysis; a nudge of at most 0.7 stops, black point kept) before the preset, so shots from different angles meet at one exposure. The preset auto always does this, whatever match says. Default false. Without an exposure_ev on the clip it changes nothing."
         }
       }
     },
@@ -444,6 +455,9 @@
         },
         "look": {
           "$ref": "#/$defs/look"
+        },
+        "exposure_ev": {
+          "$ref": "#/$defs/exposureEv"
         },
         "transition_in": {
           "$ref": "#/$defs/transition"
@@ -1373,7 +1387,7 @@
     "set_look": {
       "type": "object",
       "title": "set_look",
-      "description": "Set the colour look of a clip. Without id it applies to every clip on the main track.",
+      "description": "Set the colour look of a clip. Without id it applies to every clip on the main track. Presets: none, punchy, warm, cool, bw, matte, auto (a mild contrast curve that keeps blacks and whites, plus each clip's exposure_ev nudge, so shots from different angles meet at one exposure) and gym_moody (deep blacks, warm skin, a slight vignette: the grade for gym footage). match true also corrects each clip's exposure by its exposure_ev hint (a nudge of at most 0.7 stops, black point kept; auto always does) before the preset (left out, match keeps what the clip had). exposure_ev sets that hint on one clip (it needs id; 0 clears it, and replace_source clears it too); the analysis writes it, so only give it when you know the clip's exposure; it is -1 to 1 and must not come from a clip's mean brightness (low-key footage is dark and correct).",
       "additionalProperties": false,
       "required": [
         "op",
@@ -1397,10 +1411,21 @@
             "warm",
             "cool",
             "bw",
-            "matte"
+            "matte",
+            "auto",
+            "gym_moody"
           ],
           "title": "Preset",
-          "description": "A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white) or matte (lifted blacks)."
+          "description": "A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white), matte (lifted blacks), auto (a mild contrast curve that keeps blacks and whites where they are, plus the clip's exposure_ev nudge, so shots from different angles meet at one exposure without washing out low-key footage) or gym_moody (deep blacks, warm skin, a slight vignette)."
+        },
+        "match": {
+          "type": "boolean",
+          "default": false,
+          "title": "Match exposure",
+          "description": "True to correct the clip's exposure by its exposure_ev hint (from the analysis; a nudge of at most 0.7 stops, black point kept) before the preset, so shots from different angles meet at one exposure. The preset auto always does this, whatever match says. Default false. Without an exposure_ev on the clip it changes nothing."
+        },
+        "exposure_ev": {
+          "$ref": "#/$defs/exposureEv"
         }
       }
     },
@@ -1665,6 +1690,59 @@
         },
         "points": {
           "$ref": "#/$defs/speedRamp"
+        }
+      }
+    },
+    "exposureEv": {
+      "type": "number",
+      "minimum": -1,
+      "maximum": 1,
+      "title": "Exposure hint",
+      "description": "A small nudge, -1 to 1 stops (EV): how much brighter this clip is than the exposure the edit should have (positive: too bright, to be darkened; negative: too dark, to be lifted). It must come from highlight or midtone percentiles of the clip, never from its mean brightness, because a low-key clip (black wall, lit subject) has a low mean and is correctly exposed. The renderer applies the opposite, limited to 0.7 stops and ignoring hints under 0.15, with a highlight-preserving curve that keeps the black point, when look.match is true or the preset is auto. Without it, nothing is corrected."
+    },
+    "sfxName": {
+      "enum": [
+        "whoosh",
+        "impact",
+        "riser",
+        "swish"
+      ],
+      "title": "Effect",
+      "description": "whoosh, impact, riser or swish."
+    },
+    "add_sfx": {
+      "type": "object",
+      "title": "add_sfx",
+      "description": "Add a generated sound effect to the audio track (created when there is none): whoosh (0.6 s pass-by, for a whip or a cut), impact (0.8 s low hit, for a punch-in or the drop), riser (1.5 s rising build that peaks at its end, so start it 1.5 s before the moment it leads to) or swish (0.3 s quick air pass). The effect is synthesised by us, needs no asset or licence and is always in the render and the export. It starts at at_ms (inside the timeline; it is cut at the end) and is mixed after the loudness normalisation at a fixed level plus gain_db, so it stays an accent. Without id it gets the next free \"s<n>\". Move it with move_item (at_ms) and remove it with remove_sound.",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "sfx",
+        "at_ms"
+      ],
+      "properties": {
+        "op": {
+          "const": "add_sfx",
+          "title": "Op",
+          "description": "\"add_sfx\"."
+        },
+        "id": {
+          "$ref": "#/$defs/itemId",
+          "title": "Sound id",
+          "description": "Optional id for the new effect. Without it the next free \"s<n>\" is used. It must not be in use anywhere in the timeline."
+        },
+        "sfx": {
+          "$ref": "#/$defs/sfxName"
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms",
+          "title": "Start",
+          "description": "When the effect starts in the output, in ms."
+        },
+        "gain_db": {
+          "$ref": "#/$defs/gainDb",
+          "title": "Gain",
+          "description": "Volume change in dB, -30 to +6. Default 0."
         }
       }
     }

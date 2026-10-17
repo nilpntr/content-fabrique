@@ -169,6 +169,25 @@ describe("motion fixtures (P3-10)", () => {
   });
 });
 
+describe("look and sound effect fixtures (P3-10 part B)", () => {
+  const listed = readFileSync(join(fixtures, "render-looks.txt"), "utf8").split("\n").filter(Boolean);
+  const specs = listed.map((f) => readJson(join(fixtures, "valid", f)));
+
+  it("covers every format, the new looks, match with a hint and every sound effect", () => {
+    expect(new Set(specs.map((s) => s.output.format))).toEqual(new Set(["9:16", "1:1", "4:5", "16:9"]));
+    const video = specs.flatMap((s) => s.tracks.find((t: Json) => t.type === "video").items as Json[]);
+    const presets = new Set(video.map((c) => c.look?.preset));
+    expect(presets.has("auto") && presets.has("gym_moody")).toBe(true);
+    expect(video.some((c) => c.look?.match === true && typeof c.exposure_ev === "number")).toBe(true);
+    for (const c of video) if (c.exposure_ev !== undefined) expect(Math.abs(c.exposure_ev)).toBeLessThanOrEqual(1);
+    for (const s of specs) {
+      const sounds = s.tracks.find((t: Json) => t.type === "audio").items as Json[];
+      expect(new Set(sounds.map((a) => a.sfx)), s.output.format).toEqual(new Set(["whoosh", "impact", "riser", "swish"]));
+      for (const a of sounds) expect(a.export).toBe("licensed");
+    }
+  });
+});
+
 describe("the schema", () => {
   const base = () => structuredClone(readJson(join(fixtures, "valid", "v30_full_edit.json")));
   const main = (s: Json) => s.tracks.find((t: Json) => t.type === "video");

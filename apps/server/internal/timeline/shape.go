@@ -37,6 +37,7 @@ var (
 		string(AudioTrendSound):    reflect.TypeFor[TrendSound](),
 		string(AudioLicensedTrack): reflect.TypeFor[LicensedTrack](),
 		string(AudioCreatorAudio):  reflect.TypeFor[CreatorAudio](),
+		string(AudioSFX):           reflect.TypeFor[SFX](),
 	}
 )
 

@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/nilpntr/content-fabrique/internal/timeline"
@@ -16,6 +17,43 @@ var looks = map[string]string{
 	"cool":   "format=gbrp,curves=r='0/0 0.5/0.45 1/1':b='0/0 0.5/0.56 1/1',format=yuv420p,eq=saturation=1.03",
 	"bw":     "eq=saturation=0:contrast=1.1",
 	"matte":  "format=gbrp,curves=all='0/0.07 1/0.93',format=yuv420p,eq=saturation=0.85:contrast=0.95",
+	// auto (P3-10 part B) is a mild S-curve that keeps the black and white points where they are (a low-key frame, black wall and
+	// lit subject, keeps its blacks), plus the clip's exposure_ev nudge (exposureFilter, applied for this preset whatever
+	// look.match says). It never measures the picture: the compiler has no pass that could, and a mean-brightness measure would
+	// wash out low-key footage anyway. The exposure hint comes from the analysis, from percentiles, and is bounded.
+	"auto": "format=gbrp,curves=all='0/0 0.25/0.235 0.75/0.765 1/1',format=yuv420p",
+	// gym_moody: deep blacks (the toe pulled down), warm skin (red up, blue down in the mids), a little less saturation and
+	// more contrast, and a slight vignette with the filter's random dither off.
+	"gym_moody": "format=gbrp,curves=r='0/0 0.12/0.07 0.5/0.53 1/1':g='0/0 0.12/0.07 0.5/0.49 1/1':b='0/0 0.12/0.08 0.5/0.45 1/0.97',format=yuv420p,eq=saturation=0.92:contrast=1.08,vignette=angle=0.8:dither=0",
+}
+
+// The exposure nudge (look.match, and the preset auto): the hint is bounded by the spec to -1 to 1 stops, the applied correction
+// to exposureMaxEV, and a hint under exposureDeadEV is left alone.
+const (
+	exposureMaxEV  = 0.7
+	exposureDeadEV = 0.15
+	// exposureKnee is where the gain turns into the shoulder, as a fraction of the luma range.
+	exposureKnee = 0.5
+)
+
+// exposureFilter is the correction of a clip whose exposure hint is ev stops brighter than the target. It scales the luma by
+// G = 2^-ev (ev limited to exposureMaxEV, so G is within 0.62 and 1.62) below the knee, which keeps the black point where it is
+// (the 5th percentile of a low-key frame hardly moves), and above the knee runs a straight line from (knee, knee G) to the
+// white point, which does not move either: highlights are preserved, not clipped. It works on 8-bit planar YUV in limited
+// range, which the clip is converted to in front of it, and leaves chroma alone. It returns nothing for a hint too small to
+// matter.
+func exposureFilter(ev float64) []string {
+	if math.Abs(ev) < exposureDeadEV {
+		return nil
+	}
+	ev = math.Max(-exposureMaxEV, math.Min(exposureMaxEV, ev))
+	g := math.Exp2(-ev)
+	knee := exposureKnee
+	top := knee * g                 // where the knee lands
+	slope := (1 - top) / (1 - knee) // the shoulder to the white point
+	x := "((val-16)/219)"
+	return []string{"format=yuv420p", fmt.Sprintf("lutyuv=y='clip(16+219*if(lt(%s,%s),%s*%s,%s+%s*(%s-%s)),16,235)'",
+		x, num(knee), x, num(round6(g)), num(round6(top)), num(round6(slope)), x, num(knee))}
 }
 
 // xfadeName maps a transition type to the xfade transition that renders it, from a fixed list: nothing from the spec is
@@ -123,6 +161,14 @@ func (c *compiler) clipGraph(cl clip) ([]string, error) {
 		return nil, err
 	}
 	tail = append(tail, cam.filters()...)
+	// look.match, and the preset auto: correct the clip's exposure by its hint, before the preset.
+	if it.Look != nil && it.Look.AppliesExposure() && it.ExposureEv != nil {
+		ev := *it.ExposureEv
+		if math.IsNaN(ev) || ev < -1 || ev > 1 {
+			return nil, fmt.Errorf("%w: clip %s has exposure_ev %s outside -1 to 1", ErrInvalidSpec, it.ID, num(ev))
+		}
+		tail = append(tail, exposureFilter(ev)...)
+	}
 	if lookFilter != "" {
 		tail = append(tail, lookFilter)
 	}

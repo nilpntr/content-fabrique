@@ -1,0 +1,7 @@
+{
+  "op": "set_look",
+  "id": "c2",
+  "preset": "gym_moody",
+  "match": true,
+  "exposure_ev": -0.8
+}
