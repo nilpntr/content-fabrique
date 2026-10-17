@@ -113,7 +113,11 @@ func (c *checker) checkMain(main *VideoTrack) {
 				"item %s ends at %d ms but asset %s is %d ms long; set source.out_ms to at most %d",
 				it.ID, it.Source.OutMs, it.AssetID, asset.DurationMs, asset.DurationMs)
 		}
-		if dur < MinShotMs {
+		if dur < MinShotMs && it.HasRamp() {
+			c.add(CodeShotTooShort, path,
+				"item %s plays for %d ms on a speed ramp (source %d to %d ms); a shot must play for at least %d ms. Lengthen its source range, or lower the speeds of the ramp points (set_speed would replace the ramp)",
+				it.ID, dur, it.Source.InMs, it.Source.OutMs, MinShotMs)
+		} else if dur < MinShotMs {
 			c.add(CodeShotTooShort, path,
 				"item %s plays for %d ms (source %d to %d ms at speed %s); a shot must play for at least %d ms. Lengthen its source range or slow it down",
 				it.ID, dur, it.Source.InMs, it.Source.OutMs, num(it.SpeedOrDefault()), MinShotMs)
