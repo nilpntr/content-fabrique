@@ -7,7 +7,8 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage } from "@/co
 import { Kbd } from "@/components/ui/kbd";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { useHotkey, useModKey } from "@/hooks/use-hotkey";
-import { NAV_ITEMS } from "@/nav";
+import { MAIN_SCROLL_ID } from "@/lib/scroll";
+import { useActiveNavItem } from "@/nav";
 import { cn } from "@/lib/utils";
 
 function useScrolled(threshold = 4) {
@@ -24,19 +25,21 @@ function useScrolled(threshold = 4) {
   return { ref, scrolled };
 }
 
-export function AppShell() {
+export function AppShell({ defaultSidebarOpen = true }: { defaultSidebarOpen?: boolean }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const title = NAV_ITEMS.find((item) => item.to === pathname)?.title ?? "Not found";
+  const activeItem = useActiveNavItem();
+  const title = activeItem?.title ?? "Not found";
   const modKey = useModKey();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const { ref, scrolled } = useScrolled();
   useHotkey("k", () => setPaletteOpen((open) => !open), { mod: true });
 
   return (
-    <SidebarProvider>
-      <AppSidebar />
+    <SidebarProvider defaultOpen={defaultSidebarOpen}>
+      <AppSidebar active={activeItem} />
       <SidebarInset
         ref={ref}
+        data-scroll-restoration-id={MAIN_SCROLL_ID}
         className="isolate h-svh overflow-y-auto bg-background shadow-soft ring-1 ring-border md:h-[calc(100svh-1rem)] md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-soft"
       >
         <div aria-hidden className="page-glow pointer-events-none absolute inset-x-0 top-0 -z-10 h-[24rem]" />

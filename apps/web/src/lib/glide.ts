@@ -1,8 +1,8 @@
-export function prefersReducedMotion(): boolean {
+function prefersReducedMotion(): boolean {
   return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 }
 
-export function motion(name: string): string {
+function motion(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 

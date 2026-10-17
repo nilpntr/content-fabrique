@@ -1,4 +1,5 @@
 import { cardClassName, PagePlaceholder } from "@/components/page-placeholder";
+import { APP_NAME } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { notify } from "@/components/ui/toast";
@@ -19,7 +20,7 @@ export function SettingsPage() {
           </label>
           <p className="mt-0.5 text-[13px] text-muted-foreground">Shown in the sidebar and in page titles.</p>
         </div>
-        <Input id="workspace-name" name="workspace" defaultValue="Dashboard" autoComplete="off" />
+        <Input id="workspace-name" name="workspace" defaultValue={APP_NAME} autoComplete="off" />
         <div className="flex items-center gap-2">
           <Button type="submit">Save changes</Button>
           <Button type="reset" variant="ghost">

@@ -19,13 +19,32 @@ test("server render returns the light snapshot without reading the DOM", () => {
 });
 
 test("the head script sets the dark class from storage, else from the system", () => {
-  localStorage.setItem("dashboard-theme", "dark");
+  localStorage.setItem("cf-theme", "dark");
   new Function(THEME_SCRIPT)();
   expect(document.documentElement.classList.contains("dark")).toBe(true);
 
-  localStorage.setItem("dashboard-theme", "light");
+  localStorage.setItem("cf-theme", "light");
   new Function(THEME_SCRIPT)();
   expect(document.documentElement.classList.contains("dark")).toBe(false);
+});
+
+test("the head script moves a dashboard-theme value to cf-theme once", () => {
+  localStorage.setItem("dashboard-theme", "dark");
+  new Function(THEME_SCRIPT)();
+  expect(document.documentElement.classList.contains("dark")).toBe(true);
+  expect(localStorage.getItem("cf-theme")).toBe("dark");
+  expect(localStorage.getItem("dashboard-theme")).toBeNull();
+
+  // The new key wins over a stale old one, and an invalid old value is not migrated.
+  localStorage.setItem("cf-theme", "light");
+  localStorage.setItem("dashboard-theme", "dark");
+  new Function(THEME_SCRIPT)();
+  expect(localStorage.getItem("cf-theme")).toBe("light");
+
+  localStorage.clear();
+  localStorage.setItem("dashboard-theme", "purple");
+  new Function(THEME_SCRIPT)();
+  expect(localStorage.getItem("cf-theme")).toBeNull();
 });
 
 test("the head script survives blocked storage", () => {
@@ -47,7 +66,7 @@ test("toggling still works when storage is blocked", () => {
 
 test("the head script ignores an invalid stored value and follows the system", () => {
   const matchMedia = vi.spyOn(window, "matchMedia").mockReturnValue({ matches: false } as MediaQueryList);
-  localStorage.setItem("dashboard-theme", "purple");
+  localStorage.setItem("cf-theme", "purple");
   new Function(THEME_SCRIPT)();
   expect(document.documentElement.classList.contains("dark")).toBe(false);
   matchMedia.mockReturnValue({ matches: true } as MediaQueryList);
@@ -95,5 +114,28 @@ test("with storage blocked, an in-session choice survives a system theme change"
   act(() => theme.setTheme("dark"));
   systemChange(false);
   expect(document.documentElement.classList.contains("dark")).toBe(true);
+  view.unmount();
+});
+
+test("a saved dashboard-theme still counts when it cannot be moved, so the system theme does not override it", async () => {
+  localStorage.setItem("dashboard-theme", "dark");
+  document.documentElement.classList.add("dark");
+  vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+    throw new DOMException("blocked", "QuotaExceededError");
+  });
+  const { view, systemChange } = await mountWithSystemEvents();
+  systemChange(false);
+  expect(document.documentElement.classList.contains("dark")).toBe(true);
+  view.unmount();
+});
+
+test("the hook moves a dashboard-theme value to cf-theme", async () => {
+  localStorage.setItem("dashboard-theme", "light");
+  document.documentElement.classList.add("dark");
+  const { view, systemChange } = await mountWithSystemEvents();
+  systemChange(true);
+  expect(document.documentElement.classList.contains("dark")).toBe(true);
+  expect(localStorage.getItem("cf-theme")).toBe("light");
+  expect(localStorage.getItem("dashboard-theme")).toBeNull();
   view.unmount();
 });
