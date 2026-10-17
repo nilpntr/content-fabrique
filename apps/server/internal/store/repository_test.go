@@ -322,6 +322,7 @@ func repositorySuite(t *testing.T, st *store.Store) {
 	t.Run("projects", func(t *testing.T) { projectsSuite(t, st, suffix) })
 	t.Run("renders", func(t *testing.T) { rendersSuite(t, st, suffix) })
 	t.Run("usage ledger", func(t *testing.T) { usageSuite(t, st, suffix) })
+	t.Run("agent runs", func(t *testing.T) { agentRunsSuite(t, st, suffix) })
 }
 
 // ghostUserID and ghostWorkspaceID are well-formed keys that no row has.

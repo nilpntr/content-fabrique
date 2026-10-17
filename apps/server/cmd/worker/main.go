@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/app"
 	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
@@ -82,6 +83,7 @@ func run(args []string) error {
 				Objects:    objects,
 				Ingest:     ingester,
 				Render:     renderer,
+				Register:   runtime.Register(newAgentRunner(st, logger)),
 				Logger:     logger,
 				UIAddr:     *riverUIAddr,
 				UIPassword: cfg.RiverUIPassword,

@@ -68,6 +68,9 @@ func Workers(deps Deps) (*river.Workers, error) {
 	if err := river.AddWorkerSafely(w, &UploadsExpireWorker{deps: deps}); err != nil {
 		return nil, err
 	}
+	if err := river.AddWorkerSafely(w, &AgentRunsResumeWorker{deps: deps}); err != nil {
+		return nil, err
+	}
 	if err := river.AddWorkerSafely(w, &RenderWorker{deps: deps}); err != nil {
 		return nil, err
 	}

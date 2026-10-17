@@ -73,6 +73,7 @@ func DefaultConfig() Config {
 		{Name: QueueDefault, MaxWorkers: 10},
 		{Name: QueueMaintenance, MaxWorkers: 2},
 		{Name: QueueMedia, MaxWorkers: DefaultMediaConcurrency},
+		{Name: QueueAgents, MaxWorkers: DefaultAgentConcurrency},
 	}}
 }
 

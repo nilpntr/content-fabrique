@@ -13,6 +13,55 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/ids"
 )
 
+type AgentEvent struct {
+	RunID       uuid.UUID
+	Seq         int32
+	WorkspaceID ids.WorkspaceID
+	Type        string
+	Payload     json.RawMessage
+	CreatedAt   time.Time
+}
+
+type AgentRun struct {
+	ID                uuid.UUID
+	WorkspaceID       ids.WorkspaceID
+	Agent             string
+	Stage             string
+	ParentRunID       pgtype.UUID
+	ProjectID         ids.ProjectID
+	Status            string
+	Input             json.RawMessage
+	Output            []byte
+	RoutingProfile    string
+	Model             string
+	Effort            string
+	MaxTokens         int32
+	Escalated         bool
+	InputTokens       int64
+	CacheWriteTokens  int64
+	CacheReadTokens   int64
+	OutputTokens      int64
+	ToolCalls         int32
+	CostMicros        int64
+	ActiveMs          int64
+	BudgetMicros      int64
+	BudgetTokens      int64
+	BudgetToolCalls   int32
+	BudgetWallClockMs int64
+	BilledTo          string
+	FailureReason     *string
+	CancelRequestedAt *time.Time
+	HeartbeatAt       *time.Time
+	Epoch             int64
+	Resumes           int32
+	ResumeEnqueuedAt  *time.Time
+	LastSeq           int32
+	StartedAt         *time.Time
+	FinishedAt        *time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
 type Asset struct {
 	ID             ids.AssetID
 	WorkspaceID    ids.WorkspaceID
