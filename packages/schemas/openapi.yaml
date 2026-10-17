@@ -868,6 +868,12 @@ paths:
         `402 credits_exhausted` and no run is created (a workspace with no active plan gets `402 plan_required`, as everywhere). A workspace
         on a BYOK plan (studio) pays for the model with its own Anthropic key: until it has one the start is refused with
         `402 byok_key_required` and no run is created.
+
+        A run that is cancelled before it made anything, finds nothing to change, or fails for a reason of the creator's own (it used
+        its whole budget without anything usable, the model declined the content, the project no longer fits the model) is released:
+        no credits are charged, but it has used model time. A workspace may have 5 such runs per UTC day on every plan; the next start
+        is refused with `429 too_many_uncharged_runs` until the next UTC day. Runs that cost nothing, runs that are charged, and
+        failures on our side do not count.
         The credits are charged when the run succeeds and released when it fails. When the creator cancels it they are charged if the
         run had already made a timeline version (the work is in the project), and released if it had not. `GET /v1/me` has the balance.
 
@@ -905,6 +911,12 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: "`assets_not_usable`: the project has no ready video clip to edit."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: "`too_many_uncharged_runs`: the workspace has had today's editor runs that spent money and ended without a charge."
           content:
             application/json:
               schema:
@@ -1602,6 +1614,7 @@ components:
         - run_not_waiting # 409: the run is not waiting for an answer
         - model_not_configured # 503: the server has no model access (ANTHROPIC_API_KEY or LLM_MODE) or no such routing profile
         - edit_not_charged # 422: a final render needs an edit of the project that was charged (run the editor first)
+        - too_many_uncharged_runs # 429: the workspace has had its day's editor runs that spent money and ended without a charge (see startEdit)
         - byok_key_required # 402: the plan uses the workspace's own Anthropic key (BYOK) and none is set up, so no model run can start
         - version_not_charged # 422: a final render of a version that contains editor work that was not charged (a failed or released run)
 

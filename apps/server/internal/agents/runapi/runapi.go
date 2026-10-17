@@ -120,6 +120,8 @@ func (h *Runs) StartEdit(ctx context.Context, req api.StartEditRequestObject) (a
 			return api.StartEdit404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(body(f))}, nil
 		case 409:
 			return api.StartEdit409JSONResponse(body(f)), nil
+		case 429:
+			return api.StartEdit429JSONResponse(body(f)), nil
 		case 422:
 			return api.StartEdit422JSONResponse(body(f)), nil
 		case 500:
@@ -206,6 +208,13 @@ func (h *Runs) startEdit(ctx context.Context, req api.StartEditRequestObject) (s
 	case errors.Is(err, store.ErrInsufficientCredits):
 		// The stable code the web app opens its upgrade dialog on. The message carries no numbers: the balance is in GET /v1/me.
 		return store.AgentRun{}, &failure{http.StatusPaymentRequired, api.ErrorCodeCreditsExhausted, "this workspace does not have enough credits for this edit"}
+	case errors.Is(err, credits.ErrTooManyUncharged):
+		var tm *credits.TooManyUnchargedError
+		msg := "too many editor runs today ended with nothing to keep"
+		if errors.As(err, &tm) {
+			msg = fmt.Sprintf("this workspace has had %d editor runs today that were cancelled before they made anything, found nothing to change or failed, which is the most per day; try again tomorrow", tm.Cap)
+		}
+		return store.AgentRun{}, &failure{http.StatusTooManyRequests, api.ErrorCodeTooManyUnchargedRuns, msg}
 	case errors.Is(err, runtime.ErrBYOKKeyRequired):
 		return store.AgentRun{}, &failure{http.StatusPaymentRequired, api.ErrorCodeByokKeyRequired, "this plan uses your own Anthropic key; add it in settings"}
 	case errors.Is(err, credits.ErrNoPlan):

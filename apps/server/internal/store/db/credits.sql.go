@@ -55,6 +55,38 @@ func (q *Queries) AgentRunTimelineVersion(ctx context.Context, arg AgentRunTimel
 	return version, err
 }
 
+const countUnchargedRuns = `-- name: CountUnchargedRuns :one
+SELECT count(*)::integer AS runs
+FROM agent_runs r
+WHERE r.workspace_id = $1 AND r.agent = $2 AND r.finished_at >= $3 AND r.cost_micros > 0
+  AND (r.status = 'cancelled'
+       OR (r.status = 'succeeded' AND r.output ->> 'no_edit_needed' = 'true')
+       OR (r.status = 'failed' AND r.failure_reason = ANY($4::text[])))
+  AND NOT EXISTS (SELECT 1 FROM credit_ledger c WHERE c.workspace_id = r.workspace_id AND c.action_id = r.id AND c.kind = 'charge')
+`
+
+type CountUnchargedRunsParams struct {
+	WorkspaceID ids.WorkspaceID
+	Agent       string
+	Since       *time.Time
+	Reasons     []string
+}
+
+// How many runs of the agent the workspace has had finish since the given time that spent money (cost_micros > 0) and ended without a
+// charge: cancelled (a cancel that made a version is charged, so none is left here), succeeded having said there was nothing to change,
+// or failed for one of the given reasons (the creator's own, not ours). Runs that cost nothing, such as one cancelled in the queue, do not count.
+func (q *Queries) CountUnchargedRuns(ctx context.Context, arg CountUnchargedRunsParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countUnchargedRuns,
+		arg.WorkspaceID,
+		arg.Agent,
+		arg.Since,
+		arg.Reasons,
+	)
+	var runs int32
+	err := row.Scan(&runs)
+	return runs, err
+}
+
 const deleteCreditHold = `-- name: DeleteCreditHold :execrows
 DELETE FROM credit_holds WHERE workspace_id = $1 AND action_id = $2
 `

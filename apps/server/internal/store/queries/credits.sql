@@ -108,6 +108,18 @@ SELECT EXISTS (
       AND NOT EXISTS (SELECT 1 FROM credit_ledger r WHERE r.workspace_id = c.workspace_id AND r.kind = 'refund' AND r.action_id = c.action_id)
 ) AS charged;
 
+-- How many runs of the agent the workspace has had finish since the given time that spent money (cost_micros > 0) and ended without a
+-- charge: cancelled (a cancel that made a version is charged, so none is left here), succeeded having said there was nothing to change,
+-- or failed for one of the given reasons (the creator's own, not ours). Runs that cost nothing, such as one cancelled in the queue, do not count.
+-- name: CountUnchargedRuns :one
+SELECT count(*)::integer AS runs
+FROM agent_runs r
+WHERE r.workspace_id = @workspace_id AND r.agent = @agent AND r.finished_at >= @since AND r.cost_micros > 0
+  AND (r.status = 'cancelled'
+       OR (r.status = 'succeeded' AND r.output ->> 'no_edit_needed' = 'true')
+       OR (r.status = 'failed' AND r.failure_reason = ANY(@reasons::text[])))
+  AND NOT EXISTS (SELECT 1 FROM credit_ledger c WHERE c.workspace_id = r.workspace_id AND c.action_id = r.id AND c.kind = 'charge');
+
 -- name: GetCreditHoldByAction :one
 SELECT * FROM credit_holds WHERE workspace_id = @workspace_id AND action_id = @action_id;
 

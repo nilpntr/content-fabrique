@@ -264,3 +264,29 @@ func TestRequiredBillingIsTheLlmWorkspaceKey(t *testing.T) {
 		t.Fatalf("credits says %q, llm says %q", credits.RequiredBilling(credits.BYOK), llm.BilledToWorkspaceKey)
 	}
 }
+
+// The failure reasons that count toward the cap on runs that end without a charge are the runtime's own names, and none of them is one of
+// the failures that are ours.
+func TestUnchargedFailureReasonsAreRuntimeReasons(t *testing.T) {
+	known := map[string]bool{
+		FailBudget: true, FailRefusal: true, FailContextWindow: true, FailBadInput: true, FailContext: true,
+	}
+	for _, r := range credits.UnchargedFailureReasons {
+		if !known[r] {
+			t.Errorf("%q is not the failure reason of a creator's own failure", r)
+		}
+		delete(known, r)
+	}
+	for r := range known {
+		t.Errorf("%q should count and does not", r)
+	}
+	ours := []string{FailModelError, FailModelAccess, FailModelOutcomeUnknown, FailMaxTokens, FailEventTooLarge, FailInternal, FailLedger, FailCorruptLog,
+		FailUnknownAgent, FailTooManyResumes, FailStopReason, FailRequestCap, FailReplayMiss, FailDailyCap, FailPlatformSpendPaused, FailSpendCapBusy}
+	for _, r := range ours {
+		for _, c := range credits.UnchargedFailureReasons {
+			if r == c {
+				t.Errorf("%q is our failure and counts toward the cap", r)
+			}
+		}
+	}
+}

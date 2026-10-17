@@ -74,6 +74,9 @@ type Plan struct {
 	Refill           bool
 	StorageGB        int
 	ConcurrentRuns   int
+	// UnchargedRunsPerDay is how many editor runs per UTC day a workspace may have that spent money and ended without a charge before new
+	// ones are refused (ErrTooManyUncharged).
+	UnchargedRunsPerDay int
 	// TranscribedMinutesPerDay caps hosted transcription per UTC day (P7-09b enforces it per plan; the env cap holds until then).
 	TranscribedMinutesPerDay int
 	// COGSBudgetMicros is the hard budget_micros of the run that performs an action. On a BYOK plan it protects the creator's own key.
@@ -124,6 +127,7 @@ type planFile struct {
 	Refill                 bool             `yaml:"refill"`
 	StorageGB              int              `yaml:"storage_gb"`
 	ConcurrentRuns         int              `yaml:"concurrent_runs"`
+	UnchargedRunsPerDay    int              `yaml:"uncharged_runs_per_day"`
 	TranscribedMinutesDay  int              `yaml:"transcribed_minutes_per_day"`
 	COGSBudgetMicros       map[string]int64 `yaml:"cogs_budget_micros"`
 	NonLLMCOGSBudgetMicros map[string]int64 `yaml:"non_llm_cogs_budget_micros"`
@@ -208,13 +212,13 @@ func LoadPriceList(fsys fs.FS, name string) (*PriceList, error) {
 		}
 		pl := Plan{
 			Name: p, PriceEURCents: pf.PriceEURCents, BillingMode: BillingMode(pf.BillingMode), AllowanceCredits: pf.AllowanceCredits,
-			Refill: pf.Refill, StorageGB: pf.StorageGB, ConcurrentRuns: pf.ConcurrentRuns, TranscribedMinutesPerDay: pf.TranscribedMinutesDay,
+			Refill: pf.Refill, StorageGB: pf.StorageGB, ConcurrentRuns: pf.ConcurrentRuns, UnchargedRunsPerDay: pf.UnchargedRunsPerDay, TranscribedMinutesPerDay: pf.TranscribedMinutesDay,
 			COGSBudgetMicros: map[Action]int64{}, NonLLMCOGSBudgetMicros: map[Action]int64{},
 		}
 		switch {
 		case pl.BillingMode != Managed && pl.BillingMode != BYOK:
 			return fail("plan %s: billing_mode must be managed or byok", k)
-		case pl.PriceEURCents < 0 || pl.AllowanceCredits <= 0 || pl.StorageGB < 0 || pl.ConcurrentRuns < 1 || pl.TranscribedMinutesPerDay < 0:
+		case pl.PriceEURCents < 0 || pl.AllowanceCredits <= 0 || pl.StorageGB < 0 || pl.ConcurrentRuns < 1 || pl.UnchargedRunsPerDay < 1 || pl.TranscribedMinutesPerDay < 0:
 			return fail("plan %s: a price, an allowance, a quota or a run limit is out of range", k)
 		case pl.PriceEURCents == 0 && pl.Refill:
 			return fail("plan %s: a free plan cannot refill its allowance", k)

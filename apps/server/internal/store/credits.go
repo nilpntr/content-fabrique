@@ -834,6 +834,18 @@ func (s *Store) VersionCovered(ctx context.Context, ws ids.WorkspaceID, project 
 	return charged, mapErr(err)
 }
 
+// CountUnchargedRuns counts the runs of the agent that the workspace had finish since the given time that spent money and ended without a
+// charge: cancelled before they made anything, succeeded saying there was nothing to change, or failed for one of failureReasons. A run
+// that cost nothing (cancelled in the queue) and a run that was charged do not count. It is the abuse control of credits.Service.QuoteEdit.
+func (s *Store) CountUnchargedRuns(ctx context.Context, ws ids.WorkspaceID, agent string, since time.Time, failureReasons []string) (int, error) {
+	t := since.UTC()
+	if failureReasons == nil {
+		failureReasons = []string{}
+	}
+	n, err := s.q.CountUnchargedRuns(ctx, db.CountUnchargedRunsParams{WorkspaceID: ws, Agent: agent, Since: &t, Reasons: failureReasons})
+	return int(n), mapErr(err)
+}
+
 // ProjectHasChargedEdit says whether the project has an edit that was charged and not refunded: the first edit, or a revision. A run that
 // failed was released, not charged, so it does not count. This decides first or revision, and whether a final export may be made.
 func (s *Store) ProjectHasChargedEdit(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID) (bool, error) {

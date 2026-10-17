@@ -311,6 +311,10 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 			_, _ = fmt.Fprintf(errOut, "cfctl agent run: this workspace does not have enough credits for this edit (%v). Grant some with cfctl credits grant, or pass --no-credits (local and ci only)\n", err)
 			return 1
 		}
+		if errors.Is(err, credits.ErrTooManyUncharged) {
+			_, _ = fmt.Fprintf(errOut, "cfctl agent run: %v. Pass --no-credits (local and ci only) to run anyway\n", err)
+			return 1
+		}
 		if errors.Is(err, credits.ErrNoPlan) {
 			_, _ = fmt.Fprintln(errOut, "cfctl agent run: this workspace has no active plan. Grant one with cfctl plan grant, or pass --no-credits (local and ci only)")
 			return 1

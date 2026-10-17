@@ -431,6 +431,12 @@ export interface paths {
          *     `402 credits_exhausted` and no run is created (a workspace with no active plan gets `402 plan_required`, as everywhere). A workspace
          *     on a BYOK plan (studio) pays for the model with its own Anthropic key: until it has one the start is refused with
          *     `402 byok_key_required` and no run is created.
+         *
+         *     A run that is cancelled before it made anything, finds nothing to change, or fails for a reason of the creator's own (it used
+         *     its whole budget without anything usable, the model declined the content, the project no longer fits the model) is released:
+         *     no credits are charged, but it has used model time. A workspace may have 5 such runs per UTC day on every plan; the next start
+         *     is refused with `429 too_many_uncharged_runs` until the next UTC day. Runs that cost nothing, runs that are charged, and
+         *     failures on our side do not count.
          *     The credits are charged when the run succeeds and released when it fails. When the creator cancels it they are charged if the
          *     run had already made a timeline version (the work is in the project), and released if it had not. `GET /v1/me` has the balance.
          *
@@ -665,7 +671,7 @@ export interface components {
          *     code as a generic failure of its HTTP status.
          * @enum {string}
          */
-        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "credits_exhausted" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured" | "assets_not_usable" | "version_conflict" | "invalid_ops" | "no_change" | "timeline_invalid" | "too_many_renders" | "run_in_progress" | "run_not_waiting" | "model_not_configured" | "edit_not_charged" | "byok_key_required" | "version_not_charged";
+        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "credits_exhausted" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured" | "assets_not_usable" | "version_conflict" | "invalid_ops" | "no_change" | "timeline_invalid" | "too_many_renders" | "run_in_progress" | "run_not_waiting" | "model_not_configured" | "edit_not_charged" | "too_many_uncharged_runs" | "byok_key_required" | "version_not_charged";
         ErrorDetail: {
             code: components["schemas"]["ErrorCode"];
             /** @description For people. It may change; do not branch on it. */
@@ -2454,6 +2460,15 @@ export interface operations {
             };
             /** @description `assets_not_usable`: the project has no ready video clip to edit. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `too_many_uncharged_runs`: the workspace has had today's editor runs that spent money and ended without a charge. */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

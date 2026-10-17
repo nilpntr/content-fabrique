@@ -464,3 +464,122 @@ func TestNoEditNeededIsReleasedOnlyWhenNothingWasMade(t *testing.T) {
 		t.Fatal("a run that made a version was not charged")
 	}
 }
+
+// endRun ends a claimed run the way the loop would: some model spend on its totals (cost micros), then the status.
+func (r *rig) endRun(ws store.Workspace, run store.AgentRun, cost int64, end store.RunEnd) {
+	r.t.Helper()
+	ctx := context.Background()
+	c, err := r.st.ClaimAgentRun(ctx, ws.ID, run.ID, time.Minute)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	if cost > 0 {
+		if _, err := r.st.AppendAgentEvent(ctx, ws.ID, run.ID, c.Epoch, store.EventStatus, json.RawMessage(`{"state":"model_call"}`), store.EventDelta{CostMicros: cost}); err != nil {
+			r.t.Fatal(err)
+		}
+	}
+	if end.Event == nil {
+		end.Event = json.RawMessage(`{}`)
+	}
+	if _, err := r.st.EndAgentRun(ctx, ws.ID, run.ID, c.Epoch, end); err != nil {
+		r.t.Fatal(err)
+	}
+}
+
+func (r *rig) uncharged(ws store.Workspace) int {
+	r.t.Helper()
+	n, err := r.st.CountUnchargedRuns(context.Background(), ws.ID, credits.EditorAgent, time.Now().UTC().Truncate(24*time.Hour), credits.UnchargedFailureReasons)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return n
+}
+
+// Runs that spent money and ended without a charge are capped per workspace and UTC day. Counted: cancelled before anything was made,
+// "nothing to change", and failures that are the creator's own. Not counted: runs that cost nothing, charged runs (an edit made, however it
+// ended), failures that are ours, yesterday's, and other workspaces'.
+func TestUnchargedRunsAreCountedAndCappedPerDay(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	ws, other := r.workspace("cap"), r.workspace("cap-other")
+	creditstest.Fund(t, r.st, ws.ID, plans.Creator, 200)
+	creditstest.Fund(t, r.st, other.ID, plans.Creator, 200)
+	r.svc = creditstest.ServiceWith(t, r.st, func(l *credits.PriceList) {
+		pl := l.Plans[plans.Creator]
+		pl.UnchargedRunsPerDay = 3
+		l.Plans[plans.Creator] = pl
+	})
+	project := r.project(ws)
+	fail := func(reason string) store.RunEnd {
+		return store.RunEnd{Status: store.AgentFailed, FailureReason: reason}
+	}
+	run := func() store.AgentRun {
+		t.Helper()
+		run, _, err := r.run(ws, project, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return run
+	}
+
+	// Not counted: nothing was spent; a failure of ours; a charged run.
+	r.endRun(ws, run(), 0, store.RunEnd{Status: store.AgentCancelled})
+	for _, ours := range []string{"model_error", "internal_error", "model_outcome_unknown", "max_tokens", "daily_cap", "platform_spend_paused"} {
+		r.endRun(ws, run(), 5_000, fail(ours))
+	}
+	made := run()
+	r.addVersion(ws, project, 1, &made)
+	r.endRun(ws, made, 5_000, store.RunEnd{Status: store.AgentCancelled}) // a cancel that made a version is charged
+	ok := run()
+	r.addVersion(ws, project, 2, &ok)
+	r.endRun(ws, ok, 5_000, store.RunEnd{Status: store.AgentSucceeded, Output: json.RawMessage(`{"summary":"x","timeline_version":2,"no_edit_needed":false}`)})
+	if n := r.uncharged(ws); n != 0 {
+		t.Fatalf("%d runs counted before any ended uncharged", n)
+	}
+
+	// Counted: cancelled before anything was made (with spend), nothing to change, and a failure of the creator's own.
+	r.endRun(ws, run(), 5_000, store.RunEnd{Status: store.AgentCancelled})
+	if n := r.uncharged(ws); n != 1 {
+		t.Fatalf("after a cancel that cost money: %d", n)
+	}
+	r.endRun(ws, run(), 5_000, store.RunEnd{Status: store.AgentSucceeded, Output: json.RawMessage(`{"summary":"already fine","timeline_version":null,"no_edit_needed":true}`)})
+	if n := r.uncharged(ws); n != 2 {
+		t.Fatalf("after a no-edit run: %d", n)
+	}
+	// Two below the cap: one more run starts.
+	last := run()
+	r.endRun(ws, last, 5_000, fail("budget"))
+	if n := r.uncharged(ws); n != 3 {
+		t.Fatalf("after a budget failure: %d", n)
+	}
+
+	// At the cap the next start is refused with the cap in the error, and nothing is created or held.
+	var before int
+	if err := r.st.Pool().QueryRow(ctx, `SELECT (SELECT count(*) FROM agent_runs WHERE workspace_id = $1) + (SELECT count(*) FROM credit_holds WHERE workspace_id = $1)`, ws.ID).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := r.run(ws, project, false)
+	var tm *credits.TooManyUnchargedError
+	if !errors.Is(err, credits.ErrTooManyUncharged) || !errors.As(err, &tm) || tm.Cap != 3 {
+		t.Fatalf("the fourth uncharged run's successor: %v", err)
+	}
+	var after int
+	if err := r.st.Pool().QueryRow(ctx, `SELECT (SELECT count(*) FROM agent_runs WHERE workspace_id = $1) + (SELECT count(*) FROM credit_holds WHERE workspace_id = $1)`, ws.ID).Scan(&after); err != nil || after != before {
+		t.Fatalf("rows %d before the refusal and %d after (%v)", before, after, err)
+	}
+	// A run without credits (development) is not subject to it, and another workspace is not affected.
+	if _, _, err := r.run(ws, project, true); err != nil {
+		t.Fatalf("a free run: %v", err)
+	}
+	if _, _, err := r.run(other, r.project(other), false); err != nil {
+		t.Fatalf("another workspace: %v", err)
+	}
+	// Tomorrow it starts again.
+	r.svc.Now = func() time.Time { return time.Now().Add(24 * time.Hour) }
+	if _, err := r.st.Pool().Exec(ctx, `UPDATE agent_runs SET finished_at = finished_at - interval '25 hours' WHERE workspace_id = $1 AND finished_at IS NOT NULL`, ws.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.run(ws, project, false); err != nil {
+		t.Fatalf("the next day: %v", err)
+	}
+}

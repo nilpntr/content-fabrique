@@ -83,6 +83,9 @@ func TestThePriceListHasTheDesignNotesValues(t *testing.T) {
 				t.Errorf("plan %s has no budget for %s", p, a)
 			}
 		}
+		if got.UnchargedRunsPerDay != 5 {
+			t.Errorf("plan %s allows %d runs per day that end without a charge, want 5", p, got.UnchargedRunsPerDay)
+		}
 	}
 	if l.TopUpExpiryMonths != 12 || l.MaxCOGSShare.Cmp(big.NewRat(40, 100)) != 0 || l.MoRFeePct.Cmp(big.NewRat(5, 100)) != 0 {
 		t.Errorf("top-up expiry %d, share %v, fee %v", l.TopUpExpiryMonths, l.MaxCOGSShare, l.MoRFeePct)
@@ -175,6 +178,7 @@ plans:
     refill: false
     storage_gb: 2
     concurrent_runs: 1
+    uncharged_runs_per_day: 5
     transcribed_minutes_per_day: 30
     cogs_budget_micros: {edit.first: 1000000, edit.revision: 250000, export.final: 0, ideation.run: 125000}
   studio:
@@ -184,6 +188,7 @@ plans:
     refill: true
     storage_gb: 100
     concurrent_runs: 3
+    uncharged_runs_per_day: 5
     transcribed_minutes_per_day: 240
     cogs_budget_micros: {edit.first: 2000000, edit.revision: 2000000, export.final: 0, ideation.run: 500000}
     non_llm_cogs_budget_micros: {edit.first: 500000, edit.revision: 33000, export.final: 0, ideation.run: 16000}
@@ -194,6 +199,7 @@ plans:
     refill: true
     storage_gb: 50
     concurrent_runs: 2
+    uncharged_runs_per_day: 5
     transcribed_minutes_per_day: 120
     cogs_budget_micros: {edit.first: 1500000, edit.revision: 320000, export.final: 0, ideation.run: 160000}
   pro:
@@ -203,6 +209,7 @@ plans:
     refill: true
     storage_gb: 200
     concurrent_runs: 4
+    uncharged_runs_per_day: 5
     transcribed_minutes_per_day: 360
     cogs_budget_micros: {edit.first: 790000, edit.revision: 260000, export.final: 0, ideation.run: 130000}
 `
@@ -261,6 +268,7 @@ func TestLoadRefusesBadFiles(t *testing.T) {
 		"byok without non-llm":   {"2026-10.yaml", strings.Replace(good, "    non_llm_cogs_budget_micros: # 0.40 x $0.0419 net per credit = $0.0168 per credit\n      edit.first: 100000\n", "    non_llm_cogs_budget_micros:\n", 1), "non_llm_cogs_budget_micros"},
 		"free plan that refills": {"2026-10.yaml", strings.Replace(good, "refill: false", "refill: true", 1), "free plan cannot refill"},
 		"no allowance":           {"2026-10.yaml", strings.Replace(good, "allowance_credits: 20", "allowance_credits: 0", 1), "out of range"},
+		"no uncharged cap":       {"2026-10.yaml", strings.Replace(good, "uncharged_runs_per_day: 5", "uncharged_runs_per_day: 0", 1), "out of range"},
 		"share above one":        {"2026-10.yaml", strings.Replace(good, "max_cogs_share: 0.40", "max_cogs_share: 1.40", 1), "max_cogs_share"},
 	} {
 		t.Run(name, func(t *testing.T) {

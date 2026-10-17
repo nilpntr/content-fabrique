@@ -32,6 +32,11 @@ usd_per_eur: 1.08
 # COGS may be at most this share of what a credit earns (D-18: at least 60 % gross margin before fixed costs).
 max_cogs_share: 0.40
 
+# Abuse control (spend control v1, "Runs that end without a charge"): a run that is cancelled before it made anything, finds nothing to
+# change, or fails for a reason of the creator's own (see credits.UnchargedFailureReasons) is released, not charged, but it has spent
+# model money. Each plan caps how many of those a workspace may have per UTC day (`uncharged_runs_per_day`); the next start is refused
+# with 429 too_many_uncharged_runs. Runs that cost nothing, and failures that are ours, do not count.
+
 # Top-ups last this many months from the day they are granted.
 topup_expiry_months: 12
 
@@ -47,6 +52,7 @@ plans:
     refill: false # 20 credits once, never refilled
     storage_gb: 2
     concurrent_runs: 1
+    uncharged_runs_per_day: 5 # editor runs per UTC day that ended with nothing to charge (released after they spent money); more are refused
     transcribed_minutes_per_day: 30
     cogs_budget_micros: # 2.5 USD / 20 credits = 125,000 per credit
       edit.first: 750000
@@ -61,6 +67,7 @@ plans:
     refill: true
     storage_gb: 100
     concurrent_runs: 3
+    uncharged_runs_per_day: 5 # editor runs per UTC day that ended with nothing to charge (released after they spent money); more are refused
     transcribed_minutes_per_day: 240
     # The run's cap on the creator's own key (their money, not ours): the $2 default of spend control section 4.
     cogs_budget_micros:
@@ -82,6 +89,7 @@ plans:
     refill: true
     storage_gb: 50
     concurrent_runs: 2
+    uncharged_runs_per_day: 5 # editor runs per UTC day that ended with nothing to charge (released after they spent money); more are refused
     transcribed_minutes_per_day: 120
     cogs_budget_micros: # 0.40 x $0.4002 net per credit = $0.1601 per credit
       edit.first: 960000
@@ -96,6 +104,7 @@ plans:
     refill: true
     storage_gb: 200
     concurrent_runs: 4
+    uncharged_runs_per_day: 5 # editor runs per UTC day that ended with nothing to charge (released after they spent money); more are refused
     transcribed_minutes_per_day: 360
     cogs_budget_micros: # 0.40 x $0.3296 net per credit = $0.1318 per credit
       edit.first: 790000

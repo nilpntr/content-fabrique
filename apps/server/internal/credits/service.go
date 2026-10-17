@@ -30,6 +30,32 @@ var (
 	ErrNotConfigured = errors.New("credits: this runtime has no credits service, so an editor run cannot be started")
 )
 
+// UnchargedFailureReasons are the failure reasons (agent_runs.failure_reason, the runtime's Fail* constants; a runtime test keeps the names
+// in step) of a run that failed for a reason of the creator's own, so that it counts toward the cap on runs that end without a charge:
+//   - budget: the run spent its budget and had nothing usable to finish on;
+//   - refusal: the model declined to work on the content;
+//   - context_window_exceeded: the conversation (the footage, the instructions) no longer fits the model;
+//   - invalid_input, context_failed: the instructions or the project's data could not be used.
+//
+// A failure that is ours does not count, so a bad day of the model API or of our own services never locks a creator out: model_error,
+// model_access, model_outcome_unknown, max_tokens (the model could not fit its answer), event_too_large, internal_error, ledger_error,
+// corrupt_log, unknown_agent, too_many_resumes, unexpected_stop_reason, request_cap, replay_miss, and the spend caps (daily_cap,
+// platform_spend_paused, spend_cap_busy), which already stop the spending.
+var UnchargedFailureReasons = []string{"budget", "refusal", "context_window_exceeded", "invalid_input", "context_failed"}
+
+// ErrTooManyUncharged is wrapped by *TooManyUnchargedError.
+var ErrTooManyUncharged = errors.New("credits: too many runs ended without a charge today")
+
+// TooManyUnchargedError says how many runs that ended without a charge the workspace may have per UTC day, and that it has had them.
+type TooManyUnchargedError struct{ Cap int }
+
+func (e *TooManyUnchargedError) Error() string {
+	return fmt.Sprintf("credits: the workspace has had %d editor runs today that spent money and ended without a charge, which is the most per day", e.Cap)
+}
+
+// Is makes errors.Is(err, ErrTooManyUncharged) true.
+func (e *TooManyUnchargedError) Is(target error) bool { return target == ErrTooManyUncharged }
+
 // Service decides what an action costs and sets the credits aside for it. The money is in the store.
 type Service struct {
 	Store *store.Store
@@ -102,6 +128,18 @@ func (s *Service) QuoteEdit(ctx context.Context, tx *store.Store, ws ids.Workspa
 		return q, nil
 	}
 	q.BillingMode = s.List.Plans[ent.Plan].BillingMode
+	// A run that is cancelled before it made anything, finds nothing to change, or fails for the creator's own reason is released, not
+	// charged, but it has spent model money. A workspace may have only so many of them per UTC day.
+	cap := s.List.Plans[ent.Plan].UnchargedRunsPerDay
+	now := s.now().UTC()
+	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	n, err := tx.CountUnchargedRuns(ctx, ws, EditorAgent, day, UnchargedFailureReasons)
+	if err != nil {
+		return Quote{}, err
+	}
+	if n >= cap {
+		return Quote{}, &TooManyUnchargedError{Cap: cap}
+	}
 	q.Credits = s.List.Credits[action]
 	q.BudgetMicros = s.List.Plans[ent.Plan].COGSBudgetMicros[action]
 	return q, nil

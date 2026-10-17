@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -220,4 +221,40 @@ func TestStartEditOnAByokPlanNeedsTheWorkspacesOwnKey(t *testing.T) {
 	}
 	p := e.newProject("ada", "9:16", e.readyAsset("ada", "lat.mp4"))
 	e.startEdit("ada", p, nil)
+}
+
+// A workspace that keeps starting runs and cancelling them before they make anything burns model money for nothing: after the day's cap
+// the next start is refused with 429 too_many_uncharged_runs. Runs that cost nothing do not count.
+func TestStartEditIsRefusedAfterTheDaysUnchargedRuns(t *testing.T) {
+	e := newAssetsEnv(t, func(o *assetsEnvOptions) { o.runs = true; o.credits = 200 })
+	ctx := context.Background()
+	p := e.newProject("ada", "9:16", e.readyAsset("ada", "lat.mp4"))
+	spendAndCancel := func(cost int64) {
+		t.Helper()
+		run := e.startEdit("ada", p, nil)
+		id, _ := ids.Decode(ids.PrefixRun, run.Id)
+		if _, err := e.pool.Exec(ctx, `UPDATE agent_runs SET cost_micros = $2 WHERE id = $1`, id, cost); err != nil {
+			t.Fatal(err)
+		}
+		e.call(http.MethodPost, runPath(run, "/cancel"), "ada", nil, http.StatusOK, nil)
+	}
+	for range 3 { // runs cancelled in the queue cost nothing and do not count
+		spendAndCancel(0)
+	}
+	for range 5 {
+		spendAndCancel(25_000)
+	}
+	rec := e.do(http.MethodPost, editPath(p), "ada", nil)
+	wantError(t, rec, http.StatusTooManyRequests, string(api.ErrorCodeTooManyUnchargedRuns))
+	var body api.Error
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || !strings.Contains(body.Error.Message, "5 editor runs today") {
+		t.Fatalf("body = %s", rec.Body)
+	}
+	var runs int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM agent_runs WHERE status = 'queued'`).Scan(&runs); err != nil || runs != 0 {
+		t.Fatalf("%d queued runs after the refusal (%v)", runs, err)
+	}
+	// Another workspace is not affected.
+	bp := e.newProjectAs("bob", "9:16")
+	e.startEdit("bob", bp, nil)
 }
