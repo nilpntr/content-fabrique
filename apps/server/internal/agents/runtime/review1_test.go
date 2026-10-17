@@ -416,3 +416,24 @@ func TestDefaultAgents(t *testing.T) {
 		t.Fatal("no echo agent")
 	}
 }
+
+// The heartbeat can see "fenced" at the moment this worker writes the end of its own run (its UPDATE waited for the row
+// lock of that very transaction). That must not turn a finished run into an error or a lost run: the end write is not
+// cancelled with the loop, and the outcome is the run's.
+func TestTheEndWriteSurvivesAHeartbeatFence(t *testing.T) {
+	e := newEnv(t, newScripted(noteAndFinish()...))
+	fired := 0
+	e.runner.hookCancel = func(point string, cancel context.CancelCauseFunc) {
+		if point == "ending" {
+			fired++
+			cancel(store.ErrRunFenced) // what the heartbeat does when it sees the status change
+		}
+	}
+	run := e.create("echo", "hello", Budgets{})
+	if got := e.execute(run); got != OutcomeFinished {
+		t.Fatalf("outcome = %s", got)
+	}
+	if r := e.get(run); r.Status != store.AgentSucceeded || fired != 1 {
+		t.Fatalf("run = %s, hook fired %d times", r.Status, fired)
+	}
+}

@@ -31,6 +31,7 @@
 | D-24 | Public IDs are TypeIDs (a type prefix plus a base32 UUIDv7); Postgres stores the plain `uuid` | Accepted (engineering, 2026-10-16) |
 | D-25 | Four output formats in v1: 9:16, 1:1, 4:5 and 16:9, chosen per project; TikTok stays the only publishing target | Accepted (founder decision, 2026-10-17) |
 | D-26 | Video effects are curated presets (camera moves, transitions, graphic templates) the agent and the creator pick; bespoke effects only through the flagged sandbox | Accepted (director, 2026-10-17; founder to confirm the first templates) |
+| D-27 | Transcription: whisper.cpp in the media-tools sandbox locally; Workers AI `whisper-large-v3-turbo` through Cloudflare on staging and production; one provider interface | Accepted (founder decision, 2026-10-17) |
 
 ---
 
@@ -574,6 +575,29 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 - The style registry also covers templates.
 
 **Revisit** when creators ask for presets we don't have, or when a template marketplace becomes worth integrating.
+
+## D-27 Transcription: whisper.cpp locally, Workers AI Whisper when hosted
+
+**Context.** Captions, hooks and quotes need a word-level transcript of the clips that contain speech: P2-05, and the captions renderer in P3-04. The research named ElevenLabs Scribe and the Whisper family. Locally there is no Cloudflare account yet, and creators' voices are personal data ([D-15](#d-15-eu-data-residency)).
+
+**Decision.**
+- **One `transcribe.Provider` interface** returns words with start and end times in milliseconds, a confidence and the language. Captions and the editor never see which provider was used.
+- **Local, ci and bench run whisper.cpp** (MIT) inside the media-tools image, through the sandbox, on CPU. It uses the `large-v3-turbo` model, quantised, with the model file pinned by checksum. CI uses a tiny model.
+- **Staging and production call Workers AI `@cf/openai/whisper-large-v3-turbo`** through the environment's Cloudflare account. It is enabled by config once P0-09 exists.
+- **Transcription runs only on clips where speech is detected**, using a cheap voice-activity check first.
+- **Two checks come before production uses Workers AI:**
+  1. Where inference runs, and whether EU-only processing is available (D-15). If it isn't, production falls back to whisper.cpp on our EU servers, or this decision is revisited. The founder's alternative is OpenRouter; before choosing it, check whether it serves a Whisper-class model with word timestamps, and note that it adds a US processor. Workers AI also offers batch mode for this model, which fits a job that isn't time-critical.
+  2. The per-minute price. It goes into the price table, and usage is metered in `usage_ledger` with kind `transcription`.
+
+**Alternatives.**
+- ElevenLabs Scribe: the best quality and audio events, but higher cost and another processor.
+- whisper.cpp everywhere: free, but uses CPU on our servers.
+
+**Consequences.**
+- The media-tools image grows by the whisper.cpp binary and the model, roughly 0.5–1.5 GB depending on quantisation.
+- Transcripts are comparable across environments because the same model family is used everywhere.
+
+**Revisit** if quality on gym audio (music, noise) is poor; if Workers AI can't stay in the EU; or if a cheaper, better hosted model appears.
 
 ## Template for new decisions
 
