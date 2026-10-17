@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -140,18 +142,64 @@ func sortedAssetIDs(cat timeline.MemoryCatalog) []string {
 	return ids
 }
 
-// ffmpegTools skips the test when ffmpeg or ffprobe is missing and returns the binary paths.
+// requireFFmpegEnv names an environment variable that CI sets to the version prefix it pinned ("n8."). When it is set,
+// a missing ffmpeg or another version is a failure instead of a skip.
+const requireFFmpegEnv = "CF_RENDER_REQUIRE_FFMPEG"
+
+var (
+	versionOnce sync.Once
+	versionLine string
+)
+
+var versionRe = regexp.MustCompile(`^ffmpeg version (?:n)?(\d+)\.`)
+
+// ffmpegVersion is the first line of `ffmpeg -version`, or "" when it cannot be run.
+func ffmpegVersion(ffmpeg string) string {
+	versionOnce.Do(func() {
+		out, err := exec.CommandContext(context.Background(), ffmpeg, "-hide_banner", "-version").Output() //nolint:gosec // test helper
+		if err != nil {
+			return
+		}
+		versionLine, _, _ = strings.Cut(string(out), "\n")
+	})
+	return versionLine
+}
+
+// ffmpegTools skips the test when ffmpeg or ffprobe is missing (or older than 7, which has no amix normalize) and returns
+// the binary paths. Under CF_RENDER_REQUIRE_FFMPEG it fails instead.
 func ffmpegTools(t testing.TB) (ffmpeg, ffprobe string) {
 	t.Helper()
+	required := os.Getenv(requireFFmpegEnv)
+	unavailable := func(format string, args ...any) {
+		t.Helper()
+		if required != "" {
+			t.Fatalf(format+" ("+requireFFmpegEnv+" is set)", args...)
+		}
+		t.Skipf("skipping the render tests: "+format+" (CI installs a pinned ffmpeg; locally `brew install ffmpeg`)", args...)
+	}
 	ff, err := exec.LookPath("ffmpeg")
 	if err != nil {
-		t.Skip("ffmpeg is not on PATH: skipping the render tests (CI installs a pinned ffmpeg; locally `brew install ffmpeg`)")
+		unavailable("ffmpeg is not on PATH")
 	}
 	fp, err := exec.LookPath("ffprobe")
 	if err != nil {
-		t.Skip("ffprobe is not on PATH: skipping the render tests")
+		unavailable("ffprobe is not on PATH")
+	}
+	line := ffmpegVersion(ff)
+	if m := versionRe.FindStringSubmatch(line); m != nil {
+		if major, _ := strconv.Atoi(m[1]); major < 7 {
+			unavailable("%q is older than ffmpeg 7", line)
+		}
+	}
+	if required != "" && !strings.HasPrefix(line, "ffmpeg version "+required) {
+		t.Fatalf("%q is not the pinned ffmpeg (want version %q): %s is set", line, required, requireFFmpegEnv)
 	}
 	return ff, fp
+}
+
+func TestFFmpegVersion(t *testing.T) {
+	ff, _ := ffmpegTools(t)
+	t.Logf("rendering with %s", ffmpegVersion(ff))
 }
 
 // ensureMedia generates the test media once per test run and returns the cache directory.

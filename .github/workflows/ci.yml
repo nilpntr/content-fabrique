@@ -39,6 +39,7 @@ jobs:
       env: ${{ steps.filter.outputs.env || 'true' }}
       doctor: ${{ steps.filter.outputs.doctor || 'true' }}
       contract: ${{ steps.filter.outputs.contract || 'true' }}
+      render: ${{ steps.filter.outputs.render || 'true' }}
     steps:
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
@@ -84,6 +85,13 @@ jobs:
               - 'go.work.sum'
               - 'package.json'
               - 'bun.lock'
+              - '.github/workflows/ci.yml'
+            # The renderer and what it compiles: the Go timeline package and the fixtures (the 20 render fixtures and the
+            # asset catalog) that the golden tests read.
+            render:
+              - 'apps/server/internal/render/**'
+              - 'apps/server/internal/timeline/**'
+              - 'packages/schemas/timeline/**'
               - '.github/workflows/ci.yml'
 
   # go vet and golangci-lint (apps/server/.golangci.yml).
@@ -349,11 +357,63 @@ jobs:
       - name: cfctl doctor --env ci
         run: '"$RUNNER_TEMP/cfctl" doctor --env ci --env-file "$RUNNER_TEMP/ci.env"'
 
+  # The golden renders (P3-03, docs/design/timeline-v1.md section 7): every render fixture is rendered with ffmpeg and
+  # frames are compared with the committed PNGs (SSIM >= 0.98). The golden plans and the compiler's unit tests run in
+  # go-test as well; this job is the one that has ffmpeg, so it is the one that renders.
+  #
+  # ffmpeg is a pinned static build (BtbN, GPL, n8.1.3, from the monthly tag autobuild-2026-09-30-13-08, which the project
+  # keeps) with its SHA-256 checked before anything is unpacked. The render tests refuse to run on another major version
+  # (CF_RENDER_REQUIRE_FFMPEG, TestFFmpegVersion). TODO(P1-03): when the media-tools image lands (packages/media-tools), run this job in it
+  # and drop the download; keep the version pin in one place, the image.
+  render:
+    needs: changes
+    if: needs.changes.outputs.render == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FFMPEG_URL: https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz
+      FFMPEG_SHA256: 97ce978979194b5cf7e06a5e68020dbdaa7a4f3294c5452b6a1bc347100dbb79
+    defaults:
+      run:
+        working-directory: apps/server
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: apps/server/go.mod
+          cache: false
+      # The download is 150 MB: keep it between runs. The key is the checksum, so a new pin is a new entry.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: ffmpeg-cache
+        with:
+          path: ~/ffmpeg-download
+          key: ffmpeg-${{ env.FFMPEG_SHA256 }}
+      - name: Download ffmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$HOME/ffmpeg-download"
+          curl -fsSL --retry 3 -o "$HOME/ffmpeg-download/ffmpeg.tar.xz" "$FFMPEG_URL"
+      - name: Verify and install ffmpeg
+        run: |
+          echo "$FFMPEG_SHA256  $HOME/ffmpeg-download/ffmpeg.tar.xz" | sha256sum --check --strict -
+          mkdir -p "$HOME/ffmpeg"
+          tar -xJf "$HOME/ffmpeg-download/ffmpeg.tar.xz" -C "$HOME/ffmpeg" --strip-components=1
+          echo "$HOME/ffmpeg/bin" >> "$GITHUB_PATH"
+          "$HOME/ffmpeg/bin/ffmpeg" -hide_banner -version | head -1
+      # CF_RENDER_REQUIRE_FFMPEG turns "ffmpeg is missing" and "ffmpeg is not the pinned major version" from a skip into a
+      # failure, so a broken install can never make this job pass by skipping every render.
+      - name: Golden renders
+        env:
+          CF_RENDER_REQUIRE_FFMPEG: n8.
+        run: go test -race -count=1 -v ./internal/render/...
+
   # The single required check. It runs even when needed jobs are skipped or failed (`if: always()`), passes when every
   # needed job succeeded or was skipped, and fails on any failure or cancellation. Add every new job to `needs`.
   required:
     if: always()
-    needs: [changes, go-lint, go-test, db, web, contract, env-lint, doctor]
+    needs: [changes, go-lint, go-test, db, web, contract, env-lint, doctor, render]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
