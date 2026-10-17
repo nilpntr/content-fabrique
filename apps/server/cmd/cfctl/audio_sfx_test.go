@@ -28,6 +28,9 @@ func needFFmpeg(t *testing.T) string {
 	t.Helper()
 	p, err := exec.LookPath("ffmpeg")
 	if err != nil {
+		if os.Getenv("CF_RENDER_REQUIRE_FFMPEG") != "" { // CI's render job: a missing ffmpeg is a failure, not a skip
+			t.Fatal("ffmpeg is not on PATH (CF_RENDER_REQUIRE_FFMPEG is set)")
+		}
 		t.Skip("ffmpeg is not on PATH")
 	}
 	return p

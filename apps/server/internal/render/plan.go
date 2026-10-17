@@ -183,11 +183,11 @@ func (p Plan) SourceTimeMs(outMs int64) (entry TimeMapEntry, sourceMs int64, ok 
 // with newlines. A semicolon inside single quotes is not a statement end: the sound effects' asendcmd commands are quoted lists
 // separated by semicolons.
 func PrettyFilter(filterComplex string) string {
-	return strings.Join(splitStatements(filterComplex), "\n")
+	return strings.Join(splitStatements(filterComplex), ";\n")
 }
 
-// splitStatements splits a filter_complex at the semicolons that are not inside single quotes; every piece but the last keeps
-// its semicolon.
+// splitStatements splits a filter_complex into its statements at the semicolons that are not inside single quotes (the pieces
+// carry no semicolon: joining them with ";" gives the graph back).
 func splitStatements(g string) []string {
 	var out []string
 	quoted, start := false, 0
@@ -197,7 +197,7 @@ func splitStatements(g string) []string {
 			quoted = !quoted
 		case ';':
 			if !quoted {
-				out = append(out, g[start:i+1])
+				out = append(out, g[start:i])
 				start = i + 1
 			}
 		}
