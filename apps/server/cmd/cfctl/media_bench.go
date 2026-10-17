@@ -17,11 +17,19 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/sandbox"
 )
 
-// benchResult holds the timings of one provider.
+// The benchmark steps, in table order.
+const (
+	stepStartup   = "start-up (ffprobe -version)"
+	stepTranscode = "transcode 1080p H.264 CRF 23 veryfast"
+	stepCopy      = "copy 0.9 GB (read + write, no encode)"
+)
+
+var benchSteps = []string{stepStartup, stepTranscode, stepCopy}
+
+// benchResult holds the timings of one provider, per step.
 type benchResult struct {
-	provider  string
-	startup   []time.Duration
-	transcode []time.Duration
+	provider string
+	steps    map[string][]time.Duration
 }
 
 func cmdMediaBench(args []string, stdout, stderr io.Writer, deps mediaDeps) int {
@@ -85,24 +93,37 @@ func cmdMediaBench(args []string, stdout, stderr io.Writer, deps mediaDeps) int 
 		_, _ = fmt.Fprintf(stderr, "cfctl media bench: generate clip: %v\n", err)
 		return 1
 	}
+	raw, err := b.generateRaw(runners[names[0]], rawSeconds)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "cfctl media bench: generate raw clip: %v\n", err)
+		return 1
+	}
 	var results []benchResult
 	for _, n := range names {
-		r := benchResult{provider: n}
+		r := benchResult{provider: n, steps: map[string][]time.Duration{}}
 		for i := 0; i < *runs; i++ {
 			d, err := b.startup(runners[n])
 			if err != nil {
 				_, _ = fmt.Fprintf(stderr, "cfctl media bench: %s start-up: %v\n", n, err)
 				return 1
 			}
-			r.startup = append(r.startup, d)
+			r.steps[stepStartup] = append(r.steps[stepStartup], d)
 		}
 		for i := 0; i < *runs; i++ {
-			d, err := b.transcode(runners[n], clip, fmt.Sprintf("%s-%d", n, i))
+			d, err := b.transcode(runners[n], clip, fmt.Sprintf("%s-t%d", n, i))
 			if err != nil {
 				_, _ = fmt.Fprintf(stderr, "cfctl media bench: %s transcode: %v\n", n, err)
 				return 1
 			}
-			r.transcode = append(r.transcode, d)
+			r.steps[stepTranscode] = append(r.steps[stepTranscode], d)
+		}
+		for i := 0; i < *runs; i++ {
+			d, err := b.copyFile(runners[n], raw, fmt.Sprintf("%s-c%d", n, i))
+			if err != nil {
+				_, _ = fmt.Fprintf(stderr, "cfctl media bench: %s copy: %v\n", n, err)
+				return 1
+			}
+			r.steps[stepCopy] = append(r.steps[stepCopy], d)
 		}
 		results = append(results, r)
 	}
@@ -184,6 +205,53 @@ func (b *bencher) transcode(r *media.SandboxRunner, clip, name string) (time.Dur
 	return res.Duration, nil
 }
 
+// rawSeconds of uncompressed 1080p30 video make the copy step's file (about 0.9 GB).
+const rawSeconds = 10
+
+func (b *bencher) generateRaw(r *media.SandboxRunner, seconds int) (string, error) {
+	dir, err := b.mkdir("raw")
+	if err != nil {
+		return "", err
+	}
+	args, err := media.RawClipArgs(media.OutputPath("raw.avi"), seconds)
+	if err != nil {
+		return "", err
+	}
+	if err := b.run(r, media.Invocation{Args: args, OutputDir: dir}); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "raw.avi"), nil
+}
+
+// copyFile remuxes the raw file without encoding, so the time is reads and writes through the sandbox's filesystem.
+func (b *bencher) copyFile(r *media.SandboxRunner, raw, name string) (time.Duration, error) {
+	dir, err := b.mkdir(name)
+	if err != nil {
+		return 0, err
+	}
+	res, err := r.Run(b.ctx, media.Invocation{
+		Args:      media.CopyArgs(media.InputPath(0), media.OutputPath("out.avi")),
+		Inputs:    []media.Input{{Host: raw, Container: media.InputPath(0)}},
+		OutputDir: dir,
+	})
+	if err != nil {
+		return 0, err
+	}
+	if res.ExitCode != 0 {
+		return 0, &media.ToolError{Tool: "ffmpeg", ExitCode: res.ExitCode, Stderr: string(res.Stderr)}
+	}
+	in, err1 := os.Stat(raw)
+	out, err2 := os.Stat(filepath.Join(dir, "out.avi"))
+	if err := errors.Join(err1, err2); err != nil {
+		return 0, fmt.Errorf("the copy is missing: %w", err)
+	}
+	if out.Size() < in.Size()*9/10 {
+		return 0, fmt.Errorf("the copy is short: %d of %d bytes", out.Size(), in.Size())
+	}
+	_ = os.Remove(filepath.Join(dir, "out.avi")) // keep the disk use bounded across runs
+	return res.Duration, nil
+}
+
 func (b *bencher) run(r *media.SandboxRunner, inv media.Invocation) error {
 	res, err := r.Run(b.ctx, inv)
 	if err != nil {
@@ -222,16 +290,20 @@ func secList(ds []time.Duration) string {
 	return strings.Join(parts, " / ")
 }
 
-// writeBenchTable prints the results as Markdown. The ratio column compares each provider with the first one.
+// writeBenchTable prints the results as Markdown, one row per step and provider. The last column compares each provider
+// with the first one.
 func writeBenchTable(w io.Writer, results []benchResult, info benchInfo) {
-	_, _ = fmt.Fprintf(w, "Host: %s/%s, %d CPUs. Image %s. Limits per job: %g CPUs, %d MiB. Clip: %d s 1080p30 testsrc2 + sine, H.264 to H.264, CRF 23, veryfast. %d runs each.\n\n",
+	_, _ = fmt.Fprintf(w, "Host: %s/%s, %d CPUs. Image %s. Limits per job: %g CPUs, %d MiB. Clip: %d s 1080p30 testsrc2 + sine. %d runs each.\n\n",
 		runtime.GOOS, runtime.GOARCH, runtime.NumCPU(), info.image, info.cpus, info.memory, info.seconds, info.runs)
-	_, _ = fmt.Fprintln(w, "| provider | start-up runs (s) | start-up median (s) | transcode runs (s) | transcode median (s) | transcode vs "+results[0].provider+" |")
-	_, _ = fmt.Fprintln(w, "|---|---|---|---|---|---|")
-	base := median(results[0].transcode)
-	for _, r := range results {
-		med := median(r.transcode)
-		ratio := fmt.Sprintf("%.2fx (%+.1f%%)", float64(med)/float64(base), (float64(med)/float64(base)-1)*100)
-		_, _ = fmt.Fprintf(w, "| %s | %s | %s | %s | %s | %s |\n", r.provider, secList(r.startup), secs(median(r.startup)), secList(r.transcode), secs(med), ratio)
+	_, _ = fmt.Fprintln(w, "| step | provider | runs (s) | median (s) | vs "+results[0].provider+" |")
+	_, _ = fmt.Fprintln(w, "|---|---|---|---|---|")
+	for _, step := range benchSteps {
+		base := median(results[0].steps[step])
+		for _, r := range results {
+			ds := r.steps[step]
+			med := median(ds)
+			ratio := fmt.Sprintf("%.2fx (%+.1f%%)", float64(med)/float64(base), (float64(med)/float64(base)-1)*100)
+			_, _ = fmt.Fprintf(w, "| %s | %s | %s | %s | %s |\n", step, r.provider, secList(ds), secs(med), ratio)
+		}
 	}
 }

@@ -38,6 +38,25 @@ func TestTestClipArgsGolden(t *testing.T) {
 	}
 }
 
+func TestRawAndCopyArgsGolden(t *testing.T) {
+	a, err := RawClipArgs("/work/raw.avi", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "ffmpeg -nostdin -hide_banner -v error -y -f lavfi -i testsrc2=size=1920x1080:rate=30:duration=10 " +
+		"-c:v rawvideo -pix_fmt yuv420p /work/raw.avi"
+	if got := strings.Join(a, " "); got != want {
+		t.Fatalf("got  %s\nwant %s", got, want)
+	}
+	if _, err := RawClipArgs("x", 61); err == nil {
+		t.Error("61 s of raw video must be refused")
+	}
+	want = "ffmpeg -nostdin -hide_banner -v error -y -protocol_whitelist file -i /in/0 -map 0 -c copy /work/out.avi"
+	if got := strings.Join(CopyArgs("/in/0", "/work/out.avi"), " "); got != want {
+		t.Fatalf("got  %s\nwant %s", got, want)
+	}
+}
+
 func TestTranscodeArgsGolden(t *testing.T) {
 	a, err := TranscodeH264Args("/in/0", "/work/out.mp4", TranscodeOptions{})
 	if err != nil {

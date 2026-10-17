@@ -179,15 +179,19 @@ func TestBenchTable(t *testing.T) {
 		}
 		return out
 	}
+	step := func(start, tr, cp []int) map[string][]time.Duration {
+		return map[string][]time.Duration{stepStartup: ms(start...), stepTranscode: ms(tr...), stepCopy: ms(cp...)}
+	}
 	writeBenchTable(&b, []benchResult{
-		{provider: "docker", startup: ms(300, 310, 290), transcode: ms(10000, 10200, 9800)},
-		{provider: "hardened", startup: ms(700, 710, 690), transcode: ms(11000, 11220, 10780)},
+		{provider: "docker", steps: step([]int{300, 310, 290}, []int{10000, 10200, 9800}, []int{1000, 1000, 1000})},
+		{provider: "hardened", steps: step([]int{700, 710, 690}, []int{11000, 11220, 10780}, []int{3000, 3100, 2900})},
 	}, benchInfo{image: "media-tools:dev", cpus: 2, memory: 2048, seconds: 30, runs: 3})
 	out := b.String()
 	for _, want := range []string{
-		"| docker | 0.30 / 0.31 / 0.29 | 0.30 | 10.00 / 10.20 / 9.80 | 10.00 | 1.00x (+0.0%) |",
-		"| hardened | 0.70 / 0.71 / 0.69 | 0.70 | 11.00 / 11.22 / 10.78 | 11.00 | 1.10x (+10.0%) |",
-		"transcode vs docker",
+		"| start-up (ffprobe -version) | docker | 0.30 / 0.31 / 0.29 | 0.30 | 1.00x (+0.0%) |",
+		"| transcode 1080p H.264 CRF 23 veryfast | hardened | 11.00 / 11.22 / 10.78 | 11.00 | 1.10x (+10.0%) |",
+		"| copy 0.9 GB (read + write, no encode) | hardened | 3.00 / 3.10 / 2.90 | 3.00 | 3.00x (+200.0%) |",
+		"vs docker",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in\n%s", want, out)

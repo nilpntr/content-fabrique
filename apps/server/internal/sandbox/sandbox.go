@@ -74,7 +74,9 @@ type Mount struct {
 	Host string
 	// Container is where it appears: a path under InputDir for a read-only mount, exactly WorkDir for the writable one.
 	Container string
-	// Writable marks the job's output directory. It must be a directory.
+	// Writable marks the job's output directory. It must be a directory, and it should be empty and used by this job
+	// alone. The job controls its content: it may create symlinks, device-looking names or huge files (the disk quota is
+	// the caller's: use a size-limited directory), so open results with O_NOFOLLOW or check that they are regular files.
 	Writable bool
 }
 

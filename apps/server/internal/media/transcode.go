@@ -29,6 +29,28 @@ func TestClipArgs(output string, seconds int) ([]string, error) {
 	return a, nil
 }
 
+// RawClipArgs generates a synthetic 1080p 30 fps clip as uncompressed video in AVI (about 93 MB per second of video). It
+// exists to give the I/O benchmark a big file; nothing in the product uses raw video.
+func RawClipArgs(output string, seconds int) ([]string, error) {
+	if seconds <= 0 || seconds > 60 {
+		return nil, fmt.Errorf("media: raw clip length %d s must be in 1..60", seconds)
+	}
+	a := common()
+	a = append(a,
+		"-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=30:duration="+strconv.Itoa(seconds),
+		"-c:v", "rawvideo", "-pix_fmt", "yuv420p",
+		output,
+	)
+	return a, nil
+}
+
+// CopyArgs remuxes every stream without re-encoding: the work is reading and writing the file. Input and output are
+// container paths.
+func CopyArgs(input, output string) []string {
+	a := common()
+	return append(a, "-protocol_whitelist", "file", "-i", input, "-map", "0", "-c", "copy", output)
+}
+
 // TranscodeOptions parameterise TranscodeH264Args.
 type TranscodeOptions struct {
 	Preset string // x264 preset, default "veryfast"

@@ -427,15 +427,22 @@ jobs:
         working-directory: apps/server
         run: go test ./internal/sandbox -run Integration -docker-image media-tools:ci -docker-runtime runsc -v
 
+      # Two CPU limits: 2 CPUs throttles the transcode through the CFS quota (both providers become quota-bound), 4 CPUs is every
+      # vCPU of the runner, so the encode is not throttled and the provider's own cost shows.
       - name: Benchmark
         working-directory: apps/server
         run: |
+          go build -o "$RUNNER_TEMP/cfctl" ./cmd/cfctl
           {
             echo "## gVisor overhead (cfctl media bench)"
             echo
-            echo "gVisor release ${GVISOR_RELEASE}. Runner: $(nproc) vCPUs, $(free -m | awk '/Mem:/ {print $2}') MiB RAM, $(uname -sr)."
-            echo
-            go run ./cmd/cfctl media bench --providers docker,hardened --runs 3 --image media-tools:ci --cpus 2 --memory 2048
+            echo "gVisor release ${GVISOR_RELEASE} ($(runsc --version | head -1)). Docker $(docker version --format '{{.Server.Version}}'). Runner: $(nproc) vCPUs, $(free -m | awk '/Mem:/ {print $2}') MiB RAM, $(uname -sr)."
+            for cpus in 2 4; do
+              echo
+              echo "### ${cpus} CPUs per job"
+              echo
+              "$RUNNER_TEMP/cfctl" media bench --providers docker,hardened --runs 3 --image media-tools:ci --cpus "$cpus" --memory 2048
+            done
           } | tee "$RUNNER_TEMP/bench.md"
           cat "$RUNNER_TEMP/bench.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Keep the table
