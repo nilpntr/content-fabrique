@@ -3,12 +3,13 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/components/ui/toast";
 import { type ApiAsset, fetchSpriteVtt } from "@/lib/api/client";
-import { useDeleteAsset } from "@/lib/api/hooks";
+import { useDeleteAsset, useRenameAsset } from "@/lib/api/hooks";
 import { useApiClient } from "@/lib/api/provider";
 import { ASSETS_QUERY_KEY } from "@/lib/query-client";
 import { URL_REFRESH_MIN_MS, useRefreshThrottle } from "@/lib/refresh-throttle";
 import type { UploadItem } from "@/lib/upload/manager";
 import { useUploadCommands, useUploadSelector } from "@/lib/upload/provider";
+import { ClipDetails } from "./clip-details";
 import { LibraryGrid } from "./library-grid";
 import type { Asset, AssetId, Sprite } from "./types";
 
@@ -79,6 +80,7 @@ export function toLibraryAsset(asset: ApiAsset, local?: LocalUpload, loadVtt?: (
     title: asset.title || asset.filename,
     description: asset.description,
     tags: asset.tags,
+    ...(asset.quick_look_status ? { quickLook: asset.quick_look_status } : {}),
     status,
     progress: uploading && local && !stalled ? local.percent : asset.status === "processing" ? asset.ingest_progress : undefined,
     stage: asset.status === "processing" && asset.ingest_stage ? (STAGES[asset.ingest_stage] ?? asset.ingest_stage) : undefined,
@@ -135,11 +137,17 @@ export function RealLibrary({ assets, loading, hasMore, loadingMore, onLoadMore 
     return () => clearTimeout(timer);
   }, [assets, refresh, resetRefresh]);
 
+  const [openId, setOpenId] = React.useState<string | null>(null);
+  const rename = useRenameAsset();
+  const opened = openId ? (shown.find((asset) => asset.id === openId) ?? null) : null;
+
   return (
     <div className="space-y-4">
+      <ClipDetails asset={opened} onClose={() => setOpenId(null)} onRename={async (asset, title) => void (await rename.mutateAsync({ id: asset.id, title }))} />
       <LibraryGrid
         assets={shown}
         loading={loading}
+        onOpen={(asset) => setOpenId(asset.id)}
         onMediaError={refresh}
         onDelete={(asset) => {
           // An upload of this browser is stopped here and the asset is deleted on the server, which is what the creator asked for.

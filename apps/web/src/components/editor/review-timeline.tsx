@@ -8,16 +8,20 @@ import { assignLanes, clampZoom, createScale, MAX_ZOOM, MIN_ZOOM, msToPx, pxToMs
 import { type Handle, moveHandle, resolveGesture, snapThresholdMs } from "./lib/selection";
 import { clamp, formatRange, formatRulerLabel, formatTimecode, stepFrames } from "./lib/time";
 import { cutTimes, itemOutputDurationMs } from "./lib/time-map";
-import type { CommentDraft, MsRange, ReviewVersion } from "./types";
+import { BeatTicks, ClipBadges, ClipHandle, DownbeatLines, type Focus, type FocusControl, sameFocus, SfxLane, sfxLaneHeight, sfxRows, TimelineDetails, TransitionMarks } from "./timeline-details";
+import type { BeatMarker, CommentDraft, MsRange, ReviewVersion } from "./types";
 import { type PlayerController, usePlayhead } from "./use-player";
 
 const RULER_H = 26;
-const FILM_H = 44;
+/** The clips: a label row and a row of effect badges. */
+const FILM_H = 56;
 const LANE_H = 20;
 const LANE_GAP = 4;
 /** Used until the first measurement, and where the layout has no size (a test). */
 const FALLBACK_VIEWPORT_PX = 800;
 const COMPOSER_W = 320;
+const EMPTY_SFX: never[] = [];
+const EMPTY_MARKERS: BeatMarker[] = [];
 
 /** A comment drawn on the timeline. Replies are not drawn: they follow the comment they answer. */
 export interface TimelineRegion {
@@ -90,6 +94,28 @@ function ReviewTimelineView({
   const lanes = React.useMemo(() => assignLanes(regions, scale), [regions, scale]);
   const laneCount = Math.max(1, ...[...lanes.values()].map((lane) => lane + 1));
   const lanesH = laneCount * LANE_H + LANE_GAP * 2;
+
+  // What the editor put in the cut: sound effects get a lane of their own, the beat grid goes in the ruler.
+  const sfx = version.sfx ?? EMPTY_SFX;
+  const markers = version.markers ?? EMPTY_MARKERS;
+  const sfxLayout = React.useMemo(() => sfxRows(sfx, scale), [sfx, scale]);
+  const sfxH = sfx.length > 0 ? sfxLaneHeight(sfxLayout.count) : 0;
+  const [pinnedFocus, setPinnedFocus] = React.useState<Focus | null>(null);
+  const [peekFocus, setPeekFocus] = React.useState<Focus | null>(null);
+  // Another version has other clips: what was picked is not there any more.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: resets when the version on screen changes.
+  React.useEffect(() => {
+    setPinnedFocus(null);
+    setPeekFocus(null);
+  }, [version.version]);
+  const focusControl = React.useMemo<FocusControl>(
+    () => ({
+      selected: pinnedFocus,
+      onPeek: setPeekFocus,
+      onSelect: (focus) => setPinnedFocus((current) => (sameFocus(current, focus) ? null : focus)),
+    }),
+    [pinnedFocus],
+  );
 
   React.useLayoutEffect(() => {
     const el = viewportRef.current;
@@ -270,6 +296,7 @@ function ReviewTimelineView({
               }}
             >
               <RulerMarks scale={scale} cuts={cuts} />
+              <BeatTicks markers={markers} scale={scale} />
             </div>
 
             {/* Filmstrip and comment lane: drag to select. */}
@@ -279,17 +306,26 @@ function ReviewTimelineView({
               aria-label="Timeline tracks, drag to select a range"
               data-testid="timeline-surface"
               className="relative cursor-crosshair touch-none select-none"
-              style={{ height: FILM_H + lanesH }}
+              style={{ height: FILM_H + sfxH + lanesH }}
               onPointerDown={onSurfaceDown}
               onPointerMove={onSurfaceMove}
               onPointerUp={onSurfaceUp}
               onPointerCancel={onSurfaceCancel}
             >
-              <Filmstrip version={version} scale={scale} assetNames={assetNames} />
+              <Filmstrip version={version} scale={scale} assetNames={assetNames} control={focusControl} />
 
+              <DownbeatLines markers={markers} scale={scale} height={FILM_H + sfxH} />
               <CutLines scale={scale} cuts={cuts} />
+              <TransitionMarks items={version.items} scale={scale} height={FILM_H} control={focusControl} />
 
-              <div className="absolute inset-x-0 border-t border-hairline" style={{ top: FILM_H, height: lanesH }}>
+              {sfxH > 0 ? (
+                // biome-ignore lint/a11y/useSemanticElements: a lane drawn on the timeline surface; a fieldset cannot be positioned like this.
+                <div aria-label="Sound effects" role="group" className="absolute inset-x-0 border-t border-hairline" style={{ top: FILM_H, height: sfxH }}>
+                  <SfxLane sfx={sfx} scale={scale} rows={sfxLayout.rows} control={focusControl} />
+                </div>
+              ) : null}
+
+              <div className="absolute inset-x-0 border-t border-hairline" style={{ top: FILM_H + sfxH, height: lanesH }}>
                 {regions.map((region) => (
                   <RegionMark
                     key={region.id}
@@ -330,6 +366,17 @@ function ReviewTimelineView({
             <PlayheadMarker player={player} scale={scale} />
           </div>
         </div>
+
+        <div className="mt-2">
+          <TimelineDetails
+            focus={peekFocus ?? pinnedFocus}
+            pinned={peekFocus === null && pinnedFocus !== null}
+            items={version.items}
+            sfx={sfx}
+            assetNames={assetNames}
+            onClose={() => setPinnedFocus(null)}
+          />
+        </div>
       </div>
 
       {draft && composing && (
@@ -348,16 +395,28 @@ function ReviewTimelineView({
   );
 }
 
-const Filmstrip = React.memo(function Filmstrip({ version, scale, assetNames }: { version: ReviewVersion; scale: TimelineScale; assetNames?: Record<string, string> }) {
+const Filmstrip = React.memo(function Filmstrip({
+  version,
+  scale,
+  assetNames,
+  control,
+}: {
+  version: ReviewVersion;
+  scale: TimelineScale;
+  assetNames?: Record<string, string>;
+  control: FocusControl;
+}) {
   return (
     <div className="absolute inset-x-0 top-0 overflow-hidden" style={{ height: FILM_H }}>
       {version.items.map((item) => {
         const base = hue(item.asset_id);
+        // A clip that starts inside a blend keeps its label clear of the transition's mark.
+        const lead = item.transition_in && item.transition_in.type !== "cut" ? Math.max(msToPx(item.transition_in.duration_ms, scale), 24) : 0;
         return (
           <div
             key={item.id}
             data-item={item.id}
-            className="absolute top-1 bottom-1 overflow-hidden rounded-[5px] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.18)]"
+            className="absolute top-1 bottom-1 overflow-hidden rounded-[6px] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.18)]"
             style={{
               left: msToPx(item.at_ms, scale),
               width: Math.max(msToPx(itemOutputDurationMs(item), scale) - 1, 2),
@@ -368,14 +427,20 @@ const Filmstrip = React.memo(function Filmstrip({ version, scale, assetNames }: 
               ].join(", "),
             }}
           >
-            <span className="absolute inset-x-1.5 top-1/2 -translate-y-1/2 truncate text-[10.5px] leading-none font-medium drop-shadow-[0_1px_1px_rgba(0,0,0,0.5)]">
-              <span className="font-mono opacity-80">{item.id}</span> {assetNames?.[item.asset_id] ?? item.asset_id}
-              {item.speed_ramp ? (
-                <span className="ml-1 font-mono opacity-80">ramp</span>
-              ) : (
-                item.speed !== 1 && <span className="ml-1 font-mono opacity-80">{item.speed}×</span>
-              )}
-            </span>
+            <div className="absolute inset-0 flex flex-col justify-between px-1.5 py-1" style={{ paddingLeft: 6 + lead }}>
+              <div className="flex min-w-0 items-center gap-1 text-[10.5px] leading-none font-medium drop-shadow-[0_1px_1px_rgba(0,0,0,0.5)]">
+                <ClipHandle item={item} control={control} />
+                <span className="min-w-0 truncate">
+                  {assetNames?.[item.asset_id] ?? item.asset_id}
+                  {item.speed_ramp ? (
+                    <span className="ml-1 font-mono opacity-80">ramp</span>
+                  ) : (
+                    item.speed !== 1 && <span className="ml-1 font-mono opacity-80">{item.speed}×</span>
+                  )}
+                </span>
+              </div>
+              <ClipBadges item={item} control={control} />
+            </div>
           </div>
         );
       })}

@@ -1,17 +1,25 @@
 import { Autocomplete } from "@base-ui/react/autocomplete";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { useNavigate } from "@tanstack/react-router";
-import { CornerDownLeft, type LucideIcon, MoonIcon, SearchIcon, SunIcon } from "lucide-react";
+import { CornerDownLeft, FilmIcon, FolderOpenIcon, type LucideIcon, MoonIcon, SearchIcon, SunIcon } from "lucide-react";
 import { useEffect, useState } from "react";
+import { statusLabel } from "@/components/project/badges";
 import { HighlightGlider } from "@/components/ui/highlight-glider";
 import { Kbd } from "@/components/ui/kbd";
 import { toggleTheme, useTheme } from "@/hooks/use-theme";
+import { useAssets } from "@/lib/api/hooks";
+import { useProjects } from "@/lib/api/project-hooks";
+import { searchClips, searchProjects } from "@/lib/search";
 import { NAV_ITEMS } from "@/nav";
 
 interface PaletteItem {
   id: string;
   label: string;
   icon: LucideIcon;
+  /** A line after the label: the status of a project, the tags of a clip. */
+  hint?: string;
+  /** A small picture instead of the icon (a clip's poster). */
+  thumb?: string;
   run: () => void;
 }
 
@@ -50,13 +58,45 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
     },
   ];
 
+  // Projects and clips are looked up in what the app already holds (the first pages of each), and only once the palette has been opened.
+  const [asked, setAsked] = useState(false);
+  useEffect(() => {
+    if (open) setAsked(true);
+  }, [open]);
+  const projects = useProjects({ enabled: asked });
+  // The palette only reads the list: it does not poll for clips that are still processing (the library does that), whatever it holds.
+  const assets = useAssets({ enabled: asked, isOwned: () => true });
+  const projectItems: PaletteItem[] = searchProjects(projects.data ?? [], query).map((project) => ({
+    id: `project:${project.id}`,
+    label: project.title,
+    icon: FolderOpenIcon,
+    hint: `${project.format} · ${statusLabel(project.status)}`,
+    run: () => {
+      close();
+      void navigate({ to: "/projects/$projectId", params: { projectId: project.id } });
+    },
+  }));
+  const clipItems: PaletteItem[] = searchClips(assets.data ?? [], query).map((asset) => ({
+    id: `clip:${asset.id}`,
+    label: asset.title || asset.filename,
+    icon: FilmIcon,
+    hint: asset.tags.length > 0 ? asset.tags.slice(0, 2).join(" · ") : "Library",
+    thumb: asset.derivatives?.poster?.url,
+    run: () => {
+      close();
+      void navigate({ to: "/library", search: { state: undefined, samples: undefined } });
+    },
+  }));
+
   const needle = query.trim().toLowerCase();
   const groups: PaletteGroup[] = [
-    { value: "Pages", items: pages },
-    { value: "Actions", items: actions },
-  ]
-    .map((group) => ({ ...group, items: group.items.filter((item) => !needle || item.label.toLowerCase().includes(needle)) }))
-    .filter((group) => group.items.length > 0);
+    { value: "Projects", items: projectItems },
+    { value: "Clips", items: clipItems },
+    ...[
+      { value: "Pages", items: pages },
+      { value: "Actions", items: actions },
+    ].map((group) => ({ ...group, items: group.items.filter((item) => !needle || item.label.toLowerCase().includes(needle)) })),
+  ].filter((group) => group.items.length > 0);
 
   return (
     // The query is cleared once the exit animation has finished: clearing it on close would re-render the full list mid-fade.
@@ -89,7 +129,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
             <div className="flex h-14 shrink-0 items-center gap-3 border-b border-hairline px-4 dark:border-border">
               <SearchIcon className="size-4.5 shrink-0 text-subtle-foreground" />
               <Autocomplete.Input
-                placeholder="Search pages and actions…"
+                placeholder="Search projects, clips and pages…"
                 onKeyDown={(event) => {
                   if (event.key === "Escape") close();
                 }}
@@ -113,10 +153,15 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
                         onClick={item.run}
                         className="group flex h-11 cursor-pointer items-center gap-3 rounded-[11px] px-3 text-[13.5px] text-muted-foreground outline-none select-none transition-colors data-highlighted:text-foreground"
                       >
-                        <span className="flex size-6 shrink-0 items-center justify-center rounded-[7px] bg-surface shadow-raised transition-colors group-data-[highlighted]:text-brand">
-                          <item.icon className="size-3.5" />
-                        </span>
+                        {item.thumb ? (
+                          <img src={item.thumb} alt="" loading="lazy" draggable={false} className="size-6 shrink-0 rounded-[7px] bg-wash object-cover shadow-raised" />
+                        ) : (
+                          <span className="flex size-6 shrink-0 items-center justify-center rounded-[7px] bg-surface shadow-raised transition-colors group-data-[highlighted]:text-brand">
+                            <item.icon className="size-3.5" />
+                          </span>
+                        )}
                         <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                        {item.hint ? <span className="hidden max-w-[10rem] shrink-0 truncate text-[12px] text-subtle-foreground sm:inline">{item.hint}</span> : null}
                         <CornerDownLeft className="size-3.5 shrink-0 -translate-x-1 text-subtle-foreground opacity-0 transition-[opacity,translate] duration-(--dur-base) group-data-[highlighted]:translate-x-0 group-data-[highlighted]:opacity-100" />
                       </Autocomplete.Item>
                     )}

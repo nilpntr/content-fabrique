@@ -11,6 +11,43 @@ export type TransitionIn =
   | { type: "cut" }
   | { type: "crossfade" | "dip_to_black" | "whip" | "whip_left" | "whip_right" | "zoom_through" | "flash"; duration_ms: number };
 
+/** A camera move on a clip (`motion`, timeline-v1 section 2): `punch_in`, `push_in`, `pull_back` or `shake`. */
+export interface MotionSpec {
+  preset: string;
+  /** For `punch_in` and `shake`: where in the clip, from its own first frame. */
+  at_ms?: number;
+  strength?: number;
+}
+
+/** The colour grade of a clip (`look`). `none` is not kept. */
+export interface LookSpec {
+  preset: string;
+  match?: boolean;
+}
+
+/** What the clip's own sound does: `mute` (the default), `bed` (low ambience under the edit) or `full` (the programme). */
+export interface ClipAudio {
+  mode: "mute" | "bed" | "full";
+  gain_db?: number;
+}
+
+/** A generated sound effect (an `sfx` item of the audio track). */
+export interface SfxItem {
+  id: string;
+  /** The category: `whoosh`, `impact`, `riser`... */
+  sfx: string;
+  variant?: string;
+  at_ms: number;
+  gain_db?: number;
+}
+
+/** A point on the beat grid. */
+export interface BeatMarker {
+  at_ms: number;
+  kind: "beat" | "downbeat" | "drop" | "section";
+  strength?: number;
+}
+
 /** An item on the `main` video track (the subset of the spec the review screen needs). */
 export interface VideoItem {
   id: string;
@@ -24,6 +61,12 @@ export interface VideoItem {
   /** A speed that changes along the clip (P3-10); replaces `speed`. `at_ms` counts from `source.in_ms`. */
   speed_ramp?: SpeedPoint[];
   transition_in?: TransitionIn;
+  motion?: MotionSpec;
+  look?: LookSpec;
+  /** Always set by the spec reader; a clip with no audio settings is `mute`. Hand-made items may leave it out. */
+  audio?: ClipAudio;
+  /** Why the editor picked this clip (at most 280 characters, never rendered). */
+  why?: string;
 }
 
 /** `time_map` entry for a main-track item. */
@@ -57,6 +100,10 @@ export interface ReviewVersion {
   output: { format: OutputFormat; fps: number };
   duration_ms: number;
   items: VideoItem[];
+  /** The generated sound effects, when the version has any. */
+  sfx?: SfxItem[];
+  /** The beat grid and the other markers of the version. */
+  markers?: BeatMarker[];
   time_map: TimeMapEntry[];
   /** The preview render. Without one the screen plays a generated placeholder. */
   preview_url?: string;

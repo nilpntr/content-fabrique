@@ -31,6 +31,8 @@
   },
   "include": [
     "src",
+    "dev-fixtures",
+    "vite.fixtures.config.ts",
     "vite.base.ts",
     "vite.config.ts",
     "vitest.config.ts"

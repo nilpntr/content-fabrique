@@ -28,6 +28,8 @@ export interface Asset {
   title: string;
   description?: string;
   tags: string[];
+  /** Whether the quick look (the title, description and tags a video gets after its ingest) is done. Absent when it does not apply. */
+  quickLook?: "pending" | "succeeded" | "failed" | "skipped";
   status: AssetStatus;
   /** 0 to 100, while `uploading` or `processing`. Left out when unknown, which shows an indeterminate bar. */
   progress?: number;

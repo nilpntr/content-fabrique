@@ -1,11 +1,16 @@
-import { CircleAlert, CircleCheck, CircleStop, Loader2, MessageCircleQuestion } from "lucide-react";
+import { ChevronRight, CircleAlert, CircleCheck, CircleStop, Loader2, MessageCircleQuestion } from "lucide-react";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError, type Run } from "@/lib/api/client";
 import { isRunActive, useCancelRun, useReplyToRun, useRunQuery } from "@/lib/api/project-hooks";
 import { cn } from "@/lib/utils";
-import { budgetLimit, currentActivity, failureMessage, formatElapsed, formatUsd, runSteps } from "./run-steps";
+import { runArtifacts } from "./run-artifacts";
+import { EditChecksCard } from "./run-checks";
+import { CreativePlanCard } from "./run-plan-card";
+import { RunStepList } from "./run-step-list";
+import { budgetLimit, currentActivity, failureMessage, runSteps } from "./run-steps";
+import { FinishSummary, RunCostLine, runCreditsOf } from "./run-summary";
 
 /** The longest answer the API takes is 16 KB; the box stops well before. */
 const ANSWER_MAX_LENGTH = 4000;
@@ -71,8 +76,12 @@ export interface RunViewProps {
 /** The run panel for a run that is already loaded. */
 export function RunView({ run, assetTitles, onCancel, cancelling = false, cancelError = false, onReply, replying = false, replyError, className }: RunViewProps) {
   const active = isRunActive(run.status);
-  const steps = React.useMemo(() => runSteps(run.events ?? [], assetTitles), [run.events, assetTitles]);
+  const working = run.status === "queued" || run.status === "running";
+  const steps = React.useMemo(() => runSteps(run.events ?? [], assetTitles, { live: working }), [run.events, assetTitles, working]);
   const activity = currentActivity({ status: run.status, events: run.events ?? [], question: run.question }, assetTitles);
+  const artifacts = React.useMemo(() => runArtifacts(run.events ?? []), [run.events]);
+  // The steps are open while the editor works and fold away when it is done; the creator's own choice wins.
+  const [stepsOpen, setStepsOpen] = React.useState<boolean | undefined>(undefined);
   const titleId = React.useId();
 
   const heading =
@@ -86,13 +95,6 @@ export function RunView({ run, assetTitles, onCancel, cancelling = false, cancel
         <h2 id={titleId} className="text-[15px] font-semibold tracking-[-0.01em]">
           {heading}
         </h2>
-        <p className="font-mono text-[12.5px] text-muted-foreground tabular-nums">
-          <span>{formatUsd(run.cost_micros)}</span>
-          <span className="text-subtle-foreground"> of {formatUsd(run.budget_micros)}</span>
-          <span aria-hidden> · </span>
-          <span className="sr-only">, </span>
-          <span>{formatElapsed(run.active_ms)}</span>
-        </p>
         {active ? (
           <Button variant="secondary" size="sm" className="ml-auto" onClick={onCancel} disabled={cancelling} aria-label={cancelling ? "Stopping the editor" : "Stop the editor"}>
             <CircleStop aria-hidden />
@@ -100,6 +102,8 @@ export function RunView({ run, assetTitles, onCancel, cancelling = false, cancel
           </Button>
         ) : null}
       </div>
+
+      <RunCostLine run={run} credits={runCreditsOf(run)} />
 
       <p role="status" className={cn("text-[13.5px] text-muted-foreground", !active && "sr-only")}>
         {activity}
@@ -112,11 +116,10 @@ export function RunView({ run, assetTitles, onCancel, cancelling = false, cancel
 
       {run.status === "waiting_input" ? <QuestionBox question={run.question ?? ""} onReply={onReply} replying={replying} error={replyError} /> : null}
 
-      {run.status === "succeeded" ? (
-        <p className="max-w-prose whitespace-pre-line text-[13.5px]" data-testid="run-summary">
-          {run.summary || "The editor made your first cut."}
-        </p>
-      ) : null}
+      {artifacts.plan ? <CreativePlanCard plan={artifacts.plan} assetTitles={assetTitles} className="animate-rise" /> : null}
+      {artifacts.rounds.length > 0 ? <EditChecksCard rounds={artifacts.rounds} className="animate-rise" /> : null}
+
+      {run.status === "succeeded" ? <FinishSummary text={run.summary || "The editor made your first cut."} version={run.timeline_version} className="animate-rise" /> : null}
       {run.status === "failed" ? (
         <div role="alert" className="space-y-1 rounded-[10px] bg-del-wash px-3 py-2 text-[13.5px]">
           <p className="font-medium text-destructive">
@@ -129,18 +132,22 @@ export function RunView({ run, assetTitles, onCancel, cancelling = false, cancel
       {run.status === "cancelled" ? <p className="text-[13.5px] text-muted-foreground">What the editor made before you stopped it is kept as versions.</p> : null}
 
       {steps.length > 0 ? (
-        <details className="group text-[13px]">
-          <summary className="cursor-pointer text-muted-foreground outline-none select-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand">
+        <details
+          className="group text-[13px]"
+          open={stepsOpen ?? active}
+          // The toggle event also follows React's own change of `open`; only a difference from what is shown is the creator's click.
+          onToggle={(event) => {
+            const now = event.currentTarget.open;
+            if (now !== (stepsOpen ?? active)) setStepsOpen(now);
+          }}
+        >
+          <summary
+            className="flex cursor-pointer items-center gap-1.5 rounded-md py-0.5 text-muted-foreground outline-none select-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand">
+            <ChevronRight aria-hidden className="size-3.5 transition-transform group-open:rotate-90" />
             {steps.length} {steps.length === 1 ? "step" : "steps"}
             {active ? " so far" : ""}
           </summary>
-          <ol className="mt-2 max-h-56 space-y-1 overflow-y-auto border-l border-hairline pl-3">
-            {steps.map((step) => (
-              <li key={step.seq} className={cn("text-muted-foreground", step.tone === "error" && "text-destructive")}>
-                {step.label}
-              </li>
-            ))}
-          </ol>
+          <RunStepList steps={steps} active={active} className="mt-2.5" />
         </details>
       ) : null}
     </section>

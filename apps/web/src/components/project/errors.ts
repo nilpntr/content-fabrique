@@ -21,6 +21,7 @@ export function createProjectMessage(error: unknown): string {
 export function startEditMessage(error: unknown): string {
   if (code(error) === "run_in_progress") return "The editor is still working on this project. Wait for it to finish, or stop it first.";
   if (code(error) === "assets_not_usable") return "This project has no ready video clip to edit. Check that its clips are still in your library.";
+  if (code(error) === "credits_exhausted") return "Your workspace doesn't have enough credits for an edit.";
   if (status(error) === 402) return "Your workspace needs an active plan to use the editor.";
   if (status(error) === 403) return "Your role in this workspace can't start the editor. Ask an owner or editor.";
   if (code(error) === "model_not_configured") return "AI editing isn't available on this server yet.";
