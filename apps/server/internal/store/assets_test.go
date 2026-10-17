@@ -758,6 +758,269 @@ func assetsSuite(t *testing.T, st *store.Store, suffix string) {
 		}
 	})
 
+	t.Run("transcripts: pending after the ingest, saved for the right ingest, tenant-scoped", func(t *testing.T) {
+		audioKinds := []string{store.DerivativePoster, store.DerivativeAudio16k}
+		ingest := func(w store.Workspace, a store.Asset, kinds ...string) store.Asset {
+			t.Helper()
+			if _, err := st.ClaimAssetForIngest(ctx, w.ID, a.ID); err != nil {
+				t.Fatal(err)
+			}
+			res := store.IngestResult{DurationMs: 5000, Width: 720, Height: 1280, FPS: 30, HasAudio: len(kinds) > 1, Probe: []byte(`{}`)}
+			for _, k := range kinds {
+				res.Derivatives = append(res.Derivatives, store.NewDerivative{Kind: k, Key: "ws/" + w.ID.String() + "/assets/" + a.ID.String() + "/" + k + "-" + suffix, ContentType: "x", SizeBytes: 1})
+			}
+			done, err := st.FinishAssetIngest(ctx, w.ID, a.ID, res)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return done
+		}
+		finish := func(w store.Workspace, user ids.UserID, name string, kinds ...string) store.Asset {
+			t.Helper()
+			a, _ := newAsset(w, user, name, future)
+			if err := st.InTx(ctx, func(tx *store.Store) error { _, err := tx.CompleteUpload(ctx, w.ID, a.ID); return err }); err != nil {
+				t.Fatal(err)
+			}
+			return ingest(w, a, kinds...)
+		}
+		silent := finish(wa, ua, "tr-silent", store.DerivativePoster)
+		if silent.TranscriptStatus != store.TranscriptNone {
+			t.Fatalf("a clip without audio: %q", silent.TranscriptStatus)
+		}
+		voiced := finish(wa, ua, "tr-voiced", audioKinds...)
+		if voiced.TranscriptStatus != store.TranscriptPending || voiced.TranscriptFailureReason != nil {
+			t.Fatalf("a clip with audio: %q", voiced.TranscriptStatus)
+		}
+		if got, _ := st.GetAsset(ctx, wa.ID, voiced.ID); got.TranscriptStatus != store.TranscriptPending {
+			t.Fatalf("read back: %q", got.TranscriptStatus)
+		}
+
+		// The hook decides whether a job was inserted; a duplicate leaves the status alone.
+		var hooked []ids.AssetID
+		skip := false
+		st.SetTranscribeHook(func(_ context.Context, _ *store.Store, a store.Asset) (bool, error) {
+			hooked = append(hooked, a.ID)
+			return !skip, nil
+		})
+		defer st.SetTranscribeHook(nil)
+		hookedAsset := finish(wa, ua, "tr-hook", store.DerivativeAudio16k)
+		skip = true
+		skipped := finish(wa, ua, "tr-skip", store.DerivativeAudio16k)
+		if len(hooked) != 2 || hookedAsset.TranscriptStatus != store.TranscriptPending || skipped.TranscriptStatus != store.TranscriptNone {
+			t.Fatalf("hook calls %v, statuses %q %q", hooked, hookedAsset.TranscriptStatus, skipped.TranscriptStatus)
+		}
+		st.SetTranscribeHook(nil)
+
+		// Nothing before the job has saved: no transcript.
+		if _, err := st.GetTranscript(ctx, wa.ID, voiced.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("a transcript before the job: %v", err)
+		}
+		words := []byte(`[{"text":"Hello","start_ms":500,"end_ms":900,"confidence":0.9}]`)
+		tr, err := st.SaveTranscript(ctx, wa.ID, voiced.ID, store.NewTranscript{
+			SourceIngestedAt: voiced.IngestedAt, Speech: true, Language: "en", Words: words, Structure: []byte(`{"sentences":[],"fillers":[],"pauses":[]}`),
+			Provider: "whispercpp", Model: "ggml-tiny.en", AudioMs: 5000, SpeechMs: 400,
+		})
+		if err != nil || !tr.Speech || tr.Language != "en" || tr.AssetID != voiced.ID || tr.SourceIngestedAt == nil {
+			t.Fatalf("save = %+v %v", tr, err)
+		}
+		got, err := st.GetTranscript(ctx, wa.ID, voiced.ID)
+		if err != nil || string(got.Words) != `[{"text": "Hello", "end_ms": 900, "start_ms": 500, "confidence": 0.9}]` || got.AudioMs != 5000 {
+			t.Fatalf("read back = %+v %v", got, err)
+		}
+		if a, _ := st.GetAsset(ctx, wa.ID, voiced.ID); a.TranscriptStatus != store.TranscriptReady {
+			t.Fatalf("status after saving: %q", a.TranscriptStatus)
+		}
+
+		// Saved again (a re-run) replaces the transcript, with no speech this time.
+		if _, err := st.SaveTranscript(ctx, wa.ID, voiced.ID, store.NewTranscript{SourceIngestedAt: voiced.IngestedAt, Speech: false, Provider: "whispercpp", Model: "m", AudioMs: 5000}); err != nil {
+			t.Fatal(err)
+		}
+		got, _ = st.GetTranscript(ctx, wa.ID, voiced.ID)
+		if got.Speech || got.Language != "" || string(got.Words) != "[]" {
+			t.Fatalf("no speech: %+v", got)
+		}
+		if a, _ := st.GetAsset(ctx, wa.ID, voiced.ID); a.TranscriptStatus != store.TranscriptNoSpeech {
+			t.Fatalf("status: %q", a.TranscriptStatus)
+		}
+		// The database refuses words for a clip without speech.
+		if _, err := st.SaveTranscript(ctx, wa.ID, voiced.ID, store.NewTranscript{SourceIngestedAt: voiced.IngestedAt, Speech: false, Language: "en", Words: words, Provider: "p", Model: "m"}); err == nil {
+			t.Fatal("words without speech were accepted")
+		}
+
+		// Workspace B sees nothing and writes nothing.
+		if _, err := st.GetTranscript(ctx, wb.ID, voiced.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("workspace B read A's transcript: %v", err)
+		}
+		if _, err := st.SaveTranscript(ctx, wb.ID, voiced.ID, store.NewTranscript{SourceIngestedAt: voiced.IngestedAt, Speech: true, Language: "en", Words: words, Provider: "p", Model: "m"}); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("workspace B saved a transcript for A's asset: %v", err)
+		}
+		if err := st.SetTranscriptStatus(ctx, wb.ID, voiced.ID, store.TranscriptFailed); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("workspace B set A's status: %v", err)
+		}
+		if err := st.FailTranscript(ctx, wb.ID, voiced.ID, store.TranscriptGaveUp, voiced.IngestedAt); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("workspace B failed A's transcript: %v", err)
+		}
+		if err := st.SetTranscriptStatus(ctx, wa.ID, voiced.ID, "bogus"); !errors.Is(err, store.ErrInvalid) {
+			t.Fatalf("a bogus status: %v", err)
+		}
+
+		// A failure carries its reason, and the next status clears it. It lands only on a pending transcript: a ready one, finished by
+		// another job, is left alone.
+		if err := st.FailTranscript(ctx, wa.ID, voiced.ID, store.TranscriptGaveUp, voiced.IngestedAt); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("a late failure overwrote a transcript that is not pending: %v", err)
+		}
+		if err := st.SetTranscriptStatus(ctx, wa.ID, voiced.ID, store.TranscriptPending); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.FailTranscript(ctx, wa.ID, voiced.ID, store.TranscriptSpendCap, voiced.IngestedAt); err != nil {
+			t.Fatal(err)
+		}
+		if a, _ := st.GetAsset(ctx, wa.ID, voiced.ID); a.TranscriptStatus != store.TranscriptFailed || a.TranscriptFailureReason == nil || *a.TranscriptFailureReason != store.TranscriptSpendCap {
+			t.Fatalf("failed: %q %v", a.TranscriptStatus, a.TranscriptFailureReason)
+		}
+		if err := st.SetTranscriptStatus(ctx, wa.ID, voiced.ID, store.TranscriptPending); err != nil {
+			t.Fatal(err)
+		}
+		if a, _ := st.GetAsset(ctx, wa.ID, voiced.ID); a.TranscriptFailureReason != nil {
+			t.Fatalf("the reason outlived the failure: %v", *a.TranscriptFailureReason)
+		}
+
+		// A deleted asset has no readable transcript.
+		if _, err := st.SoftDeleteAsset(ctx, wa.ID, voiced.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.GetTranscript(ctx, wa.ID, voiced.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("a deleted asset's transcript: %v", err)
+		}
+	})
+
+	t.Run("transcripts: a save from an older ingest loses, a failure of an older ingest is ignored", func(t *testing.T) {
+		a, _ := newAsset(wa, ua, "tr-generations", future)
+		if err := st.InTx(ctx, func(tx *store.Store) error { _, err := tx.CompleteUpload(ctx, wa.ID, a.ID); return err }); err != nil {
+			t.Fatal(err)
+		}
+		ingest := func() store.Asset {
+			t.Helper()
+			if _, err := st.ClaimAssetForIngest(ctx, wa.ID, a.ID); err != nil {
+				t.Fatal(err)
+			}
+			done, err := st.FinishAssetIngest(ctx, wa.ID, a.ID, store.IngestResult{DurationMs: 5000, Width: 720, Height: 1280, FPS: 30, HasAudio: true, Probe: []byte(`{}`),
+				Derivatives: []store.NewDerivative{{Kind: store.DerivativeAudio16k, Key: "ws/" + wa.ID.String() + "/assets/" + a.ID.String() + "/audio-" + suffix, ContentType: "x", SizeBytes: 1}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return done
+		}
+		first := ingest()
+		second := ingest() // the same asset ingested again: a new generation
+		if first.IngestedAt == nil || second.IngestedAt == nil || !second.IngestedAt.After(*first.IngestedAt) {
+			t.Fatalf("generations %v %v", first.IngestedAt, second.IngestedAt)
+		}
+		words := []byte(`[{"text":"Old","start_ms":0,"end_ms":100,"confidence":1}]`)
+		if _, err := st.SaveTranscript(ctx, wa.ID, a.ID, store.NewTranscript{SourceIngestedAt: first.IngestedAt, Speech: true, Language: "en", Words: words, Provider: "p", Model: "m"}); !errors.Is(err, store.ErrStaleTranscript) {
+			t.Fatalf("a transcript of the first ingest saved over the second: %v", err)
+		}
+		if _, err := st.GetTranscript(ctx, wa.ID, a.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("a stale save wrote a row: %v", err)
+		}
+		if err := st.FailTranscript(ctx, wa.ID, a.ID, store.TranscriptGaveUp, first.IngestedAt); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("the failure of the first ingest's job marked the second's transcript: %v", err)
+		}
+		if got, _ := st.GetAsset(ctx, wa.ID, a.ID); got.TranscriptStatus != store.TranscriptPending {
+			t.Fatalf("status %q, want pending still", got.TranscriptStatus)
+		}
+		if _, err := st.SaveTranscript(ctx, wa.ID, a.ID, store.NewTranscript{SourceIngestedAt: second.IngestedAt, Speech: true, Language: "en", Words: words, Provider: "p", Model: "m"}); err != nil {
+			t.Fatalf("the current ingest's transcript: %v", err)
+		}
+
+		// A save for an asset that is being ingested again (not ready) is stale too.
+		if _, err := st.ClaimAssetForIngest(ctx, wa.ID, a.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.SaveTranscript(ctx, wa.ID, a.ID, store.NewTranscript{SourceIngestedAt: second.IngestedAt, Speech: true, Language: "en", Words: words, Provider: "p", Model: "m"}); !errors.Is(err, store.ErrStaleTranscript) {
+			t.Fatalf("a save while the asset is processing: %v", err)
+		}
+	})
+
+	t.Run("transcripts: an ingest that lost its audio clears the transcript", func(t *testing.T) {
+		a, _ := newAsset(wa, ua, "tr-lost-audio", future)
+		if err := st.InTx(ctx, func(tx *store.Store) error { _, err := tx.CompleteUpload(ctx, wa.ID, a.ID); return err }); err != nil {
+			t.Fatal(err)
+		}
+		finish := func(kinds ...string) store.Asset {
+			t.Helper()
+			if _, err := st.ClaimAssetForIngest(ctx, wa.ID, a.ID); err != nil {
+				t.Fatal(err)
+			}
+			res := store.IngestResult{DurationMs: 5000, Width: 720, Height: 1280, FPS: 30, HasAudio: len(kinds) > 1, Probe: []byte(`{}`)}
+			for _, k := range kinds {
+				res.Derivatives = append(res.Derivatives, store.NewDerivative{Kind: k, Key: "ws/" + wa.ID.String() + "/assets/" + a.ID.String() + "/" + k + "-" + suffix, ContentType: "x", SizeBytes: 1})
+			}
+			done, err := st.FinishAssetIngest(ctx, wa.ID, a.ID, res)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return done
+		}
+		with := finish(store.DerivativePoster, store.DerivativeAudio16k)
+		if _, err := st.SaveTranscript(ctx, wa.ID, a.ID, store.NewTranscript{SourceIngestedAt: with.IngestedAt, Speech: true, Language: "en",
+			Words: []byte(`[{"text":"Hi","start_ms":0,"end_ms":100,"confidence":1}]`), Provider: "p", Model: "m", AudioMs: 5000}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetTranscriptStatus(ctx, wa.ID, a.ID, store.TranscriptPending); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.FailTranscript(ctx, wa.ID, a.ID, store.TranscriptSpendCap, with.IngestedAt); err != nil {
+			t.Fatal(err)
+		}
+		without := finish(store.DerivativePoster)
+		if without.TranscriptStatus != store.TranscriptNone || without.TranscriptFailureReason != nil {
+			t.Fatalf("after the audio went: %q %v", without.TranscriptStatus, without.TranscriptFailureReason)
+		}
+		if _, err := st.GetTranscript(ctx, wa.ID, a.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("the words of the old audio are still served: %v", err)
+		}
+	})
+
+	t.Run("transcripts: the audio transcribed today is counted from the ledger", func(t *testing.T) {
+		now := time.Now().UTC()
+		day := now.Truncate(24 * time.Hour)
+		row := func(w store.Workspace, kind string, audioMs int64, at time.Time) {
+			t.Helper()
+			e := store.UsageEntry{WorkspaceID: w.ID, Stage: "transcription", Kind: kind, Model: "m", Provider: "whispercpp", AudioMs: audioMs, ListCostMicros: 0,
+				PriceTableVersion: "local", BilledTo: store.BilledToTest, CreatedAt: at}
+			if kind == "llm" {
+				e.Stage, e.Provider, e.AudioMs, e.InputTokens = "editor", "", 0, 100
+			}
+			if err := st.InsertUsage(ctx, e); err != nil {
+				t.Fatal(err)
+			}
+		}
+		row(wa, store.KindTranscription, 60_000, day.Add(time.Hour))
+		row(wa, store.KindTranscription, 30_000, day.Add(2*time.Hour))
+		row(wa, store.KindTranscription, 999_000, day.Add(-time.Hour)) // yesterday
+		row(wa, "llm", 0, day.Add(time.Hour))                          // not audio
+		row(wb, store.KindTranscription, 5_000, day.Add(time.Hour))    // another workspace
+		before, err := st.TranscribedMs(ctx, wa.ID, day, day.Add(24*time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Other subtests in this suite may have added rows for wa today, so check the difference they make.
+		row(wa, store.KindTranscription, 1_000, day.Add(3*time.Hour))
+		after, _ := st.TranscribedMs(ctx, wa.ID, day, day.Add(24*time.Hour))
+		if after-before != 1_000 || before < 90_000 {
+			t.Fatalf("before %d, after %d", before, after)
+		}
+		other, _ := st.TranscribedMs(ctx, wb.ID, day, day.Add(24*time.Hour))
+		if other < 5_000 || other >= 90_000 {
+			t.Fatalf("workspace B's audio %d", other)
+		}
+		rows, err := st.RecentUsage(ctx, wa.ID, 10)
+		if err != nil || rows[0].Provider != "whispercpp" || rows[0].AudioMs != 1_000 || rows[0].Kind != store.KindTranscription {
+			t.Fatalf("ledger = %+v %v", rows, err)
+		}
+	})
+
 	t.Run("search words", func(t *testing.T) {
 		for in, want := range map[string][]string{
 			"row":                       {"row"},

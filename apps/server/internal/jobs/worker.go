@@ -38,6 +38,8 @@ type WorkerOptions struct {
 	Ingest AssetIngester
 	// QuickLook is the quick look, for the quick_look job. Nil when the sandbox, object storage or model access is not set up.
 	QuickLook QuickLooker
+	// Transcribe is the transcription pipeline, for the transcribe job. Nil when the sandbox or object storage is not set up.
+	Transcribe Transcriber
 	// Analysis is the clip analysis, for the analyze job. Nil when the sandbox or object storage is not set up.
 	Analysis Analyzer
 	// Render is the render pipeline, for the jobs that render timelines. Nil when the sandbox or object storage is not set up.
@@ -106,7 +108,7 @@ func StartWorker(ctx context.Context, opts WorkerOptions) (*Worker, error) {
 		}
 	}
 
-	client, err := NewWorkerClient(pool, cfg, Deps{Store: opts.Store, Logger: logger, Objects: opts.Objects, Ingest: opts.Ingest, QuickLook: opts.QuickLook, Analysis: opts.Analysis, Render: opts.Render, Register: opts.Register})
+	client, err := NewWorkerClient(pool, cfg, Deps{Store: opts.Store, Logger: logger, Objects: opts.Objects, Ingest: opts.Ingest, QuickLook: opts.QuickLook, Transcribe: opts.Transcribe, Analysis: opts.Analysis, Render: opts.Render, Register: opts.Register})
 	if err != nil {
 		pool.Close()
 		return nil, err
@@ -114,6 +116,7 @@ func StartWorker(ctx context.Context, opts WorkerOptions) (*Worker, error) {
 	// The ingest marks a video ready through this Store; the same transaction enqueues its quick look (P1-04b).
 	if opts.Store != nil {
 		opts.Store.SetQuickLookHook(NewEnqueuer(client, logger).EnqueueQuickLook)
+		opts.Store.SetTranscribeHook(NewEnqueuer(client, logger).EnqueueTranscribe)
 		opts.Store.SetAnalysisHook(NewEnqueuer(client, logger).EnqueueAnalysis)
 	}
 	w := &Worker{runner: NewRunner(client, pool, logger), pool: pool, direct: direct, logger: logger}

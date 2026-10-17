@@ -17,10 +17,10 @@ const insertUsageLedger = `-- name: InsertUsageLedger :exec
 
 INSERT INTO usage_ledger (
     workspace_id, run_id, stage, kind, model, input_tokens, cache_write_tokens, cache_write_1h_tokens,
-    cache_read_tokens, output_tokens, list_cost_micros, price_table_version, billed_to, request_id, estimated, created_at
+    cache_read_tokens, output_tokens, list_cost_micros, price_table_version, billed_to, request_id, estimated, provider, audio_ms, created_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8,
-    $9, $10, $11, $12, $13, $14, $15, $16
+    $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
 )
 ON CONFLICT (request_id) WHERE request_id <> '' DO NOTHING
 `
@@ -41,6 +41,8 @@ type InsertUsageLedgerParams struct {
 	BilledTo           string
 	RequestID          string
 	Estimated          bool
+	Provider           string
+	AudioMs            int64
 	CreatedAt          time.Time
 }
 
@@ -64,13 +66,15 @@ func (q *Queries) InsertUsageLedger(ctx context.Context, arg InsertUsageLedgerPa
 		arg.BilledTo,
 		arg.RequestID,
 		arg.Estimated,
+		arg.Provider,
+		arg.AudioMs,
 		arg.CreatedAt,
 	)
 	return err
 }
 
 const listRecentUsageLedger = `-- name: ListRecentUsageLedger :many
-SELECT id, workspace_id, run_id, stage, kind, model, input_tokens, cache_write_tokens, cache_write_1h_tokens, cache_read_tokens, output_tokens, list_cost_micros, price_table_version, billed_to, request_id, estimated, created_at FROM usage_ledger
+SELECT id, workspace_id, run_id, stage, kind, model, input_tokens, cache_write_tokens, cache_write_1h_tokens, cache_read_tokens, output_tokens, list_cost_micros, price_table_version, billed_to, request_id, estimated, created_at, provider, audio_ms FROM usage_ledger
 WHERE workspace_id = $1
 ORDER BY id DESC
 LIMIT $2
@@ -109,6 +113,8 @@ func (q *Queries) ListRecentUsageLedger(ctx context.Context, arg ListRecentUsage
 			&i.RequestID,
 			&i.Estimated,
 			&i.CreatedAt,
+			&i.Provider,
+			&i.AudioMs,
 		); err != nil {
 			return nil, err
 		}
@@ -121,7 +127,7 @@ func (q *Queries) ListRecentUsageLedger(ctx context.Context, arg ListRecentUsage
 }
 
 const listUsageLedgerForRun = `-- name: ListUsageLedgerForRun :many
-SELECT id, workspace_id, run_id, stage, kind, model, input_tokens, cache_write_tokens, cache_write_1h_tokens, cache_read_tokens, output_tokens, list_cost_micros, price_table_version, billed_to, request_id, estimated, created_at FROM usage_ledger
+SELECT id, workspace_id, run_id, stage, kind, model, input_tokens, cache_write_tokens, cache_write_1h_tokens, cache_read_tokens, output_tokens, list_cost_micros, price_table_version, billed_to, request_id, estimated, created_at, provider, audio_ms FROM usage_ledger
 WHERE workspace_id = $1 AND run_id = $2
 ORDER BY id
 `
@@ -158,6 +164,8 @@ func (q *Queries) ListUsageLedgerForRun(ctx context.Context, arg ListUsageLedger
 			&i.RequestID,
 			&i.Estimated,
 			&i.CreatedAt,
+			&i.Provider,
+			&i.AudioMs,
 		); err != nil {
 			return nil, err
 		}

@@ -152,6 +152,12 @@
       "binaryLicence": "WTFPL",
       "copyrightSha256": "b302dc2568943b3326d3be15d03fe968888d1673962891ea93050a2f41e6e609"
     },
+    "whisper.cpp": {
+      "category": "permissive",
+      "binaryLicence": "MIT",
+      "copyrightSha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d",
+      "sourceSha256": "ff1a9053feb509ff9d7729703355541ae9690073a6b1c40eb692c962e0dc1720"
+    },
     "zlib1g": {
       "category": "permissive",
       "binaryLicence": "Zlib",

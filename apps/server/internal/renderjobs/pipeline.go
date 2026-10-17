@@ -359,7 +359,7 @@ func (r *run) execute(ctx context.Context) (finished, error) {
 			return finished{}, err
 		}
 	}
-	stager := newStager(ctx, r, inputs)
+	stager := newStager(ctx, r, inputs, hasCaptions(spec))
 	plan, cerr := render.Compile(spec, profile, stager)
 	switch {
 	case stager.infra != nil:
@@ -531,4 +531,14 @@ func toolFailure(tool string, code int, stderr []byte) error {
 		return fmt.Errorf("%s: %w (exit code %d)", tool, errKilled, code)
 	}
 	return fileErr(ReasonRenderFailed, te)
+}
+
+// hasCaptions reports whether the timeline has an enabled captions track, the one thing that reads transcripts.
+func hasCaptions(spec *timeline.Spec) bool {
+	for _, t := range spec.Tracks {
+		if c, ok := t.(*timeline.CaptionsTrack); ok && c.Enabled {
+			return true
+		}
+	}
+	return false
 }

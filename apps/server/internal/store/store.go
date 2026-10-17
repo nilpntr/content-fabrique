@@ -38,6 +38,7 @@ type Store struct {
 type hooks struct {
 	workspaceCreated func(ctx context.Context, tx *Store, w Workspace) error
 	quickLookDue     func(ctx context.Context, tx *Store, a Asset) error
+	transcribeDue    func(ctx context.Context, tx *Store, a Asset) (enqueued bool, err error)
 	analysisDue      func(ctx context.Context, tx *Store, a Asset) error
 }
 

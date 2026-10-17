@@ -27,6 +27,7 @@ export function apiAsset(n: number, over: Partial<ApiAsset> = {}): ApiAsset {
     failure_reason: null,
     ingest_progress: 100,
     ingest_stage: null,
+    transcript_status: "none",
     media: { duration_ms: 10_000 + n * 1000, width: 1080, height: 1920 } as ApiAsset["media"],
     derivatives: {
       poster: { url: `https://cdn.test/poster-${n}.jpg` },

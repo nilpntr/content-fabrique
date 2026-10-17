@@ -135,6 +135,9 @@ func (s *Store) FinishAssetIngest(ctx context.Context, ws ids.WorkspaceID, id id
 		if a, err = tx.quickLookDue(ctx, a); err != nil {
 			return err
 		}
+		if a, err = tx.transcribeDue(ctx, a, keep); err != nil {
+			return err
+		}
 		return tx.analysisDue(ctx, a)
 	})
 	if err != nil {

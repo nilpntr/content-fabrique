@@ -48,6 +48,7 @@ func run(args []string) error {
 				storageC *storage.Client    // the same client, for the agents
 				ingester jobs.AssetIngester // nil without storage: asset_ingest jobs then wait (snoozed)
 				renderer jobs.Renderer      // nil without storage: render jobs then wait (snoozed)
+				transcr  jobs.Transcriber   // nil without storage: transcribe jobs then wait (snoozed)
 				analyzer jobs.Analyzer      // nil without storage: analyze jobs then wait (snoozed)
 			)
 			if cfg.ObjectStorageConfigured() {
@@ -70,7 +71,13 @@ func run(args []string) error {
 					return nil, err
 				}
 				renderer = rp
-				logger.Info("media pipeline ready", "sandbox", cfg.MediaSandboxProvider, "image", cfg.MediaToolsImage, "temp_dir", cfg.MediaTempDir, "concurrency", cfg.MediaConcurrency, "render_concurrency", cfg.RenderConcurrency)
+				tr, err := newTranscriber(cfg, st, client, logger)
+				if err != nil {
+					return nil, err
+				}
+				transcr = tr
+				logger.Info("media pipeline ready", "sandbox", cfg.MediaSandboxProvider, "image", cfg.MediaToolsImage, "temp_dir", cfg.MediaTempDir, "concurrency", cfg.MediaConcurrency, "render_concurrency", cfg.RenderConcurrency,
+					"transcribe_provider", cfg.TranscribeProvider, "transcribe_model", cfg.TranscribeModel, "models_dir", cfg.WhisperModelsDir)
 				warnIfImageMissing(ctx, cfg, logger)
 			} else {
 				logger.Warn("R2_* is not set: the jobs that delete objects, clean up uploads ingest assets or render timelines wait (snoozed, no attempt used) until a worker has it")
@@ -90,6 +97,8 @@ func run(args []string) error {
 					queues.Queues[i].MaxWorkers = cfg.MediaConcurrency
 				case jobs.QueueRender:
 					queues.Queues[i].MaxWorkers = cfg.RenderConcurrency
+				case jobs.QueueTranscribe:
+					queues.Queues[i].MaxWorkers = cfg.TranscribeConcurrency
 				}
 			}
 			w, err := jobs.StartWorker(ctx, jobs.WorkerOptions{
@@ -99,6 +108,7 @@ func run(args []string) error {
 				Objects:    objects,
 				Ingest:     ingester,
 				Render:     renderer,
+				Transcribe: transcr,
 				Analysis:   analyzer,
 				Register:   runtime.Register(runner),
 				QuickLook:  quickLooker,
