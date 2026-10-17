@@ -118,19 +118,33 @@ func (s *Service) Hold(ctx context.Context, tx *store.Store, q Quote, run store.
 	})
 }
 
-// ErrEditNotCharged is returned by RecordFinalExport for a project that has no charged edit.
-var ErrEditNotCharged = errors.New("credits: the project has no charged edit, so it cannot be exported")
+// Errors of RecordFinalExport.
+var (
+	// ErrEditNotCharged is returned for a project that has no charged edit.
+	ErrEditNotCharged = errors.New("credits: the project has no charged edit, so it cannot be exported")
+	// ErrVersionNotCharged is returned for a version that contains agent work that was not charged (a run that failed or was released).
+	ErrVersionNotCharged = errors.New("credits: the version contains agent work that was not charged, so it cannot be exported")
+)
 
-// RecordFinalExport is called, inside the transaction that queues a final render, for the export.final action: it needs an edit that was
-// charged (the final render of an edit the creator paid for) and records the export on the ledger at the price of the list (0 credits).
-// It takes no lock on the credit account and never refuses for lack of credits: an export costs nothing.
-func (s *Service) RecordFinalExport(ctx context.Context, tx *store.Store, ws ids.WorkspaceID, project ids.ProjectID, member ids.UserID, render uuid.UUID) error {
+// RecordFinalExport is called, inside the transaction that queues a final render of a version, for the export.final action. The final
+// render of an edit the creator paid for: the project needs a charged edit, and the version must be covered by payment (the last agent
+// work in it belongs to a charged run; a person's edits on top of a charged version are free, and previews of any version are never
+// refused). It records the export on the ledger at the price of the list (0 credits). It takes no lock on the credit account and never
+// refuses for lack of credits: an export costs nothing.
+func (s *Service) RecordFinalExport(ctx context.Context, tx *store.Store, ws ids.WorkspaceID, project ids.ProjectID, member ids.UserID, render uuid.UUID, version int) error {
 	charged, err := tx.ProjectHasChargedEdit(ctx, ws, project)
 	if err != nil {
 		return err
 	}
 	if !charged {
 		return ErrEditNotCharged
+	}
+	covered, err := tx.VersionCovered(ctx, ws, project, version)
+	if err != nil {
+		return err
+	}
+	if !covered {
+		return ErrVersionNotCharged
 	}
 	price := s.List.Credits[ExportFinal]
 	if price != 0 {

@@ -214,6 +214,7 @@ type CreditLedger struct {
 	MemberUserID    pgtype.UUID
 	Plan            *string
 	PlanListVersion *string
+	TimelineVersion *int32
 	ExpiresAt       *time.Time
 	Actor           *string
 	Reason          *string

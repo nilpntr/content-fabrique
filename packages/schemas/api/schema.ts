@@ -429,8 +429,9 @@ export interface paths {
          *     project whether it is the first edit (6 credits: the project has no charged edit yet) or a revision (2 credits), and the
          *     price comes from the server's price list, never from the request. A workspace with fewer credits available than that gets
          *     `402 credits_exhausted` and no run is created (a workspace with no active plan gets `402 plan_required`, as everywhere).
-         *     The credits are charged when the run succeeds, released when it fails, and when the creator cancels it they are charged if
-         *     the run had already rendered a preview and released if not. `GET /v1/me` has the balance.
+         *     The credits are charged when the run succeeds and released when it fails. When the creator cancels it they are charged if the
+         *     run had already made a timeline version or rendered a preview (the work is in the project), and released if it had done
+         *     neither. `GET /v1/me` has the balance.
          *
          *     The run's spend cap is set by the server from the workspace's plan and the kind of edit; the request cannot change it. It is
          *     enforced before every model call. `budget_usd` is accepted for compatibility (and still has to be a positive number) but is
@@ -545,9 +546,12 @@ export interface paths {
          *     deleted since the edit, say). At most 5 renders per workspace are in flight at once (`429 too_many_renders`). Only
          *     owners and editors may render.
          *
-         *     A `final` render (the export) costs no credits but needs an edit of the project that was charged: a project that has had
-         *     no successful editor run is refused with `422 edit_not_charged`. A queued final render is recorded on the credit ledger as
-         *     the `export.final` action at 0 credits. Previews have no such requirement.
+         *     A `final` render (the export) costs no credits but must be of paid-for work. The project needs an edit that was charged (no
+         *     successful editor run: `422 edit_not_charged`), and the version must be covered: the last editor-made version at or before
+         *     it must come from a run that was charged. A person's own edits on top of a charged version are free to export; a version
+         *     made by a run that failed or was released, and edits made on top of it, are refused with `422 version_not_charged` until a
+         *     later editor run is charged. A queued final render is recorded on the credit ledger as the `export.final` action at 0
+         *     credits. Previews of any version are never refused.
          */
         post: operations["createRender"];
         delete?: never;
@@ -660,7 +664,7 @@ export interface components {
          *     code as a generic failure of its HTTP status.
          * @enum {string}
          */
-        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "credits_exhausted" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured" | "assets_not_usable" | "version_conflict" | "invalid_ops" | "no_change" | "timeline_invalid" | "too_many_renders" | "run_in_progress" | "run_not_waiting" | "model_not_configured" | "edit_not_charged";
+        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "credits_exhausted" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured" | "assets_not_usable" | "version_conflict" | "invalid_ops" | "no_change" | "timeline_invalid" | "too_many_renders" | "run_in_progress" | "run_not_waiting" | "model_not_configured" | "edit_not_charged" | "version_not_charged";
         ErrorDetail: {
             code: components["schemas"]["ErrorCode"];
             /** @description For people. It may change; do not branch on it. */
@@ -2648,7 +2652,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             /**
              * @description `timeline_invalid`: the version does not validate against the project's footage now. Or `edit_not_charged`: a final
-             *     render of a project that has no charged edit.
+             *     render of a project that has no charged edit. Or `version_not_charged`: a final render of a version that holds editor
+             *     work that was not charged.
              */
             422: {
                 headers: {

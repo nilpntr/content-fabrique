@@ -237,7 +237,7 @@ func TestRecordFinalExport(t *testing.T) {
 	render := uuid.Must(uuid.NewV7())
 	export := func() error {
 		return r.st.InTx(ctx, func(tx *store.Store) error {
-			return r.svc.RecordFinalExport(ctx, tx, ws.ID, project, ids.UserID{}, render)
+			return r.svc.RecordFinalExport(ctx, tx, ws.ID, project, ids.UserID{}, render, 1)
 		})
 	}
 	if err := export(); !errors.Is(err, credits.ErrEditNotCharged) {
@@ -272,5 +272,159 @@ func TestRecordFinalExport(t *testing.T) {
 	b, _ := r.st.CreditBalance(ctx, ws.ID, time.Now())
 	if b.Available != 50-6 {
 		t.Fatalf("an export changed the balance: %+v", b)
+	}
+}
+
+// addVersion stores the next timeline version of the project, made by the run (an agent version) or by a person (run is the zero value).
+func (r *rig) addVersion(ws store.Workspace, project ids.ProjectID, n int, run *store.AgentRun) {
+	r.t.Helper()
+	in := store.NewTimelineVersion{Version: n, Parent: n - 1, Spec: json.RawMessage(`{}`), AuthorKind: "user", AuthorID: "usr_test"}
+	if run != nil {
+		in.AuthorKind, in.AuthorID = "agent", ids.Encode(ids.PrefixRun, run.ID)
+	}
+	if _, err := r.st.AddTimelineVersion(context.Background(), ws.ID, project, in); err != nil {
+		r.t.Fatal(err)
+	}
+}
+
+func (r *rig) exportable(ws store.Workspace, project ids.ProjectID, version int) error {
+	r.t.Helper()
+	ctx := context.Background()
+	return r.st.InTx(ctx, func(tx *store.Store) error {
+		return r.svc.RecordFinalExport(ctx, tx, ws.ID, project, ids.UserID{}, uuid.Must(uuid.NewV7()), version)
+	})
+}
+
+// A final export must point at paid work: versions made by a run that was charged, and a person's edits on top of them, can be exported;
+// versions made by a run that failed or was released, and the edits made on top of those, cannot, until a later run is charged.
+func TestFinalExportMustPointAtPaidWork(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	ws := r.workspace("paid")
+	creditstest.Fund(t, r.st, ws.ID, plans.Creator, 100)
+	project := r.project(ws)
+
+	r.addVersion(ws, project, 1, nil) // a person's first version: no agent work in it
+	a, _, err := r.run(ws, project, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.addVersion(ws, project, 2, &a)
+	// While the run works its version is not paid for yet.
+	if err := r.exportable(ws, project, 2); !errors.Is(err, credits.ErrEditNotCharged) {
+		t.Fatalf("export during the first run: %v", err)
+	}
+	r.finish(ws, a, store.AgentSucceeded)
+	r.addVersion(ws, project, 3, nil) // a person's edit on top of paid work
+	for _, v := range []int{1, 2, 3} {
+		if err := r.exportable(ws, project, v); err != nil {
+			t.Fatalf("version %d after a charged run: %v", v, err)
+		}
+	}
+	// The charge says which version it paid for.
+	var paid *int
+	if err := r.st.Pool().QueryRow(ctx, `SELECT timeline_version FROM credit_ledger WHERE workspace_id = $1 AND action_id = $2 AND kind = 'charge'`, ws.ID, a.ID).Scan(&paid); err != nil || paid == nil || *paid != 2 {
+		t.Fatalf("the charge paid for version %v (%v), want 2", paid, err)
+	}
+
+	// A revision that fails after it made a version: released, so neither its version nor a person's edit on top of it can be exported.
+	b, _, err := r.run(ws, project, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.addVersion(ws, project, 4, &b)
+	r.finish(ws, b, store.AgentFailed)
+	r.addVersion(ws, project, 5, nil)
+	for _, v := range []int{4, 5} {
+		if err := r.exportable(ws, project, v); !errors.Is(err, credits.ErrVersionNotCharged) {
+			t.Fatalf("version %d from a released run: %v", v, err)
+		}
+	}
+	for _, v := range []int{1, 2, 3} { // earlier paid work stays exportable
+		if err := r.exportable(ws, project, v); err != nil {
+			t.Fatalf("version %d after a failed run: %v", v, err)
+		}
+	}
+
+	// A later run that is charged covers what comes after it; the released run's versions below it stay refused.
+	c, _, err := r.run(ws, project, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.addVersion(ws, project, 6, &c)
+	r.finish(ws, c, store.AgentSucceeded)
+	r.addVersion(ws, project, 7, nil)
+	for _, v := range []int{6, 7} {
+		if err := r.exportable(ws, project, v); err != nil {
+			t.Fatalf("version %d after the charged run: %v", v, err)
+		}
+	}
+	for _, v := range []int{4, 5} {
+		if err := r.exportable(ws, project, v); !errors.Is(err, credits.ErrVersionNotCharged) {
+			t.Fatalf("version %d, below the charged run: %v", v, err)
+		}
+	}
+
+	// Another project of the workspace and another workspace have their own lineage.
+	other := r.project(ws)
+	if err := r.exportable(ws, other, 1); !errors.Is(err, credits.ErrEditNotCharged) {
+		t.Fatalf("another project: %v", err)
+	}
+}
+
+// A creator who cancels is charged for what the run made: a timeline version or a preview. A cancel before either is released, and the
+// version a charged cancel made can be exported.
+func TestCancelIsChargedAfterAVersionAndReleasedBeforeOne(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	ws := r.workspace("cancel")
+	creditstest.Fund(t, r.st, ws.ID, plans.Creator, 100)
+	project := r.project(ws)
+	avail := func() int {
+		b, err := r.st.CreditBalance(ctx, ws.ID, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b.Available
+	}
+
+	// Cancelled before it made anything: released.
+	nothing, _, err := r.run(ws, project, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.finish(ws, nothing, store.AgentCancelled)
+	if avail() != 100 {
+		t.Fatalf("a cancel before any version cost %d", 100-avail())
+	}
+	if err := r.exportable(ws, project, 1); !errors.Is(err, credits.ErrEditNotCharged) {
+		t.Fatalf("export after a released cancel: %v", err)
+	}
+
+	// Cancelled after a version, before any preview: charged, and its version can be exported.
+	made, q, err := r.run(ws, project, false)
+	if err != nil || q.Action != credits.EditFirst {
+		t.Fatalf("the run after a released cancel is still the first edit: %+v %v", q, err)
+	}
+	r.addVersion(ws, project, 1, &made)
+	r.finish(ws, made, store.AgentCancelled)
+	if avail() != 94 {
+		t.Fatalf("a cancel after a version left %d credits, want 94", avail())
+	}
+	if err := r.exportable(ws, project, 1); err != nil {
+		t.Fatalf("the version of a charged cancel: %v", err)
+	}
+	// The next revision, cancelled after its version and before its preview, costs its 2 credits and cannot be had for free.
+	rev, q, err := r.run(ws, project, false)
+	if err != nil || q.Action != credits.EditRevision {
+		t.Fatalf("revision: %+v %v", q, err)
+	}
+	r.addVersion(ws, project, 2, &rev)
+	r.finish(ws, rev, store.AgentCancelled)
+	if avail() != 92 {
+		t.Fatalf("a cancelled revision left %d credits, want 92", avail())
+	}
+	if err := r.exportable(ws, project, 2); err != nil {
+		t.Fatalf("the version of a charged revision: %v", err)
 	}
 }

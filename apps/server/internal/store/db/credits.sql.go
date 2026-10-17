@@ -14,6 +14,27 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/ids"
 )
 
+const actionIsCharged = `-- name: ActionIsCharged :one
+SELECT EXISTS (
+    SELECT 1 FROM credit_ledger c
+    WHERE c.workspace_id = $1 AND c.action_id = $2 AND c.kind = 'charge'
+      AND NOT EXISTS (SELECT 1 FROM credit_ledger r WHERE r.workspace_id = c.workspace_id AND r.kind = 'refund' AND r.action_id = c.action_id)
+) AS charged
+`
+
+type ActionIsChargedParams struct {
+	WorkspaceID ids.WorkspaceID
+	ActionID    pgtype.UUID
+}
+
+// Was the action charged, and not given back.
+func (q *Queries) ActionIsCharged(ctx context.Context, arg ActionIsChargedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, actionIsCharged, arg.WorkspaceID, arg.ActionID)
+	var charged bool
+	err := row.Scan(&charged)
+	return charged, err
+}
+
 const agentRunHasPreview = `-- name: AgentRunHasPreview :one
 SELECT EXISTS (
     SELECT 1 FROM agent_events
@@ -32,6 +53,26 @@ func (q *Queries) AgentRunHasPreview(ctx context.Context, arg AgentRunHasPreview
 	var previewed bool
 	err := row.Scan(&previewed)
 	return previewed, err
+}
+
+const agentRunTimelineVersion = `-- name: AgentRunTimelineVersion :one
+SELECT COALESCE(max(version), 0)::integer AS version
+FROM timeline_versions
+WHERE workspace_id = $1 AND author_kind = 'agent' AND author_id = $2
+`
+
+type AgentRunTimelineVersionParams struct {
+	WorkspaceID ids.WorkspaceID
+	AuthorID    string
+}
+
+// The newest timeline version an agent run authored (the author id of the editor's versions is the run's TypeID), 0 when it made none.
+// A run that made a version did work the creator can keep, whether or not a preview was rendered.
+func (q *Queries) AgentRunTimelineVersion(ctx context.Context, arg AgentRunTimelineVersionParams) (int32, error) {
+	row := q.db.QueryRow(ctx, agentRunTimelineVersion, arg.WorkspaceID, arg.AuthorID)
+	var version int32
+	err := row.Scan(&version)
+	return version, err
 }
 
 const deleteCreditHold = `-- name: DeleteCreditHold :execrows
@@ -177,7 +218,7 @@ func (q *Queries) GetCreditHoldByAction(ctx context.Context, arg GetCreditHoldBy
 }
 
 const getCreditLedgerByKey = `-- name: GetCreditLedgerByKey :one
-SELECT id, workspace_id, kind, credits, grant_id, action, action_id, project_id, member_user_id, plan, plan_list_version, expires_at, actor, reason, idempotency_key, created_at FROM credit_ledger WHERE workspace_id = $1 AND idempotency_key = $2
+SELECT id, workspace_id, kind, credits, grant_id, action, action_id, project_id, member_user_id, plan, plan_list_version, timeline_version, expires_at, actor, reason, idempotency_key, created_at FROM credit_ledger WHERE workspace_id = $1 AND idempotency_key = $2
 `
 
 type GetCreditLedgerByKeyParams struct {
@@ -200,6 +241,7 @@ func (q *Queries) GetCreditLedgerByKey(ctx context.Context, arg GetCreditLedgerB
 		&i.MemberUserID,
 		&i.Plan,
 		&i.PlanListVersion,
+		&i.TimelineVersion,
 		&i.ExpiresAt,
 		&i.Actor,
 		&i.Reason,
@@ -307,12 +349,12 @@ func (q *Queries) InsertCreditHold(ctx context.Context, arg InsertCreditHoldPara
 
 const insertCreditLedger = `-- name: InsertCreditLedger :one
 INSERT INTO credit_ledger (
-    workspace_id, kind, credits, grant_id, action, action_id, project_id, member_user_id, plan, plan_list_version,
+    workspace_id, kind, credits, grant_id, action, action_id, project_id, member_user_id, plan, plan_list_version, timeline_version,
     expires_at, actor, reason, idempotency_key, created_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
-    $8, $9, $10,
-    $11, $12, $13, $14, $15
+    $8, $9, $10, $11,
+    $12, $13, $14, $15, $16
 )
 ON CONFLICT (idempotency_key) DO NOTHING
 RETURNING id
@@ -329,6 +371,7 @@ type InsertCreditLedgerParams struct {
 	MemberUserID    pgtype.UUID
 	Plan            *string
 	PlanListVersion *string
+	TimelineVersion *int32
 	ExpiresAt       *time.Time
 	Actor           *string
 	Reason          *string
@@ -349,6 +392,7 @@ func (q *Queries) InsertCreditLedger(ctx context.Context, arg InsertCreditLedger
 		arg.MemberUserID,
 		arg.Plan,
 		arg.PlanListVersion,
+		arg.TimelineVersion,
 		arg.ExpiresAt,
 		arg.Actor,
 		arg.Reason,
@@ -361,7 +405,7 @@ func (q *Queries) InsertCreditLedger(ctx context.Context, arg InsertCreditLedger
 }
 
 const listCreditChargesOfAction = `-- name: ListCreditChargesOfAction :many
-SELECT id, workspace_id, kind, credits, grant_id, action, action_id, project_id, member_user_id, plan, plan_list_version, expires_at, actor, reason, idempotency_key, created_at FROM credit_ledger
+SELECT id, workspace_id, kind, credits, grant_id, action, action_id, project_id, member_user_id, plan, plan_list_version, timeline_version, expires_at, actor, reason, idempotency_key, created_at FROM credit_ledger
 WHERE workspace_id = $1 AND action_id = $2 AND kind = 'charge'
 ORDER BY id
 `
@@ -393,6 +437,7 @@ func (q *Queries) ListCreditChargesOfAction(ctx context.Context, arg ListCreditC
 			&i.MemberUserID,
 			&i.Plan,
 			&i.PlanListVersion,
+			&i.TimelineVersion,
 			&i.ExpiresAt,
 			&i.Actor,
 			&i.Reason,
@@ -410,7 +455,7 @@ func (q *Queries) ListCreditChargesOfAction(ctx context.Context, arg ListCreditC
 }
 
 const listCreditLedger = `-- name: ListCreditLedger :many
-SELECT id, workspace_id, kind, credits, grant_id, action, action_id, project_id, member_user_id, plan, plan_list_version, expires_at, actor, reason, idempotency_key, created_at FROM credit_ledger WHERE workspace_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2
+SELECT id, workspace_id, kind, credits, grant_id, action, action_id, project_id, member_user_id, plan, plan_list_version, timeline_version, expires_at, actor, reason, idempotency_key, created_at FROM credit_ledger WHERE workspace_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2
 `
 
 type ListCreditLedgerParams struct {
@@ -440,6 +485,7 @@ func (q *Queries) ListCreditLedger(ctx context.Context, arg ListCreditLedgerPara
 			&i.MemberUserID,
 			&i.Plan,
 			&i.PlanListVersion,
+			&i.TimelineVersion,
 			&i.ExpiresAt,
 			&i.Actor,
 			&i.Reason,
@@ -457,7 +503,7 @@ func (q *Queries) ListCreditLedger(ctx context.Context, arg ListCreditLedgerPara
 }
 
 const listCreditRefundsOfAction = `-- name: ListCreditRefundsOfAction :many
-SELECT id, workspace_id, kind, credits, grant_id, action, action_id, project_id, member_user_id, plan, plan_list_version, expires_at, actor, reason, idempotency_key, created_at FROM credit_ledger
+SELECT id, workspace_id, kind, credits, grant_id, action, action_id, project_id, member_user_id, plan, plan_list_version, timeline_version, expires_at, actor, reason, idempotency_key, created_at FROM credit_ledger
 WHERE workspace_id = $1 AND action_id = $2 AND kind = 'refund'
 ORDER BY id
 `
@@ -489,6 +535,7 @@ func (q *Queries) ListCreditRefundsOfAction(ctx context.Context, arg ListCreditR
 			&i.MemberUserID,
 			&i.Plan,
 			&i.PlanListVersion,
+			&i.TimelineVersion,
 			&i.ExpiresAt,
 			&i.Actor,
 			&i.Reason,
@@ -667,6 +714,32 @@ func (q *Queries) LockCreditAccount(ctx context.Context, workspaceID ids.Workspa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
+	return i, err
+}
+
+const nearestAgentVersion = `-- name: NearestAgentVersion :one
+SELECT version, author_id FROM timeline_versions
+WHERE workspace_id = $1 AND project_id = $2 AND author_kind = 'agent' AND version <= $3
+ORDER BY version DESC
+LIMIT 1
+`
+
+type NearestAgentVersionParams struct {
+	WorkspaceID ids.WorkspaceID
+	ProjectID   ids.ProjectID
+	Version     int32
+}
+
+type NearestAgentVersionRow struct {
+	Version  int32
+	AuthorID string
+}
+
+// The newest agent-authored version at or before the given one: whose work the version contains. No row: no agent work in it.
+func (q *Queries) NearestAgentVersion(ctx context.Context, arg NearestAgentVersionParams) (NearestAgentVersionRow, error) {
+	row := q.db.QueryRow(ctx, nearestAgentVersion, arg.WorkspaceID, arg.ProjectID, arg.Version)
+	var i NearestAgentVersionRow
+	err := row.Scan(&i.Version, &i.AuthorID)
 	return i, err
 }
 

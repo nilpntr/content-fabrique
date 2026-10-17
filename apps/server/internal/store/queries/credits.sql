@@ -50,11 +50,11 @@ WHERE h.workspace_id = @workspace_id
 -- One ledger row. A key that is already in the ledger inserts nothing (no row comes back).
 -- name: InsertCreditLedger :one
 INSERT INTO credit_ledger (
-    workspace_id, kind, credits, grant_id, action, action_id, project_id, member_user_id, plan, plan_list_version,
+    workspace_id, kind, credits, grant_id, action, action_id, project_id, member_user_id, plan, plan_list_version, timeline_version,
     expires_at, actor, reason, idempotency_key, created_at
 ) VALUES (
     @workspace_id, @kind, @credits, sqlc.narg('grant_id'), sqlc.narg('action'), sqlc.narg('action_id'), sqlc.narg('project_id'),
-    sqlc.narg('member_user_id'), sqlc.narg('plan'), sqlc.narg('plan_list_version'),
+    sqlc.narg('member_user_id'), sqlc.narg('plan'), sqlc.narg('plan_list_version'), sqlc.narg('timeline_version'),
     sqlc.narg('expires_at'), sqlc.narg('actor'), sqlc.narg('reason'), @idempotency_key, @created_at
 )
 ON CONFLICT (idempotency_key) DO NOTHING
@@ -82,6 +82,28 @@ SELECT EXISTS (
     SELECT 1 FROM credit_ledger c
     WHERE c.workspace_id = @workspace_id AND c.project_id = @project_id AND c.kind = 'charge'
       AND c.action IN ('edit.first', 'edit.revision')
+      AND NOT EXISTS (SELECT 1 FROM credit_ledger r WHERE r.workspace_id = c.workspace_id AND r.kind = 'refund' AND r.action_id = c.action_id)
+) AS charged;
+
+-- The newest timeline version an agent run authored (the author id of the editor's versions is the run's TypeID), 0 when it made none.
+-- A run that made a version did work the creator can keep, whether or not a preview was rendered.
+-- name: AgentRunTimelineVersion :one
+SELECT COALESCE(max(version), 0)::integer AS version
+FROM timeline_versions
+WHERE workspace_id = @workspace_id AND author_kind = 'agent' AND author_id = @author_id;
+
+-- The newest agent-authored version at or before the given one: whose work the version contains. No row: no agent work in it.
+-- name: NearestAgentVersion :one
+SELECT version, author_id FROM timeline_versions
+WHERE workspace_id = @workspace_id AND project_id = @project_id AND author_kind = 'agent' AND version <= @version
+ORDER BY version DESC
+LIMIT 1;
+
+-- Was the action charged, and not given back.
+-- name: ActionIsCharged :one
+SELECT EXISTS (
+    SELECT 1 FROM credit_ledger c
+    WHERE c.workspace_id = @workspace_id AND c.action_id = @action_id AND c.kind = 'charge'
       AND NOT EXISTS (SELECT 1 FROM credit_ledger r WHERE r.workspace_id = c.workspace_id AND r.kind = 'refund' AND r.action_id = c.action_id)
 ) AS charged;
 

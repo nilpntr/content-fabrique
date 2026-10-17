@@ -866,8 +866,9 @@ paths:
         project whether it is the first edit (6 credits: the project has no charged edit yet) or a revision (2 credits), and the
         price comes from the server's price list, never from the request. A workspace with fewer credits available than that gets
         `402 credits_exhausted` and no run is created (a workspace with no active plan gets `402 plan_required`, as everywhere).
-        The credits are charged when the run succeeds, released when it fails, and when the creator cancels it they are charged if
-        the run had already rendered a preview and released if not. `GET /v1/me` has the balance.
+        The credits are charged when the run succeeds and released when it fails. When the creator cancels it they are charged if the
+        run had already made a timeline version or rendered a preview (the work is in the project), and released if it had done
+        neither. `GET /v1/me` has the balance.
 
         The run's spend cap is set by the server from the workspace's plan and the kind of edit; the request cannot change it. It is
         enforced before every model call. `budget_usd` is accepted for compatibility (and still has to be a positive number) but is
@@ -1057,9 +1058,12 @@ paths:
         deleted since the edit, say). At most 5 renders per workspace are in flight at once (`429 too_many_renders`). Only
         owners and editors may render.
 
-        A `final` render (the export) costs no credits but needs an edit of the project that was charged: a project that has had
-        no successful editor run is refused with `422 edit_not_charged`. A queued final render is recorded on the credit ledger as
-        the `export.final` action at 0 credits. Previews have no such requirement.
+        A `final` render (the export) costs no credits but must be of paid-for work. The project needs an edit that was charged (no
+        successful editor run: `422 edit_not_charged`), and the version must be covered: the last editor-made version at or before
+        it must come from a run that was charged. A person's own edits on top of a charged version are free to export; a version
+        made by a run that failed or was released, and edits made on top of it, are refused with `422 version_not_charged` until a
+        later editor run is charged. A queued final render is recorded on the credit ledger as the `export.final` action at 0
+        credits. Previews of any version are never refused.
       requestBody:
         required: true
         content:
@@ -1092,7 +1096,8 @@ paths:
         "422":
           description: |
             `timeline_invalid`: the version does not validate against the project's footage now. Or `edit_not_charged`: a final
-            render of a project that has no charged edit.
+            render of a project that has no charged edit. Or `version_not_charged`: a final render of a version that holds editor
+            work that was not charged.
           content:
             application/json:
               schema:
@@ -1596,6 +1601,7 @@ components:
         - run_not_waiting # 409: the run is not waiting for an answer
         - model_not_configured # 503: the server has no model access (ANTHROPIC_API_KEY or LLM_MODE) or no such routing profile
         - edit_not_charged # 422: a final render needs an edit of the project that was charged (run the editor first)
+        - version_not_charged # 422: a final render of a version that contains editor work that was not charged (a failed or released run)
 
     ErrorDetail:
       type: object

@@ -68,6 +68,9 @@ CREATE TABLE credit_ledger (
     member_user_id   uuid,
     plan             text,
     plan_list_version text,
+    -- On a charge for an edit: the newest timeline version the run authored when it was charged, i.e. the work the charge paid for. Null
+    -- when the run made none, and on every other kind of row.
+    timeline_version integer,
     expires_at       timestamptz,
     actor            text,
     reason           text,
@@ -106,6 +109,7 @@ CREATE TABLE credit_ledger (
             ELSE expires_at IS NULL
         END),
     CONSTRAINT credit_ledger_adjust_check CHECK (kind <> 'adjust' OR (char_length(btrim(coalesce(actor, ''))) > 0 AND char_length(btrim(coalesce(reason, ''))) > 0)),
+    CONSTRAINT credit_ledger_timeline_version_check CHECK (timeline_version IS NULL OR (kind = 'charge' AND timeline_version >= 1)),
     CONSTRAINT credit_ledger_action_check CHECK (action IS NULL OR action IN ('edit.first', 'edit.revision', 'export.final', 'ideation.run')),
     CONSTRAINT credit_ledger_charge_action_check CHECK (kind NOT IN ('charge', 'refund') OR (action IS NOT NULL AND action_id IS NOT NULL)),
     CONSTRAINT credit_ledger_text_check CHECK (char_length(coalesce(actor, '')) <= 200 AND char_length(coalesce(reason, '')) <= 1000),

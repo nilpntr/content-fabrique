@@ -2,6 +2,7 @@ package renderjobs
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
+	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
 // export.final (P7-01a, spend control v1 sections 3 and 5): a final render costs no credits, but only an edit that was charged can be
@@ -181,5 +183,85 @@ func TestRenderAPIAnswersEditNotCharged(t *testing.T) {
 		t.Fatal(err)
 	} else if _, ok := got.(api.CreateRender202JSONResponse); !ok {
 		t.Fatalf("after a charged edit: %#v", got)
+	}
+}
+
+// agentVersion stores the next version of the project as made by an editor run whose hold is settled as charge says (a zero-credit hold,
+// settled with a charge or released). It returns the version number.
+func (e *env) agentVersion(t *testing.T, w store.Workspace, p store.Project, spec *timeline.Spec, charged bool) int {
+	t.Helper()
+	ctx := context.Background()
+	run := newV7(t)
+	if _, err := e.st.HoldCredits(ctx, store.HoldCreditsParams{
+		Workspace: w.ID, Action: store.ActionEditRevision, ActionID: run, Credits: 0, Project: p.ID, ListVersion: "test", Now: time.Now(), TTL: time.Hour,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cur, err := e.st.GetProject(ctx, w.ID, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := int(*cur.CurrentTimelineVersion) + 1
+	if _, err := e.st.AddTimelineVersion(ctx, w.ID, p.ID, store.NewTimelineVersion{
+		Version: n, Parent: n - 1, Spec: raw, AuthorKind: store.AuthorAgent, AuthorID: ids.Encode(ids.PrefixRun, run), Summary: []string{"agent"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.SettleCredits(ctx, w.ID, run, charged, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// An export must point at paid work: what a charged run made, and a person's edits on top of it, can be exported; what a run made that
+// was released (it failed), and the edits on top of that, cannot. Previews of any version are fine.
+func TestFinalRenderOfUnchargedAgentWorkIsRefused(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	clips := testClips(t)
+	w := e.newWorkspace(t, "org_export_lineage")
+	a, b := e.readyAsset(t, w, "a", clips[0]), e.readyAsset(t, w, "b", clips[1])
+	p := e.newProjectUncharged(t, w, a, b)
+	spec := shortSpec(a, b)
+
+	v1 := e.addVersion(t, w, p, spec)
+	paid := e.agentVersion(t, w, p, spec, true)
+	human := e.addVersion(t, w, p, spec) // a person's edit on top of paid work
+	free := e.agentVersion(t, w, p, spec, false)
+	onTopOfFree := e.addVersion(t, w, p, spec)
+
+	for _, v := range []int{v1, paid, human} {
+		if _, created, rerr := e.svc.Request(ctx, e.caller(w), p.ID, v, "final"); rerr != nil || !created {
+			t.Fatalf("final render of version %d: created=%v %v", v, created, rerr)
+		}
+	}
+	for _, v := range []int{free, onTopOfFree} {
+		_, _, rerr := e.svc.Request(ctx, e.caller(w), p.ID, v, "final")
+		if rerr == nil || rerr.Status != 422 || rerr.Code != api.ErrorCodeVersionNotCharged {
+			t.Fatalf("final render of version %d from a released run: %v", v, rerr)
+		}
+	}
+	// Looking at it is fine.
+	if _, created, rerr := e.svc.Request(ctx, e.caller(w), p.ID, free, "preview"); rerr != nil || !created {
+		t.Fatalf("preview of version %d: created=%v %v", free, created, rerr)
+	}
+	if n := e.exportRows(t, w); n != 3 {
+		t.Fatalf("%d export rows, want one per final render that was queued (3)", n)
+	}
+
+	// Over the handler: 422 with the stable code.
+	h := NewAPI(e.svc, func(context.Context) (httpapi.Caller, bool) {
+		return httpapi.Caller{Workspace: w.ID, User: e.user, Role: store.RoleOwner}, true
+	}, quiet)
+	got, err := h.CreateRender(ctx, api.CreateRenderRequestObject{Id: ids.Encode(ids.PrefixProject, p.ID.UUID), Body: &api.CreateRenderRequest{Version: free, Profile: api.RenderProfileFinal}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r422, ok := got.(api.CreateRender422JSONResponse); !ok || r422.Error.Code != api.ErrorCodeVersionNotCharged {
+		t.Fatalf("response = %#v", got)
 	}
 }

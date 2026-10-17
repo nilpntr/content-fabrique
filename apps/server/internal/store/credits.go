@@ -475,10 +475,21 @@ func (s *Store) chargeHold(ctx context.Context, hold db.CreditHold, now time.Tim
 		r := fmt.Sprintf("short by %d: the credits ran out (an allowance expired) before the action ended", need)
 		reason = &r
 	}
+	// The work the charge paid for: the newest timeline version the run authored (an edit's run id is the author id of its versions).
+	var version *int32
+	if hold.Action == ActionEditFirst || hold.Action == ActionEditRevision {
+		v, err := s.q.AgentRunTimelineVersion(ctx, db.AgentRunTimelineVersionParams{WorkspaceID: hold.WorkspaceID, AuthorID: ids.Encode(ids.PrefixRun, hold.ActionID)})
+		if err != nil {
+			return err
+		}
+		if v > 0 {
+			version = &v
+		}
+	}
 	insert := func(i int, credits int32, grant pgtype.UUID) error {
 		_, err := s.q.InsertCreditLedger(ctx, db.InsertCreditLedgerParams{
 			WorkspaceID: hold.WorkspaceID, Kind: CreditCharge, Credits: credits, GrantID: grant, Action: &hold.Action, ActionID: optUUID(hold.ActionID),
-			ProjectID: hold.ProjectID, MemberUserID: hold.MemberUserID, Plan: hold.Plan, PlanListVersion: hold.PlanListVersion,
+			ProjectID: hold.ProjectID, MemberUserID: hold.MemberUserID, Plan: hold.Plan, PlanListVersion: hold.PlanListVersion, TimelineVersion: version,
 			Reason: reason, IdempotencyKey: fmt.Sprintf("charge:%s:%d", hold.ActionID, i), CreatedAt: now,
 		})
 		if errors.Is(err, errNoRows) {
@@ -727,6 +738,26 @@ func (s *Store) RefundAction(ctx context.Context, ws ids.WorkspaceID, actionID u
 		return nil
 	})
 	return refunded, lost, mapErr(err)
+}
+
+// VersionCovered says whether a final render of the version may be made as far as payment goes: the newest agent-authored version at or
+// before it (the last agent work it contains; a person's edit on top of it is free) must belong to a run that was charged and not
+// refunded. A version with no agent work in its history is covered. A run that failed or was released made versions that are not, and
+// neither are the person's edits made on top of them, until a later run is charged. The project's charged edit is checked separately.
+func (s *Store) VersionCovered(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, version int) (bool, error) {
+	n, err := s.q.NearestAgentVersion(ctx, db.NearestAgentVersionParams{WorkspaceID: ws, ProjectID: project, Version: int32(version)}) //nolint:gosec // a version number the caller checked
+	if errors.Is(err, errNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, mapErr(err)
+	}
+	run, err := ids.Decode(ids.PrefixRun, n.AuthorID)
+	if err != nil {
+		return false, nil // an agent author that is not a run id: nothing paid for it, fail closed
+	}
+	charged, err := s.q.ActionIsCharged(ctx, db.ActionIsChargedParams{WorkspaceID: ws, ActionID: optUUID(run)})
+	return charged, mapErr(err)
 }
 
 // ProjectHasChargedEdit says whether the project has an edit that was charged and not refunded: the first edit, or a revision. A run that
@@ -989,7 +1020,8 @@ func (s *Store) WorkspacesNeedingAllowance(ctx context.Context, now time.Time, a
 // ---- The end of a run -------------------------------------------------------------------------------------------
 
 // settleRunCredits settles the credit hold of a run that has just reached a final status, in the transaction that put it there: success
-// charges, failure releases, and a cancel charges when the creator was shown a preview and releases when not. A run with no hold (the
+// charges, failure releases, and a cancel charges when the run authored a timeline version or rendered a preview and releases when it did
+// neither. A run with no hold (the
 // echo agent) is left alone. A run that parks for input keeps its hold, with a long expiry. s must be a transaction Store.
 func (s *Store) settleRunCredits(ctx context.Context, ws ids.WorkspaceID, run AgentRun, now time.Time) error {
 	var charge bool
@@ -999,11 +1031,20 @@ func (s *Store) settleRunCredits(ctx context.Context, ws ids.WorkspaceID, run Ag
 	case AgentFailed:
 		charge = false
 	case AgentCancelled:
+		// The creator keeps what the run made: a cancel is charged when the run authored a timeline version (the work is in the project,
+		// and a cancel before the preview must not make a revision free) or rendered a preview, and released when it did neither.
 		previewed, err := s.q.AgentRunHasPreview(ctx, db.AgentRunHasPreviewParams{WorkspaceID: ws, RunID: run.ID})
 		if err != nil {
 			return err
 		}
 		charge = previewed
+		if !charge {
+			v, err := s.q.AgentRunTimelineVersion(ctx, db.AgentRunTimelineVersionParams{WorkspaceID: ws, AuthorID: ids.Encode(ids.PrefixRun, run.ID)})
+			if err != nil {
+				return err
+			}
+			charge = v > 0
+		}
 	case AgentWaitingInput:
 		return s.ExtendCreditHold(ctx, ws, run.ID, now.Add(CreditHoldWaitingTTL))
 	default:
