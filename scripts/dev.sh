@@ -85,10 +85,12 @@ trap cleanup EXIT
 set -m
 start web bash -c 'cd apps/web && exec bun run dev'
 start api "$BIN_DIR/api"
-start worker "$BIN_DIR/worker"
+# River UI on loopback only, behind Basic auth (user river, password RIVER_UI_PASSWORD from .env). The worker refuses to
+# start when that password is empty, which `task env:sync` prevents by generating it.
+start worker "$BIN_DIR/worker" -river-ui-addr 127.0.0.1:8082
 set +m
 
-echo "dev: web ${APP_BASE_URL:-http://localhost:3000}   api ${API_BASE_URL:-http://localhost:8080}   worker http://localhost:8081   (Ctrl-C stops all)"
+echo "dev: web ${APP_BASE_URL:-http://localhost:3000}   api ${API_BASE_URL:-http://localhost:8080}   worker http://localhost:8081   River UI http://localhost:8082 (user river)   (Ctrl-C stops all)"
 
 # If one process dies, stop the others: a half-running stack hides the problem.
 status=0

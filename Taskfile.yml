@@ -10,7 +10,7 @@ tasks:
   # ── Local development ───────────────────────────────────────────────────────
 
   dev:
-    desc: "Start everything locally: Postgres + MinIO (Docker), then web (:3000), api (:8080) and worker (:8081). Ctrl-C stops the three processes"
+    desc: "Start everything locally: Postgres + MinIO (Docker), then web (:3000), api (:8080) and worker (:8081, River UI on :8082). Ctrl-C stops the three processes"
     cmds:
       - task: install
       - task: env:sync

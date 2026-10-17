@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -28,6 +29,12 @@ type Options struct {
 	// Postgres store (the app role, over DATABASE_URL), already registered as the "postgres" readiness check. An error
 	// stops the process before it listens.
 	Routes func(cfg config.Config, mux *http.ServeMux, health *httpapi.Health, logger *slog.Logger, st *store.Store) error
+	// Background optionally starts background work (the worker's River client) after Routes and before the server
+	// listens; it may register readiness checks on health. The stop function it returns is called when shutdown
+	// begins, at the same time as the HTTP drain, with a context that is never cancelled: the work bounds itself
+	// (jobs.StopTimeout, inside the budget of package httpapi). An error from stop is returned by Run. An error from
+	// Background itself stops the process before it listens.
+	Background func(ctx context.Context, cfg config.Config, logger *slog.Logger, st *store.Store, health *httpapi.Health) (stop func(ctx context.Context) error, err error)
 	// Middleware optionally wraps the whole mux (CORS, for the api), inside tracing and the access log and outside
 	// the routes, so it also covers the 404s and 405s of the mux.
 	Middleware func(cfg config.Config) func(http.Handler) http.Handler
@@ -86,6 +93,29 @@ func Run(opts Options) error {
 			return fmt.Errorf("routes: %w", err)
 		}
 	}
+	// Background work stops as soon as shutdown begins, alongside the HTTP drain, so the two share one budget instead of
+	// adding up. It also stops when the server fails to listen.
+	stopBackground := func() error { return nil }
+	if opts.Background != nil {
+		stop, err := opts.Background(ctx, cfg, logger, st, health)
+		if err != nil {
+			return fmt.Errorf("background: %w", err)
+		}
+		serverDone := make(chan struct{})
+		stopped := make(chan error, 1)
+		go func() {
+			select {
+			case <-ctx.Done():
+			case <-serverDone:
+			}
+			stopped <- stop(context.WithoutCancel(ctx))
+		}()
+		stopBackground = func() error {
+			close(serverDone)
+			return <-stopped
+		}
+	}
+
 	var handler http.Handler = mux
 	if opts.Middleware != nil {
 		handler = opts.Middleware(cfg)(handler)
@@ -98,5 +128,10 @@ func Run(opts Options) error {
 		stop()
 	}()
 
-	return httpapi.Serve(ctx, srv, health, httpapi.ServeOptions{}, logger)
+	serveErr := httpapi.Serve(ctx, srv, health, httpapi.ServeOptions{}, logger)
+	if err := stopBackground(); err != nil {
+		logger.Error("background work did not stop cleanly", "error", err)
+		return errors.Join(serveErr, fmt.Errorf("background: %w", err))
+	}
+	return serveErr
 }

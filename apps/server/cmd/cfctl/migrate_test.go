@@ -48,13 +48,20 @@ func TestMigrateCLI(t *testing.T) {
 	if n := countTables(t, url); n != 5 {
 		t.Fatalf("tables after up = %d", n)
 	}
+	if n := countRiverTables(t, url); n == 0 {
+		t.Fatalf("River tables after up = %d, want them migrated too", n)
+	}
+	// status lists both lines, all applied.
+	if code, out, errOut := migrateCLI(t, url, "status"); code != 0 || !strings.Contains(out, "river/001_") || strings.Contains(out, " pending\n") {
+		t.Fatalf("status after up = %d\n%s\n%s", code, out, errOut)
+	}
 
 	// Flags after the command work too, and down --to 0 rolls everything back.
 	if code, out, errOut := migrateCLI(t, url, "down", "--to", "0", "--yes"); code != 0 || !strings.Contains(out, "down") {
 		t.Fatalf("down --to 0 = %d\n%s\n%s", code, out, errOut)
 	}
-	if n := countTables(t, url); n != 0 {
-		t.Fatalf("tables after down --to 0 = %d", n)
+	if n := countTables(t, url) + countRiverTables(t, url); n != 0 {
+		t.Fatalf("tables after down --to 0 = %d (River's go with the rest)", n)
 	}
 	if code, _, errOut := migrateCLI(t, url, "up"); code != 0 {
 		t.Fatalf("up after down = %d %s", code, errOut)
@@ -72,7 +79,16 @@ func lastLine(s string) string {
 	return strings.TrimSpace(lines[len(lines)-1])
 }
 
+// countTables counts the app's tables (River's are counted by countRiverTables).
 func countTables(t *testing.T, url string) int {
+	return countTablesWhere(t, url, `tablename <> 'goose_db_version' AND tablename NOT LIKE 'river\_%'`)
+}
+
+func countRiverTables(t *testing.T, url string) int {
+	return countTablesWhere(t, url, `tablename LIKE 'river\_%'`)
+}
+
+func countTablesWhere(t *testing.T, url, cond string) int {
 	t.Helper()
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, url)
@@ -81,7 +97,7 @@ func countTables(t *testing.T, url string) int {
 	}
 	defer func() { _ = conn.Close(ctx) }()
 	var n int
-	if err := conn.QueryRow(ctx, `SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'goose_db_version'`).Scan(&n); err != nil {
+	if err := conn.QueryRow(ctx, `SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND `+cond).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n

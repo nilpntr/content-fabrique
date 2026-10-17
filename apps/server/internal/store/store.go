@@ -27,9 +27,37 @@ type Options struct {
 
 // Store is the pool plus the compiled queries. Methods on a Store returned by InTx run inside that transaction.
 type Store struct {
-	pool *pgxpool.Pool // nil inside a transaction
-	q    *db.Queries
+	pool  *pgxpool.Pool // nil inside a transaction
+	tx    pgx.Tx        // nil outside a transaction
+	q     *db.Queries
+	hooks *hooks // shared by the pool Store and every transaction Store made from it
 }
+
+// hooks are the callbacks a Store runs inside the transaction of the write that triggered them. They are set once
+// during setup (see SetWorkspaceCreatedHook), before the Store is used from several goroutines.
+type hooks struct {
+	workspaceCreated func(ctx context.Context, tx *Store, w Workspace) error
+}
+
+// SetWorkspaceCreatedHook registers fn to run, in the transaction that inserts it, for every workspace SyncWorkspace
+// creates (the just-in-time sync and the Clerk webhook both end there). An error from fn rolls the workspace back, so
+// whatever fn writes (a River job, through Tx) exists exactly when the workspace does. Call it during setup, before
+// the Store serves requests; passing nil removes the hook. The hook is shared with the transaction Stores of InTx.
+func (s *Store) SetWorkspaceCreatedHook(fn func(ctx context.Context, tx *Store, w Workspace) error) {
+	s.hooks.workspaceCreated = fn
+}
+
+// Tx returns the pgx transaction of a Store that InTx handed out, so code outside this package (River's InsertTx)
+// can write in the same transaction. It returns ErrNoTx on the pool Store.
+func (s *Store) Tx() (pgx.Tx, error) {
+	if s.tx == nil {
+		return nil, ErrNoTx
+	}
+	return s.tx, nil
+}
+
+// ErrNoTx is returned by Tx outside a transaction.
+var ErrNoTx = errors.New("store: not inside a transaction")
 
 // Open creates the pool for DATABASE_URL, the pooled (request traffic) URL of the app role. It does not connect:
 // the pool dials on first use, so a process can start, report not-ready on /readyz and recover while Postgres is
@@ -52,7 +80,7 @@ func Open(ctx context.Context, dsn string, opts Options) (*Store, error) {
 	// client-side quoting.
 	//
 	// Also unavailable behind the pooled URL: LISTEN/NOTIFY, session-level advisory locks, SET without LOCAL, and
-	// temporary tables. Code that needs them uses DATABASE_DIRECT_URL (the SSE broker, from P0-06).
+	// temporary tables. Code that needs them uses DATABASE_DIRECT_URL (the SSE broker, and River's listener in the worker).
 	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe
 
 	if opts.AppName != "" {
@@ -77,7 +105,7 @@ func Open(ctx context.Context, dsn string, opts Options) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("postgres pool: %w", err)
 	}
-	return &Store{pool: pool, q: db.New(pool)}, nil
+	return New(pool), nil
 }
 
 // dsnSets reports whether the connection string names the parameter, in URL form (?name=value) or keyword form
@@ -95,9 +123,9 @@ func dsnSets(dsn, name string) bool {
 }
 
 // New wraps an existing pool, for tests and for callers that configure the pool themselves.
-func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool, q: db.New(pool)} }
+func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool, q: db.New(pool), hooks: &hooks{}} }
 
-// Pool returns the underlying pool, for code that needs it directly (River, from P0-06).
+// Pool returns the underlying pool, for code that needs it directly (River's insert-only client in the api).
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
 // Ping checks that Postgres answers. It backs the "postgres" readiness check.
@@ -134,7 +162,7 @@ func (s *Store) InTx(ctx context.Context, fn func(tx *Store) error) (err error) 
 			_ = tx.Rollback(context.WithoutCancel(ctx))
 		}
 	}()
-	if err = fn(&Store{q: s.q.WithTx(tx)}); err != nil {
+	if err = fn(&Store{q: s.q.WithTx(tx), tx: tx, hooks: s.hooks}); err != nil {
 		return err
 	}
 	if err = tx.Commit(ctx); err != nil {

@@ -1,0 +1,107 @@
+// Package jobs is the River job queue (decision D-04): the client setup, the job argument types, the worker
+// registration and the periodic jobs.
+//
+// Two kinds of client share one Postgres:
+//
+//   - The api builds an insert-only client over its pooled pool (NewInsertClient). It never fetches or works jobs and
+//     holds no listener, so it runs behind a transaction pooler. Its one job is InsertTx: a job is inserted in the same
+//     transaction as the API's own writes, and exists exactly when they commit (Enqueuer).
+//   - The worker builds the full client (NewWorkerClient) over a pool on DATABASE_DIRECT_URL, because River's
+//     LISTEN/NOTIFY needs a session a transaction pooler does not keep. It fetches, works and runs the periodic jobs.
+//
+// River's tables belong to the migrate role: `cfctl migrate` creates them after the goose migrations (Migrator) and
+// grants the app group role its rights on them. Nothing here issues DDL at runtime.
+package jobs
+
+import (
+	"errors"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
+)
+
+// Queue names. A queue is a workload class with its own concurrency limit (D-04); later tasks add theirs here.
+const (
+	// QueueDefault holds short, cheap jobs such as the welcome job.
+	QueueDefault = "default"
+	// QueueMaintenance holds housekeeping, so a flood of other work never delays it and it never uses much.
+	QueueMaintenance = "maintenance"
+)
+
+// Shutdown budget of the worker's River client. It sits inside the process budget documented in package httpapi
+// (the HTTP drain and shutdown run at the same time as this, then 2 s of telemetry flush, about 9 s in all):
+// running jobs get SoftStopTimeout to finish after the client stops fetching, then their contexts are cancelled and
+// they get CancelGrace to return. A cancelled job is retried later by whichever worker is next.
+const (
+	SoftStopTimeout = 5 * time.Second
+	CancelGrace     = 1 * time.Second
+	// StopTimeout is the whole budget handed to Runner.Stop.
+	StopTimeout = SoftStopTimeout + CancelGrace
+)
+
+// Queue is the concurrency of one queue.
+type Queue struct {
+	Name       string
+	MaxWorkers int
+}
+
+// Config names the queues the worker works and how many jobs of each run at once.
+type Config struct {
+	Queues []Queue
+}
+
+// DefaultConfig is the queue layout of the worker.
+func DefaultConfig() Config {
+	return Config{Queues: []Queue{
+		{Name: QueueDefault, MaxWorkers: 10},
+		{Name: QueueMaintenance, MaxWorkers: 2},
+	}}
+}
+
+func (c Config) riverQueues() (map[string]river.QueueConfig, error) {
+	if len(c.Queues) == 0 {
+		return nil, errors.New("jobs: no queues configured")
+	}
+	out := make(map[string]river.QueueConfig, len(c.Queues))
+	for _, q := range c.Queues {
+		if q.Name == "" || q.MaxWorkers < 1 {
+			return nil, fmt.Errorf("jobs: queue %q needs a name and at least one worker", q.Name)
+		}
+		if _, dup := out[q.Name]; dup {
+			return nil, fmt.Errorf("jobs: queue %q is configured twice", q.Name)
+		}
+		out[q.Name] = river.QueueConfig{MaxWorkers: q.MaxWorkers}
+	}
+	return out, nil
+}
+
+// NewInsertClient returns the api's client: it can insert jobs (Insert, InsertTx) and cannot work them. pool is the
+// api's pooled pool; the client opens no connection of its own and starts nothing.
+func NewInsertClient(pool *pgxpool.Pool, logger *slog.Logger) (*river.Client[pgx.Tx], error) {
+	return river.NewClient(riverpgxv5.New(pool), &river.Config{Logger: logger})
+}
+
+// NewWorkerClient returns the worker's client: the queues of cfg, every worker of this package and the periodic
+// jobs. pool must be on the direct URL (the listener holds a connection of it). The caller starts it (Runner).
+func NewWorkerClient(pool *pgxpool.Pool, cfg Config, deps Deps) (*river.Client[pgx.Tx], error) {
+	queues, err := cfg.riverQueues()
+	if err != nil {
+		return nil, err
+	}
+	workers, err := Workers(deps)
+	if err != nil {
+		return nil, err
+	}
+	return river.NewClient(riverpgxv5.New(pool), &river.Config{
+		Logger:          deps.logger(),
+		Queues:          queues,
+		Workers:         workers,
+		PeriodicJobs:    PeriodicJobs(),
+		SoftStopTimeout: SoftStopTimeout,
+	})
+}
