@@ -1,0 +1,40 @@
+{
+  "description": "The asset catalog the semantic fixtures assume. kind is video or audio; rights is licensed (a licence record), attested (the creator's rights attestation) or none. unknown_asset uses ids that are not listed.",
+  "assets": {
+    "ast_01j3er3kwcgrasdgd4aznmxxe0": {
+      "duration_ms": 60000,
+      "kind": "video",
+      "rights": "attested"
+    },
+    "ast_01jex6xx15ayjx8epfhfjj9s11": {
+      "duration_ms": 45000,
+      "kind": "video",
+      "rights": "attested"
+    },
+    "ast_01jdsx72atvnb7ssgbc57zbxj9": {
+      "duration_ms": 120000,
+      "kind": "video",
+      "rights": "attested"
+    },
+    "ast_01jfbemsc6way7dnfebdf8tf3g": {
+      "duration_ms": 30000,
+      "kind": "video",
+      "rights": "attested"
+    },
+    "ast_01j0h9rew727hk2pt0v5b31h44": {
+      "duration_ms": 90000,
+      "kind": "audio",
+      "rights": "licensed"
+    },
+    "ast_01jwbx4exrs98bh4pyzkx8020y": {
+      "duration_ms": 60000,
+      "kind": "audio",
+      "rights": "attested"
+    },
+    "ast_01j5ntfevbyp8fy4vwn751jmjq": {
+      "duration_ms": 90000,
+      "kind": "audio",
+      "rights": "none"
+    }
+  }
+}

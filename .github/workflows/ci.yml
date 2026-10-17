@@ -171,7 +171,7 @@ jobs:
           git diff --exit-code -- internal/store/db
           test -z "$(git status --porcelain -- internal/store/db)" || { git status --porcelain -- internal/store/db; exit 1; }
 
-  # typecheck, lint, test and build of @cf/web.
+  # typecheck, lint, test and build of @cf/web, and typecheck, tests and the generated-types drift check of @cf/schemas.
   web:
     needs: changes
     if: needs.changes.outputs.web == 'true'
@@ -191,6 +191,10 @@ jobs:
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
       - run: bun install --frozen-lockfile
+      - run: bun run --filter @cf/schemas typecheck
+      - run: bun run --filter @cf/schemas test
+      # Regenerates timeline/v1.ts from the JSON Schema; a diff means the committed one is stale.
+      - run: bun run --filter @cf/schemas gen:check
       - run: bun run --filter @cf/web typecheck
       - run: bun run --filter @cf/web lint
       - run: bun run --filter @cf/web test

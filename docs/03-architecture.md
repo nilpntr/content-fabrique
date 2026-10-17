@@ -255,7 +255,7 @@ The full rules for v1, the edit ops and the compiler are in the [timeline design
 ```json
 {
   "schema": "contentfabrique.timeline/v1",
-  "output": { "width": 1080, "height": 1920, "fps": 30, "background": "#000000" },
+  "output": { "format": "9:16", "width": 1080, "height": 1920, "fps": 30, "background": "#000000" },
   "tracks": [
     {
       "id": "main", "type": "video",

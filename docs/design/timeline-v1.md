@@ -7,7 +7,7 @@
 | What | Where | Notes |
 |---|---|---|
 | JSON Schema (the source of truth) | `packages/schemas/timeline/v1.schema.json` | Draft 2020-12, `$id` `https://contentfabrique.app/schemas/timeline/v1.json` |
-| Fixtures | `packages/schemas/timeline/fixtures/{valid,invalid}/*.json` | Each invalid fixture names the issue code it must raise, in `"$comment"`; `render.txt` lists the valid ones that are also render fixtures |
+| Fixtures | `packages/schemas/timeline/fixtures/{valid,invalid}/*.json` | `expect.json` maps each invalid fixture to the issue code it must raise and, for `schema`, the instance path and keyword Ajv must report (the production schema stays closed: there is no `$comment` property); `render.txt` lists the valid ones that are also render fixtures; `assets.json` is the asset catalog (`asset_id` to `duration_ms`, `kind` and `rights`) that the semantic fixtures assume |
 | Go types, validation, ops, diff | `apps/server/internal/timeline` | The schema is copied in by `task gen` and embedded with `go:embed`. CI fails if the copy differs |
 | Beat utilities | `apps/server/internal/timeline/beats` | P3-09 |
 | Compiler, profiles, ASS, time map, contact sheet | `apps/server/internal/render` | P3-03 to P3-06 |
@@ -21,7 +21,9 @@ The shape in architecture §6 stands. These are the rules it leaves open.
 
 **Top level.** `schema` is the constant `contentfabrique.timeline/v1`. `output` has `format` (`9:16`, `1:1`, `4:5` or `16:9`, [D-25](../05-decisions.md#d-25-output-formats-916-11-45-and-169-per-project)), `width` and `height` (which must equal the format's size: 1080×1920, 1080×1080, 1080×1350 or 1920×1080), `fps` (one of 24, 25, 30, 60) and `background` (`#rrggbb`). `tracks` and `markers` are arrays, and `meta` is an optional object with `idea_id` and `concept_id`. Unknown properties are rejected everywhere (`additionalProperties: false`), so a typo from the agent fails loudly.
 
-**Tracks.** Exactly one `video` track, and its id is `main`. At most one `text` track, at most one `captions` track and at most one `audio` track. Overlay video tracks come later.
+**Tracks.** Exactly one `video` track, and its id is `main`. At most one `text` track, at most one `captions` track and at most one `audio` track. Overlay video tracks come later. The schema enforces the counts with `contains`/`maxContains`, and tells the track types apart by `type`.
+
+**Required fields and defaults.** The schema requires what has no sensible default: on a video item `id`, `asset_id`, `source` and `at_ms`; on a text item `id`, `at_ms`, `duration_ms`, `text` and `style`; on a captions track `from`, `style` and `enabled`; on every audio item its kind's fields, `at_ms`, `source_offset_ms` and `export`; on a marker `at_ms` and `kind`. Everything else is optional and the compiler applies the default named in the tables: `speed` 1, `reframe` as `cover` at focus 0.5/0.5 and zoom 1, `look` none, `transition_in` a cut, `audio` silent, `animation` none, `strength` 1. An empty `main` track is structurally valid and fails the duration check. Every time field is at most 86 400 000 ms (24 hours). Go validation sums times as `int64`, so sums of several fields can't overflow.
 
 **IDs.**
 - Item and track ids match `^[a-z][a-z0-9_]{0,31}$` and are unique across the whole spec. The agent and the ops name items by these ids.
@@ -38,30 +40,30 @@ The shape in architecture §6 stands. These are the rules it leaves open.
 | `speed` | 0.25 to 4.0, default 1.0 |
 | `reframe.mode` | `cover`, `contain` or `blur_fill`; `focus.x`, `focus.y` in [0, 1] (default 0.5); `zoom` 1.0 to 3.0 |
 | `look.preset` | `none`, `punchy`, `warm`, `cool`, `bw`, `matte` |
-| `transition_in` | `{ "type": "cut" }` or `{ "type": "crossfade" \| "dip_to_black" \| "whip", "duration_ms": 100–1000 }`. The first item must be a cut |
+| `transition_in` | `{ "type": "cut" }` or `{ "type": "crossfade" \| "dip_to_black" \| "whip", "duration_ms": 100–1000 }`. The first item must be a cut (or have none); the schema checks that with a one-element `prefixItems` |
 | `audio` | `use_source` (default false) and `gain_db` (−30 to +6) |
 | `moment_id`, `why` | Optional. `why` is at most 280 characters and is never rendered |
 
-An item's **output duration** is `round((out_ms − in_ms) / speed)`.
+An item's **output duration** is `floor((out_ms − in_ms) / speed + 0.5)`: round half up, which for these non-negative values is round half away from zero (Go `math.Floor(x + 0.5)`; `math.Round` agrees). With a speed that is a power of two the quotient is exact, so the .5 case is exact: 3001 ms at speed 2 is 1501 ms.
 
 **Contiguity on `main`.**
 - The items are sorted by `at_ms`, the first starts at 0, and each next item starts at the previous item's end minus its own transition duration.
 - Gaps are errors, and so are overlaps that no transition explains.
 - `at_ms` is redundant with the durations on purpose: it keeps diffs readable and lets the UI place items without computing anything. The ops keep it consistent (§4).
 
-**Text items** (`text` track): `at_ms`, `duration_ms` (≥ 300), `text` (1 to 120 characters, at most 3 lines), `style` (an id from the style registry, §5), `anchor` (`upper_third`, `center`, `lower_third`) or `position` `{x, y}` in [0, 1] (exactly one of the two), and `animation` (`none`, `pop_in`, `fade`, `typewriter`, `slide_up`).
+**Text items** (`text` track): `at_ms`, `duration_ms` (≥ 300), `text` (1 to 120 characters, at most 3 lines; the schema counts lines by `\n` with a `pattern` and characters as code points, so Go must count runes, not bytes. Control characters other than `\n` — including `\r`, tab and NUL — and U+2028 and U+2029 are rejected; every other character is allowed, and §5 says how P3-04 keeps them from being read as markup), `style` (an id from the style registry, §5), `anchor` (`upper_third`, `center`, `lower_third`) or `position` `{x, y}` in [0, 1] (exactly one of the two), and `animation` (`none`, `pop_in`, `fade`, `typewriter`, `slide_up`).
 
 **Captions track:** `from: "transcript"`, `style` (`word_highlight` or `chunk`), `enabled`, `uppercase` (default true) and `max_words` (1 to 4, default 2).
 
-**Audio items:**
+**Audio items:** `export` is required on every item, and each kind's variant fixes it (`cue_only` for `trend_sound`, `licensed` for the other two).
 
 | `kind` | Fields | `export` |
 |---|---|---|
-| `trend_sound` | `trend_id`, `source_offset_ms` | Must be `cue_only`. The schema enforces it with `if`/`then` |
+| `trend_sound` | `trend_id`, `source_offset_ms` | Must be `cue_only`. The schema enforces it twice: the variant's `const`, and an `if`/`then` on `kind` whose error points straight at `/export` |
 | `licensed_track` | `asset_id`, `license_id`, `source_offset_ms` | `licensed` |
 | `creator_audio` | `asset_id`, `source_offset_ms` (the creator's own upload, with a rights attestation) | `licensed` |
 
-Every audio item has `at_ms`, an optional `duration_ms` (default: to the end of the timeline), `gain_db` (−30 to +6) and an optional `fade_in_ms` and `fade_out_ms`. Audio items may overlap, because they are mixed.
+Every audio item has `at_ms`, an optional `duration_ms` (default: to the end of the timeline), `gain_db` (−30 to +6) and an optional `fade_in_ms` and `fade_out_ms`. Audio items may overlap, because they are mixed. A sound with no `duration_ms` plays to the end of the timeline, so its effective duration is the total duration minus `at_ms`.
 
 **Markers:** `at_ms`, `kind` (`beat`, `downbeat`, `drop`, `section`) and `strength` in [0, 1].
 
@@ -69,15 +71,21 @@ Every audio item has `at_ms`, an optional `duration_ms` (default: to the end of 
 
 `timeline.Validate(spec []byte, assets AssetCatalog) Result` runs in two layers:
 
-1. **Structure.** The JSON Schema rejects wrong types, ranges and enums, unknown fields and the `trend_sound` export rule.
-2. **Semantics.** Go checks what the schema can't express: unique ids, contiguity, `out_ms` within the asset's duration (from the catalog), minimum shot length (an output duration ≥ 300 ms), total duration from 1 s to 180 s, every text item, audio item and marker inside the total duration, text inside the safe zone (§5), and transitions shorter than both items they join.
+1. **Structure.** The JSON Schema rejects wrong types, ranges and enums, unknown fields, the format/size pairing, track counts, text with both or neither of `anchor` and `position`, a first clip that is not a cut, text over 3 lines and the `trend_sound` export rule. Track, audio-item and transition types are `oneOf` unions, so one mistake yields errors for every branch. The Go layer reports only the branch whose discriminator (`type`, `kind`) matches, so the agent sees one message per problem.
+2. **Semantics.** Go checks what the schema can't express: unique ids, contiguity (including the first item starting at 0), `0 ≤ in_ms < out_ms ≤` the asset's duration (from the catalog), minimum shot length (an output duration ≥ 300 ms), total duration from 1 s to 180 s, every text item, audio item and marker inside the total duration, text inside the safe zone (§5), transitions shorter than both items they join, audio ranges and fades (below) and licensed audio (below). Contiguity is checked against the formula above, whatever the transition lengths. A clip with `in_ms ≥ out_ms` raises `source_out_of_range` only and is left out of the length, contiguity and total-duration checks. Each of these checks is a separate code, and the fixtures raise exactly one code each.
+
+**Audio checks.**
+- `source_out_of_range` also covers audio: `source_offset_ms` + the effective duration must be within the asset's duration. `trend_sound` has no asset in the catalog, so it has no range.
+- `outside_timeline` covers audio: `at_ms` below the total duration, and `at_ms + duration_ms` at most the total duration.
+- `fade_too_long`: `fade_in_ms + fade_out_ms` at most the effective duration.
+- `unlicensed_audio` ([D-03](../05-decisions.md#d-03-music-cue-only-by-default)): a `licensed_track` needs a catalog asset of kind `audio` whose rights are `licensed` (a licence record exists); a `creator_audio` needs a catalog asset whose rights are `attested` (the creator's rights attestation). An asset the catalog doesn't know raises `unknown_asset` instead. `trend_sound` is `cue_only` and never needs a licence.
 
 `Result` holds `[]Issue{Code, Path, Message, Severity}`:
 - `Path` is a JSON Pointer into the spec, such as `/tracks/0/items/3/source/out_ms`.
 - `Severity` is `error` or `warning`. Only errors block a version.
-- `Code` comes from a closed, documented list, such as `schema`, `duplicate_id`, `gap`, `overlap`, `source_out_of_range`, `shot_too_short`, `duration_out_of_range`, `outside_timeline`, `unsafe_text`, `unknown_asset` and `transition_too_long`. The editor agent sees the codes and messages, so they are written for a model to act on: "item c3 ends at 5400 ms but asset ast_… is 5100 ms long".
+- `Code` comes from a closed, documented list, such as `schema`, `duplicate_id`, `gap`, `overlap`, `source_out_of_range`, `shot_too_short`, `duration_out_of_range`, `outside_timeline`, `unsafe_text`, `unknown_asset`, `transition_too_long`, `unlicensed_audio` and `fade_too_long`. Style ids that the registry doesn't know get `unknown_style` once P3-04 adds the registry. The editor agent sees the codes and messages, so they are written for a model to act on: "item c3 ends at 5400 ms but asset ast_… is 5100 ms long".
 
-`AssetCatalog` is an interface (`Duration(assetID) (ms int, ok bool)`). Tests use an in-memory map.
+`AssetCatalog` is an interface with `Duration(assetID) (ms int, ok bool)` and `Rights(assetID) (kind AssetKind, rights Rights, ok bool)`, where `AssetKind` is `video` or `audio` and `Rights` is `licensed`, `attested` or `none`. Tests use an in-memory map loaded from `fixtures/assets.json`.
 
 ## 4. Edit ops and versions (P3-02)
 
@@ -93,6 +101,7 @@ Every audio item has `at_ms`, an optional `duration_ms` (default: to the end of 
 - **Safe zones are per format** (D-25). For 9:16 the zone follows [research §3.4](../02-research.md#34-captions-safe-zones-beat-snapping): keep out of the top 240 px, the bottom 660 px and 120 px on each side, and out of the right-hand action column (x > 900 for y > 840). 1:1 and 4:5 keep a 5 % margin on every side; 16:9 keeps a 10 % title-safe margin and the bottom 15 % clear. They are Go values (`render.SafeZones[format]`), so a later profile can tighten them.
 - **During validation (P3-01)**, the three anchors are boxes inside the safe zone by construction. A `position` gets an estimated box: the style's line height × the line count, and a width of 0.6 em per character, capped at the safe width. P3-04 replaces the estimate with libass font metrics and keeps the same issue code.
 - **The style registry** (`render/styles`) maps a style id to a font file, size, colours, outline and animation defaults. Fonts come from an allow-list of OFL-licensed files vendored under `packages/media-tools/fonts` with their licence texts ([D-16](../05-decisions.md#d-16-licensing-policy-for-ml-and-media-components)). The spec can't name a font directly.
+- **Escaping:** the spec's text is plain text, never markup. P3-04 escapes the ASS syntax characters (`\`, `{` and `}`) before writing the `.ass` file, so text can never inject override tags such as `{\an8}` or `{\fad(0,0)}`, and turns each `\n` into the ASS line break (`\N`) after escaping. Line counting happens on `\n` in the spec, before escaping, so escaping can't change the count. The schema has already rejected the other control characters and U+2028/2029, which some renderers treat as line breaks.
 - **Rendering:** all text and captions become one generated `.ass` file per render, burned in with the `ass` filter, with `fontsdir` pointing at the vendored fonts. Caption timing comes from the transcript's word timestamps, mapped through the time map to output time, and is snapped to frames.
 
 ## 6. Compiler and renderer (P3-03, P3-05, P3-06)
@@ -141,7 +150,7 @@ Both profiles write `yuv420p` and add `-map_metadata -1` and `-fflags +bitexact`
 
 ## 7. Tests
 
-**Fixtures (P3-01):** 30 valid and 30 invalid specs, covering every issue code and every format at least once.
+**Fixtures (P3-01):** at least 30 valid and 30 invalid specs (31 and 43 today), covering every issue code and every format at least once. `fixtures/expect.json` maps each invalid file to `{code, path?, keyword?}`; the Go tests read it as well and assert that the issue codes raised are exactly the expected one. The valid ones are structurally and semantically valid against `fixtures/assets.json`. Invalid fixtures that expect `schema` must fail the JSON Schema with an error at the expected instance path (and keyword); the ones that expect a semantic code must pass it and are caught by the Go layer. `packages/schemas` tests the first half with Ajv (2020-12, strict mode) and checks that `render.txt` covers every format, transition, reframe mode, look, audio kind and both ends of the speed range; the Go tests check the second half and that the Go types round-trip every valid fixture.
 
 **Golden plans (P3-03):** 20 of the valid fixtures are also render fixtures (listed in `fixtures/render.txt`, covering every format, transition, reframe mode, look, speed range and audio kind). For each of them, the compiled argument list and ASS text are snapshot-tested as text files under `testdata/golden/`. `go test ./internal/render -update` rewrites the snapshots, and a reviewer reads the diff.
 

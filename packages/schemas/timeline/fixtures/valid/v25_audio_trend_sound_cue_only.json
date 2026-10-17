@@ -1,0 +1,59 @@
+{
+  "schema": "contentfabrique.timeline/v1",
+  "output": {
+    "format": "9:16",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000"
+  },
+  "tracks": [
+    {
+      "id": "main",
+      "type": "video",
+      "items": [
+        {
+          "id": "c1",
+          "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+          "source": {
+            "in_ms": 0,
+            "out_ms": 6000
+          },
+          "at_ms": 0
+        }
+      ]
+    },
+    {
+      "id": "sound",
+      "type": "audio",
+      "items": [
+        {
+          "id": "s1",
+          "kind": "trend_sound",
+          "trend_id": "trd_01jcmevy4tr3fffvjc82eh7rjm",
+          "at_ms": 0,
+          "source_offset_ms": 12000,
+          "export": "cue_only",
+          "gain_db": -3
+        }
+      ]
+    }
+  ],
+  "markers": [
+    {
+      "at_ms": 0,
+      "kind": "downbeat",
+      "strength": 1
+    },
+    {
+      "at_ms": 500,
+      "kind": "beat",
+      "strength": 0.6
+    },
+    {
+      "at_ms": 1000,
+      "kind": "beat",
+      "strength": 0.6
+    }
+  ]
+}

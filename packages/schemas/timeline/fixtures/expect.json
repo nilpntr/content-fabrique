@@ -1,0 +1,171 @@
+{
+  "i01_gap_between_clips.json": {
+    "code": "gap"
+  },
+  "i02_gap_first_clip_not_at_zero.json": {
+    "code": "gap"
+  },
+  "i03_overlap_without_transition.json": {
+    "code": "overlap"
+  },
+  "i04_duplicate_id_two_clips.json": {
+    "code": "duplicate_id"
+  },
+  "i05_duplicate_id_across_tracks.json": {
+    "code": "duplicate_id"
+  },
+  "i06_source_out_of_range_past_asset_end.json": {
+    "code": "source_out_of_range"
+  },
+  "i07_source_out_of_range_one_ms_past_end.json": {
+    "code": "source_out_of_range"
+  },
+  "i08_source_out_of_range_audio_past_asset_end.json": {
+    "code": "source_out_of_range"
+  },
+  "i09_shot_too_short_200ms.json": {
+    "code": "shot_too_short"
+  },
+  "i10_duration_out_of_range_under_1s.json": {
+    "code": "duration_out_of_range"
+  },
+  "i11_duration_out_of_range_over_180s.json": {
+    "code": "duration_out_of_range"
+  },
+  "i12_duration_out_of_range_empty_main.json": {
+    "code": "duration_out_of_range"
+  },
+  "i13_outside_timeline_text_overruns.json": {
+    "code": "outside_timeline"
+  },
+  "i14_outside_timeline_marker_after_end.json": {
+    "code": "outside_timeline"
+  },
+  "i15_outside_timeline_audio_overruns.json": {
+    "code": "outside_timeline"
+  },
+  "i16_unsafe_text_9x16_top_edge.json": {
+    "code": "unsafe_text"
+  },
+  "i17_unknown_asset_video.json": {
+    "code": "unknown_asset"
+  },
+  "i18_unknown_asset_audio.json": {
+    "code": "unknown_asset"
+  },
+  "i19_transition_too_long_for_clip.json": {
+    "code": "transition_too_long"
+  },
+  "i20_unlicensed_audio_licensed_track_no_licence_record.json": {
+    "code": "unlicensed_audio"
+  },
+  "i21_unlicensed_audio_licensed_track_not_an_audio_asset.json": {
+    "code": "unlicensed_audio"
+  },
+  "i22_unlicensed_audio_creator_audio_no_attestation.json": {
+    "code": "unlicensed_audio"
+  },
+  "i23_fade_too_long_for_duration.json": {
+    "code": "fade_too_long"
+  },
+  "i24_schema_wrong_version.json": {
+    "code": "schema",
+    "path": "/schema",
+    "keyword": "const"
+  },
+  "i25_schema_format_size_mismatch.json": {
+    "code": "schema",
+    "path": "/output",
+    "keyword": "oneOf"
+  },
+  "i26_schema_fps_not_allowed.json": {
+    "code": "schema",
+    "path": "/output/fps",
+    "keyword": "enum"
+  },
+  "i27_schema_unknown_field.json": {
+    "code": "schema",
+    "path": "/tracks/0/items/0",
+    "keyword": "additionalProperties"
+  },
+  "i28_schema_time_not_integer.json": {
+    "code": "schema",
+    "path": "/tracks/0/items/0/source/out_ms",
+    "keyword": "type"
+  },
+  "i29_schema_time_over_24h.json": {
+    "code": "schema",
+    "path": "/tracks/0/items/0/source/out_ms",
+    "keyword": "maximum"
+  },
+  "i30_schema_speed_out_of_range.json": {
+    "code": "schema",
+    "path": "/tracks/0/items/0/speed",
+    "keyword": "maximum"
+  },
+  "i31_schema_typeid_wrong_prefix.json": {
+    "code": "schema",
+    "path": "/tracks/0/items/0/moment_id",
+    "keyword": "pattern"
+  },
+  "i32_schema_trend_sound_not_cue_only.json": {
+    "code": "schema",
+    "path": "/tracks/1/items/0/export",
+    "keyword": "const"
+  },
+  "i33_schema_text_anchor_and_position.json": {
+    "code": "schema",
+    "path": "/tracks/1/items/0",
+    "keyword": "oneOf"
+  },
+  "i34_schema_text_neither_anchor_nor_position.json": {
+    "code": "schema",
+    "path": "/tracks/1/items/0",
+    "keyword": "oneOf"
+  },
+  "i35_schema_unknown_transition_type.json": {
+    "code": "schema",
+    "path": "/tracks/0/items/1/transition_in",
+    "keyword": "oneOf"
+  },
+  "i36_schema_two_video_tracks.json": {
+    "code": "schema",
+    "path": "/tracks",
+    "keyword": "contains"
+  },
+  "i37_schema_zero_video_tracks.json": {
+    "code": "schema",
+    "path": "/tracks",
+    "keyword": "contains"
+  },
+  "i38_schema_video_track_id_not_main.json": {
+    "code": "schema",
+    "path": "/tracks/0/id",
+    "keyword": "const"
+  },
+  "i39_schema_text_four_lines.json": {
+    "code": "schema",
+    "path": "/tracks/1/items/0/text",
+    "keyword": "pattern"
+  },
+  "i40_schema_text_carriage_return.json": {
+    "code": "schema",
+    "path": "/tracks/1/items/0/text",
+    "keyword": "pattern"
+  },
+  "i41_schema_text_line_separator.json": {
+    "code": "schema",
+    "path": "/tracks/1/items/0/text",
+    "keyword": "pattern"
+  },
+  "i42_schema_first_clip_not_a_cut.json": {
+    "code": "schema",
+    "path": "/tracks/0/items/0/transition_in/type",
+    "keyword": "const"
+  },
+  "i43_schema_licensed_track_missing_license.json": {
+    "code": "schema",
+    "path": "/tracks/1/items/0",
+    "keyword": "required"
+  }
+}

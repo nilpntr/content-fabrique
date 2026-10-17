@@ -1,0 +1,28 @@
+{
+  "schema": "contentfabrique.timeline/v1",
+  "output": {
+    "format": "4:5",
+    "width": 1080,
+    "height": 1350,
+    "fps": 30,
+    "background": "#000000"
+  },
+  "tracks": [
+    {
+      "id": "main",
+      "type": "video",
+      "items": [
+        {
+          "id": "c1",
+          "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+          "source": {
+            "in_ms": 1000,
+            "out_ms": 4000
+          },
+          "at_ms": 0
+        }
+      ]
+    }
+  ],
+  "markers": []
+}
