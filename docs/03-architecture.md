@@ -169,7 +169,8 @@ erDiagram
 | `trends`, `trend_snapshots` | `kind` (sound, hashtag, format, topic), `external_id`, `title`, `meta` (bpm, snippet window, region); snapshots: `observed_at`, `rank`, `metrics`, `source` |
 | `concepts` | Global or per-workspace format templates: `structure` (slots, durations, text roles), `evidence`, `tags` |
 | `ideas` | `concept_id`, `hook`, `rationale`, `slot_plan` (slot → moment candidates), `sound_trend_id`, `status` |
-| `projects` | `idea_id`, `title`, `brief`, `status` (draft, editing, review, approved, exported), `current_timeline_id` |
+| `projects` | `idea_id`, `title`, `format` (9:16, 1:1, 4:5, 16:9, [D-25](05-decisions.md#d-25-output-formats-916-11-45-and-169-per-project)), `brief`, `status` (draft, editing, review, approved, exported), `current_timeline_id` |
+| `project_assets` | `project_id`, `asset_id`, `position`: the footage the creator selected in the new-project flow (P4-04b); the editor only uses these |
 | `timelines` | `project_id`, `version`, `spec` (jsonb), `schema_version`, `parent_id`, `author` (user or run), `change_summary`. Immutable once written. |
 | `renders` | `timeline_id`, `profile` (preview, final), `status`, `r2_key`, `time_map` (output ms → timeline item), `cpu_ms`, `error` |
 | `agent_runs` | `agent` (research, ideation, editor, worker), `parent_run_id` (sub-agent runs), `status` (queued, running, waiting_input, succeeded, failed, cancelled), `input`, `output`, `routing_profile`, `model`, `effort`, `escalated` (bool), token counts, `cost_micros`, `budget_micros`, `billed_to` |
