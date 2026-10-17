@@ -201,7 +201,7 @@ func (d Deps) checkEdit(ctx context.Context, rc runtime.RunContext, _ noArgs) (r
 // budgetLow says the run is close to a limit: few tool calls, little time, or little money, left. A revision pass needs about five
 // calls (an edit, a preview, a check, a finish) and the preview takes up to a minute. worst is the worst-case cost of one model call
 // of the run (max_tokens at the output price; 0 when it is not known): the metered client reserves that much before it sends a call
-// and refuses it when the run cannot cover it, so a run with fewer than two of them left cannot make a revision.
+// and refuses it when the run cannot cover it, so a run with fewer than two of them left cannot make a revision. (This counts the output side only, the figure the budget plan quotes; the input of a call is on top, so the warning comes a little late rather than early.)
 func budgetLow(l runtime.BudgetLeft, worst int64) bool {
 	return l.Known && (l.ToolCalls <= 7 || l.Wall < 3*time.Minute || (worst > 0 && l.Micros < 2*worst))
 }
@@ -212,7 +212,11 @@ func budgetNote(l runtime.BudgetLeft, worst int64) string {
 	if !l.Known {
 		return ""
 	}
-	s := fmt.Sprintf("\n\nLeft of your budget: $%.2f, %d tool calls and %s.", float64(max(l.Micros, 0))/1e6, max(l.ToolCalls, 0), approxDuration(l.Wall))
+	dollars := fmt.Sprintf("$%.2f", float64(max(l.Micros, 0))/1e6)
+	if l.Micros < 10_000 {
+		dollars = "under $0.01"
+	}
+	s := fmt.Sprintf("\n\nLeft of your budget: %s, %d tool calls and %s.", dollars, max(l.ToolCalls, 0), approxDuration(l.Wall))
 	if budgetLow(l, worst) {
 		s += " That is not much: finish soon, and do not start work you cannot complete."
 	}
@@ -237,42 +241,30 @@ func (d Deps) worstCallMicros(ctx context.Context, rc runtime.RunContext) int64 
 	}
 	run, err := d.Store.GetAgentRun(ctx, rc.WorkspaceID, rc.RunID)
 	if err != nil || run.MaxTokens <= 0 {
+		slog.WarnContext(ctx, "editor: the run row could not be read; the dollar warning is off", "run_id", rc.RunID.String(), "error", err)
 		return 0
 	}
 	c, err := d.OutputCost(run.Model, int64(run.MaxTokens))
 	if err != nil {
+		slog.WarnContext(ctx, "editor: the worst-case cost of a call is not known; the dollar warning is off", "model", run.Model, "error", err)
 		return 0
 	}
 	return c
 }
 
-// lastCheckOf is the version of the run's newest check_edit and the checks that failed in it: this worker's record, or the newest
-// edit_check event when this worker has none (a takeover).
+// lastCheckOf is the version of the run's newest check_edit and the checks that failed in it. The newest edit_check event is the
+// truth (another worker may have made later checks than this one remembers); this worker's record answers when the events cannot be
+// read.
 func (d Deps) lastCheckOf(ctx context.Context, rc runtime.RunContext) (int, []string) {
-	if v, failed := d.previews.lastCheck(rc.RunID); v > 0 {
-		return v, failed
+	memV, memFailed := d.previews.lastCheck(rc.RunID)
+	best, bestFailed := memV, memFailed
+	for _, art := range runArtifacts(ctx, d.Store, rc.WorkspaceID, rc.RunID, CheckArtifact) {
+		var rec CheckRecord
+		if json.Unmarshal(art.Data, &rec) == nil && rec.Version >= best && rec.Version > 0 {
+			best, bestFailed = rec.Version, rec.Report.Failed()
+		}
 	}
-	arts := runArtifacts(ctx, d.Store, rc.WorkspaceID, rc.RunID, CheckArtifact)
-	for i := len(arts) - 1; i >= 0; i-- {
-		var c struct {
-			Version int `json:"version"`
-			Checks  []struct {
-				ID     string      `json:"id"`
-				Status CheckStatus `json:"status"`
-			} `json:"checks"`
-		}
-		if json.Unmarshal(arts[i].Data, &c) != nil || c.Version == 0 {
-			continue
-		}
-		var failed []string
-		for _, ck := range c.Checks {
-			if ck.Status == CheckFail {
-				failed = append(failed, ck.ID)
-			}
-		}
-		return c.Version, failed
-	}
-	return 0, nil
+	return best, bestFailed
 }
 
 // onLimit ends a run that reached a limit gracefully when its work is usable: it made a version, and a version of it was previewed (or
