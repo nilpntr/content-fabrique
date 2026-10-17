@@ -158,6 +158,9 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, ErrDirectoryUnavailable):
 		h.logger.WarnContext(ctx, "clerk webhook not applied: clerk backend api unavailable; Svix will retry", "svix_id", svixID, "type", evt.Type, "error", err)
 		httpapi.WriteError(w, http.StatusServiceUnavailable, CodeIdentityProvider, "try again")
+	case errors.Is(err, store.ErrQueueNotMigrated):
+		h.logger.ErrorContext(ctx, "clerk webhook not applied: River's tables are missing (run cfctl migrate up); Svix will retry", "svix_id", svixID, "type", evt.Type)
+		httpapi.WriteError(w, http.StatusServiceUnavailable, CodeQueueNotMigrated, "try again later")
 	case err != nil:
 		h.logger.ErrorContext(ctx, "clerk webhook failed; Svix will retry", "svix_id", svixID, "type", evt.Type, "error", err)
 		httpapi.WriteError(w, http.StatusInternalServerError, CodeInternal, "something went wrong")
