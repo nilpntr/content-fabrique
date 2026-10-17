@@ -85,8 +85,13 @@ flowchart LR
 ### Repository layout
 
 ```
+package.json  bun.lock     # bun workspace: apps/web (@cf/web) + packages/*
+go.work                    # Go workspace: apps/server
+Taskfile.yml  compose.yaml # `task dev`; local Postgres (pgvector) and MinIO (stands in for R2)
+scripts/                   # dev.sh, run by `task dev`
+.editorconfig
 apps/
-  web/                     # TanStack Start app (dashboard)
+  web/                     # TanStack Start app (dashboard), package @cf/web
   server/                  # Go module github.com/nilpntr/content-fabrique
     cmd/
       api/                 # HTTP API + SSE

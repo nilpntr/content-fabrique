@@ -10,6 +10,14 @@ The full project plan lives in [`docs/`](docs/README.md):
 - [Decision log](docs/05-decisions.md): key technical decisions and why
 - [Setup and credentials](docs/06-setup-and-credentials.md): every account, key and `.env` variable (`cp .env.example .env`)
 
+## Run it locally
+Needs Docker, [task](https://taskfile.dev), Go and bun. Details in [docs/06](docs/06-setup-and-credentials.md#running-it-locally-p0-02).
+```sh
+task install   # bun install --frozen-lockfile at the root (plain `bun install` only when you change dependencies)
+task dev       # Postgres + MinIO in Docker, then web :3000, api :8080, worker :8081. Ctrl-C stops them
+task down      # stop the Docker services
+```
+
 ## FYI
 I already implemented a base ui design which you can fill to become an actual useable dashboard(the apps/web folder)
 

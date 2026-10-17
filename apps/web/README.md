@@ -1,12 +1,12 @@
-# skeleton-dashboard-ui
+# @cf/web
 
 A base template for dashboards: TanStack Start (React 19, server-rendered) on Cloudflare Workers, Vite 8, Tailwind 4, shadcn components on Base UI, TanStack Router and Query, and an inset collapsible sidebar shell with light and dark themes.
 
 ## Run
 
 ```sh
-bun install
-bun run dev        # http://localhost:5173, Vite with the Workers runtime
+bun install         # at the repo root (or `task install`): one bun.lock for apps/web + packages/*
+bun run dev        # http://localhost:3000, Vite with the Workers runtime
 bun run check      # typecheck + tests
 bun run build      # client and Worker bundles in dist/
 bun run preview    # serve the build locally (vite preview, the Workers runtime)

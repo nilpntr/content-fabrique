@@ -1,0 +1,9 @@
+{
+  "name": "content-fabrique",
+  "private": true,
+  "packageManager": "bun@1.4.2",
+  "workspaces": [
+    "apps/web",
+    "packages/*"
+  ]
+}
