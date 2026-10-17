@@ -51,6 +51,8 @@ type sample struct {
 	// sensitive is set for mid frames of clips that play at normal or higher speed, whose next frame must look
 	// different, or the frame number could not tell an off-by-one apart.
 	sensitive bool
+	// text is set when a text item or a caption is on screen in the frame (not just the watermark).
+	text bool
 }
 
 // sampleFrames picks the frames to compare: the first and last frame, the frames around every cut (the last frame before it and
@@ -106,8 +108,17 @@ func sampleFrames(t testing.TB, p Plan) []sample {
 			add(mids[i*len(mids)/6%len(mids)], "caption", false)
 		}
 	}
+	var shown [][2]int64 // frames [from, to) on which a text item or a caption is on screen
+	if p.Subtitles != nil {
+		for _, d := range parseDialogues(t, p.Subtitles.ASS) {
+			if d.layer != layerWatermark {
+				shown = append(shown, [2]int64{firstFrameAt(t, d.start, p.FPS), firstFrameAt(t, d.end, p.FPS)})
+			}
+		}
+	}
 	out := make([]sample, 0, len(byFrame))
 	for _, s := range byFrame {
+		s.text = slices.ContainsFunc(shown, func(r [2]int64) bool { return s.frame >= r[0] && s.frame < r[1] })
 		out = append(out, s)
 	}
 	slices.SortFunc(out, func(a, b sample) int { return int(a.frame - b.frame) })
@@ -215,7 +226,7 @@ func goldenRender(t *testing.T, ffmpeg, ffprobe, name string, spec *timeline.Spe
 			if got < lowest {
 				lowest, lowestAt = got, fmt.Sprintf("frame %d (%s)", s.frame, s.kind)
 			}
-			if floor := minSSIMFor(s.kind); got < floor {
+			if floor := minSSIMFor(s); got < floor {
 				t.Errorf("frame %d (%s): SSIM %.4f against %s, want at least %.2f", s.frame, s.kind, got, path, floor)
 			}
 		}

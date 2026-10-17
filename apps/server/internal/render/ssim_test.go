@@ -15,9 +15,9 @@ const minSSIM = 0.98
 // (the text tests check timing and position exactly; this checks that the picture is what it should be).
 const minTextSSIM = 0.95
 
-// minSSIMFor returns the threshold for a sample of the given kind.
-func minSSIMFor(kind string) float64 {
-	if kind == "text" || kind == "caption" {
+// minSSIMFor returns the threshold for a sample: the lower one when text or a caption is on screen in it.
+func minSSIMFor(s sample) float64 {
+	if s.text {
 		return minTextSSIM
 	}
 	return minSSIM
