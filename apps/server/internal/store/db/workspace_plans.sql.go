@@ -12,12 +12,52 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/ids"
 )
 
+const findPeople = `-- name: FindPeople :many
+SELECT u.id, u.clerk_user_id
+FROM users u
+WHERE u.deleted_at IS NULL
+  AND u.clerk_user_id = $1
+UNION
+SELECT u.id, u.clerk_user_id
+FROM users u
+WHERE u.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM users c WHERE c.deleted_at IS NULL AND c.clerk_user_id = $1)
+  AND u.email <> '' AND lower(u.email) = lower($1)
+ORDER BY 2
+`
+
+type FindPeopleRow struct {
+	ID          ids.UserID
+	ClerkUserID string
+}
+
+// The (not deleted) users a person could be: the one Clerk user id, else every user with that e-mail address (any case).
+func (q *Queries) FindPeople(ctx context.Context, person string) ([]FindPeopleRow, error) {
+	rows, err := q.db.Query(ctx, findPeople, person)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FindPeopleRow
+	for rows.Next() {
+		var i FindPeopleRow
+		if err := rows.Scan(&i.ID, &i.ClerkUserID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getWorkspacePlan = `-- name: GetWorkspacePlan :one
 
 SELECT w.id AS workspace_id,
        COALESCE(p.plan, 'none')::text AS plan,
        COALESCE(p.status, 'none')::text AS status,
-       COALESCE(p.source, 'manual')::text AS source,
+       COALESCE(p.source, 'none')::text AS source,
        p.current_period_end AS current_period_end,
        COALESCE(p.granted_by, '')::text AS granted_by,
        (p.workspace_id IS NOT NULL
@@ -26,7 +66,7 @@ SELECT w.id AS workspace_id,
            AND (p.current_period_end IS NULL OR p.current_period_end > now()))::boolean AS active
 FROM workspaces w
 LEFT JOIN workspace_plans p ON p.workspace_id = w.id
-WHERE w.id = $1
+WHERE w.id = $1 AND w.deleted_at IS NULL
 `
 
 type GetWorkspacePlanRow struct {
@@ -40,8 +80,9 @@ type GetWorkspacePlanRow struct {
 }
 
 // Plans and the paywall (P0-16). A workspace without a row has no plan.
-// The entitlements of one workspace. "active" is decided here, with the database clock, at the moment of the read:
-// plan is not none, status is active, and the period has not ended (a null end never ends). Missing row: plan 'none'.
+// The entitlements of one (not deleted) workspace. "active" is decided here, with the database clock, at the moment of
+// the read: plan is not none, status is active, and the period has not ended (a null end never ends). Missing row:
+// plan 'none', status 'none', source 'none'. No row at all (no such workspace, or a deleted one) is pgx.ErrNoRows.
 func (q *Queries) GetWorkspacePlan(ctx context.Context, workspaceID ids.WorkspaceID) (GetWorkspacePlanRow, error) {
 	row := q.db.QueryRow(ctx, getWorkspacePlan, workspaceID)
 	var i GetWorkspacePlanRow
@@ -57,39 +98,43 @@ func (q *Queries) GetWorkspacePlan(ctx context.Context, workspaceID ids.Workspac
 	return i, err
 }
 
-const listWorkspacesOfPerson = `-- name: ListWorkspacesOfPerson :many
-SELECT w.id, w.name, w.clerk_org_id
-FROM workspaces w
-WHERE w.deleted_at IS NULL
-  AND EXISTS (
-      SELECT 1
-      FROM workspace_members m
-      JOIN users u ON u.id = m.user_id
-      WHERE m.workspace_id = w.id
-        AND u.deleted_at IS NULL
-        AND (u.clerk_user_id = $1 OR (u.email <> '' AND lower(u.email) = lower($1)))
-  )
+const listWorkspacesOfUser = `-- name: ListWorkspacesOfUser :many
+SELECT w.id, w.name, w.clerk_org_id, w.created_at, m.role,
+       (SELECT count(*) FROM workspace_members c WHERE c.workspace_id = w.id)::int AS member_count
+FROM workspace_members m
+JOIN workspaces w ON w.id = m.workspace_id
+WHERE m.user_id = $1 AND w.deleted_at IS NULL
 ORDER BY w.created_at, w.id
 `
 
-type ListWorkspacesOfPersonRow struct {
-	ID         ids.WorkspaceID
-	Name       string
-	ClerkOrgID string
+type ListWorkspacesOfUserRow struct {
+	ID          ids.WorkspaceID
+	Name        string
+	ClerkOrgID  string
+	CreatedAt   time.Time
+	Role        string
+	MemberCount int32
 }
 
-// The workspaces a person belongs to, found by e-mail address (any case) or Clerk user id. Deleted users and
-// workspaces are left out. One row per workspace, however many matching user records are members.
-func (q *Queries) ListWorkspacesOfPerson(ctx context.Context, person string) ([]ListWorkspacesOfPersonRow, error) {
-	rows, err := q.db.Query(ctx, listWorkspacesOfPerson, person)
+// The workspaces of one user, with enough to tell them apart: when it was made, the user's role, how many members.
+// Deleted workspaces are left out.
+func (q *Queries) ListWorkspacesOfUser(ctx context.Context, userID ids.UserID) ([]ListWorkspacesOfUserRow, error) {
+	rows, err := q.db.Query(ctx, listWorkspacesOfUser, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListWorkspacesOfPersonRow
+	var items []ListWorkspacesOfUserRow
 	for rows.Next() {
-		var i ListWorkspacesOfPersonRow
-		if err := rows.Scan(&i.ID, &i.Name, &i.ClerkOrgID); err != nil {
+		var i ListWorkspacesOfUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.ClerkOrgID,
+			&i.CreatedAt,
+			&i.Role,
+			&i.MemberCount,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -100,22 +145,7 @@ func (q *Queries) ListWorkspacesOfPerson(ctx context.Context, person string) ([]
 	return items, nil
 }
 
-const personExists = `-- name: PersonExists :one
-SELECT EXISTS (
-    SELECT 1 FROM users u
-    WHERE u.deleted_at IS NULL AND (u.clerk_user_id = $1 OR (u.email <> '' AND lower(u.email) = lower($1)))
-)::boolean
-`
-
-// Whether any (not deleted) user record matches, so "no such person" can be told apart from "in no workspace".
-func (q *Queries) PersonExists(ctx context.Context, person string) (bool, error) {
-	row := q.db.QueryRow(ctx, personExists, person)
-	var column_1 bool
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
-const upsertWorkspacePlan = `-- name: UpsertWorkspacePlan :exec
+const upsertWorkspacePlan = `-- name: UpsertWorkspacePlan :execrows
 INSERT INTO workspace_plans (workspace_id, plan, status, source, current_period_end, granted_by)
 VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (workspace_id) DO UPDATE
@@ -124,6 +154,7 @@ SET plan = EXCLUDED.plan,
     source = EXCLUDED.source,
     current_period_end = EXCLUDED.current_period_end,
     granted_by = EXCLUDED.granted_by
+WHERE workspace_plans.source = 'manual' OR $7::boolean
 `
 
 type UpsertWorkspacePlanParams struct {
@@ -133,18 +164,24 @@ type UpsertWorkspacePlanParams struct {
 	Source           string
 	CurrentPeriodEnd *time.Time
 	GrantedBy        string
+	Force            bool
 }
 
 // Sets the plan of a workspace (insert or replace). The row is keyed by the workspace, so one workspace's grant can
-// never touch another's.
-func (q *Queries) UpsertWorkspacePlan(ctx context.Context, arg UpsertWorkspacePlanParams) error {
-	_, err := q.db.Exec(ctx, upsertWorkspacePlan,
+// never touch another's. A row whose source is not 'manual' (the merchant of record owns it) is left alone unless
+// @force: then no row is affected, and the caller reports a conflict.
+func (q *Queries) UpsertWorkspacePlan(ctx context.Context, arg UpsertWorkspacePlanParams) (int64, error) {
+	result, err := q.db.Exec(ctx, upsertWorkspacePlan,
 		arg.WorkspaceID,
 		arg.Plan,
 		arg.Status,
 		arg.Source,
 		arg.CurrentPeriodEnd,
 		arg.GrantedBy,
+		arg.Force,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

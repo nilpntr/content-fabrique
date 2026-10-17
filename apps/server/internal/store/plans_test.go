@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,15 +58,15 @@ func plansSuite(t *testing.T, st *store.Store, suffix string) {
 		if err != nil || !e.Active || e.Plan != plans.Pro || e.CurrentPeriodEnd == nil || !e.CurrentPeriodEnd.Equal(future.Truncate(time.Microsecond)) {
 			t.Fatalf("after second grant = %+v, %v", e, err)
 		}
-		e, err = st.RevokePlan(ctx, w.ID, "", "cfctl:test")
+		e, err = st.RevokePlan(ctx, store.RevokeInput{WorkspaceID: w.ID, GrantedBy: "cfctl:test"})
 		if err != nil || e.Active || e.Plan != plans.None || e.Status != store.StatusCanceled || e.CurrentPeriodEnd != nil {
 			t.Fatalf("after revoke = %+v, %v", e, err)
 		}
 		// Revoking again is fine, and so is revoking a workspace that never had a plan.
-		if e, err = st.RevokePlan(ctx, w.ID, "", ""); err != nil || e.Active {
+		if e, err = st.RevokePlan(ctx, store.RevokeInput{WorkspaceID: w.ID, GrantedBy: ""}); err != nil || e.Active {
 			t.Fatalf("second revoke = %+v, %v", e, err)
 		}
-		if e, err = st.RevokePlan(ctx, newWorkspace("never").ID, "", ""); err != nil || e.Active {
+		if e, err = st.RevokePlan(ctx, store.RevokeInput{WorkspaceID: newWorkspace("never").ID, GrantedBy: ""}); err != nil || e.Active {
 			t.Fatalf("revoke without a plan = %+v, %v", e, err)
 		}
 		// And a grant after a revoke brings it back.
@@ -169,7 +170,7 @@ func plansSuite(t *testing.T, st *store.Store, suffix string) {
 			t.Fatalf("workspace B was unlocked by A's grant: %+v", e)
 		}
 		// Revoking B (which has nothing) leaves A alone, and revoking A leaves B alone.
-		if _, err := st.RevokePlan(ctx, b.ID, "", ""); err != nil {
+		if _, err := st.RevokePlan(ctx, store.RevokeInput{WorkspaceID: b.ID, GrantedBy: ""}); err != nil {
 			t.Fatal(err)
 		}
 		if !ent(a).Active {
@@ -178,7 +179,7 @@ func plansSuite(t *testing.T, st *store.Store, suffix string) {
 		if _, err := st.GrantPlan(ctx, store.GrantInput{WorkspaceID: b.ID, Plan: plans.Studio}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := st.RevokePlan(ctx, a.ID, "", ""); err != nil {
+		if _, err := st.RevokePlan(ctx, store.RevokeInput{WorkspaceID: a.ID, GrantedBy: ""}); err != nil {
 			t.Fatal(err)
 		}
 		if ent(a).Active || !ent(b).Active || ent(b).Plan != plans.Studio {
@@ -186,32 +187,32 @@ func plansSuite(t *testing.T, st *store.Store, suffix string) {
 		}
 
 		// The person who is in both workspaces is found in both; a person in only one is found in that one.
-		refs, known, err := st.WorkspacesOfPerson(ctx, "BOTH-"+suffix+"@EXAMPLE.com") // any case
-		if err != nil || !known || len(refs) != 2 {
-			t.Fatalf("workspaces of ada = %+v, %v, %v", refs, known, err)
+		refs := workspacesOf(t, st, "BOTH-"+suffix+"@EXAMPLE.com") // any case
+		if len(refs) != 2 {
+			t.Fatalf("workspaces of ada = %+v", refs)
 		}
-		ids := []string{refs[0].ID.String(), refs[1].ID.String()}
-		if !slices.Contains(ids, a.ID.String()) || !slices.Contains(ids, b.ID.String()) {
-			t.Fatalf("ids = %v", ids)
+		got := []string{refs[0].ID.String(), refs[1].ID.String()}
+		if !slices.Contains(got, a.ID.String()) || !slices.Contains(got, b.ID.String()) {
+			t.Fatalf("ids = %v", got)
 		}
-		refs, known, err = st.WorkspacesOfPerson(ctx, "user_bob_plan_"+suffix) // by Clerk user id
-		if err != nil || !known || len(refs) != 1 || refs[0].ID != b.ID || refs[0].Name != "tenant-b" || refs[0].ClerkOrgID != "org_plan_tenant-b_"+suffix {
-			t.Fatalf("workspaces of bob = %+v, %v, %v", refs, known, err)
+		refs = workspacesOf(t, st, "user_bob_plan_"+suffix) // by Clerk user id
+		if len(refs) != 1 || refs[0].ID != b.ID || refs[0].Name != "tenant-b" || refs[0].ClerkOrgID != "org_plan_tenant-b_"+suffix ||
+			refs[0].Role != store.RoleOwner || refs[0].Members != 2 || refs[0].CreatedAt.IsZero() {
+			t.Fatalf("workspaces of bob = %+v", refs)
 		}
 	})
 
 	t.Run("finding a person", func(t *testing.T) {
-		if refs, known, err := st.WorkspacesOfPerson(ctx, "nobody-"+suffix+"@example.com"); err != nil || known || len(refs) != 0 {
-			t.Fatalf("unknown person = %+v, %v, %v", refs, known, err)
+		if people, err := st.FindPeople(ctx, "nobody-"+suffix+"@example.com"); err != nil || len(people) != 0 {
+			t.Fatalf("unknown person = %+v, %v", people, err)
 		}
-		_, err := st.UpsertUserByClerkID(ctx, "user_lonely_"+suffix, "lonely-"+suffix+"@example.com")
-		if err != nil {
+		if _, err := st.UpsertUserByClerkID(ctx, "user_lonely_"+suffix, "lonely-"+suffix+"@example.com"); err != nil {
 			t.Fatal(err)
 		}
-		if refs, known, err := st.WorkspacesOfPerson(ctx, "lonely-"+suffix+"@example.com"); err != nil || !known || len(refs) != 0 {
-			t.Fatalf("person in no workspace = %+v, %v, %v", refs, known, err)
+		if refs := workspacesOf(t, st, "lonely-"+suffix+"@example.com"); len(refs) != 0 {
+			t.Fatalf("person in no workspace = %+v", refs)
 		}
-		if _, _, err := st.WorkspacesOfPerson(ctx, "  "); !errors.Is(err, store.ErrInvalid) {
+		if _, err := st.FindPeople(ctx, "  "); !errors.Is(err, store.ErrInvalid) {
 			t.Fatalf("blank person: err = %v", err)
 		}
 		// A deleted workspace is not offered.
@@ -220,16 +221,88 @@ func plansSuite(t *testing.T, st *store.Store, suffix string) {
 		if _, err := st.AddMember(ctx, w.ID, u.ID, store.RoleOwner); err != nil {
 			t.Fatal(err)
 		}
-		if refs, _, _ := st.WorkspacesOfPerson(ctx, u.Email); len(refs) != 1 {
+		if refs := workspacesOf(t, st, u.Email); len(refs) != 1 {
 			t.Fatalf("before delete: %+v", refs)
+		}
+		if _, err := st.GrantPlan(ctx, store.GrantInput{WorkspaceID: w.ID, Plan: plans.Pro}); err != nil {
+			t.Fatal(err)
 		}
 		if _, err := st.DeleteWorkspace(ctx, w.ClerkOrgID); err != nil {
 			t.Fatal(err)
 		}
-		if refs, _, _ := st.WorkspacesOfPerson(ctx, u.Email); len(refs) != 0 {
+		if refs := workspacesOf(t, st, u.Email); len(refs) != 0 {
 			t.Fatalf("after delete: %+v", refs)
 		}
+		// A deleted workspace has no entitlements to read, whatever it was granted before.
+		if _, err := st.GetEntitlements(ctx, w.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("entitlements of a deleted workspace: err = %v", err)
+		}
 	})
+
+	// An e-mail address is not unique: two accounts can share it, and then nothing may pick one of them for you.
+	t.Run("an e-mail address shared by several users", func(t *testing.T) {
+		shared := "shared-" + suffix + "@example.com"
+		one, err := st.UpsertUserByClerkID(ctx, "user_shared_one_"+suffix, shared)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.UpsertUserByClerkID(ctx, "user_shared_two_"+suffix, strings.ToUpper(shared)); err != nil {
+			t.Fatal(err)
+		}
+		people, err := st.FindPeople(ctx, shared)
+		if err != nil || len(people) != 2 {
+			t.Fatalf("people = %+v, %v", people, err)
+		}
+		// The Clerk user id picks exactly one.
+		people, err = st.FindPeople(ctx, one.ClerkUserID)
+		if err != nil || len(people) != 1 || people[0].ID != one.ID || people[0].ClerkUserID != one.ClerkUserID {
+			t.Fatalf("by Clerk user id = %+v, %v", people, err)
+		}
+	})
+
+	t.Run("a plan the merchant of record manages is not overwritten by hand", func(t *testing.T) {
+		w := newWorkspace("merchant")
+		if _, err := st.GrantPlan(ctx, store.GrantInput{WorkspaceID: w.ID, Plan: plans.Pro, Source: store.SourceMerchant}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.GrantPlan(ctx, store.GrantInput{WorkspaceID: w.ID, Plan: plans.Trial}); !errors.Is(err, store.ErrPlanSourceConflict) {
+			t.Fatalf("grant over a merchant plan: err = %v", err)
+		}
+		if _, err := st.RevokePlan(ctx, store.RevokeInput{WorkspaceID: w.ID}); !errors.Is(err, store.ErrPlanSourceConflict) {
+			t.Fatalf("revoke of a merchant plan: err = %v", err)
+		}
+		if e := ent(w); !e.Active || e.Plan != plans.Pro || e.Source != store.SourceMerchant {
+			t.Fatalf("the refused commands changed the plan: %+v", e)
+		}
+		// Forced, the hand edit wins and the record is manual from then on.
+		e, err := st.RevokePlan(ctx, store.RevokeInput{WorkspaceID: w.ID, Force: true})
+		if err != nil || e.Active || e.Source != store.SourceManual {
+			t.Fatalf("forced revoke = %+v, %v", e, err)
+		}
+		// A manual record is replaced without --force, and so is a workspace with no record.
+		if _, err := st.GrantPlan(ctx, store.GrantInput{WorkspaceID: w.ID, Plan: plans.Studio}); err != nil {
+			t.Fatalf("grant over a manual plan: %v", err)
+		}
+	})
+
+	t.Run("a workspace with no record reports source none", func(t *testing.T) {
+		if e := ent(newWorkspace("nosource")); e.Source != store.SourceNone {
+			t.Fatalf("source = %q", e.Source)
+		}
+	})
+}
+
+func workspacesOf(t *testing.T, st *store.Store, person string) []store.WorkspaceRef {
+	t.Helper()
+	people, err := st.FindPeople(context.Background(), person)
+	if err != nil || len(people) != 1 {
+		t.Fatalf("FindPeople(%q) = %+v, %v; want exactly one", person, people, err)
+	}
+	refs, err := st.WorkspacesOfUser(context.Background(), people[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return refs
 }
 
 // setPlanStatus writes a status the way the merchant of record's webhooks will (P7-01), through the same pool.

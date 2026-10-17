@@ -24,14 +24,14 @@ export function PlanGate({ children }: { children: ReactNode }) {
     case "error":
       return (
         <div role="alert" className="mx-auto max-w-md space-y-3 py-24 text-center">
-          <h1 className="text-[1.375rem] font-semibold tracking-[-0.02em]">We could not check your plan</h1>
+          <h1 className="text-[1.375rem] font-semibold tracking-[-0.02em]">We couldn't check your plan</h1>
           <p className="text-muted-foreground">
             {me.error instanceof ApiError && me.error.code === "network_error"
               ? "The server could not be reached."
               : "Something went wrong on our side."}
           </p>
           <Button variant="outline" onClick={() => void me.refetch()}>
-            Try again
+            Retry
           </Button>
         </div>
       );

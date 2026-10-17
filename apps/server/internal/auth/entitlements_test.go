@@ -139,7 +139,16 @@ func TestMeCarriesTheEntitlements(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantError(t, get(mw(MeHandler(&fakeEnts{err: errors.New("boom")}, quiet())), "Bearer "+f.token(t, nil)), http.StatusInternalServerError, "internal_error")
+	// A plan that cannot be read does not fail /v1/me: the identity is still answered, the plan is unknown and never active.
+	var logs strings.Builder
+	rec := get(mw(MeHandler(&fakeEnts{err: errors.New("boom: password=hunter2")}, slog.New(slog.NewTextHandler(&logs, nil)))), "Bearer "+f.token(t, nil))
+	want := `"entitlements":{"plan":"none","status":"unknown","active":false,"current_period_end":null}`
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), want) || !strings.Contains(rec.Body.String(), `"email":"ada@example.com"`) {
+		t.Fatalf("/v1/me with an unreadable plan: %d %s", rec.Code, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "hunter2") || !strings.Contains(logs.String(), "reading the workspace plan failed") {
+		t.Errorf("the failure must be logged and not shown: body %s, log %s", rec.Body, logs.String())
+	}
 }
 
 // The whole API path with the real Syncer and Postgres and locally signed tokens: the paywall, from a missing plan to a
@@ -153,14 +162,16 @@ func TestMountedPaywall(t *testing.T) {
 	dir.orgs["org_bob"] = ClerkOrg{ID: "org_bob", Name: "Bob Studio", UpdatedAt: 1}
 
 	mux := http.NewServeMux()
-	if _, err := Mount(mux, Deps{
+	v1, err := Mount(mux, Deps{
 		Config:     config.Config{AppOrigin: testOrigin, ClerkSecretKey: "sk_test_unused", ClerkWebhookSecret: testWebhookSecret},
 		Store:      st,
 		Directory:  dir,
 		JWKSClient: &jwks.Client{Backend: f.backend},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
+	v1.Handle("GET /v1/library/summary", LibrarySummaryHandler())
 	// A token for a user acting in an organization.
 	token := func(user, org string) string {
 		return f.token(t, map[string]any{"sub": user, "o": map[string]any{"id": org, "rol": "admin", "slg": "x"}})
@@ -219,7 +230,7 @@ func TestMountedPaywall(t *testing.T) {
 	}
 
 	// Revoked: 402 again, with the same token.
-	if _, err := st.RevokePlan(ctx, wsA.ID, "", "test"); err != nil {
+	if _, err := st.RevokePlan(ctx, store.RevokeInput{WorkspaceID: wsA.ID, GrantedBy: "test"}); err != nil {
 		t.Fatal(err)
 	}
 	wantError(t, call("/v1/library/summary", ada), http.StatusPaymentRequired, "plan_required")
@@ -274,5 +285,123 @@ func TestPaidRouteWithoutClerkFailsClosed(t *testing.T) {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 		wantError(t, rec, http.StatusServiceUnavailable, "auth_not_configured")
+	}
+}
+
+// Every /v1 route that is not on the allowlist is behind the authentication middleware and the paywall, also a path
+// that no route has: nothing under /v1/ is reachable without a token, or (for a route that is not allowlisted) without a plan.
+func TestV1CatchAll(t *testing.T) {
+	ctx := context.Background()
+	st, dir, f := newStore(t), newFakeDir(), newFixture(t)
+	dir.users["user_ada"] = ClerkUser{ID: "user_ada", Email: "ada@example.com", UpdatedAt: 1}
+	dir.orgs["org_ada"] = ClerkOrg{ID: "org_ada", Name: "Ada Studio", UpdatedAt: 1}
+
+	mux := http.NewServeMux()
+	v1, err := Mount(mux, Deps{
+		Config:     config.Config{AppOrigin: testOrigin, ClerkSecretKey: "sk_test_unused", ClerkWebhookSecret: testWebhookSecret},
+		Store:      st,
+		Directory:  dir,
+		JWKSClient: &jwks.Client{Backend: f.backend},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reached := 0
+	v1.Handle("GET /v1/things", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { reached++; w.WriteHeader(http.StatusOK) }))
+	do := func(method, path, tok string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, nil)
+		if tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec
+	}
+	tok := f.token(t, map[string]any{"sub": "user_ada", "o": map[string]any{"id": "org_ada", "rol": "admin", "slg": "x"}})
+
+	// No token: 401, whatever the path, method or whether a route exists. Never a 404 or a 405 that shows the shape of the API.
+	for _, tc := range [][2]string{
+		{"GET", "/v1/things"}, {"POST", "/v1/things"}, {"GET", "/v1/x"}, {"GET", "/v1/x/y/z"}, {"DELETE", "/v1/"},
+		{"GET", "/v1/webhooks/clerk"}, {"GET", "/v1/Things"}, {"GET", "/v1//things"},
+	} {
+		if rec := do(tc[0], tc[1], ""); rec.Code != http.StatusUnauthorized {
+			// ServeMux may answer a redirect for a path it cleans (//, ..); that carries no data, and must not be a route.
+			if rec.Code < 300 || rec.Code >= 400 {
+				t.Errorf("%s %s without a token: %d %s", tc[0], tc[1], rec.Code, rec.Body)
+			}
+		}
+	}
+	if reached != 0 {
+		t.Fatal("a route ran without a token")
+	}
+
+	// A token and no plan: 402 for the registered route, for an unknown one, and for a wrong method.
+	for _, tc := range [][2]string{{"GET", "/v1/things"}, {"POST", "/v1/things"}, {"GET", "/v1/x"}, {"PUT", "/v1/x/y"}} {
+		wantError(t, do(tc[0], tc[1], tok), http.StatusPaymentRequired, "plan_required")
+	}
+	if reached != 0 {
+		t.Fatal("a route ran without a plan")
+	}
+	// The allowlist still answers without a plan.
+	if rec := do("GET", "/v1/me", tok); rec.Code != http.StatusOK {
+		t.Fatalf("/v1/me without a plan: %d %s", rec.Code, rec.Body)
+	}
+
+	// With a plan the request gets to the router: the route runs, the rest is an ordinary 404 or 405.
+	ws, err := st.GetWorkspaceByClerkOrgID(ctx, "org_ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.GrantPlan(ctx, store.GrantInput{WorkspaceID: ws.ID, Plan: plans.Creator}); err != nil {
+		t.Fatal(err)
+	}
+	if rec := do("GET", "/v1/things", tok); rec.Code != http.StatusOK || reached != 1 {
+		t.Fatalf("GET /v1/things with a plan: %d, reached %d", rec.Code, reached)
+	}
+	if rec := do("GET", "/v1/x", tok); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown route with a plan: %d", rec.Code)
+	}
+	if rec := do("POST", "/v1/things", tok); rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("wrong method with a plan: %d", rec.Code)
+	}
+}
+
+func TestV1HandleRefusesRoutesOutsideV1(t *testing.T) {
+	v1 := &V1{mux: http.NewServeMux()}
+	for _, pattern := range []string{"/things", "GET /healthz", "GET /v2/x", "GET v1/x", "/v1", "GET /v1"} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("Handle(%q) did not panic", pattern)
+				}
+			}()
+			v1.Handle(pattern, http.NotFoundHandler())
+		}()
+	}
+	v1.Handle("GET /v1/ok", http.NotFoundHandler()) // must not panic
+}
+
+// The plan is read once per request, however many handlers want it.
+func TestPlanIsReadOncePerRequest(t *testing.T) {
+	f := newFixture(t)
+	ents := &fakeEnts{e: store.Entitlements{Plan: plans.Creator, Status: store.StatusActive, Active: true}}
+	mw, err := NewMiddleware(MiddlewareConfig{AppOrigin: testOrigin, JWKSClient: &jwks.Client{Backend: f.backend}}, &fakeResolver{ret: testPrincipal()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	guarded := mw(RequireActivePlan(ents, quiet())(WorkspacePlanHandler(ents, quiet())))
+	if rec := get(guarded, "Bearer "+f.token(t, nil)); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	if ents.calls != 1 {
+		t.Errorf("the plan was read %d times behind the guard, want 1", ents.calls)
+	}
+	ents.calls = 0
+	guardedMe := mw(RequireActivePlan(ents, quiet())(MeHandler(ents, quiet())))
+	if rec := get(guardedMe, "Bearer "+f.token(t, nil)); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	if ents.calls != 1 {
+		t.Errorf("/v1/me read the plan %d times behind the guard, want 1", ents.calls)
 	}
 }

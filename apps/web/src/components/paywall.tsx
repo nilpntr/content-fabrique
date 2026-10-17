@@ -2,6 +2,7 @@ import { CheckIcon } from "lucide-react";
 import { cardClassName } from "@/components/page-placeholder";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Me, PlanName } from "@/lib/api";
+import { isLapsed } from "@/lib/paywall";
 import { cn } from "@/lib/utils";
 
 interface PlanCard {
@@ -55,7 +56,8 @@ export const PLAN_CARDS: readonly PlanCard[] = [
  */
 export function Paywall({ workspace, plan }: { workspace: Me["workspace"]; plan: Me["entitlements"] | undefined }) {
   // plan is undefined only when the API sent no entitlements: treated as no plan.
-  const lapsed = plan !== undefined && plan.plan !== "none";
+  const lapsed = isLapsed(plan);
+  const planName = plan && plan.plan !== "none" ? `The ${plan.plan} plan` : "The plan";
   return (
     <section aria-labelledby="paywall-title" data-testid="paywall" className="mx-auto max-w-5xl space-y-6">
       <div className="animate-rise">
@@ -64,7 +66,7 @@ export function Paywall({ workspace, plan }: { workspace: Me["workspace"]; plan:
         </h1>
         <p className="mt-1.5 max-w-prose text-muted-foreground">
           {lapsed
-            ? `The ${plan?.plan} plan of ${workspace.name} is no longer active. Pick a plan below to carry on.`
+            ? `${planName} of ${workspace.name} is no longer active. Pick a plan below to carry on.`
             : `${workspace.name} has no plan yet. Pick one below to unlock the app.`}
         </p>
       </div>

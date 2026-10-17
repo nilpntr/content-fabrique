@@ -43,11 +43,12 @@ func MeHandler(ents EntitlementReader, logger *slog.Logger) http.Handler {
 			httpapi.WriteError(w, http.StatusUnauthorized, CodeUnauthenticated, "sign in to use the API")
 			return
 		}
-		e, err := ents.GetEntitlements(r.Context(), p.WorkspaceID)
+		// Who the caller is does not depend on the plan, so a plan that cannot be read is not a failure of /v1/me: it is
+		// reported as unknown (never active), and the web app says it could not check, rather than showing the paywall.
+		e, err := readEntitlements(r.Context(), ents, p)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "reading the workspace plan failed", "error", err)
-			httpapi.WriteError(w, http.StatusInternalServerError, CodeInternal, "something went wrong")
-			return
+			e = store.Unknown(p.WorkspaceID)
 		}
 		httpapi.WriteJSON(w, http.StatusOK, MeResponse{
 			User:         MeUser{ID: p.UserID, Email: p.Email},

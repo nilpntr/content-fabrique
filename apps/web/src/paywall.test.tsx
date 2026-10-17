@@ -108,9 +108,35 @@ test("an unreachable API is an error with a retry, not a paywall and not the app
   vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
   renderAt("/reports");
   const alert = await screen.findByRole("alert", {}, { timeout: 4000 });
-  expect(within(alert).getByText("We could not check your plan")).toBeTruthy();
+  expect(within(alert).getByText("We couldn't check your plan")).toBeTruthy();
   expect(screen.queryByTestId("paywall")).toBeNull();
   expect(screen.queryByRole("heading", { name: "Reports" })).toBeNull();
+});
+
+test("a plan the API could not read is an error with a retry, not the paywall", async () => {
+  stubPlan({ plan: "none", status: "unknown", active: false });
+  renderAt("/reports");
+  const alert = await screen.findByRole("alert");
+  expect(within(alert).getByText("We couldn't check your plan")).toBeTruthy();
+  expect(within(alert).getByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(screen.queryByTestId("paywall")).toBeNull();
+  expect(screen.queryByRole("heading", { name: "Reports" })).toBeNull();
+});
+
+test("a canceled or past-due plan says it has ended, a revoked one does not name a plan", async () => {
+  stubPlan({ plan: "pro", status: "past_due", active: false });
+  renderAt("/");
+  let paywall = await screen.findByTestId("paywall");
+  expect(within(paywall).getByRole("heading", { level: 1, name: "Your plan has ended" })).toBeTruthy();
+  expect(within(paywall).getByText(/The pro plan of Fit Studio is no longer active/)).toBeTruthy();
+  act(() => root?.unmount());
+  root = undefined;
+
+  stubPlan({ plan: "none", status: "canceled", active: false });
+  renderAt("/");
+  paywall = await screen.findByTestId("paywall");
+  expect(within(paywall).getByRole("heading", { level: 1, name: "Your plan has ended" })).toBeTruthy();
+  expect(within(paywall).getByText(/The plan of Fit Studio is no longer active/)).toBeTruthy();
 });
 
 test("a grant shows up on the next load: the same page, a different answer", async () => {

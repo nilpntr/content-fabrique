@@ -35,13 +35,15 @@ name, its id, the plan, status and end of the period. Never prints the URL or a 
 
   --user      the person: an e-mail address (any case) or a Clerk user id (user_...)
   --plan      the plan to grant: trial, studio, creator or pro
-  --until     the last day of the plan: YYYY-MM-DD (until the end of that day, UTC) or an RFC 3339 time. Default: no end.
+  --until     the last day of the plan: YYYY-MM-DD (the plan runs through that day and ends at the start of the next, UTC)
+              or an RFC 3339 time (the exact end). Default: no end.
               A date in the past is accepted (the plan is then not active): that is how expiry is tried out
   --workspace which workspace, when the person is in several: a wks_... id or a Clerk org_... id. The candidates are listed when it is needed
   --env-file  the env file; default .env at the repository root, and a relative name is taken from there too
               (task plan runs in apps/server). A non-empty value in the file wins; the process environment fills the rest
   --yes       grant and revoke ask for this unless CF_ENV is set to local or ci, the database host is localhost, 127.0.0.1,
               ::1 or the compose service "postgres", and CF_ENV and DATABASE_URL come from the same place
+  --force     replace a plan that the merchant of record manages (its source is not manual); refused without it
   --allow-production
               grant and revoke are refused when CF_ENV is production without this, and with it they still need --yes
 
@@ -71,7 +73,7 @@ func planOperator(lookup lookupEnv) string {
 func parseUntil(s string) (time.Time, error) {
 	s = strings.TrimSpace(s)
 	if t, err := time.ParseInLocation("2006-01-02", s, time.UTC); err == nil {
-		return t.Add(24*time.Hour - time.Second), nil
+		return t.Add(24 * time.Hour), nil // the end is exclusive: the whole of the named day counts
 	}
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
 		return t.UTC(), nil
@@ -105,6 +107,7 @@ func cmdPlan(args []string, stdout, stderr io.Writer, lookup lookupEnv) int {
 	envFileArg := flags.String("env-file", "", "env file")
 	yes := flags.Bool("yes", false, "confirm on staging or any database that is not this machine")
 	allowProd := flags.Bool("allow-production", false, "allow grant and revoke on production")
+	force := flags.Bool("force", false, "replace a plan managed by the merchant of record")
 	if err := flags.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -225,11 +228,15 @@ func cmdPlan(args []string, stdout, stderr io.Writer, lookup lookupEnv) int {
 	var ent store.Entitlements
 	switch command {
 	case "grant":
-		ent, err = st.GrantPlan(ctx, store.GrantInput{WorkspaceID: ws.ID, Plan: plan, PeriodEnd: until, Source: store.SourceManual, GrantedBy: planOperator(lookup)})
+		ent, err = st.GrantPlan(ctx, store.GrantInput{WorkspaceID: ws.ID, Plan: plan, PeriodEnd: until, Source: store.SourceManual, GrantedBy: planOperator(lookup), Force: *force})
 	case "revoke":
-		ent, err = st.RevokePlan(ctx, ws.ID, store.SourceManual, planOperator(lookup))
+		ent, err = st.RevokePlan(ctx, store.RevokeInput{WorkspaceID: ws.ID, Source: store.SourceManual, GrantedBy: planOperator(lookup), Force: *force})
 	default:
 		ent, err = st.GetEntitlements(ctx, ws.ID)
+	}
+	if errors.Is(err, store.ErrPlanSourceConflict) {
+		_, _ = fmt.Fprintf(errOut, "cfctl plan %s: the plan of this workspace is managed by the merchant of record (its source is not manual), so a hand edit would be overwritten by billing or disagree with what the customer pays. Nothing was changed. Pass --force if you mean it\n", command)
+		return 2
 	}
 	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "cfctl plan %s failed: %v\n", command, err)
@@ -244,16 +251,29 @@ func cmdPlan(args []string, stdout, stderr io.Writer, lookup lookupEnv) int {
 
 // chooseWorkspace resolves --user (and --workspace) to exactly one workspace of that person, or explains what to pass.
 func chooseWorkspace(ctx context.Context, st *store.Store, person string, want ids.WorkspaceID, wantOrg, command string, errOut io.Writer) (store.WorkspaceRef, int) {
-	refs, known, err := st.WorkspacesOfPerson(ctx, person)
+	people, err := st.FindPeople(ctx, person)
 	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "cfctl plan %s: looking up the person failed: %v\n", command, err)
 		return store.WorkspaceRef{}, 1
 	}
 	switch {
-	case !known:
+	case len(people) == 0:
 		_, _ = fmt.Fprintf(errOut, "cfctl plan %s: no user matches that e-mail address or Clerk user id. They must sign in to the app once, which creates their workspace\n", command)
 		return store.WorkspaceRef{}, 1
-	case len(refs) == 0:
+	case len(people) > 1:
+		// An e-mail address is not unique to one account. Granting to "whoever matched first" could unlock a stranger.
+		_, _ = fmt.Fprintf(errOut, "cfctl plan %s: that e-mail address belongs to %d users. Pass the Clerk user id of the one you mean as --user:\n", command, len(people))
+		for _, p := range people {
+			_, _ = fmt.Fprintf(errOut, "  %s\n", safeID(p.ClerkUserID))
+		}
+		return store.WorkspaceRef{}, 2
+	}
+	refs, err := st.WorkspacesOfUser(ctx, people[0].ID)
+	if err != nil {
+		_, _ = fmt.Fprintf(errOut, "cfctl plan %s: looking up the workspaces failed: %v\n", command, err)
+		return store.WorkspaceRef{}, 1
+	}
+	if len(refs) == 0 {
 		_, _ = fmt.Fprintf(errOut, "cfctl plan %s: that user is in no workspace. They must create or join one in the app first\n", command)
 		return store.WorkspaceRef{}, 1
 	}
@@ -277,8 +297,32 @@ func chooseWorkspace(ctx context.Context, st *store.Store, person string, want i
 
 func listWorkspaces(w io.Writer, refs []store.WorkspaceRef) {
 	for _, r := range refs {
-		_, _ = fmt.Fprintf(w, "  %s  %s\n", r.ID, r.Name)
+		// The name is text a user typed: %q quotes it and escapes control characters, so it cannot forge lines or move the
+		// cursor. Either id works for --workspace.
+		_, _ = fmt.Fprintf(w, "  %s  %s  %q  created %s  role %s  %d %s\n", r.ID, safeID(r.ClerkOrgID), r.Name,
+			r.CreatedAt.UTC().Format("2006-01-02"), r.Role, r.Members, pluralMembers(r.Members))
 	}
+}
+
+// safeID prints a Clerk id as it is when it is plain (letters, digits, underscore and hyphen, which is what Clerk makes),
+// so it can be pasted into --workspace or --user, and quoted with escapes otherwise.
+func safeID(id string) string {
+	if id == "" {
+		return `""`
+	}
+	for _, r := range id {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
+			return fmt.Sprintf("%q", id)
+		}
+	}
+	return id
+}
+
+func pluralMembers(n int) string {
+	if n == 1 {
+		return "member"
+	}
+	return "members"
 }
 
 func printEntitlements(w io.Writer, ws store.WorkspaceRef, e store.Entitlements) {
@@ -290,7 +334,7 @@ func printEntitlements(w io.Writer, ws store.WorkspaceRef, e store.Entitlements)
 	if e.Active {
 		active = "yes"
 	}
-	_, _ = fmt.Fprintf(w, "  workspace   %s (%s)\n", ws.Name, ws.ID)
+	_, _ = fmt.Fprintf(w, "  workspace   %q (%s)\n", ws.Name, ws.ID)
 	_, _ = fmt.Fprintf(w, "  plan        %s\n", e.Plan)
 	_, _ = fmt.Fprintf(w, "  status      %s\n", e.Status)
 	_, _ = fmt.Fprintf(w, "  period end  %s\n", end)

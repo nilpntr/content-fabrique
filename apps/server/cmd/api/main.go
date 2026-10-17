@@ -20,10 +20,15 @@ func main() {
 		Service: telemetry.ServiceAPI,
 		Addr:    func(c config.Config) string { return c.APIListenAddr },
 		// app.Run registers the Postgres readiness check. The health endpoints stay unauthenticated; everything under
-		// /v1 sits behind the Clerk middleware, except the Svix-signed webhook.
+		// /v1 sits behind the Clerk middleware and the paywall, except the Svix-signed webhook and the allowlist in
+		// internal/auth/entitlements.go. A new /v1 route is added to v1 (never to mux), which makes it paid-only.
 		Routes: func(cfg config.Config, mux *http.ServeMux, _ *httpapi.Health, logger *slog.Logger, st *store.Store) error {
-			_, err := auth.Mount(mux, auth.Deps{Config: cfg, Store: st, Logger: logger})
-			return err
+			v1, err := auth.Mount(mux, auth.Deps{Config: cfg, Store: st, Logger: logger})
+			if err != nil {
+				return err
+			}
+			v1.Handle("GET /v1/library/summary", auth.LibrarySummaryHandler())
+			return nil
 		},
 		// The CORS allowlist is the web app's origin, APP_BASE_URL, and nothing else.
 		Middleware: func(cfg config.Config) func(http.Handler) http.Handler { return httpapi.CORS(cfg.AppOrigin, nil) },

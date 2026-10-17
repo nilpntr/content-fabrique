@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { Entitlements, Me } from "@/lib/api";
-import { decidePlanGate, isPaywallExempt } from "@/lib/paywall";
+import { decidePlanGate, isLapsed, isPaywallExempt } from "@/lib/paywall";
 
 function meWith(entitlements: Partial<Entitlements> | undefined): Me {
   return {
@@ -18,6 +18,11 @@ describe("decidePlanGate", () => {
     expect(decidePlanGate("/", { isPending: false, isError: false, data: meWith(none) })).toBe("paywall");
     // An expired grant: the plan is still named, but it is not active.
     expect(decidePlanGate("/reports", { isPending: false, isError: false, data: meWith({ ...active, active: false }) })).toBe("paywall");
+  });
+
+  test("a plan the API could not read is an error, never the paywall or the app", () => {
+    const unknown = { plan: "none", status: "unknown", active: false, current_period_end: null } as const;
+    expect(decidePlanGate("/", { isPending: false, isError: false, data: meWith(unknown) })).toBe("error");
   });
 
   test("it fails closed: a missing or odd entitlements field is the paywall", () => {
@@ -51,5 +56,15 @@ describe("isPaywallExempt", () => {
     for (const path of ["/", "/reports", "/projects/new", "/settingsx", "/x/settings", "/not-a-page"]) {
       expect(isPaywallExempt(path)).toBe(false);
     }
+  });
+});
+
+describe("isLapsed", () => {
+  test("a plan that existed and ended is lapsed, a workspace that never had one is not", () => {
+    expect(isLapsed({ plan: "none", status: "none", active: false, current_period_end: null })).toBe(false);
+    expect(isLapsed(undefined)).toBe(false);
+    expect(isLapsed({ plan: "creator", status: "active", active: false, current_period_end: "2020-01-01T00:00:00Z" })).toBe(true);
+    expect(isLapsed({ plan: "pro", status: "past_due", active: false, current_period_end: null })).toBe(true);
+    expect(isLapsed({ plan: "none", status: "canceled", active: false, current_period_end: null })).toBe(true);
   });
 });

@@ -3,6 +3,8 @@ package auth
 import (
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/clerk/clerk-sdk-go/v2/jwks"
 	"github.com/nilpntr/content-fabrique/internal/config"
@@ -20,18 +22,36 @@ type Deps struct {
 	JWKSClient *jwks.Client
 }
 
+// V1 is the router of the paid-only API. Every route added with Handle sits behind the authentication middleware and
+// RequireActivePlan, because Mount put them in front of this router with a catch-all on "/v1/": a request gets 401 without
+// a valid token and 402 plan_required without an active plan, whether or not a route matches it, and only then reaches
+// the route (or 404, or 405). Add routes here, never on the shared mux.
+type V1 struct{ mux *http.ServeMux }
+
+// Handle registers a paid-only route. The pattern is ServeMux's (an optional method, then a path) and the path must start
+// with /v1/; anything else is a programming error and panics at start-up.
+func (v *V1) Handle(pattern string, h http.Handler) {
+	path := pattern
+	if _, p, ok := strings.Cut(pattern, " "); ok {
+		path = strings.TrimSpace(p)
+	}
+	if !strings.HasPrefix(path, "/v1/") {
+		panic("auth: V1.Handle pattern " + strconv.Quote(pattern) + " is not under /v1/")
+	}
+	v.mux.Handle(pattern, h)
+}
+
 // Mount registers the auth routes on mux:
 //
 //	GET  /v1/me                the signed-in user, workspace and entitlements (authenticated; open without a plan)
 //	GET  /v1/workspace/plan    the plan and what it includes (authenticated; open without a plan)
-//	GET  /v1/library/summary   counts for the library, the first paid-only endpoint (authenticated, active plan)
 //	POST /v1/webhooks/clerk    Clerk's Svix-signed webhook (signed, not behind the middleware)
+//	ANY  /v1/                  everything else: the authentication middleware, RequireActivePlan, then the returned V1
 //
-// and returns the guard that every other /v1 route (except webhooks) goes behind: the authentication middleware followed
-// by RequireActivePlan, so a route is paid-only unless it is on the allowlist documented in entitlements.go and mounted
-// here with authentication alone. Without CLERK_SECRET_KEY the guard answers 503 to everything it guards, and the
-// webhook without CLERK_WEBHOOK_SECRET answers 503, so a missing secret is never an open door.
-func Mount(mux *http.ServeMux, d Deps) (func(http.Handler) http.Handler, error) {
+// and returns the V1 router that every other /v1 route is added to (see entitlements.go for the allowlist). Without
+// CLERK_SECRET_KEY the catch-all answers 503 to everything it guards, and the webhook without CLERK_WEBHOOK_SECRET
+// answers 503, so a missing secret is never an open door.
+func Mount(mux *http.ServeMux, d Deps) (*V1, error) {
 	logger := d.Logger
 	if logger == nil {
 		logger = slog.Default()
@@ -70,9 +90,8 @@ func Mount(mux *http.ServeMux, d Deps) (func(http.Handler) http.Handler, error) 
 	mux.Handle("GET /v1/workspace/plan", mw(WorkspacePlanHandler(d.Store, logger)))
 	mux.Handle("POST /v1/webhooks/clerk", wh)
 
-	// Everything else: authenticated, then an active plan.
-	paid := RequireActivePlan(d.Store, logger)
-	guard := func(next http.Handler) http.Handler { return mw(paid(next)) }
-	mux.Handle("GET /v1/library/summary", guard(LibrarySummaryHandler()))
-	return guard, nil
+	// Everything else, also a path no route has: authenticated, then an active plan, then the V1 router.
+	v1 := &V1{mux: http.NewServeMux()}
+	mux.Handle("/v1/", mw(RequireActivePlan(d.Store, logger)(v1.mux)))
+	return v1, nil
 }

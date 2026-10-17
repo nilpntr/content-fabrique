@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/plans"
 	"github.com/nilpntr/content-fabrique/internal/store"
@@ -117,7 +118,7 @@ func TestPlanGrantRevokeShow(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("grant = %d\n%s%s", code, out, errOut)
 	}
-	for _, want := range []string{"Fit Studio (wks_", "plan        creator", "status      active", "period end  none (does not end)", "active      yes"} {
+	for _, want := range []string{"\"Fit Studio\" (wks_", "plan        creator", "status      active", "period end  none (does not end)", "active      yes"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("grant output lacks %q:\n%s", want, out)
 		}
@@ -140,7 +141,7 @@ func TestPlanGrantRevokeShow(t *testing.T) {
 
 	// --until: a date runs through the end of that day, UTC.
 	code, out, errOut = r.run("grant", "--user", email, "--plan", "pro", "--until", "2999-12-31", "--yes")
-	if code != 0 || !strings.Contains(out, "plan        pro") || !strings.Contains(out, "period end  2999-12-31T23:59:59Z") || !strings.Contains(out, "active      yes") {
+	if code != 0 || !strings.Contains(out, "plan        pro") || !strings.Contains(out, "period end  3000-01-01T00:00:00Z") || !strings.Contains(out, "active      yes") {
 		t.Fatalf("grant --until = %d\n%s%s", code, out, errOut)
 	}
 	// A date in the past is accepted and says so: the plan is not active (that is how expiry is tried out).
@@ -176,27 +177,33 @@ func TestPlanNeedsOneWorkspace(t *testing.T) {
 		t.Fatalf("ambiguous grant = %d\n%s%s", code, out, errOut)
 	}
 	for _, name := range []string{"Alpha", "Beta"} {
-		if !strings.Contains(errOut, name) || !strings.Contains(errOut, r.workspace(name).ID.String()) {
+		if !strings.Contains(errOut, `"`+name+`"`) || !strings.Contains(errOut, r.workspace(name).ID.String()) || !strings.Contains(errOut, "org_"+name) {
 			t.Errorf("the candidates do not list %s with its id:\n%s", name, errOut)
 		}
 		if r.active(name) {
 			t.Errorf("%s was granted although the choice was ambiguous", name)
 		}
 	}
-	if strings.Contains(errOut, "org_") || strings.Contains(errOut, "user_") || strings.Contains(errOut, "example.com") {
-		t.Errorf("the candidate list shows more than names and ids:\n%s", errOut)
+	if strings.Contains(errOut, "user_") || strings.Contains(errOut, "example.com") {
+		t.Errorf("the candidate list shows more than the workspaces:\n%s", errOut)
+	}
+
+	for _, want := range []string{"created ", "role owner", "members"} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("the candidates lack %q:\n%s", want, errOut)
+		}
 	}
 
 	// By TypeID.
 	code, out, errOut = r.run("grant", "--user", both, "--plan", "pro", "--workspace", r.workspace("Alpha").ID.String(), "--yes")
-	if code != 0 || !strings.Contains(out, "Alpha (") {
+	if code != 0 || !strings.Contains(out, "\"Alpha\" (") {
 		t.Fatalf("grant with --workspace = %d\n%s%s", code, out, errOut)
 	}
 	if !r.active("Alpha") || r.active("Beta") {
 		t.Fatalf("Alpha = %v, Beta = %v; only Alpha was named", r.active("Alpha"), r.active("Beta"))
 	}
 	// By Clerk organization id.
-	if code, out, errOut = r.run("grant", "--user", both, "--plan", "studio", "--workspace", "org_Beta", "--yes"); code != 0 || !strings.Contains(out, "Beta (") {
+	if code, out, errOut = r.run("grant", "--user", both, "--plan", "studio", "--workspace", "org_Beta", "--yes"); code != 0 || !strings.Contains(out, "\"Beta\" (") {
 		t.Fatalf("grant with an org id = %d\n%s%s", code, out, errOut)
 	}
 	// Revoke is as strict as grant.
@@ -223,7 +230,7 @@ func TestPlanNeedsOneWorkspace(t *testing.T) {
 	}
 
 	// A person with exactly one workspace needs no --workspace; the one next to them is not touched (tenancy).
-	if code, out, errOut = r.run("grant", "--user", "user_beta", "--plan", "trial", "--yes"); code != 0 || !strings.Contains(out, "Beta (") {
+	if code, out, errOut = r.run("grant", "--user", "user_beta", "--plan", "trial", "--yes"); code != 0 || !strings.Contains(out, "\"Beta\" (") {
 		t.Fatalf("grant for the single-workspace person = %d\n%s%s", code, out, errOut)
 	}
 }
@@ -383,6 +390,118 @@ func TestPlanPrintsNoSecrets(t *testing.T) {
 		// The dsn's password is the container's, "postgres": the connection error of a bad run would quote it.
 		if strings.Contains(all, "@127.0.0.1") || strings.Contains(all, "@localhost") {
 			t.Errorf("%v printed a URL host with credentials:\n%s", args, all)
+		}
+	}
+}
+
+// A workspace name is text a user typed. In the candidate list it is quoted, so a control character or a fake line in it
+// cannot move the cursor, clear the screen or pass for another candidate.
+func TestPlanCandidateNamesAreQuoted(t *testing.T) {
+	r := newPlanRig(t)
+	evil := "Evil\x1b[2J\r\nwks_01fakefakefakefakefakefakef  \"Trusted\""
+	both := r.person("user_evil", evil, "Plain")
+	code, _, errOut := r.run("grant", "--user", both, "--plan", "pro", "--yes")
+	if code != 2 {
+		t.Fatalf("exit %d\n%s", code, errOut)
+	}
+	if strings.ContainsAny(errOut, "\x1b\r") {
+		t.Errorf("a control character reached the terminal: %q", errOut)
+	}
+	// One line per candidate: the header line plus two.
+	if lines := strings.Split(strings.TrimSpace(errOut), "\n"); len(lines) != 3 {
+		t.Errorf("%d lines, want 3 (a name must not add lines):\n%q", len(lines), errOut)
+	}
+	if !strings.Contains(errOut, `\x1b[2J`) {
+		t.Errorf("the name is not shown quoted:\n%q", errOut)
+	}
+	// The same for the result of a grant.
+	code, out, errOut := r.run("grant", "--user", both, "--plan", "pro", "--workspace", r.workspace(evil).ID.String(), "--yes")
+	if code != 0 || strings.ContainsAny(out, "\x1b\r") || len(strings.Split(strings.TrimSpace(out), "\n")) != 6 {
+		t.Fatalf("grant for the evil name = %d\n%q%s", code, out, errOut)
+	}
+}
+
+// An e-mail address is not unique to one account: nothing is granted to "whoever matched first".
+func TestPlanSharedEmailNeedsAClerkUserID(t *testing.T) {
+	r := newPlanRig(t)
+	ctx := context.Background()
+	for _, id := range []string{"user_twin_a", "user_twin_b"} {
+		u, err := r.st.UpsertUserByClerkID(ctx, id, "twin@example.com")
+		if err != nil {
+			t.Fatal(err)
+		}
+		w, err := r.st.CreateWorkspace(ctx, store.NewWorkspace{ClerkOrgID: "org_" + id, Name: id + " studio"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.st.AddMember(ctx, w.ID, u.ID, store.RoleOwner); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, out, errOut := r.run("grant", "--user", "twin@example.com", "--plan", "pro", "--yes")
+	if code != 2 || !strings.Contains(errOut, "belongs to 2 users") || !strings.Contains(errOut, "user_twin_a") || !strings.Contains(errOut, "user_twin_b") {
+		t.Fatalf("shared e-mail = %d\n%s%s", code, out, errOut)
+	}
+	for _, org := range []string{"user_twin_a", "user_twin_b"} {
+		if e, _ := r.st.GetEntitlements(ctx, r.workspace(org).ID); e.Active {
+			t.Fatal("a workspace was granted although the e-mail was ambiguous")
+		}
+	}
+	code, out, errOut = r.run("grant", "--user", "user_twin_b", "--plan", "pro", "--yes")
+	if code != 0 || !strings.Contains(out, "user_twin_b studio") {
+		t.Fatalf("grant by Clerk user id = %d\n%s%s", code, out, errOut)
+	}
+}
+
+// A plan the merchant of record manages is not replaced by hand without --force.
+func TestPlanRefusesToOverwriteAMerchantPlan(t *testing.T) {
+	r := newPlanRig(t)
+	ctx := context.Background()
+	email := r.person("user_paying", "Paying")
+	ws := r.workspace("Paying")
+	if _, err := r.st.GrantPlan(ctx, store.GrantInput{WorkspaceID: ws.ID, Plan: plans.Pro, Source: store.SourceMerchant}); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"grant", "--user", email, "--plan", "trial", "--yes"},
+		{"revoke", "--user", email, "--yes"},
+	} {
+		code, out, errOut := r.run(args...)
+		if code != 2 || !strings.Contains(errOut, "merchant of record") || !strings.Contains(errOut, "--force") {
+			t.Fatalf("%v = %d\n%s%s", args, code, out, errOut)
+		}
+		if e, _ := r.st.GetEntitlements(ctx, ws.ID); !e.Active || e.Plan != plans.Pro || e.Source != store.SourceMerchant {
+			t.Fatalf("%v changed the plan: %+v", args, e)
+		}
+	}
+	// show is never blocked, and --force replaces the record, which is manual afterwards.
+	if code, out, _ := r.run("show", "--user", email); code != 0 || !strings.Contains(out, "plan        pro") {
+		t.Fatalf("show = %d\n%s", code, out)
+	}
+	code, out, errOut := r.run("revoke", "--user", email, "--yes", "--force")
+	if code != 0 || !strings.Contains(out, "plan        none") {
+		t.Fatalf("forced revoke = %d\n%s%s", code, out, errOut)
+	}
+	if e, _ := r.st.GetEntitlements(ctx, ws.ID); e.Source != store.SourceManual {
+		t.Fatalf("source after a forced revoke = %q", e.Source)
+	}
+}
+
+// --until DATE keeps the plan through that whole day: the stored end is the start of the next day, UTC.
+func TestPlanUntilDateIsTheStartOfTheNextDay(t *testing.T) {
+	got, err := parseUntil("2026-12-31")
+	if err != nil || !got.Equal(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("parseUntil(2026-12-31) = %v, %v", got, err)
+	}
+	if got, err = parseUntil("2026-02-28"); err != nil || !got.Equal(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("parseUntil(2026-02-28) = %v, %v", got, err)
+	}
+	if got, err = parseUntil("2026-12-31T18:00:00+02:00"); err != nil || !got.Equal(time.Date(2026, 12, 31, 16, 0, 0, 0, time.UTC)) {
+		t.Fatalf("parseUntil(RFC 3339) = %v, %v", got, err)
+	}
+	for _, bad := range []string{"", "tomorrow", "2026-13-01", "31-12-2026"} {
+		if _, err := parseUntil(bad); err == nil {
+			t.Errorf("parseUntil(%q) succeeded", bad)
 		}
 	}
 }

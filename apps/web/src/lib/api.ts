@@ -82,8 +82,8 @@ export type PlanName = "none" | "trial" | "studio" | "creator" | "pro";
 /** The workspace's plan (P0-16). Only `active` decides what the app shows; the rest is for display. */
 export interface Entitlements {
   plan: PlanName;
-  /** `none` when the workspace never had a plan. */
-  status: "none" | "active" | "past_due" | "canceled";
+  /** `none` when the workspace never had a plan; `unknown` when the API could not read it (never active). */
+  status: "none" | "active" | "past_due" | "canceled" | "unknown";
   active: boolean;
   /** ISO time when the paid period ends, or null when it does not. */
   current_period_end: string | null;

@@ -1,6 +1,6 @@
-import { QueryClient } from "@tanstack/react-query";
 import { createRouter, type RouterHistory } from "@tanstack/react-router";
 import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query";
+import { createQueryClient } from "./lib/query-client";
 import { MAIN_SCROLL_ID } from "./lib/scroll";
 import { routeTree } from "./routeTree.gen";
 
@@ -9,8 +9,7 @@ import { routeTree } from "./routeTree.gen";
  * Tests pass a memory history.
  */
 export function getRouter(history?: RouterHistory) {
-  // Data fetched on the server is sent to the browser; a staleTime keeps it from being refetched at once.
-  const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000 } } });
+  const queryClient = createQueryClient();
   const router = createRouter({
     routeTree,
     history,

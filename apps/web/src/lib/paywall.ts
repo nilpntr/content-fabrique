@@ -22,6 +22,15 @@ export function isPaywallExempt(pathname: string): boolean {
   return PAYWALL_EXEMPT_PATHS.some((exempt) => path === exempt || path.startsWith(`${exempt}/`));
 }
 
+/**
+ * Whether the workspace had a plan that has lapsed (expired, canceled, past due, or revoked by hand), as opposed to never
+ * having had one. It only changes the words of the paywall.
+ */
+export function isLapsed(entitlements: Me["entitlements"] | undefined): boolean {
+  if (!entitlements) return false;
+  return entitlements.status === "canceled" || entitlements.status === "past_due" || entitlements.plan !== "none";
+}
+
 /** What to render for a page. `loading` is "ask again in a moment": the plan is not known yet. */
 export type PlanGate = "app" | "paywall" | "loading" | "error";
 
@@ -30,6 +39,8 @@ export function decidePlanGate(pathname: string, me: { isPending: boolean; isErr
   if (me.isPending) return "loading";
   // An unreachable API says so (the paywall would wrongly tell the user to buy something), and the app stays hidden.
   if (me.isError || !me.data) return "error";
+  // The API answered, but could not read the plan: that is not "no plan", so it is not the paywall either.
+  if (me.data.entitlements?.status === "unknown") return "error";
   // Fail closed in the browser too: anything but an explicit `active: true` is the paywall.
   return me.data.entitlements?.active === true ? "app" : "paywall";
 }
