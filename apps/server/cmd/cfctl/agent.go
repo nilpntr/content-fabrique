@@ -18,27 +18,33 @@ import (
 
 	"github.com/google/uuid"
 
-	configfiles "github.com/nilpntr/content-fabrique/config"
+	"github.com/nilpntr/content-fabrique/internal/agents/agentset"
+	"github.com/nilpntr/content-fabrique/internal/agents/editor"
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/doctor"
 	"github.com/nilpntr/content-fabrique/internal/envfile"
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/renderjobs"
+	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
 const agentUsage = `Usage:
-  cfctl agent run  --agent <name> --workspace <wks_...> --input <text or JSON> [--profile <name>] [budget flags] [flags]
+  cfctl agent run  --agent <name> --workspace <wks_...> [--project <prj_...>] [--input <text or JSON>] [--profile <name>] [budget flags] [flags]
   cfctl agent show <run id> --workspace <wks_...> [flags]
 
 DEVELOPMENT ONLY (refused on staging and production). run starts one agent run and works it in this process, without the
 job queue: it spends real money when LLM_MODE is live or record, and nothing when it is replay. show prints a run: its
 status, totals, every event and the usage_ledger rows, which is how a run's cost is measured.
 
-  --agent      the agent to run (echo)
+  --agent      the agent to run (echo, editor)
   --workspace  the workspace (wks_...) that owns the run
-  --input      the user's message; or a JSON object, which is the run's input as it is
+  --project    the project (prj_...) of an editor run: it edits that project's timeline. Needs R2_* and the media sandbox settings
+               (MEDIA_SANDBOX_PROVIDER, MEDIA_TOOLS_IMAGE, MEDIA_TEMP_DIR), because the editor looks at frames of the footage
+  --input      the user's message; or a JSON object, which is the run's input as it is. For the editor it is the extra
+               instructions of the run and may be left out
   --profile    a routing profile for this run, instead of ROUTING_PROFILE (dev-cheap, dev-mid, v1-start)
   --budget-usd, --max-tool-calls, --max-tokens, --wall-clock
                override the agent's budgets (dollars, count, tokens, duration such as 5m)
@@ -157,6 +163,7 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 	agentName := flags.String("agent", "", "agent")
 	workspaceArg := flags.String("workspace", "", "workspace id")
 	input := flags.String("input", "", "message or JSON input")
+	projectArg := flags.String("project", "", "project id")
 	profile := flags.String("profile", "", "routing profile")
 	budgetUSD := flags.Float64("budget-usd", 0, "dollar budget")
 	maxCalls := flags.Int("max-tool-calls", 0, "tool-call budget")
@@ -175,9 +182,18 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 		_, _ = fmt.Fprintf(stderr, "cfctl agent run: unexpected argument %q\n", flags.Arg(0))
 		return 2
 	}
-	if *agentName == "" || strings.TrimSpace(*input) == "" {
-		_, _ = fmt.Fprintln(stderr, "cfctl agent run: --agent and --input are required")
+	isEditor := *agentName == editor.Name
+	if *agentName == "" || (strings.TrimSpace(*input) == "" && !isEditor) {
+		_, _ = fmt.Fprintln(stderr, "cfctl agent run: --agent and --input are required (the editor needs no --input)")
 		return 2
+	}
+	var projectID ids.ProjectID
+	if isEditor || *projectArg != "" {
+		var err error
+		if projectID, err = ids.ParseProjectID(strings.TrimSpace(*projectArg)); err != nil {
+			_, _ = fmt.Fprintln(stderr, "cfctl agent run: --project <prj_...> is required for the editor")
+			return 2
+		}
 	}
 	ws, ok := parseWorkspaceFlag("agent run", *workspaceArg, stderr)
 	if !ok {
@@ -185,7 +201,15 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 	}
 	runInput := json.RawMessage(*input)
 	if !json.Valid(runInput) || !strings.HasPrefix(strings.TrimSpace(*input), "{") {
-		runInput, _ = json.Marshal(runtime.Input{Message: *input})
+		if isEditor {
+			var err error
+			if runInput, err = editor.NewInput(*input); err != nil {
+				_, _ = fmt.Fprintf(stderr, "cfctl agent run: %v\n", err)
+				return 2
+			}
+		} else {
+			runInput, _ = json.Marshal(runtime.Input{Message: *input})
+		}
 	}
 
 	env, code := loadAgentEnv("agent run", *envFileArg, stdout, stderr, lookup)
@@ -210,22 +234,6 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 		return 2
 	}
 
-	router, err := llm.NewRouter(configfiles.Routing(), cmp.Or(settings.RoutingProfile, *profile, "dev-cheap"))
-	if err != nil {
-		_, _ = fmt.Fprintf(errOut, "cfctl agent run: routing: %v\n", err)
-		return 2
-	}
-	prices, err := llm.LoadPriceTable(configfiles.Pricing(), llm.PriceFile)
-	if err != nil {
-		_, _ = fmt.Fprintf(errOut, "cfctl agent run: %v\n", err)
-		return 2
-	}
-	agents, err := runtime.NewAgents(runtime.DefaultAgents()...)
-	if err != nil {
-		_, _ = fmt.Fprintf(errOut, "cfctl agent run: %v\n", err)
-		return 1
-	}
-
 	ctx, stop := signalContext()
 	defer stop()
 	st, code := env.openDB(ctx, "agent run", deps)
@@ -237,20 +245,50 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 		_, _ = fmt.Fprintf(errOut, "cfctl agent run: workspace %s: %v\n", ws, err)
 		return 1
 	}
+	if !projectID.IsZero() {
+		if _, err := st.GetProject(ctx, ws, projectID); err != nil {
+			_, _ = fmt.Fprintf(errOut, "cfctl agent run: project %s in workspace %s: %v\n", projectID, ws, err)
+			return 1
+		}
+	}
 
-	factory, err := llm.NewFactory(llm.FactoryOptions{Settings: settings, Getenv: env.get, Prices: prices, Ledger: st, HTTPClient: deps.httpClient})
+	opts := agentset.Options{
+		Store: st, Getenv: env.get, DefaultProfile: *profile, Inline: true, HTTPClient: deps.httpClient,
+	}
+	storageCfg := storage.Config{
+		Endpoint: env.get("R2_ENDPOINT"), Bucket: env.get("R2_BUCKET"), AccessKeyID: env.get("R2_ACCESS_KEY_ID"),
+		SecretAccessKey: env.get("R2_SECRET_ACCESS_KEY"), Jurisdiction: strings.ToLower(env.get("R2_JURISDICTION")),
+	}
+	if storageCfg.Configured() {
+		objects, err := storage.New(storageCfg)
+		if err != nil {
+			_, _ = fmt.Fprintf(errOut, "cfctl agent run: object storage: %v\n", err)
+			return 1
+		}
+		opts.Objects = objects
+		// render_preview queues a render job: a worker with the render pipeline must be running to work it.
+		if opts.Preview, err = renderjobs.NewPreviewRendererFor(st, objects, nil); err != nil {
+			_, _ = fmt.Fprintf(errOut, "cfctl agent run: preview renderer: %v\n", err)
+			return 1
+		}
+		provider := cmp.Or(env.get("MEDIA_SANDBOX_PROVIDER"), config.SandboxDocker)
+		tempDir := cmp.Or(env.get("MEDIA_TEMP_DIR"), filepath.Join(os.TempDir(), "cf-media"))
+		if opts.Frames, opts.TempDir, err = agentset.NewFrameRunner(provider, env.get("MEDIA_TOOLS_IMAGE"), tempDir, env.get("CF_ENV")); err != nil {
+			_, _ = fmt.Fprintf(errOut, "cfctl agent run: the sandbox for the editor's frames: %v\n", err)
+			return 2
+		}
+	} else if isEditor {
+		_, _ = fmt.Fprintf(errOut, "cfctl agent run: the editor needs object storage: set R2_ENDPOINT, R2_BUCKET, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY in %s\n", displayPath(env.root, env.path))
+		return 2
+	}
+	rt, err := agentset.Open(opts)
 	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "cfctl agent run: %v\n", err)
 		return 2
 	}
-	svc := &runtime.Service{Store: st, Router: router, Factory: factory, Agents: agents, Inline: true}
-	runner, err := runtime.NewRunner(runtime.Deps{Store: st, Factory: factory, Agents: agents})
-	if err != nil {
-		_, _ = fmt.Fprintf(errOut, "cfctl agent run: %v\n", err)
-		return 1
-	}
+	svc, runner := rt.Service, rt.Runner
 	run, err := svc.Create(ctx, st, runtime.StartParams{
-		Agent: *agentName, WorkspaceID: ws, Input: runInput, Profile: *profile,
+		Agent: *agentName, WorkspaceID: ws, ProjectID: projectID.UUID, Input: runInput, Profile: *profile,
 		Budgets: runtime.Budgets{Micros: int64(*budgetUSD * 1e6), Tokens: *maxTokens, ToolCalls: *maxCalls, WallClock: *wall},
 	})
 	if err != nil {
@@ -300,6 +338,16 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 		return 1
 	}
 	return 0
+}
+
+// cacheHitText says how much of the prompts came from the prompt cache: read tokens over every prompt token (input, cache write
+// and cache read). It is the number to watch when the system prompt or the tool list changes.
+func cacheHitText(input, write, read int64) string {
+	prompt := input + write + read
+	if prompt <= 0 {
+		return "no prompt tokens yet"
+	}
+	return fmt.Sprintf("%.0f%% of %d prompt tokens read from the cache (%d written)", 100*float64(read)/float64(prompt), prompt, write)
 }
 
 func lastQuestion(ctx context.Context, st *store.Store, ws ids.WorkspaceID, run uuid.UUID) string {
@@ -395,6 +443,7 @@ func printRun(ctx context.Context, out, errOut io.Writer, st *store.Store, ws id
 		usd(r.CostMicros), usd(r.BudgetMicros), r.ToolCalls, r.BudgetToolCalls,
 		(time.Duration(r.ActiveMs) * time.Millisecond).Round(time.Millisecond), (time.Duration(r.BudgetWallClockMs) * time.Millisecond).Round(time.Second))
 	_, _ = fmt.Fprintf(out, "  tokens: input %d, cache write %d, cache read %d, output %d (budget %d)\n", r.InputTokens, r.CacheWriteTokens, r.CacheReadTokens, r.OutputTokens, r.BudgetTokens)
+	_, _ = fmt.Fprintf(out, "  prompt cache: %s\n", cacheHitText(r.InputTokens, r.CacheWriteTokens, r.CacheReadTokens))
 	if len(r.Output) > 0 {
 		_, _ = fmt.Fprintf(out, "  output %s\n", clip(string(r.Output), 600))
 	}
@@ -476,7 +525,14 @@ func describeEvent(e store.AgentEvent) string {
 	case store.EventAssistantMessage:
 		var cost int64
 		_ = json.Unmarshal(m["cost_micros"], &cost)
-		return fmt.Sprintf("%s  stop=%s cost=%s", clip(texts("content"), 100), str("stop_reason"), usd(cost))
+		var u struct {
+			Input      int64 `json:"input_tokens"`
+			CacheWrite int64 `json:"cache_write_tokens"`
+			CacheRead  int64 `json:"cache_read_tokens"`
+			Output     int64 `json:"output_tokens"`
+		}
+		_ = json.Unmarshal(m["usage"], &u)
+		return fmt.Sprintf("%s  stop=%s cost=%s in=%d cache w/r=%d/%d out=%d", clip(texts("content"), 100), str("stop_reason"), usd(cost), u.Input, u.CacheWrite, u.CacheRead, u.Output)
 	case store.EventToolCall:
 		return str("name") + " " + clip(string(m["input"]), 100)
 	case store.EventToolResult:

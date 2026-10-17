@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/store/storetest"
 )
@@ -70,7 +71,7 @@ func TestAgentRunAndShowInReplayMode(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}
-	for _, want := range []string{"LLM_MODE=replay", "profile  dev-cheap  model claude-haiku-5-5  effort medium", "succeeded", "usage_ledger: 0 calls", "events (", "note", "finish", "Noted: hello cassette", "status"} {
+	for _, want := range []string{"LLM_MODE=replay", "profile  dev-cheap  model claude-haiku-5-5  effort medium", "succeeded", "usage_ledger: 0 calls", "prompt cache: ", "32% of 932 prompt tokens read from the cache", "cache w/r=0/", "events (", "note", "finish", "Noted: hello cassette", "status"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -101,5 +102,45 @@ func TestAgentRunAndShowInReplayMode(t *testing.T) {
 	// A message no cassette holds fails the run with the miss, and the exit code says so.
 	if code, out, _ := runAgent(t, deps, "run", "--agent", "echo", "--workspace", w.ID.String(), "--input", "not recorded", "--yes", "--env-file", env); code != 1 || !strings.Contains(out, "failed (replay_miss)") {
 		t.Errorf("replay miss = %d\n%s", code, out)
+	}
+}
+
+func TestCacheHitText(t *testing.T) {
+	for _, c := range []struct {
+		in, write, read int64
+		want            string
+	}{
+		{0, 0, 0, "no prompt tokens yet"},
+		{100, 0, 0, "0% of 100 prompt tokens read from the cache (0 written)"},
+		{100, 300, 600, "60% of 1000 prompt tokens read from the cache (300 written)"},
+	} {
+		if got := cacheHitText(c.in, c.write, c.read); got != c.want {
+			t.Errorf("cacheHitText(%d, %d, %d) = %q, want %q", c.in, c.write, c.read, got, c.want)
+		}
+	}
+}
+
+// The editor needs a project and object storage; the command says so before it touches a database.
+func TestAgentRunEditorGuards(t *testing.T) {
+	srv := storetest.Start(t)
+	dsn := srv.SuperDSN(srv.NewDatabase(t, ""))
+	deps := agentDeps{openStore: func(ctx context.Context, dsn string) (*store.Store, error) {
+		return store.Open(ctx, dsn, store.Options{AppName: "agent-test", MaxConns: 2})
+	}}
+	env := pingEnv(t, "CF_ENV=local\nROUTING_PROFILE=dev-cheap\nLLM_MODE=replay\nDATABASE_URL="+dsn+"\n")
+	ws := ids.Encode(ids.PrefixWorkspace, uuid.Must(uuid.NewV7()))
+	prj := ids.Encode(ids.PrefixProject, uuid.Must(uuid.NewV7()))
+	if code, _, errOut := runAgent(t, deps, "run", "--agent", "editor", "--workspace", ws, "--yes", "--env-file", env); code != 2 || !strings.Contains(errOut, "--project <prj_...> is required") {
+		t.Errorf("no project = %d %s", code, errOut)
+	}
+	if code, _, errOut := runAgent(t, deps, "run", "--agent", "editor", "--workspace", ws, "--project", "nope", "--yes", "--env-file", env); code != 2 || !strings.Contains(errOut, "--project") {
+		t.Errorf("bad project = %d %s", code, errOut)
+	}
+	if code, _, errOut := runAgent(t, deps, "run", "--agent", "editor", "--workspace", ws, "--project", prj, "--input", strings.Repeat("x", 2001), "--yes", "--env-file", env); code != 2 || !strings.Contains(errOut, "instructions") {
+		t.Errorf("long instructions = %d %s", code, errOut)
+	}
+	// The echo agent still wants its message.
+	if code, _, errOut := runAgent(t, deps, "run", "--agent", "echo", "--workspace", ws, "--yes", "--env-file", env); code != 2 || !strings.Contains(errOut, "--input are required") {
+		t.Errorf("echo without input = %d %s", code, errOut)
 	}
 }

@@ -361,6 +361,112 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/projects/{id}/edit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The project's TypeID. */
+                id: components["parameters"]["ProjectIdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start an editor run on the project
+         * @description Starts the editor agent on the project: it looks at the project's footage, builds the timeline with edit ops (each one a
+         *     new timeline version, authored by the run) and ends with a message for the creator. The call only creates the run and
+         *     returns it (`202`, status `queued`); follow it with `GET /v1/runs/{id}`. Only owners and editors may start a run.
+         *     A project has at most one unfinished editor run (`409 run_in_progress`), and needs at least one ready video clip
+         *     (`422 assets_not_usable`; an audio file is not a clip to cut).
+         *     `instructions` is the creator's extra instruction for this run (text, at most 2,000 characters; the model treats it as data
+         *     that steers the content of the video, nothing else). `profile` picks the model profile of the run; the default is the
+         *     server's. `budget_usd` is the run's spend cap in dollars: the default is $5, and a larger value is cut to the server's maximum
+         *     (also $5 unless the operator raised it). The cap is enforced before every model call.
+         */
+        post: operations["startEdit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The run's TypeID. */
+                id: components["parameters"]["RunIdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * A run, with its cost and a summary of its events
+         * @description The run's status, what it cost (at list price) and used (tokens, with the prompt cache's share), its budgets, and its
+         *     events as one-line summaries, oldest first, after `after_seq` (default: from the start), at most `limit`. Poll with
+         *     `after_seq` set to the last `seq` you have. A run of another workspace is `404 not_found`. Any member may read.
+         *     The text of a summary was written by a model or a tool, and may quote the creator's own text: show it as text.
+         */
+        get: operations["getRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/runs/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The run's TypeID. */
+                id: components["parameters"]["RunIdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a run
+         * @description A queued run, or one that waits for an answer, is cancelled at once; a running one stops between two steps, so its status
+         *     may still say `running` in the answer. Cancelling a run that has finished changes nothing. Only owners and editors may cancel.
+         */
+        post: operations["cancelRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/runs/{id}/reply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The run's TypeID. */
+                id: components["parameters"]["RunIdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Answer a question of a run that waits for input
+         * @description When a run asks the creator a question its status is `waiting_input` and `question` holds it. The reply is the answer
+         *     (text, at most 16 KB; the model treats it as data) and puts the run back in the queue. A run that is not waiting is
+         *     `409 run_not_waiting`. Only owners and editors may reply.
+         */
+        post: operations["replyToRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/projects/{id}/renders": {
         parameters: {
             query?: never;
@@ -430,7 +536,7 @@ export interface components {
          *     code as a generic failure of its HTTP status.
          * @enum {string}
          */
-        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured" | "assets_not_usable" | "version_conflict" | "invalid_ops" | "no_change" | "timeline_invalid" | "too_many_renders";
+        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured" | "assets_not_usable" | "version_conflict" | "invalid_ops" | "no_change" | "timeline_invalid" | "too_many_renders" | "run_in_progress" | "run_not_waiting" | "model_not_configured";
         ErrorDetail: {
             code: components["schemas"]["ErrorCode"];
             /** @description For people. It may change; do not branch on it. */
@@ -755,7 +861,10 @@ export interface components {
             /** @description The version this one was made from. Null for version 1. */
             parent_version: number | null;
             author_kind: components["schemas"]["AuthorKind"];
-            /** @description The user's TypeID, or the editor run's id. */
+            /**
+             * @description For `user`, the TypeID of the user (`usr_...`). For `agent`, the TypeID of the editor run (`run_...`) that made the
+             *     version; `GET /v1/runs/{id}` shows the run. (The key that makes a repeated tool call idempotent is stored apart from it.)
+             */
             author_id: string;
             /** @description One line per change, for the version list and the run feed. */
             summary: string[];
@@ -869,6 +978,104 @@ export interface components {
         OpsRejected: {
             error: components["schemas"]["ErrorDetail"];
             issues: components["schemas"]["OpIssue"][];
+        };
+        /**
+         * @description A model routing profile (config/routing): `dev-cheap` (Haiku, cents per run), `dev-mid` or `v1-start` (the editor on Opus).
+         * @enum {string}
+         */
+        RunProfile: "dev-cheap" | "dev-mid" | "v1-start";
+        StartEditRequest: {
+            /** @description Extra instructions for this run, in the creator's words. Data for the model, not commands. */
+            instructions?: string;
+            profile?: components["schemas"]["RunProfile"];
+            /** @description The run's spend cap in dollars. Default 5; a larger value is cut to the server's maximum. */
+            budget_usd?: number;
+        };
+        ReplyRequest: {
+            /** @description The answer to the run's question. */
+            text: string;
+        };
+        /** @enum {string} */
+        RunStatus: "queued" | "running" | "waiting_input" | "succeeded" | "failed" | "cancelled";
+        /** @enum {string} */
+        RunEventType: "status" | "assistant_message" | "tool_call" | "tool_result" | "error" | "artifact";
+        /** @description One step of a run, as a line of text. */
+        RunEvent: {
+            /** @description The event's place in the run, from 1. */
+            seq: number;
+            type: components["schemas"]["RunEventType"];
+            /** @description One line, at most 400 bytes. Text a model or a tool wrote; show it as text. */
+            text: string;
+            /** @description The tool of a `tool_call` or `tool_result`. */
+            tool?: string | null;
+            /** @description A failed tool call, or an `error` event. */
+            is_error?: boolean;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /**
+         * @description What the run's model calls used. `cache_hit_rate` is `cache_read` over all prompt tokens (`input` + `cache_write` +
+         *     `cache_read`), `null` before the first call.
+         */
+        RunTokens: {
+            /** Format: int64 */
+            input: number;
+            /** Format: int64 */
+            cache_write: number;
+            /** Format: int64 */
+            cache_read: number;
+            /** Format: int64 */
+            output: number;
+            cache_hit_rate: number | null;
+        };
+        Run: {
+            id: components["schemas"]["RunId"];
+            /** @description The agent, such as `editor`. */
+            agent: string;
+            project_id?: components["schemas"]["ProjectId"];
+            status: components["schemas"]["RunStatus"];
+            /** @description Why a `failed` run failed, such as `budget`, `model_error`, `daily_cap` or `internal_error`. `null` otherwise. */
+            failure_reason?: string | null;
+            /** @description The question of a run that is `waiting_input`; answer it with `POST /v1/runs/{id}/reply`. */
+            question?: string | null;
+            /** @description The message for the creator that a finished run ended with (for a run that stopped early, why it did). */
+            summary?: string | null;
+            /** @description The timeline version the run finished on, for a run that finished the edit. */
+            timeline_version?: number | null;
+            routing_profile: string;
+            model: string;
+            effort: string;
+            /** @description Who pays for the run's model calls (`platform`, `workspace_key` or `test`). */
+            billed_to: string;
+            /**
+             * Format: int64
+             * @description What the run's model calls cost at list price, in millionths of a dollar.
+             */
+            cost_micros: number;
+            /**
+             * Format: int64
+             * @description The run's spend cap, in millionths of a dollar.
+             */
+            budget_micros: number;
+            tokens: components["schemas"]["RunTokens"];
+            tool_calls: number;
+            budget_tool_calls: number;
+            /**
+             * Format: int64
+             * @description How long the run has been running (waiting for an answer does not count).
+             */
+            active_ms: number;
+            /** Format: int64 */
+            budget_wall_clock_ms: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            started_at?: string | null;
+            /** Format: date-time */
+            finished_at?: string | null;
+            events: components["schemas"]["RunEvent"][];
+            /** @description The sequence number of the run's last event (not only of the ones returned), 0 before the first. */
+            last_seq: number;
         };
         /**
          * @description `preview`: half the format's size, from the 720p proxies, x264 veryfast, with the beat guide. `final`: the format's size, from the originals, x264 medium, two-pass loudness.
@@ -1090,6 +1297,8 @@ export interface components {
         ProjectIdPath: components["schemas"]["ProjectId"];
         /** @description The render's TypeID. */
         RenderIdPath: components["schemas"]["RenderId"];
+        /** @description The run's TypeID. */
+        RunIdPath: components["schemas"]["RunId"];
     };
     requestBodies: never;
     headers: never;
@@ -1732,6 +1941,166 @@ export interface operations {
             402: components["responses"]["PlanRequired"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    startEdit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The project's TypeID. */
+                id: components["parameters"]["ProjectIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["StartEditRequest"];
+            };
+        };
+        responses: {
+            /** @description The run, queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `run_in_progress`: the project's editor run has not finished. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `assets_not_usable`: the project has no ready video clip to edit. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getRun: {
+        parameters: {
+            query?: {
+                /** @description Only events after this sequence number. */
+                after_seq?: number;
+                /** @description How many events to return (default 200). */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The run's TypeID. */
+                id: components["parameters"]["RunIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    cancelRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The run's TypeID. */
+                id: components["parameters"]["RunIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run as it is after the request. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    replyToRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The run's TypeID. */
+                id: components["parameters"]["RunIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplyRequest"];
+            };
+        };
+        responses: {
+            /** @description The run, queued again. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `run_not_waiting`: the run is not waiting for an answer. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             500: components["responses"]["InternalError"];
             503: components["responses"]["Unavailable"];
         };

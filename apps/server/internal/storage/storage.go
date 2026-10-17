@@ -145,6 +145,22 @@ func DerivativeKey(ws ids.WorkspaceID, asset ids.AssetID, name string) (string, 
 	return AssetPrefix(ws, asset) + name, nil
 }
 
+// FramePrefix is the prefix of the still frames cut from an asset's proxy for the editor agent: ws/{workspace}/assets/{asset}/frames/.
+// It sits under the asset's prefix, so deleting the asset (DeletePrefix) deletes its frames too.
+func FramePrefix(ws ids.WorkspaceID, asset ids.AssetID) string {
+	return AssetPrefix(ws, asset) + "frames/"
+}
+
+// FrameKey is the key of the frame at atMs of an asset's proxy, scaled to longSide pixels on its long side:
+// ws/{workspace}/assets/{asset}/frames/{at_ms}_{long_side}.jpg, the time zero-padded to eight digits (up to 27 hours) so the
+// names sort by time. The same asset, time and size always give the same key, which is what makes the frames a cache.
+func FrameKey(ws ids.WorkspaceID, asset ids.AssetID, atMs int64, longSide int) (string, error) {
+	if atMs < 0 || atMs > 99_999_999 || longSide < 16 || longSide > 4096 {
+		return "", fmt.Errorf("storage: frame at %d ms, %d px is out of range", atMs, longSide)
+	}
+	return fmt.Sprintf("%s%08d_%d.jpg", FramePrefix(ws, asset), atMs, longSide), nil
+}
+
 // ValidDerivativeName reports whether name is a short plain file name: letters, digits, '_', '-' and '.', not starting with
 // a dot, and not "original" (the uploaded file is never overwritten by a derivative).
 func ValidDerivativeName(name string) bool {
