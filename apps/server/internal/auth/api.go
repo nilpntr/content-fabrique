@@ -11,15 +11,18 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/api"
 	"github.com/nilpntr/content-fabrique/internal/assets"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
+	"github.com/nilpntr/content-fabrique/internal/projects"
 )
 
 // apiServer implements api.StrictServerInterface, the generated interface of the OpenAPI contract
 // (packages/schemas/openapi.yaml). The handlers live next to what they report: GetMe in me.go, GetWorkspacePlan and
 // GetLibrarySummary in entitlements.go, and the assets operations come from the embedded *assets.Handler (package assets,
-// which reads the workspace from the Principal through callerOf). The Clerk webhook is not here: it reads the raw body and the Svix headers
+// which reads the workspace from the Principal through callerOf), and the projects and timeline operations come from the
+// embedded *projects.API (package projects, the same way). The Clerk webhook is not here: it reads the raw body and the Svix headers
 // itself (webhook.go), so the spec documents it and the generator leaves it out.
 type apiServer struct {
 	*assets.Handler
+	*projects.API
 	ents   EntitlementReader
 	logger *slog.Logger
 }
@@ -32,17 +35,17 @@ func newAPIServer(ents EntitlementReader, logger *slog.Logger) *apiServer {
 	}
 	// Without a configured object store the assets operations answer 503 storage_not_configured (Mount replaces this
 	// handler when it is given a service).
-	return &apiServer{Handler: assets.NewHandler(nil, callerOf, logger), ents: ents, logger: logger}
+	return &apiServer{Handler: assets.NewHandler(nil, callerOf, logger), API: projects.NewAPI(nil, callerOf, logger), ents: ents, logger: logger}
 }
 
-// callerOf is how the assets package learns who is calling: the Principal the authentication middleware resolved from the
-// verified token. Nothing else names the workspace.
-func callerOf(ctx context.Context) (assets.Caller, bool) {
+// callerOf is how the handlers learn who is calling: the Principal the authentication middleware resolved from the verified
+// token. Nothing else names the workspace.
+func callerOf(ctx context.Context) (httpapi.Caller, bool) {
 	p, ok := PrincipalFromContext(ctx)
 	if !ok {
-		return assets.Caller{}, false
+		return httpapi.Caller{}, false
 	}
-	return assets.Caller{Workspace: p.WorkspaceID, User: p.UserID, Role: p.Role}, true
+	return httpapi.Caller{Workspace: p.WorkspaceID, User: p.UserID, Role: p.Role}, true
 }
 
 // maxBodyBytes caps the body of every API request. The largest legitimate one is the completion of a 10,000 part upload
