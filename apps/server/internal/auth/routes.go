@@ -41,10 +41,11 @@ func (v *V1) Handle(pattern string, h http.Handler) {
 	v.mux.Handle(pattern, h)
 }
 
-// Mount registers the auth routes on mux:
+// Mount registers the routes of the API contract (packages/schemas/openapi.yaml) and the webhook on mux:
 //
 //	GET  /v1/me                the signed-in user, workspace and entitlements (authenticated; open without a plan)
 //	GET  /v1/workspace/plan    the plan and what it includes (authenticated; open without a plan)
+//	GET  /v1/library/summary   the first paid-only endpoint (authentication, then RequireActivePlan, through the catch-all)
 //	POST /v1/webhooks/clerk    Clerk's Svix-signed webhook (signed, not behind the middleware)
 //	ANY  /v1/                  everything else: the authentication middleware, RequireActivePlan, then the returned V1
 //
@@ -65,7 +66,7 @@ func Mount(mux *http.ServeMux, d Deps) (*V1, error) {
 
 	var mw func(http.Handler) http.Handler
 	if cfg.ClerkSecretKey == "" && d.JWKSClient == nil {
-		logger.Warn("CLERK_SECRET_KEY is not set: authenticated endpoints answer 503 " + CodeNotConfigured)
+		logger.Warn("CLERK_SECRET_KEY is not set: authenticated endpoints answer 503 " + string(CodeNotConfigured))
 		mw = NotConfigured()
 	} else {
 		var err error
@@ -85,13 +86,25 @@ func Mount(mux *http.ServeMux, d Deps) (*V1, error) {
 		return nil, err
 	}
 
-	// The allowlist: authenticated, and open to a workspace without a plan.
-	mux.Handle("GET /v1/me", mw(MeHandler(d.Store, logger)))
-	mux.Handle("GET /v1/workspace/plan", mw(WorkspacePlanHandler(d.Store, logger)))
+	// The routes of the OpenAPI contract, built by the generated code (see api.go). Which middleware each sits behind is
+	// decided here and nowhere else: the operations the spec marks x-open-without-plan are open to a workspace without a plan
+	// (authentication alone), and every other operation of the spec, including one added later, goes to the paid-only router.
+	open, err := openOperations()
+	if err != nil {
+		return nil, err
+	}
+	v1 := &V1{mux: http.NewServeMux()}
+	for pattern, h := range apiRoutes(newAPIServer(d.Store, logger), logger) {
+		if open[pattern] {
+			mux.Handle(pattern, mw(h))
+		} else {
+			v1.Handle(pattern, h)
+		}
+	}
+	// Clerk's webhook is Svix-signed and not behind a session, so it is no part of the generated interface.
 	mux.Handle("POST /v1/webhooks/clerk", wh)
 
 	// Everything else, also a path no route has: authenticated, then an active plan, then the V1 router.
-	v1 := &V1{mux: http.NewServeMux()}
 	mux.Handle("/v1/", mw(RequireActivePlan(d.Store, logger)(v1.mux)))
 	return v1, nil
 }

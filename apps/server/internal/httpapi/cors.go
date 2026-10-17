@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/nilpntr/content-fabrique/internal/api"
 )
 
 // The CORS policy of the API (D-23). The web app and the API are different origins, and the session token travels in
@@ -58,7 +60,7 @@ func CORS(allowedOrigin string, logger *slog.Logger) func(http.Handler) http.Han
 					}
 				}
 				if !allowed || !corsMethodAllowed(r.Header.Get("Access-Control-Request-Method")) {
-					WriteError(w, http.StatusForbidden, "origin_not_allowed", "this origin may not call the API")
+					WriteError(w, http.StatusForbidden, api.ErrorCodeOriginNotAllowed, "this origin may not call the API")
 					return
 				}
 				h.Set("Access-Control-Allow-Origin", allowedOrigin)

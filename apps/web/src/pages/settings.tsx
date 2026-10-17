@@ -1,7 +1,7 @@
 import { cardClassName } from "@/components/page-placeholder";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError } from "@/lib/api";
-import { useMe } from "@/lib/use-me";
+import { useMe } from "@/lib/api/hooks";
 
 /** Settings. For now it shows what the API knows about the signed-in user and the active workspace (GET /v1/me). */
 export function SettingsPage() {

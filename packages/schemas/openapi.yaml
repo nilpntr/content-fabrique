@@ -1,0 +1,472 @@
+openapi: 3.1.0
+
+# The contract of the Go API (P0-08, D-14). This file is the source of truth: the Go server interfaces
+# (apps/server/internal/api) and the TypeScript types (packages/schemas/api/schema.ts) are generated from it with
+# `task gen:api`, and CI fails when they are out of date. See docs/03-architecture.md section 9 for how to add an endpoint.
+#
+# Paid by default: every /v1 operation is behind the paywall (402 plan_required without an active plan), and must document
+# that 402 response ($ref PlanRequired). An operation opts out with `x-open-without-plan: true`, which the Go server reads
+# from this spec (embedded in the generated code) to put it behind authentication alone; apps/server/internal/auth tests
+# that the two always agree. Only GET /v1/me and GET /v1/workspace/plan are open (and the webhook, which has no session at
+# all). An operation added here is paid-only until someone opens it on purpose.
+
+info:
+  title: Content Fabrique API
+  version: 0.1.0
+  summary: The REST API of the Content Fabrique server.
+  description: |
+    REST and JSON. Every endpoint but the health probes and the webhooks needs a Clerk session token in
+    `Authorization: Bearer <token>`; there are no cookies. Errors always have the shape
+    `{ "error": { "code": "...", "message": "..." } }`. `code` is stable and meant for programs; `message` is for people
+    and may change. Neither ever contains request data, a token or a secret.
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+
+servers:
+  - url: https://api.contentfabrique.app
+    description: Production
+  - url: https://api-staging.contentfabrique.app
+    description: Staging
+  - url: http://localhost:8080
+    description: Local development (`task dev`)
+
+tags:
+  - name: account
+    description: Who is calling, and in which workspace.
+  - name: workspace
+    description: The active workspace and its plan.
+  - name: library
+    description: The creator's library (paid-only).
+  - name: webhooks
+    description: Called by other services, not by the web app. Not part of the generated TypeScript client or of the generated Go server interface.
+
+security:
+  - bearerAuth: []
+
+paths:
+  /v1/me:
+    get:
+      operationId: getMe
+      x-open-without-plan: true
+      tags: [account]
+      summary: The signed-in user, the active workspace and its plan
+      description: |
+        Open to a workspace without a plan: it is how the web app finds out. A plan that cannot be read does not fail the
+        request; it is reported as `entitlements.status = "unknown"` (never active).
+      responses:
+        "200":
+          description: The caller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeResponse"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/workspace/plan:
+    get:
+      operationId: getWorkspacePlan
+      x-open-without-plan: true
+      tags: [workspace]
+      summary: The plan of the active workspace and what it includes
+      description: "Open to a workspace without a plan (it answers `active: false` and zero limits)."
+      responses:
+        "200":
+          description: The plan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspacePlanResponse"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/library/summary:
+    get:
+      operationId: getLibrarySummary
+      tags: [library]
+      summary: Counts of the workspace's library
+      description: |
+        The first paid-only endpoint. There is no library yet (P1), so the counts are zero; it exists to prove the paywall
+        on the API.
+      responses:
+        "200":
+          description: The counts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibrarySummaryResponse"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/webhooks/clerk:
+    post:
+      operationId: receiveClerkWebhook
+      tags: [webhooks]
+      summary: Clerk's Svix-signed webhook
+      description: |
+        Not called by the web app, and not behind a session: the Svix signature is the authentication. It mirrors users,
+        organizations and memberships into Postgres, idempotently and in an order-safe way (the `svix-id` of an applied
+        delivery is recorded, so a replay changes nothing). The nine events it handles are listed in the setup guide
+        (docs/06, section 3.2). It answers 2xx for everything it understood, 400 for a bad signature, and 5xx when
+        Postgres or Clerk's Backend API failed, which makes Svix retry.
+      security: []
+      parameters:
+        - name: svix-id
+          in: header
+          required: true
+          description: The delivery id (also accepted as `webhook-id`).
+          schema:
+            type: string
+        - name: svix-timestamp
+          in: header
+          required: true
+          description: Unix seconds. A signature older than five minutes is refused.
+          schema:
+            type: string
+        - name: svix-signature
+          in: header
+          required: true
+          description: The Svix signature of the exact request body.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        description: Clerk's event, at most 1 MiB. It is verified as raw bytes before it is parsed.
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Understood. `status` says what happened to the delivery.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookResult"
+        "400":
+          description: "`invalid_signature` or `invalid_event`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: "`payload_too_large`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          description: "`webhook_not_configured` (no CLERK_WEBHOOK_SECRET), `identity_unavailable` or `queue_not_migrated`. Svix retries."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        A Clerk session token (a JWT) for a user acting in an organization, which is the workspace of the request. It must
+        verify against the instance's keys, be unexpired, and have `azp` equal to the web app's origin. The workspace id is
+        taken from the token's organization and never from request input.
+
+  responses:
+    Unauthenticated:
+      description: |
+        No token (`unauthenticated`) or a token that failed verification (`invalid_token`). Sent with
+        `WWW-Authenticate: Bearer`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    PlanRequired:
+      description: The workspace has no active plan (`plan_required`). The web app shows the paywall and fetches `/v1/me` again.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: |
+        Signed in, but not allowed: `no_active_workspace` (no organization is active), `user_deleted`, `workspace_deleted`
+        or `not_a_member` (removed from the workspace).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InternalError:
+      description: "`internal_error`. Logged on the server; nothing about the cause is in the body."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unavailable:
+      description: |
+        `identity_unavailable` (Clerk's API or key set did not answer), `auth_not_configured` (no CLERK_SECRET_KEY on the
+        server) or `queue_not_migrated` (River's tables are missing, so a new workspace cannot be created). Try again later.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    # ── Errors ──────────────────────────────────────────────────────────────────
+
+    ErrorCode:
+      type: string
+      description: |
+        The stable error codes of the API. The web client branches on these; new ones may be added, so treat an unknown
+        code as a generic failure of its HTTP status.
+      enum:
+        - invalid_request # 400: the server could not bind the request (a malformed parameter); no endpoint takes parameters yet
+        - unauthenticated # 401: no token
+        - invalid_token # 401: the token failed verification (signature, expiry, issuer, azp)
+        - plan_required # 402: the workspace has no active plan
+        - no_active_workspace # 403: signed in, but no organization is active
+        - user_deleted # 403
+        - workspace_deleted # 403
+        - not_a_member # 403: removed from the workspace
+        - origin_not_allowed # 403: a CORS preflight from an origin other than APP_BASE_URL (no CORS headers)
+        - invalid_signature # 400: webhook, the Svix signature is not valid
+        - invalid_event # 400: webhook, the body could not be read
+        - payload_too_large # 413: webhook
+        - internal_error # 500
+        - identity_unavailable # 503: Clerk's Backend API or key set did not answer
+        - auth_not_configured # 503: no CLERK_SECRET_KEY
+        - queue_not_migrated # 503: River's tables are missing
+        - webhook_not_configured # 503: no CLERK_WEBHOOK_SECRET
+
+    ErrorDetail:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          $ref: "#/components/schemas/ErrorCode"
+        message:
+          type: string
+          description: For people. It may change; do not branch on it.
+
+    Error:
+      type: object
+      description: The error body of every endpoint.
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+
+    # ── TypeIDs (D-24) ──────────────────────────────────────────────────────────
+    # A lowercase prefix, an underscore, and a UUIDv7 in 26 characters of Crockford base32 (the first one is 0 to 7).
+    # One schema per kind, so a client cannot pass a UserId where a WorkspaceId belongs. A new table adds its prefix here
+    # and to the decision's table.
+
+    WorkspaceId:
+      type: string
+      pattern: "^wks_[0-7][0-9a-hjkmnp-tv-z]{25}$"
+      examples: [wks_01j9z3x7m8c4v6n2q5r0t1y8ab]
+    UserId:
+      type: string
+      pattern: "^usr_[0-7][0-9a-hjkmnp-tv-z]{25}$"
+      examples: [usr_01j9z3x7m8c4v6n2q5r0t1y8ab]
+    AssetId:
+      type: string
+      pattern: "^ast_[0-7][0-9a-hjkmnp-tv-z]{25}$"
+    MomentId:
+      type: string
+      pattern: "^mom_[0-7][0-9a-hjkmnp-tv-z]{25}$"
+    ShotId:
+      type: string
+      pattern: "^shot_[0-7][0-9a-hjkmnp-tv-z]{25}$"
+    AnnotationId:
+      type: string
+      pattern: "^ann_[0-7][0-9a-hjkmnp-tv-z]{25}$"
+    TrendId:
+      type: string
+      pattern: "^trd_[0-7][0-9a-hjkmnp-tv-z]{25}$"
+    ConceptId:
+      type: string
+      pattern: "^con_[0-7][0-9a-hjkmnp-tv-z]{25}$"
+    IdeaId:
+      type: string
+      pattern: "^ide_[0-7][0-9a-hjkmnp-tv-z]{25}$"
+    ProjectId:
+      type: string
+      pattern: "^prj_[0-7][0-9a-hjkmnp-tv-z]{25}$"
+    TimelineId:
+      type: string
+      pattern: "^tl_[0-7][0-9a-hjkmnp-tv-z]{25}$"
+    RenderId:
+      type: string
+      pattern: "^ren_[0-7][0-9a-hjkmnp-tv-z]{25}$"
+    RunId:
+      type: string
+      pattern: "^run_[0-7][0-9a-hjkmnp-tv-z]{25}$"
+    ExportId:
+      type: string
+      pattern: "^exp_[0-7][0-9a-hjkmnp-tv-z]{25}$"
+    LicenceId:
+      type: string
+      pattern: "^lic_[0-7][0-9a-hjkmnp-tv-z]{25}$"
+    UploadId:
+      type: string
+      pattern: "^upl_[0-7][0-9a-hjkmnp-tv-z]{25}$"
+    EventId:
+      type: string
+      pattern: "^evt_[0-7][0-9a-hjkmnp-tv-z]{25}$"
+
+    # ── Account and workspace ───────────────────────────────────────────────────
+
+    Role:
+      type: string
+      description: The caller's role in the workspace. Clerk's `org:admin` is `owner`, `org:member` is `editor`, any other role is `viewer`.
+      enum: [owner, editor, viewer]
+
+    PlanName:
+      type: string
+      description: "The plans. `none` is no plan: the paywall."
+      enum: [none, trial, studio, creator, pro]
+
+    PlanStatus:
+      type: string
+      description: |
+        The state of the workspace's plan record. `none` means the workspace never had a plan; `unknown` means the API
+        could not read it (never active).
+      enum: [active, past_due, canceled, none, unknown]
+
+    PlanSource:
+      type: string
+      description: Who set the plan. `none` when the workspace never had one.
+      enum: [manual, merchant, none]
+
+    AiBilling:
+      type: string
+      description: |
+        Who pays for the model calls (D-18): `managed` (we do) or `byok` (the creator's own key). Empty when the workspace
+        has no active plan.
+      enum: [managed, byok, ""]
+
+    Entitlements:
+      type: object
+      description: The plan of the workspace as the API shows it.
+      required: [plan, status, active, current_period_end]
+      properties:
+        plan:
+          $ref: "#/components/schemas/PlanName"
+        status:
+          $ref: "#/components/schemas/PlanStatus"
+        active:
+          type: boolean
+          description: The paywall looks at this and nothing else.
+        current_period_end:
+          type: [string, "null"]
+          format: date-time
+          description: "When the paid period ends. `null` means the plan does not end (or there is none)."
+
+    PlanLimits:
+      type: object
+      description: What the plan includes. A zero number means "not included"; all zero without an active plan.
+      required: [exports, storage_gb, ai_billing]
+      properties:
+        exports:
+          type: integer
+          minimum: 0
+          description: Exported videos per month (the trial's two are in total, not per month).
+        storage_gb:
+          type: integer
+          minimum: 0
+        ai_billing:
+          $ref: "#/components/schemas/AiBilling"
+
+    MeUser:
+      type: object
+      description: The signed-in user.
+      required: [id, email]
+      properties:
+        id:
+          $ref: "#/components/schemas/UserId"
+        email:
+          type: string
+
+    MeWorkspace:
+      type: object
+      description: The active workspace (the Clerk organization of the session) and the caller's role in it.
+      required: [id, name, role]
+      properties:
+        id:
+          $ref: "#/components/schemas/WorkspaceId"
+        name:
+          type: string
+        role:
+          $ref: "#/components/schemas/Role"
+
+    MeResponse:
+      type: object
+      required: [user, workspace, entitlements]
+      properties:
+        user:
+          $ref: "#/components/schemas/MeUser"
+        workspace:
+          $ref: "#/components/schemas/MeWorkspace"
+        entitlements:
+          $ref: "#/components/schemas/Entitlements"
+
+    WorkspacePlanResponse:
+      description: The entitlements, flattened, plus where the plan came from and what it includes.
+      allOf:
+        - $ref: "#/components/schemas/Entitlements"
+        - type: object
+          required: [source, limits]
+          properties:
+            source:
+              $ref: "#/components/schemas/PlanSource"
+            limits:
+              $ref: "#/components/schemas/PlanLimits"
+
+    LibrarySummaryResponse:
+      type: object
+      required: [assets, projects]
+      properties:
+        assets:
+          type: integer
+          minimum: 0
+        projects:
+          type: integer
+          minimum: 0
+
+    # ── Webhooks ────────────────────────────────────────────────────────────────
+
+    WebhookResult:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          description: |
+            `applied`: the event changed something. `duplicate`: a replay of a delivery already applied. `ignored`: an event
+            type the endpoint does not handle. `rejected`: signed by Clerk, but not usable; recorded as failed and
+            acknowledged so that Svix does not retry it.
+          enum: [applied, duplicate, ignored, rejected]
