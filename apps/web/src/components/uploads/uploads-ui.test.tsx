@@ -170,6 +170,8 @@ const ASSET = (id: string, over: Record<string, unknown> = {}) => ({
   description: "",
   tags: [],
   failure_reason: null,
+  ingest_progress: 0,
+  ingest_stage: null,
   created_at: "2026-10-17T10:00:00Z",
   updated_at: "2026-10-17T10:00:00Z",
   ...over,

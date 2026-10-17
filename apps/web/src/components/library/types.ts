@@ -16,7 +16,12 @@ export interface SpriteGrid {
 }
 
 /** The scrub sprite: the sheet image plus how to find a frame in it, either a regular grid or a WebVTT thumbnails track. */
-export type Sprite = { url: string } & ({ grid: SpriteGrid; vttUrl?: undefined } | { vttUrl: string; grid?: undefined });
+export type Sprite = { url: string } & (
+  | { grid: SpriteGrid; vttUrl?: undefined; loadVtt?: undefined }
+  | { vttUrl: string; grid?: undefined; loadVtt?: undefined }
+  // A track that needs the API's bearer token: `loadVtt` returns its text, `vttKey` says when it is the same track again.
+  | { loadVtt: () => Promise<string>; vttKey: string; grid?: undefined; vttUrl?: undefined }
+);
 
 export interface Asset {
   id: AssetId;
@@ -38,4 +43,10 @@ export interface Asset {
   sprite?: Sprite;
   /** Whether a failed clip can be retried from here. Default true. */
   retryable?: boolean;
+  /** What the ingest is doing while `processing`: `downloading`, `probing`... (shown as a tooltip of the status). */
+  stage?: string;
+  /** Why a clip failed, in words for the creator. */
+  failureMessage?: string;
+  /** When the picture and video URLs stop working (ISO 8601). */
+  mediaExpiresAt?: string;
 }

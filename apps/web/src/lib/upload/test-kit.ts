@@ -119,6 +119,8 @@ export class FakeServer implements UploadApi {
       description: "",
       tags: [],
       failure_reason: null,
+      ingest_progress: 0,
+      ingest_stage: null,
       created_at: this.createdAt,
       updated_at: this.createdAt,
     };

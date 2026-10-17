@@ -121,3 +121,7 @@ export const fetchAssets = async (client: ApiClient, cursor?: string, signal?: A
 export const deleteAsset = async (client: ApiClient, id: string): Promise<void> => {
   unwrap(await client.DELETE("/v1/assets/{id}", { params: { path: { id: id as ApiAsset["id"] } } }));
 };
+
+/** The hover-scrub track of a ready video as WebVTT text, every cue pointing at the sprite sheet through a fresh URL. It needs the bearer token, so it cannot be a plain `<track src>`. */
+export const fetchSpriteVtt = async (client: ApiClient, id: string, signal?: AbortSignal): Promise<string> =>
+  unwrap(await client.GET("/v1/assets/{id}/sprite.vtt", { params: { path: { id: id as ApiAsset["id"] } }, parseAs: "text", signal }));

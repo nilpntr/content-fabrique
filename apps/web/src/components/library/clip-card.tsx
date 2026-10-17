@@ -34,12 +34,13 @@ function clampPercent(value: number): number {
   return Math.min(100, Math.max(0, value));
 }
 
-export function StatusChip({ asset }: { asset: Pick<Asset, "status" | "progress"> }) {
+export function StatusChip({ asset }: { asset: Pick<Asset, "status" | "progress"> & { stage?: string } }) {
   const { status } = asset;
   return (
     <span
       data-slot="status-chip"
       data-status={status}
+      title={status === "processing" ? asset.stage : undefined}
       className={cn(
         "inline-flex h-5 shrink-0 items-center gap-1.5 rounded-full bg-wash px-2 text-[11.5px] font-medium text-muted-foreground tabular-nums",
         status === "failed" && "bg-del-wash text-destructive",
@@ -135,10 +136,12 @@ export interface ClipCardProps {
   onDelete?: (asset: Asset) => void;
   /** Called by the Retry button of a failed clip. */
   onRetry?: (asset: Asset) => void;
+  /** A picture or video of the clip did not load: its URL has probably expired, so the clip should be fetched again. */
+  onMediaError?: (asset: Asset) => void;
   className?: string;
 }
 
-export function ClipCard({ asset, onOpen, onDelete, onRetry, className }: ClipCardProps) {
+export function ClipCard({ asset, onOpen, onDelete, onRetry, onMediaError, className }: ClipCardProps) {
   const ready = asset.status === "ready";
   const busy = BUSY.has(asset.status);
   const title = asset.title.trim() || "Untitled clip";
@@ -192,7 +195,7 @@ export function ClipCard({ asset, onOpen, onDelete, onRetry, className }: ClipCa
               style={{ aspectRatio: `${asset.width} / ${asset.height}` }}
             >
               {asset.posterUrl ? (
-                <img src={asset.posterUrl} alt="" loading="lazy" draggable={false} className="size-full object-cover" />
+                <img src={asset.posterUrl} alt="" loading="lazy" draggable={false} onError={() => onMediaError?.(asset)} className="size-full object-cover" />
               ) : (
                 <span className="flex size-full items-center justify-center text-white/40">
                   <Film aria-hidden="true" className="size-7" />
@@ -207,7 +210,11 @@ export function ClipCard({ asset, onOpen, onDelete, onRetry, className }: ClipCa
                 />
               ) : null}
               {showVideo && asset.hoverPreviewUrl ? (
-                <HoverVideo src={asset.hoverPreviewUrl} hidden={scrubbing} onFail={() => setFailedUrl(asset.hoverPreviewUrl)} />
+                <HoverVideo src={asset.hoverPreviewUrl} hidden={scrubbing} onFail={() => {
+                    setFailedUrl(asset.hoverPreviewUrl);
+                    onMediaError?.(asset);
+                  }}
+                />
               ) : null}
             </span>
           </button>
@@ -271,6 +278,7 @@ export function ClipCard({ asset, onOpen, onDelete, onRetry, className }: ClipCa
               : null}
             {ready && moreTags > 0 ? <span className="shrink-0 text-[11.5px] leading-5 text-subtle-foreground tabular-nums" title={asset.tags.join(", ")}>+{moreTags}</span> : null}
           </div>
+          {asset.status === "failed" && asset.failureMessage ? <p className="text-[12px] leading-snug text-destructive text-pretty">{asset.failureMessage}</p> : null}
           {asset.status === "failed" && onRetry && asset.retryable !== false ? (
             <Button variant="secondary" size="sm" onClick={() => onRetry(asset)} aria-label={`Retry ${title}`}>
               <RotateCw aria-hidden="true" />
