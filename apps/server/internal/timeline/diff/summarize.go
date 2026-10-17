@@ -492,6 +492,12 @@ func (s *summarizer) itemField(typ, id string, rest []string, op Operation, item
 		s.say("replaced the asset of %s with %s", id, s.assetName(str(newV)))
 	case field == "speed":
 		if op.Op == OpRemove {
+			// A speed that went because a ramp replaced it is not a reset: the ramp's own line says what happened.
+			if it := findItem(s.after, id); it != nil {
+				if _, ramped := it["speed_ramp"]; ramped {
+					return
+				}
+			}
 			s.say("reset the speed of %s to 1x", id)
 			return
 		}
