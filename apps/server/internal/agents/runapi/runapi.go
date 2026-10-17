@@ -293,7 +293,7 @@ func (h *Runs) getRun(ctx context.Context, req api.GetRunRequestObject) (api.Run
 	if run.Status == store.AgentWaitingInput {
 		out.Question = h.question(ctx, who.Workspace, id)
 	}
-	if run.Agent == credits.EditorAgent {
+	if credits.BillsEdits(run.Agent) {
 		rc, ok, err := h.svc.Store.RunCreditsOf(ctx, who.Workspace, id)
 		if err != nil {
 			return api.Run{}, h.internal(ctx, "run credits", err)
@@ -377,9 +377,10 @@ func (h *Runs) getRunArtifacts(ctx context.Context, req api.GetRunArtifactsReque
 	for _, e := range events {
 		a, ok := runtime.ArtifactOf(e)
 		if !ok {
+			h.logger.WarnContext(ctx, "runs: an artifact event cannot be read", "run_id", id, "seq", e.Seq)
 			continue
 		}
-		item := api.RunArtifact{Seq: int(e.Seq), Kind: a.Kind, Data: a.Data, CreatedAt: e.CreatedAt}
+		item := api.RunArtifact{Seq: int(e.Seq), Kind: a.Kind, Data: &a.Data, CreatedAt: e.CreatedAt}
 		if a.CallID != "" {
 			call := a.CallID
 			item.CallId = &call

@@ -1358,10 +1358,10 @@ export interface components {
             kind: string;
             /** @description The tool call that made it (the `call_id` of its `tool_call` and `tool_result` events). */
             call_id: string | null;
-            /** @description The artifact itself, at most 64 KB. Its shape depends on `kind`. Untrusted text. */
+            /** @description The artifact itself, at most 64 KB; `null` for an artifact event that has none. Its shape depends on `kind`. Untrusted text. */
             data: {
                 [key: string]: unknown;
-            };
+            } | null;
             /** Format: date-time */
             created_at: string;
         };
@@ -1382,7 +1382,7 @@ export interface components {
             state: "held" | "charged" | "refunded";
             /** @enum {string} */
             action: "edit.first" | "edit.revision";
-            /** @description How many credits (for `refunded`, how many were charged). */
+            /** @description How many credits (for `refunded`, how many were given back, which is less than the charge when part of it came from credits that had expired). */
             credits: number;
         };
         /**

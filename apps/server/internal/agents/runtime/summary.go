@@ -93,11 +93,15 @@ func SummarizeEvent(e store.AgentEvent) EventSummary {
 		s.IsError = true
 		s.Text = p.Code + ": " + p.Message
 	case store.EventArtifact:
-		p, ok := ArtifactOf(e)
-		if !ok {
+		// Only the head: the data (up to 64 KB) is not needed for a one-line summary.
+		var p struct {
+			Kind      string `json:"kind"`
+			ToolUseID string `json:"tool_use_id"`
+		}
+		if json.Unmarshal(e.Payload, &p) != nil {
 			break
 		}
-		s.Text, s.Kind, s.CallID = p.Kind, p.Kind, p.CallID
+		s.Text, s.Kind, s.CallID = p.Kind, p.Kind, p.ToolUseID
 	}
 	s.Text = oneLine(s.Text, SummaryChars)
 	return s

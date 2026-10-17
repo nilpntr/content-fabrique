@@ -96,7 +96,7 @@ func TestRunsArtifacts(t *testing.T) {
 	// The data is whole and equal to what was stored.
 	var want, have map[string]any
 	_ = json.Unmarshal(plan, &want)
-	if err := json.Unmarshal(a[0].Data, &have); err != nil {
+	if err := json.Unmarshal(*a[0].Data, &have); err != nil {
 		t.Fatal(err)
 	}
 	wj, _ := json.Marshal(want["data"])
@@ -104,11 +104,11 @@ func TestRunsArtifacts(t *testing.T) {
 	if shotList, _ := have["shots"].([]any); !bytes.Equal(wj, hj) || len(shotList) != 12 {
 		t.Errorf("plan data differs:\n%s\n%s", wj, hj)
 	}
-	if len(a[1].Data) < store.MaxEventPayloadBytes-300 {
-		t.Errorf("the big artifact was cut to %d bytes", len(a[1].Data))
+	if len(*a[1].Data) < store.MaxEventPayloadBytes-300 {
+		t.Errorf("the big artifact was cut to %d bytes", len(*a[1].Data))
 	}
-	if string(a[3].Data) != "null" {
-		t.Errorf("an artifact without data: %s", a[3].Data)
+	if a[3].Data != nil {
+		t.Errorf("an artifact without data: %s", *a[3].Data)
 	}
 
 	// The run itself stays small: the summaries, none of the data.
