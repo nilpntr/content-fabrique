@@ -23,6 +23,13 @@ RETURNING *;
 -- name: DeleteMembershipsOfUser :exec
 DELETE FROM workspace_members WHERE user_id = @user_id;
 
+-- A workspace seen for the first time. No row back means it exists already (SyncWorkspace then decides).
+-- name: InsertWorkspaceIfNew :one
+INSERT INTO workspaces (clerk_org_id, name, clerk_updated_at)
+VALUES (@clerk_org_id, @name, @clerk_updated_at)
+ON CONFLICT (clerk_org_id) DO NOTHING
+RETURNING *;
+
 -- name: SyncWorkspace :one
 INSERT INTO workspaces (clerk_org_id, name, clerk_updated_at)
 VALUES (@clerk_org_id, @name, @clerk_updated_at)
@@ -87,3 +94,12 @@ WHERE w.id = @workspace_id AND u.id = @user_id;
 -- webhook and a just-in-time sync cannot interleave between the tombstone check and the insert.
 -- name: LockMembership :exec
 SELECT pg_advisory_xact_lock(hashtextextended(@subject::text, 0));
+
+-- The webhook delivery log, trimmed by the webhook_events_prune job. Membership deletes that were applied are the
+-- tombstones MembershipDeletedSince reads, so they live longer than the rest (the cutoffs are the job's).
+-- name: PruneWebhookEvents :execrows
+DELETE FROM webhook_events
+WHERE CASE
+          WHEN event_type = 'organizationMembership.deleted' AND status = 'applied' THEN received_at < @tombstone_before
+          ELSE received_at < @other_before
+      END;

@@ -12,8 +12,8 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
-// loginVerifier is the part of the store that asks what the app login may do.
-type loginVerifier interface {
+// LoginVerifier is the part of the store that asks what the app login may do.
+type LoginVerifier interface {
 	Ping(ctx context.Context) error
 	VerifyAppLogin(ctx context.Context) error
 }
@@ -22,10 +22,10 @@ type loginVerifier interface {
 // the migrate/app role split exists. Locally, in ci and in bench one login does both on purpose.
 func strictLogin(env string) bool { return env == config.EnvStaging || env == config.EnvProduction }
 
-// startupLoginCheck refuses to start when the app login is privileged. When Postgres cannot be asked (it is down),
+// StartupLoginCheck refuses to start when the app login is privileged. When Postgres cannot be asked (it is down),
 // the process starts anyway and the readiness check keeps failing until the question is answered, because a database
 // outage must not become a crash loop.
-func startupLoginCheck(ctx context.Context, v loginVerifier, env string, logger *slog.Logger) error {
+func StartupLoginCheck(ctx context.Context, v LoginVerifier, env string, logger *slog.Logger) error {
 	if !strictLogin(env) {
 		return nil
 	}
@@ -43,10 +43,10 @@ func startupLoginCheck(ctx context.Context, v loginVerifier, env string, logger 
 	}
 }
 
-// postgresCheck is the "postgres" readiness check: a ping, and on staging and production also proof, once, that the
+// PostgresCheck is the "postgres" readiness check: a ping, and on staging and production also proof, once, that the
 // login is unprivileged. A privileged login fails readiness with an error in the log, every time it is asked, so the
 // instance never receives traffic.
-func postgresCheck(v loginVerifier, env string, logger *slog.Logger) func(ctx context.Context) error {
+func PostgresCheck(v LoginVerifier, env string, logger *slog.Logger) func(ctx context.Context) error {
 	var verified atomic.Bool
 	return func(ctx context.Context) error {
 		if err := v.Ping(ctx); err != nil {
