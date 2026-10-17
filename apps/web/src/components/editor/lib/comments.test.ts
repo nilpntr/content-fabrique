@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { SAMPLE_COMMENTS, SAMPLE_VERSIONS } from "../sample-data";
+import type { ReviewAnnotation } from "../types";
 import { countOpen, filterComments, resolveComments, statusLabel } from "./comments";
 
 const [v1, v2, v3] = SAMPLE_VERSIONS;
@@ -43,9 +44,65 @@ test("a comment from v2 maps through a speed change", () => {
   expect(find(resolve(), "ann_pace").mapped).toMatchObject({ start_ms: 5500, end_ms: 6700 });
 });
 
-test("comments made on later versions map back onto an earlier one", () => {
-  // v3 2600 is c1 source 4100, which is 3100 ms into v1's c1.
-  expect(find(resolve(v1), "ann_logo").mapped).toMatchObject({ start_ms: 3100, item_id: "c1" });
+test("a comment made on a newer version is not on an earlier one yet: it is not mapped backwards", () => {
+  const logo = find(resolve(v1), "ann_logo");
+  expect(logo.mapped).toBeNull();
+  expect(logo.status).toEqual({ kind: "newer", version: 3 });
+  expect(statusLabel(logo.status)).toBe("Made on v3 (newer)");
+  // Not "no longer mapped", and not open on that version.
+  expect(filterComments(resolve(v1), "open").map((item) => item.comment.id)).not.toContain("ann_logo");
+  expect(find(resolve(v2), "ann_hook").status).toEqual({ kind: "open" });
+  expect(find(resolve(v2), "ann_logo").status.kind).toBe("newer");
+});
+
+test("an agent reply to a newer comment is newer too", () => {
+  const items = resolveComments(
+    [
+      { ...SAMPLE_COMMENTS[0], id: "root", version: 2, status: "open" },
+      { ...SAMPLE_COMMENTS[1], id: "reply", version: 3, reply_to: "root" },
+    ] as ReviewAnnotation[],
+    SAMPLE_VERSIONS,
+    v1,
+  );
+  expect(items.map((item) => item.status.kind)).toEqual(["newer", "newer"]);
+});
+
+const base: ReviewAnnotation = {
+  id: "x",
+  version: 3,
+  start_ms: 1000,
+  end_ms: 1000,
+  kind: "comment",
+  body: "b",
+  status: "open",
+  author: { kind: "creator", name: "Sam" },
+  created_at: "2026-10-15T09:00:00Z",
+};
+
+test("only an open comment counts as open: resolved and applied do not", () => {
+  const items = resolveComments(
+    [
+      { ...base, id: "open" },
+      { ...base, id: "resolved", status: "resolved" },
+      { ...base, id: "resolved_v", status: "resolved", applied_in_version: 3 },
+      { ...base, id: "applied", status: "applied" },
+      { ...base, id: "addressed", status: "applied", applied_in_version: 3 },
+    ],
+    SAMPLE_VERSIONS,
+    v3,
+  );
+  const kinds = Object.fromEntries(items.map((item) => [item.comment.id, item.status]));
+  expect(kinds).toEqual({
+    open: { kind: "open" },
+    resolved: { kind: "resolved" },
+    resolved_v: { kind: "resolved" },
+    applied: { kind: "applied" },
+    addressed: { kind: "addressed", version: 3 },
+  });
+  expect(statusLabel({ kind: "resolved" })).toBe("Resolved");
+  expect(statusLabel({ kind: "applied" })).toBe("Applied");
+  expect(countOpen(items)).toBe(1);
+  expect(filterComments(items, "open").map((item) => item.comment.id)).toEqual(["open"]);
 });
 
 test("an agent reply follows the comment it answers", () => {

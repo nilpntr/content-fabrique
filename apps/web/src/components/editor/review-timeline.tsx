@@ -9,7 +9,7 @@ import { type Handle, moveHandle, resolveGesture, snapThresholdMs } from "./lib/
 import { clamp, formatRange, formatRulerLabel, formatTimecode, stepFrames } from "./lib/time";
 import { cutTimes, itemOutputDurationMs } from "./lib/time-map";
 import type { CommentDraft, MsRange, ReviewVersion } from "./types";
-import type { PlayerController } from "./use-player";
+import { type PlayerController, usePlayhead } from "./use-player";
 
 const RULER_H = 26;
 const FILM_H = 44;
@@ -25,7 +25,8 @@ export interface TimelineRegion {
   start_ms: number;
   end_ms: number;
   body: string;
-  tone: "open" | "addressed";
+  /** `open` is brand, `addressed` (applied in a known version) is green, `neutral` is resolved or applied. */
+  tone: "open" | "addressed" | "neutral";
   pinned: boolean;
 }
 
@@ -38,15 +39,20 @@ export interface ReviewTimelineProps {
   hoveredRegionId: string | null;
   draft: CommentDraft | null;
   composing: boolean;
-  /** `compose` opens the comment box (a drag or a click does, the I and O keys don't). */
-  onDraftChange: (draft: CommentDraft | null, options?: { compose?: boolean }) => void;
+  /** The comment text being typed, kept by the screen so a new selection can't take it along. */
+  body: string;
+  onBodyChange: (body: string) => void;
+  /** Shown in the comment box, e.g. why a new selection was ignored. */
+  notice?: { text: string };
+  /** `compose` opens the comment box (a drag or a click does, the I and O keys don't); `seekTo` moves the playhead if the selection is accepted. */
+  onDraftChange: (draft: CommentDraft | null, options?: { compose?: boolean; seekTo?: number }) => void;
   onSaveDraft: (body: string) => void;
   onCancelDraft: () => void;
   onSelectRegion: (id: string) => void;
   onHoverRegion: (id: string | null) => void;
 }
 
-export function ReviewTimeline({
+function ReviewTimelineView({
   version,
   player,
   assetNames,
@@ -55,6 +61,9 @@ export function ReviewTimeline({
   hoveredRegionId,
   draft,
   composing,
+  body,
+  onBodyChange,
+  notice,
   onDraftChange,
   onSaveDraft,
   onCancelDraft,
@@ -102,13 +111,17 @@ export function ReviewTimeline({
     setScrollLeft(el.scrollLeft);
   }, [scale]);
 
-  // Zoomed in, follow the playhead when it leaves the view.
+  // Zoomed in, follow the playhead during playback and seeks when it leaves the view. It listens to the playhead
+  // store directly, so a zoom (which moves no time) never triggers it and cannot undo the keep-centre above.
   React.useEffect(() => {
-    const el = viewportRef.current;
-    if (!el || zoom <= MIN_ZOOM) return;
-    const x = msToPx(player.currentMs, scale);
-    if (x < el.scrollLeft || x > el.scrollLeft + el.clientWidth) el.scrollLeft = Math.max(x - el.clientWidth / 2, 0);
-  }, [player.currentMs, scale, zoom]);
+    if (zoom <= MIN_ZOOM) return;
+    return player.playhead.subscribe(() => {
+      const el = viewportRef.current;
+      if (!el) return;
+      const x = msToPx(player.playhead.get(), scale);
+      if (x < el.scrollLeft || x > el.scrollLeft + el.clientWidth) el.scrollLeft = Math.max(x - el.clientWidth / 2, 0);
+    });
+  }, [player.playhead, scale, zoom]);
 
   const changeZoom = (factor: number) => {
     const el = viewportRef.current;
@@ -152,9 +165,7 @@ export function ReviewTimeline({
     if (current.cancelled) return;
     const range =
       gesture.kind === "range" ? { start_ms: gesture.start_ms, end_ms: gesture.end_ms } : { start_ms: gesture.ms, end_ms: gesture.ms };
-    player.pause();
-    player.seek(range.start_ms);
-    onDraftChange(range, { compose: true });
+    onDraftChange(range, { compose: true, seekTo: range.start_ms });
   };
 
   const onSurfaceCancel = () => {
@@ -174,8 +185,6 @@ export function ReviewTimeline({
 
   const shown: CommentDraft | null = live ?? draft;
   const isRange = shown !== null && shown.end_ms > shown.start_ms;
-  const ticks = React.useMemo(() => rulerTicks(scale), [scale]);
-  const tickStep = rulerStepMs(scale);
 
   const composerLeft = draft
     ? clamp(msToPx((draft.start_ms + draft.end_ms) / 2, scale) - scrollLeft + 12 - COMPOSER_W / 2, 0, Math.max(viewportPx + 24 - COMPOSER_W, 0))
@@ -260,28 +269,7 @@ export function ReviewTimeline({
                 scrubbing.current = false;
               }}
             >
-              {ticks.map((tick) => (
-                <div
-                  key={tick.ms}
-                  className="pointer-events-none absolute bottom-0"
-                  style={{ left: msToPx(tick.ms, scale), height: tick.major ? 10 : 5 }}
-                >
-                  <div className={cn("h-full w-px", tick.major ? "bg-muted-foreground/70" : "bg-muted-foreground/30")} />
-                  {tick.major && (
-                    <span className="absolute bottom-3 left-1 font-mono text-[10.5px] leading-none whitespace-nowrap text-muted-foreground tabular-nums">
-                      {formatRulerLabel(tick.ms, tickStep)}
-                    </span>
-                  )}
-                </div>
-              ))}
-              {cuts.map((ms) => (
-                <div
-                  key={ms}
-                  aria-hidden
-                  className="pointer-events-none absolute bottom-0.5 size-1.5 -translate-x-1/2 rotate-45 bg-brand"
-                  style={{ left: msToPx(ms, scale) }}
-                />
-              ))}
+              <RulerMarks scale={scale} cuts={cuts} />
             </div>
 
             {/* Filmstrip and comment lane: drag to select. */}
@@ -299,15 +287,7 @@ export function ReviewTimeline({
             >
               <Filmstrip version={version} scale={scale} assetNames={assetNames} />
 
-              {cuts.map((ms) => (
-                <div
-                  key={ms}
-                  aria-hidden
-                  data-cut={ms}
-                  className="pointer-events-none absolute top-0 w-0.5 -translate-x-1/2 bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
-                  style={{ left: msToPx(ms, scale), height: FILM_H }}
-                />
-              ))}
+              <CutLines scale={scale} cuts={cuts} />
 
               <div className="absolute inset-x-0 border-t border-hairline" style={{ top: FILM_H, height: lanesH }}>
                 {regions.map((region) => (
@@ -347,27 +327,28 @@ export function ReviewTimeline({
               )}
             </div>
 
-            {/* The playhead. */}
-            <div
-              aria-hidden
-              data-testid="playhead"
-              className="pointer-events-none absolute inset-y-0 z-20 w-0.5 -translate-x-1/2 bg-foreground"
-              style={{ left: msToPx(player.currentMs, scale) }}
-            >
-              <div className="absolute top-0 left-1/2 h-0 w-0 -translate-x-1/2 border-x-[5px] border-t-[7px] border-x-transparent border-t-foreground" />
-            </div>
+            <PlayheadMarker player={player} scale={scale} />
           </div>
         </div>
       </div>
 
       {draft && composing && (
-        <CommentComposer draft={draft} onSave={onSaveDraft} onCancel={onCancelDraft} className="absolute top-full z-30 mt-2" style={{ left: composerLeft }} />
+        <CommentComposer
+          draft={draft}
+          body={body}
+          onBodyChange={onBodyChange}
+          notice={notice}
+          onSave={onSaveDraft}
+          onCancel={onCancelDraft}
+          className="absolute top-full z-30 mt-2"
+          style={{ left: composerLeft }}
+        />
       )}
     </section>
   );
 }
 
-function Filmstrip({ version, scale, assetNames }: { version: ReviewVersion; scale: TimelineScale; assetNames?: Record<string, string> }) {
+const Filmstrip = React.memo(function Filmstrip({ version, scale, assetNames }: { version: ReviewVersion; scale: TimelineScale; assetNames?: Record<string, string> }) {
   return (
     <div className="absolute inset-x-0 top-0 overflow-hidden" style={{ height: FILM_H }}>
       {version.items.map((item) => {
@@ -396,9 +377,9 @@ function Filmstrip({ version, scale, assetNames }: { version: ReviewVersion; sca
       })}
     </div>
   );
-}
+});
 
-function RegionMark({
+const RegionMark = React.memo(function RegionMark({
   region,
   scale,
   lane,
@@ -437,9 +418,9 @@ function RegionMark({
       className={cn(
         "absolute cursor-pointer overflow-hidden border text-left text-[10.5px] leading-[1.15rem] font-medium text-foreground outline-none transition-[background-color,box-shadow] focus-visible:ring-2 focus-visible:ring-brand",
         isPoint ? "size-3.5 -translate-x-1/2 rounded-full" : "rounded-md px-1.5 whitespace-nowrap",
-        "data-[tone=open]:border-brand/60 data-[tone=open]:bg-brand/20 data-[tone=addressed]:border-good/60 data-[tone=addressed]:bg-good/20",
-        "data-[hovered=true]:data-[tone=open]:bg-brand/35 data-[hovered=true]:data-[tone=addressed]:bg-good/35",
-        "data-[selected=true]:z-10 data-[selected=true]:ring-2 data-[selected=true]:ring-foreground data-[selected=true]:data-[tone=open]:bg-brand/50 data-[selected=true]:data-[tone=addressed]:bg-good/50",
+        "data-[tone=open]:border-brand/60 data-[tone=open]:bg-brand/20 data-[tone=addressed]:border-good/60 data-[tone=addressed]:bg-good/20 data-[tone=neutral]:border-border data-[tone=neutral]:bg-muted-foreground/15",
+        "data-[hovered=true]:data-[tone=open]:bg-brand/35 data-[hovered=true]:data-[tone=addressed]:bg-good/35 data-[hovered=true]:data-[tone=neutral]:bg-muted-foreground/25",
+        "data-[selected=true]:z-10 data-[selected=true]:ring-2 data-[selected=true]:ring-foreground data-[selected=true]:data-[tone=open]:bg-brand/50 data-[selected=true]:data-[tone=addressed]:bg-good/50 data-[selected=true]:data-[tone=neutral]:bg-muted-foreground/40",
       )}
       style={{
         left,
@@ -456,7 +437,69 @@ function RegionMark({
       )}
     </button>
   );
+});
+
+/** The ruler's ticks, labels and cut diamonds. Static between zooms. */
+const RulerMarks = React.memo(function RulerMarks({ scale, cuts }: { scale: TimelineScale; cuts: number[] }) {
+  const ticks = React.useMemo(() => rulerTicks(scale), [scale]);
+  const step = rulerStepMs(scale);
+  return (
+    <>
+      {ticks.map((tick) => (
+        <div key={tick.ms} className="pointer-events-none absolute bottom-0" style={{ left: msToPx(tick.ms, scale), height: tick.major ? 10 : 5 }}>
+          <div className={cn("h-full w-px", tick.major ? "bg-muted-foreground/70" : "bg-muted-foreground/30")} />
+          {tick.major && (
+            <span className="absolute bottom-3 left-1 font-mono text-[10.5px] leading-none whitespace-nowrap text-muted-foreground tabular-nums">
+              {formatRulerLabel(tick.ms, step)}
+            </span>
+          )}
+        </div>
+      ))}
+      {cuts.map((ms) => (
+        <div
+          key={ms}
+          aria-hidden
+          className="pointer-events-none absolute bottom-0.5 size-1.5 -translate-x-1/2 rotate-45 bg-brand"
+          style={{ left: msToPx(ms, scale) }}
+        />
+      ))}
+    </>
+  );
+});
+
+/** The white cut lines across the filmstrip. */
+const CutLines = React.memo(function CutLines({ scale, cuts }: { scale: TimelineScale; cuts: number[] }) {
+  return (
+    <>
+      {cuts.map((ms) => (
+        <div
+          key={ms}
+          aria-hidden
+          data-cut={ms}
+          className="pointer-events-none absolute top-0 w-0.5 -translate-x-1/2 bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
+          style={{ left: msToPx(ms, scale), height: FILM_H }}
+        />
+      ))}
+    </>
+  );
+});
+
+/** The playhead line: the one part of the timeline that renders on every frame of playback. */
+function PlayheadMarker({ player, scale }: { player: PlayerController; scale: TimelineScale }) {
+  const currentMs = usePlayhead(player);
+  return (
+    <div
+      aria-hidden
+      data-testid="playhead"
+      className="pointer-events-none absolute inset-y-0 z-20 w-0.5 -translate-x-1/2 bg-foreground"
+      style={{ left: msToPx(currentMs, scale) }}
+    >
+      <div className="absolute top-0 left-1/2 h-0 w-0 -translate-x-1/2 border-x-[5px] border-t-[7px] border-x-transparent border-t-foreground" />
+    </div>
+  );
 }
+
+export const ReviewTimeline = React.memo(ReviewTimelineView);
 
 /** One end of the selected range: drag it, or use the arrow keys (Shift for ten frames). */
 function EdgeHandle({

@@ -4,14 +4,15 @@ import type { ReviewVersion } from "./types";
 
 export interface VersionSelectorProps {
   versions: ReviewVersion[];
+  /** The newest version number, computed once by the screen. */
+  latest: number;
   selected: number;
   onSelect: (version: number) => void;
   className?: string;
 }
 
 /** v1, v2, … above the player. Comments follow the choice: they are mapped onto the version on screen. */
-export function VersionSelector({ versions, selected, onSelect, className }: VersionSelectorProps) {
-  const latest = Math.max(...versions.map((version) => version.version));
+export function VersionSelector({ versions, latest, selected, onSelect, className }: VersionSelectorProps) {
   const current = versions.find((version) => version.version === selected);
 
   return (

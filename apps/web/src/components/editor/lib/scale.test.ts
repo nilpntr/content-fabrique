@@ -77,3 +77,26 @@ test("a dot counts as wide as its mark when it is laid out", () => {
   );
   expect(lanes.get("b")).toBe(1);
 });
+
+test("a dot is laid out where it is drawn: seven pixels either side of its time", () => {
+  const scale = createScale(10_000, 1000, 1);
+  // The range ends at 96 px. The dot at 100 px covers 93 to 107, so it needs its own lane.
+  const lanes = assignLanes(
+    [
+      { id: "range", start_ms: 200, end_ms: 960 },
+      { id: "dot", start_ms: 1000, end_ms: 1000 },
+    ],
+    scale,
+  );
+  expect(lanes.get("range")).toBe(0);
+  expect(lanes.get("dot")).toBe(1);
+  // Eight pixels further on they no longer touch.
+  const apart = assignLanes(
+    [
+      { id: "range", start_ms: 200, end_ms: 860 },
+      { id: "dot", start_ms: 1000, end_ms: 1000 },
+    ],
+    scale,
+  );
+  expect(apart.get("dot")).toBe(0);
+});

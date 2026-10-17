@@ -1,10 +1,19 @@
 import type { ReviewAnnotation, ReviewVersion } from "../types";
 import { entryAt, type MapResult, mapCommentToVersion, type UnmappedReason } from "./time-map";
 
+/**
+ * What the panel shows for a comment on the version being viewed. Only `open` counts as open.
+ * - `addressed`: the editor applied it in a known version. `applied` is the same without a version, `resolved` is closed by hand.
+ * - `unmapped`: the moment is gone from this version.
+ * - `newer`: made on a later version than the one viewed, so it did not exist yet.
+ */
 export type CommentStatus =
   | { kind: "open" }
   | { kind: "addressed"; version: number }
-  | { kind: "unmapped"; reason: UnmappedReason };
+  | { kind: "applied" }
+  | { kind: "resolved" }
+  | { kind: "unmapped"; reason: UnmappedReason }
+  | { kind: "newer"; version: number };
 
 export interface MappedRange {
   start_ms: number;
@@ -39,25 +48,32 @@ export function resolveComments(comments: ReviewAnnotation[], versions: ReviewVe
   const byId = new Map(comments.map((comment) => [comment.id, comment]));
   const mapOf = (version: number) => versions.find((candidate) => candidate.version === version)?.time_map ?? [];
 
-  const mapRoot = (root: ReviewAnnotation): MapResult =>
-    root.version === viewed.version
-      ? { mapped: true, start_ms: root.start_ms, end_ms: root.end_ms, item_id: entryAt(viewed.time_map, root.start_ms)?.item_id ?? "" }
-      : mapCommentToVersion(root, mapOf(root.version), viewed.time_map);
+  const mapRoot = (root: ReviewAnnotation): MapResult | "newer" => {
+    // Comments only map forward in time. One made on a later version is not on this one yet.
+    if (root.version > viewed.version) return "newer";
+    if (root.version === viewed.version) {
+      return { mapped: true, start_ms: root.start_ms, end_ms: root.end_ms, item_id: entryAt(viewed.time_map, root.start_ms)?.item_id ?? "" };
+    }
+    return mapCommentToVersion(root, mapOf(root.version), viewed.time_map);
+  };
 
   return comments.map((comment) => {
     const root = (comment.reply_to && byId.get(comment.reply_to)) || comment;
     const result = mapRoot(root);
     const addressedIn = root.status !== "open" ? root.applied_in_version : undefined;
 
-    let status: CommentStatus = { kind: "open" };
-    if (!result.mapped) status = { kind: "unmapped", reason: result.reason };
-    else if (addressedIn !== undefined) status = { kind: "addressed", version: addressedIn };
+    let status: CommentStatus;
+    if (result === "newer") status = { kind: "newer", version: root.version };
+    else if (!result.mapped) status = { kind: "unmapped", reason: result.reason };
+    else if (root.status === "open") status = { kind: "open" };
+    else if (root.status === "resolved") status = { kind: "resolved" };
+    else status = addressedIn === undefined ? { kind: "applied" } : { kind: "addressed", version: addressedIn };
 
     return {
       comment,
       rootId: root.id,
       isReply: root !== comment,
-      mapped: toMapped(result),
+      mapped: result === "newer" ? null : toMapped(result),
       status,
       addressedIn: status.kind === "unmapped" ? addressedIn : undefined,
     };
@@ -70,8 +86,14 @@ export function statusLabel(status: CommentStatus): string {
       return "Open";
     case "addressed":
       return `Addressed in v${status.version}`;
+    case "applied":
+      return "Applied";
+    case "resolved":
+      return "Resolved";
     case "unmapped":
       return "No longer mapped";
+    case "newer":
+      return `Made on v${status.version} (newer)`;
   }
 }
 

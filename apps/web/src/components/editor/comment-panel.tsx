@@ -16,7 +16,7 @@ export interface CommentPanelProps {
   className?: string;
 }
 
-export function CommentPanel({ items, selectedId, hoveredId, onSelect, onHover, onOpenVersion, className }: CommentPanelProps) {
+function CommentPanelView({ items, selectedId, hoveredId, onSelect, onHover, onOpenVersion, className }: CommentPanelProps) {
   const [filter, setFilter] = React.useState<CommentFilter>("all");
   const visible = React.useMemo(() => filterComments(items, filter), [items, filter]);
   const open = countOpen(items);
@@ -83,7 +83,7 @@ export function CommentPanel({ items, selectedId, hoveredId, onSelect, onHover, 
   );
 }
 
-function CommentItem({
+const CommentItem = React.memo(function CommentItem({
   item,
   selected,
   hovered,
@@ -115,7 +115,7 @@ function CommentItem({
         "rounded-[10px] transition-colors",
         item.isReply && "ml-5",
         "data-[hovered=true]:bg-wash data-[selected=true]:bg-brand-wash data-[selected=true]:shadow-[inset_0_0_0_1px_var(--brand)]",
-        status.kind === "unmapped" && "opacity-85",
+        (status.kind === "unmapped" || status.kind === "newer") && "opacity-85",
       )}
     >
       <button
@@ -145,7 +145,7 @@ function CommentItem({
         </span>
       </button>
 
-      {(moved || item.addressedIn !== undefined || status.kind === "unmapped") && !item.isReply && (
+      {(moved || item.addressedIn !== undefined || status.kind === "unmapped" || status.kind === "newer") && !item.isReply && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2.5 pb-2 text-[11.5px] text-muted-foreground">
           {(moved || status.kind === "unmapped") && (
             <span>
@@ -153,7 +153,7 @@ function CommentItem({
             </span>
           )}
           {item.addressedIn !== undefined && <span>Addressed in v{item.addressedIn}</span>}
-          {status.kind === "unmapped" && (
+          {(status.kind === "unmapped" || status.kind === "newer") && (
             <Button variant="link" size="sm" className="h-auto p-0 text-[11.5px]" onClick={() => onOpenVersion(comment.version, comment.id)}>
               Open v{comment.version}
             </Button>
@@ -162,7 +162,9 @@ function CommentItem({
       )}
     </li>
   );
-}
+});
+
+export const CommentPanel = React.memo(CommentPanelView);
 
 function StatusChip({ status }: { status: CommentStatus }) {
   return (
@@ -172,7 +174,8 @@ function StatusChip({ status }: { status: CommentStatus }) {
         "ml-auto rounded-full px-2 py-px text-[11px] leading-4 font-medium",
         status.kind === "open" && "bg-brand-wash text-brand",
         status.kind === "addressed" && "bg-add-wash text-good",
-        status.kind === "unmapped" && "bg-wash text-muted-foreground",
+        (status.kind === "applied" || status.kind === "resolved" || status.kind === "unmapped" || status.kind === "newer") &&
+          "bg-wash text-muted-foreground",
       )}
     >
       {statusLabel(status)}

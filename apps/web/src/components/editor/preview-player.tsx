@@ -6,7 +6,7 @@ import { pinFromPoint } from "./lib/selection";
 import { formatTimecode } from "./lib/time";
 import { entryAt } from "./lib/time-map";
 import type { OutputFormat, Pin, ReviewVersion } from "./types";
-import type { PlayerController } from "./use-player";
+import { type PlayerController, usePlayhead } from "./use-player";
 
 const RATIO: Record<OutputFormat, [number, number]> = { "9:16": [9, 16], "1:1": [1, 1], "4:5": [4, 5], "16:9": [16, 9] };
 
@@ -56,12 +56,10 @@ export function PreviewPlayer({ player, version, src, assetNames, pinMode, onPin
               className="size-full object-contain"
               playsInline
               preload="metadata"
-              onLoadedMetadata={(event) => {
-                event.currentTarget.currentTime = player.currentMs / 1000;
-              }}
+              onLoadedMetadata={(event) => player.syncMedia(event.currentTarget)}
             />
           ) : (
-            <PlaceholderFrame version={version} currentMs={player.currentMs} assetNames={assetNames} />
+            <PlaceholderFrame version={version} player={player} assetNames={assetNames} />
           )}
 
           <button
@@ -107,19 +105,7 @@ export function PreviewPlayer({ player, version, src, assetNames, pinMode, onPin
         <Button variant="ghost" size="icon" aria-label="Next frame" title="Next frame (.)" onClick={() => player.step(1)}>
           <ChevronRight />
         </Button>
-        <output className="font-mono text-[12.5px] tabular-nums text-muted-foreground" aria-label="Playhead">
-          <span className="text-foreground">{formatTimecode(player.currentMs)}</span> / {formatTimecode(player.durationMs)}
-        </output>
-        <input
-          type="range"
-          aria-label="Scrub"
-          min={0}
-          max={player.durationMs}
-          step={1}
-          value={player.currentMs}
-          onChange={(event) => player.seek(Number(event.target.value))}
-          className="order-last h-5 min-w-40 basis-full cursor-pointer accent-brand sm:order-none sm:flex-1 sm:basis-0"
-        />
+        <PlayheadControls player={player} />
         <Button
           variant={pinMode ? "default" : "secondary"}
           size="sm"
@@ -140,13 +126,14 @@ export function PreviewPlayer({ player, version, src, assetNames, pinMode, onPin
 /** The stand-in for a render: a colour per clip, the clip's name and a mark that moves, so seeking and stepping show. */
 function PlaceholderFrame({
   version,
-  currentMs,
+  player,
   assetNames,
 }: {
   version: ReviewVersion;
-  currentMs: number;
+  player: PlayerController;
   assetNames?: Record<string, string>;
 }) {
+  const currentMs = usePlayhead(player);
   const entry = entryAt(version.time_map, Math.min(currentMs, version.duration_ms - 1));
   const base = hue(entry?.asset_id ?? "none");
   const progress = entry ? (currentMs - entry.out_start_ms) / Math.max(entry.out_end_ms - entry.out_start_ms, 1) : 0;
@@ -172,5 +159,27 @@ function PlaceholderFrame({
         <div className="text-base font-semibold text-balance">{entry ? (assetNames?.[entry.asset_id] ?? entry.asset_id) : "End of video"}</div>
       </div>
     </div>
+  );
+}
+
+/** The clock and the scrub slider: the parts of the controls that follow the playhead. */
+function PlayheadControls({ player }: { player: PlayerController }) {
+  const currentMs = usePlayhead(player);
+  return (
+    <>
+      <output className="font-mono text-[12.5px] tabular-nums text-muted-foreground" aria-label="Playhead">
+        <span className="text-foreground">{formatTimecode(currentMs)}</span> / {formatTimecode(player.durationMs)}
+      </output>
+      <input
+        type="range"
+        aria-label="Scrub"
+        min={0}
+        max={player.durationMs}
+        step={1}
+        value={currentMs}
+        onChange={(event) => player.seek(Number(event.target.value))}
+        className="order-last h-5 min-w-40 basis-full cursor-pointer accent-brand sm:order-none sm:flex-1 sm:basis-0"
+      />
+    </>
   );
 }

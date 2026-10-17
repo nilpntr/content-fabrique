@@ -75,17 +75,23 @@ export interface LaneItem {
   end_ms: number;
 }
 
+/** A point comment is drawn as a dot this wide, centred on its time. */
+export const DOT_PX = 14;
+
 /**
- * Stacks overlapping regions into rows: each goes into the first lane that is free for its width, where a region is
- * at least `minWidthPx` wide (a point comment is a dot). Returns lane indexes by id.
+ * Stacks overlapping regions into rows: each goes into the first lane that is free for what is drawn. A range
+ * covers [left, left + width] (at least `DOT_PX` wide); a point covers [left - 7, left + 7], like its dot.
+ * Returns lane indexes by id.
  */
-export function assignLanes(items: LaneItem[], scale: TimelineScale, minWidthPx = 14): Map<string, number> {
+export function assignLanes(items: LaneItem[], scale: TimelineScale): Map<string, number> {
   const lanes = new Map<string, number>();
   const laneEnds: number[] = [];
   const sorted = [...items].sort((a, b) => a.start_ms - b.start_ms || b.end_ms - a.end_ms || a.id.localeCompare(b.id));
   for (const item of sorted) {
-    const left = msToPx(item.start_ms, scale);
-    const right = left + Math.max(msToPx(item.end_ms - item.start_ms, scale), minWidthPx);
+    const at = msToPx(item.start_ms, scale);
+    const isPoint = item.end_ms <= item.start_ms;
+    const left = isPoint ? at - DOT_PX / 2 : at;
+    const right = isPoint ? at + DOT_PX / 2 : at + Math.max(msToPx(item.end_ms - item.start_ms, scale), DOT_PX);
     let lane = laneEnds.findIndex((end) => end <= left);
     if (lane === -1) lane = laneEnds.length;
     laneEnds[lane] = right;

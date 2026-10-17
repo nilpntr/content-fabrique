@@ -299,3 +299,157 @@ test("without a src the screen plays a generated placeholder instead of a video"
   expect(document.querySelector("video")).toBeNull();
   expect(screen.getByTestId("placeholder-frame")).toBeTruthy();
 });
+
+const sampleScreen = (props: Partial<Parameters<typeof ReviewScreen>[0]> = {}) =>
+  render(<ReviewScreen versions={SAMPLE_VERSIONS} comments={SAMPLE_COMMENTS} assetNames={SAMPLE_ASSET_NAMES} {...props} />);
+const itemOf = (text: RegExp | string) => within(panel()).getByText(text).closest("li") as HTMLElement;
+
+test("Space presses a focused button and does not toggle playback; elsewhere it plays", () => {
+  renderScreen();
+  const next = screen.getByRole("button", { name: "Next frame" });
+  const onButton = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+  next.dispatchEvent(onButton);
+  expect(onButton.defaultPrevented).toBe(false);
+  expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+
+  const onPage = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+  document.body.dispatchEvent(onPage);
+  expect(onPage.defaultPrevented).toBe(true);
+  expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(1);
+});
+
+test("resolved and applied comments are not open: own label, no count, not in the Open filter, neutral on the timeline", () => {
+  const base = { version: 1, start_ms: 1000, end_ms: 2000, kind: "comment", author: { kind: "creator", name: "Sam" } } as const;
+  renderScreen({
+    comments: [
+      { ...base, id: "o", body: "still open", status: "open", created_at: "2026-10-14T09:03:00Z" },
+      { ...base, id: "r", body: "closed by hand", status: "resolved", created_at: "2026-10-14T09:02:00Z" },
+      { ...base, id: "a", body: "applied somewhere", status: "applied", created_at: "2026-10-14T09:01:00Z" },
+    ],
+  });
+  expect(within(panel()).getByText("1 open · 3 total")).toBeTruthy();
+  expect(within(itemOf("closed by hand")).getByText("Resolved")).toBeTruthy();
+  expect(within(itemOf("applied somewhere")).getByText("Applied")).toBeTruthy();
+  expect(document.querySelector('[data-region-id="r"]')?.getAttribute("data-tone")).toBe("neutral");
+  expect(document.querySelector('[data-region-id="a"]')?.getAttribute("data-tone")).toBe("neutral");
+  expect(document.querySelector('[data-region-id="o"]')?.getAttribute("data-tone")).toBe("open");
+
+  fireEvent.click(within(panel()).getByRole("button", { name: "Open" }));
+  expect(within(panel()).getAllByRole("listitem")).toHaveLength(1);
+});
+
+test("on an older version, a comment from a newer one says it was made later, not that it no longer maps", () => {
+  sampleScreen();
+  fireEvent.click(screen.getByRole("button", { name: /^v1/ }));
+  const logo = itemOf("Put the logo here.");
+  expect(logo.getAttribute("data-status")).toBe("newer");
+  expect(within(logo).getByText("Made on v3 (newer)")).toBeTruthy();
+  expect(within(panel()).queryAllByText("No longer mapped")).toHaveLength(0);
+  expect(document.querySelector('[data-region-id="ann_logo"]')).toBeNull();
+});
+
+test("Open vN switches to that version and seeks to the comment's start there", () => {
+  const onSeek = vi.fn();
+  sampleScreen({ onSeek });
+  const pulldown = itemOf("This pulldown clip drags. Cut it.");
+  fireEvent.click(within(pulldown).getByRole("button", { name: "Open v1" }));
+
+  expect(screen.getByRole("button", { name: /^v1/ }).getAttribute("aria-pressed")).toBe("true");
+  expect(onSeek).toHaveBeenLastCalledWith(4500);
+  expect(screen.getByRole("status", { name: "Playhead" }).textContent).toContain("00:04.5");
+  expect(itemOf("This pulldown clip drags. Cut it.").getAttribute("data-selected")).toBe("true");
+});
+
+test("a new drag while a comment has text keeps the old range and the text", () => {
+  renderScreen();
+  drag(200, 500);
+  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "half written" } });
+
+  drag(600, 800);
+  const dialog = screen.getByRole("dialog", { name: "Add comment" });
+  expect(within(dialog).getByText("00:02.0–00:05.0")).toBeTruthy();
+  expect((within(dialog).getByRole("textbox", { name: "Comment" }) as HTMLTextAreaElement).value).toBe("half written");
+  expect(within(dialog).getByRole("status").textContent).toContain("Save or cancel");
+  // The refused selection did not move the playhead either.
+  expect(screen.getByRole("status", { name: "Playhead" }).textContent).toContain("00:02.0");
+
+  // A click for a point is a new selection too.
+  pointer("pointerDown", 900);
+  pointer("pointerUp", 900);
+  expect(within(screen.getByRole("dialog")).getByText("00:02.0–00:05.0")).toBeTruthy();
+
+  // Once cancelled, the next drag starts a fresh comment with no text.
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  drag(600, 800);
+  const fresh = screen.getByRole("dialog", { name: "Add comment" });
+  expect(within(fresh).getByText("00:06.0–00:08.0")).toBeTruthy();
+  expect((within(fresh).getByRole("textbox", { name: "Comment" }) as HTMLTextAreaElement).value).toBe("");
+});
+
+test("a new drag while the comment box is still empty starts over", () => {
+  renderScreen();
+  drag(200, 500);
+  drag(600, 800);
+  expect(within(screen.getByRole("dialog")).getByText("00:06.0–00:08.0")).toBeTruthy();
+});
+
+test("with typed text, picking another comment or version leaves the draft where it is", () => {
+  sampleScreen();
+  pointer("pointerDown", 300);
+  pointer("pointerUp", 300);
+  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "typed" } });
+  const range = within(screen.getByRole("dialog")).getByText(/^\d\d:\d\d\.\d$/).textContent;
+
+  fireEvent.click(screen.getByRole("button", { name: /^v1/ }));
+  expect(screen.getByRole("button", { name: /^v3/ }).getAttribute("aria-pressed")).toBe("true");
+  expect(within(screen.getByRole("dialog")).getByRole("status").textContent).toContain("Save or cancel");
+
+  fireEvent.click(within(panel()).getByText(/b-roll cuts in too early/));
+  const dialog = screen.getByRole("dialog");
+  expect(within(dialog).getByText(range as string)).toBeTruthy();
+  expect((within(dialog).getByRole("textbox", { name: "Comment" }) as HTMLTextAreaElement).value).toBe("typed");
+});
+
+test("with no versions the screen shows an empty state instead of crashing", () => {
+  render(<ReviewScreen versions={[]} comments={[]} />);
+  expect(screen.getByText("No versions to review yet")).toBeTruthy();
+});
+
+test("an initial version that does not exist falls back to the latest", () => {
+  sampleScreen({ initialVersion: 9 });
+  expect(screen.getByRole("button", { name: /^v3/ }).getAttribute("aria-pressed")).toBe("true");
+  cleanup();
+  sampleScreen({ initialVersion: 2 });
+  expect(screen.getByRole("button", { name: /^v2/ }).getAttribute("aria-pressed")).toBe("true");
+});
+
+test("zooming keeps the middle of the view, and the playhead follow does not undo it", () => {
+  const offsets = new WeakMap<Element, number>();
+  Object.defineProperty(HTMLElement.prototype, "scrollLeft", {
+    configurable: true,
+    get(this: Element) {
+      return offsets.get(this) ?? 0;
+    },
+    set(this: Element, value: number) {
+      offsets.set(this, value);
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => 1000 });
+  try {
+    renderScreen();
+    const viewport = screen.getByTestId("timeline-surface").parentElement?.parentElement as HTMLElement;
+
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    // 4x: 400 px per second. Seeking far to the right brings the playhead into view.
+    scrubTo(9000);
+    expect(viewport.scrollLeft).toBe(3100);
+
+    // Zooming in again keeps 9 s in the middle: 8x is 800 px per second, so 9 s is at 7200 px.
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(viewport.scrollLeft).toBe(6700);
+  } finally {
+    Reflect.deleteProperty(HTMLElement.prototype, "scrollLeft");
+    Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
+  }
+});
