@@ -1,0 +1,23 @@
+/** Mirrors the future API (D-25): the four output sizes a project can pick. */
+export const FORMAT_IDS = ["9:16", "1:1", "4:5", "16:9"] as const;
+export type Format = (typeof FORMAT_IDS)[number];
+
+/** A TypeID: the `ast_` prefix plus a base32 UUIDv7 (D-24). */
+export type AssetId = `ast_${string}`;
+
+/** A clip in the library, as the library list endpoint will return it. */
+export interface Asset {
+  id: AssetId;
+  title: string;
+  posterUrl: string;
+  durationMs: number;
+  tags: string[];
+}
+
+/** What "Create project" hands to the caller. `assetIds` are in the order the clips were picked. */
+export interface NewProjectInput {
+  format: Format;
+  assetIds: AssetId[];
+  /** The trimmed free-text instructions; an empty string when the creator wrote none. */
+  brief: string;
+}
