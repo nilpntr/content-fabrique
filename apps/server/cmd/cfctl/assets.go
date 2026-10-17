@@ -30,6 +30,7 @@ import (
 )
 
 const assetsUsage = `Usage:
+  cfctl assets quicklook --workspace <wks_... or org_...> [--all] [--asset <ast_...>] [flags]   (run "cfctl assets quicklook -h")
   cfctl assets import --workspace <wks_... or org_...> [--title-from-filename] [--wait] [flags] [--] <files...>
 
 Development only. Imports local media files into a workspace's library through the same code as the browser: each file becomes
@@ -77,6 +78,12 @@ func cmdAssets(args []string, stdout, stderr io.Writer, lookup lookupEnv) int {
 		return 0
 	case "import":
 		return cmdAssetsImport(args[1:], stdout, stderr, lookup)
+	case "quicklook":
+		if len(args) > 1 && (args[1] == "help" || args[1] == "-h" || args[1] == "--help") {
+			_, _ = fmt.Fprint(stdout, assetsQuickLookUsage)
+			return 0
+		}
+		return cmdAssetsQuickLook(args[1:], stdout, stderr, lookup)
 	}
 	_, _ = fmt.Fprintf(stderr, "cfctl assets: unknown command %q\n\n%s", args[0], assetsUsage)
 	return 2

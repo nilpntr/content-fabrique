@@ -24,6 +24,9 @@ type Deps struct {
 	// Ingest is the media pipeline for the asset_ingest job. Nil when the worker has no object storage or sandbox set up:
 	// ingest jobs then wait (snoozed) until a worker that has them picks them up.
 	Ingest AssetIngester
+	// QuickLook is the quick look for the quick_look job. Nil when the worker has no object storage, sandbox or model access:
+	// quick_look jobs then wait (snoozed) until a worker that has them picks them up.
+	QuickLook QuickLooker
 	// Render is the render pipeline for the render job. Nil when the worker has no object storage or sandbox set up: render jobs
 	// then wait (snoozed) until a worker that has them picks them up.
 	Render Renderer
@@ -69,6 +72,9 @@ func Workers(deps Deps) (*river.Workers, error) {
 		return nil, err
 	}
 	if err := river.AddWorkerSafely(w, &AgentRunsResumeWorker{deps: deps}); err != nil {
+		return nil, err
+	}
+	if err := river.AddWorkerSafely(w, &QuickLookWorker{deps: deps}); err != nil {
 		return nil, err
 	}
 	if err := river.AddWorkerSafely(w, &RenderWorker{deps: deps}); err != nil {

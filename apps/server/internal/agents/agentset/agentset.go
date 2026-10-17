@@ -69,6 +69,9 @@ type Runtime struct {
 	Router   *llm.Router
 	Factory  *llm.Factory
 	Agents   *runtime.Agents
+	// Frames is the frame service the editor looks at footage with (and the quick look cuts its candidates with): the same
+	// cache of pictures in object storage. Nil when the process has no object storage and sandbox for it.
+	Frames *editor.FrameService
 	// Service starts, answers and cancels runs.
 	Service *runtime.Service
 	// Runner executes runs; nil for a DefinitionOnly runtime.
@@ -101,10 +104,14 @@ func Open(o Options) (*Runtime, error) {
 		return nil, err
 	}
 	deps := editor.Deps{Projects: projectsSvc, Store: o.Store, Preview: o.Preview}
-	var images llm.ImageResolver
+	var (
+		images llm.ImageResolver
+		frames *editor.FrameService
+	)
 	switch {
 	case o.Objects != nil && o.Frames != nil && o.TempDir != "":
-		deps.Frames = &editor.FrameService{Store: o.Store, Objects: o.Objects, Runner: o.Frames, TempDir: o.TempDir, Logger: o.Logger}
+		frames = &editor.FrameService{Store: o.Store, Objects: o.Objects, Runner: o.Frames, TempDir: o.TempDir, Logger: o.Logger}
+		deps.Frames = frames
 		images = editor.ImageResolver{Objects: o.Objects}
 	case o.RequireStorage && !o.DefinitionOnly:
 		return nil, ErrNoStorage
@@ -127,7 +134,7 @@ func Open(o Options) (*Runtime, error) {
 		return nil, err
 	}
 	rt := &Runtime{
-		Settings: settings, Router: router, Factory: factory, Agents: agents,
+		Settings: settings, Router: router, Factory: factory, Agents: agents, Frames: frames,
 		Service: &runtime.Service{Store: o.Store, Enqueuer: o.Enqueuer, Router: router, Factory: factory, Agents: agents, Inline: o.Inline},
 	}
 	if !o.DefinitionOnly {

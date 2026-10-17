@@ -88,6 +88,9 @@ func TestMigrateCLI(t *testing.T) {
 	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || countRiverTables(t, url) == 0 || strings.Contains(out, "river/") {
 		t.Fatalf("down one removed River too: %d %s", code, out)
 	}
+	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00012_renders.sql") {
+		t.Fatalf("down one (00012) = %d %s", code, out)
+	}
 	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00011_timeline_version_idempotency.sql") {
 		t.Fatalf("down one (00011) = %d %s", code, out)
 	}
@@ -121,7 +124,7 @@ func TestMigrateCLI(t *testing.T) {
 	if code, _, _ := migrateCLI(t, url, "up"); code != 0 {
 		t.Fatal("up")
 	}
-	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00012_renders.sql") {
+	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00013_quick_look.sql") {
 		t.Fatalf("down one = %d %s", code, out)
 	}
 }
