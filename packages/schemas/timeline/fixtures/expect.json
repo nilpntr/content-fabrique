@@ -231,5 +231,33 @@
     "code": "schema",
     "path": "/tracks/0/items/0/motion/preset",
     "keyword": "enum"
+  },
+  "i62_outside_timeline_sfx_starts_at_the_end.json": {
+    "code": "outside_timeline"
+  },
+  "i63_schema_sfx_cue_only.json": {
+    "code": "schema",
+    "path": "/tracks/1/items/0/export",
+    "keyword": "const"
+  },
+  "i64_schema_sfx_unknown_effect.json": {
+    "code": "schema",
+    "path": "/tracks/1/items/0/sfx",
+    "keyword": "enum"
+  },
+  "i65_schema_look_unknown_preset.json": {
+    "code": "schema",
+    "path": "/tracks/0/items/0/look/preset",
+    "keyword": "enum"
+  },
+  "i66_schema_exposure_ev_too_high.json": {
+    "code": "schema",
+    "path": "/tracks/0/items/0/exposure_ev",
+    "keyword": "maximum"
+  },
+  "i67_schema_look_match_not_a_boolean.json": {
+    "code": "schema",
+    "path": "/tracks/0/items/0/look/match",
+    "keyword": "type"
   }
 }

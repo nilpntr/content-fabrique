@@ -31,6 +31,7 @@ const OPS = [
   "set_clip_audio",
   "set_motion",
   "set_speed_ramp",
+  "add_sfx",
 ];
 
 type Json = Record<string, any>;
@@ -107,6 +108,8 @@ describe("op schema", () => {
     expect(schema.$defs.speed).toEqual(item.speed);
     expect(schema.$defs.sourceRange).toEqual(item.source);
     expect(schema.$defs.why).toEqual(item.why);
+    expect(schema.$defs.exposureEv).toEqual(item.exposure_ev);
+    expect(schema.$defs.sfxName).toEqual(timelineSchema.$defs.sfxSound.properties.sfx);
     const text = timelineSchema.$defs.textItem.properties;
     expect(schema.$defs.textBody).toEqual(text.text);
     expect(schema.$defs.textDuration).toEqual(text.duration_ms);

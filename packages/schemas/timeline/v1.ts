@@ -729,9 +729,17 @@ export type At = number;
  */
 export type Strength = number;
 /**
- * A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white) or matte (lifted blacks).
+ * A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white), matte (lifted blacks), auto (a mild contrast curve that keeps blacks and whites where they are, plus the clip's exposure_ev nudge, so shots from different angles meet at one exposure without washing out low-key footage) or gym_moody (deep blacks, warm skin, a slight vignette).
  */
-export type Preset1 = "none" | "punchy" | "warm" | "cool" | "bw" | "matte";
+export type Preset1 = "none" | "punchy" | "warm" | "cool" | "bw" | "matte" | "auto" | "gym_moody";
+/**
+ * True to correct the clip's exposure by its exposure_ev hint (from the analysis; a nudge of at most 0.7 stops, black point kept) before the preset, so shots from different angles meet at one exposure. The preset auto always does this, whatever match says. Default false. Without an exposure_ev on the clip it changes nothing.
+ */
+export type MatchExposure = boolean;
+/**
+ * A small nudge, -1 to 1 stops (EV): how much brighter this clip is than the exposure the edit should have (positive: too bright, to be darkened; negative: too dark, to be lifted). It must come from highlight or midtone percentiles of the clip, never from its mean brightness, because a low-key clip (black wall, lit subject) has a low mean and is correctly exposed. The renderer applies the opposite, limited to 0.7 stops and ignoring hints under 0.15, with a highlight-preserving curve that keeps the black point, when look.match is true or the preset is auto. Without it, nothing is corrected.
+ */
+export type ExposureHint = number;
 /**
  * How the clip begins. A cut is instant. The other types blend with the previous clip over duration_ms, and the clip then starts that long before the previous one ends. The first clip must have a cut.
  *
@@ -872,12 +880,12 @@ export type ItemId3 = string;
  */
 export type TrackType3 = "audio";
 /**
- * A sound in the mix, told apart by its "kind": trend_sound (cue-only, never reproduced by us), licensed_track (from the licensed library) or creator_audio (the creator's own upload).
+ * A sound in the mix, told apart by its "kind": trend_sound (cue-only, never reproduced by us), licensed_track (from the licensed library), creator_audio (the creator's own upload) or sfx (a sound effect the renderer synthesises: no asset, always in the export).
  *
  * This interface was referenced by `Timeline`'s JSON-Schema
  * via the `definition` "audioItem".
  */
-export type AudioItem = TrendSound | LicensedTrack | CreatorAudio;
+export type AudioItem = TrendSound | LicensedTrack | CreatorAudio | SoundEffect;
 /**
  * "trend_sound".
  */
@@ -963,6 +971,22 @@ export type SourceOffset3 = number;
  */
 export type ExportPolicy2 = "licensed";
 /**
+ * "sfx".
+ */
+export type Kind3 = "sfx";
+/**
+ * whoosh, impact, riser or swish.
+ */
+export type Effect = "whoosh" | "impact" | "riser" | "swish";
+/**
+ * When the effect starts in the output, in ms. For an impact or a riser that should land on a beat, start it before the beat by the time it takes to build: a riser ends 1500 ms after it starts.
+ */
+export type Start4 = number;
+/**
+ * Always "licensed": the effect is ours and is mixed into the render.
+ */
+export type ExportPolicy3 = "licensed";
+/**
  * The sounds in the mix.
  */
 export type AudioItems = AudioItem[];
@@ -973,7 +997,7 @@ export type Time = number;
 /**
  * beat is a beat of the bar, downbeat the first beat of a bar, drop the big moment of the track and section the start of a part.
  */
-export type Kind3 = "beat" | "downbeat" | "drop" | "section";
+export type Kind4 = "beat" | "downbeat" | "drop" | "section";
 /**
  * How strong the marker is, from 0 to 1. Default 1.
  */
@@ -1070,6 +1094,7 @@ export interface VideoClip {
   reframe?: Reframe;
   motion?: Motion;
   look?: Look;
+  exposure_ev?: ExposureHint;
   transition_in?: TransitionIn;
   audio?: ClipAudio;
   why?: Why;
@@ -1118,6 +1143,7 @@ export interface Motion {
  */
 export interface Look {
   preset: Preset1;
+  match?: MatchExposure;
 }
 /**
  * Whether the clip's own sound is in the mix. Without it, the clip is silent.
@@ -1239,6 +1265,20 @@ export interface CreatorAudio {
   fade_out_ms?: FadeOut;
 }
 /**
+ * A sound effect that the renderer synthesises itself (no asset, no licence: it is ours, so its export is "licensed" and it is in every render and export). whoosh (0.6 s, a pass-by), impact (0.8 s, a low hit with a crack), riser (1.5 s, a rising tension build that peaks at its end) or swish (0.3 s, a quick air pass). It starts at at_ms and is cut at the end of the timeline. It is mixed after the loudness normalisation, at a fixed level plus gain_db, so it stays an accent above the programme.
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "sfxSound".
+ */
+export interface SoundEffect {
+  id: ItemId;
+  kind: Kind3;
+  sfx: Effect;
+  at_ms: Start4;
+  export: ExportPolicy3;
+  gain_db?: GainInDB;
+}
+/**
  * A point on the beat grid or a section boundary, in output time.
  *
  * This interface was referenced by `Timeline`'s JSON-Schema
@@ -1246,7 +1286,7 @@ export interface CreatorAudio {
  */
 export interface Marker {
   at_ms: Time;
-  kind: Kind3;
+  kind: Kind4;
   strength?: Strength1;
 }
 /**

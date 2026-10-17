@@ -1,0 +1,6 @@
+{
+  "op": "add_sfx",
+  "sfx": "riser",
+  "at_ms": 1500,
+  "gain_db": 2.5
+}
