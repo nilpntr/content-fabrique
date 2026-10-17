@@ -35,6 +35,7 @@ const asset = (id: string, over: Partial<ApiAsset> = {}): ApiAsset => ({
   failure_reason: null,
   ingest_progress: 0,
   ingest_stage: null,
+  transcript_status: "none",
   created_at: "2026-10-17T10:00:00Z",
   updated_at: "2026-10-17T10:00:00Z",
   ...over,
