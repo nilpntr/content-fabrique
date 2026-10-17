@@ -58,7 +58,7 @@ const deleteWorkspaceByClerkOrgID = `-- name: DeleteWorkspaceByClerkOrgID :one
 INSERT INTO workspaces (clerk_org_id, name, deleted_at)
 VALUES ($1, '', now())
 ON CONFLICT (clerk_org_id) DO UPDATE SET deleted_at = COALESCE(workspaces.deleted_at, now())
-RETURNING id, clerk_org_id, name, plan, region, billing_mode, created_at, updated_at, deleted_at, clerk_updated_at
+RETURNING id, clerk_org_id, name, region, billing_mode, created_at, updated_at, deleted_at, clerk_updated_at
 `
 
 // An unknown workspace gets a tombstone, as for users.
@@ -69,7 +69,6 @@ func (q *Queries) DeleteWorkspaceByClerkOrgID(ctx context.Context, clerkOrgID st
 		&i.ID,
 		&i.ClerkOrgID,
 		&i.Name,
-		&i.Plan,
 		&i.Region,
 		&i.BillingMode,
 		&i.CreatedAt,
@@ -159,7 +158,7 @@ const insertWorkspaceIfNew = `-- name: InsertWorkspaceIfNew :one
 INSERT INTO workspaces (clerk_org_id, name, clerk_updated_at)
 VALUES ($1, $2, $3)
 ON CONFLICT (clerk_org_id) DO NOTHING
-RETURNING id, clerk_org_id, name, plan, region, billing_mode, created_at, updated_at, deleted_at, clerk_updated_at
+RETURNING id, clerk_org_id, name, region, billing_mode, created_at, updated_at, deleted_at, clerk_updated_at
 `
 
 type InsertWorkspaceIfNewParams struct {
@@ -176,7 +175,6 @@ func (q *Queries) InsertWorkspaceIfNew(ctx context.Context, arg InsertWorkspaceI
 		&i.ID,
 		&i.ClerkOrgID,
 		&i.Name,
-		&i.Plan,
 		&i.Region,
 		&i.BillingMode,
 		&i.CreatedAt,
@@ -353,7 +351,7 @@ INSERT INTO workspaces (clerk_org_id, name, clerk_updated_at)
 VALUES ($1, $2, $3)
 ON CONFLICT (clerk_org_id) DO UPDATE SET name = EXCLUDED.name, clerk_updated_at = EXCLUDED.clerk_updated_at
 WHERE workspaces.deleted_at IS NULL AND workspaces.clerk_updated_at < EXCLUDED.clerk_updated_at
-RETURNING id, clerk_org_id, name, plan, region, billing_mode, created_at, updated_at, deleted_at, clerk_updated_at
+RETURNING id, clerk_org_id, name, region, billing_mode, created_at, updated_at, deleted_at, clerk_updated_at
 `
 
 type SyncWorkspaceParams struct {
@@ -369,7 +367,6 @@ func (q *Queries) SyncWorkspace(ctx context.Context, arg SyncWorkspaceParams) (W
 		&i.ID,
 		&i.ClerkOrgID,
 		&i.Name,
-		&i.Plan,
 		&i.Region,
 		&i.BillingMode,
 		&i.CreatedAt,

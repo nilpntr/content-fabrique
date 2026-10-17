@@ -77,7 +77,7 @@ func clerkSyncSuite(t *testing.T, st *store.Store) {
 
 	t.Run("workspaces are synced in order", func(t *testing.T) {
 		w := newWorkspace(t, "studio", 1000)
-		if w.ID.IsZero() || w.Plan != store.DefaultPlan || w.Region != store.DefaultRegion || w.BillingMode != string(store.BillingManaged) || w.DeletedAt != nil {
+		if w.ID.IsZero() || w.Region != store.DefaultRegion || w.BillingMode != string(store.BillingManaged) || w.DeletedAt != nil {
 			t.Fatalf("workspace = %+v", w)
 		}
 		id := "org_studio" + suffix

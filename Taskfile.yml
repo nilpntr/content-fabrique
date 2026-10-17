@@ -61,6 +61,13 @@ tasks:
     cmds:
       - go run ./cmd/cfctl migrate up
 
+  # Plans are granted by hand until billing exists (P7-01). Reads DATABASE_URL: the app's own role is enough.
+  plan:
+    desc: "Grant, revoke or show a plan by hand. Example: task plan -- grant --user you@example.com --plan creator [--until 2026-12-31] | task plan -- revoke --user you@example.com | task plan -- show --user you@example.com"
+    dir: apps/server
+    cmds:
+      - go run ./cmd/cfctl plan {{if .CLI_ARGS}}{{.CLI_ARGS}}{{else}}help{{end}}
+
   gen:sql:
     desc: Regenerate the sqlc code (apps/server/internal/store/db) from the migrations and queries. Commit the result
     dir: apps/server

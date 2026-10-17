@@ -88,7 +88,7 @@ func (e *env) startWorker(t *testing.T, opts jobs.WorkerOptions) *jobs.Worker {
 
 func (e *env) newWorkspace(t *testing.T, org string) store.Workspace {
 	t.Helper()
-	w, err := e.api.CreateWorkspace(context.Background(), store.NewWorkspace{ClerkOrgID: org, Name: org, Plan: "free", Region: "eu", BillingMode: store.BillingManaged})
+	w, err := e.api.CreateWorkspace(context.Background(), store.NewWorkspace{ClerkOrgID: org, Name: org, Region: "eu", BillingMode: store.BillingManaged})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestJobEnqueuedInAPITransactionIsProcessedByWorker(t *testing.T) {
 
 	err := e.api.InTx(ctx, func(tx *store.Store) error {
 		// Another write in the same transaction, to show they travel together.
-		if _, err := tx.CreateWorkspace(ctx, store.NewWorkspace{ClerkOrgID: "org_same_tx", Name: "same tx", Plan: "free", Region: "eu", BillingMode: store.BillingManaged}); err != nil {
+		if _, err := tx.CreateWorkspace(ctx, store.NewWorkspace{ClerkOrgID: "org_same_tx", Name: "same tx", Region: "eu", BillingMode: store.BillingManaged}); err != nil {
 			return err
 		}
 		if _, err := e.enq.InsertInStore(ctx, tx, jobs.WorkspaceWelcomeArgs{WorkspaceID: ws.ID}, nil); err != nil {

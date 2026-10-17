@@ -73,7 +73,7 @@ type SyncWorkspaceInput struct {
 }
 
 // SyncWorkspace creates the workspace of a Clerk organization or renames it, when this version is newer. A new
-// workspace gets the defaults (plan, region, billing mode) of the table.
+// workspace gets the defaults (region, billing mode) of the table.
 func (s *Store) SyncWorkspace(ctx context.Context, in SyncWorkspaceInput) (Workspace, bool, error) {
 	if strings.TrimSpace(in.ClerkOrgID) == "" {
 		return Workspace{}, false, fmt.Errorf("%w: clerk org id is required", ErrInvalid)

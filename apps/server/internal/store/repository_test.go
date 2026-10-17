@@ -38,7 +38,7 @@ func repositorySuite(t *testing.T, st *store.Store) {
 		if w.ID.IsZero() || w.ID.Version() != 7 || !strings.HasPrefix(w.ID.String(), "wks_") {
 			t.Fatalf("id = %v", w.ID)
 		}
-		if w.Plan != store.DefaultPlan || w.Region != store.DefaultRegion || w.BillingMode != string(store.BillingManaged) {
+		if w.Region != store.DefaultRegion || w.BillingMode != string(store.BillingManaged) {
 			t.Fatalf("defaults not applied: %+v", w)
 		}
 		if w.CreatedAt.IsZero() || w.UpdatedAt.IsZero() {
@@ -66,8 +66,8 @@ func repositorySuite(t *testing.T, st *store.Store) {
 		if _, err := st.GetWorkspaceByClerkOrgID(ctx, "org_missing_"+suffix); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("missing workspace: err = %v, want ErrNotFound", err)
 		}
-		byok, err := st.CreateWorkspace(ctx, store.NewWorkspace{ClerkOrgID: "org_byok_" + suffix, Name: "B", BillingMode: store.BillingBYOK, Plan: "pro", Region: "us"})
-		if err != nil || byok.BillingMode != "byok" || byok.Plan != "pro" || byok.Region != "us" {
+		byok, err := st.CreateWorkspace(ctx, store.NewWorkspace{ClerkOrgID: "org_byok_" + suffix, Name: "B", BillingMode: store.BillingBYOK, Region: "us"})
+		if err != nil || byok.BillingMode != "byok" || byok.Region != "us" {
 			t.Fatalf("explicit values: %+v, %v", byok, err)
 		}
 	})
@@ -316,6 +316,8 @@ func repositorySuite(t *testing.T, st *store.Store) {
 			t.Fatalf("the committed workspace is missing: %v", err)
 		}
 	})
+
+	t.Run("plans", func(t *testing.T) { plansSuite(t, st, suffix) })
 }
 
 // ghostUserID and ghostWorkspaceID are well-formed keys that no row has.
