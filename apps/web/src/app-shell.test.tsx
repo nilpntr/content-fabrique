@@ -51,6 +51,14 @@ test("the active item and the title come from the router's match, also with a tr
   expect(document.querySelector('[data-slot="breadcrumb-page"]')?.textContent).toBe("Reports");
 });
 
+test("an unknown path under a nav page is Not found with no active item", async () => {
+  renderAt("/reports/does-not-exist");
+  const nav = within(await screen.findByRole("navigation", { name: "Main" }));
+  expect(await screen.findByText("Nothing at this address")).toBeTruthy();
+  expect(document.querySelector('[data-slot="breadcrumb-page"]')?.textContent).toBe("Not found");
+  expect(nav.getAllByRole("link").some((link) => link.hasAttribute("data-active"))).toBe(false);
+});
+
 test("keyboard focus moves through the nav", async () => {
   renderAt("/reports");
   const nav = within(await screen.findByRole("navigation", { name: "Main" }));

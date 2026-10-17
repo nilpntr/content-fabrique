@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { parseSidebarOpen, sidebarCookie } from "./sidebar-state";
+import { parseSidebarOpen, sidebarCookie, sidebarOpenFromValue } from "./sidebar-state";
 
 test("the sidebar is open unless the cookie says false", () => {
   expect(parseSidebarOpen(undefined)).toBe(true);
@@ -28,4 +28,11 @@ test("the written cookie reads back", () => {
     const [pair] = sidebarCookie(open).split(";");
     expect(parseSidebarOpen(pair)).toBe(open);
   }
+});
+
+test("the server's getCookie value: open unless it is exactly false", () => {
+  expect(sidebarOpenFromValue(undefined)).toBe(true);
+  expect(sidebarOpenFromValue("true")).toBe(true);
+  expect(sidebarOpenFromValue("banana")).toBe(true);
+  expect(sidebarOpenFromValue("false")).toBe(false);
 });

@@ -62,6 +62,10 @@ test("a page outside the nav has no active item", async () => {
   expect(await activeAt("/elsewhere")).toBe("none");
 });
 
+test("an unknown child path (a 404) activates nothing", async () => {
+  expect(await activeAt("/reports/a/b")).toBe("none");
+});
+
 test("a lookalike path is not a child", async () => {
   expect(await activeAt("/reportsx")).toBe("none");
 });

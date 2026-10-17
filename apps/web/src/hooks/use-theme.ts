@@ -19,10 +19,24 @@ let userChose = false;
  */
 export const THEME_SCRIPT = `(function(){try{var s=null;try{s=localStorage.getItem("${KEY}");if(s===null){var o=localStorage.getItem("${LEGACY_KEY}");if(o==="dark"||o==="light"){s=o;localStorage.setItem("${KEY}",o);localStorage.removeItem("${LEGACY_KEY}")}}}catch(e){}var d=s==="dark"||s==="light"?s==="dark":window.matchMedia("${DARK_QUERY}").matches;document.documentElement.classList.toggle("dark",d)}catch(e){}})();`;
 
+function valid(value: string | null): Theme | null {
+  return value === "light" || value === "dark" ? value : null;
+}
+
+/** The saved choice. Falls back to `LEGACY_KEY` and moves it to `KEY` when it can; if it cannot, the old value still counts. */
 function stored(): Theme | null {
   try {
-    const value = localStorage.getItem(KEY);
-    return value === "light" || value === "dark" ? value : null;
+    const value = valid(localStorage.getItem(KEY));
+    if (value) return value;
+    const legacy = valid(localStorage.getItem(LEGACY_KEY));
+    if (!legacy) return null;
+    try {
+      localStorage.setItem(KEY, legacy);
+      localStorage.removeItem(LEGACY_KEY);
+    } catch {
+      // Keep the legacy value: it is still the user's choice.
+    }
+    return legacy;
   } catch {
     return null;
   }

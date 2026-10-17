@@ -28,7 +28,10 @@ export const Route = createRootRoute({
     scripts: [{ children: THEME_SCRIPT }],
   }),
   // The sidebar's state lives in a cookie, so the server can render it collapsed on the first paint.
+  // Only the first render needs it (it is the sidebar's initial state), so it never reloads on navigation or preload.
   loader: async () => ({ sidebarOpen: await getSidebarOpen() }),
+  staleTime: Number.POSITIVE_INFINITY,
+  shouldReload: false,
   shellComponent: RootDocument,
   component: RootComponent,
   notFoundComponent: NotFound,

@@ -11,6 +11,12 @@ function Probe({ hotkey, options, onKey }: { hotkey: string; options?: HotkeyOpt
       <input aria-label="field" />
       <textarea aria-label="notes" />
       <div data-testid="editor" contentEditable suppressContentEditableWarning />
+      <input type="checkbox" aria-label="check" />
+      <input type="range" aria-label="range" />
+      <input type="password" aria-label="secret" />
+      <input type="email" aria-label="mail" />
+      <input type="number" aria-label="amount" />
+      <input type="search" aria-label="find" />
       <button type="button">button</button>
     </>
   );
@@ -72,4 +78,33 @@ test("a bare key is ignored while typing", () => {
   expect(onKey).not.toHaveBeenCalled();
   press(view.getByText("button"), { key: "/" });
   expect(onKey).toHaveBeenCalledTimes(1);
+});
+
+test("modifiers are exact: Shift blocks a shortcut that does not declare it", () => {
+  const { onKey } = setup({ mod: true });
+  const event = press(window, { key: "B", ctrlKey: true, shiftKey: true });
+  expect(onKey).not.toHaveBeenCalled();
+  expect(event.defaultPrevented).toBe(false);
+  press(window, { key: "b", metaKey: true, shiftKey: true });
+  expect(onKey).not.toHaveBeenCalled();
+});
+
+test("a shortcut that declares Shift needs it", () => {
+  const { onKey } = setup({ mod: true, shift: true });
+  press(window, { key: "b", ctrlKey: true });
+  expect(onKey).not.toHaveBeenCalled();
+  press(window, { key: "B", ctrlKey: true, shiftKey: true });
+  expect(onKey).toHaveBeenCalledTimes(1);
+});
+
+test("only text-entry fields count as typing", () => {
+  const { onKey, view } = setup({ mod: true, allowWhileTyping: false });
+  for (const label of ["secret", "mail", "amount", "find"]) {
+    press(view.getByLabelText(label), { key: "b", ctrlKey: true });
+  }
+  expect(onKey).not.toHaveBeenCalled();
+  for (const label of ["check", "range"]) {
+    press(view.getByLabelText(label), { key: "b", ctrlKey: true });
+  }
+  expect(onKey).toHaveBeenCalledTimes(2);
 });

@@ -2,7 +2,7 @@ import { Autocomplete } from "@base-ui/react/autocomplete";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { useNavigate } from "@tanstack/react-router";
 import { CornerDownLeft, type LucideIcon, MoonIcon, SearchIcon, SunIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { HighlightGlider } from "@/components/ui/highlight-glider";
 import { Kbd } from "@/components/ui/kbd";
 import { toggleTheme, useTheme } from "@/hooks/use-theme";
@@ -24,6 +24,12 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
   const [query, setQuery] = useState("");
   const navigate = useNavigate();
   const theme = useTheme();
+
+  // Closing leaves the query alone (clearing it would re-render the full list mid-fade; see onOpenChangeComplete).
+  // Opening clears it, which covers a reopen during the exit animation, when that never completes.
+  useEffect(() => {
+    if (open) setQuery("");
+  }, [open]);
 
   const close = () => onOpenChange(false);
   const pages: PaletteItem[] = NAV_ITEMS.map((item) => ({

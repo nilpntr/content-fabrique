@@ -16,7 +16,7 @@ import {
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { NAV_ITEMS, useActiveNavItem } from "@/nav";
+import { NAV_ITEMS, type NavItem } from "@/nav";
 
 function useCloseSheetOnNavigate(pathname: string) {
   const { isMobile, setOpenMobile } = useSidebar();
@@ -30,9 +30,9 @@ function useCloseSheetOnNavigate(pathname: string) {
   }, [pathname, isMobile, setOpenMobile]);
 }
 
-export function AppSidebar() {
+/** `active` is worked out once in the shell, so the sidebar and the title cannot disagree. */
+export function AppSidebar({ active }: { active: NavItem | undefined }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const active = useActiveNavItem();
   useCloseSheetOnNavigate(pathname);
 
   return (

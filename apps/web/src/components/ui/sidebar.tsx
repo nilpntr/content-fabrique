@@ -657,6 +657,14 @@ function SidebarMenuButton({
     }
   }, [scope, isActive])
 
+  // Only when the item unmounts: deactivating must keep `scope.lens`, it is the glide's starting point.
+  React.useLayoutEffect(() => {
+    const lens = lensRef.current
+    return () => {
+      if (scope && scope.lens === lens) scope.lens = null
+    }
+  }, [scope])
+
   const comp = useRender({
     defaultTagName: "button",
     props: mergeProps<"button">(

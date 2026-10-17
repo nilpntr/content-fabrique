@@ -53,3 +53,16 @@ test("the list keeps its filter while the palette fades out, and is reset once i
   expect(reopened.value).toBe("");
   expect(within(document.body).queryAllByRole("option")).toHaveLength(4);
 });
+
+test("reopening during the exit animation starts with an empty query", async () => {
+  const input = await openPalette();
+  fireEvent.change(input, { target: { value: "settings" } });
+  await waitFor(() => expect(options()).toEqual(["Go to Settings"]));
+
+  fireEvent.keyDown(input, { key: "Escape" });
+  await waitFor(() => expect(document.querySelector("[data-ending-style]")).toBeTruthy());
+  fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+
+  await waitFor(() => expect(options()).toHaveLength(4));
+  expect((screen.getByPlaceholderText("Search pages and actions…") as HTMLInputElement).value).toBe("");
+});

@@ -27,7 +27,8 @@ function useScrolled(threshold = 4) {
 
 export function AppShell({ defaultSidebarOpen = true }: { defaultSidebarOpen?: boolean }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const title = useActiveNavItem()?.title ?? "Not found";
+  const activeItem = useActiveNavItem();
+  const title = activeItem?.title ?? "Not found";
   const modKey = useModKey();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const { ref, scrolled } = useScrolled();
@@ -35,7 +36,7 @@ export function AppShell({ defaultSidebarOpen = true }: { defaultSidebarOpen?: b
 
   return (
     <SidebarProvider defaultOpen={defaultSidebarOpen}>
-      <AppSidebar />
+      <AppSidebar active={activeItem} />
       <SidebarInset
         ref={ref}
         data-scroll-restoration-id={MAIN_SCROLL_ID}
