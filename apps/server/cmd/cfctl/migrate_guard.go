@@ -52,6 +52,13 @@ func isLocalHost(host string) bool {
 // URL from different places (say a staging URL in the shell and CF_ENV=local in .env) are the classic mix-up.
 // Production is refused outright without --allow-production, and with it still needs --yes.
 func destructiveRefusal(command, cfEnv string, cfSource, urlSource source, dsn string, yes, allowProd bool) string {
+	return mutationRefusal(command, "it drops tables and their data", "DATABASE_MIGRATE_URL", cfEnv, cfSource, urlSource, dsn, yes, allowProd)
+}
+
+// mutationRefusal is the guard behind destructiveRefusal and `cfctl plan grant|revoke`: consequence says what the
+// command does (it goes into the refusal), urlName is the variable that names the database. Same rules, same fail-closed
+// order: production needs --allow-production and --yes; anything that is not plainly this machine needs --yes.
+func mutationRefusal(command, consequence, urlName, cfEnv string, cfSource, urlSource source, dsn string, yes, allowProd bool) string {
 	if cfEnv == config.EnvProduction && !allowProd {
 		return fmt.Sprintf("refusing to %s with CF_ENV=production. Pass --allow-production and --yes if you mean it", command)
 	}
@@ -69,10 +76,10 @@ func destructiveRefusal(command, cfEnv string, cfSource, urlSource source, dsn s
 		why = append(why, "the database host is not this machine or the compose service")
 	}
 	if cfSource != urlSource {
-		why = append(why, fmt.Sprintf("CF_ENV comes from %s but DATABASE_MIGRATE_URL from %s", cfSource, urlSource))
+		why = append(why, fmt.Sprintf("CF_ENV comes from %s but %s from %s", cfSource, urlName, urlSource))
 	}
 	if len(why) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("refusing to %s without --yes (it drops tables and their data): %s", command, strings.Join(why, "; "))
+	return fmt.Sprintf("refusing to %s without --yes (%s): %s", command, consequence, strings.Join(why, "; "))
 }

@@ -578,7 +578,8 @@ func TestWebhookRouteAcceptsOnlyPost(t *testing.T) {
 	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest(method, "/v1/webhooks/clerk", nil))
-		if rec.Code != http.StatusMethodNotAllowed {
+		// Not the webhook: only POST is, and anything else under /v1/ is the guarded catch-all (no token, so 401).
+		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("%s: status = %d", method, rec.Code)
 		}
 	}

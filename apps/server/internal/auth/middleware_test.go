@@ -133,7 +133,7 @@ func (f *fixture) handler(t *testing.T, res Resolver) http.Handler {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return mw(MeHandler())
+	return mw(MeHandler(&fakeEnts{}, nil))
 }
 
 func get(h http.Handler, authz string, mutate ...func(*http.Request)) *httptest.ResponseRecorder {
@@ -378,7 +378,7 @@ func TestMiddlewareMapsResolverErrors(t *testing.T) {
 
 func TestMeHandlerWithoutMiddlewareIsNotSignedIn(t *testing.T) {
 	rec := httptest.NewRecorder()
-	MeHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/me", nil))
+	MeHandler(&fakeEnts{}, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/me", nil))
 	wantError(t, rec, http.StatusUnauthorized, "unauthenticated")
 }
 
