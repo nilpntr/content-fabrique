@@ -323,13 +323,26 @@ func TestUploadsExpireJobDeletesAnOrphanedObject(t *testing.T) {
 	if _, err := client.Insert(ctx, jobs.UploadsExpireArgs{}, nil); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "the orphaned object to be deleted", func() bool { return !e.exists(t, a.R2Key) })
+	// The two jobs run on their own: the expire job records its output when it ends, which can be after the deletion job it
+	// queued has already finished. Wait for both to end before looking at anything.
+	jobDone := func(kind string) func() bool {
+		return func() bool {
+			var n int
+			err := e.super.QueryRow(ctx, `SELECT count(*) FROM river_job WHERE kind = $1 AND state = 'completed'`, kind).Scan(&n)
+			return err == nil && n == 1
+		}
+	}
+	eventually(t, "the expire job to complete", jobDone("uploads_expire"))
+	eventually(t, "the object deletion job to complete", jobDone("asset_object_delete"))
+	if e.exists(t, a.R2Key) {
+		t.Error("the orphaned object is still there after its deletion job completed")
+	}
 	got, upload, err := e.api.GetAssetUpload(ctx, w.ID, a.ID)
 	if err != nil || got.Status != store.AssetFailed || upload.AbortedAt == nil {
 		t.Errorf("asset after the clean-up: %+v %+v %v", got, upload, err)
 	}
-	var out string
-	if err := e.super.QueryRow(ctx, `SELECT (metadata->'output')::text FROM river_job WHERE kind = 'uploads_expire'`).Scan(&out); err != nil || !strings.Contains(out, `"orphans": 1`) {
-		t.Errorf("output = %s, %v, want 1 orphan", out, err)
+	var out *string
+	if err := e.super.QueryRow(ctx, `SELECT (metadata->'output')::text FROM river_job WHERE kind = 'uploads_expire'`).Scan(&out); err != nil || out == nil || !strings.Contains(*out, `"orphans": 1`) {
+		t.Errorf("output = %v, %v, want 1 orphan", out, err)
 	}
 }
