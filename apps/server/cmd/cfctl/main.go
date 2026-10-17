@@ -16,6 +16,7 @@ Usage:
 
 Commands:
   doctor     check the environment's variables and services (cfctl doctor --help)
+  migrate    apply the database migrations as the schema-owning role (cfctl migrate help)
   env        init: create .env and generate secrets. lint: check variable reads against .env.example
   version    print the build version
   help       show this help
@@ -39,6 +40,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdDoctor(args[1:], stdout, stderr, os.LookupEnv)
 	case "env":
 		return cmdEnv(args[1:], stdout, stderr)
+	case "migrate":
+		return cmdMigrate(args[1:], stdout, stderr, os.LookupEnv)
 	case "help", "-h", "-help", "--help":
 		_, _ = fmt.Fprint(stdout, usage)
 		return 0

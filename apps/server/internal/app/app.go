@@ -13,6 +13,7 @@ import (
 
 	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
+	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/telemetry"
 	"github.com/nilpntr/content-fabrique/internal/version"
 )
@@ -23,8 +24,9 @@ type Options struct {
 	Service string
 	// Addr picks the listen address from the loaded config.
 	Addr func(config.Config) string
-	// Routes optionally registers extra routes and readiness checks before the server starts.
-	Routes func(mux *http.ServeMux, health *httpapi.Health, logger *slog.Logger)
+	// Routes optionally registers extra routes and readiness checks before the server starts. st is the process's
+	// Postgres store (the app role, over DATABASE_URL), already registered as the "postgres" readiness check.
+	Routes func(mux *http.ServeMux, health *httpapi.Health, logger *slog.Logger, st *store.Store)
 }
 
 // Run loads config, sets up telemetry, serves HTTP until SIGINT or SIGTERM, then shuts down gracefully
@@ -61,10 +63,22 @@ func Run(opts Options) error {
 	addr := opts.Addr(cfg)
 	logger.Info("starting", "env", cfg.Env, "version", version.Get(), "addr", addr)
 
-	health := httpapi.NewHealth(logger)
+	// The pool connects lazily, so a Postgres that is down at start makes /readyz fail instead of killing the
+	// process, and the pool recovers on its own when it returns.
+	st, err := store.Open(ctx, cfg.DatabaseURL, store.Options{AppName: opts.Service})
+	if err != nil {
+		return fmt.Errorf("postgres: %w", err)
+	}
+	defer st.Close()
+
+	if err := startupLoginCheck(ctx, st, cfg.Env, logger); err != nil {
+		return err
+	}
+
+	health := httpapi.NewHealth(logger, httpapi.Check{Name: "postgres", Fn: postgresCheck(st, cfg.Env, logger)})
 	mux := httpapi.NewMux(health)
 	if opts.Routes != nil {
-		opts.Routes(mux, health, logger)
+		opts.Routes(mux, health, logger, st)
 	}
 	srv := httpapi.NewServer(addr, httpapi.Handler(mux, logger))
 

@@ -115,6 +115,62 @@ jobs:
           cache-dependency-path: apps/server/go.sum
       - run: go test -race ./...
 
+  # `cfctl migrate` against a real Postgres: up, down to 0, up again, redo. The sqlc output must match what is committed.
+  # The repository, round-trip and role-split tests run in go-test (they start Postgres themselves).
+  db:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        # The same image as the doctor job and compose.yaml (what `pg18` pointed to on 2026-10-17). Change all three together.
+        image: pgvector/pgvector:pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11
+        env:
+          POSTGRES_USER: cf
+          POSTGRES_PASSWORD: cf
+          POSTGRES_DB: cf
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cf -d cf"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # The local default of .env.example. cfctl reads it from the process environment: there is no .env in CI.
+      DATABASE_MIGRATE_URL: postgres://cf:cf@localhost:5432/cf?sslmode=disable
+      # down and redo run without --yes only for an explicit local or ci CF_ENV on localhost, both from one source.
+      CF_ENV: ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: apps/server/go.mod
+          cache: false
+      - name: Build cfctl
+        working-directory: apps/server
+        run: go build -o "$RUNNER_TEMP/cfctl" ./cmd/cfctl
+      - name: cfctl migrate up
+        run: '"$RUNNER_TEMP/cfctl" migrate up'
+      - name: cfctl migrate down to 0
+        run: '"$RUNNER_TEMP/cfctl" migrate down --to 0'
+      - name: cfctl migrate up again
+        run: '"$RUNNER_TEMP/cfctl" migrate up'
+      - name: cfctl migrate redo
+        run: '"$RUNNER_TEMP/cfctl" migrate redo'
+      - name: cfctl migrate status
+        run: '"$RUNNER_TEMP/cfctl" migrate status'
+      # sqlc is pinned by a `tool` directive in go.mod, so this needs no install.
+      - name: sqlc drift check
+        working-directory: apps/server
+        run: |
+          go tool sqlc generate
+          git diff --exit-code -- internal/store/db
+          test -z "$(git status --porcelain -- internal/store/db)" || { git status --porcelain -- internal/store/db; exit 1; }
+
   # typecheck, lint, test and build of @cf/web.
   web:
     needs: changes
@@ -169,8 +225,8 @@ jobs:
     timeout-minutes: 10
     services:
       postgres:
-        # Pinned by digest (what `pg17` pointed to on 2026-10-17), the same one as compose.yaml. Change both together.
-        image: pgvector/pgvector:pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
+        # Pinned by digest (what `pg18` pointed to on 2026-10-17), the same one as the db job and compose.yaml. Change all together.
+        image: pgvector/pgvector:pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11
         env:
           POSTGRES_USER: cf
           POSTGRES_PASSWORD: cf
@@ -232,7 +288,7 @@ jobs:
   # needed job succeeded or was skipped, and fails on any failure or cancellation. Add every new job to `needs`.
   required:
     if: always()
-    needs: [changes, go-lint, go-test, web, env-lint, doctor]
+    needs: [changes, go-lint, go-test, db, web, env-lint, doctor]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:

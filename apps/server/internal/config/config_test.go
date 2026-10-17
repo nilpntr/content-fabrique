@@ -5,7 +5,39 @@ import (
 	"testing"
 )
 
-func env(m map[string]string) Getenv { return func(k string) string { return m[k] } }
+const testDB = "postgres://cf:cf@localhost:5432/cf?sslmode=disable"
+
+// env returns a lookup over m plus a valid DATABASE_URL, which Load requires, unless m sets its own.
+func env(m map[string]string) Getenv {
+	return func(k string) string {
+		if v, ok := m[k]; ok {
+			return v
+		}
+		if k == "DATABASE_URL" {
+			return testDB
+		}
+		return ""
+	}
+}
+
+func TestLoadDatabaseURL(t *testing.T) {
+	c, err := Load(env(nil))
+	if err != nil || c.DatabaseURL != testDB {
+		t.Fatalf("DatabaseURL = %q, %v", c.DatabaseURL, err)
+	}
+
+	const secret = "hunter2-secret"
+	for _, v := range []string{"", "   ", "mysql://u:" + secret + "@h/db", "localhost:5432", "postgres://:" + secret + "@/db", "://" + secret} {
+		_, err := Load(env(map[string]string{"DATABASE_URL": v}))
+		if err == nil || !strings.Contains(err.Error(), "DATABASE_URL") {
+			t.Errorf("%q: err = %v, want a DATABASE_URL error", v, err)
+			continue
+		}
+		if strings.Contains(err.Error(), secret) {
+			t.Errorf("%q: the error repeats the password: %v", v, err)
+		}
+	}
+}
 
 func TestLoadDefaults(t *testing.T) {
 	c, err := Load(env(nil))

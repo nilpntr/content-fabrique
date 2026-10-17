@@ -34,6 +34,9 @@ type Config struct {
 	// OTLPEndpoint is OTEL_EXPORTER_OTLP_ENDPOINT. Empty disables trace export. The OpenTelemetry SDK
 	// reads this and OTEL_EXPORTER_OTLP_HEADERS itself, so the value is only used to decide whether to export.
 	OTLPEndpoint string
+	// DatabaseURL is DATABASE_URL: the pooled Postgres URL of the app role. It carries a password, so it is never
+	// logged. The migrate role's URL is not here: only `cfctl migrate` reads it.
+	DatabaseURL string
 }
 
 // Getenv looks up an environment variable, like os.Getenv.
@@ -46,6 +49,7 @@ func Load(getenv Getenv) (Config, error) {
 		Env:          strings.TrimSpace(getenv("CF_ENV")),
 		APIBaseURL:   strings.TrimSpace(getenv("API_BASE_URL")),
 		OTLPEndpoint: strings.TrimSpace(getenv("OTEL_EXPORTER_OTLP_ENDPOINT")),
+		DatabaseURL:  strings.TrimSpace(getenv("DATABASE_URL")),
 	}
 
 	if c.Env == "" {
@@ -72,10 +76,27 @@ func Load(getenv Getenv) (Config, error) {
 		}
 	}
 
+	// The messages never repeat the value: it holds a password.
+	if c.DatabaseURL == "" {
+		errs = append(errs, errors.New("DATABASE_URL: required (see .env.example)"))
+	} else if err := ValidatePostgresURL(c.DatabaseURL); err != nil {
+		errs = append(errs, fmt.Errorf("DATABASE_URL: %w", err))
+	}
+
 	if len(errs) > 0 {
 		return Config{}, errors.Join(errs...)
 	}
 	return c, nil
+}
+
+// ValidatePostgresURL checks that raw is a postgres:// or postgresql:// URL with a host. The error never contains
+// raw, because a database URL carries a password. cfctl migrate uses it for DATABASE_MIGRATE_URL too.
+func ValidatePostgresURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") || u.Host == "" {
+		return errors.New("must be a postgres:// or postgresql:// URL")
+	}
+	return nil
 }
 
 // listenAddr derives the bind address from the API base URL: its explicit port, else DefaultAPIPort.

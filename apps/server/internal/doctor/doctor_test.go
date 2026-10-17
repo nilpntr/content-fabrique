@@ -27,6 +27,7 @@ func localInfra(t *testing.T, vars map[string]string) {
 	pg := fakePG(t)
 	vars["DATABASE_URL"] = "postgres://cf:cf@" + pg + "/cf?sslmode=disable"
 	vars["DATABASE_DIRECT_URL"] = "postgres://cf:cf@" + pg + "/cf?sslmode=disable"
+	vars["DATABASE_MIGRATE_URL"] = "postgres://cf:cf@" + pg + "/cf?sslmode=disable"
 	s3 := newFakeS3(t, vars["R2_BUCKET"])
 	vars["R2_ENDPOINT"] = s3.URL
 }
@@ -51,6 +52,7 @@ func TestCIWithoutAnthropicAndClerkPasses(t *testing.T) {
 	}
 	wantStatus(t, rep, "postgres DATABASE_URL", OK)
 	wantStatus(t, rep, "postgres DATABASE_DIRECT_URL", OK)
+	wantStatus(t, rep, "postgres DATABASE_MIGRATE_URL", OK)
 	wantStatus(t, rep, "object-storage", OK)
 }
 
