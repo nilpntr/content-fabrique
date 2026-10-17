@@ -241,3 +241,40 @@ func clamp01(v float64) float64 { return math.Max(0, math.Min(1, v)) }
 
 func round1(v float64) float64 { return math.Round(v*10) / 10 }
 func round2(v float64) float64 { return math.Round(v*100) / 100 }
+
+// Drift is how far the picture strays from where it was at sample a, anywhere in [a, b): the largest mean absolute difference
+// (brightness-corrected, like the motion) between the thumbnail at a and one of the later ones, looked at every third sample.
+// Slow, large movement (the last reps of a tired set) moves little from one sample to the next, so its motion looks like rest, but
+// it drifts far over a few seconds; a body that is still does not.
+func (r Raw) Drift(a, b int) float64 {
+	const px = media.ThumbPixels
+	n := r.N()
+	if a < 0 || b > n || b-a < 2 {
+		return 0
+	}
+	ref := make([]float64, px)
+	t := r.Thumbs[a*px : (a+1)*px]
+	m := 0.0
+	for _, v := range t {
+		m += float64(v)
+	}
+	m /= px
+	for j, v := range t {
+		ref[j] = float64(v) - m
+	}
+	best := 0.0
+	for i := a + 3; i < b; i += 3 {
+		u := r.Thumbs[i*px : (i+1)*px]
+		um := 0.0
+		for _, v := range u {
+			um += float64(v)
+		}
+		um /= px
+		d := 0.0
+		for j, v := range u {
+			d += math.Abs(float64(v) - um - ref[j])
+		}
+		best = math.Max(best, d/px)
+	}
+	return best
+}

@@ -18,8 +18,8 @@ func momentsOf(a Analysis, kind string) []Moment {
 	return out
 }
 
-func analyzeSynth(s synth, words ...string) Analysis {
-	return Analyze(s.raw(), Hints{Words: words}, DefaultParams(), DefaultShotParams())
+func analyzeSynth(s synth) Analysis {
+	return Analyze(s.raw(), DefaultParams(), DefaultShotParams())
 }
 
 // phaseOffset is how far t is from the nearest multiple of period (plus offset), in seconds.
@@ -136,32 +136,35 @@ func TestMovementThatIsNotPeriodicIsDeadTime(t *testing.T) {
 }
 
 func TestStillClipIsAHold(t *testing.T) {
-	// a box that does not move, for 12 s: a hold, with or without a hint
-	for _, words := range [][]string{nil, {"posing", "back double biceps"}} {
-		a := analyzeSynth(synth{seconds: 12, pos: func(float64) float64 { return 0.5 }, noise: 0.3, seed: 6}, words...)
-		holds := momentsOf(a, KindHold)
-		if len(holds) != 1 {
-			t.Fatalf("hint %v: %d holds, want 1: %s", words, len(holds), a.Summary.Line())
-		}
-		if holds[0].StartMs > 1500 || holds[0].EndMs < 10000 {
-			t.Errorf("hold %d-%d ms does not cover the clip", holds[0].StartMs, holds[0].EndMs)
-		}
-		if a.Summary.Reps != 0 || a.Summary.DeadMs != 0 {
-			t.Errorf("reps %d, dead %d ms in a still clip", a.Summary.Reps, a.Summary.DeadMs)
-		}
+	// a box that does not move, for 12 s, and no reps anywhere: a hold, whatever the clip is called
+	a := analyzeSynth(synth{seconds: 12, pos: func(float64) float64 { return 0.5 }, noise: 0.3, seed: 6})
+	holds := momentsOf(a, KindHold)
+	if len(holds) != 1 {
+		t.Fatalf("%d holds, want 1: %s", len(holds), a.Summary.Line())
+	}
+	if holds[0].StartMs > 1500 || holds[0].EndMs < 10000 {
+		t.Errorf("hold %d-%d ms does not cover the clip", holds[0].StartMs, holds[0].EndMs)
+	}
+	if a.Summary.Reps != 0 || a.Summary.DeadMs != 0 {
+		t.Errorf("reps %d, dead %d ms in a still clip", a.Summary.Reps, a.Summary.DeadMs)
 	}
 }
 
-func TestStillnessIsAHoldOnlyForPosingWhenThereAreReps(t *testing.T) {
-	// reps, then a still stretch: dead time, unless the clip says it is of posing
+// Without the quick look's words (they may not exist yet), a still stretch after reps is a hold only when it is long, steady and
+// well exposed; the rest between sets is dead time.
+func TestStillnessAfterRepsIsAHoldOnlyWhenLongSteadyAndWellLit(t *testing.T) {
 	pos := phases(phase{30, 3}, phase{45, 0})
-	plain := analyzeSynth(synth{seconds: 45, pos: pos, noise: 0.4, seed: 7})
-	if len(momentsOf(plain, KindHold)) != 0 || len(momentsOf(plain, KindDead)) == 0 {
-		t.Errorf("a rest after reps should be dead time: holds %d dead %d", len(momentsOf(plain, KindHold)), len(momentsOf(plain, KindDead)))
+	dark := analyzeSynth(synth{seconds: 45, pos: pos, noise: 0.4, seed: 7, bg: 12, fg: 40})
+	if len(momentsOf(dark, KindHold)) != 0 || len(momentsOf(dark, KindDead)) == 0 {
+		t.Errorf("a dark rest after reps should be dead time: holds %d dead %d", len(momentsOf(dark, KindHold)), len(momentsOf(dark, KindDead)))
 	}
-	posing := analyzeSynth(synth{seconds: 45, pos: pos, noise: 0.4, seed: 7}, "posing")
-	if len(momentsOf(posing, KindHold)) == 0 {
-		t.Errorf("a still stretch of a posing clip should be a hold")
+	lit := analyzeSynth(synth{seconds: 45, pos: pos, noise: 0.4, seed: 7, bg: 90, fg: 200})
+	if len(momentsOf(lit, KindHold)) == 0 {
+		t.Errorf("a long, steady, well lit stretch after reps should be a hold: %s", lit.Summary.Line())
+	}
+	short := analyzeSynth(synth{seconds: 34, pos: phases(phase{30, 3}, phase{34, 0}), noise: 0.4, seed: 7, bg: 90, fg: 200})
+	if len(momentsOf(short, KindHold)) != 0 {
+		t.Errorf("a 3 s pause is not a hold")
 	}
 }
 
@@ -302,7 +305,7 @@ func TestExposureHint(t *testing.T) {
 }
 
 func TestSummaryLine(t *testing.T) {
-	a := analyzeSynth(synth{seconds: 90, pos: phases(phase{15, 0}, phase{60, 3}, phase{90, 0}), noise: 3, seed: 12}, "row")
+	a := analyzeSynth(synth{seconds: 90, pos: phases(phase{15, 0}, phase{60, 3}, phase{90, 0}), noise: 3, seed: 12})
 	line := a.Summary.Line()
 	for _, want := range []string{"1 set,", "reps (best at", "dead time"} {
 		if !strings.Contains(line, want) {
@@ -334,7 +337,7 @@ func TestTooShortClipsDoNotPanic(t *testing.T) {
 			t.Errorf("%d s: %d shots", secs, len(a.Shots))
 		}
 	}
-	if a := Analyze(Raw{}, Hints{}, DefaultParams(), DefaultShotParams()); len(a.Moments) != 0 || len(a.Shots) != 0 {
+	if a := Analyze(Raw{}, DefaultParams(), DefaultShotParams()); len(a.Moments) != 0 || len(a.Shots) != 0 {
 		t.Errorf("empty: %+v", a)
 	}
 }

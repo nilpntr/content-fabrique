@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/analysis"
@@ -17,14 +16,13 @@ import (
 )
 
 const mediaAnalyzeUsage = `Usage:
-  cfctl media analyze <proxy.mp4> [--provider local|docker|hardened] [--hint words] [--json] [flags]
+  cfctl media analyze <proxy.mp4> [--provider local|docker|hardened] [--json] [flags]
 
 Development only. Runs the clip analysis (shots, motion, exposure, reps, holds, dead time) on a video file on this machine, with
 no database and no object storage, and prints what it found. Give it a 720 px proxy (what the ingest makes: portrait 720x1280,
 30 fps); the numbers are tuned for that. The file is copied into a temporary job directory and read by ffmpeg in the sandbox.
 
   --provider   local (ffmpeg on this machine, development only: it isolates nothing), docker (default) or hardened
-  --hint       words that describe the clip, as the quick look's title and tags would ("posing", "lat pulldown")
   --json       print the shots, moments and summary as JSON
   --image      the media-tools image (default media-tools:dev)
   --docker     the docker CLI (default docker)
@@ -36,7 +34,6 @@ func cmdMediaAnalyze(args []string, stdout, stderr io.Writer, deps mediaDeps) in
 	fs.Usage = func() { _, _ = fmt.Fprint(stderr, mediaAnalyzeUsage) }
 	provider := fs.String("provider", "docker", "local, docker or hardened")
 	asJSON := fs.Bool("json", false, "print JSON")
-	hint := fs.String("hint", "", "words that describe the clip")
 	image := fs.String("image", "media-tools:dev", "media-tools image")
 	dockerBin := fs.String("docker", "docker", "docker CLI")
 	files, err := parseInterspersed(fs, args)
@@ -77,7 +74,7 @@ func cmdMediaAnalyze(args []string, stdout, stderr io.Writer, deps mediaDeps) in
 	ctx, stop := signalContext()
 	defer stop()
 	start := time.Now()
-	an, err := analysis.AnalyzeFile(ctx, runner, root, files[0], 0, analysis.Hints{Words: strings.Fields(*hint)}, analysis.DefaultParams(), analysis.DefaultShotParams())
+	an, err := analysis.AnalyzeFile(ctx, runner, root, files[0], 0, analysis.DefaultParams(), analysis.DefaultShotParams())
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "cfctl media analyze: %v\n", err)
 		return 1

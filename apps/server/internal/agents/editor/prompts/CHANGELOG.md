@@ -32,6 +32,7 @@ exposure that jumped between angles; the editor saw 3 to 8 stills per 90 s clip 
   `auto` look preset is not built; the analysis stores a per-shot gain and gamma hint for it).
 - The analysis lines and `find_moments` answers are measured from the picture, not words of a person, so their times can be
   relied on (they never carry the clip's title or tags).
+- `rep_candidate` moments (slow, tired reps next to a set that do not repeat clearly) are returned below the reps; use them only after looking, never as ready cuts, and never skip them as dead time.
 - Cassettes re-recorded (the prompt, the tool list and the run context changed).
 
 ## editor.v1.2 (2026-10-17)

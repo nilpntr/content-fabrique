@@ -8,6 +8,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/nilpntr/content-fabrique/internal/ids"
@@ -43,7 +44,7 @@ func (q *Queries) DeleteAssetShots(ctx context.Context, arg DeleteAssetShotsPara
 }
 
 const getAssetSignals = `-- name: GetAssetSignals :one
-SELECT workspace_id, asset_id, version, step_ms, duration_ms, series, summary, created_at, updated_at FROM asset_signals WHERE workspace_id = $1 AND asset_id = $2
+SELECT workspace_id, asset_id, version, step_ms, duration_ms, source_ingested_at, scales, motion, luma, contrast, high, sharp, scene, summary, created_at, updated_at FROM asset_signals WHERE workspace_id = $1 AND asset_id = $2
 `
 
 type GetAssetSignalsParams struct {
@@ -60,10 +61,46 @@ func (q *Queries) GetAssetSignals(ctx context.Context, arg GetAssetSignalsParams
 		&i.Version,
 		&i.StepMs,
 		&i.DurationMs,
-		&i.Series,
+		&i.SourceIngestedAt,
+		&i.Scales,
+		&i.Motion,
+		&i.Luma,
+		&i.Contrast,
+		&i.High,
+		&i.Sharp,
+		&i.Scene,
 		&i.Summary,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAssetSignalsMeta = `-- name: GetAssetSignalsMeta :one
+SELECT asset_id, version, source_ingested_at, duration_ms FROM asset_signals WHERE workspace_id = $1 AND asset_id = $2
+`
+
+type GetAssetSignalsMetaParams struct {
+	WorkspaceID ids.WorkspaceID
+	AssetID     ids.AssetID
+}
+
+type GetAssetSignalsMetaRow struct {
+	AssetID          ids.AssetID
+	Version          int32
+	SourceIngestedAt *time.Time
+	DurationMs       int32
+}
+
+// Which analysis an asset has, without the series: the skip check of the job reads this.
+func (q *Queries) GetAssetSignalsMeta(ctx context.Context, arg GetAssetSignalsMetaParams) (GetAssetSignalsMetaRow, error) {
+	row := q.db.QueryRow(ctx, getAssetSignalsMeta, arg.WorkspaceID, arg.AssetID)
+	var i GetAssetSignalsMetaRow
+	err := row.Scan(
+		&i.AssetID,
+		&i.Version,
+		&i.SourceIngestedAt,
+		&i.DurationMs,
 	)
 	return i, err
 }
@@ -330,6 +367,58 @@ func (q *Queries) ListAssetsForAnalysis(ctx context.Context, arg ListAssetsForAn
 	return items, nil
 }
 
+const listDeadSpans = `-- name: ListDeadSpans :many
+SELECT asset_id, start_ms, end_ms, total FROM (
+    SELECT asset_id, start_ms, end_ms,
+           row_number() OVER (PARTITION BY asset_id ORDER BY (end_ms - start_ms) DESC, start_ms) AS rn,
+           count(*) OVER (PARTITION BY asset_id) AS total
+    FROM moments
+    WHERE workspace_id = $1 AND asset_id = ANY($2::uuid[]) AND kind = 'dead'
+) d
+WHERE rn <= $3::int
+ORDER BY asset_id, start_ms
+`
+
+type ListDeadSpansParams struct {
+	WorkspaceID ids.WorkspaceID
+	AssetIds    []uuid.UUID
+	PerAsset    int32
+}
+
+type ListDeadSpansRow struct {
+	AssetID ids.AssetID
+	StartMs int32
+	EndMs   int32
+	Total   int64
+}
+
+// The longest dead spans of each asset (at most per_asset of them), with how many the asset has in all: the note find_moments
+// ends with.
+func (q *Queries) ListDeadSpans(ctx context.Context, arg ListDeadSpansParams) ([]ListDeadSpansRow, error) {
+	rows, err := q.db.Query(ctx, listDeadSpans, arg.WorkspaceID, arg.AssetIds, arg.PerAsset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDeadSpansRow
+	for rows.Next() {
+		var i ListDeadSpansRow
+		if err := rows.Scan(
+			&i.AssetID,
+			&i.StartMs,
+			&i.EndMs,
+			&i.Total,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMoments = `-- name: ListMoments :many
 SELECT id, workspace_id, asset_id, kind, source, start_ms, end_ms, score, labels, attrs, description, created_at FROM moments
 WHERE workspace_id = $1 AND asset_id = ANY($2::uuid[])
@@ -387,25 +476,50 @@ func (q *Queries) ListMoments(ctx context.Context, arg ListMomentsParams) ([]Mom
 	return items, nil
 }
 
+const relabelAssetMoments = `-- name: RelabelAssetMoments :exec
+UPDATE moments SET labels = $1::text[]
+WHERE workspace_id = $2 AND asset_id = $3 AND source = 'analysis'
+`
+
+type RelabelAssetMomentsParams struct {
+	Labels      []string
+	WorkspaceID ids.WorkspaceID
+	AssetID     ids.AssetID
+}
+
+// The quick look landed (or ran again): its tags label the asset's analysis moments.
+func (q *Queries) RelabelAssetMoments(ctx context.Context, arg RelabelAssetMomentsParams) error {
+	_, err := q.db.Exec(ctx, relabelAssetMoments, arg.Labels, arg.WorkspaceID, arg.AssetID)
+	return err
+}
+
 const upsertAssetSignals = `-- name: UpsertAssetSignals :one
 
-INSERT INTO asset_signals (workspace_id, asset_id, version, step_ms, duration_ms, series, summary)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO asset_signals (workspace_id, asset_id, version, source_ingested_at, step_ms, duration_ms, scales, motion, luma, contrast, high, sharp, scene, summary)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT (asset_id) DO UPDATE
-SET version = EXCLUDED.version, step_ms = EXCLUDED.step_ms, duration_ms = EXCLUDED.duration_ms,
-    series = EXCLUDED.series, summary = EXCLUDED.summary
+SET version = EXCLUDED.version, source_ingested_at = EXCLUDED.source_ingested_at, step_ms = EXCLUDED.step_ms, duration_ms = EXCLUDED.duration_ms,
+    scales = EXCLUDED.scales, motion = EXCLUDED.motion, luma = EXCLUDED.luma, contrast = EXCLUDED.contrast, high = EXCLUDED.high,
+    sharp = EXCLUDED.sharp, scene = EXCLUDED.scene, summary = EXCLUDED.summary
 WHERE asset_signals.workspace_id = EXCLUDED.workspace_id
 RETURNING asset_id
 `
 
 type UpsertAssetSignalsParams struct {
-	WorkspaceID ids.WorkspaceID
-	AssetID     ids.AssetID
-	Version     int32
-	StepMs      int32
-	DurationMs  int32
-	Series      json.RawMessage
-	Summary     json.RawMessage
+	WorkspaceID      ids.WorkspaceID
+	AssetID          ids.AssetID
+	Version          int32
+	SourceIngestedAt *time.Time
+	StepMs           int32
+	DurationMs       int32
+	Scales           json.RawMessage
+	Motion           []byte
+	Luma             []byte
+	Contrast         []byte
+	High             []byte
+	Sharp            []byte
+	Scene            []byte
+	Summary          json.RawMessage
 }
 
 // Clip analysis (P2-02, P2-03, P2-09). EVERY query filters by workspace_id, like the other asset queries: the job acts with the
@@ -415,9 +529,16 @@ func (q *Queries) UpsertAssetSignals(ctx context.Context, arg UpsertAssetSignals
 		arg.WorkspaceID,
 		arg.AssetID,
 		arg.Version,
+		arg.SourceIngestedAt,
 		arg.StepMs,
 		arg.DurationMs,
-		arg.Series,
+		arg.Scales,
+		arg.Motion,
+		arg.Luma,
+		arg.Contrast,
+		arg.High,
+		arg.Sharp,
+		arg.Scene,
 		arg.Summary,
 	)
 	var asset_id ids.AssetID

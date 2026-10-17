@@ -56,6 +56,28 @@ func TestAnalyzeIsEnqueuedByTheIngestAndWaitsForAWorkerThatCanRunIt(t *testing.T
 		t.Errorf("a snooze must not use attempts, got %d", attempt)
 	}
 
+	// An asset that is ingested again has a new proxy: its analysis is enqueued again, not deduplicated against the first job (the
+	// generation, the time the ingest finished, is part of the job's unique key).
+	jobsFor := func() int {
+		var n int
+		if err := e.super.QueryRow(context.Background(), `SELECT count(*) FROM river_job WHERE kind = 'analyze' AND args->>'asset_id' = $1`, a.ID.String()).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if jobsFor() != 1 {
+		t.Fatalf("%d analyze jobs after the first ingest", jobsFor())
+	}
+	if _, err := e.api.ClaimAssetForIngest(context.Background(), w.ID, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.api.FinishAssetIngest(context.Background(), w.ID, a.ID, store.IngestResult{DurationMs: 5000, Width: 1080, Height: 1920}); err != nil {
+		t.Fatal(err)
+	}
+	if jobsFor() != 2 {
+		t.Fatalf("%d analyze jobs after a re-ingest, want a new one", jobsFor())
+	}
+
 	// An audio file never gets one.
 	audio := e.newUploadedAsset(t, w, store.AssetKindAudio, "voice.mp3", []byte("data"))
 	if _, err := e.api.ClaimAssetForIngest(context.Background(), w.ID, audio.ID); err != nil {

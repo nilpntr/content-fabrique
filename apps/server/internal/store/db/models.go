@@ -114,15 +114,22 @@ type AssetDerivative struct {
 }
 
 type AssetSignal struct {
-	WorkspaceID ids.WorkspaceID
-	AssetID     ids.AssetID
-	Version     int32
-	StepMs      int32
-	DurationMs  int32
-	Series      json.RawMessage
-	Summary     json.RawMessage
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	WorkspaceID      ids.WorkspaceID
+	AssetID          ids.AssetID
+	Version          int32
+	StepMs           int32
+	DurationMs       int32
+	SourceIngestedAt *time.Time
+	Scales           json.RawMessage
+	Motion           []byte
+	Luma             []byte
+	Contrast         []byte
+	High             []byte
+	Sharp            []byte
+	Scene            []byte
+	Summary          json.RawMessage
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type CreatorProfile struct {

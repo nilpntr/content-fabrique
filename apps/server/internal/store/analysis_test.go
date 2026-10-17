@@ -57,7 +57,7 @@ func analysisSuite(t *testing.T, st *store.Store, suffix string) {
 
 	result := func(reps int) store.AnalysisResult {
 		r := store.AnalysisResult{
-			Version: 1, StepMs: 100, DurationMs: 60000, Series: []byte(`{"motion":[1,2,3]}`), Summary: []byte(`{"reps":3}`),
+			Version: 1, StepMs: 100, DurationMs: 60000, Series: store.PackedSeries{Scales: []byte(`{"scale":{}}`), Motion: []byte{1, 0, 2, 0, 3, 0}, Luma: []byte{1, 2, 3}, Contrast: []byte{1, 2, 3}, High: []byte{1, 2, 3}, Sharp: []byte{1, 0, 2, 0, 3, 0}, Scene: []byte{0, 0, 0, 0, 0, 0}}, Summary: []byte(`{"reps":3}`),
 			Shots: []store.NewShot{{Idx: 0, StartMs: 0, EndMs: 60000, Signals: []byte(`{"exposure":{"level":"dark"}}`)}},
 			Moments: []store.NewMoment{
 				{Kind: store.MomentShot, StartMs: 0, EndMs: 60000, Score: 0.5, Attrs: []byte(`{}`), Description: "shot 1"},
@@ -148,6 +148,75 @@ func analysisSuite(t *testing.T, st *store.Store, suffix string) {
 		}
 		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, result(1)); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("an analysis was saved on a deleted asset: %v", err)
+		}
+	})
+
+	t.Run("labels follow the quick look, dead spans are limited per asset, candidates rank below", func(t *testing.T) {
+		a := ready(wa, ua, "labels-clip")
+		r := result(2)
+		for i := 0; i < 8; i++ { // eight dead spans of different lengths
+			r.Moments = append(r.Moments, store.NewMoment{Kind: store.MomentDead, StartMs: 1000 + i*5000, EndMs: 1000 + i*5000 + 1000 + i*100, Attrs: []byte(`{}`), Description: "dead"})
+		}
+		r.Moments = append(r.Moments, store.NewMoment{Kind: store.MomentRepCandidate, StartMs: 52000, EndMs: 58000, Score: 0.3, Attrs: []byte(`{}`), Description: "slow"})
+		for i := range r.Moments {
+			r.Moments[i].Labels = nil
+		}
+		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, r); err != nil {
+			t.Fatal(err)
+		}
+		// before the quick look the moments have no labels; when it lands they get its tags
+		if ms, _ := st.ListAssetMoments(ctx, wa.ID, a.ID); ms[0].Labels == nil || len(ms[0].Labels) != 0 {
+			t.Fatalf("labels before the quick look: %v", ms[0].Labels)
+		}
+		if _, err := st.ApplyQuickLook(ctx, wa.ID, a.ID, store.QuickLookResult{Title: "Row", Description: "A row.", Tags: []string{"row", "back"}, Detail: []byte(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+		ms, _ := st.ListAssetMoments(ctx, wa.ID, a.ID)
+		for _, m := range ms {
+			if len(m.Labels) != 2 || m.Labels[0] != "row" {
+				t.Fatalf("a moment was not labelled by the quick look: %+v", m)
+			}
+		}
+		if _, err := st.ApplyQuickLook(ctx, wb.ID, a.ID, store.QuickLookResult{Tags: []string{"stolen"}}); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("workspace B applied a quick look: %v", err)
+		}
+		if ms, _ = st.ListAssetMoments(ctx, wa.ID, a.ID); ms[0].Labels[0] != "row" {
+			t.Fatalf("labels after B's attempt: %v", ms[0].Labels)
+		}
+		// a later analysis of an asset that has tags labels its moments with them
+		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, r); err != nil {
+			t.Fatal(err)
+		}
+		if ms, _ = st.ListAssetMoments(ctx, wa.ID, a.ID); ms[0].Labels[0] != "row" {
+			t.Fatalf("a re-run lost the labels: %v", ms[0].Labels)
+		}
+
+		spans, err := st.ListDeadSpans(ctx, wa.ID, []ids.AssetID{a.ID}, 3)
+		if err != nil || len(spans) != 3 {
+			t.Fatalf("spans %v %v", spans, err)
+		}
+		for i, sp := range spans {
+			if sp.Total != 9 || (i > 0 && sp.StartMs < spans[i-1].StartMs) {
+				t.Fatalf("span %d: %+v (a clip has 9 in all: 8 and the one of result)", i, sp)
+			}
+		}
+		if spans[2].EndMs-spans[2].StartMs != 1700 { // the longest of the eight, in time order last
+			t.Errorf("the longest spans were not the ones kept: %+v", spans)
+		}
+		if other, _ := st.ListDeadSpans(ctx, wb.ID, []ids.AssetID{a.ID}, 3); len(other) != 0 {
+			t.Fatalf("B read A's dead spans: %v", other)
+		}
+		// by default candidates are searched with the reps and hold, below them
+		top, _ := st.ListMoments(ctx, wa.ID, store.MomentFilter{Assets: []ids.AssetID{a.ID}, Limit: 20})
+		if top[len(top)-1].Kind != store.MomentRepCandidate {
+			t.Fatalf("the rep candidate should rank last: %+v", top)
+		}
+		meta, err := st.GetAssetSignalsMeta(ctx, wa.ID, a.ID)
+		if err != nil || meta.Version != 1 {
+			t.Fatalf("meta %+v %v", meta, err)
+		}
+		if _, err := st.GetAssetSignalsMeta(ctx, wb.ID, a.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("B read A's meta: %v", err)
 		}
 	})
 

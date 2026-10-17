@@ -33,7 +33,7 @@ type Store interface {
 	GetAsset(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (store.Asset, error)
 	ListAssetDerivatives(ctx context.Context, ws ids.WorkspaceID, assetIDs []ids.AssetID) ([]store.Derivative, error)
 	SaveAnalysis(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, r store.AnalysisResult) error
-	GetAssetSignals(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (store.AssetSignals, error)
+	GetAssetSignalsMeta(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (store.SignalsMeta, error)
 }
 
 // Objects is the object storage the proxy is read from. *storage.Client is the real one.
@@ -138,9 +138,13 @@ func (s *Service) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, o
 		return Result{}, fmt.Errorf("%w (status %s)", ErrNotReady, a.Status)
 	}
 	if !opts.Force {
-		if sig, err := s.cfg.Store.GetAssetSignals(ctx, ws, id); err == nil && sig.Version >= Version {
+		// Up to date means: made by this version of the analysis from the proxy this ingest made. An asset that was ingested again
+		// has a new ingested_at, so its analysis is made again.
+		meta, err := s.cfg.Store.GetAssetSignalsMeta(ctx, ws, id)
+		switch {
+		case err == nil && meta.Version >= Version && sameTime(meta.SourceIngestedAt, a.IngestedAt):
 			return Result{Outcome: OutcomeSkipped}, nil
-		} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		case err != nil && !errors.Is(err, store.ErrNotFound):
 			return Result{}, fmt.Errorf("look for an earlier analysis: %w", err)
 		}
 	}
@@ -161,13 +165,10 @@ func (s *Service) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, o
 		return Result{}, err
 	}
 
-	hints := Hints{Words: append([]string{a.Title, a.Filename, a.Description}, a.Tags...)}
-	an := Analyze(raw, hints, s.cfg.Params, s.cfg.Shots)
-	// Tags from the quick look label every moment, so a search by "row" finds them (labels, docs/03 section 4).
-	for i := range an.Moments {
-		an.Moments[i].Labels = append([]string(nil), a.Tags...)
-	}
-	res, err := toStore(an)
+	an := Analyze(raw, s.cfg.Params, s.cfg.Shots)
+	// The moments carry the asset's tags as labels when they are stored (the quick look may not have landed yet; it labels them again
+	// when it does).
+	res, err := toStore(an, a.IngestedAt)
 	if err != nil {
 		return Result{}, err
 	}
@@ -193,8 +194,8 @@ func (s *Service) RunJob(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID
 }
 
 // toStore converts an analysis to the rows the store writes.
-func toStore(an Analysis) (store.AnalysisResult, error) {
-	series, err := json.Marshal(compactSeries(an.Series))
+func toStore(an Analysis, ingested *time.Time) (store.AnalysisResult, error) {
+	series, err := Pack(an.Series)
 	if err != nil {
 		return store.AnalysisResult{}, err
 	}
@@ -203,7 +204,7 @@ func toStore(an Analysis) (store.AnalysisResult, error) {
 		return store.AnalysisResult{}, err
 	}
 	out := store.AnalysisResult{
-		Version: Version, StepMs: an.Series.StepMs, DurationMs: an.Series.DurationMs(), Series: series, Summary: summary,
+		Version: Version, SourceIngestedAt: ingested, StepMs: an.Series.StepMs, DurationMs: an.Series.DurationMs(), Series: series, Summary: summary,
 	}
 	for _, sh := range an.Shots {
 		sig, err := json.Marshal(sh)
@@ -224,31 +225,12 @@ func toStore(an Analysis) (store.AnalysisResult, error) {
 	return out, nil
 }
 
-// compactSeries is the series as stored: whole numbers (the motion in hundredths, sharpness in hundredths, scene scores in tenths,
-// luma and contrast in whole grey levels), which keeps a 90 s clip near 15 KB of JSON.
-type compactSeriesDoc struct {
-	StepMs   int            `json:"step_ms"`
-	Unit     map[string]int `json:"scale"`
-	Motion   []int          `json:"motion"`
-	Luma     []int          `json:"luma"`
-	Contrast []int          `json:"contrast"`
-	High     []int          `json:"high"`
-	Sharp    []int          `json:"sharp"`
-	Scene    []int          `json:"scene"`
-}
-
-func compactSeries(s Series) compactSeriesDoc {
-	d := compactSeriesDoc{StepMs: s.StepMs, Unit: map[string]int{"motion": 100, "luma": 1, "contrast": 1, "high": 1, "sharp": 100, "scene": 10}}
-	q := func(x []float64, scale float64) []int {
-		out := make([]int, len(x))
-		for i, v := range x {
-			out[i] = int(v*scale + 0.5)
-		}
-		return out
+// sameTime reports whether two instants are the same (both unset counts); the database keeps microseconds.
+func sameTime(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
 	}
-	d.Motion, d.Luma, d.Contrast, d.High = q(s.Motion, 100), q(s.Luma, 1), q(s.Contrast, 1), q(s.High, 1)
-	d.Sharp, d.Scene = q(s.Sharp, 100), q(s.Scene, 10)
-	return d
+	return a.Truncate(time.Microsecond).Equal(b.Truncate(time.Microsecond))
 }
 
 var errNoProxy = errors.New("analysis: the asset has no proxy")
@@ -292,7 +274,7 @@ func (s *Service) signals(ctx context.Context, proxyKey string, durationMs int64
 // AnalyzeFile runs the analysis on a proxy file on this machine, without a database or object storage: cfctl's development
 // command. The file is copied into a job directory under tempDir (which must be inside the sandbox provider's allowed roots),
 // so the sandbox never sees anything else.
-func AnalyzeFile(ctx context.Context, runner media.Runner, tempDir, path string, durationMs int64, h Hints, p Params, sp ShotParams) (Analysis, error) {
+func AnalyzeFile(ctx context.Context, runner media.Runner, tempDir, path string, durationMs int64, p Params, sp ShotParams) (Analysis, error) {
 	dir, err := os.MkdirTemp(tempDir, "analysis-")
 	if err != nil {
 		return Analysis{}, fmt.Errorf("temp dir: %w", err)
@@ -322,7 +304,7 @@ func AnalyzeFile(ctx context.Context, runner media.Runner, tempDir, path string,
 	if err != nil {
 		return Analysis{}, err
 	}
-	return Analyze(raw, h, p, sp), nil
+	return Analyze(raw, p, sp), nil
 }
 
 // runPass runs the ffmpeg signals pass on the proxy at local (inside dir) and reads what it wrote.

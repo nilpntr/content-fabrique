@@ -129,19 +129,40 @@ func FindRepsIn(raw Raw, s Series, from, to int, p Params) RepsResult {
 	// 2. Runs of periodic windows: a run starts at a window that is clearly periodic and reaches over the neighbours that still
 	// are somewhat (hysteresis), so a window that straddles the end of a set does not cut the set short.
 	ok := make([]bool, len(ws))
-	weak := p.MinStrength * 0.6
+	anchor := make([]float64, len(ws)) // the strength of the clearly periodic window a window was reached from
 	for i, w := range ws {
-		ok[i] = w.strength >= p.MinStrength
+		if w.strength >= p.MinStrength {
+			// the anchor is the clearest window around (four either side): tired reps follow clear ones
+			best := w.strength
+			for k := max(i-4, 0); k <= min(i+4, len(ws)-1); k++ {
+				best = math.Max(best, ws[k].strength)
+			}
+			ok[i], anchor[i] = true, best
+		}
 	}
-	// at most two windows (5 s) beyond the clearly periodic ones, so a still stretch's noise never carries a run on
-	for reach := 0; reach < 2; reach++ {
-		next := append([]bool(nil), ok...)
+	// Up to three windows (7.5 s) beyond the clearly periodic ones. Next to a strong window (0.8 and above, so the reps before were
+	// unmistakable) the bar is lower, because slow, tired reps repeat less clearly; a still stretch's noise never carries a run on
+	// (a set is still checked against the rhythm the scan heard, rep by rep).
+	for reach := 0; reach < 3; reach++ {
+		nextOK, nextAnchor := append([]bool(nil), ok...), append([]float64(nil), anchor...)
 		for i := range ws {
-			if !ok[i] && ws[i].strength >= weak && ((i > 0 && ok[i-1]) || (i+1 < len(ws) && ok[i+1])) {
-				next[i] = true
+			if ok[i] {
+				continue
+			}
+			for _, n := range []int{i - 1, i + 1} {
+				if n < 0 || n >= len(ws) || !ok[n] {
+					continue
+				}
+				bar := 0.6 * p.MinStrength
+				if anchor[n] >= 0.8 {
+					bar = 0.4 * p.MinStrength
+				}
+				if ws[i].strength >= bar {
+					nextOK[i], nextAnchor[i] = true, anchor[n]
+				}
 			}
 		}
-		ok = next
+		ok, anchor = nextOK, nextAnchor
 	}
 	for i := 0; i < len(ws); {
 		if !ok[i] {
@@ -464,32 +485,71 @@ func repsOf(s Series, x []float64, a int, period float64, p Params) (Set, bool) 
 		amps[i], durs[i] = r.Amplitude, float64(r.EndIdx-r.StartIdx)
 	}
 	medAmp, medDur := quantile(amps, 0.5), quantile(durs, 0.5)
-	if math.Abs(medDur/period-1) > 0.35 {
+	if math.Abs(medDur/period-1) > 0.5 {
 		return Set{}, false // the reps are not at the rhythm the scan heard: not a set
+	}
+	// A tired lifter slows down: the length of a rep is judged against its neighbours (the local period), not against the median
+	// of the whole set, so a gradual slowdown is not irregularity.
+	local := func(i int) float64 {
+		var near []float64
+		for k := max(i-2, 0); k <= min(i+2, len(durs)-1); k++ {
+			if k != i {
+				near = append(near, durs[k])
+			}
+		}
+		if len(near) == 0 {
+			return medDur
+		}
+		return quantile(near, 0.5)
 	}
 	for i := range reps {
 		reps[i].Range = reps[i].Amplitude / math.Max(medAmp, 1e-9)
-		reps[i].Regularity = clamp01(1 - math.Abs(durs[i]-medDur)/math.Max(medDur, 1)/0.4)
+		l := local(i)
+		reps[i].Regularity = clamp01(1 - math.Abs(durs[i]-l)/math.Max(l, 1)/0.4)
 	}
-	// A rep at an edge of the set that is much smaller, or of another length, is the lifter getting into position or putting
-	// the weight down: strip edges while they are off.
-	off := func(r Rep) bool {
+	// A rep at an edge of the set that is much smaller, or much longer or shorter than the reps next to it, is the lifter getting
+	// into position or putting the weight down: strip edges while they are off. The bound is 1.75 times the neighbours' length.
+	off := func(r Rep, l float64) bool {
 		d := float64(r.EndIdx - r.StartIdx)
-		return r.Range < 0.4 || r.Regularity < 0.25 || d < 0.6*medDur || d > 1.5*medDur
+		return r.Range < 0.4 || d < 0.55*l || d > 1.75*l
 	}
-	for len(reps) > 0 && off(reps[0]) {
+	for len(reps) > p.MinReps {
+		if !off(reps[0], neighbours(reps, 1)) {
+			break
+		}
 		reps = reps[1:]
 	}
-	for len(reps) > 0 && off(reps[len(reps)-1]) {
+	for len(reps) > p.MinReps {
+		if !off(reps[len(reps)-1], neighbours(reps, len(reps)-2)) {
+			break
+		}
 		reps = reps[:len(reps)-1]
 	}
 	if len(reps) < p.MinReps {
 		return Set{}, false
 	}
+	durs = durs[:0]
+	for _, r := range reps {
+		durs = append(durs, float64(r.EndIdx-r.StartIdx))
+	}
 	return Set{
 		StartIdx: reps[0].StartIdx, EndIdx: reps[len(reps)-1].EndIdx,
-		PeriodMs: medDur * float64(StepMs), Reps: reps,
+		PeriodMs: quantile(durs, 0.5) * float64(StepMs), Reps: reps,
 	}, true
+}
+
+// neighbours is the median length of the reps around index i (i and the two next to it on its inner side), the local period the
+// edge rep next to it is compared with.
+func neighbours(reps []Rep, i int) float64 {
+	var d []float64
+	step := 1
+	if i > 0 && i == len(reps)-2 {
+		step = -1
+	}
+	for k, n := i, 0; k >= 0 && k < len(reps) && n < 3; k, n = k+step, n+1 {
+		d = append(d, float64(reps[k].EndIdx-reps[k].StartIdx))
+	}
+	return quantile(d, 0.5)
 }
 
 // spread keeps, of turning points of one kind (all tops or all bottoms of x), the ones that are at least dist samples from a
@@ -577,6 +637,11 @@ func turningPoints(x []float64, fraction float64) []int {
 				dir, ext, extI = 1, v, i
 			}
 		}
+	}
+	// The extreme the signal was heading for when it ended counts if it has turned back for a moment (a set that ends at the top
+	// of its last rep): without this the last rep of a signal is always lost.
+	if dir != 0 && extI <= len(x)-3 && (len(out) == 0 || extI > out[len(out)-1]) {
+		out = append(out, extI)
 	}
 	return out
 }

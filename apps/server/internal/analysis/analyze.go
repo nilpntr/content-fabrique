@@ -9,10 +9,13 @@ import (
 
 // The kinds of moment (moments.kind).
 const (
-	KindRep  = "rep"
-	KindHold = "hold"
-	KindDead = "dead"
-	KindShot = "shot"
+	KindRep = "rep"
+	// KindRepCandidate is movement next to a set, as big as its reps, that does not repeat clearly enough to cut reps from: slow reps
+	// at the end of a tired set. It is not dead time, and it scores below the reps.
+	KindRepCandidate = "rep_candidate"
+	KindHold         = "hold"
+	KindDead         = "dead"
+	KindShot         = "shot"
 )
 
 // Version is the version of the analysis (the algorithm and its parameters). It is stored with the result; a change of the
@@ -31,28 +34,6 @@ type Moment struct {
 	Attrs       map[string]any `json:"attrs,omitempty"`
 }
 
-// Hints are what is known about the clip besides its pixels: its words (title, file name, tags from the quick look). Posing is
-// a still thing, so a clip that says it is posing holds are what to look for; a rep clip's stillness is only a rest.
-type Hints struct {
-	Words []string
-}
-
-// poseWords are the words of a title, file name or tag that say the clip is about posing, not about repeated movement.
-var poseWords = []string{"pose", "posing", "flex", "flexing", "front double", "back double", "double biceps", "lat spread", "most muscular", "side chest", "side triceps", "physique", "mandatory"}
-
-// Posing reports whether the hints say the clip is of posing.
-func (h Hints) Posing() bool {
-	for _, w := range h.Words {
-		w = strings.ToLower(w)
-		for _, p := range poseWords {
-			if strings.Contains(w, p) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // Summary is the one-glance result of an analysis, stored with it and read by the editor's run context.
 type Summary struct {
 	Version   int `json:"version"`
@@ -64,8 +45,10 @@ type Summary struct {
 	// BestRep is the highest-scoring rep.
 	BestRep *Moment `json:"best_rep,omitempty"`
 	// PeriodMs is the median rep duration over all sets.
-	PeriodMs      int     `json:"period_ms,omitempty"`
-	DeadMs        int     `json:"dead_ms"`
+	PeriodMs int `json:"period_ms,omitempty"`
+	DeadMs   int `json:"dead_ms"`
+	// CandidateMs is the movement next to sets that may be slow reps (rep_candidate moments).
+	CandidateMs   int     `json:"candidate_ms"`
 	Holds         int     `json:"holds"`
 	HoldMs        int     `json:"hold_ms"`
 	LongestHoldMs int     `json:"longest_hold_ms"`
@@ -85,14 +68,13 @@ type Analysis struct {
 }
 
 // Analyze runs the whole analysis on the raw output of the ffmpeg pass.
-func Analyze(raw Raw, h Hints, p Params, sp ShotParams) Analysis {
+func Analyze(raw Raw, p Params, sp ShotParams) Analysis {
 	s := BuildSeries(raw)
 	a := Analysis{Series: s, Shots: DetectShots(s, sp)}
 	if s.Len() == 0 {
 		return a
 	}
 	sharpRef := quantile(s.Sharp, 0.9)
-	posing := h.Posing()
 
 	type shotResult struct {
 		sets []Set
@@ -122,7 +104,7 @@ func Analyze(raw Raw, h Hints, p Params, sp ShotParams) Analysis {
 				covered[k-sh.From] = true
 			}
 		}
-		a.Moments = append(a.Moments, restMoments(s, sh, covered, results[i].sets, clipHasReps, posing, sharpRef, p)...)
+		a.Moments = append(a.Moments, restMoments(raw, s, sh, covered, results[i].sets, clipHasReps, sharpRef, p)...)
 		a.Moments = append(a.Moments, shotMoment(sh, len(results[i].sets), clipHasReps))
 	}
 	sort.SliceStable(a.Moments, func(i, j int) bool {
@@ -147,12 +129,12 @@ func repMoment(s Series, sh Shot, rp Rep, set, n, of int, st Set, sharpRef float
 
 	var notes []string
 	switch {
-	case rp.Range >= 0.85 && rp.Regularity >= 0.6:
+	case rp.Range >= 0.85 && rp.Regularity >= 0.4:
 		notes = append(notes, "clean, full range")
 	case rp.Range < 0.85:
 		notes = append(notes, fmt.Sprintf("short range (%d%% of the set's typical)", int(math.Round(rp.Range*100))))
 	}
-	if rp.Regularity < 0.6 {
+	if rp.Regularity < 0.4 {
 		notes = append(notes, "uneven tempo")
 	}
 	if SharpnessScore(rel) < 0.4 {
@@ -174,9 +156,14 @@ func repMoment(s Series, sh Shot, rp Rep, set, n, of int, st Set, sharpRef float
 	}
 }
 
-// restMoments marks what is outside the sets of a shot: still stretches (a hold when the clip is of posing or has no reps at all,
-// otherwise dead time, the rest between sets) and stretches of movement that is not periodic (dead time).
-func restMoments(s Series, sh Shot, covered []bool, sets []Set, clipHasReps, posing bool, sharpRef float64, p Params) []Moment {
+// restMoments marks what is outside the sets of a shot, from the signals alone (what the quick look says about the clip is not
+// known yet when this runs):
+//   - a still stretch is a hold when the clip has no reps at all, or when it is long (4 s), steady and well exposed (a pose is
+//     held; the rest between sets is usually short or dark); otherwise it is dead time, the rest between sets;
+//   - movement next to a set that is as big as the set's reps but does not repeat clearly enough is a rep candidate (slow, tired
+//     reps), not dead time, and the editor is not told to skip it;
+//   - other movement that is not periodic for more than 2 s is dead time.
+func restMoments(raw Raw, s Series, sh Shot, covered []bool, sets []Set, clipHasReps bool, sharpRef float64, p Params) []Moment {
 	n := sh.To - sh.From
 	if n < 2 {
 		return nil
@@ -221,6 +208,7 @@ func restMoments(s Series, sh Shot, covered []bool, sets []Set, clipHasReps, pos
 	}
 	minStill, minDead := p.samples(p.MinStillMs), p.samples(p.MinDeadMs)
 	var out []Moment
+	var chained []int // where rep candidates end: a stretch that follows one is next to the set as well
 	for i := 0; i < n; {
 		j := i
 		for j < n && cls[j] == cls[i] {
@@ -228,18 +216,64 @@ func restMoments(s Series, sh Shot, covered []bool, sets []Set, clipHasReps, pos
 		}
 		a, b := sh.From+i, sh.From+j
 		switch {
-		case cls[i] == still && j-i >= minStill:
-			if posing || !clipHasReps {
+		case (cls[i] == still && j-i >= minStill) || (cls[i] == moving && j-i >= minDead):
+			// next to a set, a stretch that drifts as far as the set's reps do is the set going on slowly: its motion per sample is
+			// small (it can look like rest) but it travels
+			if m, ok := candidateMoment(raw, s, sh, a, b, sets, chained); ok {
+				out = append(out, m)
+				chained = append(chained, b)
+				break
+			}
+			if cls[i] == moving {
+				out = append(out, deadMoment(s, sh, a, b, "movement that is not a repeating rep"))
+				break
+			}
+			steady := mean(s.Motion[a:b]) < 0.7*thr
+			good := ExposureScore(KeyLuma(NormLuma(mean(s.Luma[a:b])), NormLuma(mean(s.High[a:b])))) >= 0.45
+			if !clipHasReps || ((b-a)*s.StepMs >= 4000 && steady && good) {
 				out = append(out, holdMoment(s, sh, a, b, thr, sharpRef))
 			} else {
 				out = append(out, deadMoment(s, sh, a, b, "still between sets"))
 			}
-		case cls[i] == moving && j-i >= minDead:
-			out = append(out, deadMoment(s, sh, a, b, "movement that is not a repeating rep"))
 		}
 		i = j
 	}
 	return out
+}
+
+// candidateMoment says whether a stretch [a, b) next to a set (it starts within a second of the set's end or ends within a second
+// of its start) drifts about as far as one of the set's reps does, between half and 1.3 times (Raw.Drift; walking about drifts far more).
+// Then it is probably the set going on slowly, and is a rep candidate scoring up to 0.35.
+func candidateMoment(raw Raw, s Series, sh Shot, a, b int, sets []Set, chained []int) (Moment, bool) {
+	near := 1000 / s.StepMs
+	for _, set := range sets {
+		// the movement that leads into or out of a set was given to it (up to one rep), so "next to" counts from there
+		reach := int(set.PeriodMs)/s.StepMs + near
+		afterSet := a >= set.EndIdx-near && a <= set.EndIdx+reach
+		for _, e := range chained {
+			afterSet = afterSet || (a >= e-near && a <= e+2*near && e >= set.EndIdx && a-set.EndIdx <= 15*1000/s.StepMs)
+		}
+		beforeSet := b >= set.StartIdx-reach && b <= set.StartIdx+near
+		if !afterSet && !beforeSet {
+			continue
+		}
+		var travel []float64
+		for _, r := range set.Reps {
+			travel = append(travel, raw.Drift(r.StartIdx, min(r.EndIdx+1, s.Len())))
+		}
+		repTravel := quantile(travel, 0.5)
+		runTravel := raw.Drift(a, b)
+		if repTravel <= 0 || runTravel < 0.5*repTravel || runTravel > 1.3*repTravel {
+			continue
+		}
+		match := math.Min(runTravel/repTravel, 1)
+		return Moment{
+			Kind: KindRepCandidate, StartMs: a * s.StepMs, EndMs: b * s.StepMs, Score: round2(0.35 * match),
+			Description: fmt.Sprintf("possible slow reps, %.1f s: moves as far as the set next to it but does not repeat clearly", float64(b-a)*float64(s.StepMs)/1000),
+			Attrs:       map[string]any{"shot": sh.Idx, "travel_match": round2(match), "set_period_ms": int(math.Round(set.PeriodMs))},
+		}, true
+	}
+	return Moment{}, false
 }
 
 func holdMoment(s Series, sh Shot, a, b int, thr, sharpRef float64) Moment {
@@ -310,6 +344,8 @@ func summarise(s Series, a Analysis, sets int, periods []float64) Summary {
 				c := m
 				sum.BestRep = &c
 			}
+		case KindRepCandidate:
+			sum.CandidateMs += m.EndMs - m.StartMs
 		case KindDead:
 			sum.DeadMs += m.EndMs - m.StartMs
 		case KindHold:
@@ -345,6 +381,9 @@ func (s Summary) Line() string {
 	}
 	if s.Reps > 0 && s.Holds > 0 {
 		parts = append(parts, fmt.Sprintf("%d %s", s.Holds, plural(s.Holds, "hold", "holds")))
+	}
+	if s.CandidateMs >= 2000 {
+		parts = append(parts, fmt.Sprintf("%d s that may be slow reps", int(math.Round(float64(s.CandidateMs)/1000))))
 	}
 	if s.DeadMs >= 1000 {
 		parts = append(parts, fmt.Sprintf("%d s dead time", int(math.Round(float64(s.DeadMs)/1000))))

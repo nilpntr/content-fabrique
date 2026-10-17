@@ -29,7 +29,7 @@ type fakeStore struct {
 	mu      sync.Mutex
 	asset   store.Asset
 	derivs  []store.Derivative
-	signals *store.AssetSignals
+	signals *store.SignalsMeta
 	saved   []store.AnalysisResult
 	saveErr error
 	missing bool
@@ -56,13 +56,13 @@ func (f *fakeStore) SaveAnalysis(_ context.Context, _ ids.WorkspaceID, _ ids.Ass
 		return f.saveErr
 	}
 	f.saved = append(f.saved, r)
-	f.signals = &store.AssetSignals{Version: int32(r.Version)}
+	f.signals = &store.SignalsMeta{Version: int32(r.Version), SourceIngestedAt: r.SourceIngestedAt}
 	return nil
 }
 
-func (f *fakeStore) GetAssetSignals(context.Context, ids.WorkspaceID, ids.AssetID) (store.AssetSignals, error) {
+func (f *fakeStore) GetAssetSignalsMeta(context.Context, ids.WorkspaceID, ids.AssetID) (store.SignalsMeta, error) {
 	if f.signals == nil {
-		return store.AssetSignals{}, store.ErrNotFound
+		return store.SignalsMeta{}, store.ErrNotFound
 	}
 	return *f.signals, nil
 }
@@ -103,8 +103,10 @@ func fixture(t *testing.T) (*Service, *fakeStore, *fakeRunner) {
 	ws := ids.WorkspaceID{UUID: uuid.New()}
 	id := ids.AssetID{UUID: uuid.New()}
 	dur := int64(30_000)
+	ingested := time.Date(2026, 10, 17, 12, 0, 0, 123456000, time.UTC)
 	a := store.Asset{
-		ID: id, WorkspaceID: ws, Kind: store.AssetKindVideo, Status: store.AssetReady, Filename: "lat-pulldown.mov", Title: "Lat pulldown",
+		IngestedAt: &ingested,
+		ID:         id, WorkspaceID: ws, Kind: store.AssetKindVideo, Status: store.AssetReady, Filename: "lat-pulldown.mov", Title: "Lat pulldown",
 		Tags: []string{"lat pulldown", "back"}, DurationMs: &dur,
 	}
 	key := storage.AssetPrefix(ws, id) + "proxy_720.mp4"
@@ -148,10 +150,6 @@ func TestRunStoresTheAnalysis(t *testing.T) {
 		if m.Kind == KindRep {
 			reps++
 		}
-		// the quick look's tags label every moment
-		if len(m.Labels) != 2 || m.Labels[0] != "lat pulldown" {
-			t.Fatalf("labels %v", m.Labels)
-		}
 		if m.Score < 0 || m.Score > 1 || m.EndMs <= m.StartMs {
 			t.Fatalf("moment %+v", m)
 		}
@@ -166,15 +164,16 @@ func TestRunStoresTheAnalysis(t *testing.T) {
 	if err := json.Unmarshal(saved.Summary, &sum); err != nil || sum.Reps != reps {
 		t.Fatalf("summary %s: %v", saved.Summary, err)
 	}
-	var series map[string]any
-	if err := json.Unmarshal(saved.Series, &series); err != nil {
-		t.Fatalf("series: %v", err)
+	un, err := Unpack(saved.Series, saved.StepMs)
+	if err != nil || un.Len() != 400 {
+		t.Fatalf("series: %d samples, %v", un.Len(), err)
 	}
-	if motion, _ := series["motion"].([]any); len(motion) != 400 {
-		t.Fatalf("%d motion samples, want 400", len(motion))
+	size := len(saved.Series.Motion) + len(saved.Series.Luma) + len(saved.Series.Contrast) + len(saved.Series.High) + len(saved.Series.Sharp) + len(saved.Series.Scene)
+	if size != 400*9 {
+		t.Errorf("the series of 40 s are %d bytes, want 9 a sample", size)
 	}
-	if len(saved.Series) > 40_000 {
-		t.Errorf("the series of 40 s is %d bytes of JSON", len(saved.Series))
+	if saved.SourceIngestedAt == nil || !saved.SourceIngestedAt.Equal(*st.asset.IngestedAt) {
+		t.Errorf("the analysis does not say which proxy it was made from: %v", saved.SourceIngestedAt)
 	}
 	// a second run is skipped unless forced
 	if res, err := svc.Run(context.Background(), st.asset.WorkspaceID, st.asset.ID, Options{}); err != nil || res.Outcome != OutcomeSkipped || run.runs != 1 {
@@ -182,6 +181,15 @@ func TestRunStoresTheAnalysis(t *testing.T) {
 	}
 	if res, err := svc.Run(context.Background(), st.asset.WorkspaceID, st.asset.ID, Options{Force: true}); err != nil || res.Outcome != OutcomeDone || run.runs != 2 {
 		t.Fatalf("forced run: %+v %v", res, err)
+	}
+	// an asset that was ingested again has a new proxy: its analysis is out of date and runs again without Force
+	again := st.asset.IngestedAt.Add(time.Minute)
+	st.asset.IngestedAt = &again
+	if res, err := svc.Run(context.Background(), st.asset.WorkspaceID, st.asset.ID, Options{}); err != nil || res.Outcome != OutcomeDone || run.runs != 3 {
+		t.Fatalf("run after a re-ingest: %+v %v runs %d", res, err, run.runs)
+	}
+	if res, err := svc.Run(context.Background(), st.asset.WorkspaceID, st.asset.ID, Options{}); err != nil || res.Outcome != OutcomeSkipped {
+		t.Fatalf("run after that: %+v %v", res, err)
 	}
 }
 

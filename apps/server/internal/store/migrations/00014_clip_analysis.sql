@@ -5,12 +5,15 @@
 -- the editor needs to cut on the beat of the movement: motion, exposure and sharpness per 100 ms, shots, and the reps, still
 -- holds and dead time inside them.
 --
--- asset_signals: one row per analysed asset. `series` holds the per-sample series (step_ms apart: motion, luma, contrast, sharp,
---                scene) as compact arrays; `summary` the one-glance result the editor's context line is made from. `version` is
---                the version of the analysis code that made it (analysis.Version), so a backfill can re-run older ones.
+-- asset_signals: one row per analysed asset. The per-sample series (step_ms apart) are packed, one bytea per series: motion,
+--                sharp and scene as little-endian int16 and luma, contrast and high as uint8, each with its scale in
+--                `scales` (value = stored / scale), 9 bytes a sample (a 90 s clip is 8 KB, a 30 minute one 160 KB).
+--                `summary` is the one-glance result the editor's context line is made from. `version` is the version of
+--                the analysis code that made it (analysis.Version) and `source_ingested_at` the assets.ingested_at of the
+--                proxy it was made from: an asset that is ingested again (a new proxy) is analysed again.
 -- shots:         the continuous takes of an asset (start_ms, end_ms) with their signals (exposure and the correction that would
 --                bring it to the target, sharpness, motion). docs/03 lists keyframe_key too; keyframes (P2-04) add it.
--- moments:       a stretch of an asset with a kind (rep, hold, dead, shot), a 0..1 score, labels, attrs and a short description
+-- moments:       a stretch of an asset with a kind (rep, rep_candidate, hold, dead, shot), a 0..1 score, labels, attrs and a short description
 --                (the reason the editor reads: "rep 3 of 8, clean, full range"). `source` is analysis here; user annotations and the
 --                agent's own marks come later (docs/03 section 4). The full-text search vector and the embedding of the docs come
 --                with the moment builder (P2-06); this is the subset the editor's find_moments needs.
@@ -26,7 +29,14 @@ CREATE TABLE asset_signals (
     version      integer     NOT NULL,
     step_ms      integer     NOT NULL,
     duration_ms  integer     NOT NULL,
-    series       jsonb       NOT NULL,
+    source_ingested_at timestamptz,
+    scales       jsonb       NOT NULL,
+    motion       bytea       NOT NULL,
+    luma         bytea       NOT NULL,
+    contrast     bytea       NOT NULL,
+    high         bytea       NOT NULL,
+    sharp        bytea       NOT NULL,
+    scene        bytea       NOT NULL,
     summary      jsonb       NOT NULL,
     created_at   timestamptz NOT NULL DEFAULT now(),
     updated_at   timestamptz NOT NULL DEFAULT now(),
@@ -74,15 +84,16 @@ CREATE TABLE moments (
     created_at   timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT moments_asset_fkey FOREIGN KEY (workspace_id, asset_id)
         REFERENCES assets (workspace_id, id) ON DELETE CASCADE,
-    CONSTRAINT moments_kind_check CHECK (kind IN ('rep', 'hold', 'dead', 'shot')),
+    CONSTRAINT moments_kind_check CHECK (kind IN ('rep', 'rep_candidate', 'hold', 'dead', 'shot')),
     CONSTRAINT moments_source_check CHECK (source IN ('analysis', 'user', 'agent')),
     CONSTRAINT moments_range_check CHECK (start_ms >= 0 AND end_ms > start_ms),
     CONSTRAINT moments_score_check CHECK (score >= 0 AND score <= 1)
 );
 
--- The timeline of an asset, and the best moments of a kind among a project's assets.
+-- The timeline of an asset, and the best moments of a kind among a project's assets (ListMoments filters by workspace, assets
+-- and kinds and sorts by score).
 CREATE INDEX moments_asset_start_idx ON moments (workspace_id, asset_id, start_ms);
-CREATE INDEX moments_kind_score_idx ON moments (workspace_id, kind, score DESC);
+CREATE INDEX moments_asset_kind_score_idx ON moments (workspace_id, asset_id, kind, score DESC);
 
 SELECT cf_grant_app_dml('moments');
 

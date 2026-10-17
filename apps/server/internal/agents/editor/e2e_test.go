@@ -143,7 +143,7 @@ func newE2E(t *testing.T, vars map[string]string, api *fakeAnthropic) *e2e {
 	e.asset(e.wsB, clip{title: "private clip of workspace B"})
 	e.asset(e.wsA, clip{title: "private clip of another project"})
 	// The analysis of the heaviest set: two clean reps from 2 s to 8 s, rest before and after.
-	res := store.AnalysisResult{Version: 1, StepMs: 100, DurationMs: 12000, Series: []byte(`{}`), Shots: []store.NewShot{{Idx: 0, StartMs: 0, EndMs: 12000, Signals: []byte(`{}`)}},
+	res := store.AnalysisResult{Version: 1, StepMs: 100, DurationMs: 12000, Series: store.PackedSeries{}, Shots: []store.NewShot{{Idx: 0, StartMs: 0, EndMs: 12000, Signals: []byte(`{}`)}},
 		Summary: []byte(`{"version":1,"duration_ms":12000,"shots":1,"sets":1,"reps":2,"clean_reps":2,"period_ms":3000,"dead_ms":4000,"mean_y":0.3,"exposure_level":"ok","exposure_gain":1.2,"best_rep":{"kind":"rep","start_ms":5000,"end_ms":8000,"score":0.88}}`),
 		Moments: []store.NewMoment{
 			{Kind: store.MomentRep, StartMs: 2000, EndMs: 5000, Score: 0.81, Attrs: []byte(`{}`), Description: "rep 1 of 2, clean, full range"},

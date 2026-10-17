@@ -42,7 +42,7 @@ func TestRealPassOnAGeneratedClip(t *testing.T) {
 	if err := os.Mkdir(work, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	an, err := AnalyzeFile(context.Background(), runner, work, clip, 40000, Hints{Words: []string{"generated box"}}, DefaultParams(), DefaultShotParams())
+	an, err := AnalyzeFile(context.Background(), runner, work, clip, 40000, DefaultParams(), DefaultShotParams())
 	if err != nil {
 		t.Fatal(err)
 	}

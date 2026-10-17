@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -24,14 +25,21 @@ type (
 	AssetSignals = db.AssetSignal
 	// AnalysisSummaryRow is the summary of one asset's analysis.
 	AnalysisSummaryRow = db.ListAssetAnalysisSummariesRow
+	// SignalsMeta says which analysis an asset has (version and the proxy it was made from), without the series.
+	SignalsMeta = db.GetAssetSignalsMetaRow
+	// DeadSpan is one of the longest dead spans of an asset, with the number of dead spans it has in all.
+	DeadSpan = db.ListDeadSpansRow
 )
 
 // The moment kinds (moments.kind).
 const (
-	MomentRep  = "rep"
-	MomentHold = "hold"
-	MomentDead = "dead"
-	MomentShot = "shot"
+	MomentRep = "rep"
+	// MomentRepCandidate is movement next to a set that looks like its reps but does not repeat clearly enough to cut reps from
+	// (slow reps at the end of a tired set): not dead time, and ranked below the reps.
+	MomentRepCandidate = "rep_candidate"
+	MomentHold         = "hold"
+	MomentDead         = "dead"
+	MomentShot         = "shot"
 )
 
 // SetAnalysisHook registers fn to run, in the transaction that marks a video ready (FinishAssetIngest), for that video: fn
@@ -73,13 +81,23 @@ type NewMoment struct {
 	Description string
 }
 
+// PackedSeries are the per-sample series of an analysis as stored: one byte string per series (int16 little-endian for motion,
+// sharp and scene, uint8 for luma, contrast and high) and the JSON document of their scales (package analysis packs them).
+type PackedSeries struct {
+	Scales                                     json.RawMessage
+	Motion, Luma, Contrast, High, Sharp, Scene []byte
+}
+
 // AnalysisResult is what the analysis of one asset produced.
 type AnalysisResult struct {
-	Version    int
-	StepMs     int
-	DurationMs int
-	// Series and Summary are JSON documents.
-	Series  json.RawMessage
+	Version int
+	// SourceIngestedAt is the assets.ingested_at of the proxy the analysis was made from: an asset that is ingested again has a
+	// new one, and its analysis is out of date.
+	SourceIngestedAt *time.Time
+	StepMs           int
+	DurationMs       int
+	Series           PackedSeries
+	// Summary is a JSON document.
 	Summary json.RawMessage
 	Shots   []NewShot
 	Moments []NewMoment
@@ -89,12 +107,14 @@ type AnalysisResult struct {
 // one transaction. ErrNotFound when the asset is not in this workspace (or is deleted): nothing is written then.
 func (s *Store) SaveAnalysis(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, r AnalysisResult) error {
 	return s.inTx(ctx, func(tx *Store) error {
-		if _, err := tx.GetAsset(ctx, ws, id); err != nil {
+		a, err := tx.GetAsset(ctx, ws, id)
+		if err != nil {
 			return err
 		}
 		if _, err := tx.q.UpsertAssetSignals(ctx, db.UpsertAssetSignalsParams{
-			WorkspaceID: ws, AssetID: id, Version: int32(r.Version), StepMs: int32(r.StepMs), DurationMs: int32(r.DurationMs), //nolint:gosec // bounded by the analysis
-			Series: jsonOrEmpty(r.Series), Summary: jsonOrEmpty(r.Summary),
+			WorkspaceID: ws, AssetID: id, Version: int32(r.Version), SourceIngestedAt: r.SourceIngestedAt, StepMs: int32(r.StepMs), DurationMs: int32(r.DurationMs), //nolint:gosec // bounded by the analysis
+			Scales: jsonOrEmpty(r.Series.Scales), Motion: nonNil(r.Series.Motion), Luma: nonNil(r.Series.Luma), Contrast: nonNil(r.Series.Contrast),
+			High: nonNil(r.Series.High), Sharp: nonNil(r.Series.Sharp), Scene: nonNil(r.Series.Scene), Summary: jsonOrEmpty(r.Summary),
 		}); err != nil {
 			return mapErr(err)
 		}
@@ -114,6 +134,9 @@ func (s *Store) SaveAnalysis(ctx context.Context, ws ids.WorkspaceID, id ids.Ass
 		for _, m := range r.Moments {
 			labels := m.Labels
 			if labels == nil {
+				labels = a.Tags // what the quick look has said so far; ApplyQuickLook labels them again when it lands
+			}
+			if labels == nil {
 				labels = []string{}
 			}
 			if err := mapErr(tx.q.InsertMoment(ctx, db.InsertMomentParams{
@@ -125,6 +148,13 @@ func (s *Store) SaveAnalysis(ctx context.Context, ws ids.WorkspaceID, id ids.Ass
 		}
 		return nil
 	})
+}
+
+func nonNil(b []byte) []byte {
+	if b == nil {
+		return []byte{}
+	}
+	return b
 }
 
 func jsonOrEmpty(raw json.RawMessage) json.RawMessage {
@@ -140,6 +170,22 @@ func (s *Store) ListAssetAnalysisSummaries(ctx context.Context, ws ids.Workspace
 		return nil, nil
 	}
 	rows, err := s.q.ListAssetAnalysisSummaries(ctx, db.ListAssetAnalysisSummariesParams{WorkspaceID: ws, AssetIds: assetUUIDs(assets)})
+	return rows, mapErr(err)
+}
+
+// GetAssetSignalsMeta returns which analysis an asset has (its version and the proxy it was made from) without reading the series,
+// or ErrNotFound when it was not analysed.
+func (s *Store) GetAssetSignalsMeta(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (SignalsMeta, error) {
+	r, err := s.q.GetAssetSignalsMeta(ctx, db.GetAssetSignalsMetaParams{WorkspaceID: ws, AssetID: id})
+	return r, mapErr(err)
+}
+
+// ListDeadSpans returns, for each asset, its perAsset longest dead spans in time order, each with the asset's total number of them.
+func (s *Store) ListDeadSpans(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID, perAsset int) ([]DeadSpan, error) {
+	if len(assets) == 0 || perAsset < 1 {
+		return nil, nil
+	}
+	rows, err := s.q.ListDeadSpans(ctx, db.ListDeadSpansParams{WorkspaceID: ws, AssetIds: assetUUIDs(assets), PerAsset: int32(perAsset)}) //nolint:gosec // small
 	return rows, mapErr(err)
 }
 
@@ -165,7 +211,7 @@ func (s *Store) ListAssetMoments(ctx context.Context, ws ids.WorkspaceID, id ids
 type MomentFilter struct {
 	// Assets are the assets to look in; the caller has checked that they belong to the project asking.
 	Assets []ids.AssetID
-	// Kinds are the kinds wanted (MomentRep and so on); empty means rep and hold, the moments worth cutting.
+	// Kinds are the kinds wanted (MomentRep and so on); empty means rep, rep candidate and hold, the moments worth cutting.
 	Kinds    []string
 	MinScore float64
 	Limit    int
@@ -181,7 +227,7 @@ func (s *Store) ListMoments(ctx context.Context, ws ids.WorkspaceID, f MomentFil
 	}
 	kinds := f.Kinds
 	if len(kinds) == 0 {
-		kinds = []string{MomentRep, MomentHold}
+		kinds = []string{MomentRep, MomentHold, MomentRepCandidate}
 	}
 	rows, err := s.q.ListMoments(ctx, db.ListMomentsParams{
 		WorkspaceID: ws, AssetIds: assetUUIDs(f.Assets), Kinds: kinds, MinScore: float32(f.MinScore), RowLimit: int32(f.Limit), //nolint:gosec // checked

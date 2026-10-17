@@ -52,6 +52,7 @@ type Store interface {
 	// ListMoments and ListAssetAnalysisSummaries read the clip analysis (P2-02, P2-09) for find_moments and the run context.
 	ListMoments(ctx context.Context, ws ids.WorkspaceID, f store.MomentFilter) ([]store.Moment, error)
 	ListAssetAnalysisSummaries(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.AnalysisSummaryRow, error)
+	ListDeadSpans(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID, perAsset int) ([]store.DeadSpan, error)
 }
 
 // Deps are what the editor's tools need.

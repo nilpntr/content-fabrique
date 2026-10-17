@@ -14,7 +14,7 @@ import (
 // saveAnalysis stores an analysis for the asset: nReps reps of 3 s from 6 s on (scores rising by a tenth), a hold, dead time.
 func (e *env) saveAnalysis(ws store.Workspace, asset ids.AssetID, nReps int) {
 	e.t.Helper()
-	res := store.AnalysisResult{Version: analysis.Version, StepMs: 100, DurationMs: 60000, Series: []byte(`{}`)}
+	res := store.AnalysisResult{Version: analysis.Version, StepMs: 100, DurationMs: 60000, Series: store.PackedSeries{}}
 	sum := analysis.Summary{Version: analysis.Version, DurMs: 60000, Shots: 1, Sets: 1, Reps: nReps, CleanReps: nReps, PeriodMs: 3000, DeadMs: 12000, Level: "dark", MeanY: 0.1, Gain: 2.5}
 	for i := 0; i < nReps; i++ {
 		m := store.NewMoment{

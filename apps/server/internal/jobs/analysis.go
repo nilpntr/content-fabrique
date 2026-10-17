@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/rivertype"
 
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
@@ -32,26 +31,32 @@ const AnalysisTimeout = 30 * time.Minute
 type AnalyzeArgs struct {
 	WorkspaceID ids.WorkspaceID `json:"workspace_id"`
 	AssetID     ids.AssetID     `json:"asset_id"`
+	// Generation is the ingest the job was enqueued for (assets.ingested_at in microseconds). It is part of the job's unique key, so
+	// an asset that is ingested again gets a new analysis of its new proxy instead of being deduplicated against the old job.
+	Generation int64 `json:"generation"`
 }
 
 // Kind implements river.JobArgs.
 func (AnalyzeArgs) Kind() string { return "analyze" }
 
-// InsertOpts puts the job on its own queue and makes it unique by asset while one is waiting or running: an asset that is
-// ingested again (a new proxy) gets a fresh analysis, but a double enqueue runs once.
+// InsertOpts puts the job on its own queue and makes it unique by its arguments, which include the ingest generation: a double
+// enqueue for one ingest runs once, and a re-ingest (a new proxy, a new generation) is never deduplicated away.
 func (AnalyzeArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{
-		Queue: QueueAnalysis, MaxAttempts: 4,
-		UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: []rivertype.JobState{
-			rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled,
-		}},
+	return river.InsertOpts{Queue: QueueAnalysis, MaxAttempts: 4, UniqueOpts: river.UniqueOpts{ByArgs: true}}
+}
+
+// generationOf is the ingest generation of an asset: the time its ingest finished, in microseconds (0 when it has none).
+func generationOf(a store.Asset) int64 {
+	if a.IngestedAt == nil {
+		return 0
 	}
+	return a.IngestedAt.UnixMicro()
 }
 
 // EnqueueAnalysis is the store's analysis hook (Store.SetAnalysisHook): it inserts the job in the transaction that marks the
 // video ready, so the job exists exactly when the ready asset does.
 func (e *Enqueuer) EnqueueAnalysis(ctx context.Context, tx *store.Store, a store.Asset) error {
-	if _, err := e.InsertInStore(ctx, tx, AnalyzeArgs{WorkspaceID: a.WorkspaceID, AssetID: a.ID}, nil); err != nil {
+	if _, err := e.InsertInStore(ctx, tx, AnalyzeArgs{WorkspaceID: a.WorkspaceID, AssetID: a.ID, Generation: generationOf(a)}, nil); err != nil {
 		return fmt.Errorf("enqueue analyze: %w", err)
 	}
 	return nil

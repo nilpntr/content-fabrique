@@ -128,7 +128,7 @@ func (d Deps) findMoments(ctx context.Context, rc runtime.RunContext, in findMom
 	if clamped {
 		fmt.Fprintf(&b, "(limit lowered to %d.) ", maxMoments)
 	}
-	b.WriteString(d.deadTimeNote(ctx, ws, assets))
+	b.WriteString(d.deadTimeNote(ctx, rc, ws, assets))
 	if len(waiting) > 0 {
 		fmt.Fprintf(&b, "\nNot analysed yet, so not covered here: %s.", strings.Join(waiting, ", "))
 	}
@@ -139,7 +139,8 @@ func (d Deps) findMoments(ctx context.Context, rc runtime.RunContext, in findMom
 func momentKinds(kind string) ([]string, error) {
 	switch kind {
 	case "", "any":
-		return []string{store.MomentRep, store.MomentHold}, nil
+		// Rep candidates (slow reps next to a set) are in too, ranked below the reps by their lower score.
+		return []string{store.MomentRep, store.MomentHold, store.MomentRepCandidate}, nil
 	case "rep":
 		return []string{store.MomentRep}, nil
 	case "hold":
@@ -148,31 +149,34 @@ func momentKinds(kind string) ([]string, error) {
 	return nil, runtime.UserErrorf("kind must be rep, hold or any")
 }
 
-// deadTimeNote lists the stretches to skip (dead time) of the assets: at most maxDeadSpans per clip, in time order.
-func (d Deps) deadTimeNote(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) string {
-	dead, err := d.Store.ListMoments(ctx, ws, store.MomentFilter{Assets: assets, Kinds: []string{store.MomentDead}, Limit: 200})
-	if err != nil || len(dead) == 0 {
+// deadTimeNote lists the stretches to skip (dead time) of the assets: the longest maxDeadSpans of each clip, in time order. When
+// they cannot be read it says so, instead of leaving the editor to think there is none.
+func (d Deps) deadTimeNote(ctx context.Context, rc runtime.RunContext, ws ids.WorkspaceID, assets []ids.AssetID) string {
+	spans, err := d.Store.ListDeadSpans(ctx, ws, assets, maxDeadSpans)
+	if err != nil {
+		logOf(rc).WarnContext(ctx, "find_moments: dead time could not be read", "error", err)
+		return "\n(The dead time of these clips could not be read just now; do not assume there is none.)"
+	}
+	if len(spans) == 0 {
 		return ""
 	}
-	byAsset := map[ids.AssetID][]store.Moment{}
-	for _, m := range dead {
-		byAsset[m.AssetID] = append(byAsset[m.AssetID], m)
+	byAsset := map[ids.AssetID][]store.DeadSpan{}
+	for _, sp := range spans {
+		byAsset[sp.AssetID] = append(byAsset[sp.AssetID], sp)
 	}
 	var b strings.Builder
 	b.WriteString("\nDead time to skip (nothing useful happens):")
 	for _, a := range assets {
-		spans := byAsset[a]
-		if len(spans) == 0 {
+		list := byAsset[a]
+		if len(list) == 0 {
 			continue
 		}
-		slices.SortFunc(spans, func(x, y store.Moment) int { return int(x.StartMs) - int(y.StartMs) })
-		parts := make([]string, 0, maxDeadSpans)
-		for i, m := range spans {
-			if i == maxDeadSpans {
-				parts = append(parts, fmt.Sprintf("and %d more", len(spans)-maxDeadSpans))
-				break
-			}
-			parts = append(parts, fmt.Sprintf("%d to %d ms", m.StartMs, m.EndMs))
+		parts := make([]string, 0, len(list)+1)
+		for _, sp := range list {
+			parts = append(parts, fmt.Sprintf("%d to %d ms", sp.StartMs, sp.EndMs))
+		}
+		if more := int(list[0].Total) - len(list); more > 0 {
+			parts = append(parts, fmt.Sprintf("and %d shorter ones", more))
 		}
 		fmt.Fprintf(&b, "\n- %s: %s", a, strings.Join(parts, ", "))
 	}
