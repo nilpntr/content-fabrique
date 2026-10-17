@@ -38,6 +38,8 @@ jobs:
       web: ${{ steps.filter.outputs.web || 'true' }}
       env: ${{ steps.filter.outputs.env || 'true' }}
       doctor: ${{ steps.filter.outputs.doctor || 'true' }}
+      media_licences: ${{ steps.filter.outputs.media_licences || 'true' }}
+      media_sandbox: ${{ steps.filter.outputs.media_sandbox || 'true' }}
     steps:
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
@@ -68,6 +70,17 @@ jobs:
               - '.env.example'
               - 'go.work'
               - 'compose.yaml'
+              - '.github/workflows/ci.yml'
+            # The media-tools image and its licence allowlist (P1-03, D-16).
+            media_licences:
+              - 'packages/media-tools/**'
+              - '.github/workflows/ci.yml'
+            # Everything that decides how media jobs are sandboxed: the image, the providers, the media wrappers, cfctl media.
+            media_sandbox:
+              - 'packages/media-tools/**'
+              - 'apps/server/internal/sandbox/**'
+              - 'apps/server/internal/media/**'
+              - 'apps/server/cmd/cfctl/media*.go'
               - '.github/workflows/ci.yml'
 
   # go vet and golangci-lint (apps/server/.golangci.yml).
@@ -288,11 +301,156 @@ jobs:
       - name: cfctl doctor --env ci
         run: '"$RUNNER_TEMP/cfctl" doctor --env ci --env-file "$RUNNER_TEMP/ci.env"'
 
+  # The media-tools image (P1-03): build it, check its shape and its licences. The licence check fails on anything outside
+  # packages/media-tools/licenses/policy.json, the allowlist D-16 (as amended) asks for: permissive licences, plus the named
+  # GPL/LGPL exceptions (ffmpeg, x264 and their runtime libraries, run as separate processes in our containers). It also
+  # fails when LICENSES.md's generated inventory is stale. Then cfctl probes a generated clip through the docker provider and
+  # the sandbox integration tests run against the image. The image is built from pinned inputs (base image digest, Debian
+  # snapshot date, ffmpeg checksum), so the result does not drift on its own.
+  media-tools:
+    needs: changes
+    if: needs.changes.outputs.media_licences == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: apps/server/go.mod
+          cache: false
+
+      - name: Licence check tests
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 -I -m unittest discover -s packages/media-tools/licenses -v
+
+      - name: Build the image
+        run: docker build --tag media-tools:ci packages/media-tools
+
+      # No shell, not root, a working ffmpeg that is a GPL build without anything non-free, and it runs the way the sandbox runs it.
+      - name: Image shape
+        run: |
+          user=$(docker image inspect media-tools:ci --format '{{.Config.User}}')
+          echo "user: $user"
+          case "$user" in ""|0|0:*|root|root:*) echo "the image must not run as root" >&2; exit 1;; esac
+          if docker run --rm --entrypoint sh media-tools:ci -c true 2>/dev/null; then
+            echo "the image must not contain a shell" >&2; exit 1
+          fi
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 12345:12345 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m media-tools:ci ffmpeg -hide_banner -version | tee "$RUNNER_TEMP/ffmpeg-version.txt"
+          grep -q -- '--enable-gpl' "$RUNNER_TEMP/ffmpeg-version.txt"
+          if grep -q -- '--enable-nonfree' "$RUNNER_TEMP/ffmpeg-version.txt"; then
+            echo "ffmpeg must not be a nonfree build" >&2; exit 1
+          fi
+          docker run --rm --network none --read-only --user 12345:12345 media-tools:ci ffprobe -hide_banner -version | head -1
+
+      - name: Licence inventory
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          python3 -I packages/media-tools/licenses/check.py --image media-tools:ci \
+            --check-md packages/media-tools/LICENSES.md --save-md-to "$RUNNER_TEMP/licence-inventory.md"
+      # When the check says LICENSES.md is stale, this is the file to commit (its block replaces the generated one).
+      - name: Keep the generated inventory
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: licence-inventory
+          path: ${{ runner.temp }}/licence-inventory.md
+          if-no-files-found: ignore
+
+      - name: cfctl media probe through the docker provider
+        working-directory: apps/server
+        run: |
+          go build -o "$RUNNER_TEMP/cfctl" ./cmd/cfctl
+          mkdir "$RUNNER_TEMP/clips"
+          docker run --rm --network none --read-only --user "$(id -u):$(id -g)" \
+            --mount "type=bind,src=$RUNNER_TEMP/clips,dst=/work" media-tools:ci \
+            ffmpeg -nostdin -v error -f lavfi -i testsrc2=size=1280x720:rate=30:duration=2 -f lavfi -i sine=duration=2 \
+            -vf setparams=color_primaries=bt2020:color_trc=arib-std-b67:colorspace=bt2020nc -c:v libx264 -pix_fmt yuv420p -c:a aac /work/hlg.mp4
+          "$RUNNER_TEMP/cfctl" media probe "$RUNNER_TEMP/clips/hlg.mp4" --provider docker --image media-tools:ci | tee "$RUNNER_TEMP/probe.txt"
+          grep -q 'HDR HLG' "$RUNNER_TEMP/probe.txt"
+          grep -q '1280x720' "$RUNNER_TEMP/probe.txt"
+
+      - name: Sandbox integration tests against the image
+        working-directory: apps/server
+        run: go test ./internal/sandbox -run Integration -docker-image media-tools:ci -v
+
+  # gVisor overhead (D-08, P1-03): installs runsc (pinned and checksum-verified), registers it with Docker, then transcodes a
+  # generated 1080p 30 s clip with the docker and hardened providers three times each and prints the table. It also runs the
+  # sandbox integration tests under runsc. Runs on manual dispatch and on pull requests that touch the sandbox or the image.
+  gvisor-bench:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && needs.changes.outputs.media_sandbox == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      # https://storage.googleapis.com/gvisor/releases/release/<RELEASE>/x86_64/gvisor.tar.zstd and its .sha512
+      GVISOR_RELEASE: '20261012.0'
+      GVISOR_SHA512: ce2e1aeb853c104e854dea6644333a1dba0fbc9dd1646af97e1d013fdf810da6d4176dd96f2139d7b055e5382117c0d7c4567ebd64ed9bef47fdd15f80fd67ab
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: apps/server/go.mod
+          cache: false
+
+      - name: Install runsc and register it with Docker
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/gvisor.tar.zstd" \
+            "https://storage.googleapis.com/gvisor/releases/release/${GVISOR_RELEASE}/x86_64/gvisor.tar.zstd"
+          echo "${GVISOR_SHA512}  $RUNNER_TEMP/gvisor.tar.zstd" | sha512sum -c -
+          sudo tar --zstd -xf "$RUNNER_TEMP/gvisor.tar.zstd" -C /usr/local/bin
+          runsc --version
+          sudo runsc install
+          sudo systemctl reload docker || sudo systemctl restart docker
+          sleep 3
+          docker info --format '{{json .Runtimes}}' | tee "$RUNNER_TEMP/runtimes.json"
+          grep -q runsc "$RUNNER_TEMP/runtimes.json"
+
+      - name: Prove containers really run under gVisor
+        run: |
+          base=debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
+          echo "runc : $(docker run --rm "$base" cat /proc/version)"
+          echo "runsc: $(docker run --rm --runtime runsc "$base" cat /proc/version)"
+          # gVisor presents itself as a 4.4.0 kernel.
+          docker run --rm --runtime runsc "$base" cat /proc/version | grep -q 'Linux version 4.4.0'
+
+      - name: Build the image
+        run: docker build --tag media-tools:ci packages/media-tools
+
+      - name: Sandbox integration tests under runsc
+        working-directory: apps/server
+        run: go test ./internal/sandbox -run Integration -docker-image media-tools:ci -docker-runtime runsc -v
+
+      - name: Benchmark
+        working-directory: apps/server
+        run: |
+          {
+            echo "## gVisor overhead (cfctl media bench)"
+            echo
+            echo "gVisor release ${GVISOR_RELEASE}. Runner: $(nproc) vCPUs, $(free -m | awk '/Mem:/ {print $2}') MiB RAM, $(uname -sr)."
+            echo
+            go run ./cmd/cfctl media bench --providers docker,hardened --runs 3 --image media-tools:ci --cpus 2 --memory 2048
+          } | tee "$RUNNER_TEMP/bench.md"
+          cat "$RUNNER_TEMP/bench.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the table
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gvisor-bench
+          path: ${{ runner.temp }}/bench.md
+          if-no-files-found: ignore
+
   # The single required check. It runs even when needed jobs are skipped or failed (`if: always()`), passes when every
   # needed job succeeded or was skipped, and fails on any failure or cancellation. Add every new job to `needs`.
   required:
     if: always()
-    needs: [changes, go-lint, go-test, db, web, env-lint, doctor]
+    needs: [changes, go-lint, go-test, db, web, env-lint, doctor, media-tools, gvisor-bench]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
