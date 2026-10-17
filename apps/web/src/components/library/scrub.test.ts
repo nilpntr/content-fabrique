@@ -94,6 +94,10 @@ test("a cue is found by time, with the ends clamped", () => {
   expect(cueTile(cues, 3999)?.x).toBe(160);
   expect(cueTile(cues, 99_000)?.y).toBe(90);
   expect(cueTile([], 0)).toBeUndefined();
+  // In a gap between cues the earlier one keeps showing.
+  expect(cueTile(cues, 30_000)?.x).toBe(160);
+  expect(cueTile(cues, 4000)?.x).toBe(160);
+  expect(cueTile(cues, 60_499)?.x).toBe(160);
   expect(cuesSheet(cues)).toEqual({ width: 320, height: 180 });
 });
 

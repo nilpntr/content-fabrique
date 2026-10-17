@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { filterOf, LibraryGrid, sortAssets } from "./library-grid";
-import { LibraryDemo } from "./library-demo";
+import { LibraryDemo, parseDemoState } from "./library-demo";
 import { isLocalSamples, withLocalPreviews } from "./local-samples";
 import { SAMPLE_ASSETS } from "./sample-data";
 import type { Asset } from "./types";
@@ -91,17 +91,26 @@ test("the grid passes open, delete and retry through", () => {
   expect(onOpen).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed" }));
 });
 
-test("the demo drops a clip from its list and reads the local-samples switch", () => {
+test("the demo reads its state and the local-samples switch from props", () => {
   expect(isLocalSamples("?samples=local")).toBe(true);
   expect(isLocalSamples("?samples=other")).toBe(false);
-  expect(isLocalSamples("")).toBe(false);
+  expect(parseDemoState("loading")).toBe("loading");
+  expect(parseDemoState("nope")).toBeUndefined();
 
-  const { rerender } = render(<LibraryDemo search="" />);
+  const { rerender } = render(<LibraryDemo />);
   expect(screen.queryByText(/Pick local videos/)).toBeNull();
-  rerender(<LibraryDemo search="?samples=local" />);
+  rerender(<LibraryDemo localSamples />);
   expect(screen.getByText(/Pick local videos/)).toBeTruthy();
-  rerender(<LibraryDemo search="?state=empty" />);
+  rerender(<LibraryDemo state="empty" />);
   expect(screen.getByText("Upload your first clips")).toBeTruthy();
+});
+
+test("newest first compares instants, not strings", () => {
+  const base = SAMPLE_ASSETS[0] as Asset;
+  // 10:00 at +02:00 is 08:00 UTC, earlier than 09:00 UTC although it sorts later as text.
+  const earlier: Asset = { ...base, id: "ast_early", createdAt: "2026-10-12T10:00:00+02:00" };
+  const later: Asset = { ...base, id: "ast_late", createdAt: "2026-10-12T09:00:00Z" };
+  expect(sortAssets([earlier, later], "newest").map((x) => x.id)).toEqual(["ast_late", "ast_early"]);
 });
 
 test("local previews are given to ready clips only, round-robin", () => {

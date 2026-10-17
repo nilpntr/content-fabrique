@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { ClipCard } from "./clip-card";
 import { SAMPLE_ASSETS } from "./sample-data";
 import type { Asset } from "./types";
-import { HOVER_DELAY_MS, LONG_PRESS_MS, SCRUB_IDLE_MS } from "./use-clip-preview";
+import { HOVER_DELAY_MS, LONG_PRESS_MS, SCRUB_IDLE_MS, SUPPRESS_CLICK_MS } from "./use-clip-preview";
 
 const GRID = { cols: 5, rows: 4, intervalMs: 1000, tileW: 100, tileH: 180 };
 
@@ -24,12 +24,15 @@ const clip = (overrides: Partial<Asset> = {}): Asset => ({ ...READY, ...override
 
 const play = vi.fn(() => Promise.resolve());
 const pause = vi.fn();
+const load = vi.fn();
 const originalMatchMedia = window.matchMedia;
 
 beforeEach(() => {
   vi.useFakeTimers();
   play.mockClear();
   pause.mockClear();
+  load.mockClear();
+  Object.defineProperty(HTMLMediaElement.prototype, "load", { configurable: true, value: load });
   Object.defineProperty(HTMLMediaElement.prototype, "play", { configurable: true, value: play });
   Object.defineProperty(HTMLMediaElement.prototype, "pause", { configurable: true, value: pause });
 });
@@ -387,4 +390,96 @@ test("the sample library covers every status and has no video files", () => {
   expect(new Set(SAMPLE_ASSETS.map((asset) => asset.status))).toEqual(new Set(["ready", "processing", "uploading", "uploaded", "failed"]));
   for (const asset of SAMPLE_ASSETS) expect(asset.hoverPreviewUrl).toBeUndefined();
   expect(SAMPLE_ASSETS.every((asset) => asset.posterUrl === undefined || asset.posterUrl.startsWith("data:image/svg+xml"))).toBe(true);
+});
+
+test("a touch scrub without a sprite leaves the video playing", () => {
+  render(<ClipCard asset={clip({ sprite: undefined })} />);
+  const surface = media();
+  sized(surface);
+  fireEvent.pointerDown(surface, { pointerType: "touch", clientX: 10, clientY: 50 });
+  advance(LONG_PRESS_MS);
+  const video = document.querySelector("video") as HTMLVideoElement;
+  fireEvent.playing(video);
+  fireEvent.pointerMove(surface, { pointerType: "touch", clientX: 100, clientY: 50 });
+  expect(surface.getAttribute("data-scrubbing")).toBe("false");
+  expect(pause).not.toHaveBeenCalled();
+  expect(video.className).toContain("opacity-100");
+});
+
+test("a sprite track that has not loaded yet does not hide the video either", () => {
+  vi.mocked(fetch).mockReturnValue(new Promise(() => {}));
+  render(<ClipCard asset={clip({ sprite: { url: "s.jpg", vttUrl: "https://cdn.test/s.vtt" } })} />);
+  const surface = media();
+  sized(surface);
+  fireEvent.pointerEnter(surface, { ...mouse, clientX: 0 });
+  advance(HOVER_DELAY_MS);
+  fireEvent.pointerMove(surface, { ...mouse, clientX: 100 });
+  expect(surface.getAttribute("data-scrubbing")).toBe("false");
+  expect(pause).not.toHaveBeenCalled();
+});
+
+test("the actions button is part of the hover region: moving onto it keeps the preview", () => {
+  render(<ClipCard asset={clip()} />);
+  const surface = media();
+  expect(surface.contains(screen.getByRole("button", { name: "Actions for Lat pulldown" }))).toBe(true);
+  fireEvent.pointerEnter(surface, mouse);
+  advance(HOVER_DELAY_MS);
+  expect(videos()).toHaveLength(1);
+  // Moving onto the button is moving inside the region: no leave fires.
+  fireEvent.pointerMove(screen.getByRole("button", { name: "Actions for Lat pulldown" }), { ...mouse, clientX: 190 });
+  expect(videos()).toHaveLength(1);
+});
+
+test("a new preview URL gets another chance after the old one failed", () => {
+  const { rerender } = render(<ClipCard asset={clip()} />);
+  fireEvent.pointerEnter(media(), mouse);
+  advance(HOVER_DELAY_MS);
+  fireEvent.error(document.querySelector("video") as HTMLVideoElement);
+  expect(videos()).toHaveLength(0);
+  rerender(<ClipCard asset={clip({ hoverPreviewUrl: "blob:http://localhost/preview-b" })} />);
+  expect(document.querySelector("video")?.getAttribute("src")).toBe("blob:http://localhost/preview-b");
+});
+
+test("a card that turns ready under a resting pointer starts the hover flow on the next move", () => {
+  const { rerender } = render(<ClipCard asset={clip({ status: "processing", progress: 90 })} />);
+  const surface = media();
+  sized(surface);
+  fireEvent.pointerEnter(surface, { ...mouse, clientX: 100 });
+  advance(2000);
+  rerender(<ClipCard asset={clip()} />);
+  advance(2000);
+  expect(videos()).toHaveLength(0);
+  fireEvent.pointerMove(surface, { ...mouse, clientX: 101 });
+  advance(HOVER_DELAY_MS);
+  expect(videos()).toHaveLength(1);
+});
+
+test("a long press that ends without a click does not swallow a later keyboard activation", () => {
+  const onOpen = vi.fn();
+  render(<ClipCard asset={clip()} onOpen={onOpen} />);
+  const surface = media();
+  const touch = { pointerType: "touch", clientX: 50, clientY: 50 };
+  fireEvent.pointerDown(surface, touch);
+  advance(LONG_PRESS_MS);
+  fireEvent.pointerCancel(surface, touch);
+  advance(SUPPRESS_CLICK_MS);
+  fireEvent.click(screen.getByRole("button", { name: "Open Lat pulldown" }));
+  expect(onOpen).toHaveBeenCalledTimes(1);
+
+  // And a key press clears it at once.
+  fireEvent.pointerDown(surface, touch);
+  advance(LONG_PRESS_MS);
+  fireEvent.keyDown(screen.getByRole("button", { name: "Open Lat pulldown" }), { key: "Enter" });
+  fireEvent.click(screen.getByRole("button", { name: "Open Lat pulldown" }));
+  expect(onOpen).toHaveBeenCalledTimes(2);
+});
+
+test("unmounting the preview aborts its download", () => {
+  render(<ClipCard asset={clip()} />);
+  fireEvent.pointerEnter(media(), mouse);
+  advance(HOVER_DELAY_MS);
+  const video = document.querySelector("video") as HTMLVideoElement;
+  fireEvent.pointerLeave(media(), mouse);
+  expect(video.hasAttribute("src")).toBe(false);
+  expect(load).toHaveBeenCalled();
 });

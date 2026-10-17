@@ -13,6 +13,8 @@ export const LONG_PRESS_SLOP_PX = 10;
 export const SCRUB_START_PX = 6;
 /** The scrub frame stays this long after the pointer stops, then the video (if any) shows again. */
 export const SCRUB_IDLE_MS = 600;
+/** How long after a long press is released a click is still taken to be its tail. */
+export const SUPPRESS_CLICK_MS = 100;
 
 export interface ClipPreviewOptions {
   id: string;
@@ -41,21 +43,25 @@ export function useClipPreview({ id, enabled, hasVideo, hasSprite }: ClipPreview
   const hoverTimer = React.useRef<Timer>(undefined);
   const idleTimer = React.useRef<Timer>(undefined);
   const pressTimer = React.useRef<Timer>(undefined);
+  const suppressTimer = React.useRef<Timer>(undefined);
   const press = React.useRef<{ x: number; y: number; fired: boolean } | null>(null);
   const suppressClick = React.useRef(false);
   const anchorX = React.useRef<number | null>(null);
+  const hoveringRef = React.useRef(false);
   const canPlay = hasVideo && !reducedMotion;
 
   const clearTimers = React.useCallback(() => {
     clearTimeout(hoverTimer.current);
     clearTimeout(idleTimer.current);
     clearTimeout(pressTimer.current);
+    clearTimeout(suppressTimer.current);
   }, []);
 
   const end = React.useCallback(() => {
     clearTimers();
     press.current = null;
     anchorX.current = null;
+    hoveringRef.current = false;
     setHovering(false);
     setWantsVideo(false);
     setScrub(null);
@@ -76,14 +82,18 @@ export function useClipPreview({ id, enabled, hasVideo, hasSprite }: ClipPreview
 
   function begin(clientX?: number) {
     if (!enabled) return;
+    hoveringRef.current = true;
     setHovering(true);
     anchorX.current = clientX ?? null;
     clearTimeout(hoverTimer.current);
     hoverTimer.current = setTimeout(startVideo, HOVER_DELAY_MS);
   }
 
+  // Events that bubble up from a portal (the menu popup) are not over the card.
+  const over = (event: React.SyntheticEvent<HTMLElement>) => event.currentTarget.contains(event.target as Node);
+
   function track(clientX: number, rect: { left: number; width: number }) {
-    if (!enabled || !hasSprite) return;
+    if (!enabled || !hasSprite || !hoveringRef.current) return;
     if (scrub === null && anchorX.current !== null && Math.abs(clientX - anchorX.current) < SCRUB_START_PX) return;
     setScrub(scrubFraction(clientX, rect));
     clearTimeout(idleTimer.current);
@@ -103,6 +113,8 @@ export function useClipPreview({ id, enabled, hasVideo, hasSprite }: ClipPreview
       end();
     },
     onPointerDown(event: React.PointerEvent<HTMLElement>) {
+      if (!over(event)) return;
+      clearTimeout(suppressTimer.current);
       suppressClick.current = false;
       if (event.pointerType !== "touch" || !enabled) return;
       press.current = { x: event.clientX, y: event.clientY, fired: false };
@@ -111,32 +123,40 @@ export function useClipPreview({ id, enabled, hasVideo, hasSprite }: ClipPreview
         if (!press.current) return;
         press.current.fired = true;
         suppressClick.current = true;
+        hoveringRef.current = true;
         setHovering(true);
         startVideo();
       }, LONG_PRESS_MS);
     },
     onPointerMove(event: React.PointerEvent<HTMLElement>) {
+      if (!over(event)) return;
       const rect = event.currentTarget.getBoundingClientRect();
       if (event.pointerType !== "touch") {
-        track(event.clientX, rect);
+        // The pointer was already resting here when the clip became ready: this move starts the normal hover flow.
+        if (enabled && !hoveringRef.current) begin(event.clientX);
+        else track(event.clientX, rect);
         return;
       }
       const current = press.current;
       if (!current) return;
       if (current.fired) {
-        setScrub(scrubFraction(event.clientX, rect));
+        if (hasSprite) setScrub(scrubFraction(event.clientX, rect));
       } else if (Math.hypot(event.clientX - current.x, event.clientY - current.y) > LONG_PRESS_SLOP_PX) {
         clearTimeout(pressTimer.current);
         press.current = null;
       }
     },
     onPointerUp(event: React.PointerEvent<HTMLElement>) {
-      if (event.pointerType === "touch") releaseTouch();
+      if (event.pointerType === "touch" && over(event)) releaseTouch();
     },
     onPointerCancel(event: React.PointerEvent<HTMLElement>) {
       if (event.pointerType === "touch") releaseTouch();
     },
     // The long press must not open the browser's context menu (Android) or select the label (iOS).
+    onKeyDown() {
+      clearTimeout(suppressTimer.current);
+      suppressClick.current = false;
+    },
     onContextMenu(event: React.MouseEvent<HTMLElement>) {
       if (press.current) event.preventDefault();
     },
@@ -150,7 +170,14 @@ export function useClipPreview({ id, enabled, hasVideo, hasSprite }: ClipPreview
 
   function releaseTouch() {
     clearTimeout(pressTimer.current);
-    if (press.current?.fired) end();
+    if (press.current?.fired) {
+      end();
+      // The click that follows a long press comes within moments. If none does (a cancel), the next one is a real tap.
+      clearTimeout(suppressTimer.current);
+      suppressTimer.current = setTimeout(() => {
+        suppressClick.current = false;
+      }, SUPPRESS_CLICK_MS);
+    }
     press.current = null;
   }
 
@@ -162,6 +189,8 @@ export function useClipPreview({ id, enabled, hasVideo, hasSprite }: ClipPreview
     showVideo: wantsVideo && holdsSlot,
     /** 0 to 1 while the sprite scrub is showing, otherwise null. */
     scrub,
+    /** Ends the preview now, e.g. when a menu opens over the card. */
+    stop: end,
     /** True once for the click that follows a long press, which must not open the clip. */
     consumeClick() {
       const swallow = suppressClick.current;

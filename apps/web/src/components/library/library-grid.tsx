@@ -29,7 +29,9 @@ export function filterOf(asset: Pick<Asset, "status">): Exclude<FilterId, "all">
 }
 
 export function sortAssets(assets: readonly Asset[], sort: SortId): Asset[] {
-  const byNewest = (a: Asset, b: Asset) => (a.createdAt === b.createdAt ? a.id.localeCompare(b.id) : a.createdAt < b.createdAt ? 1 : -1);
+  // Compared as instants: ISO strings with different offsets or precision do not sort as text. An unparsable date counts as oldest.
+  const time = (asset: Asset) => Date.parse(asset.createdAt) || 0;
+  const byNewest = (a: Asset, b: Asset) => time(b) - time(a) || a.id.localeCompare(b.id);
   const compare: Record<SortId, (a: Asset, b: Asset) => number> = {
     newest: byNewest,
     longest: (a, b) => b.durationMs - a.durationMs || byNewest(a, b),

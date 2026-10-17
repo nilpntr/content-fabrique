@@ -47,10 +47,13 @@ export function gridSheet(grid: SpriteGrid): SpriteSheet {
   return { width: grid.cols * grid.tileW, height: grid.rows * grid.tileH };
 }
 
-/** The cue that covers `timeMs`; the first before the track starts and the last after it ends. */
+/** The cue showing at `timeMs`: the latest one that has started. Before the first cue that is the first; past the end, the last. */
 export function cueTile(cues: readonly SpriteCue[], timeMs: number): SpriteCue | undefined {
-  if (cues.length === 0) return undefined;
-  return cues.find((cue) => timeMs >= cue.startMs && timeMs < cue.endMs) ?? (timeMs < (cues[0]?.startMs ?? 0) ? cues[0] : cues.at(-1));
+  let found: SpriteCue | undefined;
+  for (const cue of cues) {
+    if (cue.startMs <= timeMs && (!found || cue.startMs >= found.startMs)) found = cue;
+  }
+  return found ?? cues.reduce<SpriteCue | undefined>((first, cue) => (!first || cue.startMs < first.startMs ? cue : first), undefined);
 }
 
 /** The sheet size implied by the cues: the far edge of the furthest tile. */

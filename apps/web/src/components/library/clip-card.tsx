@@ -99,6 +99,16 @@ function HoverVideo({ src, hidden, onFail }: { src: string; hidden: boolean; onF
     Promise.resolve(video.play?.()).catch(() => {});
   }, [hidden]);
 
+  // Unmounting alone does not stop the download: drop the source so the browser aborts the request.
+  React.useEffect(() => {
+    const video = ref.current;
+    return () => {
+      if (!video) return;
+      video.removeAttribute("src");
+      video.load?.();
+    };
+  }, []);
+
   return (
     <video
       ref={ref}
@@ -133,7 +143,8 @@ export function ClipCard({ asset, onOpen, onDelete, onRetry, className }: ClipCa
   const busy = BUSY.has(asset.status);
   const title = asset.title.trim() || "Untitled clip";
   const [confirming, setConfirming] = React.useState(false);
-  const [videoFailed, setVideoFailed] = React.useState(false);
+  // The URL that failed, so a new preview URL (a reprocessed clip) gets its chance again.
+  const [failedUrl, setFailedUrl] = React.useState<string | undefined>();
 
   const preview = useClipPreview({
     id: asset.id,
@@ -143,8 +154,9 @@ export function ClipCard({ asset, onOpen, onDelete, onRetry, className }: ClipCa
   });
   const sprite = useSpriteModel(asset.sprite, asset.durationMs, ready && preview.hovering);
   const frame = sprite?.at(preview.scrub ?? 0);
-  const scrubbing = preview.scrub !== null;
-  const showVideo = preview.showVideo && !videoFailed && asset.hoverPreviewUrl !== undefined;
+  // Without a frame to show (no sprite, or its track has not loaded) the video is left alone.
+  const scrubbing = preview.scrub !== null && frame !== undefined;
+  const showVideo = preview.showVideo && asset.hoverPreviewUrl !== undefined && failedUrl !== asset.hoverPreviewUrl;
 
   const portrait = asset.width / asset.height <= CARD_RATIO;
   const tags = asset.tags.slice(0, 1);
@@ -195,7 +207,7 @@ export function ClipCard({ asset, onOpen, onDelete, onRetry, className }: ClipCa
                 />
               ) : null}
               {showVideo && asset.hoverPreviewUrl ? (
-                <HoverVideo src={asset.hoverPreviewUrl} hidden={scrubbing} onFail={() => setVideoFailed(true)} />
+                <HoverVideo src={asset.hoverPreviewUrl} hidden={scrubbing} onFail={() => setFailedUrl(asset.hoverPreviewUrl)} />
               ) : null}
             </span>
           </button>
@@ -212,6 +224,29 @@ export function ClipCard({ asset, onOpen, onDelete, onRetry, className }: ClipCa
               <div className="h-full bg-brand" style={{ width: `${(preview.scrub ?? 0) * 100}%` }} />
             </div>
           ) : null}
+
+          <DropdownMenu onOpenChange={(open) => open && preview.stop()}>
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={`Actions for ${title}`}
+                  data-slot="clip-menu"
+                  className="absolute top-2 right-2 z-10 flex size-7 cursor-pointer items-center justify-center rounded-[8px] bg-black/55 text-white opacity-0 outline-none backdrop-blur-sm transition-opacity duration-(--dur-fast) group-hover/clip:opacity-100 hover:bg-black/70 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-brand data-popup-open:opacity-100 pointer-coarse:opacity-100"
+                />
+              }
+            >
+              <MoreHorizontal aria-hidden="true" className="size-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => onOpen?.(asset)}>Open</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onClick={() => setConfirming(true)}>
+                <Trash2 aria-hidden="true" />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           {ready ? (
             <span className="pointer-events-none absolute right-1.5 bottom-2 rounded bg-black/70 px-1.5 font-mono text-[11px] leading-5 text-white tabular-nums">
@@ -244,29 +279,6 @@ export function ClipCard({ asset, onOpen, onDelete, onRetry, className }: ClipCa
           ) : null}
         </div>
       </article>
-
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <button
-              type="button"
-              aria-label={`Actions for ${title}`}
-              data-slot="clip-menu"
-              className="absolute top-2 right-2 z-10 flex size-7 cursor-pointer items-center justify-center rounded-[8px] bg-black/55 text-white opacity-0 outline-none backdrop-blur-sm transition-opacity duration-(--dur-fast) group-hover/clip:opacity-100 hover:bg-black/70 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-brand data-popup-open:opacity-100 pointer-coarse:opacity-100"
-            />
-          }
-        >
-          <MoreHorizontal aria-hidden="true" className="size-4" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={() => onOpen?.(asset)}>Open</DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem variant="destructive" onClick={() => setConfirming(true)}>
-            <Trash2 aria-hidden="true" />
-            Delete
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
 
       <Dialog open={confirming} onOpenChange={setConfirming}>
         <DialogContent>
