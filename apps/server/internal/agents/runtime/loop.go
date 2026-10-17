@@ -9,6 +9,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -90,6 +91,8 @@ type Runner struct {
 	// hook, set by tests, is called at named points of the loop. A test simulates a killed worker by panicking in it:
 	// nothing after that point runs, and nothing is cleaned up, as when a process dies.
 	hook func(point string)
+	// hookCancel, set by tests, is called at the same points with the loop's cancel function.
+	hookCancel func(point string, cancel context.CancelCauseFunc)
 }
 
 // NewRunner checks the dependencies.
@@ -137,6 +140,7 @@ func (r *Runner) Execute(ctx context.Context, ws ids.WorkspaceID, id uuid.UUID) 
 
 	l := r.newLoop(ws, run)
 	loopCtx, cancel := context.WithCancelCause(ctx)
+	l.cancel = cancel
 	out, err := func() (out Outcome, err error) {
 		// The heartbeat stops however the loop ends, a panic included: a worker that dies must not keep its run fresh.
 		var wg sync.WaitGroup
@@ -236,6 +240,8 @@ type loop struct {
 	// segStart is when this claim began; flushedAt is when the active time was last written (by an event or the
 	// heartbeat, which share it under mu).
 	mu        sync.Mutex
+	finishing atomic.Bool // the loop is writing the end of the run
+	cancel    context.CancelCauseFunc
 	segStart  time.Time
 	flushedAt time.Time
 	baseMs    int64
@@ -247,6 +253,26 @@ func (l *loop) hook(point string) {
 	if l.r.hook != nil {
 		l.r.hook(point)
 	}
+	if l.r.hookCancel != nil {
+		l.r.hookCancel(point, l.cancel)
+	}
+}
+
+// end writes the end of the run (finished, failed, cancelled or parked). The write is the loop's last act, so:
+//
+//   - from here the heartbeat does not treat "the run is not running" as a takeover (it is, because this write is about to
+//     commit, or has);
+//   - the write is not cancelled with the loop. The heartbeat's UPDATE waits for the row lock of this very transaction, then
+//     sees the new status and, without the flag above, would cancel the loop while the client is still reading the COMMIT
+//     answer: the run is finished in the database and the worker would report an error, or a run it lost.
+//
+// A real takeover still shows: the epoch check makes the write itself return ErrRunFenced.
+func (l *loop) end(ctx context.Context, end store.RunEnd) (store.AgentRun, error) {
+	l.finishing.Store(true)
+	l.hook("ending")
+	wctx, stop := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer stop()
+	return l.st.EndAgentRun(wctx, l.ws, l.run.ID, l.run.Epoch, end)
 }
 
 // heartbeat touches the run until ctx ends. If the run is no longer this worker's, it cancels the loop.
@@ -264,6 +290,9 @@ func (l *loop) heartbeat(ctx context.Context, cancel context.CancelCauseFunc) {
 			err := l.st.TouchAgentRun(ctx, l.ws, l.run.ID, l.run.Epoch, active)
 			switch {
 			case errors.Is(err, store.ErrRunFenced):
+				if l.finishing.Load() {
+					return // this worker's own final write moved the run on
+				}
 				cancel(store.ErrRunFenced)
 				return
 			case err != nil:
@@ -840,7 +869,7 @@ func (l *loop) park(ctx context.Context, use llm.Block, res Result) (Outcome, bo
 		out, cerr := l.cancelled(ctx)
 		return out, true, cerr
 	}
-	r, err := l.st.EndAgentRun(ctx, l.ws, l.run.ID, l.run.Epoch, store.RunEnd{
+	r, err := l.end(ctx, store.RunEnd{
 		Status:   store.AgentWaitingInput,
 		Event:    mustJSON(statusPayload{State: stateWaitingInput, ToolUseID: use.ID, Tool: use.Name, Question: question}),
 		ActiveMs: l.takeActive(),
@@ -857,7 +886,7 @@ func (l *loop) park(ctx context.Context, use llm.Block, res Result) (Outcome, bo
 // ---- ending a run -----------------------------------------------------------------------------------------------
 
 func (l *loop) succeed(ctx context.Context, output json.RawMessage) (Outcome, error) {
-	_, err := l.st.EndAgentRun(ctx, l.ws, l.run.ID, l.run.Epoch, store.RunEnd{
+	_, err := l.end(ctx, store.RunEnd{
 		Status: store.AgentSucceeded, Output: output, Event: mustJSON(statusPayload{State: stateSucceeded}), ActiveMs: l.takeActive(),
 	})
 	if err != nil {
@@ -867,7 +896,7 @@ func (l *loop) succeed(ctx context.Context, output json.RawMessage) (Outcome, er
 }
 
 func (l *loop) cancelled(ctx context.Context) (Outcome, error) {
-	_, err := l.st.EndAgentRun(ctx, l.ws, l.run.ID, l.run.Epoch, store.RunEnd{
+	_, err := l.end(ctx, store.RunEnd{
 		Status: store.AgentCancelled, Output: l.summary("cancelled", ""), Event: mustJSON(statusPayload{State: stateCancelled}), ActiveMs: l.takeActive(),
 	})
 	if err != nil {
@@ -914,7 +943,7 @@ func (l *loop) stopBudgetWithUsage(ctx context.Context, limit string, usage llm.
 	if err := l.recordSpend(ctx, FailBudget, msg, usage, cost); err != nil {
 		return "", err
 	}
-	_, err := l.st.EndAgentRun(ctx, l.ws, l.run.ID, l.run.Epoch, store.RunEnd{
+	_, err := l.end(ctx, store.RunEnd{
 		Status: store.AgentFailed, FailureReason: FailBudget, Output: l.summary(FailBudget, limit),
 		Event: mustJSON(statusPayload{State: stateFailed, Reason: FailBudget, Limit: limit}), ActiveMs: l.takeActive(),
 	})
@@ -940,7 +969,7 @@ func (l *loop) failWithUsage(ctx context.Context, reason, message string, usage 
 	if len(out) == 0 {
 		out = l.summary(reason, "")
 	}
-	_, err := l.st.EndAgentRun(ctx, l.ws, l.run.ID, l.run.Epoch, store.RunEnd{
+	_, err := l.end(ctx, store.RunEnd{
 		Status: store.AgentFailed, FailureReason: reason, Output: out,
 		Event: mustJSON(statusPayload{State: stateFailed, Reason: reason}), ActiveMs: l.takeActive(),
 	})
