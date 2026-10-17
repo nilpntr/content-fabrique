@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { createRouter, type RouterHistory } from "@tanstack/react-router";
 import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query";
+import { MAIN_SCROLL_ID } from "./lib/scroll";
 import { routeTree } from "./routeTree.gen";
 
 /**
@@ -14,7 +15,9 @@ export function getRouter(history?: RouterHistory) {
     routeTree,
     history,
     defaultPreload: "intent",
+    // Pages scroll inside the shell's <main>, not the window, so it is reset on navigation too.
     scrollRestoration: true,
+    scrollToTopSelectors: [`[data-scroll-restoration-id="${MAIN_SCROLL_ID}"]`],
   });
   // Also wraps the router in a QueryClientProvider.
   setupRouterSsrQueryIntegration({ router, queryClient });

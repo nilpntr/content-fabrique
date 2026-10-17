@@ -1,9 +1,11 @@
 import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { APP_NAME } from "@/components/logo";
 import { AppShell } from "@/components/app-shell";
 import { ToastProvider } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { THEME_SCRIPT } from "@/hooks/use-theme";
+import { getSidebarOpen } from "@/lib/sidebar-open";
 import { NotFound } from "@/pages/not-found";
 import appCss from "../index.css?url";
 
@@ -16,7 +18,7 @@ export const Route = createRootRoute({
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1.0" },
       { name: "color-scheme", content: "light dark" },
-      { title: "Dashboard" },
+      { title: APP_NAME },
     ],
     links: [
       { rel: "icon", type: "image/svg+xml", href: FAVICON },
@@ -25,6 +27,8 @@ export const Route = createRootRoute({
     // Sets the `dark` class before first paint, so a dark-mode visitor never sees a light flash.
     scripts: [{ children: THEME_SCRIPT }],
   }),
+  // The sidebar's state lives in a cookie, so the server can render it collapsed on the first paint.
+  loader: async () => ({ sidebarOpen: await getSidebarOpen() }),
   shellComponent: RootDocument,
   component: RootComponent,
   notFoundComponent: NotFound,
@@ -46,10 +50,11 @@ function RootDocument({ children }: { children: ReactNode }) {
 }
 
 function RootComponent() {
+  const { sidebarOpen } = Route.useLoaderData();
   return (
     <TooltipProvider>
       <ToastProvider>
-        <AppShell />
+        <AppShell defaultSidebarOpen={sidebarOpen} />
       </ToastProvider>
     </TooltipProvider>
   );

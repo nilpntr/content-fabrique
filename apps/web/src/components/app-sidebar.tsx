@@ -16,7 +16,7 @@ import {
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { NAV_ITEMS } from "@/nav";
+import { NAV_ITEMS, useActiveNavItem } from "@/nav";
 
 function useCloseSheetOnNavigate(pathname: string) {
   const { isMobile, setOpenMobile } = useSidebar();
@@ -32,6 +32,7 @@ function useCloseSheetOnNavigate(pathname: string) {
 
 export function AppSidebar() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const active = useActiveNavItem();
   useCloseSheetOnNavigate(pathname);
 
   return (
@@ -52,7 +53,7 @@ export function AppSidebar() {
             <SidebarMenu>
               {NAV_ITEMS.map((item) => (
                 <SidebarMenuItem key={item.to}>
-                  <SidebarMenuButton tooltip={item.title} isActive={pathname === item.to} render={<Link to={item.to} />}>
+                  <SidebarMenuButton tooltip={item.title} isActive={active === item} render={<Link to={item.to} />}>
                     <item.icon />
                     <SidebarMenuLabel>{item.title}</SidebarMenuLabel>
                   </SidebarMenuButton>

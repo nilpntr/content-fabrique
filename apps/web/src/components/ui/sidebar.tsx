@@ -24,11 +24,10 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { useModKey } from "@/hooks/use-hotkey"
+import { useHotkey, useModKey } from "@/hooks/use-hotkey"
 import { Glider, handOff } from "@/lib/glide"
+import { sidebarCookie } from "@/lib/sidebar-state"
 
-const SIDEBAR_COOKIE_NAME = "sidebar_state"
-const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH = "16rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
@@ -83,7 +82,7 @@ function SidebarProvider({
       }
 
       // biome-ignore lint/suspicious/noDocumentCookie: shadcn persists the sidebar state in a cookie that the server can read; the Cookie Store API is not available everywhere yet.
-      document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
+      document.cookie = sidebarCookie(openState)
     },
     [setOpenProp, open]
   )
@@ -92,20 +91,11 @@ function SidebarProvider({
     return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open)
   }, [isMobile, setOpen])
 
-  React.useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (
-        event.key === SIDEBAR_KEYBOARD_SHORTCUT &&
-        (event.metaKey || event.ctrlKey)
-      ) {
-        event.preventDefault()
-        toggleSidebar()
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [toggleSidebar])
+  // Not while typing: Ctrl+B is "cursor back" in text fields on macOS.
+  useHotkey(SIDEBAR_KEYBOARD_SHORTCUT, toggleSidebar, {
+    mod: true,
+    allowWhileTyping: false,
+  })
 
   const state = open ? "expanded" : "collapsed"
 
@@ -657,12 +647,9 @@ function SidebarMenuButton({
   React.useLayoutEffect(() => {
     const lens = lensRef.current
     if (!scope || !lens) return
-    if (!isActive) {
-      queueMicrotask(() => {
-        if (scope.lens === lens) scope.lens = null
-      })
-      return
-    }
+    if (!isActive) return
+    // `scope.lens` stays on the last active item, also while no item is active (a page outside the nav),
+    // so the lens still glides from where it was.
     const prev = scope.lens
     scope.lens = lens
     if (prev && prev !== lens && prev.isConnected) {

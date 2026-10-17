@@ -2,7 +2,7 @@ import { Autocomplete } from "@base-ui/react/autocomplete";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { useNavigate } from "@tanstack/react-router";
 import { CornerDownLeft, type LucideIcon, MoonIcon, SearchIcon, SunIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { HighlightGlider } from "@/components/ui/highlight-glider";
 import { Kbd } from "@/components/ui/kbd";
 import { toggleTheme, useTheme } from "@/hooks/use-theme";
@@ -24,10 +24,6 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
   const [query, setQuery] = useState("");
   const navigate = useNavigate();
   const theme = useTheme();
-
-  useEffect(() => {
-    if (!open) setQuery("");
-  }, [open]);
 
   const close = () => onOpenChange(false);
   const pages: PaletteItem[] = NAV_ITEMS.map((item) => ({
@@ -57,7 +53,14 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
     .filter((group) => group.items.length > 0);
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+    // The query is cleared once the exit animation has finished: clearing it on close would re-render the full list mid-fade.
+    <DialogPrimitive.Root
+      open={open}
+      onOpenChange={onOpenChange}
+      onOpenChangeComplete={(isOpen) => {
+        if (!isOpen) setQuery("");
+      }}
+    >
       <DialogPrimitive.Portal>
         <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-[oklch(0.25_0.01_80/0.18)] backdrop-blur-[2px] transition-opacity duration-(--dur-base) data-ending-style:opacity-0 data-starting-style:opacity-0 dark:bg-black/55" />
         <DialogPrimitive.Popup
