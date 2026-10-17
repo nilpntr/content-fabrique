@@ -62,3 +62,23 @@ func (e *Enqueuer) WorkspaceCreated(ctx context.Context, tx *store.Store, w stor
 	}
 	return nil
 }
+
+// JobInfo names the River job attempt a worker is running. The workers that meter work put it in the context (WithJobInfo), so the
+// ledger rows of an attempt get stable idempotency keys that a retry of the same write reproduces and another attempt does not.
+type JobInfo struct {
+	ID      int64
+	Attempt int
+}
+
+type jobInfoKey struct{}
+
+// WithJobInfo returns a context that carries the job attempt.
+func WithJobInfo(ctx context.Context, info JobInfo) context.Context {
+	return context.WithValue(ctx, jobInfoKey{}, info)
+}
+
+// JobInfoFrom reads the job attempt from a context made by WithJobInfo.
+func JobInfoFrom(ctx context.Context) (JobInfo, bool) {
+	info, ok := ctx.Value(jobInfoKey{}).(JobInfo)
+	return info, ok
+}

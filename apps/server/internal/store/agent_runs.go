@@ -73,6 +73,8 @@ type NewAgentRun struct {
 	BudgetToolCalls   int
 	BudgetWallClockMs int64
 	BilledTo          string
+	// StartedBy is the member who started the run (the ledger's member_user_id); the zero value for a run nobody started by hand.
+	StartedBy ids.UserID
 }
 
 // CreateAgentRun inserts a queued run. The caller enqueues the agent_run job in the same transaction.
@@ -84,7 +86,7 @@ func (s *Store) CreateAgentRun(ctx context.Context, ws ids.WorkspaceID, in NewAg
 		WorkspaceID: ws, Agent: in.Agent, Stage: in.Stage, ParentRunID: pgUUID(in.ParentRunID), ProjectID: in.ProjectID,
 		Input: in.Input, RoutingProfile: in.RoutingProfile, Model: in.Model, Effort: in.Effort, MaxTokens: int32(in.MaxTokens), //nolint:gosec // checked by the caller and the table
 		BudgetMicros: in.BudgetMicros, BudgetTokens: in.BudgetTokens, BudgetToolCalls: int32(in.BudgetToolCalls), //nolint:gosec // checked by the caller and the table
-		BudgetWallClockMs: in.BudgetWallClockMs, BilledTo: in.BilledTo,
+		BudgetWallClockMs: in.BudgetWallClockMs, BilledTo: in.BilledTo, StartedBy: pgUUID(in.StartedBy.UUID),
 	})
 	return r, mapErr(err)
 }

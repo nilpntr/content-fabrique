@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -24,6 +23,8 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/media"
 	"github.com/nilpntr/content-fabrique/internal/sandbox"
+	"github.com/nilpntr/content-fabrique/internal/spend"
+	"github.com/nilpntr/content-fabrique/internal/spend/spendtest"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
@@ -323,36 +324,10 @@ func toolReply(input string, in, out int) (int, string) {
 
 func goodReply(int) (int, string) { return toolReply(goodAnswer, 1750, 110) }
 
-// fakeLedger collects the usage_ledger rows.
-type fakeLedger struct {
-	mu   sync.Mutex
-	rows []store.UsageEntry
-}
+// fakeLedger is the in-memory spend backend: it collects the usage_ledger rows (spendtest.Memory).
+type fakeLedger struct{ spendtest.Memory }
 
-func (l *fakeLedger) InsertUsage(_ context.Context, e store.UsageEntry) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.rows = append(l.rows, e)
-	return nil
-}
-
-func (l *fakeLedger) UsageCostMicros(_ context.Context, ws ids.WorkspaceID, _, _ time.Time) (int64, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	var sum int64
-	for _, r := range l.rows {
-		if r.WorkspaceID == ws {
-			sum += r.ListCostMicros
-		}
-	}
-	return sum, nil
-}
-
-func (l *fakeLedger) snapshot() []store.UsageEntry {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return append([]store.UsageEntry(nil), l.rows...)
-}
+func (l *fakeLedger) snapshot() []store.UsageEntry { return l.Rows() }
 
 // ---- A service over the fakes ------------------------------------------------------------------------------------------
 
@@ -380,7 +355,7 @@ type rigOptions struct {
 	tempDir string
 }
 
-func newFactory(t *testing.T, o rigOptions, ledger llm.Ledger, api *fakeAPI) *llm.Factory {
+func newFactory(t *testing.T, o rigOptions, ledger spend.Backend, api *fakeAPI) *llm.Factory {
 	t.Helper()
 	prices, err := llm.LoadPriceTable(configfiles.Pricing(), llm.PriceFile)
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -100,6 +101,22 @@ func TestRenderPreviewAndFinal(t *testing.T) {
 				got.DurationMs == nil || *got.DurationMs != plan.DurationMs || got.Width == nil || int(*got.Width) != prof.width || got.Height == nil || int(*got.Height) != prof.height ||
 				got.WallMs == nil || *got.WallMs <= 0 || got.CpuMs == nil || *got.CpuMs <= 0 {
 				t.Fatalf("render row: %+v", got)
+			}
+			// The render's CPU time is in the usage ledger: one row of kind render, vCPU-milliseconds from cpu_ms, priced from the table,
+			// attributed to the project, the member who asked and the render.
+			var rows []store.UsageEntry
+			for _, row := range e.mem.Rows() {
+				if row.Kind == store.KindRender && row.ActionID == r.ID.UUID {
+					rows = append(rows, row)
+				}
+			}
+			if len(rows) != 1 {
+				t.Fatalf("%d render ledger rows, want 1: %+v", len(rows), e.mem.Rows())
+			}
+			if row := rows[0]; row.Quantity != *got.CpuMs || row.Unit != store.UnitVCPUMs || row.ListCostMicros != (*got.CpuMs*20+999)/1000 ||
+				row.PriceTableVersion != "test-prices" || row.ProjectID != p.ID || row.MemberUserID != e.user || row.WorkspaceID != w.ID ||
+				row.Stage != "render" || !strings.HasPrefix(row.IdempotencyKey, "render:"+r.ID.String()) {
+				t.Errorf("render ledger row = %+v (cpu_ms %d)", row, *got.CpuMs)
 			}
 			for name, key := range map[string]*string{storage.RenderMP4Name: got.Mp4Key, storage.RenderContactSheetName: got.ContactSheetKey, storage.RenderTimeMapName: got.TimeMapKey} {
 				want, _ := storage.RenderKey(w.ID, p.ID, r.ID, name)

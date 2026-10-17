@@ -97,7 +97,9 @@ func (w *AssetIngestWorker) Work(ctx context.Context, job *river.Job[AssetIngest
 		return river.JobSnooze(noIngestSnooze)
 	}
 	ws, id := job.Args.WorkspaceID, job.Args.AssetID
+	began := w.deps.now()
 	res, err := w.deps.Ingest.Run(ctx, ws, id)
+	w.deps.meterMedia(ctx, ws, id, "ingest", job.ID, job.Attempt, began)
 	switch {
 	case errors.Is(err, ingest.ErrAssetGone):
 		w.deps.logger().InfoContext(ctx, "asset ingest skipped", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "reason", err.Error())

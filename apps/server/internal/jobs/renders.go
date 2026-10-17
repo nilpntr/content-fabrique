@@ -90,7 +90,7 @@ func (w *RenderWorker) Work(ctx context.Context, job *river.Job[RenderArgs]) err
 		return river.JobSnooze(noRenderSnooze)
 	}
 	ws, id := job.Args.WorkspaceID, job.Args.RenderID
-	res, err := w.deps.Render.Run(ctx, ws, id)
+	res, err := w.deps.Render.Run(WithJobInfo(ctx, JobInfo{ID: job.ID, Attempt: job.Attempt}), ws, id)
 	switch {
 	case errors.Is(err, ErrRenderGone):
 		w.deps.logger().InfoContext(ctx, "render skipped", "workspace_id", ws.String(), "render_id", id.String(), "job_id", job.ID, "reason", err.Error())

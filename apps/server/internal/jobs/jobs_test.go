@@ -307,7 +307,7 @@ func TestNewWorkspaceIsWelcomedByTheWorker(t *testing.T) {
 // ── periodic jobs and the prune ─────────────────────────────────────────────────────────────────────────────────
 
 func TestPeriodicJobsAreRegistered(t *testing.T) {
-	if got, want := jobs.PeriodicJobIDs(), []string{"webhook_events_prune", "uploads_expire", "agent_runs_resume", "renders_sweep"}; !slices.Equal(got, want) {
+	if got, want := jobs.PeriodicJobIDs(), []string{"webhook_events_prune", "uploads_expire", "agent_runs_resume", "renders_sweep", "spend_holds_sweep"}; !slices.Equal(got, want) {
 		t.Fatalf("PeriodicJobIDs = %v, want %v", got, want)
 	}
 	if n := len(jobs.PeriodicJobs()); n != len(jobs.PeriodicJobIDs()) {

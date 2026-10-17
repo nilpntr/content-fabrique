@@ -1,0 +1,77 @@
+# The price table, version 2026-10b (P7-09a, docs/design/spend-control-v1.md section 6). It supersedes 2026-10 (the model prices are
+# copied unchanged) and adds the sections that price what is not a model call: transcription, compute and storage. A price change is a
+# new file and a new version, never an edit of an old one: every ledger row names the `version` that priced it.
+#
+# A price that is `null` (or missing) is UNPRICED: the paid provider refuses to run in staging and production, because its spend
+# could not be metered or capped. Only development and ci may run it, with LLM_ALLOW_UNPRICED=1 (cost recorded as 0, version
+# "unpriced"). Never guess a price. Look it up, put the page in `source` and the day in `retrieved`; a figure that is an estimate says
+# so (`estimate: true`).
+version: "2026-10b"
+source: https://platform.claude.com/docs/en/about-claude/pricing
+retrieved: 2026-10-17
+notes:
+  - Standard (non-batch, non-fast-mode, global inference) model prices only. The Batch API is 50 % off, fast mode and US-only inference (inference_geo) are priced differently; none of those is metered here yet.
+  - Cache hits on Opus 5.5 and Sonnet 5.5 cost 0.05x the base input price (the page's footnote 2), not the usual 0.1x.
+  - Haiku 5.5 is priced by prompt length. A request whose prompt (input + cache writes + cache reads) is over 100,000 tokens pays the long_context prices.
+
+models:
+  claude-opus-5-5:
+    input: 4
+    cache_write_5m: 5
+    cache_write_1h: 8
+    cache_read: 0.20
+    output: 20
+  claude-sonnet-5-5:
+    input: 2
+    cache_write_5m: 2.50
+    cache_write_1h: 4
+    cache_read: 0.10
+    output: 10
+  claude-haiku-5-5:
+    input: 0.10
+    cache_write_5m: 0.125
+    cache_write_1h: 0.20
+    cache_read: 0.01
+    output: 0.50
+    long_context:
+      over_prompt_tokens: 100000
+      input: 0.50
+      cache_write_5m: 0.625
+      cache_write_1h: 1
+      cache_read: 0.05
+      output: 2.50
+
+# Transcription (D-27). Dollars.
+transcription:
+  workers_ai:
+    model: "@cf/openai/whisper-large-v3-turbo"
+    # Read from Cloudflare's Workers AI pricing page on the day below ("$0.0005 per audio minute", 46.63 neurons per audio minute).
+    # Read through a page fetch, not the dashboard: confirm it against the Cloudflare invoice before production carries real traffic.
+    # WORKERS_AI_PRICE_MICROS_PER_MINUTE overrides it (an operator-verified price) without a new file. null would leave it unpriced.
+    per_minute: 0.0005
+    source: https://developers.cloudflare.com/workers-ai/platform/pricing/
+    retrieved: 2026-10-17
+  # whisper.cpp in our own sandbox costs compute, not a vendor price: its row is priced from `compute` below, as vCPUs x wall time.
+  # The wall time is not measured per call yet, so it is estimated as wall_seconds_per_audio_second x the audio (a deliberately
+  # slow figure; measure it with the transcription benchmark and put the result in the next file).
+  whisper_cpp_local:
+    vcpus: 4
+    wall_seconds_per_audio_second: 1.0
+    estimate: true
+
+# Compute: what our own CPU time costs when it runs on rented capacity. Dollars per vCPU-second.
+compute:
+  vcpu_second: 0.000020
+  # Cloudflare Containers: "+ $0.000020 per additional vCPU-second" on the Workers Paid plan, read on the day below. Architecture
+  # section 13 models a render as about 60 s of 4 vCPU for about $0.005, which is the same figure to within rounding. Memory and
+  # disk are not priced separately, so this is an ESTIMATE of the compute cost, not an invoice line (our own servers cost less).
+  estimate: true
+  source: https://developers.cloudflare.com/containers/pricing/
+  retrieved: 2026-10-17
+
+# Storage and egress on R2 Standard. Dollars. Metered by P7-09b (the kinds are ready in the ledger).
+storage:
+  gb_month: 0.015
+  egress_gb: 0
+  source: https://developers.cloudflare.com/r2/pricing/
+  retrieved: 2026-10-17

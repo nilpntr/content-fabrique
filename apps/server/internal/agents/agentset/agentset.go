@@ -164,6 +164,11 @@ func (noFrames) Frames(context.Context, ids.WorkspaceID, ids.AssetID, []int64) (
 	return nil, errors.New("agentset: this process has no object storage and sandbox to take frames with")
 }
 
+// FrameLimits bound the sandboxed ffmpeg runs of the editor's frames and the quick look; the quick look's compute is metered on its CPU.
+func FrameLimits() sandbox.Limits {
+	return sandbox.Limits{CPU: 2, MemoryMB: 2048, Timeout: 2 * time.Minute, PIDs: 256}
+}
+
 // NewFrameRunner builds the sandbox runner the editor takes its frames with, and the directory it works in. provider is
 // "docker", "hardened" or "local" (MEDIA_SANDBOX_PROVIDER), image the media-tools image, tempRoot MEDIA_TEMP_DIR and cfEnv the
 // environment (the local provider isolates nothing and is refused in staging and production). The directory is created and
@@ -195,7 +200,6 @@ func NewFrameRunner(provider, image, tempRoot, cfEnv string) (media.Runner, stri
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, "", fmt.Errorf("MEDIA_TEMP_DIR: %w", err)
 	}
-	limits := sandbox.Limits{CPU: 2, MemoryMB: 2048, Timeout: 2 * time.Minute, PIDs: 256}
-	runner := &media.SandboxRunner{Provider: p, Image: image, Limits: limits, Labels: map[string]string{"cf.job": "editor_frames"}}
+	runner := &media.SandboxRunner{Provider: p, Image: image, Limits: FrameLimits(), Labels: map[string]string{"cf.job": "editor_frames"}}
 	return runner, dir, nil
 }

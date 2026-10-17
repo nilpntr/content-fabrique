@@ -27,20 +27,24 @@ const (
 	FailModelError          = "model_error"
 	FailModelAccess         = "model_access"
 	FailDailyCap            = "daily_cap"
-	FailRequestCap          = "request_cap"
-	FailReplayMiss          = "replay_miss"
-	FailMaxTokens           = "max_tokens"
-	FailRefusal             = "refusal"
-	FailLedger              = "ledger_error"
-	FailEventTooLarge       = "event_too_large"
-	FailUnknownAgent        = "unknown_agent"
-	FailBadInput            = "invalid_input"
-	FailContext             = "context_failed"
-	FailCorruptLog          = "corrupt_log"
-	FailInternal            = "internal_error"
-	FailTooManyResumes      = "too_many_resumes"
-	FailContextWindow       = "context_window_exceeded"
-	FailStopReason          = "unexpected_stop_reason"
+	// FailPlatformSpendPaused: the platform's daily spend breaker is open (D-31); managed paid calls are refused until the next UTC day.
+	FailPlatformSpendPaused = "platform_spend_paused"
+	// FailSpendCapBusy: the breaker's room could not take a call for the rest of a (non-wall-clock) wait; see llm.RunInfo.WaitOnBusy.
+	FailSpendCapBusy   = "spend_cap_busy"
+	FailRequestCap     = "request_cap"
+	FailReplayMiss     = "replay_miss"
+	FailMaxTokens      = "max_tokens"
+	FailRefusal        = "refusal"
+	FailLedger         = "ledger_error"
+	FailEventTooLarge  = "event_too_large"
+	FailUnknownAgent   = "unknown_agent"
+	FailBadInput       = "invalid_input"
+	FailContext        = "context_failed"
+	FailCorruptLog     = "corrupt_log"
+	FailInternal       = "internal_error"
+	FailTooManyResumes = "too_many_resumes"
+	FailContextWindow  = "context_window_exceeded"
+	FailStopReason     = "unexpected_stop_reason"
 )
 
 // The limits a budget failure names (the "limit" of the failed status event).
@@ -553,7 +557,13 @@ func (l *loop) request() llm.Request {
 		MaxTokens: int(l.run.MaxTokens),
 		Effort:    l.run.Effort,
 		Thinking:  l.agent.Thinking,
-		Run:       llm.RunInfo{ID: l.run.ID, Profile: l.run.RoutingProfile, Budget: l.budget},
+		Run: llm.RunInfo{
+			ID: l.run.ID, Profile: l.run.RoutingProfile, Budget: l.budget,
+			// The ledger attributes the call to the project and the member who started the run (P7-09a).
+			ProjectID: l.run.ProjectID, MemberUserID: ids.UserID{UUID: l.run.StartedBy.Bytes},
+			// A refusal that is only "busy" (spend_cap_busy) waits and retries inside the call, up to the run's wall clock.
+			WaitOnBusy: true,
+		},
 	}
 }
 
@@ -752,6 +762,10 @@ func (l *loop) modelFailed(ctx context.Context, err error, wallExpired bool, usa
 			return l.stopBudgetWithUsage(ctx, LimitDollars, usage, cost)
 		case llm.CapDaily:
 			return l.failWithUsage(ctx, FailDailyCap, err.Error(), usage, cost)
+		case llm.CapPlatform:
+			return l.failWithUsage(ctx, FailPlatformSpendPaused, err.Error(), usage, cost)
+		case llm.CapPlatformBusy:
+			return l.failWithUsage(ctx, FailSpendCapBusy, err.Error(), usage, cost)
 		default:
 			return l.failWithUsage(ctx, FailRequestCap, err.Error(), usage, cost)
 		}

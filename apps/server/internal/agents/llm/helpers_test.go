@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/spend/spendtest"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
@@ -188,54 +189,10 @@ func errReply(status int, typ, msg string, header map[string]string) fakeReply {
 
 // ---- a fake ledger -------------------------------------------------------------------------------------------
 
-type fakeLedger struct {
-	mu   sync.Mutex
-	rows []store.UsageEntry
-	// failInserts makes the next n InsertUsage calls fail.
-	failInserts int
-	failSum     bool
-	inserts     int
-}
+// fakeLedger is the in-memory spend backend: ledger rows, holds and counters derived from the rows (spendtest.Memory).
+type fakeLedger struct{ spendtest.Memory }
 
-func (l *fakeLedger) InsertUsage(_ context.Context, e store.UsageEntry) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.inserts++
-	if l.failInserts > 0 {
-		l.failInserts--
-		return fmt.Errorf("ledger down")
-	}
-	if e.RequestID != "" {
-		for _, r := range l.rows {
-			if r.RequestID == e.RequestID {
-				return nil
-			}
-		}
-	}
-	l.rows = append(l.rows, e)
-	return nil
-}
-
-func (l *fakeLedger) UsageCostMicros(_ context.Context, ws ids.WorkspaceID, from, to time.Time) (int64, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.failSum {
-		return 0, fmt.Errorf("ledger down")
-	}
-	var sum int64
-	for _, r := range l.rows {
-		if r.WorkspaceID == ws && !r.CreatedAt.Before(from) && r.CreatedAt.Before(to) {
-			sum += r.ListCostMicros
-		}
-	}
-	return sum, nil
-}
-
-func (l *fakeLedger) snapshot() []store.UsageEntry {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return append([]store.UsageEntry(nil), l.rows...)
-}
+func (l *fakeLedger) snapshot() []store.UsageEntry { return l.Rows() }
 
 // ---- a factory over the fakes --------------------------------------------------------------------------------
 

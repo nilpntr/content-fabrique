@@ -12,10 +12,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
-	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/spend/spendtest"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
@@ -83,14 +82,6 @@ func anthropicMessage(block string, in, cacheRead, out int) string {
 
 func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }
 
-// nopLedger stands in for the usage ledger in the record test.
-type nopLedger struct{}
-
-func (nopLedger) InsertUsage(context.Context, store.UsageEntry) error { return nil }
-func (nopLedger) UsageCostMicros(context.Context, ids.WorkspaceID, time.Time, time.Time) (int64, error) {
-	return 0, nil
-}
-
 // llmFactory builds the real llm layer in the given mode over the repository's price table.
 func llmFactory(t *testing.T, vars map[string]string, api *fakeAnthropic) *llm.Factory {
 	t.Helper()
@@ -106,7 +97,7 @@ func llmFactory(t *testing.T, vars map[string]string, api *fakeAnthropic) *llm.F
 	}
 	opts := llm.FactoryOptions{Settings: settings, Getenv: getenv, Prices: prices, Logger: quiet}
 	if api != nil {
-		opts.HTTPClient, opts.Ledger = api.client(), nopLedger{}
+		opts.HTTPClient, opts.Ledger = api.client(), &spendtest.Memory{}
 	}
 	f, err := llm.NewFactory(opts)
 	if err != nil {

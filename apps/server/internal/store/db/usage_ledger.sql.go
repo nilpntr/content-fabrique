@@ -13,16 +13,18 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/ids"
 )
 
-const insertUsageLedger = `-- name: InsertUsageLedger :exec
+const insertUsageLedger = `-- name: InsertUsageLedger :execrows
 
 INSERT INTO usage_ledger (
     workspace_id, run_id, stage, kind, model, input_tokens, cache_write_tokens, cache_write_1h_tokens,
-    cache_read_tokens, output_tokens, list_cost_micros, price_table_version, billed_to, request_id, estimated, provider, audio_ms, created_at
+    cache_read_tokens, output_tokens, list_cost_micros, price_table_version, billed_to, request_id, estimated, provider, audio_ms,
+    quantity, unit, project_id, member_user_id, action_id, idempotency_key, created_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8,
-    $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+    $9, $10, $11, $12, $13, $14, $15, $16, $17,
+    $18, $19, $20, $21, $22, $23, $24
 )
-ON CONFLICT (request_id) WHERE request_id <> '' DO NOTHING
+ON CONFLICT DO NOTHING
 `
 
 type InsertUsageLedgerParams struct {
@@ -43,14 +45,21 @@ type InsertUsageLedgerParams struct {
 	Estimated          bool
 	Provider           string
 	AudioMs            int64
+	Quantity           int64
+	Unit               string
+	ProjectID          pgtype.UUID
+	MemberUserID       pgtype.UUID
+	ActionID           pgtype.UUID
+	IdempotencyKey     string
 	CreatedAt          time.Time
 }
 
 // The usage ledger (P4-00a). Every query filters by workspace_id.
-// One row per model call. A row whose request_id is already there (a retried insert whose first attempt did commit)
-// changes nothing, so a call is never counted twice.
-func (q *Queries) InsertUsageLedger(ctx context.Context, arg InsertUsageLedgerParams) error {
-	_, err := q.db.Exec(ctx, insertUsageLedger,
+// One row per metered event. A row whose idempotency_key (or request_id) is already there (a retried insert whose first attempt
+// did commit, or a replayed settle) changes nothing and reports 0 rows, so an event is never counted twice. The caller adds the
+// row's cost to the counters only when this reports 1.
+func (q *Queries) InsertUsageLedger(ctx context.Context, arg InsertUsageLedgerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertUsageLedger,
 		arg.WorkspaceID,
 		arg.RunID,
 		arg.Stage,
@@ -68,13 +77,22 @@ func (q *Queries) InsertUsageLedger(ctx context.Context, arg InsertUsageLedgerPa
 		arg.Estimated,
 		arg.Provider,
 		arg.AudioMs,
+		arg.Quantity,
+		arg.Unit,
+		arg.ProjectID,
+		arg.MemberUserID,
+		arg.ActionID,
+		arg.IdempotencyKey,
 		arg.CreatedAt,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const listRecentUsageLedger = `-- name: ListRecentUsageLedger :many
-SELECT id, workspace_id, run_id, stage, kind, model, input_tokens, cache_write_tokens, cache_write_1h_tokens, cache_read_tokens, output_tokens, list_cost_micros, price_table_version, billed_to, request_id, estimated, created_at, provider, audio_ms FROM usage_ledger
+SELECT id, workspace_id, run_id, stage, kind, model, input_tokens, cache_write_tokens, cache_write_1h_tokens, cache_read_tokens, output_tokens, list_cost_micros, price_table_version, billed_to, request_id, estimated, created_at, provider, audio_ms, quantity, unit, project_id, member_user_id, action_id, idempotency_key FROM usage_ledger
 WHERE workspace_id = $1
 ORDER BY id DESC
 LIMIT $2
@@ -115,6 +133,12 @@ func (q *Queries) ListRecentUsageLedger(ctx context.Context, arg ListRecentUsage
 			&i.CreatedAt,
 			&i.Provider,
 			&i.AudioMs,
+			&i.Quantity,
+			&i.Unit,
+			&i.ProjectID,
+			&i.MemberUserID,
+			&i.ActionID,
+			&i.IdempotencyKey,
 		); err != nil {
 			return nil, err
 		}
@@ -127,7 +151,7 @@ func (q *Queries) ListRecentUsageLedger(ctx context.Context, arg ListRecentUsage
 }
 
 const listUsageLedgerForRun = `-- name: ListUsageLedgerForRun :many
-SELECT id, workspace_id, run_id, stage, kind, model, input_tokens, cache_write_tokens, cache_write_1h_tokens, cache_read_tokens, output_tokens, list_cost_micros, price_table_version, billed_to, request_id, estimated, created_at, provider, audio_ms FROM usage_ledger
+SELECT id, workspace_id, run_id, stage, kind, model, input_tokens, cache_write_tokens, cache_write_1h_tokens, cache_read_tokens, output_tokens, list_cost_micros, price_table_version, billed_to, request_id, estimated, created_at, provider, audio_ms, quantity, unit, project_id, member_user_id, action_id, idempotency_key FROM usage_ledger
 WHERE workspace_id = $1 AND run_id = $2
 ORDER BY id
 `
@@ -166,6 +190,12 @@ func (q *Queries) ListUsageLedgerForRun(ctx context.Context, arg ListUsageLedger
 			&i.CreatedAt,
 			&i.Provider,
 			&i.AudioMs,
+			&i.Quantity,
+			&i.Unit,
+			&i.ProjectID,
+			&i.MemberUserID,
+			&i.ActionID,
+			&i.IdempotencyKey,
 		); err != nil {
 			return nil, err
 		}

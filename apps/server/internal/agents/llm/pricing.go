@@ -12,7 +12,7 @@ import (
 
 // PriceFile is the price table the code loads from config/pricing. A price change is a new file and a new version:
 // ledger rows name the version that priced them.
-const PriceFile = "2026-10.yaml"
+const PriceFile = "2026-10b.yaml"
 
 // UnpricedVersion is the price_table_version of a ledger row written under LLM_ALLOW_UNPRICED for a model with no
 // price. Its cost is 0.
@@ -51,6 +51,20 @@ type PriceTable struct {
 
 	models map[string]modelPrices // priced models only
 	known  map[string]bool        // every model the file lists, priced or not
+
+	// The sections that are not model calls (zero means unpriced).
+	workersAIPerMinuteMicros int64
+	whisperLocal             WhisperLocal
+	vcpuSecondMicros         int64
+	storageGBMonthMicros     int64
+	egressGBMicros           int64
+	hasStorage               bool
+}
+
+// WhisperLocal is how local whisper.cpp is priced: compute for an estimated wall time on a number of vCPUs.
+type WhisperLocal struct {
+	VCPUs                     int
+	WallSecondsPerAudioSecond float64
 }
 
 type priceFile struct {
@@ -58,6 +72,23 @@ type priceFile struct {
 	Source    string                `yaml:"source"`
 	Retrieved yaml.Node             `yaml:"retrieved"`
 	Models    map[string]priceModel `yaml:"models"`
+
+	Transcription struct {
+		WorkersAI struct {
+			PerMinute *float64 `yaml:"per_minute"`
+		} `yaml:"workers_ai"`
+		WhisperCPPLocal struct {
+			VCPUs                     int     `yaml:"vcpus"`
+			WallSecondsPerAudioSecond float64 `yaml:"wall_seconds_per_audio_second"`
+		} `yaml:"whisper_cpp_local"`
+	} `yaml:"transcription"`
+	Compute struct {
+		VCPUSecond *float64 `yaml:"vcpu_second"`
+	} `yaml:"compute"`
+	Storage struct {
+		GBMonth  *float64 `yaml:"gb_month"`
+		EgressGB *float64 `yaml:"egress_gb"`
+	} `yaml:"storage"`
 }
 
 type priceSet struct {
@@ -123,7 +154,58 @@ func LoadPriceTable(fsys fs.FS, name string) (*PriceTable, error) {
 		}
 		t.models[id] = mp
 	}
+	if t.workersAIPerMinuteMicros, err = dollarsToMicros(f.Transcription.WorkersAI.PerMinute); err != nil {
+		return nil, fmt.Errorf("llm: price table %s: transcription.workers_ai.per_minute: %w", name, err)
+	}
+	if t.vcpuSecondMicros, err = dollarsToMicros(f.Compute.VCPUSecond); err != nil {
+		return nil, fmt.Errorf("llm: price table %s: compute.vcpu_second: %w", name, err)
+	}
+	if t.storageGBMonthMicros, err = dollarsToMicros(f.Storage.GBMonth); err != nil {
+		return nil, fmt.Errorf("llm: price table %s: storage.gb_month: %w", name, err)
+	}
+	if t.egressGBMicros, err = dollarsToMicros(f.Storage.EgressGB); err != nil {
+		return nil, fmt.Errorf("llm: price table %s: storage.egress_gb: %w", name, err)
+	}
+	t.hasStorage = f.Storage.GBMonth != nil && f.Storage.EgressGB != nil
+	if w := f.Transcription.WhisperCPPLocal; w.VCPUs > 0 && w.WallSecondsPerAudioSecond > 0 {
+		t.whisperLocal = WhisperLocal{VCPUs: w.VCPUs, WallSecondsPerAudioSecond: w.WallSecondsPerAudioSecond}
+	}
 	return t, nil
+}
+
+// dollarsToMicros converts a dollar price to micro-dollars; nil (null or missing) is 0, unpriced. Prices finer than a micro-dollar
+// per unit round to the nearest micro-dollar, so the unit must be chosen with that in mind (vCPU-seconds are 20).
+func dollarsToMicros(v *float64) (int64, error) {
+	if v == nil {
+		return 0, nil
+	}
+	if *v < 0 || math.IsNaN(*v) || math.IsInf(*v, 0) {
+		return 0, fmt.Errorf("a price is negative or not a number")
+	}
+	return int64(math.Round(*v * 1e6)), nil
+}
+
+// WorkersAIMicrosPerMinute is the list price of a minute of hosted transcription in micro-dollars; 0 when the file leaves it unpriced.
+func (t *PriceTable) WorkersAIMicrosPerMinute() int64 { return t.workersAIPerMinuteMicros }
+
+// VCPUSecondMicros is the compute price of a vCPU-second in micro-dollars; 0 when unpriced.
+func (t *PriceTable) VCPUSecondMicros() int64 { return t.vcpuSecondMicros }
+
+// WhisperLocal says how local whisper.cpp is priced; the zero value when the file does not say.
+func (t *PriceTable) WhisperLocal() WhisperLocal { return t.whisperLocal }
+
+// StorageGBMonthMicros and EgressGBMicros are the R2 prices in micro-dollars, ok false when the file leaves either unpriced.
+func (t *PriceTable) StorageGBMonthMicros() (storageGBMonth, egressGB int64, ok bool) {
+	return t.storageGBMonthMicros, t.egressGBMicros, t.hasStorage
+}
+
+// ComputeCostMicros is the list cost of vcpuMs milliseconds of vCPU time, rounded up to the next micro-dollar. It returns an
+// *UnpricedError when the file has no compute price.
+func (t *PriceTable) ComputeCostMicros(vcpuMs int64) (int64, error) {
+	if t.vcpuSecondMicros <= 0 {
+		return 0, &UnpricedError{Model: "compute.vcpu_second", TableVersion: t.Version}
+	}
+	return ceilDiv(max(vcpuMs, 0)*t.vcpuSecondMicros, 1000), nil
 }
 
 // convert turns dollars per MTok into micro-dollars per MTok. ok is false when any of the five prices is null or

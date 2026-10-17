@@ -91,6 +91,11 @@ var periodicRegistry = []periodic{
 		schedule: river.PeriodicInterval(RendersSweepInterval),
 		args:     func() river.JobArgs { return RendersSweepArgs{} },
 	},
+	{
+		id:       spendHoldsSweepID,
+		schedule: river.PeriodicInterval(SpendHoldsSweepInterval),
+		args:     func() river.JobArgs { return SpendHoldsSweepArgs{} },
+	},
 }
 
 // PeriodicJobs builds the River periodic jobs of the registry.
