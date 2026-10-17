@@ -481,8 +481,9 @@ func (a *applier) updateText(o *UpdateText) bool {
 	}
 	if o.Style != "" {
 		if o.Style != ti.Style {
-			// The fill, size and shadow were chosen for the old style: the new one starts from its own (the op may set them again below).
-			ti.Fill, ti.Scale, ti.Shadow = "", nil, ""
+			// The fill, size, shadow and alignment were chosen for the old style: the new one starts from its own (the op may set them
+			// again below).
+			ti.Fill, ti.Scale, ti.Shadow, ti.Align = "", nil, "", ""
 		}
 		ti.Style = o.Style
 	}

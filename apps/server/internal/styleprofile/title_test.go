@@ -150,3 +150,39 @@ func TestCompareTheTitleLook(t *testing.T) {
 		}
 	}
 }
+
+// A reference's text height is a share of its own frame height; the profile keeps it as a share of a 9:16 frame's height, so a 16:9 or a
+// 1:1 reference does not read 1.78 times too large (and its recipe does not shrink the title).
+func TestTextHeightIsNormalisedToAPortraitFrame(t *testing.T) {
+	ref := func(w, h int, pct float64) Measures {
+		m := referenceMeasures(t)[0]
+		m.Width, m.Height = w, h
+		m.Text.TextHeightPct = pct
+		return m
+	}
+	// The same capitals, 43 px on a 1080 px short side, read as a share of three different frames.
+	cases := map[string]Measures{
+		"9:16": ref(1080, 1920, 2.25), // 43 / 1920
+		"16:9": ref(1920, 1080, 4.0),  // 43 / 1080
+		"1:1":  ref(1080, 1080, 4.0),  // 43 / 1080
+		"4:5":  ref(1080, 1350, 3.2),  // 43 / 1350
+	}
+	for name, m := range cases {
+		p := Aggregate([]Measures{m})
+		if got := p.Text.HeightPct; math.Abs(got-2.25) > 0.06 {
+			t.Errorf("%s: %.2f %% of a 9:16 frame, want 2.25", name, got)
+		}
+	}
+	// Without dimensions nothing is rescaled.
+	if p := Aggregate([]Measures{ref(0, 0, 4.0)}); p.Text.HeightPct != 4 {
+		t.Errorf("unknown size: %.2f", p.Text.HeightPct)
+	}
+	if f := portraitFactor(Measures{Width: 1080, Height: 1920}); f != 1 {
+		t.Errorf("9:16 factor %v", f)
+	}
+	// The recipe of a 16:9 reference is the same as the recipe of the 9:16 one with the same capitals.
+	a, b := Aggregate([]Measures{cases["9:16"]}).TitleRecipe(), Aggregate([]Measures{cases["16:9"]}).TitleRecipe()
+	if a.Scale != b.Scale {
+		t.Errorf("scales differ: %v %v", a.Scale, b.Scale)
+	}
+}

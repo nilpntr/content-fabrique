@@ -520,11 +520,23 @@ func majority(values []string) string {
 	return best
 }
 
+// portraitFactor converts a share of the reference's own frame height to a share of a 9:16 frame's height (1.78 times the short side),
+// the unit the profile and the style_match check use: a 16:9 reference whose capitals are 4 % of its 1080 px height has capitals of 43 px,
+// 2.25 % of a 1920 px height. 1 when the dimensions are not known.
+func portraitFactor(m Measures) float64 {
+	if m.Width <= 0 || m.Height <= 0 {
+		return 1
+	}
+	return float64(m.Height) / (float64(min(m.Width, m.Height)) * 16 / 9)
+}
+
 func aggregateText(refs []Measures) *TextProfile {
 	var read []*TextStyle
+	portrait := map[*TextStyle]float64{} // each read's factor to a 9:16 frame's height
 	for _, m := range refs {
 		if m.Text != nil {
 			read = append(read, m.Text)
+			portrait[m.Text] = portraitFactor(m)
 		}
 	}
 	if len(read) == 0 {
@@ -560,7 +572,7 @@ func aggregateText(refs []Measures) *TextProfile {
 			oneLine++
 		}
 		if r.TextHeightPct > 0 {
-			heights = append(heights, r.TextHeightPct)
+			heights = append(heights, r.TextHeightPct*portrait[r])
 		}
 		if r.Condensed {
 			condensed++

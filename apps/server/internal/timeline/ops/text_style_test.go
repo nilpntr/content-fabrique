@@ -42,11 +42,11 @@ func TestTextStyleOverridesOps(t *testing.T) {
 	// A new style starts from its own look: the overrides chosen for the old one are dropped, unless the same op sets them again.
 	changed := mustApply(t, out, `[{"op":"update_text","id":"t9","style":"title_lowercase"}]`)
 	it = textItemsByID(t, changed)["t9"]
-	if it.Style != "title_lowercase" || it.Fill != "" || it.Scale != nil || it.Shadow != "" || it.Align != "center" {
-		t.Errorf("a new style kept the old overrides: %+v", it) // align is a layout choice, not a look: it stays
+	if it.Style != "title_lowercase" || it.Fill != "" || it.Scale != nil || it.Shadow != "" || it.Align != "" {
+		t.Errorf("a new style kept the old overrides: %+v", it)
 	}
 	kept := mustApply(t, out, `[{"op":"update_text","id":"t9","style":"title_lowercase","fill":"#101010"}]`)
-	if it = textItemsByID(t, kept)["t9"]; it.Fill != "#101010" || it.Scale != nil {
+	if it = textItemsByID(t, kept)["t9"]; it.Fill != "#101010" || it.Scale != nil || it.Align != "" {
 		t.Errorf("an op that sets a fill with a new style: %+v", it)
 	}
 	// The result validates, and the original spec is untouched.

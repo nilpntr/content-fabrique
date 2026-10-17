@@ -60,18 +60,54 @@ func TestInvalidTextStyleIsAnIssue(t *testing.T) {
 		"shadow": {ID: "t1", AtMs: 0, DurationMs: 1000, Text: "A", Style: "title_series", Anchor: AnchorUpperThird, Shadow: "big"},
 		"align":  {ID: "t1", AtMs: 0, DurationMs: 1000, Text: "A", Style: "title_series", Anchor: AnchorUpperThird, Align: "top"},
 	} {
+		// Through Validate the JSON Schema refuses each of them first, at the field.
 		res := validateSpec(t, addTrack(baseSpec(), textTrack(it)))
-		// The JSON Schema refuses each of them first; invalid_text_style is the same check for a spec that did not go through it.
 		wantCodes(t, res, CodeSchema)
 		if !strings.HasPrefix(res.Issues[0].Path, "/tracks/1/items/0/") {
 			t.Errorf("%s: %+v", name, res.Issues[0])
 		}
+		// A Go-built spec does not pass the schema: the semantic checker called directly reports invalid_text_style at the field's own
+		// path, and does not go on to measure a text it cannot place.
+		issues := checkSemantics(addTrack(baseSpec(), textTrack(it)), MemoryCatalog(nil))
+		var found []Issue
+		for _, is := range issues {
+			if is.Code == CodeInvalidTextStyle {
+				found = append(found, is)
+			}
+			if is.Code == CodeUnsafeText {
+				t.Errorf("%s: a text that cannot be placed was measured: %+v", name, is)
+			}
+		}
+		if len(found) != 1 || found[0].Path != "/tracks/1/items/0/"+name || !strings.Contains(found[0].Message, "t1") {
+			t.Errorf("%s: invalid_text_style issues %+v", name, found)
+		}
+	}
+	// A bad override is reported whether or not the style is known.
+	unknown := TextItem{ID: "t1", AtMs: 0, DurationMs: 1000, Text: "A", Style: "no_such_style", Anchor: AnchorUpperThird, Fill: "red"}
+	codes := map[Code]bool{}
+	for _, is := range checkSemantics(addTrack(baseSpec(), textTrack(unknown)), MemoryCatalog(nil)) {
+		codes[is.Code] = true
+	}
+	if !codes[CodeInvalidTextStyle] || !codes[CodeUnknownStyle] {
+		t.Errorf("unknown style with a bad fill: %v", codes)
 	}
 	// Good overrides validate, and a title whose scale makes it fit a smaller zone is safe.
 	good := TextItem{ID: "t1", AtMs: 0, DurationMs: 1000, Text: "BUILDING LATS 101", Style: "title_series", Anchor: AnchorUpperThird,
 		Fill: "#F2E9A0", Scale: ptr(0.85), Shadow: style.ShadowNone, Align: style.AlignLeft}
 	wantCodes(t, validateSpec(t, addTrack(baseSpec(), textTrack(good))))
-	// The size is checked against the safe zone with the override: a text too wide at 1.4 is unsafe, at 1 it is not.
-	wide := TextItem{ID: "t1", AtMs: 0, DurationMs: 1000, Text: "A", Style: "title_bold", Anchor: AnchorUpperThird}
-	wantCodes(t, validateSpec(t, addTrack(baseSpec(), textTrack(wide))))
+}
+
+// The size override is part of the safe-zone check: a title low in the zone fits at the style's size and runs out of the bottom of the zone
+// at a scale of 1.4, so the same item is safe at 1 and unsafe_text at 1.4.
+func TestScaleCountsInTheSafeZone(t *testing.T) {
+	low := func(scale *float64) TextItem {
+		return TextItem{ID: "t1", AtMs: 0, DurationMs: 1000, Text: "BUILDING LATS 101", Style: "title_series", Position: &Point{X: 0.5, Y: 0.605}, Scale: scale}
+	}
+	wantCodes(t, validateSpec(t, addTrack(baseSpec(), textTrack(low(nil)))))
+	wantCodes(t, validateSpec(t, addTrack(baseSpec(), textTrack(low(ptr(1.0))))))
+	res := validateSpec(t, addTrack(baseSpec(), textTrack(low(ptr(1.4)))))
+	wantCodes(t, res, CodeUnsafeText)
+	if !strings.Contains(res.Issues[0].Message, "bottom edge") {
+		t.Errorf("message: %s", res.Issues[0].Message)
+	}
 }

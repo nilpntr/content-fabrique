@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "c87d75d00e123390558dc2c71e6868ef87f347f70615675bd1075ae2a09d9b34",
-  "recorded_at": "2026-10-17T21:51:11Z",
+  "key": "a42fed9ca1fd2e0e836d6085114c40e5471c66cd3dcdc0aded382bca7f2ff036",
+  "recorded_at": "2026-10-17T22:17:57Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,
@@ -21,6 +21,30 @@
           "text",
           "text",
           "text"
+        ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
+        ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
         ]
       },
       {
@@ -102,67 +126,17 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_3",
-        "name": "plan_edit",
-        "input": {
-          "content_type": "workout",
-          "story": "A heavy lat day in six quick cuts, ending on the wide gym.",
-          "hook": "The lat pulldown at full stretch, with the words HEAVY LAT DAY.",
-          "arc": "Hook on the heaviest rep, the cable row, a second look at the pulldown, the wide gym and a last pulldown rep.",
-          "ending": "Back to the cable row, held a little longer.",
-          "playbook": "workout",
-          "target_length_s": 14,
-          "tempo_bpm": 124,
-          "pace": "building",
-          "shots": [
-            {
-              "role": "hook",
-              "what": "Heaviest pulldown rep, first half",
-              "asset_id": "ast_01jc000000e00800000000000a",
-              "beats": 3,
-              "effect": "punch_in"
-            },
-            {
-              "role": "build",
-              "what": "Cable row",
-              "asset_id": "ast_01jc000000e00800000000000b",
-              "beats": 4
-            },
-            {
-              "role": "peak",
-              "what": "The first pulldown rep, first half",
-              "asset_id": "ast_01jc000000e00800000000000a",
-              "beats": 3
-            },
-            {
-              "role": "detail",
-              "what": "The wide gym",
-              "asset_id": "ast_01jc000000e00800000000000c",
-              "beats": 6,
-              "effect": "flash"
-            },
-            {
-              "role": "peak",
-              "what": "Last pulldown rep, second half",
-              "asset_id": "ast_01jc000000e00800000000000a",
-              "beats": 3
-            },
-            {
-              "role": "ending",
-              "what": "Cable row, held",
-              "asset_id": "ast_01jc000000e00800000000000b",
-              "beats": 6
-            }
-          ]
-        }
+        "id": "toolu_ed_5",
+        "name": "render_preview",
+        "input": {}
       }
     ],
     "usage": {
-      "input_tokens": 430,
-      "cache_write_tokens": 700,
+      "input_tokens": 410,
+      "cache_write_tokens": 600,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 10100,
-      "output_tokens": 210
+      "cache_read_tokens": 12900,
+      "output_tokens": 40
     }
   },
   "count_tokens": 9000

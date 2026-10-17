@@ -885,7 +885,7 @@
     "update_text": {
       "type": "object",
       "title": "update_text",
-      "description": "Change fields of a text item; the fields you leave out stay as they are. Setting anchor removes the position and the other way round. Give at least one field.",
+      "description": "Change fields of a text item; the fields you leave out stay as they are, except that changing the style resets fill, scale, shadow and align to the new style's own: restate the ones you want to keep. Setting anchor removes the position and the other way round. Give at least one field.",
       "additionalProperties": false,
       "required": [
         "op",

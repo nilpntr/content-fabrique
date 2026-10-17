@@ -912,7 +912,7 @@ export type Shadow = "none" | "soft" | "strong";
  */
 export type Alignment = "left" | "center" | "right";
 /**
- * Change fields of a text item; the fields you leave out stay as they are. Setting anchor removes the position and the other way round. Give at least one field.
+ * Change fields of a text item; the fields you leave out stay as they are, except that changing the style resets fill, scale, shadow and align to the new style's own: restate the ones you want to keep. Setting anchor removes the position and the other way round. Give at least one field.
  */
 export type UpdateText = UpdateText1 & UpdateText2;
 export type UpdateText1 =
