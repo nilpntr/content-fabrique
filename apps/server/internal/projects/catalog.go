@@ -45,7 +45,7 @@ func catalogOf(rows []store.ProjectCatalogRow) Catalog {
 		if r.DurationMs == nil || *r.DurationMs <= 0 {
 			continue
 		}
-		c[r.AssetID.String()] = timeline.Asset{DurationMs: *r.DurationMs, Kind: kind, Rights: timeline.RightsNone}
+		c[r.AssetID.String()] = timeline.Asset{DurationMs: *r.DurationMs, Kind: kind, Rights: timeline.RightsNone, Title: r.Title}
 	}
 	return c
 }

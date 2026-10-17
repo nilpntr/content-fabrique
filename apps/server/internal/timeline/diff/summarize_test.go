@@ -66,7 +66,7 @@ func TestSummarize(t *testing.T) {
 		{"moved sound", `[{"op":"replace","path":"/tracks/2/items/0/at_ms","value":2005}]`, []string{"moved s1 to 2.005 s"}},
 		{"trimmed text", `[{"op":"replace","path":"/tracks/1/items/0/duration_ms","value":1500}]`, []string{"trimmed t1 by 500 ms at the end"}},
 		{"added clip", `[{"op":"add","path":"/tracks/0/items/3","value":{"id":"c7","asset_id":"ast_01j3er3kwcgrasdgd4aznmxxe0","source":{"in_ms":0,"out_ms":2000},"at_ms":10000}}]`,
-			[]string{"added clip c7 (ast_01j3er3kwcgrasdgd4aznmxxe0)"}},
+			[]string{"added clip c7 (asset nmxxe0, 0.0-2.0 s)"}},
 		{"removed clip", `[{"op":"remove","path":"/tracks/0/items/1"},{"op":"replace","path":"/tracks/0/items/1/at_ms","value":3000}]`,
 			[]string{"removed clip c2", "shifted c3 by -4000 ms"}},
 		{"moved clip", `[{"op":"move","from":"/tracks/0/items/2","path":"/tracks/0/items/0"}]`, []string{"moved c3 to position 1"}},
@@ -74,7 +74,7 @@ func TestSummarize(t *testing.T) {
 			[]string{`added text t2 "Back day" at 3.0 s`}},
 		{"removed text", `[{"op":"remove","path":"/tracks/1/items/0"}]`, []string{"removed text t1"}},
 		{"added sound", `[{"op":"add","path":"/tracks/2/items/1","value":{"id":"s2","kind":"licensed_track","asset_id":"ast_01j0h9rew727hk2pt0v5b31h44","license_id":"lic_01jg1bfdc146rw2b0vngmx6p6f","at_ms":0,"source_offset_ms":0,"export":"licensed"}}]`,
-			[]string{"added sound s2 (licensed_track ast_01j0h9rew727hk2pt0v5b31h44)"}},
+			[]string{"added sound s2 (licensed_track asset b31h44)"}},
 		{"removed sound", `[{"op":"remove","path":"/tracks/2/items/0"}]`, []string{"removed sound s1"}},
 		{"new text track", `[{"op":"add","path":"/tracks/3","value":{"id":"text2","type":"text","items":[{"id":"t5","at_ms":0,"duration_ms":500,"text":"Hi","style":"title_bold","anchor":"center"}]}}]`,
 			[]string{"added text track text2", `added text t5 "Hi" at 0.0 s`}},
@@ -93,7 +93,7 @@ func TestSummarize(t *testing.T) {
 		{"clip audio", `[{"op":"add","path":"/tracks/0/items/2/audio","value":{"use_source":true,"gain_db":-3}}]`,
 			[]string{"set the source audio of c3 on at -3 dB"}},
 		{"replaced source", `[{"op":"replace","path":"/tracks/0/items/1/asset_id","value":"ast_01jfbemsc6way7dnfebdf8tf3g"},{"op":"replace","path":"/tracks/0/items/1/source/out_ms","value":4000}]`,
-			[]string{"replaced the asset of c2 with ast_01jfbemsc6way7dnfebdf8tf3g", "trimmed c2 by 1000 ms at the end"}},
+			[]string{"replaced the asset of c2 with asset f8tf3g", "trimmed c2 by 1000 ms at the end"}},
 		{"text fields", `[
 			{"op":"replace","path":"/tracks/1/items/0/text","value":"Bye"},
 			{"op":"add","path":"/tracks/1/items/0/animation","value":"fade"},
@@ -161,5 +161,39 @@ func TestSecs(t *testing.T) {
 		if got := secs(ms); got != want {
 			t.Errorf("secs(%d) = %q, want %q", ms, got, want)
 		}
+	}
+}
+
+func TestSummarizeNamesAssetsByTitle(t *testing.T) {
+	spec, err := timeline.Parse([]byte(summaryBase))
+	if err != nil {
+		t.Fatal(err)
+	}
+	titles := map[string]string{
+		"ast_01j3er3kwcgrasdgd4aznmxxe0": "posing",
+		"ast_01jfbemsc6way7dnfebdf8tf3g": "  a very\nlong title that goes on and on and on past forty characters ",
+		"ast_01j0h9rew727hk2pt0v5b31h44": "",
+	}
+	lookup := func(id string) string { return titles[id] }
+	cases := []struct{ name, patch, want string }{
+		{"added clip", `[{"op":"add","path":"/tracks/0/items/3","value":{"id":"c7","asset_id":"ast_01j3er3kwcgrasdgd4aznmxxe0","source":{"in_ms":5500,"out_ms":8200},"at_ms":10000}}]`,
+			"added clip c7 (posing, 5.5-8.2 s)"},
+		{"long title is one short line", `[{"op":"add","path":"/tracks/0/items/3","value":{"id":"c7","asset_id":"ast_01jfbemsc6way7dnfebdf8tf3g","source":{"in_ms":0,"out_ms":1250},"at_ms":10000}}]`,
+			"added clip c7 (a very long title that goes on and on..., 0.0-1.25 s)"},
+		{"no title falls back to the id suffix", `[{"op":"add","path":"/tracks/0/items/3","value":{"id":"c7","asset_id":"ast_01j0h9rew727hk2pt0v5b31h44","source":{"in_ms":0,"out_ms":2000},"at_ms":10000}}]`,
+			"added clip c7 (asset b31h44, 0.0-2.0 s)"},
+		{"replaced asset", `[{"op":"replace","path":"/tracks/0/items/1/asset_id","value":"ast_01j3er3kwcgrasdgd4aznmxxe0"}]`,
+			"replaced the asset of c2 with posing"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			lines, err := SummarizeWith(*spec, mustPatch(t, c.patch), lookup)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(lines) != 1 || lines[0] != c.want {
+				t.Errorf("got %q, want %q", lines, c.want)
+			}
+		})
 	}
 }

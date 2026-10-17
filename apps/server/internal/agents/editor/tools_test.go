@@ -689,6 +689,13 @@ func TestFinish(t *testing.T) {
 	if res, _ := e.call(e.nextCall(rc), ToolFinish, `{"summary":"   "}`); !res.IsError || res.Final {
 		t.Error("an empty summary finished the run")
 	}
+	// Not before the version has been looked at.
+	if res, _ := e.call(e.nextCall(rc), ToolFinish, `{"summary":"I cut a 16 second video that opens on your best rep."}`); !res.IsError || res.Final ||
+		!strings.Contains(textOf(res), "render_preview") || !strings.Contains(textOf(res), "version 1") {
+		t.Fatalf("finish before a preview: %+v", res)
+	}
+	e.sheet(prj)
+	e.ok(e.nextCall(rc), ToolRenderPreview, `{}`)
 	res = e.ok(e.nextCall(rc), ToolFinish, `{"summary":"I cut a 16 second video that opens on your best rep."}`)
 	if !res.Final || textOf(res) != "I cut a 16 second video that opens on your best rep." {
 		t.Fatalf("finish: %+v", res)
@@ -730,6 +737,8 @@ func TestFinishNeedsAnEditOrAnExplicitNoEdit(t *testing.T) {
 	// An edit by this run wins over the flag: the output names the version the run made.
 	rc2 := e.runCtx(e.wsA, prj, "")
 	e.ok(rc2, ToolEditTimeline, e.opsArgs(prj, `{"op":"set_look","preset":"bw"}`))
+	e.sheet(prj)
+	e.ok(e.nextCall(rc2), ToolRenderPreview, `{}`)
 	res = e.ok(e.nextCall(rc2), ToolFinish, `{"summary":"Added a look.","no_edit_needed":true}`)
 	if json.Unmarshal(res.Output, &out) != nil || out.Version == nil || *out.Version != 2 {
 		t.Fatalf("output: %s", res.Output)
@@ -737,6 +746,153 @@ func TestFinishNeedsAnEditOrAnExplicitNoEdit(t *testing.T) {
 	// The versions of another run do not count.
 	if res, _ := e.call(e.nextCall(e.runCtx(e.wsA, prj, "")), ToolFinish, `{"summary":"Done."}`); !res.IsError {
 		t.Error("another run's edit let this run finish")
+	}
+}
+
+// ---- the preview gate -------------------------------------------------------------------------------------------------
+
+// With a renderer wired, finish needs a successful preview of the newest version the run made; an edit after the preview needs a new one.
+func TestFinishNeedsAPreviewOfTheLatestVersion(t *testing.T) {
+	e := newEnv(t)
+	a := e.asset(e.wsA, clip{durMs: 20000})
+	prj := e.project(e.wsA, "9:16", "", a)
+	e.sheet(prj)
+	rc := e.runCtx(e.wsA, prj, "")
+	e.ok(rc, ToolEditTimeline, e.opsArgs(prj, addClipOp(a, 0, 8000), addClipOp(a, 9000, 17000)))
+	e.ok(e.nextCall(rc), ToolRenderPreview, `{}`)
+	// A second edit makes version 2, which has not been looked at.
+	e.ok(e.nextCall(rc), ToolEditTimeline, `{"base_version":1,"ops":[{"op":"set_look","preset":"bw"}]}`)
+	res, _ := e.call(e.nextCall(rc), ToolFinish, `{"summary":"Done."}`)
+	if !res.IsError || res.Final || !strings.Contains(textOf(res), "version 2") {
+		t.Fatalf("finish after an edit that was not previewed: %+v", res)
+	}
+	e.ok(e.nextCall(rc), ToolRenderPreview, `{}`)
+	if res := e.ok(e.nextCall(rc), ToolFinish, `{"summary":"Done."}`); !res.Final {
+		t.Fatalf("finish after the preview: %+v", res)
+	}
+	// Another run's preview does not count for this one.
+	other := e.runCtx(e.wsA, prj, "")
+	e.ok(other, ToolEditTimeline, `{"base_version":2,"ops":[{"op":"set_look","preset":"warm"}]}`)
+	if res, _ := e.call(e.nextCall(other), ToolFinish, `{"summary":"Done."}`); !res.IsError {
+		t.Error("a run finished on the strength of another run's preview")
+	}
+}
+
+// Without a renderer there is nothing to look at: finish works as before. A renderer that says it is unavailable, or that keeps
+// failing, lets the model finish too.
+func TestFinishWithoutWorkingPreviews(t *testing.T) {
+	e := newEnv(t)
+	a := e.asset(e.wsA, clip{durMs: 20000})
+	prj := e.project(e.wsA, "9:16", "", a)
+
+	// Not wired.
+	e.deps.Preview = nil
+	e.rebuild()
+	rc := e.runCtx(e.wsA, prj, "")
+	e.ok(rc, ToolEditTimeline, e.opsArgs(prj, addClipOp(a, 0, 8000), addClipOp(a, 9000, 17000)))
+	if res := e.ok(e.nextCall(rc), ToolFinish, `{"summary":"Done."}`); !res.Final {
+		t.Fatalf("no renderer: %+v", res)
+	}
+	e.deps.Preview = UnavailablePreviews{}
+	e.rebuild()
+	rc = e.runCtx(e.wsA, prj, "")
+	e.ok(rc, ToolEditTimeline, `{"base_version":1,"ops":[{"op":"set_look","preset":"bw"}]}`)
+	if res := e.ok(e.nextCall(rc), ToolFinish, `{"summary":"Done."}`); !res.Final {
+		t.Fatalf("unavailable renderer: %+v", res)
+	}
+
+	// Wired, but it says it cannot render: the model is told so, and may finish.
+	e.deps.Preview = e.preview
+	e.rebuild()
+	e.preview.err = ErrPreviewUnavailable
+	rc = e.runCtx(e.wsA, prj, "")
+	e.ok(rc, ToolEditTimeline, `{"base_version":2,"ops":[{"op":"set_look","preset":"warm"}]}`)
+	e.toolErr(e.nextCall(rc), ToolRenderPreview, `{}`)
+	if res := e.ok(e.nextCall(rc), ToolFinish, `{"summary":"Done."}`); !res.Final {
+		t.Fatalf("renderer that is unavailable: %+v", res)
+	}
+
+	// Wired and failing: after two failures the gate opens, not before.
+	e.preview.err = errors.New("the render worker is down")
+	rc = e.runCtx(e.wsA, prj, "")
+	e.ok(rc, ToolEditTimeline, `{"base_version":3,"ops":[{"op":"set_look","preset":"cool"}]}`)
+	if _, err := e.call(e.nextCall(rc), ToolRenderPreview, `{}`); err == nil {
+		t.Fatal("a renderer failure was not an error")
+	}
+	if res, _ := e.call(e.nextCall(rc), ToolFinish, `{"summary":"Done."}`); !res.IsError {
+		t.Error("finished after one failed preview")
+	}
+	_, _ = e.call(e.nextCall(rc), ToolRenderPreview, `{}`)
+	if res := e.ok(e.nextCall(rc), ToolFinish, `{"summary":"Done."}`); !res.Final {
+		t.Fatalf("after two failed previews: %+v", res)
+	}
+}
+
+// A turn that ends in text: an implicit finish when the newest version was previewed, one nudge when it was not, and the old
+// behaviour (the text ends the run) after the nudge or when there are no previews.
+func TestEndTurnHook(t *testing.T) {
+	e := newEnv(t)
+	a := e.asset(e.wsA, clip{durMs: 20000})
+	prj := e.project(e.wsA, "9:16", "", a)
+	e.sheet(prj)
+	ag, err := NewAgent(e.deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The agent's tools and its hook share one record: use the agent's tools.
+	tools := map[string]runtime.Tool{}
+	for _, tl := range ag.Tools {
+		tools[tl.Name()] = tl
+	}
+	run := func(rc runtime.RunContext, tool, args string) {
+		t.Helper()
+		if _, err := tools[tool].Run(context.Background(), rc, json.RawMessage(args)); err != nil {
+			t.Fatalf("%s: %v", tool, err)
+		}
+	}
+	ctx := context.Background()
+
+	// No edit by this run: one nudge about finish, then the text ends the run.
+	rc := e.runCtx(e.wsA, prj, "")
+	d, err := ag.EndTurn(ctx, rc, "I looked and it is fine.", 0)
+	if err != nil || !strings.Contains(d.Nudge, "no_edit_needed") || d.Output != nil {
+		t.Fatalf("no edit, first time: %+v %v", d, err)
+	}
+	if d, err = ag.EndTurn(ctx, rc, "I looked and it is fine.", 1); err != nil || d.Nudge != "" || d.Output != nil {
+		t.Fatalf("no edit, second time: %+v %v", d, err)
+	}
+
+	// An edit that was not previewed: nudged to preview, once.
+	run(e.nextCall(rc), ToolEditTimeline, e.opsArgs(prj, addClipOp(a, 0, 8000), addClipOp(a, 9000, 17000)))
+	if d, err = ag.EndTurn(ctx, rc, "Made a video.", 0); err != nil || !strings.Contains(d.Nudge, "render_preview") || !strings.Contains(d.Nudge, "version 1") {
+		t.Fatalf("not previewed: %+v %v", d, err)
+	}
+	if d, err = ag.EndTurn(ctx, rc, "Made a video.", 1); err != nil || d.Nudge != "" || d.Output != nil {
+		t.Fatalf("not previewed, after the nudge: %+v %v", d, err)
+	}
+
+	// Previewed: an implicit finish with the finish tool's output shape.
+	run(e.nextCall(rc), ToolRenderPreview, `{}`)
+	d, err = ag.EndTurn(ctx, rc, "  I made a 16 second video.  ", 0)
+	var out struct {
+		Summary string `json:"summary"`
+		Version *int   `json:"timeline_version"`
+	}
+	if err != nil || d.Nudge != "" || json.Unmarshal(d.Output, &out) != nil || out.Summary != "I made a 16 second video." || out.Version == nil || *out.Version != 1 {
+		t.Fatalf("previewed: %+v %v %s", d, err, d.Output)
+	}
+	if d, _ = ag.EndTurn(ctx, rc, "", 0); !strings.Contains(string(d.Output), "finished the edit") {
+		t.Errorf("empty text: %s", d.Output)
+	}
+
+	// No renderer wired: the hook leaves the default alone.
+	e.deps.Preview = nil
+	ag2, err := NewAgent(e.deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, err = ag2.EndTurn(ctx, rc, "Done.", 0); err != nil || d.Nudge != "" || d.Output != nil {
+		t.Fatalf("no renderer: %+v %v", d, err)
 	}
 }
 

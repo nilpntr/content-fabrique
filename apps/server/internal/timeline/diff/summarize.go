@@ -13,7 +13,7 @@ import (
 //
 //	trimmed c3 by 400 ms at the end
 //	moved t1 to 2.0 s
-//	added clip c7 (ast_01j3er3kwcgrasdgd4aznmxxe0)
+//	added clip c7 (posing, 5.5-8.2 s)
 //
 // parent is the spec the patch applies to. A JSON Patch carries neither the ids of the items it touches (its paths
 // are array indexes) nor the old values, so Summarize replays the patch on a copy of the parent and reads both from it
@@ -21,6 +21,16 @@ import (
 // c5 by -400 ms"), the markers are counted, and a change the summary has no sentence for is written as the operation
 // and its path. An error means the patch does not apply to parent.
 func Summarize(parent timeline.Spec, patch Patch) ([]string, error) {
+	return SummarizeWith(parent, patch, nil)
+}
+
+// Titles names an asset for a summary: it returns the asset's title, or "" when it has none or is not known. A nil
+// Titles knows no asset.
+type Titles func(assetID string) string
+
+// SummarizeWith is Summarize with a title lookup: a clip is named by its asset's title ("posing") instead of the asset id.
+// An asset without a title is named by the end of its id ("asset 899gs"), never the whole id.
+func SummarizeWith(parent timeline.Spec, patch Patch, titles Titles) ([]string, error) {
 	doc, err := json.Marshal(parent)
 	if err != nil {
 		return nil, fmt.Errorf("diff: encode the spec: %w", err)
@@ -35,7 +45,7 @@ func Summarize(parent timeline.Spec, patch Patch) ([]string, error) {
 			return nil, fmt.Errorf("diff: operation %d (%s %q): %w", i, op.Op, op.Path, err)
 		}
 	}
-	s := &summarizer{work: root, after: after, done: map[string]bool{}, moved: map[string]bool{}}
+	s := &summarizer{titles: titles, work: root, after: after, done: map[string]bool{}, moved: map[string]bool{}}
 	for i, op := range patch {
 		if err := s.describe(op); err != nil {
 			// The patch applies (it did above), so this is only a sentence that could not be made.
@@ -54,9 +64,10 @@ type shift struct {
 }
 
 type summarizer struct {
-	work  any // the document before the operation being described
-	after any // the document after the whole patch
-	lines []string
+	titles Titles
+	work   any // the document before the operation being described
+	after  any // the document after the whole patch
+	lines  []string
 	// done holds the (item, field) pairs that are described once from the final state, however many operations touched
 	// them.
 	done   map[string]bool
@@ -348,6 +359,33 @@ func (s *summarizer) move(op Operation, path []string) error {
 	return nil
 }
 
+// assetName is how a summary names an asset: its title when the lookup knows one (one line, at most 40 characters), else the
+// last characters of its id.
+func (s *summarizer) assetName(id string) string {
+	if s.titles != nil {
+		if t := strings.Join(strings.Fields(s.titles(id)), " "); t != "" {
+			if r := []rune(t); len(r) > 40 {
+				t = string(r[:37]) + "..."
+			}
+			return t
+		}
+	}
+	const keep = 6
+	if r := []rune(id); len(r) > keep {
+		return "asset " + string(r[len(r)-keep:])
+	}
+	return id
+}
+
+// sourceSuffix is ", 5.5-8.2 s" for the part of the asset a clip plays, or "" when the clip has no source range.
+func sourceSuffix(v any) string {
+	m, ok := v.(map[string]any)
+	if !ok || !isNumber(m["in_ms"]) || !isNumber(m["out_ms"]) {
+		return ""
+	}
+	return fmt.Sprintf(", %s-%s", secsBare(intOf(m["in_ms"])), secs(intOf(m["out_ms"])))
+}
+
 func itemNoun(typ string) string {
 	switch typ {
 	case "video":
@@ -363,13 +401,13 @@ func (s *summarizer) addedItem(typ string, v any) {
 	id := str(m["id"])
 	switch typ {
 	case "video":
-		s.say("added clip %s (%s)", id, str(m["asset_id"]))
+		s.say("added clip %s (%s%s)", id, s.assetName(str(m["asset_id"])), sourceSuffix(m["source"]))
 	case "text":
 		s.say("added text %s %s at %s", id, quoted(str(m["text"])), secs(intOf(m["at_ms"])))
 	case "audio":
 		ref := str(m["trend_id"])
 		if ref == "" {
-			ref = str(m["asset_id"])
+			ref = s.assetName(str(m["asset_id"]))
 		}
 		s.say("added sound %s (%s %s)", id, str(m["kind"]), ref)
 	default:
@@ -430,7 +468,7 @@ func (s *summarizer) itemField(typ, id string, rest []string, op Operation, item
 	case field == "duration_ms" && hasNums:
 		s.edge(id, newN-oldN, false)
 	case field == "asset_id" && typ == "video":
-		s.say("replaced the asset of %s with %s", id, str(newV))
+		s.say("replaced the asset of %s with %s", id, s.assetName(str(newV)))
 	case field == "speed":
 		if op.Op == OpRemove {
 			s.say("reset the speed of %s to 1x", id)
@@ -719,3 +757,6 @@ func secs(ms int64) string {
 	}
 	return fmt.Sprintf("%s%d.%03d s", sign, whole, frac)
 }
+
+// secsBare is secs without the unit, for the start of a range.
+func secsBare(ms int64) string { return strings.TrimSuffix(secs(ms), " s") }

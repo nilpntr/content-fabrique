@@ -126,6 +126,7 @@ const (
 	stateCancelled    = "cancelled"
 	stateCostFixed    = "cost_reconciled"
 	stateModelCall    = "model_call"
+	stateNudge        = "nudge"
 )
 
 // statusPayload is a status event.
@@ -147,6 +148,7 @@ type statusPayload struct {
 	// cost_reconciled: what a takeover charged that the run's totals did not have (a call that was in flight, or that the
 	// ledger holds and the events do not).
 	AddedCostMicros int64 `json:"added_cost_micros,omitempty"`
+	// nudge: the message the agent sent after a turn that ended without a tool call (Blocks holds it).
 	// model_call: written before a request is sent, with the worst-case cost reserved for it.
 	ReservedMicros int64 `json:"reserved_micros,omitempty"`
 }
@@ -201,6 +203,7 @@ type turn struct {
 	assistant  llm.Message
 	stopReason string
 	uses       []llm.Block
+	nudge      []llm.Block     // the user message that followed a turn with no tool call, if the agent sent one
 	called     map[string]bool // tool_call events seen, by tool_use id
 	results    map[string]toolResultPayload
 }
@@ -236,6 +239,8 @@ type convo struct {
 	turns      []*turn
 	// started says the run has a status event of state running already: this start is a resume.
 	started bool
+	// nudges counts the nudge events: how often the agent asked the model to go on after a turn that ended without a tool call.
+	nudges int
 	// inflight is the worst-case cost reserved for a model call that was sent and has no answer on record: the worker died
 	// (or was stopped) during it. A takeover charges it to the run, because the call may have been billed.
 	inflight int64
@@ -266,6 +271,11 @@ func (c *convo) apply(e store.AgentEvent) error {
 			c.context, c.hasContext = fromWire(p.Blocks), true
 		case stateRunning:
 			c.started = true
+		case stateNudge:
+			if cur := c.last(); cur != nil {
+				cur.nudge = fromWire(p.Blocks)
+				c.nudges++
+			}
 		case stateModelCall:
 			c.inflight = p.ReservedMicros
 		case stateCostFixed:
@@ -354,6 +364,10 @@ func (c *convo) messages(opening []llm.Block) []llm.Message {
 	msgs := []llm.Message{{Role: llm.RoleUser, Content: first}}
 	for _, t := range c.turns {
 		msgs = append(msgs, t.assistant)
+		if len(t.uses) == 0 && len(t.nudge) > 0 {
+			msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: t.nudge})
+			continue
+		}
 		if len(t.uses) == 0 || !t.complete() {
 			continue
 		}

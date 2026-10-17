@@ -613,12 +613,45 @@ func (l *loop) modelStep(ctx context.Context) (Outcome, bool, error) {
 	case reason == "pause_turn", reason == "tool_use" && len(resp.ToolUses()) > 0, reason == "end_turn" && len(resp.ToolUses()) > 0:
 		return "", false, nil
 	case reason == "end_turn" || reason == "stop_sequence":
-		out, ferr := l.succeed(ctx, mustJSON(map[string]any{"summary": resp.Text(), "stop_reason": reason}))
+		output := mustJSON(map[string]any{"summary": resp.Text(), "stop_reason": reason})
+		if reason == "end_turn" && l.agent.EndTurn != nil {
+			d, herr := l.agent.EndTurn(ctx, l.toolContext("", false), resp.Text(), l.cv.nudges)
+			switch {
+			case herr != nil && ctx.Err() != nil:
+				return "", true, context.Cause(ctx)
+			case herr != nil:
+				return "", true, fmt.Errorf("end of turn: %w", herr) // retried; the last attempt fails the run
+			case d.Nudge != "":
+				return l.nudge(ctx, d.Nudge)
+			case len(d.Output) > 0:
+				output = d.Output
+			}
+		}
+		out, ferr := l.succeed(ctx, output)
 		return out, true, ferr
 	default:
 		out, ferr := l.fail(ctx, FailStopReason, fmt.Sprintf("the model stopped with %q, which the runtime does not handle", reason), nil)
 		return out, true, ferr
 	}
+}
+
+// nudge stores the agent's message after a turn that ended without a tool call; the next model call sends it. done is false:
+// the run goes on.
+func (l *loop) nudge(ctx context.Context, text string) (Outcome, bool, error) {
+	wire, err := toWire([]llm.Block{llm.TextBlock(text)})
+	if err != nil {
+		out, ferr := l.fail(ctx, FailBadInput, "the agent's nudge is invalid: "+err.Error(), nil)
+		return out, true, ferr
+	}
+	e, err := l.append(ctx, store.EventStatus, mustJSON(statusPayload{State: stateNudge, Blocks: wire}), store.EventDelta{})
+	if err != nil {
+		return "", true, err
+	}
+	if err := l.cv.apply(e); err != nil {
+		out, ferr := l.fail(ctx, FailCorruptLog, err.Error(), nil)
+		return out, true, ferr
+	}
+	return "", false, nil
 }
 
 func cmpOr(a, b string) string {

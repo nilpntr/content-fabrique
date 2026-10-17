@@ -1,6 +1,6 @@
 # Editor system prompt: changelog
 
-The editor agent's system prompt is `editor.v1.2.md`, embedded in the Go binary. The text the model receives is the runtime's
+The editor agent's system prompt is `editor.v1.3.md`, embedded in the Go binary. The text the model receives is the runtime's
 preamble (`runtime.SystemPreamble`, the untrusted-data rule) followed by this file. The prompt version (`PromptVersion` in
 `prompt.go`) is stored in every run's input, so a run can always be tied to the text it was given.
 
@@ -14,6 +14,18 @@ Rules for changing it:
 - The cache hit rate of a run is visible: `cfctl agent show <run>` prints the cache write and read tokens of every model call and
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
+
+## editor.v1.3 (2026-10-17)
+
+The founder's first live run (Haiku, dev-cheap) never called render_preview, so its summary said it had not checked a preview, and
+it ended its turn in plain text instead of calling finish. The file is now `editor.v1.3.md`.
+
+- Step 5 makes the preview mandatory when previews exist: finish is refused until the newest version the run made has a
+  successful render_preview, and an edit after a preview needs another. If render_preview says previews are not available (or
+  fails twice), the model checks with get_timeline and finishes.
+- Step 6 and "Finishing" say that a run ends with a finish call; a plain-text reply without it is nudged once (a status event
+  `nudge`, sent to the model as a user message), and counts as the finish only when the newest version was previewed.
+- Code, not prompt: `Deps.previewGate` (finish) and `Deps.endTurn` (the runtime's `Agent.EndTurn` hook) in `gate.go`.
 
 ## editor.v1.2 (2026-10-17)
 

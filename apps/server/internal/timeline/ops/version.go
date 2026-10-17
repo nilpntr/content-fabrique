@@ -116,7 +116,13 @@ func NewVersion(parent Version, batch []Op, author Author, catalog timeline.Asse
 		})
 		return nil, res
 	}
-	summary, err := diff.Summarize(parent.Spec, patch)
+	summary, err := diff.SummarizeWith(parent.Spec, patch, func(id string) string {
+		if catalog == nil {
+			return ""
+		}
+		a, _ := catalog.Lookup(id)
+		return a.Title
+	})
 	if err != nil {
 		res.Issues = append(res.Issues, opIssue(NoOp, "", CodeInvalidOp, "", err.Error()))
 		return nil, res

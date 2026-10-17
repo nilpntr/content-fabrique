@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "457a670caedb26831fc16b4975ae76764d16094868a0275e2de623d84842c4a6",
-  "recorded_at": "2026-10-17T12:35:15Z",
+  "key": "3a4ae2d0f70bf1d414224e4c751894d6a673b242662c5790952619333f5bbae4",
+  "recorded_at": "2026-10-17T13:40:51Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 16000,
@@ -121,18 +121,16 @@
       {
         "type": "tool_use",
         "id": "toolu_ed_5",
-        "name": "finish",
-        "input": {
-          "summary": "I cut a 17 second video from your three clips. It opens on the heaviest lat pulldown rep with the words HEAVY LAT DAY, then the cable row, then the wide gym shot. Check the wide shot: I framed it with a blurred fill so nobody is cropped out."
-        }
+        "name": "render_preview",
+        "input": {}
       }
     ],
     "usage": {
-      "input_tokens": 400,
-      "cache_write_tokens": 650,
+      "input_tokens": 410,
+      "cache_write_tokens": 600,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 12900,
-      "output_tokens": 92
+      "cache_read_tokens": 13500,
+      "output_tokens": 40
     }
   },
   "count_tokens": 9000

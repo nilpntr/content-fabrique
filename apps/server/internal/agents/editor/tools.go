@@ -58,6 +58,9 @@ type Deps struct {
 	Frames   FrameSource
 	// Preview renders previews; nil means UnavailablePreviews.
 	Preview PreviewRenderer
+
+	// previews records which versions a run has previewed (the gate on finish, gate.go). withState sets it.
+	previews *previewLog
 }
 
 func (d Deps) check() error {
@@ -93,6 +96,7 @@ func Tools(d Deps) ([]runtime.Tool, error) {
 	if err := d.check(); err != nil {
 		return nil, err
 	}
+	d = d.withState()
 	type entry struct {
 		name    string
 		mutates bool
@@ -477,15 +481,21 @@ func (d Deps) renderPreview(ctx context.Context, rc runtime.RunContext, _ noArgs
 	sheet, dur, err := d.preview().RenderAndWait(waitCtx, ws, pid, v, rc.RunID)
 	switch {
 	case errors.Is(err, ErrPreviewUnavailable):
+		d.previews.failed(rc.RunID, maxPreviewFailures) // nothing to wait for: finish no longer needs a preview
 		return runtime.Result{}, runtime.UserErrorf("previews are not available yet, so there is no contact sheet to look at. Check your work with get_timeline instead (its issues and its length), and carry on")
 	case err != nil && ctx.Err() == nil && waitCtx.Err() != nil:
+		d.previews.failed(rc.RunID, 1)
 		return runtime.Result{}, runtime.UserErrorf("the preview did not finish within %d seconds. Check your work with get_timeline instead, or try render_preview again later", int(previewWait.Seconds()))
 	case err != nil:
+		if ctx.Err() == nil {
+			d.previews.failed(rc.RunID, 1)
+		}
 		return runtime.Result{}, fmt.Errorf("render_preview: %w", err)
 	}
 	if _, err := CheckImageRef(ws, string(sheet)); err != nil {
 		return runtime.Result{}, fmt.Errorf("render_preview: contact sheet reference: %w", err)
 	}
+	d.previews.previewed(rc.RunID, v)
 	vd, perr := d.Projects.Version(ctx, actor(ws), pid, v)
 	if perr != nil {
 		return runtime.Result{}, projectErr(perr)
@@ -531,6 +541,9 @@ func (d Deps) finish(ctx context.Context, rc runtime.RunContext, in finishArgs) 
 	switch {
 	case err == nil:
 		version = made.Version
+		if msg := d.previewGate(rc.RunID, int(made.Version)); msg != "" {
+			return runtime.Errorf("%s", msg), nil
+		}
 	case !errors.Is(err, store.ErrNotFound):
 		return runtime.Result{}, fmt.Errorf("look for the run's versions: %w", err)
 	case det.Project.CurrentTimelineVersion == nil:

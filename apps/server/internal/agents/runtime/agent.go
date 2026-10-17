@@ -69,6 +69,17 @@ func (b Budgets) validate() error {
 	return nil
 }
 
+// EndTurn is an agent's answer to a turn that ended with text and no tool call.
+type EndTurn struct {
+	// Nudge, when not empty, is sent to the model as a user message and the run goes on. It is stored in the run's events, so a
+	// resumed run sends the same one. The agent's hook is told how many nudges the run has had (nudges), and must stop nudging
+	// at some point: the runtime does not limit them.
+	Nudge string
+	// Output, when set (and Nudge is empty), is the output the run succeeds with. Empty keeps the default: {"summary": the text,
+	// "stop_reason": ...}.
+	Output json.RawMessage
+}
+
 // Agent is a definition: a system prompt, tools and defaults. Runs of it are agent_runs rows.
 type Agent struct {
 	// Name identifies the agent in agent_runs.agent: lowercase letters, digits and underscores.
@@ -86,6 +97,10 @@ type Agent struct {
 	// that is the same for the whole run. It runs once, when the run starts, and its blocks are stored in the run's events so
 	// a resumed run sends exactly the same prefix. Text from users goes through Untrusted. Nil means no context.
 	Context func(ctx context.Context, rc RunContext) ([]llm.Block, error)
+	// EndTurn, when set, is asked when the model ends its turn with text and no tool call. It may answer with a message to send the
+	// model instead of ending the run (a nudge), or with the output the run ends with. Nil ends the run with the text as its
+	// summary. See EndTurn.
+	EndTurn func(ctx context.Context, rc RunContext, text string, nudges int) (EndTurn, error)
 	// Thinking, when set, is sent with every request. Nil leaves the model's default. Effort always comes from the routing
 	// entry.
 	Thinking *llm.Thinking
