@@ -1,4 +1,4 @@
-# Playbook: tutorial and how-to (tutorial.v1)
+# Playbook: tutorial and how-to (tutorial.v2)
 
 You chose this playbook because the footage teaches something: a recipe, a repair, a technique, a setup. Target 25 to 45 seconds.
 
@@ -12,6 +12,6 @@ You chose this playbook because the footage teaches something: a recipe, a repai
 
 **Energy.** Plain: a crossfade or a flash between steps, a punch_in on a detail the viewer must see. No whips.
 
-**Sound.** Silent clips unless the person explains out loud (set_clip_audio use_source true on those).
+**Sound.** A clip where the person explains out loud is full (set_clip_audio mode full); the others are a low bed (mode bed), or muted when the room is noisy.
 
 **Ending.** The finished result held for a moment, with a short line ("DONE") or a call to action. It can loop back to the first frame.

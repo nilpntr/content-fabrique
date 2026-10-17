@@ -45,7 +45,7 @@ func TestBedModeCompilesToASoundReadyMix(t *testing.T) {
 			t.Fatalf("%s: sound ready %v bed %+v", prof.Name, plan.SoundReady, plan.Bed)
 		}
 		ln := plan.Loudnorm
-		if ln == nil || !ln.TwoPass || ln.MaxGainDB != SoundReadyMaxBoostDB || !strings.Contains(ln.Filter, "I=-17:TP=-2") || len(ln.Pass1Args) == 0 {
+		if ln == nil || !ln.TwoPass || ln.MaxGainDB != SoundReadyMaxBoostDB || !strings.Contains(ln.Filter, "I=-17:TP=-2.5") || len(ln.Pass1Args) == 0 {
 			t.Errorf("%s: loudnorm %+v", prof.Name, ln)
 		}
 		g := plan.FilterComplex
@@ -53,6 +53,10 @@ func TestBedModeCompilesToASoundReadyMix(t *testing.T) {
 			if !strings.Contains(g, want) {
 				t.Errorf("%s: the graph lacks %q", prof.Name, want)
 			}
+		}
+		// The export is limited under the peak ceiling after the normalisation, so the stem (the same core) is what the export is.
+		if !strings.Contains(g, "aformat=sample_fmts=fltp:channel_layouts=stereo,alimiter=") {
+			t.Errorf("%s: the sound-ready core has no limiter after the normalisation", prof.Name)
 		}
 		if strings.Contains(g, "loudnorm=I=-14") {
 			t.Errorf("%s: the bed was normalised to the programme's -14", prof.Name)
@@ -113,6 +117,15 @@ func TestMeasuredFilterCapsTheBoost(t *testing.T) {
 	if err != nil || !strings.HasPrefix(f, "loudnorm=I=-30:") {
 		t.Errorf("a cut: %q %v", f, err)
 	}
+	// A nearly silent mix is not normalised at all when it is capped (the single-pass filter would boost its hiss), and keeps the
+	// single-pass filter when it is not.
+	silent := strings.Replace(loudnormJSON, `"-23.45"`, `"-inf"`, 1)
+	if f, err = measuredFilter("loudnorm=I=-17:TP=-1.5:LRA=11", silent, 8); err != nil || f != "anull" {
+		t.Errorf("a silent capped mix: %q %v", f, err)
+	}
+	if f, err = measuredFilter("loudnorm=I=-14:TP=-1:LRA=11", silent, 0); err != nil || f != "" {
+		t.Errorf("a silent programme: %q %v", f, err)
+	}
 }
 
 func TestBedClipsAreEvenedOutAndTheMixIsSoundReady(t *testing.T) {
@@ -162,12 +175,7 @@ func TestPreviewStemHasNoBeatGuide(t *testing.T) {
 	ffmpeg, _ := ffmpegTools(t)
 	_, _ = ensureMedia(t)
 	src := genLevelSource(t, ffmpeg, "bed", -34)
-	resolver := oneFileResolver(src)
-	withAudio := func(id string) ResolverFunc {
-		return func(string, Variant) (ResolvedAsset, error) { return ResolvedAsset{Location: src, HasAudio: true}, nil }
-	}
-	_ = withAudio
-	resolver = ResolverFunc(func(string, Variant) (ResolvedAsset, error) { return ResolvedAsset{Location: src, HasAudio: true}, nil })
+	resolver := ResolverFunc(func(string, Variant) (ResolvedAsset, error) { return ResolvedAsset{Location: src, HasAudio: true}, nil })
 	spec := specOf(30, []timeline.VideoItem{clipAt("c1", assetA, 0, 3000, 0, withMode(timeline.AudioModeBed))})
 	spec.Markers = []timeline.Marker{{AtMs: 1000, Kind: timeline.MarkerBeat}, {AtMs: 2000, Kind: timeline.MarkerDownbeat}}
 	plan, err := Compile(spec, Preview, resolver)
@@ -182,6 +190,13 @@ func TestPreviewStemHasNoBeatGuide(t *testing.T) {
 	if err := Execute(context.Background(), plan, testRunner(t), ExecuteOptions{Output: mp4, StemOutput: stem}); err != nil {
 		t.Fatal(err)
 	}
+	// Without a stem asked for, the pad is still read (by a discarding output) and the render succeeds; the printed command has it too.
+	if err := Execute(context.Background(), plan, testRunner(t), ExecuteOptions{Output: filepath.Join(dir, "plain.mp4")}); err != nil {
+		t.Fatalf("a render without a stem output: %v", err)
+	}
+	if a := plan.OutputArgs("x.mp4"); strings.Join(a[len(a)-8:], " ") != "-map [astem] -vn -c:a pcm_s16le -f null -" {
+		t.Errorf("the printed command does not read the stem pad: %v", a)
+	}
 	withGuide, without := monoSamples(t, ffmpeg, mp4), monoSamples(t, ffmpeg, stem)
 	// At the beat the preview has a 1 kHz click (30 ms, -12 dB under the guide's level); the stem has only the bed (300 and 733 Hz).
 	band := func(x []float64) float64 {
@@ -195,4 +210,23 @@ func TestPreviewStemHasNoBeatGuide(t *testing.T) {
 		t.Errorf("the stem is at %.1f LUFS", lufsStem)
 	}
 	_ = fmt.Sprint
+}
+
+// A ramped clip in bed mode keeps its bed, at the clip's average speed; in full mode (speech) it stays muted.
+func TestRampedBedClipKeepsItsBed(t *testing.T) {
+	ramp := []timeline.SpeedPoint{{AtMs: 0, Speed: 2}, {AtMs: 1000, Speed: 2}, {AtMs: 1600, Speed: 0.5}}
+	r := clipAt("c1", assetA, 1000, 3000, 0, withRamp(ramp...), withMode(timeline.AudioModeBed))
+	plan := mustCompile(t, specOf(30, []timeline.VideoItem{r, clipAt("c2", assetB, 0, 2000, timeline.OutputDuration(r), withMode(timeline.AudioModeBed))}), Final)
+	if plan.Bed == nil || len(plan.Bed.Clips) != 2 {
+		t.Fatalf("bed %+v", plan.Bed)
+	}
+	g := plan.FilterComplex
+	if !strings.Contains(g, "volume@bed0=0dB") || !strings.Contains(g, "atempo=1.078") { // 2000 ms of source in 1855 ms
+		t.Errorf("the ramped clip has no bed at its average speed:\n%s", PrettyFilter(g))
+	}
+	full := clipAt("c1", assetA, 1000, 3000, 0, withRamp(ramp...), withMode(timeline.AudioModeFull))
+	plan = mustCompile(t, specOf(30, []timeline.VideoItem{full, clipAt("c2", assetB, 0, 2000, timeline.OutputDuration(full), withMode(timeline.AudioModeBed))}), Final)
+	if strings.Contains(plan.FilterComplex, "atempo=1.078") || len(plan.Bed.Clips) != 1 {
+		t.Errorf("a speech clip with a ramp has sound: %d bed clips", len(plan.Bed.Clips))
+	}
 }

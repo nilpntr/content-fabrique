@@ -200,3 +200,37 @@ func TestSystemPromptIsStable(t *testing.T) {
 }
 
 func embeddedPromptHead() []byte { return []byte(systemPromptTemplate[:40]) }
+
+// The prompt teaches every sound effect category and variant name of the build, the three clip sound modes and the audio checks, and
+// the playbooks keep the bed policy (P3-12).
+func TestPromptTeachesTheSoundReadyExport(t *testing.T) {
+	p := SystemPrompt()
+	for _, c := range timeline.SFXCategories() {
+		if !strings.Contains(p, c+" (") {
+			t.Errorf("the prompt does not teach the sound effect category %s", c)
+		}
+		vs, _ := timeline.SFXVariants(c)
+		for _, v := range vs {
+			if !strings.Contains(p, v) {
+				t.Errorf("the prompt does not name the variant %s of %s", v, c)
+			}
+		}
+	}
+	for _, want := range []string{`"auto"`, "mute", "bed", "full", "audio_bed", "audio_effects", "audio_level", "-17 LUFS", `{"op":"set_clip_audio","mode":"bed"}`} {
+		if !strings.Contains(p, want) {
+			t.Errorf("the prompt lacks %q", want)
+		}
+	}
+	for typ, want := range map[string]string{TypeWorkout: "mode bed", TypeTalking: "mode full", TypeUnboxing: "full"} {
+		book, err := Playbook(typ, AvailableFeatures())
+		if err != nil || !strings.Contains(book, want) {
+			t.Errorf("playbook %s lacks %q: %v", typ, want, err)
+		}
+	}
+	book, _ := Playbook(TypeWorkout, AvailableFeatures())
+	for _, want := range []string{"sub_drop", "riser", "sting", "whoosh"} {
+		if !strings.Contains(book, want) {
+			t.Errorf("the workout playbook lacks %s", want)
+		}
+	}
+}

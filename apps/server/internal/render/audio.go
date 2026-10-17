@@ -86,19 +86,24 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 		if mode == timeline.AudioModeMute || !cl.asset.HasAudio {
 			continue
 		}
-		if cl.item.HasRamp() {
-			// atempo cannot follow a changing speed, so a clip with a speed ramp plays no sound of its own (Validate warns
-			// with ramp_audio_muted). It gets no input in the mix either.
-			continue
-		}
 		it := cl.item
 		start := timeline.FrameStartMs(cl.startFrame, c.fps)
 		dur := timeline.FrameStartMs(cl.endFrame, c.fps) - start
+		speed := it.SpeedOrDefault()
+		if it.HasRamp() {
+			// atempo cannot follow a changing speed, so a speech clip with a speed ramp plays no sound of its own (Validate warns
+			// with ramp_audio_muted): it gets no input in the mix either. An ambience bed does not need to follow the ramp: it plays
+			// at the clip's average speed, which keeps the bed continuous under the ramped shot.
+			if mode != timeline.AudioModeBed || timeline.OutputDuration(it) <= 0 {
+				continue
+			}
+			speed = float64(it.Source.OutMs-it.Source.InMs) / float64(timeline.OutputDuration(it))
+		}
 		f := []string{
 			"atrim=end=" + secs(it.Source.OutMs-it.Source.InMs),
 			"asetpts=PTS-STARTPTS",
 		}
-		f = append(f, atempoChain(it.SpeedOrDefault())...)
+		f = append(f, atempoChain(speed)...)
 		f = append(f, stereo48)
 		pre := slices.Clone(f)
 		trim := a.GainDBOrDefault()
@@ -319,7 +324,7 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 		if len(guide) > 0 {
 			stmts = append(stmts, fmt.Sprintf("[%s]asplit=2[astem][acg]", core))
 			c.plan.StemLabel = "astem"
-			mix := fmt.Sprintf("[acg][abeat]amix=inputs=2:duration=first:normalize=0:dropout_transition=0")
+			mix := "[acg][abeat]amix=inputs=2:duration=first:normalize=0:dropout_transition=0"
 			if len(sfxPads) > 0 {
 				mix += "," + sfxLimiter
 			}
@@ -358,7 +363,7 @@ func (c *compiler) soundReadyMix(stmts, bedPads, sfxStmts, sfxPads []string, gui
 	res.loudnorm = &LoudnormPlan{Filter: ln, TwoPass: true, MaxGainDB: SoundReadyMaxBoostDB}
 	measure := append(slices.Clone(stmts), mix+","+ln+":print_format=json[aout]")
 	res.pass1Graph = strings.Join(measure, ";")
-	stmts = append(stmts, mix+","+ln+","+stereo48+"["+core+"]")
+	stmts = append(stmts, mix+","+ln+","+stereo48+","+sfxLimiter+"["+core+"]")
 	if len(guide) > 0 {
 		stmts = append(stmts, guide...)
 		stmts = append(stmts, "[acore]asplit=2[astem][acg]", "[acg][abeat]amix=inputs=2:duration=first:normalize=0:dropout_transition=0,"+sfxLimiter+"[aout]")

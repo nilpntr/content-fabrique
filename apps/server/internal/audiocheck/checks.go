@@ -1,6 +1,11 @@
 package audiocheck
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/nilpntr/content-fabrique/internal/timeline"
+)
 
 // Where the targets come from (shown in the report, so that a reader can weigh them).
 const (
@@ -11,6 +16,14 @@ const (
 
 // checklist builds the pass/fail list. A check that does not apply to the edit (no cuts, no effects) is info, never a failure.
 func checklist(r Report) []CheckItem {
+	cs := programmeChecklist(r)
+	if r.Profile == ProfileSoundReady {
+		cs = soundReadyChecklist(r, cs)
+	}
+	return cs
+}
+
+func programmeChecklist(r Report) []CheckItem {
 	var cs []CheckItem
 	add := func(c CheckItem) { cs = append(cs, c) }
 	st := func(ok, warn bool) string {
@@ -220,4 +233,172 @@ func counts(cs []CheckItem) (pass, warn, fail, info int) {
 		}
 	}
 	return pass, warn, fail, info
+}
+
+// soundReadyChecklist turns the programme checklist into the sound-ready one (P3-12). The export is a bed and effects to which the creator
+// adds a trend sound in TikTok, so the web's programme loudness, the long-silence and the ending checks do not apply (they stay as info);
+// what matters is that the bed is there and steady, that the effects cut through it, land on their frame and would still be heard under
+// a trend sound, and that the export is in the sound-ready loudness range with headroom. Every target here is an estimate of ours.
+func soundReadyChecklist(r Report, cs []CheckItem) []CheckItem {
+	if !r.HasAudio || r.Loudness.IntegratedLUFS <= -69 {
+		for i := range cs {
+			if cs[i].ID == "loudness" {
+				cs[i].Fix = "The export is silent: put the clips' own sound in as a bed (set_clip_audio with mode bed for every clip) and add a few sound effects."
+			}
+		}
+		return cs
+	}
+	st := func(ok, warn bool) string {
+		switch {
+		case ok:
+			return StatusPass
+		case warn:
+			return StatusWarn
+		}
+		return StatusFail
+	}
+	info := func(c *CheckItem) {
+		c.Status = StatusInfo
+		c.Source += " (info in the sound-ready profile: the export is a bed and effects)"
+	}
+	var out []CheckItem
+	for _, c := range cs {
+		switch c.ID {
+		case "loudness":
+			li := r.Loudness.IntegratedLUFS
+			out = append(out, CheckItem{
+				ID: "loudness", Title: "Integrated loudness (sound-ready range)", Status: st(li >= soundReadyLo && li <= soundReadyHi, li >= soundReadyLo-soundReadyWarn && li <= soundReadyHi+soundReadyWarn),
+				Value: fmt.Sprintf("%.1f LUFS", li), Target: fmt.Sprintf("%.0f to %.0f LUFS (about -17)", soundReadyLo, soundReadyHi),
+				Source: srcEstimate + " (D-33: the web's -14 is for a programme; a bed is lifted to about -17 so a trend sound at -14 can be layered on top)", Estimate: true,
+				Fix: "The renderer lifts a bed and effects toward -17 LUFS by at most 8 dB: a lower reading means the bed is almost silent (check the clips have sound), a higher one that effects are very loud or numerous.",
+			})
+		case "silent_gap":
+			g := r.Silence.LongestS
+			out = append(out, CheckItem{
+				ID: "bed_gaps", Title: "The bed has no gap", Status: st(g <= bedGapMaxS, g <= bedGapWarnS),
+				Value: fmt.Sprintf("longest silent gap %.2f s", g), Target: fmt.Sprintf("at most %.1f s", bedGapMaxS),
+				Source: srcEstimate + " (a cut fades for 20 ms; a longer hole is a clip with no sound or one left in mute)", Estimate: true,
+				Fix: "Set every clip's audio to bed (set_clip_audio with mode bed, no id) so there is sound under every shot; a clip with no sound of its own needs a sound effect on it.",
+			})
+		case "sfx_sync":
+			out = append(out, soundReadySync(r))
+		case "loudness_range", "time_to_body", "dead_air_at_end", "ending_level", "sound_events":
+			info(&c)
+			out = append(out, c)
+		default:
+			out = append(out, c)
+		}
+	}
+
+	bed := r.Bed
+	if bed == nil {
+		bed = &BedStats{LevelLUFS: silenceFloor, P10LUFS: silenceFloor}
+	}
+	out = append(out,
+		CheckItem{
+			ID: "bed_present", Title: "The bed is there", Status: st(bed.Coverage >= bedCoverageMin, bed.Coverage >= bedCoverageWarn),
+			Value:  fmt.Sprintf("sound over %.0f LUFS for %.0f %% of the time, bed at %.1f LUFS", bedPresentLUFS, bed.Coverage*100, bed.LevelLUFS),
+			Target: fmt.Sprintf("at least %.0f %% of the time", bedCoverageMin*100), Source: srcEstimate + " (D-33: an export that is silent until a sound is added feels broken)", Estimate: true,
+			Fix: "Put the clips' own sound in as a bed: set_clip_audio with mode bed (no id) for the footage without speech.",
+		},
+		CheckItem{
+			ID: "bed_steady", Title: "The bed is steady", Status: st(bed.LevelLUFS-bed.P10LUFS <= bedSteadyDipLU, bed.LevelLUFS-bed.P10LUFS <= bedSteadyWarnLU),
+			Value: fmt.Sprintf("the quietest tenth is %.1f LU under the median", bed.LevelLUFS-bed.P10LUFS), Target: fmt.Sprintf("at most %.0f LU", bedSteadyDipLU),
+			Source: srcEstimate + " (the renderer evens the clips out to one level; a dip is a clip with little sound)", Estimate: true,
+			Fix: "A shot has much less sound than the rest: replace it, or lay a sound effect over it.",
+		},
+	)
+	var accents, through, audible int
+	var weak, quiet []string
+	for _, s := range r.Sync.SFX {
+		if !s.Accent || s.AtMs >= int64(r.DurationS*1000) || s.PeakLUFS <= -69 {
+			continue
+		}
+		accents++
+		if s.MarginLU >= cutThroughMinLU {
+			through++
+		} else {
+			weak = append(weak, s.ID)
+		}
+		if s.PeakLUFS >= trendLUFS-trendMarginLU {
+			audible++
+		} else {
+			quiet = append(quiet, s.ID)
+		}
+	}
+	if accents == 0 {
+		for _, id := range []string{"sfx_cut_through", "trend_audible"} {
+			out = append(out, CheckItem{ID: id, Title: map[string]string{"sfx_cut_through": "Effects cut through the bed", "trend_audible": "Effects audible under a trend sound"}[id],
+				Status: StatusInfo, Value: "no accent effects", Target: "-", Source: srcEstimate, Estimate: true})
+		}
+		return out
+	}
+	share := func(n int) float64 { return float64(n) / float64(accents) }
+	out = append(out,
+		CheckItem{
+			ID: "sfx_cut_through", Title: "Effects cut through the bed", Status: st(through == accents, share(through) >= 0.5),
+			Value: fmt.Sprintf("%d of %d accents are at least %.0f LU over the bed", through, accents, cutThroughMinLU), Target: "all of them",
+			Source: srcEstimate + " (a hit that is not clearly over the bed is not heard)", Estimate: true,
+			Fix: "Raise the gain_db of " + strings.Join(weak, ", ") + " (a few dB), or use a heavier variant (impact deep, whoosh heavy): they are lost in the bed.",
+		},
+		CheckItem{
+			ID: "trend_audible", Title: "Effects audible under a trend sound", Status: st(audible == accents, share(audible) >= 0.5),
+			Value: fmt.Sprintf("%d of %d accents peak within %.0f LU of %.0f LUFS", audible, accents, trendMarginLU, trendLUFS), Target: fmt.Sprintf("peak (momentary) at least %.0f LUFS", trendLUFS-trendMarginLU),
+			Source: srcEstimate + " (each hit's peak momentary loudness against a trend sound at -14 LUFS, with a 6 LU margin: a transient 6 dB under music is still heard; an estimate, not a listening test)", Estimate: true,
+			Fix: "Raise the gain_db of " + strings.Join(quiet, ", ") + ", or use a stronger effect: under a trend sound at -14 LUFS they will not be heard.",
+		},
+	)
+	return out
+}
+
+// soundReadySync judges the effects on their frame under a bed. A bed has onsets of its own (a rep, a plate), so the nearest onset of a
+// soft effect can be the bed's; and a riser, a downlifter or a shimmer have no onset at all. So a hard attack (impact, sting, sub_drop,
+// click, pop, glitch) must be heard within a frame, a whoosh or a swish within 100 ms, and the others are left to the loudness checks.
+func soundReadySync(r Report) CheckItem {
+	hard := map[string]bool{timeline.SFXImpact: true, timeline.SFXSting: true, timeline.SFXSubDrop: true, timeline.SFXClick: true, timeline.SFXPop: true, timeline.SFXGlitch: true}
+	soft := map[string]bool{timeline.SFXWhoosh: true, timeline.SFXSwish: true}
+	counted, ok := 0, 0
+	var late []string
+	for _, s := range r.Sync.SFX {
+		if s.AtMs >= int64(r.DurationS*1000) {
+			continue
+		}
+		heard := s.OnsetMs >= 0
+		switch {
+		case hard[s.Sfx]:
+			counted++
+			if heard && s.WithinFrame {
+				ok++
+			} else {
+				late = append(late, s.ID)
+			}
+		case soft[s.Sfx]:
+			counted++
+			if heard && s.DeltaMs >= -100 && s.DeltaMs <= 100 {
+				ok++
+			} else {
+				late = append(late, s.ID)
+			}
+		}
+	}
+	c := CheckItem{
+		ID: "sfx_sync", Title: "Sound effects land on their frame", Target: fmt.Sprintf("at least %.0f %%", sfxFrameMinShare*100),
+		Source: srcEstimate + " (a hard attack within a frame, a whoosh or swish within 100 ms because the bed has onsets of its own; risers, downlifters and shimmers have no onset to measure)", Estimate: true,
+	}
+	if counted == 0 {
+		c.Status, c.Value, c.Target = StatusInfo, "no effect with a measurable onset", "-"
+		return c
+	}
+	share := float64(ok) / float64(counted)
+	c.Value = fmt.Sprintf("%.0f %% (%d of %d)", share*100, ok, counted)
+	switch {
+	case share >= sfxFrameMinShare:
+		c.Status = StatusPass
+	case share >= sfxFrameMinShare-0.2:
+		c.Status = StatusWarn
+	default:
+		c.Status = StatusFail
+	}
+	c.Fix = "Move " + strings.Join(late, ", ") + " to the frame of the cut or hit (at_ms), or raise its gain_db: it is not heard on its frame, so the bed or another sound covers it."
+	return c
 }

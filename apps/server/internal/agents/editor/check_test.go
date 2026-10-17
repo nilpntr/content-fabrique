@@ -407,7 +407,7 @@ func TestBeatSyncCheck(t *testing.T) {
 func TestReportText(t *testing.T) {
 	r := RunChecks(CheckInput{Version: 3, Spec: specOf(t, []shot{{asset: assetA, in: 0, out: 3500}, {asset: assetA, in: 0, out: 1000}}, nil, nil), Plan: &Plan{ContentType: TypeWorkout, TargetLengthS: 5}})
 	pass, fail, skip := r.Counts()
-	if pass+fail+skip != 13 || fail == 0 {
+	if pass+fail+skip != 16 || fail == 0 {
 		t.Errorf("counts %d %d %d", pass, fail, skip)
 	}
 	text := r.Text()

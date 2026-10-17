@@ -170,9 +170,13 @@ func (c *checker) checkSpeedRamp(it VideoItem, path string) {
 				i, it.ID, p.AtMs, span, it.Source.InMs, it.Source.OutMs, span)
 		}
 	}
-	if a := it.Audio; a != nil && a.Plays() {
-		c.addSeverity(SeverityWarning, CodeRampAudioMuted, path+"/audio/use_source",
-			"item %s has a speed ramp, so its own audio is muted: the audio cannot follow a changing speed. Turn use_source off, or give the clip a constant speed to keep its sound",
+	if a := it.Audio; a != nil && ClipAudioMode(a) == AudioModeFull {
+		field := "/audio/use_source"
+		if a.Mode != "" {
+			field = "/audio/mode"
+		}
+		c.addSeverity(SeverityWarning, CodeRampAudioMuted, path+field,
+			"item %s has a speed ramp, so its own audio is muted in full mode: speech cannot follow a changing speed. Set the mode to mute or bed (a bed plays at the clip's average speed under the ramp), or give the clip a constant speed to keep its speech",
 			it.ID)
 	}
 }

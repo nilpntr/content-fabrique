@@ -1,4 +1,4 @@
-# Playbook: vlog and lifestyle (vlog.v1)
+# Playbook: vlog and lifestyle (vlog.v2)
 
 You chose this playbook because the footage is a day, a trip, a routine or a place: moments in time rather than one subject. Target 20 to 45 seconds.
 
@@ -12,7 +12,7 @@ You chose this playbook because the footage is a day, a trip, a routine or a pla
 
 **Energy.** Light: a punch_in on a beat now and then, a whip or a zoom_through to move to a new place. One effect per 3 or 4 cuts.
 
-**Sound.** Keep the natural sound of a clip when it carries the place (waves, a street, a laugh) and the clip has sound. The pacing follows the beat grid, and the creator adds music in TikTok.
+**Sound.** Keep the natural sound of a clip when it carries the place (waves, a street, a laugh) and the clip has sound: a bed (set_clip_audio mode bed) for the ambience, full for someone talking. The pacing follows the beat grid, and the creator adds music in TikTok.
 
 {{if .Has "look:auto"}}**Look.** One mild grade for all shots: set_look with preset auto and no id, once, when the cuts are final. No exposure_ev, no match.
 {{end}}

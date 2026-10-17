@@ -63,21 +63,25 @@ const (
 	renderStatsTime = 60 * time.Second
 )
 
-// Rendered implements RenderSampler.
-func (m *RenderMeasurer) Rendered(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, version int) (analysis.Series, error) {
+// previewOf is the newest ready preview render of a version that still has its files, or ErrNoPreview.
+func (m *RenderMeasurer) previewOf(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, version int) (*store.Render, error) {
 	renders, err := m.Store.ListRenders(ctx, ws, project, store.RenderFilter{Version: version, Profile: store.ProfilePreview}, 5)
 	if err != nil {
-		return analysis.Series{}, fmt.Errorf("editor: list renders: %w", err)
+		return nil, fmt.Errorf("editor: list renders: %w", err)
 	}
-	var r *store.Render
 	for i := range renders { // newest first
 		if renders[i].Status == store.RenderReady && renders[i].Mp4Key != nil && renders[i].ObjectsPurgedAt == nil {
-			r = &renders[i]
-			break
+			return &renders[i], nil
 		}
 	}
-	if r == nil {
-		return analysis.Series{}, ErrNoPreview
+	return nil, ErrNoPreview
+}
+
+// Rendered implements RenderSampler.
+func (m *RenderMeasurer) Rendered(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, version int) (analysis.Series, error) {
+	r, err := m.previewOf(ctx, ws, project, version)
+	if err != nil {
+		return analysis.Series{}, err
 	}
 	want, err := storage.RenderKey(ws, project, r.ID, storage.RenderMP4Name)
 	if err != nil || *r.Mp4Key != want {
@@ -168,19 +172,24 @@ func ParseLumaStats(data []byte) (analysis.Series, error) {
 }
 
 func (m *RenderMeasurer) download(ctx context.Context, key, path string) error {
+	return m.fetch(ctx, key, path, maxRenderBytes)
+}
+
+// fetch downloads an object of at most limit bytes to a new file.
+func (m *RenderMeasurer) fetch(ctx context.Context, key, path string, limit int64) error {
 	obj, err := m.Objects.Get(ctx, key)
 	if err != nil {
 		return fmt.Errorf("editor: download the render: %w", err)
 	}
 	defer func() { _ = obj.Body.Close() }()
-	if obj.Size <= 0 || obj.Size > maxRenderBytes {
+	if obj.Size <= 0 || obj.Size > limit {
 		return fmt.Errorf("editor: the render is %d bytes, which is not plausible", obj.Size)
 	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) // #nosec G302,G304 -- a path in our job dir; the container user must read it
 	if err != nil {
 		return err
 	}
-	n, err := io.Copy(f, io.LimitReader(obj.Body, maxRenderBytes+1))
+	n, err := io.Copy(f, io.LimitReader(obj.Body, limit+1))
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}

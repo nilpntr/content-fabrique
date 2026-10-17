@@ -204,15 +204,26 @@ const (
 // with true-peak headroom for the trend sound the creator layers on in TikTok.
 const (
 	SoundReadyLUFS       = -17.0
-	SoundReadyTP         = -2.0
+	SoundReadyTP         = -2.5
 	SoundReadyMaxBoostDB = 8.0
 )
 
-// OutputArgs returns Args followed by -y and the output path, so an existing file is replaced.
+// OutputArgs returns Args followed by -y and the output path, so an existing file is replaced. A plan with an audio stem pad (a
+// preview with a beat guide) has its pad read by a second output that discards it, so the command runs as it is printed.
 func (p Plan) OutputArgs(output string) []string {
 	args := make([]string, 0, len(p.Args)+2)
 	args = append(args, p.Args...)
-	return append(args, "-y", output)
+	args = append(args, "-y", output)
+	return append(args, p.unusedStemArgs()...)
+}
+
+// unusedStemArgs is the output that consumes the stem pad when nobody wants the stem: raw PCM into the null muxer (no encoder cost),
+// or nothing when the plan has no stem.
+func (p Plan) unusedStemArgs() []string {
+	if p.StemLabel == "" {
+		return nil
+	}
+	return []string{"-map", "[" + p.StemLabel + "]", "-vn", "-c:a", "pcm_s16le", "-f", "null", "-"}
 }
 
 // TimeMapJSON is the time map as the JSON array the render job stores.

@@ -473,6 +473,16 @@ func (r *run) execute(ctx context.Context) (finished, error) {
 		keys[up.name] = key
 	}
 
+	// The audio stem of a preview with a beat guide (the audio without the guide, for the audio check). It is optional: a render without
+	// one is ready all the same, and the check then measures the video's own sound.
+	if plan.StemLabel != "" {
+		if err := r.putStem(ctx); err != nil {
+			// The stem is a measurement aid: a failed upload must not fail a render whose video, sheet and time map are in storage.
+			// The editor's audio checks then say the preview has no stem.
+			r.log.WarnContext(ctx, "could not store the audio stem of the preview; the render is finished without it", "render_id", r.render.ID.String(), "error", err)
+		}
+	}
+
 	_, err = st.FinishRender(ctx, r.ws, r.render.ID, store.RenderResult{
 		MP4Key: keys[storage.RenderMP4Name], ContactSheetKey: keys[storage.RenderContactSheetName], TimeMapKey: keys[storage.RenderTimeMapName],
 		DurationMs: plan.DurationMs, Width: plan.OutputSize.Width, Height: plan.OutputSize.Height,
@@ -513,7 +523,10 @@ func (r *run) renderVideo(ctx context.Context, plan render.Plan) (string, error)
 		}
 	}
 	t0 := time.Now()
-	err := render.Execute(execCtx, plan, r.runner, render.ExecuteOptions{Output: out, WorkDir: filepath.Join(r.dir, "work"), Progress: onProgress})
+	err := render.Execute(execCtx, plan, r.runner, render.ExecuteOptions{
+		Output: out, WorkDir: filepath.Join(r.dir, "work"), Progress: onProgress,
+		StemOutput: filepath.Join(r.dir, "out", storage.RenderAudioStemName),
+	})
 	r.sandbox += time.Since(t0)
 	if err != nil {
 		if cause := context.Cause(execCtx); errors.Is(cause, jobs.ErrRenderGone) {
@@ -579,4 +592,23 @@ func hasCaptions(spec *timeline.Spec) bool {
 		}
 	}
 	return false
+}
+
+// maxStemBytes caps the audio stem that is uploaded: 128 kbps AAC is a megabyte a minute.
+const maxStemBytes = 64 << 20
+
+// putStem uploads the audio stem the render wrote, if it wrote one (a regular file of reasonable size in the job's output directory).
+func (r *run) putStem(ctx context.Context) error {
+	path := filepath.Join(r.dir, "out", storage.RenderAudioStemName)
+	fi, err := os.Lstat(path)
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() < 1 || fi.Size() > maxStemBytes {
+		return nil // no stem is not a failure of the render
+	}
+	f, err := os.Open(path) //nolint:gosec // the render's own output in our job directory, checked above
+	if err != nil {
+		return err
+	}
+	defer f.Close() //nolint:errcheck // read-only
+	_, err = r.put(ctx, storage.RenderAudioStemName, f, fi.Size(), "audio/mp4")
+	return err
 }

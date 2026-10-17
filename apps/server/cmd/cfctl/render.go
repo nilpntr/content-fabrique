@@ -38,6 +38,7 @@ so run it through the validator first if it did not come from one.
   --fonts-dir  the directory with the font files (packages/media-tools/fonts), for --provider local outside a repository checkout;
                docker and hardened use the fonts in the image (default: found above the working directory)
   --ffmpeg     the ffmpeg binary used by --dry-run's printout, and ffprobe's directory (default: from PATH)
+  --stem       also write the audio of a preview without its beat guide here (an M4A): what cfctl audio check should measure
   --dry-run    print the ffmpeg command line and the filter graph, and do not run it
 
 Prints the sound cues (cue_only sounds are never mixed in) and progress while it runs.
@@ -50,6 +51,7 @@ func cmdRender(args []string, stdout, stderr io.Writer) int {
 	assetsArg := flags.String("assets", "", "directory with the assets")
 	outArg := flags.String("o", "", "output MP4")
 	profileArg := flags.String("profile", "preview", "preview or final")
+	stemArg := flags.String("stem", "", "also write the audio without the preview's beat guide here (an M4A; only a preview with a guide has one)")
 	ffmpegArg := flags.String("ffmpeg", "ffmpeg", "ffmpeg binary")
 	providerArg := flags.String("provider", "local", "local, docker or hardened")
 	imageArg := flags.String("image", "media-tools:dev", "media-tools image")
@@ -139,9 +141,10 @@ func cmdRender(args []string, stdout, stderr io.Writer) int {
 	defer stop()
 	lastTenth := -1
 	err = render.Execute(ctx, plan, runner, render.ExecuteOptions{
-		Output:   *outArg,
-		WorkDir:  workDir,
-		FontsDir: *fontsArg,
+		Output:     *outArg,
+		StemOutput: *stemArg,
+		WorkDir:    workDir,
+		FontsDir:   *fontsArg,
 		Progress: func(p render.Progress) {
 			if tenth := int(p.Fraction * 10); tenth != lastTenth || p.Done {
 				lastTenth = tenth

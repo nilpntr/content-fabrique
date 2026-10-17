@@ -428,9 +428,6 @@ func ClipAudioMode(a *VideoAudio) string {
 	return AudioModeMute
 }
 
-// Plays is whether the mode puts the clip's own sound in the mix at all.
-func (a VideoAudio) Plays() bool { return ClipAudioMode(&a) != AudioModeMute }
-
 // UseSourceOrDefault is whether the clip's own audio plays: false when the spec leaves it out.
 func (a VideoAudio) UseSourceOrDefault() bool {
 	if a.UseSource == nil {

@@ -142,16 +142,19 @@ func Execute(ctx context.Context, plan Plan, runner media.Runner, opts ExecuteOp
 	}
 	full := append(ffmpegPrefix("error", "progress-render.txt"), containerArgs(args, inputs)...)
 	full = append(full, "-y", media.OutputPath(outName))
-	withStem := plan.StemLabel != "" // the pad is in the graph, so it is always written; the file is kept only when the caller asked for it
-	if withStem {
+	withStem := plan.StemLabel != "" && opts.StemOutput != ""
+	switch {
+	case withStem:
 		// The audio mix without the beat guide, as a second output of the same run.
 		full = append(full, "-map", "["+plan.StemLabel+"]", "-vn", "-c:a", "aac", "-b:a", "128k", "-ar", strconv.Itoa(AudioSampleRate), "-ac", "2",
 			"-map_metadata", "-1", "-fflags", "+bitexact", "-flags:a", "+bitexact", media.OutputPath(stemName))
+	case plan.StemLabel != "":
+		full = append(full, plan.unusedStemArgs()...) // the pad is in the graph, so something must read it
 	}
 	if _, err := runFFmpeg(ctx, runner, full, inputs, work, plan, "render", "progress-render.txt", opts.Progress); err != nil {
 		return err
 	}
-	if withStem && opts.StemOutput != "" {
+	if withStem {
 		if err := moveFile(filepath.Join(work, stemName), opts.StemOutput); err != nil {
 			return err
 		}
@@ -366,6 +369,11 @@ func measuredFilter(base, log string, maxGain float64) (string, error) {
 		vals[i] = v
 	}
 	if math.IsInf(vals[0], 0) || math.IsNaN(vals[0]) || vals[0] < silenceFloor {
+		if maxGain > 0 {
+			// A capped mix that is (nearly) silent is not lifted at all: the single-pass filter would boost its hiss by whatever
+			// its dynamic mode allows, which is what the cap is there to prevent.
+			return "anull", nil
+		}
 		return "", nil
 	}
 	// A capped mix (a sound-ready one) is lifted by at most maxGain. In linear mode loudnorm applies target_I - measured_I (it computes
@@ -389,9 +397,7 @@ func applySwaps(args []string, swaps map[string]string) []string {
 	copy(out, args)
 	for i, a := range out {
 		for old, repl := range swaps {
-			if strings.Contains(a, old) {
-				a = strings.Replace(a, old, repl, 1)
-			}
+			a = strings.Replace(a, old, repl, 1)
 		}
 		out[i] = a
 	}
