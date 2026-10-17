@@ -130,11 +130,13 @@ func (d Deps) runContext(ctx context.Context, rc runtime.RunContext) ([]llm.Bloc
 		return nil, err
 	}
 	hint := contentTypeHint(det.Project.Brief, rows, sums)
+	styleBlk := styleBlocks(d.style(ctx, ws))
 	for _, caps := range contextSteps {
 		blocks := contextBlocks(det.Project.Format, det.Project.Brief, rows, sums, status, caps)
 		if hint != "" {
 			blocks = append(blocks, llm.TextBlock(hint))
 		}
+		blocks = append(blocks, styleBlk...)
 		blocks = append(blocks, commentsIntro(comments, total, now, caps.comments, caps.commentChars)...)
 		if encodedSize(blocks) <= maxContextBytes {
 			// Only the comments this context shows (the rest are for get_comments to list) are the run's to deal with.

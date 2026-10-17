@@ -1,6 +1,6 @@
 # Editor system prompt: changelog
 
-The editor agent's system prompt is `editor.v2.1.md`, embedded in the Go binary, and the genre playbooks are the files in
+The editor agent's system prompt is `editor.v2.2.md`, embedded in the Go binary, and the genre playbooks are the files in
 `playbooks/`, embedded too. The text the model receives is the runtime's preamble (`runtime.SystemPreamble`, the untrusted-data
 rule) followed by this file. The prompt version (`PromptVersion` in `prompt.go`) is stored in every run's input, so a run can
 always be tied to the text it was given; a playbook has its own version (`workout.v2`, in `playbooks.go`) that the run's plan
@@ -21,6 +21,32 @@ Rules for changing it:
 - The cache hit rate of a run is visible: `cfctl agent show <run>` prints the cache write and read tokens of every model call and
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
+
+## editor.v2.2 (2026-10-17)
+
+The creator style profile (P6-05, `docs/design/style-profile-v1.md`). The prompt so far knew one way to edit: a fast cut-up with a
+beat grid, an effect every three or four cuts and a one to two second hook. A creator who lets long takes run, uses no effects and
+posts the natural picture (the first creator we measured) was told to do the opposite of what they do. The editor now follows the
+creator's style over the generic defaults. The file is `editor.v2.2.md`; it changes what the editor puts on the timeline for a workspace
+that has a profile, and nothing for one that has none, so it is a minor version.
+
+- **A new section, "Following the creator's style".** When the start of the conversation holds a `creator_style` block (an
+  `untrusted_data` block: the numbers are facts about the creator's videos, the titles in it are text read from pictures), the creator's
+  style wins over the playbook and over this prompt where they differ. It says how to read each line: pacing (a creator of long takes
+  gets a few long shots of full sets and short details between them, and the shot-length limits of the fast edit do not apply), the
+  hook (the opening shot runs as long as the creator's first cut, which can be a pose with the title on it, and ends where the music
+  lifts), effects, labels, look and sound effects (none when the profile says none; the bed of the Sound section stays), the title
+  (`title_series` for bold uppercase, `title_lowercase` for witty lowercase lines, upper third, in the creator's case), the cuts and the
+  music (no beat grid and `tempo_bpm 0` when the cuts sit loosely near onsets, cut on the drop when they are on the beat), the sound the
+  creator adds (the hook is the quiet intro, the energy builds with the music, the last shot is held) and the length.
+- **Two title styles in the list.** `title_series` (bold condensed uppercase in cream, no outline) and `title_lowercase` (a quiet lowercase
+  line in cream) join the title styles.
+- **The defaults say they are defaults.** The pacing and effects paragraphs say that a creator style block overrides them. Without a
+  block nothing changes.
+- **Tools.** `plan_edit` ends its answer with a "Creator style" note (computed from the profile; the profile block itself is in the run context only); it notes a plan
+  that has effects for a creator who uses none, and it accepts tempo 0 for a workout when the profile says the cuts are not on the beat.
+  `check_edit` takes its thresholds from the profile and has a new check, `style_match`, with the distance per dimension and a
+  one-line fix for each that is out of range.
 
 ## editor.v2.1 (2026-10-17)
 

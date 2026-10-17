@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/nilpntr/content-fabrique/internal/analysis"
+	"github.com/nilpntr/content-fabrique/internal/styleprofile"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
@@ -44,6 +45,7 @@ const (
 	CheckBrightness    = "brightness_jump"
 	CheckCrushed       = "crushed"
 	CheckBeatSync      = "beat_sync"
+	CheckStyleMatch    = "style_match"
 )
 
 // The thresholds that do not depend on the kind of video.
@@ -116,6 +118,9 @@ type CheckInput struct {
 	Assets map[string]AssetAnalysis
 	// Issues are the validation issues of the version (the safe zone of the texts is the validator's).
 	Issues []timeline.Issue
+	// Style is the creator's style profile (P6-05), nil for a workspace that has none: the thresholds then are the defaults of the
+	// content type, and style_match does not apply.
+	Style *styleprofile.Profile
 	// Rendered is the luma of the version's preview render (a mean in Luma and a 90th percentile in High per sample, as the analysis
 	// series), nil when there is no preview of the version yet: the checks that look at the rendered picture do not apply then.
 	Rendered *analysis.Series
@@ -151,6 +156,8 @@ type Metrics struct {
 	// RenderedKept is the lowest share of its source's p90 luma that a rendered shot keeps (1 is as bright as the source), 0 when the
 	// preview was not measured.
 	RenderedKept float64 `json:"rendered_kept"`
+	// StyleScore is the share of the style dimensions that are in the creator's range (0 when there is no profile).
+	StyleScore float64 `json:"style_score,omitempty"`
 	// The ears (P3-12), when the preview was listened to: the profile ("programme" or "sound_ready"), the integrated loudness and the
 	// bed level (LUFS; the bed only in the sound-ready profile), what was measured ("stem" or "preview") and how long listening took.
 	AudioProfile string  `json:"audio_profile,omitempty"`
@@ -167,6 +174,8 @@ type Report struct {
 	TargetS     int     `json:"target_length_s,omitempty"`
 	Checks      []Check `json:"checks"`
 	Metrics     Metrics `json:"metrics"`
+	// Style is the distance of the edit from the creator's style profile, per dimension (nil without a profile).
+	Style *styleprofile.Distance `json:"style,omitempty"`
 }
 
 // Counts returns how many checks passed, failed and were skipped.
@@ -202,6 +211,50 @@ type limits struct {
 	beatGrid     bool    // the video follows a beat grid
 	gridRequired bool    // a plan for this type may not have tempo 0
 	paceBuilds   bool    // the cuts speed up toward the end
+	// hookMaxMs is the longest first shot (the default is hookMaxMs), and the rest come from the creator's style profile (applyStyle):
+	// noEffects, no motion preset, transition or ramp at all; noTitle, no title is expected; durLo and durHi, the length range when
+	// the plan names no target; styled, a profile is in force.
+	hookMaxMs          int64
+	noEffects, noTitle bool
+	durLo, durHi       int64
+	styled             bool
+	// looseBeat says the creator's cuts are known not to sit on a beat grid, so beat_sync does not apply.
+	looseBeat bool
+}
+
+// applyStyle sets the thresholds from the creator's style profile: a creator who lets takes run, uses no effects, cuts loosely near the
+// music and has a first cut after two seconds is not held to the defaults of a fast edit. The profile loosens the checks that
+// assume a montage (shot pacing, the pace building, the effect minimum, the beat grid, the hook length) and the style_match check
+// measures the edit against the profile instead.
+func applyStyle(l limits, p *styleprofile.Profile) limits {
+	l.hookMaxMs = hookMaxMs
+	if !p.Firm() {
+		return l // a profile of one or two videos is a hint for the prompt, not a rule for the checks
+	}
+	l.styled = true
+	pc, th := p.Pacing, p.Thresholds()
+	// The median shot: what the creator's videos have, with room, from quartiles and capped (thresholds.go), never under the default.
+	l.medianShotMs = max(l.medianShotMs, int64(th.MedianShotMaxS*1000))
+	// The checks that assume a fast edit are loosened for a creator of long takes or of few effects; a montage or busy-effects profile
+	// keeps the minimum effect rate and the building pace.
+	if pc.Style == styleprofile.PaceLongTake || p.Effects.Verdict == styleprofile.EffectsNone || p.Effects.Verdict == styleprofile.EffectsLight {
+		l.minEffects = 0
+		l.paceBuilds = false
+	}
+	if p.Effects.Verdict == styleprofile.EffectsNone {
+		l.noEffects = true
+	}
+	if p.CutsOffBeat() {
+		l.beatGrid, l.gridRequired, l.looseBeat = false, false, true
+	}
+	l.hookMaxMs = max(hookMaxMs, int64(th.HookMaxS*1000))
+	if p.Text != nil && p.Text.TitleShare == 0 {
+		l.noTitle = true
+	}
+	if th.DurHiS > 0 {
+		l.durLo, l.durHi = int64(th.DurLoS*1000), int64(th.DurHiS*1000)
+	}
+	return l
 }
 
 var typeLimits = map[string]limits{
@@ -228,11 +281,16 @@ func RunChecks(in CheckInput) Report {
 	}
 	items := slices.Clone(main.Items)
 	slices.SortStableFunc(items, func(a, b timeline.VideoItem) int { return cmp.Compare(a.AtMs, b.AtMs) })
-	lim := typeLimits[typ]
+	lim := applyStyle(typeLimits[typ], in.Style)
+	weakStyle := ""
+	if in.Style != nil && !in.Style.Firm() {
+		weakStyle = fmt.Sprintf("the creator style profile rests on %d reference videos; it sets thresholds from %d", in.Style.References, styleprofile.MinReferences)
+		in.Style = nil
+	}
 	if in.Plan != nil && in.Plan.TempoBPM == 0 {
 		lim.beatGrid = false // the plan has no beat grid (a vlog or a general video that follows speech, say): the cuts are not judged against one
 	}
-	c := &checker{in: in, items: items, lim: lim, typ: typ, m: &r.Metrics}
+	c := &checker{in: in, items: items, lim: lim, typ: typ, m: &r.Metrics, dist: &r.Style, weakStyle: weakStyle}
 	c.total = timeline.TotalDuration(in.Spec)
 	// A shot's length is what it is on screen: from where it starts to where the next one starts, so the overlap of a transition
 	// into the next shot is not counted (a 1.95 s hook with a 250 ms whip out of it is still a 1.95 s hook). The last shot runs to
@@ -249,7 +307,7 @@ func RunChecks(in CheckInput) Report {
 	r.Metrics.DurationMs, r.Metrics.Shots = c.total, len(items)
 	r.Checks = []Check{
 		c.hookLength(), c.hookTitle(), c.shotPacing(), c.shotVariety(), c.paceBuilds(), c.repBoundaries(), c.deadTime(),
-		c.effectDensity(), c.textSafe(), c.duration(targetS), c.brightness(), c.crushed(), c.beatSync(),
+		c.effectDensity(), c.textSafe(), c.duration(targetS), c.brightness(), c.crushed(), c.beatSync(), c.styleMatch(),
 	}
 	if a := in.Audio; a != nil {
 		r.Checks = append(r.Checks, audioChecks(*a)...)
@@ -271,6 +329,9 @@ type checker struct {
 	lim   limits
 	typ   string
 	m     *Metrics
+	dist  **styleprofile.Distance
+	// weakStyle is why a profile that is there is not used (too few references), for the style_match line.
+	weakStyle string
 }
 
 func (c *checker) pass(id, format string, a ...any) Check {
@@ -285,13 +346,20 @@ func (c *checker) skip(id, format string, a ...any) Check {
 
 func (c *checker) hookLength() Check {
 	d := c.durs[0]
-	if d > hookMaxMs {
-		return c.fail(CheckHookLength, "the first shot (%s) is %s long; the hook should be at most %s. Trim it to its strongest 1 to 2 seconds, or speed it up", c.items[0].ID, secs2(d), secs2(hookMaxMs))
+	limit := c.lim.hookMaxMs
+	if d > limit {
+		if c.lim.styled {
+			return c.fail(CheckHookLength, "the first shot (%s) is %s long; the creator's first cut comes by %s", c.items[0].ID, secs2(d), secs2(limit))
+		}
+		return c.fail(CheckHookLength, "the first shot (%s) is %s long; the hook should be at most %s. Trim it to its strongest 1 to 2 seconds, or speed it up", c.items[0].ID, secs2(d), secs2(limit))
 	}
-	return c.pass(CheckHookLength, "the first shot is %s long (at most %s)", secs2(d), secs2(hookMaxMs))
+	return c.pass(CheckHookLength, "the first shot is %s long (at most %s)", secs2(d), secs2(limit))
 }
 
 func (c *checker) hookTitle() Check {
+	if c.lim.noTitle {
+		return c.skip(CheckHookTitle, "the creator's videos have no title")
+	}
 	var first int64 = -1
 	for _, t := range c.in.Spec.Tracks {
 		switch t := t.(type) {
@@ -515,9 +583,9 @@ func (c *checker) deadTime() Check {
 	return c.pass(CheckDeadTime, "%.0f %% of the screen time is dead time (at most %.0f %%)", share*100, deadShareMax*100)
 }
 
-func (c *checker) effectDensity() Check {
-	effects, ramps := 0, 0
-	for i, it := range c.items {
+// countEffects counts the effects of the main track: motion presets, transitions that are not cuts and speed ramps (also separately).
+func countEffects(items []timeline.VideoItem) (effects, ramps int) {
+	for i, it := range items {
 		if it.Motion.Active() {
 			effects++
 		}
@@ -529,8 +597,19 @@ func (c *checker) effectDensity() Check {
 			ramps++
 		}
 	}
+	return effects, ramps
+}
+
+func (c *checker) effectDensity() Check {
+	effects, ramps := countEffects(c.items)
 	cuts := len(c.items) - 1
 	c.m.Effects, c.m.Ramps, c.m.Cuts = effects, ramps, cuts
+	if c.lim.noEffects {
+		if effects > 0 {
+			return c.fail(CheckEffectDensity, "%d effects (motion presets, transitions, speed ramps); the creator uses none: take them out", effects)
+		}
+		return c.pass(CheckEffectDensity, "no effects, as in the creator's videos")
+	}
 	if cuts < 1 {
 		return c.skip(CheckEffectDensity, "there are no cuts")
 	}
@@ -572,6 +651,9 @@ func (c *checker) textSafe() Check {
 func (c *checker) duration(targetS int) Check {
 	lo, hi := int64(defaultMinDurationMs), int64(defaultMaxDurationMs)
 	what := "the default range"
+	if c.lim.durHi > 0 {
+		lo, hi, what = c.lim.durLo, c.lim.durHi, "the creator's usual length"
+	}
 	if targetS > 0 {
 		lo, hi = int64(targetS)*10*durationLoPct, int64(targetS)*10*durationHiPct
 		what = fmt.Sprintf("the plan's %d s, give or take a quarter", targetS)
@@ -733,6 +815,70 @@ func (c *checker) crushed() Check {
 	return c.pass(CheckCrushed, "%d shots rendered; the darkest keeps %.0f %% of its source's p90 luma (at least %.0f %%)", measured, kept*100, crushedRatio*100)
 }
 
+// editStats measures the edit against the dimensions of the creator's profile.
+func (c *checker) editStats() styleprofile.EditStats {
+	e := styleprofile.EditStats{DurationS: float64(c.total) / 1000, FirstCutS: -1}
+	for _, d := range c.durs {
+		e.ShotsS = append(e.ShotsS, float64(d)/1000)
+	}
+	if len(c.items) > 1 {
+		e.FirstCutS = float64(c.items[1].AtMs) / 1000
+	}
+	e.Effects, _ = countEffects(c.items)
+	for _, it := range c.items {
+		if it.Look != nil && it.Look.Preset != "" && it.Look.Preset != timeline.LookNone {
+			e.Graded = true
+		}
+	}
+	firstTitleAt := int64(math.MaxInt64)
+	for _, t := range c.in.Spec.Tracks {
+		switch t := t.(type) {
+		case *timeline.CaptionsTrack:
+			e.Captions = e.Captions || t.Enabled
+		case *timeline.TextTrack:
+			for _, it := range t.Items {
+				if !strings.HasPrefix(it.Style, "title_") {
+					e.Labels++
+					continue
+				}
+				e.Titles++
+				if it.AtMs < firstTitleAt { // the case judged is the earliest title's, whatever track it is on
+					firstTitleAt = it.AtMs
+					e.TitleCase, e.TitleAtS = styleprofile.CaseOf(it.Text), float64(it.AtMs)/1000
+				}
+			}
+		case *timeline.AudioTrack:
+			for _, a := range t.Items {
+				if _, ok := a.(*timeline.SFX); ok {
+					e.SFX++
+				}
+			}
+		}
+	}
+	return e
+}
+
+// styleMatch measures the edit against the creator's profile: one line per dimension, with the fix for the ones out of range.
+func (c *checker) styleMatch() Check {
+	if c.in.Style == nil {
+		if c.weakStyle != "" {
+			return c.skip(CheckStyleMatch, "%s", c.weakStyle)
+		}
+		return c.skip(CheckStyleMatch, "this workspace has no creator style profile")
+	}
+	d := c.in.Style.Compare(c.editStats())
+	c.m.StyleScore = d.Score
+	*c.dist = &d
+	if bad := d.Failed(); len(bad) > 0 {
+		var parts []string
+		for _, b := range bad[:min(4, len(bad))] {
+			parts = append(parts, fmt.Sprintf("%s: %s, expected %s (%s)", b.ID, b.Value, b.Expected, b.Fix))
+		}
+		return c.fail(CheckStyleMatch, "%d of %d style dimensions are out of the creator's range: %s", len(bad), len(d.Dimensions), strings.Join(parts, "; "))
+	}
+	return c.pass(CheckStyleMatch, "all %d style dimensions are in the creator's range", len(d.Dimensions))
+}
+
 func (c *checker) beatSync() Check {
 	var beats []int64
 	for _, m := range c.in.Spec.Markers {
@@ -743,6 +889,9 @@ func (c *checker) beatSync() Check {
 	cuts := len(c.items) - 1
 	if cuts < 1 {
 		return c.skip(CheckBeatSync, "there are no cuts")
+	}
+	if c.lim.looseBeat {
+		return c.skip(CheckBeatSync, "the creator's cuts do not sit on a beat grid (loose near the music's onsets, or too few cuts): no beat grid is needed")
 	}
 	if len(beats) == 0 {
 		if c.lim.beatGrid {

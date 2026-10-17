@@ -19,6 +19,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/projects"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
+	"github.com/nilpntr/content-fabrique/internal/styleprofile"
 )
 
 const evalUsage = `Usage:
@@ -128,7 +129,12 @@ func cmdEvalEditor(args []string, stdout, stderr io.Writer, lookup lookupEnv, de
 	}
 	plan, author := planOfVersion(ctx, st, ws.ID, vd.Version)
 	sampler, note := renderSamplerFor(env, st)
-	report, err := editor.CheckVersion(ctx, svc, st, ws.ID, pid, v, plan, sampler)
+	style, _, serr := styleprofile.Load(ctx, st, ws.ID)
+	if serr != nil {
+		_, _ = fmt.Fprintf(errOut, "cfctl %s: the style profile: %v\n", name, serr)
+		return 1
+	}
+	report, err := editor.CheckVersion(ctx, svc, st, ws.ID, pid, v, plan, sampler, style)
 	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "cfctl %s: %v\n", name, err)
 		return 1
@@ -153,6 +159,11 @@ func cmdEvalEditor(args []string, stdout, stderr io.Writer, lookup lookupEnv, de
 	_, _ = fmt.Fprintln(out, report.Text())
 	if note != "" {
 		_, _ = fmt.Fprintln(out, note)
+	}
+	if report.Style != nil {
+		_, _ = fmt.Fprintln(out, "\n"+report.Style.Text())
+	} else if style == nil {
+		_, _ = fmt.Fprintln(out, "\nstyle distance: this workspace has no creator style profile (cfctl style analyze makes one)")
 	}
 	m := report.Metrics
 	_, _ = fmt.Fprintf(out, "\nmetrics: duration %d ms, %d shots (shortest %d ms, median %d ms, longest %d ms), longest equal run %d, rep edges %d/%d, dead share %.3f, effects %d (%.2f per cut, %d ramps), cuts on beat %d/%d, brightness jump %.2f (range %.2f)\n",

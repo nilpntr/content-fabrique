@@ -95,7 +95,7 @@ The new craft features reach the editor agent as edit ops, whose descriptions in
 
 Every addition comes with schema fixtures, ops, validation rules (for example, a speed ramp must not exceed the source length, and a motion preset needs a long enough shot), compiler support and golden renders in all four formats.
 
-## 6. Editor v2 as built (`internal/agents/editor`, prompt `editor.v2.1`)
+## 6. Editor v2 as built (`internal/agents/editor`, prompt `editor.v2.2`)
 
 **The flow of a run.** Understand (`find_moments`, `view_clip`) → `plan_edit` → `edit_timeline` (in the order of section 7) → `render_preview` → `check_edit` → at most one revision (`edit_timeline`, `render_preview`, `check_edit`) → `finish`. The tools are in [agent-runtime-v1](agent-runtime-v1.md) section 5; the gates are the first `edit_timeline` of a run (refused without a plan) and `finish` (refused without a preview and a `check_edit` of the newest version the run made). Both gates keep their record in the worker and fall back to the run's events, so a run that resumes in another worker is not asked to plan or check again. The revision limit is guidance in the answer of `check_edit` ("this was the check after your revision pass: do not revise again"), not a refusal, so a run that cannot fix a check can still finish and say why; the run's budgets still bound it.
 
@@ -109,7 +109,7 @@ Every addition comes with schema fixtures, ops, validation rules (for example, a
   "target_length_s": 25, "tempo_bpm": 124, "pace": "building",
   "beat_ms": 484, "estimated_length_ms": 24200,
   "shots": [{"role": "hook", "what": "...", "asset_id": "ast_...", "beats": 3, "effect": "punch_in", "length_ms": 1452}],
-  "prompt_version": "editor.v2.1"}}
+  "prompt_version": "editor.v2.2"}}
 ```
 
 `data.version` is the shape's version (a reader checks it first). A later `plan_edit` writes another event; the last one is the plan. `role` is one of hook, build, peak, detail, step, reveal, payoff, broll, ending; `pace` is steady, building or fast; `effect` is none, punch_in, push_in, pull_back, shake, speed_ramp, whip, zoom_through or flash. `asset_id` and `effect` may be absent (`effect` is `none` when left out).
@@ -148,6 +148,7 @@ Every number is computed in Go from the stored timeline version and the stored c
 | `brightness_jump` | no cut jumps more than 0.25 in the p90 luma of the lit part of the picture, or by 1.8 times with at least 0.10 | measured on the **rendered preview** (below), not the source: the exposure of each shot is the median, over the samples of the middle half of its time on screen, of the 90th percentile luma of the frame (`analysis.Series.ExposureBetween`): not the mean, so low-key footage is not penalised. In low-key footage the numbers are small, hence the ratio: the founder's posing clip (p90 0.37) is 1.9 times the gym clips (0.20) and only 0.17 apart. Not applicable without a preview |
 | `crushed` | every shot's rendered p90 luma keeps at least 70 % of its source's p90 (allowing for the exposure hint the clip carries), and likewise its mean, and none renders near black (p90 under 0.04) | measured on the rendered preview against the analysis of the part of the clip the shot plays. Not applicable without a preview |
 | `beat_sync` | at least 70 % of the cuts are within 2 frames of a beat marker | a workout, unboxing, vlog or general video with no markers fails; talking and tutorial skip it |
+| `style_match` | the workspace has a creator style profile and every dimension of the edit is in the creator's range: cuts, long takes (or shot length), first cut, effects, title, labels, title case, captions, grade, sound effects, duration | skipped without a profile; see "Creator style (P6-05)" below. The report also holds the distance per dimension |
 | `audio_level` | the ears' level checks of the preview's sound pass: has a sound track, the integrated loudness in the profile's window (sound-ready: -19 to -15 LUFS; programme: the web's -16 to -9), true peak, no clipping, DC or imbalance | measured on the **preview's audio stem** (the mix without the beat guide), or the video's own sound when there is no guide; `skip` without a preview (P3-12, [audio v1](audio-v1.md) section 6) |
 | `audio_bed` | sound-ready profile only: the bed is there (sound over -45 LUFS at least 90 % of the time), has no gap over 0.5 s and is steady (the quietest tenth within 6 LU of the median) | the fix names `set_clip_audio` mode `bed` or an effect on a clip with no sound |
 | `audio_effects` | the effects land on their frame (hard attacks within a frame, whooshes within 100 ms), every accent peaks at least 4 LU over the bed and within 6 LU of a -14 LUFS trend sound, and the density is at most 4 per 10 s | an estimate close to its bar is reported as "borderline" and passes |
@@ -194,3 +195,15 @@ The export has no music and no trend sound, and the creator adds a trending soun
 - **UI foley.** One click per on-screen click, short, bright (2 to 6 kHz) and well under the hits (about 10 to 15 dB under the music's peaks, practice); notifications short and soft.
 
 The ears (`audiocheck.Check`, a model-free report on the rendered video) check these: first sound, time to body level, silent gaps, dead air, the ending level, the share of cuts and of planned effects with an onset on their frame (with the chance level next to it), effects per 10 s, the longest stretch with nothing new, and clipping. Each target in the report names its source, and the ones that are our estimates say so.
+
+## Creator style (P6-05)
+
+> Built in `editor.v2.2`. The full design is [style-profile-v1](style-profile-v1.md); this is how it changes the editor.
+
+Sections 2 and 3 are the generic craft of a genre. A creator who shows us their own finished videos has a craft of their own, and where the two differ the creator's wins. The first creator we measured (five gym videos) lets takes run for 8 to 44 s, cuts 0 to 5 times a video, uses no effects, no grade and no exercise labels, puts one title in cream capitals in the upper third, and posts to a trending sound with a quiet intro of 2 to 3 s that lifts and builds to the end. Every default in the sections above is wrong for that creator, and the playbook said so nowhere.
+
+- **A profile per workspace** (medians, ranges and a confidence over 1 to 10 reference videos) is measured with ffmpeg and one Haiku read of the title, stored in `creator_style_profiles`, and read by the editor.
+- **The run context** carries a compact `creator_style` block as untrusted data; `plan_edit` ends with a note computed from the profile; the prompt has a section "Following the creator's style" that puts the creator's style over the playbook and over the prompt's own pacing, effect, hook and beat defaults. A workspace with no profile gets the same prompt behaviour as before.
+- **`check_edit` takes its thresholds from the profile and has a `style_match` check** (the table in section 7 gives the checks that change): the hook may run to the creator's first cut, the median shot may be as long as the creator's takes, effects are none for a creator who has none, a beat grid is not demanded when the creator's cuts are not on the beat, the duration is the creator's range. `style_match` reports a distance per dimension with a one-line fix. `cfctl eval editor` prints it.
+- **Two title styles** for the creator's titles: `title_series` (bold condensed uppercase, cream, no outline) and `title_lowercase` (a quiet lowercase line).
+- **Sound.** The profile's audio block describes the trending sound the creator puts on after our export (the quiet intro and the lift, the energy arc, the tempo, the loudness, whether the cuts sit on the beat, music only or with effects). The export itself stays sound-ready (P3-12); the profile tells the editor where the hook ends (at the lift), whether to snap cuts to a beat grid and whether to add sound effects, and it is the similarity key for recommending a trend sound in P5-02.

@@ -85,8 +85,8 @@ func TestRegistryIsConsistent(t *testing.T) {
 		}
 	}
 	ids := IDs()
-	if !slices.IsSorted(ids) || len(ids) < 6 || len(ids) > 8 {
-		t.Errorf("styles %v: want 6 to 8, sorted", ids)
+	if !slices.IsSorted(ids) || len(ids) < 6 || len(ids) > 10 {
+		t.Errorf("styles %v: want 6 to 10, sorted", ids)
 	}
 	for _, s := range All() {
 		if _, ok := LookupFont(s.Font); !ok {

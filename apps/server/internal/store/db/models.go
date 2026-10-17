@@ -178,6 +178,16 @@ type CreatorProfile struct {
 	UpdatedAt       time.Time
 }
 
+type CreatorStyleProfile struct {
+	WorkspaceID     ids.WorkspaceID
+	Version         int32
+	Profile         json.RawMessage
+	Measures        json.RawMessage
+	ReferencesCount int32
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
 type CreditAccount struct {
 	WorkspaceID    ids.WorkspaceID
 	Plan           string

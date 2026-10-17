@@ -23,7 +23,7 @@ func validPlanArgs(asset string) planArgs {
 
 func TestBuildPlanComputesTheBeatArithmetic(t *testing.T) {
 	asset := assetA
-	p, err := BuildPlan(validPlanArgs(asset), map[string]bool{asset: true}, AvailableFeatures())
+	p, err := BuildPlan(validPlanArgs(asset), map[string]bool{asset: true}, AvailableFeatures(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestBuildPlanComputesTheBeatArithmetic(t *testing.T) {
 	// No tempo: a beat counts for half a second, and the playbook defaults to the content type.
 	in := validPlanArgs(asset)
 	in.TempoBPM, in.Playbook, in.ContentType = 0, "", "talking"
-	p, err = BuildPlan(in, map[string]bool{asset: true}, AvailableFeatures())
+	p, err = BuildPlan(in, map[string]bool{asset: true}, AvailableFeatures(), nil)
 	if err != nil || p.BeatMs != 500 || p.Playbook != "talking" || p.PlaybookVersion != "talking.v2" {
 		t.Errorf("no tempo: %+v %v", p, err)
 	}
@@ -79,7 +79,7 @@ func TestBuildPlanRefusesWhatIsNotValid(t *testing.T) {
 	for _, c := range cases {
 		in := validPlanArgs(asset)
 		c.mut(&in)
-		_, err := BuildPlan(in, footage, AvailableFeatures())
+		_, err := BuildPlan(in, footage, AvailableFeatures(), nil)
 		var te *runtime.ToolError
 		if err == nil || !errorsAs(err, &te) || !strings.Contains(te.Msg, c.want) {
 			t.Errorf("%s: %v, want a message with %q", c.name, err, c.want)
@@ -87,7 +87,7 @@ func TestBuildPlanRefusesWhatIsNotValid(t *testing.T) {
 	}
 	// An effect the build cannot make is not planned.
 	in := validPlanArgs(asset)
-	if _, err := BuildPlan(in, footage, NewFeatures("op:add_clip")); err == nil || !strings.Contains(err.Error(), "punch_in is not available") {
+	if _, err := BuildPlan(in, footage, NewFeatures("op:add_clip"), nil); err == nil || !strings.Contains(err.Error(), "punch_in is not available") {
 		t.Errorf("an effect without its feature: %v", err)
 	}
 }
@@ -104,11 +104,11 @@ func TestPlanNotes(t *testing.T) {
 	in := validPlanArgs(assetA)
 	in.TargetLengthS = 60
 	in.Shots = []planArgsShot{{Role: "hook", What: "a", Beats: 6}, {Role: "build", What: "b", Beats: 4}, {Role: "build", What: "c", Beats: 4}, {Role: "build", What: "d", Beats: 4}, {Role: "ending", What: "e", Beats: 4}}
-	p, err := BuildPlan(in, nil, AvailableFeatures())
+	p, err := BuildPlan(in, nil, AvailableFeatures(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	notes := strings.Join(planNotes(p), "\n")
+	notes := strings.Join(planNotes(p, nil), "\n")
 	for _, want := range []string{"adds up to 10.6 s but your target is 60 s", "Shots 2 to 5 are all 4 beats long", "The hook shot is 2.9 s long"} {
 		if !strings.Contains(notes, want) {
 			t.Errorf("notes lack %q:\n%s", want, notes)
