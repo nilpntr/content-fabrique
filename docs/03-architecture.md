@@ -105,7 +105,7 @@ apps/
       auth/                # Clerk JWT verification, Clerk webhooks (Svix)
       store/               # pgx pool, repository functions, goose migrations (migrations/), sqlc queries (queries/) and generated code (db/)
       ids/                 # TypeID <-> UUIDv7 helpers and the typed IDs (WorkspaceID, UserID), D-24
-      jobs/                # River job args, worker registration, periodic jobs
+      jobs/                # River: client setup, job args, worker registration, periodic jobs, River UI, River's migrations
       storage/             # R2 (S3 API) client, presign, multipart, key layout
       media/               # ffprobe/ffmpeg wrappers: proxies, sprites, waveforms, keyframes
       analysis/            # shots, tagging, transcription, quality, pose; moment builder
@@ -583,13 +583,13 @@ Every model call goes through `llm.ClientFactory(workspace)` ([D-18](05-decision
 - **Hosting** ([D-09](05-decisions.md#d-09-hosting)):
   - Web on Cloudflare Workers.
   - Go `api` and `worker` on EU servers (e.g. Hetzner) as containers, reachable only through **Cloudflare Tunnel**.
-  - Workers are horizontally scalable, with per-queue concurrency limits: render and analysis are CPU-bound, agent runs are I/O-bound.
+  - Workers are horizontally scalable, with per-queue concurrency limits: render and analysis are CPU-bound, agent runs are I/O-bound. The worker's River client listens on the direct database URL; the api only inserts jobs, in the transaction of the write they belong to. River UI runs inside the worker on its own address behind Basic auth (`-river-ui-addr`, staging and local only).
   - When queues back up, burst render and analysis onto Cloudflare Containers with the same image.
 - **CI/CD** (GitHub Actions):
   - lint + test for Go and web, render golden tests, and OpenAPI drift check;
   - build the images (`api`, `worker`, `media-tools`) and deploy;
   - Renovate for dependencies;
-  - migrations run as a release step, as the schema-owning migrate role (`DATABASE_MIGRATE_URL`). The app roles on staging and production can read and write rows but not change the schema.
+  - migrations run as a release step, as the schema-owning migrate role (`DATABASE_MIGRATE_URL`): the goose migrations, then River's own tables (`cfctl migrate up` does both and grants the app role DML on them). The app roles on staging and production can read and write rows but not change the schema.
 - **Observability**: structured logs (`slog`) + OpenTelemetry traces and metrics. One trace spans API → job → agent turns → sandbox exec. Export goes to a managed backend (e.g. Axiom or Grafana Cloud), with error tracking in the web app. Dashboards: queue depth and latency per job type, render time per output minute, agent cost per run, failures by tool. AI Gateway analytics give a second view of model cost and latency per stage; our ledger stays the source of truth, because gateway cost is a best-effort estimate.
 - **Agent observability**: every run has a replayable event log, plus an admin view to inspect prompts, tool calls, cost and the resulting timeline.
 

@@ -52,6 +52,13 @@ type Config struct {
 	// DatabaseURL is DATABASE_URL: the pooled Postgres URL of the app role. It carries a password, so it is never
 	// logged. The migrate role's URL is not here: only `cfctl migrate` reads it.
 	DatabaseURL string
+	// DatabaseDirectURL is DATABASE_DIRECT_URL: the direct (not pooled) Postgres URL of the same app role. The worker's
+	// River client listens on it, because LISTEN/NOTIFY does not work through a transaction pooler. Optional here (the
+	// api does not use it); the worker refuses to start without it. It carries a password: never logged.
+	DatabaseDirectURL string
+	// RiverUIPassword is RIVER_UI_PASSWORD, the HTTP Basic password of River UI (worker flag -river-ui-addr). A secret:
+	// never logged. The worker refuses to serve River UI when it is empty.
+	RiverUIPassword string
 }
 
 // Getenv looks up an environment variable, like os.Getenv.
@@ -65,6 +72,10 @@ func Load(getenv Getenv) (Config, error) {
 		APIBaseURL:   strings.TrimSpace(getenv("API_BASE_URL")),
 		OTLPEndpoint: strings.TrimSpace(getenv("OTEL_EXPORTER_OTLP_ENDPOINT")),
 		DatabaseURL:  strings.TrimSpace(getenv("DATABASE_URL")),
+
+		DatabaseDirectURL: strings.TrimSpace(getenv("DATABASE_DIRECT_URL")),
+		// Not trimmed: Basic auth compares the password as typed.
+		RiverUIPassword: getenv("RIVER_UI_PASSWORD"),
 
 		AppBaseURL:         strings.TrimSpace(getenv("APP_BASE_URL")),
 		ClerkSecretKey:     strings.TrimSpace(getenv("CLERK_SECRET_KEY")),
@@ -119,6 +130,12 @@ func Load(getenv Getenv) (Config, error) {
 		errs = append(errs, errors.New("DATABASE_URL: required (see .env.example)"))
 	} else if err := ValidatePostgresURL(c.DatabaseURL); err != nil {
 		errs = append(errs, fmt.Errorf("DATABASE_URL: %w", err))
+	}
+
+	if c.DatabaseDirectURL != "" {
+		if err := ValidatePostgresURL(c.DatabaseDirectURL); err != nil {
+			errs = append(errs, fmt.Errorf("DATABASE_DIRECT_URL: %w", err))
+		}
 	}
 
 	if len(errs) > 0 {
@@ -184,8 +201,8 @@ func originOf(base, env string) (string, error) {
 
 // String describes the config without its secrets (database URL, Clerk keys), so a stray %v or %+v cannot leak them.
 func (c Config) String() string {
-	return fmt.Sprintf("config{env=%s api=%s app=%s clerk_secret=%t clerk_webhook_secret=%t otlp=%t}",
-		c.Env, c.APIBaseURL, c.AppOrigin, c.ClerkSecretKey != "", c.ClerkWebhookSecret != "", c.OTLPEndpoint != "")
+	return fmt.Sprintf("config{env=%s api=%s app=%s clerk_secret=%t clerk_webhook_secret=%t river_ui_password=%t otlp=%t}",
+		c.Env, c.APIBaseURL, c.AppOrigin, c.ClerkSecretKey != "", c.ClerkWebhookSecret != "", c.RiverUIPassword != "", c.OTLPEndpoint != "")
 }
 
 // GoString makes %#v print the same redacted form.

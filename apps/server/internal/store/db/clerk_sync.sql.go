@@ -154,6 +154,37 @@ func (q *Queries) GetWorkspaceMember(ctx context.Context, arg GetWorkspaceMember
 	return i, err
 }
 
+const insertWorkspaceIfNew = `-- name: InsertWorkspaceIfNew :one
+INSERT INTO workspaces (clerk_org_id, name, clerk_updated_at)
+VALUES ($1, $2, $3)
+ON CONFLICT (clerk_org_id) DO NOTHING
+RETURNING id, clerk_org_id, name, region, billing_mode, created_at, updated_at, deleted_at, clerk_updated_at
+`
+
+type InsertWorkspaceIfNewParams struct {
+	ClerkOrgID     string
+	Name           string
+	ClerkUpdatedAt int64
+}
+
+// A workspace seen for the first time. No row back means it exists already (SyncWorkspace then decides).
+func (q *Queries) InsertWorkspaceIfNew(ctx context.Context, arg InsertWorkspaceIfNewParams) (Workspace, error) {
+	row := q.db.QueryRow(ctx, insertWorkspaceIfNew, arg.ClerkOrgID, arg.Name, arg.ClerkUpdatedAt)
+	var i Workspace
+	err := row.Scan(
+		&i.ID,
+		&i.ClerkOrgID,
+		&i.Name,
+		&i.Region,
+		&i.BillingMode,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.ClerkUpdatedAt,
+	)
+	return i, err
+}
+
 const lockMembership = `-- name: LockMembership :exec
 SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
 `
@@ -183,6 +214,29 @@ func (q *Queries) MembershipDeletedSince(ctx context.Context, arg MembershipDele
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const pruneWebhookEvents = `-- name: PruneWebhookEvents :execrows
+DELETE FROM webhook_events
+WHERE CASE
+          WHEN event_type = 'organizationMembership.deleted' AND status = 'applied' THEN received_at < $1
+          ELSE received_at < $2
+      END
+`
+
+type PruneWebhookEventsParams struct {
+	TombstoneBefore time.Time
+	OtherBefore     time.Time
+}
+
+// The webhook delivery log, trimmed by the webhook_events_prune job. Membership deletes that were applied are the
+// tombstones MembershipDeletedSince reads, so they live longer than the rest (the cutoffs are the job's).
+func (q *Queries) PruneWebhookEvents(ctx context.Context, arg PruneWebhookEventsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneWebhookEvents, arg.TombstoneBefore, arg.OtherBefore)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const recordWebhookEvent = `-- name: RecordWebhookEvent :execrows

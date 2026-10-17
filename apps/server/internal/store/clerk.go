@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/nilpntr/content-fabrique/internal/ids"
@@ -77,12 +78,37 @@ func (s *Store) SyncWorkspace(ctx context.Context, in SyncWorkspaceInput) (Works
 	if strings.TrimSpace(in.ClerkOrgID) == "" {
 		return Workspace{}, false, fmt.Errorf("%w: clerk org id is required", ErrInvalid)
 	}
-	w, err := s.q.SyncWorkspace(ctx, db.SyncWorkspaceParams{ClerkOrgID: in.ClerkOrgID, Name: in.Name, ClerkUpdatedAt: in.ClerkUpdatedAt})
-	if errors.Is(err, pgx.ErrNoRows) {
-		w, err = s.q.GetWorkspaceByClerkOrgID(ctx, in.ClerkOrgID)
-		return w, false, mapErr(err)
+	var (
+		w       Workspace
+		applied bool
+	)
+	// One transaction: the insert and the created hook (a River job) commit or roll back together.
+	err := s.inTx(ctx, func(tx *Store) error {
+		var err error
+		w, err = tx.q.InsertWorkspaceIfNew(ctx, db.InsertWorkspaceIfNewParams{ClerkOrgID: in.ClerkOrgID, Name: in.Name, ClerkUpdatedAt: in.ClerkUpdatedAt})
+		if err == nil {
+			applied = true
+			if hook := tx.hooks.workspaceCreated; hook != nil {
+				return hook(ctx, tx, w)
+			}
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		// It exists: rename it when this version is newer.
+		w, err = tx.q.SyncWorkspace(ctx, db.SyncWorkspaceParams{ClerkOrgID: in.ClerkOrgID, Name: in.Name, ClerkUpdatedAt: in.ClerkUpdatedAt})
+		if errors.Is(err, pgx.ErrNoRows) { // stale, a replay, or deleted
+			w, err = tx.q.GetWorkspaceByClerkOrgID(ctx, in.ClerkOrgID)
+			return err
+		}
+		applied = err == nil
+		return err
+	})
+	if err != nil {
+		return Workspace{}, false, mapErr(err)
 	}
-	return w, true, mapErr(err)
+	return w, applied, nil
 }
 
 // DeleteWorkspace marks the workspace deleted and removes its memberships. The workspace's data stays in place. A
@@ -240,4 +266,12 @@ func (s *Store) inTx(ctx context.Context, fn func(tx *Store) error) error {
 		return fn(s)
 	}
 	return s.InTx(ctx, fn)
+}
+
+// PruneWebhookEvents deletes delivery records received before otherBefore, except the applied membership deletes (the
+// tombstones MembershipDeletedSince reads), which are deleted when received before tombstoneBefore. It returns how
+// many rows went. The webhook_events_prune job calls it.
+func (s *Store) PruneWebhookEvents(ctx context.Context, otherBefore, tombstoneBefore time.Time) (int64, error) {
+	n, err := s.q.PruneWebhookEvents(ctx, db.PruneWebhookEventsParams{OtherBefore: otherBefore, TombstoneBefore: tombstoneBefore})
+	return n, mapErr(err)
 }
