@@ -417,8 +417,8 @@ jobs:
           base=debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
           echo "runc : $(docker run --rm "$base" cat /proc/version)"
           echo "runsc: $(docker run --rm --runtime runsc "$base" cat /proc/version)"
-          # gVisor presents itself as a 4.4.0 kernel.
-          docker run --rm --runtime runsc "$base" cat /proc/version | grep -q 'Linux version 4.4.0'
+          # gVisor's kernel string says so (for example 4.19.0-gvisor).
+          docker run --rm --runtime runsc "$base" cat /proc/version | grep -q 'gvisor'
 
       - name: Build the image
         run: docker build --tag media-tools:ci packages/media-tools
