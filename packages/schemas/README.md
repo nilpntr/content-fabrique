@@ -13,7 +13,7 @@ timeline/
   v1.test.ts            Ajv tests: every fixture, the render-fixture coverage and the edge rules
   fixtures/
     valid/*.json        31 specs that pass the schema (and the Go semantic checks, given assets.json)
-    invalid/*.json      43 specs, each of which must raise exactly one issue code (named in expect.json)
+    invalid/*.json      46 specs, each of which must raise exactly one issue code (named in expect.json)
     expect.json         invalid fixture file -> { code, path?, keyword? }
     render.txt          the 20 valid fixtures that are also render fixtures (P3-03)
     assets.json         the asset catalog the semantic fixtures assume (asset_id -> duration_ms)
@@ -44,7 +44,7 @@ Everything that needs to compare values or look something up lives in Go (`apps/
 ## Fixtures
 
 - Fixtures are plain specs. The schema is closed (no `$comment` property anywhere), so expectations live in `fixtures/expect.json`, which the TS test and the Go tests both read.
-- An invalid fixture that expects `schema` must fail the JSON Schema, and Ajv must report an error at the `path` (and `keyword`, where given) in `expect.json`. One that expects any other code (`gap`, `overlap`, `duplicate_id`, `source_out_of_range`, `shot_too_short`, `duration_out_of_range`, `outside_timeline`, `unsafe_text`, `unknown_asset`, `transition_too_long`, `unlicensed_audio`, `fade_too_long`) must pass it: the Go layer catches it and raises that code only.
+- An invalid fixture that expects `schema` must fail the JSON Schema, and Ajv must report an error at the `path` (and `keyword`, where given) in `expect.json`. One that expects any other code (`gap`, `overlap`, `duplicate_id`, `source_out_of_range`, `shot_too_short`, `duration_out_of_range`, `outside_timeline`, `unsafe_text`, `unknown_asset`, `transition_too_long`, `unlicensed_audio`, `fade_too_long`, `wrong_asset_kind`, `first_transition`) must pass it: the Go layer catches it and raises that code only.
 - `assets.json` is the catalog the semantic fixtures assume: duration, `kind` (`video`, `audio`) and `rights` (`licensed`, `attested`, `none`) per asset.
 - Ids in the fixtures are real TypeIDs (lowercase prefix, then 26 characters of Crockford base32 whose first character is 0 to 7).
 - Adding a fixture: add the file, keep the counts the test expects (or change them on purpose), and add it to `render.txt` only if it should be rendered.
