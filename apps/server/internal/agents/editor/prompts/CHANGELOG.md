@@ -1,19 +1,39 @@
 # Editor system prompt: changelog
 
-The editor agent's system prompt is `editor.v1.4.md`, embedded in the Go binary. The text the model receives is the runtime's
+The editor agent's system prompt is `editor.v1.5.md`, embedded in the Go binary. The text the model receives is the runtime's
 preamble (`runtime.SystemPreamble`, the untrusted-data rule) followed by this file. The prompt version (`PromptVersion` in
 `prompt.go`) is stored in every run's input, so a run can always be tied to the text it was given.
 
 Rules for changing it:
 
 - A change to the text is a new entry here and, when it changes behaviour on purpose, a new `PromptVersion` (a new file, such as
-  `editor.v1.2.md`). A typo fix or a clarification that changes nothing keeps the version and says so here.
+  `editor.v1.5.md`). A typo fix or a clarification that changes nothing keeps the version and says so here.
 - The prompt is part of every request's cache key, so any change starts a cold prompt cache (one cache write, then reads).
   Record mode cassettes depend on it too: after a change, re-record with
   `CF_UPDATE_CASSETTES=1 go test ./internal/agents/editor -run TestEditorCassettesAreCurrent`.
 - The cache hit rate of a run is visible: `cfctl agent show <run>` prints the cache write and read tokens of every model call and
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
+
+## editor.v1.5 (2026-10-17)
+
+Clip analysis landed (P2-02 shots, P2-03 quality signals, the deterministic slice of P2-09 reps) with the `find_moments` tool and an
+analysis line per clip in the run context and in `list_footage`. The file is now `editor.v1.5.md`. Cause: the founder's first
+Opus edit of real gym footage had cuts of exactly 3 s that landed mid-rep, shots of the lifter standing between sets, and
+exposure that jumped between angles; the editor saw 3 to 8 stills per 90 s clip and could not tell where the reps were.
+
+- How you work, step 2: find the moments first (`find_moments`), then view each clip once to check what numbers cannot (framing,
+  setting, the right exercise).
+- Pacing: cut on rep boundaries, with `start_ms` and `end_ms` of a rep as in and out points; never into dead time; vary the
+  length (hook of 1 to 2 s, full reps where the movement is the point, faster cuts toward the end, the last shot held a little
+  longer); prefer reps that score 0.7 and above and avoid the flagged ones.
+- New paragraph "Exposure": keep it consistent from shot to shot, group clips of similar brightness, prefer the better lit of two
+  equal moments, say so in `finish` when a dark clip has to be mixed in. There is no automatic exposure correction yet (the
+  `auto` look preset is not built; the analysis stores a per-shot gain and gamma hint for it).
+- The analysis lines and `find_moments` answers are measured from the picture, not words of a person, so their times can be
+  relied on (they never carry the clip's title or tags).
+- `rep_candidate` moments (slow, tired reps next to a set that do not repeat clearly) are returned below the reps; use them only after looking, never as ready cuts, and never skip them as dead time.
+- Cassettes re-recorded (the prompt, the tool list and the run context changed).
 
 ## editor.v1.4 (2026-10-17)
 

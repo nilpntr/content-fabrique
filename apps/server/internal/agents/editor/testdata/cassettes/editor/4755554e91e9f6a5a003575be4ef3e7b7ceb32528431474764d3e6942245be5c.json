@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "2f8717f102ca1866e84cf4b1a054b37018c62909cd7a9a47ef0755620f68872e",
-  "recorded_at": "2026-10-17T15:23:59Z",
+  "key": "4755554e91e9f6a5a003575be4ef3e7b7ceb32528431474764d3e6942245be5c",
+  "recorded_at": "2026-10-17T15:36:56Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 16000,
@@ -27,6 +27,7 @@
       "get_brief",
       "list_footage",
       "view_clip",
+      "find_moments",
       "get_timeline",
       "get_comments",
       "edit_timeline",
@@ -42,8 +43,12 @@
       {
         "type": "tool_use",
         "id": "toolu_ed_1",
-        "name": "list_footage",
-        "input": {}
+        "name": "find_moments",
+        "input": {
+          "asset_id": "ast_01jc000000e00800000000000a",
+          "kind": "rep",
+          "min_score": 0.7
+        }
       }
     ],
     "usage": {

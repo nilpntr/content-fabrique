@@ -38,6 +38,7 @@ type Store struct {
 type hooks struct {
 	workspaceCreated func(ctx context.Context, tx *Store, w Workspace) error
 	quickLookDue     func(ctx context.Context, tx *Store, a Asset) error
+	analysisDue      func(ctx context.Context, tx *Store, a Asset) error
 }
 
 // SetWorkspaceCreatedHook registers fn to run, in the transaction that inserts it, for every workspace SyncWorkspace

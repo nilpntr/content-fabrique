@@ -103,7 +103,7 @@ func TestContextLastStepAlwaysFits(t *testing.T) {
 		rows[i] = store.ProjectFootageRow{AssetID: newAssetID(), Kind: "video", Title: strings.Repeat("背", 255), Description: strings.Repeat("\"", 100_000), DurationMs: &dur, Width: &w, Height: &h, HasAudio: &yes}
 	}
 	last := contextSteps[len(contextSteps)-1]
-	blocks := contextBlocks("9:16", strings.Repeat("背", 4000), rows, "Timeline: none yet (version 0).", last)
+	blocks := contextBlocks("9:16", strings.Repeat("背", 4000), rows, nil, "Timeline: none yet (version 0).", last)
 	if size := encodedSize(blocks); size > maxContextBytes {
 		t.Fatalf("the last step is %d bytes", size)
 	}

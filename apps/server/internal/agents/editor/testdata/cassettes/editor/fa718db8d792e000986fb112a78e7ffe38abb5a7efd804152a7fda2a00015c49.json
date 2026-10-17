@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "4c18d1162cf529ca9f8474a323c9751d3fb0549dcb87ee605870af7a969072c1",
-  "recorded_at": "2026-10-17T15:23:59Z",
+  "key": "fa718db8d792e000986fb112a78e7ffe38abb5a7efd804152a7fda2a00015c49",
+  "recorded_at": "2026-10-17T15:36:56Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 16000,
@@ -87,6 +87,7 @@
       "get_brief",
       "list_footage",
       "view_clip",
+      "find_moments",
       "get_timeline",
       "get_comments",
       "edit_timeline",

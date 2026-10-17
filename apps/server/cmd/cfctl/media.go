@@ -18,6 +18,7 @@ import (
 const mediaUsage = `Usage:
   cfctl media probe <file> [--provider local|docker|hardened] [--json] [flags]
   cfctl media bench [--providers docker,hardened] [--runs 3] [flags]
+  cfctl media analyze <proxy.mp4> [--provider local|docker|hardened] [--hint words] [--json]   (run "cfctl media analyze -h")
 
 probe prints a file's normalised metadata: container, duration, display size (after rotation), frame rate, codecs,
 colour (HDR is flagged) and every audio stream with the one that would be used. Nothing from the file's tags is shown.
@@ -90,6 +91,8 @@ func cmdMedia(args []string, stdout, stderr io.Writer, deps mediaDeps) int {
 		return cmdMediaProbe(args[1:], stdout, stderr, deps)
 	case "bench":
 		return cmdMediaBench(args[1:], stdout, stderr, deps)
+	case "analyze":
+		return cmdMediaAnalyze(args[1:], stdout, stderr, deps)
 	default:
 		_, _ = fmt.Fprintf(stderr, "cfctl media: unknown command %q\n\n%s", args[0], mediaUsage)
 		return 2

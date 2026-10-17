@@ -85,10 +85,19 @@ func (s *Store) ApplyQuickLook(ctx context.Context, ws ids.WorkspaceID, id ids.A
 	if tags == nil {
 		tags = []string{}
 	}
-	a, err := s.q.ApplyQuickLook(ctx, db.ApplyQuickLookParams{
-		WorkspaceID: ws, ID: id, Title: r.Title, Description: r.Description, Tags: tags, Detail: detailOrEmpty(r.Detail),
+	var a Asset
+	err := s.inTx(ctx, func(tx *Store) error {
+		var err error
+		a, err = tx.q.ApplyQuickLook(ctx, db.ApplyQuickLookParams{
+			WorkspaceID: ws, ID: id, Title: r.Title, Description: r.Description, Tags: tags, Detail: detailOrEmpty(r.Detail),
+		})
+		if err != nil {
+			return mapErr(err)
+		}
+		// The tags label the clip analysis's moments too (the analysis may have run before the quick look landed).
+		return mapErr(tx.q.RelabelAssetMoments(ctx, db.RelabelAssetMomentsParams{WorkspaceID: ws, AssetID: id, Labels: tags}))
 	})
-	return a, mapErr(err)
+	return a, err
 }
 
 // FailQuickLook marks the quick look failed and records the detail (an error code, the frames when they were cut). The
