@@ -139,6 +139,8 @@ The README asks for a pluggable layer that can be "a hosted one or this one your
 - `hardened`: containers under **gVisor (`runsc`)** on our own worker hosts. No network except presigned R2 URLs; non-root; read-only rootfs; CPU, memory and time limits. **All deterministic media jobs run here.** gVisor needs no KVM, so it runs on ordinary VMs too; measure its I/O overhead in the P1-03 spike.
 - `cloudflare`: the **Cloudflare Sandbox SDK** through a thin Worker shim, the **default for the agent escape hatch**. Each job gets its own sandbox with internet disabled. The job's R2 prefix is mounted through `S3Gateway`, so **credentials never enter the sandbox**. Limits: 4 vCPU / 12 GiB / 20 GB disk per instance; ≈ $0.072 per vCPU-hour.
 
+**Validated in P1-03 (2026-10-17).** On a GitHub-hosted 4-vCPU runner with runsc 20261012.0, a 30 s 1080p H.264 transcode takes 7.41 s under `hardened` against 7.46 s under `docker` (-0.8 %, noise), a 0.9 GB read-and-write copy is within 5 %, and the only measured cost is start-up, +30 to 50 ms per job. gVisor stays the `hardened` runtime; repeat the benchmark on the first real worker host. Details: [benchmarks/2026-10-17-gvisor-overhead.md](benchmarks/2026-10-17-gvisor-overhead.md).
+
 **Alternatives behind the same interface:**
 - E2B (Firecracker microVMs, ≈ $0.166/h for 2 vCPU / 4 GiB).
 - Claude Managed Agents, when we want Anthropic to run the free-form loop: `cloud` environment, or `self_hosted` on our `hardened` hosts through the Go environment worker.
