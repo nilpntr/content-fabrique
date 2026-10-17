@@ -32,16 +32,17 @@ var (
 
 // UnchargedFailureReasons are the failure reasons (agent_runs.failure_reason, the runtime's Fail* constants; a runtime test keeps the names
 // in step) of a run that failed for a reason of the creator's own, so that it counts toward the cap on runs that end without a charge:
-//   - budget: the run spent its budget and had nothing usable to finish on;
 //   - refusal: the model declined to work on the content;
 //   - context_window_exceeded: the conversation (the footage, the instructions) no longer fits the model;
 //   - invalid_input, context_failed: the instructions or the project's data could not be used.
 //
-// A failure that is ours does not count, so a bad day of the model API or of our own services never locks a creator out: model_error,
+// A failure that is ours does not count, so a bad day of the model API or of our own services never locks a creator out: budget (the run
+// budget comes from the plan's price list, so running out of it is our sizing, not the creator's behaviour; budget fitting and OnLimit end
+// such a run gracefully once a preview exists), model_error,
 // model_access, model_outcome_unknown, max_tokens (the model could not fit its answer), event_too_large, internal_error, ledger_error,
 // corrupt_log, unknown_agent, too_many_resumes, unexpected_stop_reason, request_cap, replay_miss, and the spend caps (daily_cap,
 // platform_spend_paused, spend_cap_busy), which already stop the spending.
-var UnchargedFailureReasons = []string{"budget", "refusal", "context_window_exceeded", "invalid_input", "context_failed"}
+var UnchargedFailureReasons = []string{"refusal", "context_window_exceeded", "invalid_input", "context_failed"}
 
 // ErrTooManyUncharged is wrapped by *TooManyUnchargedError.
 var ErrTooManyUncharged = errors.New("credits: too many runs ended without a charge today")

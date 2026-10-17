@@ -269,7 +269,7 @@ func TestRequiredBillingIsTheLlmWorkspaceKey(t *testing.T) {
 // the failures that are ours.
 func TestUnchargedFailureReasonsAreRuntimeReasons(t *testing.T) {
 	known := map[string]bool{
-		FailBudget: true, FailRefusal: true, FailContextWindow: true, FailBadInput: true, FailContext: true,
+		FailRefusal: true, FailContextWindow: true, FailBadInput: true, FailContext: true,
 	}
 	for _, r := range credits.UnchargedFailureReasons {
 		if !known[r] {
@@ -280,7 +280,7 @@ func TestUnchargedFailureReasonsAreRuntimeReasons(t *testing.T) {
 	for r := range known {
 		t.Errorf("%q should count and does not", r)
 	}
-	ours := []string{FailModelError, FailModelAccess, FailModelOutcomeUnknown, FailMaxTokens, FailEventTooLarge, FailInternal, FailLedger, FailCorruptLog,
+	ours := []string{FailBudget, FailModelError, FailModelAccess, FailModelOutcomeUnknown, FailMaxTokens, FailEventTooLarge, FailInternal, FailLedger, FailCorruptLog,
 		FailUnknownAgent, FailTooManyResumes, FailStopReason, FailRequestCap, FailReplayMiss, FailDailyCap, FailPlatformSpendPaused, FailSpendCapBusy}
 	for _, r := range ours {
 		for _, c := range credits.UnchargedFailureReasons {

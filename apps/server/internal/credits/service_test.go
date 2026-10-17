@@ -527,7 +527,7 @@ func TestUnchargedRunsAreCountedAndCappedPerDay(t *testing.T) {
 
 	// Not counted: nothing was spent; a failure of ours; a charged run.
 	r.endRun(ws, run(), 0, store.RunEnd{Status: store.AgentCancelled})
-	for _, ours := range []string{"model_error", "internal_error", "model_outcome_unknown", "max_tokens", "daily_cap", "platform_spend_paused"} {
+	for _, ours := range []string{"budget", "model_error", "internal_error", "model_outcome_unknown", "max_tokens", "daily_cap", "platform_spend_paused"} {
 		r.endRun(ws, run(), 5_000, fail(ours))
 	}
 	made := run()
@@ -551,9 +551,9 @@ func TestUnchargedRunsAreCountedAndCappedPerDay(t *testing.T) {
 	}
 	// Two below the cap: one more run starts.
 	last := run()
-	r.endRun(ws, last, 5_000, fail("budget"))
+	r.endRun(ws, last, 5_000, fail("refusal"))
 	if n := r.uncharged(ws); n != 3 {
-		t.Fatalf("after a budget failure: %d", n)
+		t.Fatalf("after a refusal: %d", n)
 	}
 
 	// At the cap the next start is refused with the cap in the error, and nothing is created or held.
