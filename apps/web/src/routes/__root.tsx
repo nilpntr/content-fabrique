@@ -8,6 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { THEME_SCRIPT } from "@/hooks/use-theme";
 import { decideAccess, isBarePath, SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/auth-guard";
 import { getAppOrigin } from "@/lib/app-origin";
+import { ApiClientProvider } from "@/lib/api/provider";
 import { resolveSession } from "@/lib/client-session";
 import { getSidebarOpen } from "@/lib/sidebar-open";
 import { NotFound } from "@/pages/not-found";
@@ -77,11 +78,13 @@ function RootComponent() {
       afterSignOutUrl={SIGN_IN_PATH}
       allowedRedirectOrigins={[appOrigin]}
     >
-      <TooltipProvider>
-        <ToastProvider>
-          {isBarePath(pathname) ? <BareLayout /> : <AppShell defaultSidebarOpen={sidebarOpen} />}
-        </ToastProvider>
-      </TooltipProvider>
+      <ApiClientProvider>
+        <TooltipProvider>
+          <ToastProvider>
+            {isBarePath(pathname) ? <BareLayout /> : <AppShell defaultSidebarOpen={sidebarOpen} />}
+          </ToastProvider>
+        </TooltipProvider>
+      </ApiClientProvider>
     </ClerkProvider>
   );
 }

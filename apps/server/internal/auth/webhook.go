@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/nilpntr/content-fabrique/internal/api"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	svix "github.com/svix/svix-webhooks/go"
@@ -33,9 +34,9 @@ const (
 
 // Error codes and statuses of the webhook endpoint.
 const (
-	CodeInvalidSignature = "invalid_signature" // 400
-	CodeInvalidEvent     = "invalid_event"     // 400: the body could not be read
-	CodePayloadTooLarge  = "payload_too_large" // 413
+	CodeInvalidSignature = api.ErrorCodeInvalidSignature // 400
+	CodeInvalidEvent     = api.ErrorCodeInvalidEvent     // 400: the body could not be read
+	CodePayloadTooLarge  = api.ErrorCodePayloadTooLarge  // 413
 
 	webhookStatusApplied   = "applied"
 	webhookStatusDuplicate = "duplicate"

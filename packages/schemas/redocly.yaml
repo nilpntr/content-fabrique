@@ -1,0 +1,11 @@
+# Redocly CLI configuration for `bun run lint:api` (CI runs it in the contract job). recommended-strict is the recommended
+# ruleset with every warning raised to an error, so any finding makes the lint exit non-zero.
+extends:
+  - recommended-strict
+rules:
+  # No public contact page yet.
+  info-contact: off
+  # The TypeID schemas of D-24 are defined for every prefix before the endpoints that use them exist.
+  no-unused-components: off
+  # The local development server is listed on purpose.
+  no-server-example.com: off

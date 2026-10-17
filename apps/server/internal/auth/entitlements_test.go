@@ -122,8 +122,8 @@ func TestMeCarriesTheEntitlements(t *testing.T) {
 		ents *fakeEnts
 		want string
 	}{
-		"no plan":     {&fakeEnts{}, `"entitlements":{"plan":"none","status":"none","active":false,"current_period_end":null}`},
-		"with a plan": {&fakeEnts{e: store.Entitlements{Plan: plans.Creator, Status: store.StatusActive, Active: true, CurrentPeriodEnd: &end}}, `"entitlements":{"plan":"creator","status":"active","active":true,"current_period_end":"2026-12-31T23:59:59Z"}`},
+		"no plan":     {&fakeEnts{}, `"entitlements":{"active":false,"current_period_end":null,"plan":"none","status":"none"}`},
+		"with a plan": {&fakeEnts{e: store.Entitlements{Plan: plans.Creator, Status: store.StatusActive, Active: true, CurrentPeriodEnd: &end}}, `"entitlements":{"active":true,"current_period_end":"2026-12-31T23:59:59Z","plan":"creator","status":"active"}`},
 	} {
 		mw, err := NewMiddleware(MiddlewareConfig{AppOrigin: testOrigin, JWKSClient: &jwks.Client{Backend: f.backend}}, &fakeResolver{ret: testPrincipal()})
 		if err != nil {
@@ -142,7 +142,7 @@ func TestMeCarriesTheEntitlements(t *testing.T) {
 	// A plan that cannot be read does not fail /v1/me: the identity is still answered, the plan is unknown and never active.
 	var logs strings.Builder
 	rec := get(mw(MeHandler(&fakeEnts{err: errors.New("boom: password=hunter2")}, slog.New(slog.NewTextHandler(&logs, nil)))), "Bearer "+f.token(t, nil))
-	want := `"entitlements":{"plan":"none","status":"unknown","active":false,"current_period_end":null}`
+	want := `"entitlements":{"active":false,"current_period_end":null,"plan":"none","status":"unknown"}`
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), want) || !strings.Contains(rec.Body.String(), `"email":"ada@example.com"`) {
 		t.Fatalf("/v1/me with an unreadable plan: %d %s", rec.Code, rec.Body)
 	}
@@ -162,7 +162,7 @@ func TestMountedPaywall(t *testing.T) {
 	dir.orgs["org_bob"] = ClerkOrg{ID: "org_bob", Name: "Bob Studio", UpdatedAt: 1}
 
 	mux := http.NewServeMux()
-	v1, err := Mount(mux, Deps{
+	_, err := Mount(mux, Deps{
 		Config:     config.Config{AppOrigin: testOrigin, ClerkSecretKey: "sk_test_unused", ClerkWebhookSecret: testWebhookSecret},
 		Store:      st,
 		Directory:  dir,
@@ -171,7 +171,6 @@ func TestMountedPaywall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v1.Handle("GET /v1/library/summary", LibrarySummaryHandler())
 	// A token for a user acting in an organization.
 	token := func(user, org string) string {
 		return f.token(t, map[string]any{"sub": user, "o": map[string]any{"id": org, "rol": "admin", "slg": "x"}})
@@ -195,7 +194,7 @@ func TestMountedPaywall(t *testing.T) {
 		t.Fatalf("/v1/me without a plan: %d %s", rec.Code, rec.Body)
 	}
 	rec = call("/v1/workspace/plan", ada)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"active":false`) || !strings.Contains(rec.Body.String(), `"limits":{"exports":0,"storage_gb":0,"ai_billing":""}`) {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"active":false`) || !strings.Contains(rec.Body.String(), `"limits":{"ai_billing":"","exports":0,"storage_gb":0}`) {
 		t.Fatalf("/v1/workspace/plan without a plan: %d %s", rec.Code, rec.Body)
 	}
 	// Authentication comes first: no token is 401, not 402.
@@ -215,11 +214,11 @@ func TestMountedPaywall(t *testing.T) {
 		t.Fatalf("/v1/library/summary with a plan: %d %s", rec.Code, rec.Body)
 	}
 	rec = call("/v1/me", ada)
-	if !strings.Contains(rec.Body.String(), `"entitlements":{"plan":"creator","status":"active","active":true,"current_period_end":null}`) {
+	if !strings.Contains(rec.Body.String(), `"entitlements":{"active":true,"current_period_end":null,"plan":"creator","status":"active"}`) {
 		t.Fatalf("/v1/me with a plan: %s", rec.Body)
 	}
 	rec = call("/v1/workspace/plan", ada)
-	if !strings.Contains(rec.Body.String(), `"limits":{"exports":15,"storage_gb":50,"ai_billing":"managed"}`) || !strings.Contains(rec.Body.String(), `"source":"manual"`) {
+	if !strings.Contains(rec.Body.String(), `"limits":{"ai_billing":"managed","exports":15,"storage_gb":50}`) || !strings.Contains(rec.Body.String(), `"source":"manual"`) {
 		t.Fatalf("/v1/workspace/plan with a plan: %s", rec.Body)
 	}
 	wantError(t, call("/v1/library/summary", bob), http.StatusPaymentRequired, "plan_required")
