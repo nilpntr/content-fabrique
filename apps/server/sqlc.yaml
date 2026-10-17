@@ -28,5 +28,9 @@ sql:
             go_type: "github.com/google/uuid.UUID"
           - db_type: "timestamptz"
             go_type: "time.Time"
+          # A nullable timestamp (deleted_at) is a *time.Time, nil when unset.
+          - db_type: "timestamptz"
+            nullable: true
+            go_type: { import: "time", type: "Time", pointer: true }
           - db_type: "jsonb"
             go_type: "encoding/json.RawMessage"

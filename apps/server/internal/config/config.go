@@ -23,6 +23,9 @@ const (
 // API_BASE_URL is the public https URL behind Cloudflare Tunnel, which has no port.
 const DefaultAPIPort = "8080"
 
+// DefaultAppBaseURL is where the web dev server listens, the APP_BASE_URL of a developer machine.
+const DefaultAppBaseURL = "http://localhost:3000"
+
 // Config is the parsed service configuration.
 type Config struct {
 	// Env is the environment name (CF_ENV).
@@ -34,6 +37,18 @@ type Config struct {
 	// OTLPEndpoint is OTEL_EXPORTER_OTLP_ENDPOINT. Empty disables trace export. The OpenTelemetry SDK
 	// reads this and OTEL_EXPORTER_OTLP_HEADERS itself, so the value is only used to decide whether to export.
 	OTLPEndpoint string
+	// AppBaseURL is the public base URL of the web app (APP_BASE_URL), as given.
+	AppBaseURL string
+	// AppOrigin is AppBaseURL reduced to its origin (scheme://host[:port], no path or trailing slash). It is the one
+	// origin the CORS allowlist admits and the only "authorized party" of a session token.
+	AppOrigin string
+	// ClerkSecretKey is CLERK_SECRET_KEY. The API verifies session tokens and calls Clerk's Backend API with it. Empty
+	// means Clerk is not configured: the authenticated endpoints answer 503 instead of the process refusing to start
+	// (the ci environment holds no Clerk secrets, D-22). It is a secret and is never logged.
+	ClerkSecretKey string
+	// ClerkWebhookSecret is CLERK_WEBHOOK_SECRET, the Svix signing secret of the webhook endpoint. Empty means the
+	// endpoint answers 503. A secret: never logged.
+	ClerkWebhookSecret string
 	// DatabaseURL is DATABASE_URL: the pooled Postgres URL of the app role. It carries a password, so it is never
 	// logged. The migrate role's URL is not here: only `cfctl migrate` reads it.
 	DatabaseURL string
@@ -50,6 +65,10 @@ func Load(getenv Getenv) (Config, error) {
 		APIBaseURL:   strings.TrimSpace(getenv("API_BASE_URL")),
 		OTLPEndpoint: strings.TrimSpace(getenv("OTEL_EXPORTER_OTLP_ENDPOINT")),
 		DatabaseURL:  strings.TrimSpace(getenv("DATABASE_URL")),
+
+		AppBaseURL:         strings.TrimSpace(getenv("APP_BASE_URL")),
+		ClerkSecretKey:     strings.TrimSpace(getenv("CLERK_SECRET_KEY")),
+		ClerkWebhookSecret: strings.TrimSpace(getenv("CLERK_WEBHOOK_SECRET")),
 	}
 
 	if c.Env == "" {
@@ -69,6 +88,25 @@ func Load(getenv Getenv) (Config, error) {
 		errs = append(errs, fmt.Errorf("API_BASE_URL: %w", err))
 	}
 	c.APIListenAddr = addr
+
+	// The CORS allowlist and the token's authorized party are built from this, so staging and production must say it:
+	// a silent localhost default there would lock every real user out.
+	if c.AppBaseURL == "" && c.Env != EnvStaging && c.Env != EnvProduction {
+		c.AppBaseURL = DefaultAppBaseURL
+	}
+	if appOrigin, err := originOf(c.AppBaseURL, c.Env); err != nil {
+		errs = append(errs, fmt.Errorf("APP_BASE_URL: %w", err))
+	} else {
+		c.AppOrigin = appOrigin
+	}
+
+	// The messages never repeat the values: they are secrets.
+	if c.ClerkSecretKey != "" && !strings.HasPrefix(c.ClerkSecretKey, "sk_") {
+		errs = append(errs, errors.New("CLERK_SECRET_KEY: must be a Clerk secret key (sk_test_... or sk_live_...)"))
+	}
+	if c.ClerkWebhookSecret != "" && !strings.HasPrefix(c.ClerkWebhookSecret, "whsec_") {
+		errs = append(errs, errors.New("CLERK_WEBHOOK_SECRET: must be a Svix signing secret (whsec_...)"))
+	}
 
 	if c.OTLPEndpoint != "" {
 		if u, err := url.Parse(c.OTLPEndpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
@@ -114,6 +152,44 @@ func listenAddr(base string) (string, error) {
 	}
 	return ":" + port, nil
 }
+
+// originOf reduces an app base URL to its origin. It must be an absolute http(s) URL with a host and no credentials,
+// query or fragment; a path other than "/" is refused, because an origin has none. staging and production must be https.
+func originOf(base, env string) (string, error) {
+	u, err := url.Parse(base)
+	if err != nil || u.Scheme == "" || u.Hostname() == "" {
+		return "", errors.New("must be an absolute http(s) URL")
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("scheme %q is not http or https", u.Scheme)
+	}
+	if u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+		return "", errors.New("must be a bare origin: no credentials, path, query or fragment")
+	}
+	if u.Scheme != "https" && (env == EnvStaging || env == EnvProduction) {
+		return "", errors.New("must be https in staging and production")
+	}
+	// The same form a browser sends in the Origin header: lowercase scheme and host, the port only when it is not
+	// the default of the scheme.
+	host := strings.ToLower(u.Hostname())
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	result := u.Scheme + "://" + host
+	if p := u.Port(); p != "" && (u.Scheme != "http" || p != "80") && (u.Scheme != "https" || p != "443") {
+		result += ":" + p
+	}
+	return result, nil
+}
+
+// String describes the config without its secrets (database URL, Clerk keys), so a stray %v or %+v cannot leak them.
+func (c Config) String() string {
+	return fmt.Sprintf("config{env=%s api=%s app=%s clerk_secret=%t clerk_webhook_secret=%t otlp=%t}",
+		c.Env, c.APIBaseURL, c.AppOrigin, c.ClerkSecretKey != "", c.ClerkWebhookSecret != "", c.OTLPEndpoint != "")
+}
+
+// GoString makes %#v print the same redacted form.
+func (c Config) GoString() string { return c.String() }
 
 // IsLocal reports whether the config describes a developer machine, where logs are human-readable.
 func (c Config) IsLocal() bool { return c.Env == EnvLocal }

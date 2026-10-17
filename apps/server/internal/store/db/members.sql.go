@@ -16,7 +16,7 @@ const addWorkspaceMember = `-- name: AddWorkspaceMember :one
 INSERT INTO workspace_members (workspace_id, user_id, role)
 VALUES ($1, $2, $3)
 ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = EXCLUDED.role
-RETURNING workspace_id, user_id, role, created_at, updated_at
+RETURNING workspace_id, user_id, role, created_at, updated_at, clerk_updated_at
 `
 
 type AddWorkspaceMemberParams struct {
@@ -35,6 +35,7 @@ func (q *Queries) AddWorkspaceMember(ctx context.Context, arg AddWorkspaceMember
 		&i.Role,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ClerkUpdatedAt,
 	)
 	return i, err
 }

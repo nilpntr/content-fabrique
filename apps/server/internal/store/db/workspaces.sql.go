@@ -14,7 +14,7 @@ import (
 const createWorkspace = `-- name: CreateWorkspace :one
 INSERT INTO workspaces (clerk_org_id, name, plan, region, billing_mode)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, clerk_org_id, name, plan, region, billing_mode, created_at, updated_at
+RETURNING id, clerk_org_id, name, plan, region, billing_mode, created_at, updated_at, deleted_at, clerk_updated_at
 `
 
 type CreateWorkspaceParams struct {
@@ -44,12 +44,14 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 		&i.BillingMode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.ClerkUpdatedAt,
 	)
 	return i, err
 }
 
 const getWorkspace = `-- name: GetWorkspace :one
-SELECT id, clerk_org_id, name, plan, region, billing_mode, created_at, updated_at FROM workspaces WHERE id = $1
+SELECT id, clerk_org_id, name, plan, region, billing_mode, created_at, updated_at, deleted_at, clerk_updated_at FROM workspaces WHERE id = $1
 `
 
 func (q *Queries) GetWorkspace(ctx context.Context, id ids.WorkspaceID) (Workspace, error) {
@@ -64,12 +66,14 @@ func (q *Queries) GetWorkspace(ctx context.Context, id ids.WorkspaceID) (Workspa
 		&i.BillingMode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.ClerkUpdatedAt,
 	)
 	return i, err
 }
 
 const getWorkspaceByClerkOrgID = `-- name: GetWorkspaceByClerkOrgID :one
-SELECT id, clerk_org_id, name, plan, region, billing_mode, created_at, updated_at FROM workspaces WHERE clerk_org_id = $1
+SELECT id, clerk_org_id, name, plan, region, billing_mode, created_at, updated_at, deleted_at, clerk_updated_at FROM workspaces WHERE clerk_org_id = $1
 `
 
 // The entry point that turns the active Clerk organization into our workspace id. It is the one lookup that is not
@@ -86,6 +90,8 @@ func (q *Queries) GetWorkspaceByClerkOrgID(ctx context.Context, clerkOrgID strin
 		&i.BillingMode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.ClerkUpdatedAt,
 	)
 	return i, err
 }
