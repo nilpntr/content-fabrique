@@ -49,8 +49,6 @@ type compiler struct {
 	// inputs are the ffmpeg inputs: one per clip, then one per audio track item.
 	inputs []Input
 	plan   Plan
-	// sfxErr is the first error of the generated sound effects (see sfx.go).
-	sfxErr error
 }
 
 // Compile builds the Plan for rendering spec with profile. It is pure and deterministic: no process is started and
@@ -251,7 +249,7 @@ func (c *compiler) args() []string {
 // uses. The graph (built with the clips' and items' own input numbers) is renumbered to match.
 func (c *compiler) pass1Args(graph string) []string {
 	used := map[int]int{}
-	for _, st := range strings.Split(graph, ";") {
+	for _, st := range splitStatements(graph) {
 		if m := audioInputRe.FindStringSubmatch(st); m != nil {
 			k, _ := strconv.Atoi(m[1])
 			if _, ok := used[k]; !ok {
@@ -267,7 +265,7 @@ func (c *compiler) pass1Args(graph string) []string {
 	for rank, k := range keep {
 		used[k] = rank
 	}
-	stmts := strings.Split(graph, ";")
+	stmts := splitStatements(graph)
 	for i, st := range stmts {
 		if m := audioInputRe.FindStringSubmatch(st); m != nil {
 			k, _ := strconv.Atoi(m[1])

@@ -349,13 +349,19 @@ func loadProjectRender(ctx context.Context, name, projectArg, workspaceArg, rend
 		return "", nil, nil, nil, "", nil, 0, 1
 	}
 	// The planned effects and the frame rate come from the timeline version the render was made of.
-	if tv, err := st.GetTimelineVersion(ctx, ws.ID, pid, int(row.TimelineVersion)); err == nil {
-		if spec, err := timeline.Parse(tv.Spec); err == nil {
+	// Without it the check still runs, but it cannot say where the effects were planned: say so.
+	tv, err := st.GetTimelineVersion(ctx, ws.ID, pid, int(row.TimelineVersion))
+	if err == nil {
+		var spec *timeline.Spec
+		if spec, err = timeline.Parse(tv.Spec); err == nil {
 			planned = audiocheck.PlannedSFXFromSpec(spec)
 			if fps == 0 {
 				fps = spec.Output.FPS
 			}
 		}
+	}
+	if err != nil {
+		_, _ = fmt.Fprintf(env.err, "cfctl %s: warning: could not read the timeline version %d the render was made from, so the planned sound effects and the frame rate are unknown: %v\n", name, row.TimelineVersion, err)
 	}
 	_, _ = fmt.Fprintf(stdout, "cfctl %s: render %s (version %d, %s profile)\n", name, ids.Encode(ids.PrefixRender, row.ID.UUID), row.TimelineVersion, row.Profile)
 	return mp4, tm, planned, runnerOut, out, func() { _ = os.RemoveAll(work) }, fps, 0

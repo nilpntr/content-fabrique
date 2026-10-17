@@ -370,6 +370,26 @@ func TestRejectsAFileThatIsNotMedia(t *testing.T) {
 	}
 }
 
+// A mono file is read at its own level: the mono dump is not halved the way a pan of a missing second channel would be (a quiet
+// sound just above the first-sound threshold would be lost), and a log without its summary is an error, not silence.
+func TestAMonoFileIsReadAtItsOwnLevel(t *testing.T) {
+	dir, runner := fixtureDir(t)
+	// A 1 kHz mono tone of 0.005 (-46 dBFS peak, -49 dBFS RMS) from 0.3 s, just above the -50 dBFS first-sound threshold: at its own
+	// level it is heard, halved (-55 dBFS) it would not be.
+	mp4 := makeVideo(t, dir, "mono.mp4", "aevalsrc='if(gte(t,0.3),0.005*sin(2*PI*1000*t),0)':s=48000:d=2:c=mono", 2, "-c:a", "aac", "-b:a", "192k")
+	r := check(t, runner, mp4, nil)
+	if math.Abs(r.Hook.FirstSoundS-0.3) > 0.02 {
+		t.Errorf("first sound at %.3f s, want 0.3: the mono dump is at the wrong level", r.Hook.FirstSoundS)
+	}
+	if len(r.Problems.ChannelRMSDB) != 1 {
+		t.Errorf("channels %v", r.Problems.ChannelRMSDB)
+	}
+	// A channel balance check needs two channels.
+	if find(r, "channel_balance").ID != "missing:channel_balance" {
+		t.Error("a mono file has a channel balance check")
+	}
+}
+
 // An effect on the very first frame is the loudest thing in the file from its first sample: it has no quiet before it, and it is
 // still heard. Effects planned after the end of the file are not counted at all.
 func TestAnEffectOnTheFirstFrameIsHeard(t *testing.T) {

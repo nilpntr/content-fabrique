@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -26,7 +27,7 @@ const (
 	silenceDB   = -50.0
 	silenceMinS = 0.1
 	// maxPCMBytes caps the dump the sandbox writes: MaxDurationS at 16 kHz mono float.
-	maxPCMBytes = MaxDurationS * PCMRate * 4
+	maxPCMBytes = (MaxDurationS + 5) * PCMRate * 4
 	// maxMetaBytes caps the loudness metadata file.
 	maxMetaBytes = 16 << 20
 	runTimeout   = 3 * time.Minute
@@ -51,14 +52,15 @@ type chanStats struct {
 }
 
 // graph is the one filter graph the check runs: the audio is split four ways: the loudness (ebur128 with its metadata written to
-// a file in the work directory, no per-frame log; the name is relative because the sandbox's working directory is the work
+// a file in the work directory, no per-frame log; the dump is downmixed by aformat, which keeps the level of a mono file and gives
+// 0.5 L + 0.5 R for a stereo one; the name is relative because the sandbox's working directory is the work
 // directory and an argument is only rewritten for the local provider when it is a whole path), the silences (silencedetect logs them), the per-channel statistics (astats logs
 // a summary at the end) and the mono 16 kHz dump that the Go analysis reads. Nothing here comes from the file or the caller.
 var graph = "[0:a]asplit=4[a1][a2][a3][a4];" +
 	"[a1]ebur128=peak=true:framelog=quiet:metadata=1,ametadata=mode=print:file=loudness.txt,anullsink;" +
 	"[a2]silencedetect=noise=" + strconv.Itoa(int(silenceDB)) + "dB:d=" + strconv.FormatFloat(silenceMinS, 'f', -1, 64) + ",anullsink;" +
 	"[a3]astats=metadata=0:reset=0,anullsink;" +
-	"[a4]aresample=" + strconv.Itoa(PCMRate) + ",pan=mono|c0=0.5*c0+0.5*c1[pcm]"
+	"[a4]aresample=" + strconv.Itoa(PCMRate) + ",aformat=channel_layouts=mono[pcm]"
 
 // measure runs ffmpeg in the sandbox over mp4 and reads what it wrote.
 func measure(ctx context.Context, runner media.Runner, mp4, dir string) (measured, error) {
@@ -86,9 +88,14 @@ func measure(ctx context.Context, runner media.Runner, mp4, dir string) (measure
 	if m.durationS > MaxDurationS {
 		return measured{}, fmt.Errorf("%w: %.0f s (the limit is %d s)", ErrTooLong, m.durationS, MaxDurationS)
 	}
-	parseSummary(log, &m)
+	if !parseSummary(log, &m) {
+		return measured{}, errors.New("audiocheck: ffmpeg's log has no loudness summary (the log was cut or ffmpeg's format changed)")
+	}
 	m.silences = parseSilences(log, m.durationS)
 	m.channels = parseAstats(log)
+	if len(m.channels) == 0 {
+		return measured{}, errors.New("audiocheck: ffmpeg's log has no channel statistics (the log was cut or ffmpeg's format changed)")
+	}
 	pcm, err := readPCM(filepath.Join(dir, "mono.f32"))
 	if err != nil {
 		return measured{}, err
@@ -96,6 +103,10 @@ func measure(ctx context.Context, runner media.Runner, mp4, dir string) (measure
 	m.pcm = pcm
 	if m.durationS <= 0 {
 		m.durationS = float64(len(pcm)) / PCMRate
+	}
+	// ffmpeg read at most MaxDurationS+1 s: a dump that long is a file whose header understated its length.
+	if len(pcm) > (MaxDurationS+0.5)*PCMRate {
+		return measured{}, fmt.Errorf("%w: more than %d s of sound (the limit is %d s)", ErrTooLong, MaxDurationS, MaxDurationS)
 	}
 	meta, err := readRegular(filepath.Join(dir, "loudness.txt"), maxMetaBytes)
 	if err != nil {
@@ -176,11 +187,11 @@ func num(s string) float64 {
 	return v
 }
 
-// parseSummary reads the ebur128 summary: integrated loudness, loudness range and the true peak.
-func parseSummary(log string, m *measured) {
+// parseSummary reads the ebur128 summary: integrated loudness, loudness range and the true peak. It reports whether there was one.
+func parseSummary(log string, m *measured) bool {
 	i := strings.Index(log, "Summary:")
 	if i < 0 {
-		return
+		return false
 	}
 	s := log[i:]
 	if v := reLUFS.FindStringSubmatch(s); v != nil {
@@ -192,6 +203,7 @@ func parseSummary(log string, m *measured) {
 	if v := rePeak.FindStringSubmatch(s); v != nil {
 		m.truePeak = num(v[1])
 	}
+	return true
 }
 
 // parseSilences reads silencedetect's lines into gaps. A silence that runs to the end of the file is closed at the duration.

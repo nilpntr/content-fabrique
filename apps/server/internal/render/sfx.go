@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 
@@ -30,14 +31,13 @@ import (
 // the sound stays where it was and keeps its length; the same test pins that with an impulse.
 const (
 	sfxBaseDB = -6
-	// sfxLimitDB is the peak ceiling of the mix in dBFS and sfxLimitLin the same as the linear value alimiter takes.
-	sfxLimitDB  = -1.5
-	sfxLimitLin = "0.841395"
+	// sfxLimitDB is the peak ceiling of the mix in dBFS.
+	sfxLimitDB = -1.5
 )
 
-// sfxLimiter is the limiter stage that follows the mix of the effects (auto level off: it would normalise the mix). The attack
-// is written out so that no default can change it.
-const sfxLimiter = "alimiter=limit=" + sfxLimitLin + ":attack=5:release=50:level=false:latency=1"
+// sfxLimiter is the limiter stage that follows the mix of the effects (auto level off: it would normalise the mix). The ceiling is
+// sfxLimitDB as the linear value alimiter takes (0.841395), and the attack is written out so that no default can change it.
+var sfxLimiter = "alimiter=limit=" + f(math.Pow(10, sfxLimitDB/20)) + ":attack=5:release=50:level=false:latency=1"
 
 // sfxSpecError is the error for an item whose category or variant the renderer does not know.
 func sfxSpecError(it *timeline.SFX) error {
@@ -79,8 +79,8 @@ type sfxPlacement struct {
 	targetDB float64 // the category's level: what decides whether it ducks the programme
 }
 
-// sfxPlacements builds every effect of the spec in order. The first error is kept in c.sfxErr.
-func (c *compiler) sfxPlacements() []sfxPlacement {
+// sfxPlacements builds every effect of the spec in order and returns the first error.
+func (c *compiler) sfxPlacements() ([]sfxPlacement, error) {
 	var out []sfxPlacement
 	n := 0
 	for _, t := range c.spec.Tracks {
@@ -94,18 +94,15 @@ func (c *compiler) sfxPlacements() []sfxPlacement {
 				continue
 			}
 			if sfx.Export != timeline.ExportLicensed {
-				c.sfxErr = fmt.Errorf("%w: audio item %s: export %q does not fit kind %q", ErrInvalidSpec, sfx.ID, sfx.Export, sfx.AudioKind())
-				return nil
+				return nil, fmt.Errorf("%w: audio item %s: export %q does not fit kind %q", ErrInvalidSpec, sfx.ID, sfx.Export, sfx.AudioKind())
 			}
 			it, err := buildItem("fx"+strconv.Itoa(n), sfx)
 			if err != nil {
-				c.sfxErr = err
-				return nil
+				return nil, err
 			}
 			gain := sfx.GainDB
 			if gain != nil && (*gain < -30 || *gain > 6 || *gain != *gain) {
-				c.sfxErr = fmt.Errorf("%w: audio item %s: gain %s dB is outside -30 to 6", ErrInvalidSpec, sfx.ID, num(*gain))
-				return nil
+				return nil, fmt.Errorf("%w: audio item %s: gain %s dB is outside -30 to 6", ErrInvalidSpec, sfx.ID, num(*gain))
 			}
 			if sfx.AtMs < 0 || sfx.AtMs >= c.totalMs {
 				continue
@@ -130,7 +127,7 @@ func (c *compiler) sfxPlacements() []sfxPlacement {
 			out = append(out, sfxPlacement{stmts: st, pad: pad, atMs: sfx.AtMs, durMs: dur, targetDB: sfxTargetDB[it.cat]})
 		}
 	}
-	return out
+	return out, nil
 }
 
 // SFXPreviewGraph returns the filter graph (one statement per element, ending in [aout]) of one effect rendered alone, the way it
@@ -189,6 +186,8 @@ const (
 	// duckMinTargetDB is the quietest category that ducks: the accents (impact, sting, sub drop, riser, downlifter, whoosh, glitch),
 	// not the detail (swish, shimmer, pop, click), which are too small to cover a word.
 	duckMinTargetDB = -13
+	// duckMinClipGainDB is the gain of a clip's own sound at or under which it is taken for muted: no speech to cover.
+	duckMinClipGainDB = -24
 )
 
 // speechSpans returns where, in output ms, a clip's own sound carries speech: the transcript words of every clip whose source audio
@@ -198,7 +197,7 @@ func (c *compiler) speechSpans() [][2]int64 {
 	for _, w := range c.mapWords() {
 		cl := c.clips[w.clip]
 		a := cl.item.Audio
-		if a == nil || !a.UseSourceOrDefault() || !cl.asset.HasAudio || cl.item.HasRamp() {
+		if a == nil || !a.UseSourceOrDefault() || !cl.asset.HasAudio || cl.item.HasRamp() || a.GainDBOrDefault() <= duckMinClipGainDB {
 			continue
 		}
 		start, end := timeline.FrameStartMs(w.startF, c.fps), timeline.FrameStartMs(w.endF, c.fps)

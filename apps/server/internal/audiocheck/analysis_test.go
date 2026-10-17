@@ -58,7 +58,9 @@ func TestParsesTheLogOfTheGraph(t *testing.T) {
 	}
 	var m measured
 	m.truePeak = math.Inf(-1)
-	parseSummary(sampleLog, &m)
+	if !parseSummary(sampleLog, &m) {
+		t.Fatal("no summary found")
+	}
 	if m.integrated != -14.3 || m.lra != 5.6 || m.truePeak != -1.2 {
 		t.Errorf("summary %+v", m)
 	}
@@ -87,7 +89,12 @@ func TestParsesTheLogOfTheGraph(t *testing.T) {
 	// Digital silence is -inf in the logs; nothing infinite gets into the report.
 	var silent measured
 	silent.truePeak = math.Inf(-1)
-	parseSummary("[Parsed_ebur128_1 @ 0x1] Summary:\n  I:         -70.0 LUFS\n  LRA:         0.0 LU\n  Peak:       -inf dBFS\n", &silent)
+	if !parseSummary("[Parsed_ebur128_1 @ 0x1] Summary:\n  I:         -70.0 LUFS\n  LRA:         0.0 LU\n  Peak:       -inf dBFS\n", &silent) {
+		t.Error("no summary found in the log of a silent file")
+	}
+	if parseSummary("no summary here", &silent) {
+		t.Error("a summary was found in a log that has none")
+	}
 	if !math.IsInf(silent.truePeak, -1) || round(silent.truePeak, 1) != silenceFloor {
 		t.Errorf("silent summary %+v", silent)
 	}

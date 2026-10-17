@@ -118,7 +118,7 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 		}
 		for _, item := range tr.Items {
 			if _, isSFX := item.(*timeline.SFX); isSFX {
-				continue // generated: sfxGraph, mixed in after the programme
+				continue // generated: sfxPlacements, mixed in after the programme
 			}
 			com := item.Common()
 			trend, isTrend := item.(*timeline.TrendSound)
@@ -181,9 +181,9 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 	// timeline are not boosted to -14 LUFS.
 	guide := c.beatGuide()
 	// The sound effects are the same kind of thing: an accent mixed in after the normalisation, at a fixed level.
-	places := c.sfxPlacements()
-	if c.sfxErr != nil {
-		return audioResult{}, c.sfxErr
+	places, err := c.sfxPlacements()
+	if err != nil {
+		return audioResult{}, err
 	}
 	var sfxStmts, sfxPads []string
 	for _, p := range places {

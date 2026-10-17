@@ -30,14 +30,6 @@ const (
 // that six whooshes on one timeline are not six copies of one sample, and the same item always gets the same one.
 const SFXVariantAuto = "auto"
 
-// The natural lengths, in ms, of the default variants. They are the lengths of the effects before P3-11, which keep them.
-const (
-	SFXWhooshMs = 600
-	SFXImpactMs = 800
-	SFXRiserMs  = 1500
-	SFXSwishMs  = 300
-)
-
 // sfxVariant is one named variant and its natural length.
 type sfxVariant struct {
 	name     string
