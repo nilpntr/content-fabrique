@@ -146,6 +146,29 @@ describe("render fixtures", () => {
   });
 });
 
+describe("motion fixtures (P3-10)", () => {
+  // render-motion.txt: one fixture per format, each with every motion preset, a speed ramp and the new transitions.
+  const listed = readFileSync(join(fixtures, "render-motion.txt"), "utf8").split("\n").filter(Boolean);
+  const specs = listed.map((f) => readJson(join(fixtures, "valid", f)));
+  const video = specs.flatMap((s) => s.tracks.find((t: Json) => t.type === "video").items as Json[]);
+
+  it("covers every format, motion preset, new transition and a speed ramp", () => {
+    expect(new Set(specs.map((s) => s.output.format))).toEqual(new Set(["9:16", "1:1", "4:5", "16:9"]));
+    expect(new Set(video.map((c) => c.motion?.preset).filter(Boolean))).toEqual(
+      new Set(["punch_in", "push_in", "pull_back", "shake"]),
+    );
+    expect(new Set(video.map((c) => c.transition_in?.type).filter(Boolean))).toEqual(
+      new Set(["whip_left", "whip_right", "zoom_through", "flash"]),
+    );
+    expect(video.some((c) => Array.isArray(c.speed_ramp))).toBe(true);
+    for (const s of specs) {
+      const items = s.tracks.find((t: Json) => t.type === "video").items as Json[];
+      expect(new Set(items.map((c) => c.motion?.preset).filter(Boolean)).size, s.output.format).toBe(4);
+      expect(items.some((c) => c.speed_ramp), s.output.format).toBe(true);
+    }
+  });
+});
+
 describe("the schema", () => {
   const base = () => structuredClone(readJson(join(fixtures, "valid", "v30_full_edit.json")));
   const main = (s: Json) => s.tracks.find((t: Json) => t.type === "video");

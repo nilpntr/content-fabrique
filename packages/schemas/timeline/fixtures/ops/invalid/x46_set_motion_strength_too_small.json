@@ -1,0 +1,6 @@
+{
+  "op": "set_motion",
+  "id": "c1",
+  "preset": "shake",
+  "strength": 0.01
+}

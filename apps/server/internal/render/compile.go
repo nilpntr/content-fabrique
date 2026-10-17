@@ -307,7 +307,9 @@ func (c *compiler) collectMaps() {
 			})
 		}
 		in := cl.item.Source.InMs
-		speed := cl.item.SpeedOrDefault()
+		// A clip with a speed ramp reports its average speed as `speed` (for readers that know nothing of ramps) and the ramp
+		// itself, which maps output time to source time exactly (TimeMapEntry.SourceAtMs).
+		speed := cl.item.AverageSpeed()
 		p.TimeMap = append(p.TimeMap, TimeMapEntry{
 			OutStartMs: timeline.FrameStartMs(cl.startFrame, c.fps),
 			OutEndMs:   timeline.FrameStartMs(cl.ownedEnd, c.fps),
@@ -315,6 +317,7 @@ func (c *compiler) collectMaps() {
 			AssetID:    cl.item.AssetID,
 			SourceInMs: &in,
 			Speed:      &speed,
+			SpeedRamp:  slices.Clone(cl.item.SpeedRamp),
 		})
 	}
 

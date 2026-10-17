@@ -54,9 +54,9 @@ func Resolve(entries []render.TimeMapEntry, startMs, endMs int64) []Span {
 			}
 		}
 		s := Span{ItemID: e.ItemID, AssetID: e.AssetID, OutStartMs: lo, OutEndMs: hi}
-		if e.SourceInMs != nil && e.Speed != nil {
-			in := *e.SourceInMs + int64(math.Round(float64(lo-e.OutStartMs)**e.Speed))
-			outT := *e.SourceInMs + int64(math.Round(float64(hi-e.OutStartMs)**e.Speed))
+		if from, ok := e.SourceAtMs(float64(lo)); ok {
+			to, _ := e.SourceAtMs(float64(hi)) // along the item's speed ramp, if it has one
+			in, outT := int64(math.Round(from)), int64(math.Round(to))
 			s.SourceInMs, s.SourceOutMs = &in, &outT
 		}
 		out = append(out, s)

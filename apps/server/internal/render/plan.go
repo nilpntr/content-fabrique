@@ -3,6 +3,8 @@ package render
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
 // Plan is everything Compile knows about one render. It is plain data: it can be stored next to the render, diffed
@@ -77,21 +79,50 @@ type Cut struct {
 	// Frame is the first output frame of the incoming item and AtMs the time that frame starts at.
 	Frame int64 `json:"frame"`
 	AtMs  int64 `json:"at_ms"`
-	// Transition is cut, crossfade, dip_to_black or whip. TransitionFrames is how many frames both items overlap
+	// Transition is the spec's transition type (cut, crossfade, dip_to_black, whip, whip_left, whip_right, zoom_through or flash). TransitionFrames is how many frames both items overlap
 	// (0 for a cut), which is the spec's duration_ms snapped to the frame grid.
 	Transition       string `json:"transition"`
 	TransitionFrames int64  `json:"transition_frames"`
 }
 
 // TimeMapEntry is one entry of the time map. Main items carry the asset, the source in point and the speed; text
-// items carry the first three fields only.
+// items carry the first three fields only. A main item with a speed ramp (P3-10) also carries the ramp, and then `speed`
+// is its average speed: source_in_ms + (t - out_start_ms) * speed is only an approximation inside such an item, and
+// SourceAtMs is exact.
 type TimeMapEntry struct {
-	OutStartMs int64    `json:"out_start_ms"`
-	OutEndMs   int64    `json:"out_end_ms"`
-	ItemID     string   `json:"item_id"`
-	AssetID    string   `json:"asset_id,omitempty"`
-	SourceInMs *int64   `json:"source_in_ms,omitempty"`
-	Speed      *float64 `json:"speed,omitempty"`
+	OutStartMs int64                 `json:"out_start_ms"`
+	OutEndMs   int64                 `json:"out_end_ms"`
+	ItemID     string                `json:"item_id"`
+	AssetID    string                `json:"asset_id,omitempty"`
+	SourceInMs *int64                `json:"source_in_ms,omitempty"`
+	Speed      *float64              `json:"speed,omitempty"`
+	SpeedRamp  []timeline.SpeedPoint `json:"speed_ramp,omitempty"`
+}
+
+// SourceAtMs is the time inside the item's asset that is on screen at output time outMs (milliseconds on the timeline):
+// source_in_ms + (outMs - out_start_ms) * speed, or along the speed ramp. The result is a float, so a caller can round it
+// the way it needs to; it is meaningless for a text item (SourceInMs is nil), for which it returns false.
+func (e TimeMapEntry) SourceAtMs(outMs float64) (float64, bool) {
+	if e.SourceInMs == nil || e.Speed == nil {
+		return 0, false
+	}
+	d := outMs - float64(e.OutStartMs)
+	if len(e.SpeedRamp) > 0 {
+		return float64(*e.SourceInMs) + timeline.RampSourceMs(e.SpeedRamp, d), true
+	}
+	return float64(*e.SourceInMs) + d**e.Speed, true
+}
+
+// OutAtMs is the inverse of SourceAtMs: the output time at which source time sourceMs of the item's asset is on screen.
+func (e TimeMapEntry) OutAtMs(sourceMs float64) (float64, bool) {
+	if e.SourceInMs == nil || e.Speed == nil || *e.Speed <= 0 {
+		return 0, false
+	}
+	d := sourceMs - float64(*e.SourceInMs)
+	if len(e.SpeedRamp) > 0 {
+		return float64(e.OutStartMs) + timeline.RampOutMs(e.SpeedRamp, d), true
+	}
+	return float64(e.OutStartMs) + d / *e.Speed, true
 }
 
 // SoundCue is a cue_only sound (D-03). Its audio is not available to the renderer and never appears in the plan's
@@ -141,7 +172,8 @@ func (p Plan) SourceTimeMs(outMs int64) (entry TimeMapEntry, sourceMs int64, ok 
 			continue
 		}
 		if outMs >= e.OutStartMs && outMs < e.OutEndMs {
-			return e, *e.SourceInMs + int64(float64(outMs-e.OutStartMs)**e.Speed+0.5), true
+			src, _ := e.SourceAtMs(float64(outMs))
+			return e, int64(src + 0.5), true
 		}
 	}
 	return TimeMapEntry{}, 0, false

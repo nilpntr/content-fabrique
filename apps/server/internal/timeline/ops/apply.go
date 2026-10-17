@@ -268,6 +268,10 @@ func (a *applier) dispatch(op Op) bool {
 		return a.setCaptions(o)
 	case *SetClipAudio:
 		return a.setClipAudio(o)
+	case *SetMotion:
+		return a.setMotion(o)
+	case *SetSpeedRamp:
+		return a.setSpeedRamp(o)
 	}
 	return a.errf(CodeUnknownOp, "unsupported op type %T", op)
 }

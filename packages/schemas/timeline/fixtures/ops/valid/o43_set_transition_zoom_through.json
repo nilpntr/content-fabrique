@@ -1,0 +1,6 @@
+{
+  "op": "set_transition",
+  "id": "c2",
+  "type": "zoom_through",
+  "duration_ms": 300
+}

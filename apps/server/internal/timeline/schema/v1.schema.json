@@ -3,7 +3,7 @@
   "$id": "https://contentfabrique.app/schemas/timeline/v1.json",
   "title": "Timeline",
   "description": "A Content Fabrique edit: the declarative timeline (an EDL in JSON) that agents and users change through edit ops and that the Go compiler turns into one ffmpeg invocation. Every time is an integer number of milliseconds.",
-  "$comment": "Structure only. The Go layer (apps/server/internal/timeline, docs/design/timeline-v1.md section 3) checks what a schema cannot: unique ids across the spec (duplicate_id), contiguity of the main track including the first item starting at 0 (gap, overlap), source ranges inside the asset, for video and audio, with in < out (source_out_of_range), output duration of an item >= 300 ms (shot_too_short), total duration 1 s to 180 s (duration_out_of_range), every text item, audio item and marker inside the total duration (outside_timeline), text inside the format safe zone (unsafe_text), asset ids that exist in the catalog (unknown_asset), transitions shorter than both items they join (transition_too_long), audio assets that are licensed or attested (unlicensed_audio), fades that fit the sound (fade_too_long), assets of the right kind (wrong_asset_kind), no transition on the first clip in time (first_transition) and text styles that exist in the style registry (unknown_style). The schema is closed: no property is allowed outside the ones listed, at any level.",
+  "$comment": "Structure only. The Go layer (apps/server/internal/timeline, docs/design/timeline-v1.md section 3) checks what a schema cannot: unique ids across the spec (duplicate_id), contiguity of the main track including the first item starting at 0 (gap, overlap), source ranges inside the asset, for video and audio, with in < out (source_out_of_range), output duration of an item >= 300 ms (shot_too_short), total duration 1 s to 180 s (duration_out_of_range), every text item, audio item and marker inside the total duration (outside_timeline), text inside the format safe zone (unsafe_text), asset ids that exist in the catalog (unknown_asset), transitions shorter than both items they join (transition_too_long), audio assets that are licensed or attested (unlicensed_audio), fades that fit the sound (fade_too_long), assets of the right kind (wrong_asset_kind), no transition on the first clip in time (first_transition) text styles that exist in the style registry (unknown_style), motion presets on clips of at least 400 ms with an at_ms inside the clip (invalid_motion), and speed ramps that are sorted, inside the source range and not combined with speed (invalid_speed_ramp; a ramp with use_source also raises the warning ramp_audio_muted). The schema is closed: no property is allowed outside the ones listed, at any level.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "output", "tracks", "markers"],
@@ -244,9 +244,11 @@
           "maximum": 4,
           "default": 1,
           "title": "Speed",
-          "description": "Playback speed from 0.25 (slow motion) to 4 (fast). Default 1."
+          "description": "Playback speed from 0.25 (slow motion) to 4 (fast). Default 1. A clip has either speed or speed_ramp, not both (checked by the Go layer)."
         },
+        "speed_ramp": { "$ref": "#/$defs/speedRamp" },
         "reframe": { "$ref": "#/$defs/reframe" },
+        "motion": { "$ref": "#/$defs/motion" },
         "look": { "$ref": "#/$defs/look" },
         "transition_in": { "$ref": "#/$defs/transition" },
         "audio": { "$ref": "#/$defs/videoAudio" },
@@ -293,6 +295,50 @@
       }
     },
 
+    "speedRamp": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 16,
+      "title": "Speed ramp",
+      "description": "A speed that changes along the clip, as 2 to 16 points {at_ms, speed}. at_ms is a source offset: milliseconds into the clip's source range, counted from source.in_ms (0 to out_ms - in_ms), strictly increasing. The speed (0.25 to 4) changes linearly in source time between two points, is the first point's speed before the first and the last point's speed after the last. The clip's output duration is the integral of 1/speed over its source range. It replaces speed: give one of the two. The clip's own audio is muted (it cannot follow the ramp). Sorted points and the range are checked by the Go layer.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["at_ms", "speed"],
+        "properties": {
+          "at_ms": { "$ref": "#/$defs/ms", "title": "Source offset", "description": "Where the point is, in ms from source.in_ms (in source time)." },
+          "speed": { "type": "number", "minimum": 0.25, "maximum": 4, "title": "Speed", "description": "The playback speed at the point, 0.25 to 4." }
+        }
+      }
+    },
+
+    "motion": {
+      "type": "object",
+      "title": "Motion",
+      "description": "A camera move on the clip, applied as a digital zoom on the already-reframed frame (after reframe, so it composes with every reframe mode and never shows a border). punch_in is a fast zoom (about 5 frames) that lands at at_ms and holds, push_in a slow continuous zoom over the whole clip, pull_back the reverse (starts zoomed, pulls back to the full frame) and shake a short camera shake that starts at at_ms and dies out (deterministic: the pattern comes from the clip's id). Needs a clip of at least 400 ms (checked by the Go layer).",
+      "additionalProperties": false,
+      "required": ["preset"],
+      "properties": {
+        "preset": {
+          "enum": ["none", "punch_in", "push_in", "pull_back", "shake"],
+          "title": "Preset",
+          "description": "none, punch_in, push_in, pull_back or shake."
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms",
+          "title": "At",
+          "description": "Only for punch_in (where the zoom has landed) and shake (where it starts): milliseconds from the clip's first frame, inside the clip. Without it punch_in zooms over the first frames of the clip and shake starts at its first frame."
+        },
+        "strength": {
+          "type": "number",
+          "minimum": 0.05,
+          "maximum": 0.35,
+          "title": "Strength",
+          "description": "The peak scale increase, 0.05 (5 % bigger) to 0.35. Defaults: punch_in 0.15, push_in 0.1, pull_back 0.15, shake 0.08 (also the size of the shake)."
+        }
+      }
+    },
+
     "look": {
       "type": "object",
       "title": "Look",
@@ -326,9 +372,9 @@
           "required": ["type", "duration_ms"],
           "properties": {
             "type": {
-              "enum": ["crossfade", "dip_to_black", "whip"],
+              "enum": ["crossfade", "dip_to_black", "whip", "whip_left", "whip_right", "zoom_through", "flash"],
               "title": "Type",
-              "description": "crossfade blends the two clips. dip_to_black fades out to black and in again. whip is a fast sideways slide with motion blur."
+              "description": "crossfade blends the two clips. dip_to_black fades out to black and in again. whip_left is a fast slide to the left with motion blur (whip is the same, kept for older edits); whip_right slides to the right. zoom_through zooms into the outgoing clip and out of the incoming one through a blur. flash dips to white."
             },
             "duration_ms": {
               "type": "integer",

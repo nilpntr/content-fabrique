@@ -39,13 +39,15 @@ const (
 	NameSetLook         = "set_look"
 	NameSetCaptions     = "set_captions"
 	NameSetClipAudio    = "set_clip_audio"
+	NameSetMotion       = "set_motion"
+	NameSetSpeedRamp    = "set_speed_ramp"
 )
 
 // Names lists the ops in the order of the schema.
 var Names = []string{
 	NameAddClip, NameRemoveItem, NameMoveItem, NameTrimItem, NameReplaceSource, NameSetSpeed, NameSetReframe,
 	NameAddText, NameUpdateText, NameRemoveText, NameSetTransition, NameSetSound, NameRemoveSound,
-	NameSnapCutsToBeats, NameSetLook, NameSetCaptions, NameSetClipAudio,
+	NameSnapCutsToBeats, NameSetLook, NameSetCaptions, NameSetClipAudio, NameSetMotion, NameSetSpeedRamp,
 }
 
 // MaxBatchOps is the most ops in one batch.
@@ -66,15 +68,17 @@ type AddClip struct {
 	Source  timeline.Source `json:"source"`
 	// Index is the position the clip will have (0 is the start); AfterID puts it right after that clip. At most one of
 	// them; without either the clip goes at the end.
-	Index        *int                 `json:"index,omitempty"`
-	AfterID      string               `json:"after_id,omitempty"`
-	Speed        *float64             `json:"speed,omitempty"`
-	Reframe      *timeline.Reframe    `json:"reframe,omitempty"`
-	Look         *timeline.Look       `json:"look,omitempty"`
-	TransitionIn *timeline.Transition `json:"transition_in,omitempty"`
-	Audio        *timeline.VideoAudio `json:"audio,omitempty"`
-	MomentID     string               `json:"moment_id,omitempty"`
-	Why          *string              `json:"why,omitempty"`
+	Index        *int                  `json:"index,omitempty"`
+	AfterID      string                `json:"after_id,omitempty"`
+	Speed        *float64              `json:"speed,omitempty"`
+	SpeedRamp    []timeline.SpeedPoint `json:"speed_ramp,omitempty"`
+	Reframe      *timeline.Reframe     `json:"reframe,omitempty"`
+	Motion       *timeline.Motion      `json:"motion,omitempty"`
+	Look         *timeline.Look        `json:"look,omitempty"`
+	TransitionIn *timeline.Transition  `json:"transition_in,omitempty"`
+	Audio        *timeline.VideoAudio  `json:"audio,omitempty"`
+	MomentID     string                `json:"moment_id,omitempty"`
+	Why          *string               `json:"why,omitempty"`
 }
 
 // RemoveItem removes a clip from the main track.
@@ -226,6 +230,21 @@ type SetClipAudio struct {
 	GainDB    *float64 `json:"gain_db,omitempty"`
 }
 
+// SetMotion sets the camera move of a clip, replacing its whole motion: fields left out go back to their defaults, and the
+// preset none removes it.
+type SetMotion struct {
+	ID       string   `json:"id"`
+	Preset   string   `json:"preset"`
+	AtMs     *int64   `json:"at_ms,omitempty"`
+	Strength *float64 `json:"strength,omitempty"`
+}
+
+// SetSpeedRamp gives a clip a speed ramp, which replaces its speed.
+type SetSpeedRamp struct {
+	ID     string                `json:"id"`
+	Points []timeline.SpeedPoint `json:"points"`
+}
+
 // OpName implements Op.
 func (*AddClip) OpName() string { return NameAddClip }
 
@@ -276,6 +295,12 @@ func (*SetCaptions) OpName() string { return NameSetCaptions }
 
 // OpName implements Op.
 func (*SetClipAudio) OpName() string { return NameSetClipAudio }
+
+// OpName implements Op.
+func (*SetMotion) OpName() string { return NameSetMotion }
+
+// OpName implements Op.
+func (*SetSpeedRamp) OpName() string { return NameSetSpeedRamp }
 
 // ---- encoding ---------------------------------------------------------------------------------------------------
 
@@ -373,6 +398,18 @@ func (o SetClipAudio) MarshalJSON() ([]byte, error) {
 	return tagged(NameSetClipAudio, p(o))
 }
 
+// MarshalJSON writes the op with its "op" field.
+func (o SetMotion) MarshalJSON() ([]byte, error) {
+	type p SetMotion
+	return tagged(NameSetMotion, p(o))
+}
+
+// MarshalJSON writes the op with its "op" field.
+func (o SetSpeedRamp) MarshalJSON() ([]byte, error) {
+	type p SetSpeedRamp
+	return tagged(NameSetSpeedRamp, p(o))
+}
+
 // MarshalBatch encodes a batch of ops as a JSON array.
 func MarshalBatch(batch []Op) ([]byte, error) {
 	if batch == nil {
@@ -418,6 +455,10 @@ func newOp(name string) Op {
 		return &SetCaptions{}
 	case NameSetClipAudio:
 		return &SetClipAudio{}
+	case NameSetMotion:
+		return &SetMotion{}
+	case NameSetSpeedRamp:
+		return &SetSpeedRamp{}
 	}
 	return nil
 }

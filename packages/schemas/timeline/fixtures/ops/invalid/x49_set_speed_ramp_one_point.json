@@ -1,0 +1,10 @@
+{
+  "op": "set_speed_ramp",
+  "id": "c1",
+  "points": [
+    {
+      "at_ms": 0,
+      "speed": 2
+    }
+  ]
+}

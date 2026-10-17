@@ -492,10 +492,20 @@ func (s *summarizer) itemField(typ, id string, rest []string, op Operation, item
 		s.say("replaced the asset of %s with %s", id, s.assetName(str(newV)))
 	case field == "speed":
 		if op.Op == OpRemove {
+			// A speed that went because a ramp replaced it is not a reset: the ramp's own line says what happened.
+			if it := findItem(s.after, id); it != nil {
+				if _, ramped := it["speed_ramp"]; ramped {
+					return
+				}
+			}
 			s.say("reset the speed of %s to 1x", id)
 			return
 		}
 		s.say("set the speed of %s to %sx", id, scalar(newV))
+	case field == "speed_ramp":
+		once("speed_ramp", func() { s.finalSpeedRamp(id) })
+	case field == "motion":
+		once("motion", func() { s.finalMotion(id) })
 	case field == "reframe":
 		once("reframe", func() { s.finalReframe(id) })
 	case field == "look":
@@ -581,6 +591,45 @@ func (s *summarizer) finalReframe(id string) {
 		parts = append(parts, "zoom "+scalar(z))
 	}
 	s.say("set the reframe of %s to %s", id, strings.Join(parts, ", "))
+}
+
+func (s *summarizer) finalSpeedRamp(id string) {
+	it := findItem(s.after, id)
+	if it == nil {
+		return
+	}
+	pts, ok := it["speed_ramp"].([]any)
+	if !ok {
+		s.say("removed the speed ramp of %s", id)
+		return
+	}
+	parts := make([]string, 0, len(pts))
+	for _, p := range pts {
+		if m, ok := p.(map[string]any); ok {
+			parts = append(parts, fmt.Sprintf("%sx at %s ms", scalar(m["speed"]), scalar(m["at_ms"])))
+		}
+	}
+	s.say("set a speed ramp on %s: %s", id, strings.Join(parts, ", "))
+}
+
+func (s *summarizer) finalMotion(id string) {
+	it := findItem(s.after, id)
+	if it == nil {
+		return
+	}
+	m, ok := it["motion"].(map[string]any)
+	if !ok {
+		s.say("removed the motion of %s", id)
+		return
+	}
+	parts := []string{str(m["preset"])}
+	if v, ok := m["at_ms"]; ok {
+		parts = append(parts, "at "+scalar(v)+" ms")
+	}
+	if v, ok := m["strength"]; ok {
+		parts = append(parts, "strength "+scalar(v))
+	}
+	s.say("set the motion of %s to %s", id, strings.Join(parts, ", "))
 }
 
 func (s *summarizer) finalLook(id string) {

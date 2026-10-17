@@ -18,18 +18,35 @@ var looks = map[string]string{
 	"matte":  "format=gbrp,curves=all='0/0.07 1/0.93',format=yuv420p,eq=saturation=0.85:contrast=0.95",
 }
 
-// xfadeName maps a transition type to the xfade transition that renders it. A whip is a slideleft, with a blur added
-// by the caller.
+// xfadeName maps a transition type to the xfade transition that renders it, from a fixed list: nothing from the spec is
+// written into the graph. A whip is a slide, with a blur added by the caller (whip is the old name of whip_left). A
+// zoom_through is a plain fade between two clips that the camera has zoomed (camera.go), with a blur added by the caller. A
+// flash is a dip to white.
 func xfadeName(transition string) string {
 	switch transition {
 	case timeline.TransitionCrossfade:
 		return "fade"
 	case timeline.TransitionDipToBlack:
 		return "fadeblack"
-	case timeline.TransitionWhip:
+	case timeline.TransitionWhip, timeline.TransitionWhipLeft:
 		return "slideleft"
+	case timeline.TransitionWhipRight:
+		return "slideright"
+	case timeline.TransitionZoomThrough:
+		return "fade"
+	case timeline.TransitionFlash:
+		return "fadewhite"
 	}
 	return ""
+}
+
+// blurred says whether a transition has a short blur while it lasts: the whips, which slide, and the zoom_through.
+func blurred(transition string) bool {
+	switch transition {
+	case timeline.TransitionWhip, timeline.TransitionWhipLeft, timeline.TransitionWhipRight, timeline.TransitionZoomThrough:
+		return true
+	}
+	return false
 }
 
 // videoGraph returns the statements of the video part of the filter_complex. Its output pad is [vout]: the joined clips, with
@@ -59,7 +76,14 @@ func (c *compiler) clipGraph(cl clip) ([]string, error) {
 		"trim=end=" + secs(it.Source.OutMs-it.Source.InMs),
 		"setpts=PTS-STARTPTS",
 	}
-	if speed != 1 {
+	switch {
+	case it.HasRamp():
+		expr, err := rampSetpts(it.SpeedRamp)
+		if err != nil {
+			return nil, fmt.Errorf("%w: clip %s: %w", ErrInvalidSpec, it.ID, err)
+		}
+		src = append(src, "setpts='"+expr+"'")
+	case speed != 1:
 		src = append(src, "setpts=PTS/"+num(speed))
 	}
 	// tpad repeats the last frame without limit and trim cuts exactly outFrames, so a source that falls a frame short
@@ -93,6 +117,12 @@ func (c *compiler) clipGraph(cl clip) ([]string, error) {
 		cw, ch := even(int(float64(c.w)/z)), even(int(float64(c.h)/z))
 		tail = append(tail, fmt.Sprintf("crop=%d:%d", cw, ch), fmt.Sprintf("scale=%d:%d:flags=bicubic", c.w, c.h))
 	}
+	// The camera moves the already-reframed frame (and the zoom above it), before the look.
+	cam, err := c.cameraFor(cl)
+	if err != nil {
+		return nil, err
+	}
+	tail = append(tail, cam.filters()...)
 	if lookFilter != "" {
 		tail = append(tail, lookFilter)
 	}
@@ -189,12 +219,12 @@ func (c *compiler) joinGraph(final string) []string {
 		offset := c.frameSecs(cl.startFrame)
 		dur := c.frameSecs(cl.overlapFrames)
 		xf := fmt.Sprintf("xfade=transition=%s:duration=%s:offset=%s", xfadeName(cl.transition), dur, offset)
-		if cl.transition != timeline.TransitionWhip {
+		if !blurred(cl.transition) {
 			stmts = append(stmts, chain(pair, []string{xf}, out))
 			acc = out
 			continue
 		}
-		// A whip: a slide with a short blur while it lasts.
+		// A whip or a zoom_through: the transition with a short blur while it lasts.
 		mid := fmt.Sprintf("w%d", i)
 		sigma := max(2, min(c.w, c.h)/90)
 		stmts = append(stmts,

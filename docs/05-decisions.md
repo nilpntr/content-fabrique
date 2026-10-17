@@ -563,7 +563,7 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 
   | Tier | Presets | How they render | Task |
   |---|---|---|---|
-  | Camera moves and transitions | digital zoom, zoom-through cut, pull-back reveal, vertigo | ffmpeg in the compiler: a `motion` preset on clips and extra transition types | P3-10 |
+  | Camera moves and transitions | digital zoom (`punch_in`, `push_in`), pull-back reveal (`pull_back`), `shake`, zoom-through cut, flash, whips; vertigo later | ffmpeg in the compiler: a `motion` preset on clips and extra transition types | P3-10 |
   | Graphic templates | First five: **checklist, chart grow, cover story, headline wall, phone mockup**. Later: glass type, ui world, couch wall, paper cut, doodle boil | An HTML template per preset rendered to video frames (HyperFrames, Apache-2.0), composited by the compiler | P4-11 |
   | Needs person segmentation | green screen, frame break, orbit | A permissively licensed matting model ([D-16](#d-16-licensing-policy-for-ml-and-media-components)), after a spike | P2-11 |
 
