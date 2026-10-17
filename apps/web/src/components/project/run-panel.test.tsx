@@ -60,8 +60,9 @@ test("a run is followed while it is active: queued, running with its steps and c
   expect(screen.getByRole("heading").textContent).toBe("The editor finished");
   expect(screen.getByTestId("run-summary").textContent).toBe("A 12 second vertical cut: the pose, the row, the lockout.");
   expect(screen.queryByRole("button", { name: "Stop the editor" })).toBeNull();
-  // The events of every poll are kept: three tool calls so far.
-  expect(screen.getByText("3 steps so far")).toBeTruthy();
+  // The events of every poll are kept: three tool calls. The run is over, so it is not "so far" any more.
+  expect(screen.getByText("3 steps")).toBeTruthy();
+  expect(screen.queryByText(/so far/)).toBeNull();
 
   const before = api.callsTo(RUN).length;
   await tick(10_000);

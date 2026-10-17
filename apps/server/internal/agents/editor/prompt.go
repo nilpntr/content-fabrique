@@ -10,9 +10,9 @@ import (
 
 // PromptVersion names the system prompt below. It is stored in every run's input (Input.PromptVersion), so a run can be tied to
 // the text it was given. prompts/CHANGELOG.md says what each version changed.
-const PromptVersion = "editor.v1.2"
+const PromptVersion = "editor.v1.3"
 
-//go:embed prompts/editor.v1.2.md
+//go:embed prompts/editor.v1.3.md
 var systemPrompt string
 
 // SystemPrompt is the editor's system prompt (the runtime puts its preamble in front). It is the same for every run, so the

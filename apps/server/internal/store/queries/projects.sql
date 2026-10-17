@@ -75,7 +75,7 @@ ORDER BY pa.position;
 
 -- The assets an edit may use: the project's footage that is ready and not deleted, with what the timeline validator needs.
 -- name: ListProjectCatalogAssets :many
-SELECT a.id AS asset_id, a.kind, a.duration_ms
+SELECT a.id AS asset_id, a.kind, a.title, a.duration_ms
 FROM project_assets pa
 JOIN assets a ON a.workspace_id = pa.workspace_id AND a.id = pa.asset_id
 WHERE pa.workspace_id = @workspace_id AND pa.project_id = @project_id

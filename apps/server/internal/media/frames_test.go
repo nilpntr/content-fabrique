@@ -11,9 +11,9 @@ func TestFramesArgsGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	vf := "scale=384:384:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos"
-	want := prefix + inOpts + " -ss 0.000 -i /in/0 " + inOpts + " -ss 2.500 -i /in/0 " +
-		"-map 0:v:0 -an -sn -dn -map_metadata -1 -vf " + vf + " -frames:v 1 -update 1 -q:v 4 /work/f0.jpg " +
-		"-map 1:v:0 -an -sn -dn -map_metadata -1 -vf " + vf + " -frames:v 1 -update 1 -q:v 4 /work/f1.jpg"
+	want := prefix + inOpts + " -threads 1 -ss 0.000 -i /in/0 " + inOpts + " -threads 1 -ss 2.500 -i /in/0 " +
+		"-map 0:v:0 -an -sn -dn -map_metadata -1 -vf " + vf + " -threads 1 -frames:v 1 -update 1 -q:v 4 /work/f0.jpg " +
+		"-map 1:v:0 -an -sn -dn -map_metadata -1 -vf " + vf + " -threads 1 -frames:v 1 -update 1 -q:v 4 /work/f1.jpg"
 	if got := join(a); got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}
