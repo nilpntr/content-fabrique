@@ -2,86 +2,86 @@ package render
 
 import (
 	"fmt"
-	"strings"
+	"slices"
+	"strconv"
 
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
-// Generated sound effects (P3-10 part B): whoosh, impact, riser and swish are synthesised in ffmpeg from aevalsrc and a
-// seeded anoisesrc, with filters and envelopes. There are no asset files, the seeds are fixed, so the samples are the same on
-// every render and every machine (to the precision of the float maths of ffmpeg's expression evaluator), and they are ours:
-// the export is "licensed" and nothing is cue-only about them (D-03 is about the trend sounds we do not own).
+// Generated sound effects (P3-10 part B, redesigned in P3-11): eleven categories with three or four variants each, synthesised in
+// ffmpeg from aevalsrc and seeded anoisesrc with filters and envelopes (sfx_recipes.go, sfx_dsp.go and docs/design/audio-v1.md
+// hold the design). There are no asset files and the seeds are fixed, so the samples are the same on every render and every
+// machine (to the precision of the float maths of ffmpeg's expression evaluator), and they are ours: the export is "licensed"
+// and nothing is cue-only about them (D-03 is about the trend sounds we do not own).
 //
-// Every number written here is a constant of this file or a number the compiler formatted (the start and the gain of an item);
-// the effect itself is chosen by a switch on the enum, so nothing from the spec is written into the graph as text.
+// Every number written into the graph is a constant of the recipes, a number the compiler formatted (the start and the gain of
+// an item, the jitter taken from a hash of its id), and the effect is chosen by a switch on the category and variant enums, so
+// nothing from the spec is written into the graph as text.
 //
-// Level: each effect is built with a peak of about 0.9 to 1.4 before the stage that sets its level, then goes through
-// sfxBaseDB and the item's gain_db. The effects are mixed in after the loudness normalisation of the programme (the way the
-// preview's beat guide is), at that fixed level, followed by a limiter at -1 dBFS: a lone impact on a silent timeline is not
-// boosted to -14 LUFS, and an effect on top of a normalised programme cannot push the mix over its true-peak target.
+// Level: each effect is loudness-matched to its category (sfxLevelDB), then goes through sfxBaseDB and the item's gain_db. The
+// effects are mixed in after the loudness normalisation of the programme (the way the preview's beat guide is), at that fixed
+// level, followed by a limiter: a lone impact on a silent timeline is not boosted to -14 LUFS, and an effect on top of a
+// normalised programme cannot push the mix over its peak ceiling.
+//
+// The limiter is a sample-peak limiter at sfxLimitDB (-1.5 dBFS), not a true-peak limiter: the 0.5 dB between it and the -1 dBTP
+// target is headroom for the inter-sample peaks that the AAC encoder and a player's resampler add (a sample peak of -1.5 dBFS
+// stays under -1 dBTP in practice; TestSoundEffectsLeaveTheProgrammeAlone measures the true peak with ebur128). Its look-ahead
+// delay is compensated by alimiter itself (latency=1), which also flushes the look-ahead buffer at the end of the stream, so
+// the sound stays where it was and keeps its length; the same test pins that with an impulse.
 const (
-	sfxBaseDB   = -6
-	sfxLimitLin = "0.891251" // -1 dBFS
-	// sfxLimiterDelay is the latency of alimiter at its 5 ms attack (written into the filter, so no default can change it) and 48 kHz, in samples (an impulse comes out 239
-	// samples late, in ffmpeg 7.1 and 8.1 alike). TestSoundEffectsLeaveTheProgrammeAlone fails if another ffmpeg changes it.
-	sfxLimiterDelay = 239
+	sfxBaseDB = -6
+	// sfxLimitDB is the peak ceiling of the mix in dBFS and sfxLimitLin the same as the linear value alimiter takes.
+	sfxLimitDB  = -1.5
+	sfxLimitLin = "0.841395"
 )
 
-// sfxSource returns the statements that make the raw effect (mono) and end in the filter chain tail (a comma-separated list
-// of filters, possibly empty), into pad out. It returns false for a name that is not an effect.
-func sfxSource(name, tail, out string) ([]string, bool) {
-	finish := func(in string, extra string) string {
-		f := extra
-		if tail != "" {
-			f += "," + tail
+// sfxLimiter is the limiter stage that follows the mix of the effects (auto level off: it would normalise the mix). The attack
+// is written out so that no default can change it.
+const sfxLimiter = "alimiter=limit=" + sfxLimitLin + ":attack=5:release=50:level=false:latency=1"
+
+// sfxSpecError is the error for an item whose category or variant the renderer does not know.
+func sfxSpecError(it *timeline.SFX) error {
+	return fmt.Errorf("%w: audio item %s: %q is not a sound effect", ErrInvalidSpec, it.ID, it.Sfx)
+}
+
+// builtSFX is one effect resolved and built: the statements that make it (to be placed on the timeline by the caller) and its
+// length.
+type builtSFX struct {
+	stmts []string
+	out   string
+	ms    int64
+	cat   string
+	vari  string
+}
+
+// buildItem resolves an item's variant and builds its layers under the label prefix.
+func buildItem(prefix string, it *timeline.SFX) (builtSFX, error) {
+	variant, ok := timeline.ResolveSFXVariant(it.Sfx, it.Variant, it.ID)
+	if !ok {
+		if _, known := timeline.SFXVariants(it.Sfx); known {
+			return builtSFX{}, fmt.Errorf("%w: audio item %s: %q is not a variant of %s", ErrInvalidSpec, it.ID, it.Variant, it.Sfx)
 		}
-		return fmt.Sprintf("%s%s[%s]", in, f, out)
+		return builtSFX{}, sfxSpecError(it)
 	}
-	noise := func(color string, seed int, seconds string) string {
-		return fmt.Sprintf("anoisesrc=color=%s:seed=%d:amplitude=1:sample_rate=%d:duration=%s", color, seed, AudioSampleRate, seconds)
+	res, ok := buildSFX(prefix, it.Sfx, variant, it.ID)
+	if !ok {
+		return builtSFX{}, sfxSpecError(it)
 	}
-	switch name {
-	case timeline.SFXWhoosh:
-		// Pink noise through a wide band around 900 Hz under a bell-shaped envelope: air passing.
-		return []string{noise("pink", 11, "0.6") +
-			",bandpass=f=900:width_type=h:width=1400,volume='0.9*pow(sin(PI*t/0.6),2)':eval=frame:precision=float,afade=t=out:st=0.57:d=0.03," + stereo48 +
-			finishTail(tail, out)}, true
-	case timeline.SFXSwish:
-		// A short, higher air pass.
-		return []string{noise("white", 3, "0.3") +
-			",bandpass=f=3500:width_type=h:width=3000,volume='0.8*pow(sin(PI*t/0.3),2)':eval=frame:precision=float,afade=t=out:st=0.285:d=0.015," + stereo48 +
-			finishTail(tail, out)}, true
-	case timeline.SFXImpact:
-		// A sine that falls from 133 Hz to 38 Hz (phase: the integral of 38 + 95 e^(-14 t)) under a fast decay, and a crack of
-		// high-passed noise that dies in 60 ms.
-		return []string{
-			"aevalsrc='0.9*sin(2*PI*(38*t+6.785714*(1-exp(-14*t))))*exp(-5*t)':s=" + fmt.Sprint(AudioSampleRate) + ":d=0.8[ia]",
-			noise("white", 7, "0.8") + ",highpass=f=1500,volume='0.5*exp(-45*t)':eval=frame:precision=float[ib]",
-			finish("[ia][ib]amix=inputs=2:duration=longest:normalize=0,afade=t=out:st=0.77:d=0.03,"+stereo48, ""),
-		}, true
-	case timeline.SFXRiser:
-		// A sine that rises from 220 Hz to 2020 Hz in 1.5 s (phase: 220 t + 600 t^2) and white noise above 900 Hz, both growing
-		// with the square of the time: tension that peaks at the end.
-		return []string{
-			"aevalsrc='0.55*sin(2*PI*(220*t+600*t*t))*pow(t/1.5,2)':s=" + fmt.Sprint(AudioSampleRate) + ":d=1.5[ra]",
-			noise("white", 5, "1.5") + ",highpass=f=900,volume='0.4*pow(t/1.5,2)':eval=frame:precision=float[rb]",
-			finish("[ra][rb]amix=inputs=2:duration=longest:normalize=0,afade=t=out:st=1.47:d=0.03,"+stereo48, ""),
-		}, true
-	}
-	return nil, false
+	return builtSFX{stmts: res.stmts, out: res.out, ms: res.ms, cat: it.Sfx, vari: variant}, nil
 }
 
-// finishTail is the end of a single-chain statement: the optional tail filters and the output pad.
-func finishTail(tail, out string) string {
-	if tail == "" {
-		return "[" + out + "]"
-	}
-	return "," + tail + "[" + out + "]"
+// sfxPlacement is one effect placed on the timeline.
+type sfxPlacement struct {
+	stmts    []string
+	pad      string
+	atMs     int64
+	durMs    int64
+	targetDB float64 // the category's level: what decides whether it ducks the programme
 }
 
-// sfxGraph returns the statements of the sound effects and the pads they end in, to be mixed after the programme. An effect
-// that starts at or after the end of the timeline plays nothing and is left out.
-func (c *compiler) sfxGraph() (stmts, pads []string, err error) {
+// sfxPlacements builds every effect of the spec in order. The first error is kept in c.sfxErr.
+func (c *compiler) sfxPlacements() []sfxPlacement {
+	var out []sfxPlacement
 	n := 0
 	for _, t := range c.spec.Tracks {
 		tr, ok := t.(*timeline.AudioTrack)
@@ -94,26 +94,29 @@ func (c *compiler) sfxGraph() (stmts, pads []string, err error) {
 				continue
 			}
 			if sfx.Export != timeline.ExportLicensed {
-				return nil, nil, fmt.Errorf("%w: audio item %s: export %q does not fit kind %q", ErrInvalidSpec, sfx.ID, sfx.Export, sfx.AudioKind())
+				c.sfxErr = fmt.Errorf("%w: audio item %s: export %q does not fit kind %q", ErrInvalidSpec, sfx.ID, sfx.Export, sfx.AudioKind())
+				return nil
 			}
-			natural, known := timeline.SFXLengthMs(sfx.Sfx)
-			if !known {
-				return nil, nil, fmt.Errorf("%w: audio item %s: %q is not a sound effect", ErrInvalidSpec, sfx.ID, sfx.Sfx)
+			it, err := buildItem("fx"+strconv.Itoa(n), sfx)
+			if err != nil {
+				c.sfxErr = err
+				return nil
 			}
 			gain := sfx.GainDB
 			if gain != nil && (*gain < -30 || *gain > 6 || *gain != *gain) {
-				return nil, nil, fmt.Errorf("%w: audio item %s: gain %s dB is outside -30 to 6", ErrInvalidSpec, sfx.ID, num(*gain))
+				c.sfxErr = fmt.Errorf("%w: audio item %s: gain %s dB is outside -30 to 6", ErrInvalidSpec, sfx.ID, num(*gain))
+				return nil
 			}
 			if sfx.AtMs < 0 || sfx.AtMs >= c.totalMs {
 				continue
 			}
-			dur := min(natural, c.totalMs-sfx.AtMs)
+			dur := min(it.ms, c.totalMs-sfx.AtMs)
 			db := float64(sfxBaseDB)
 			if gain != nil {
 				db += *gain
 			}
-			tail := []string{"volume=" + num(round6(db)) + "dB", "atrim=end=" + secs(dur), "asetpts=PTS-STARTPTS"}
-			if dur < natural { // cut by the end of the timeline: a short fade instead of a click
+			tail := []string{stereo48, "volume=" + f(db) + "dB", "atrim=end=" + secs(dur), "asetpts=PTS-STARTPTS"}
+			if dur < it.ms { // cut by the end of the timeline: a short fade instead of a click
 				fade := min(dur, 10)
 				tail = append(tail, fmt.Sprintf("afade=t=out:st=%s:d=%s", secs(dur-fade), secs(fade)))
 			}
@@ -122,10 +125,136 @@ func (c *compiler) sfxGraph() (stmts, pads []string, err error) {
 			}
 			pad := fmt.Sprintf("fx%d", n)
 			n++
-			st, _ := sfxSource(sfx.Sfx, strings.Join(tail, ","), pad)
-			stmts = append(stmts, st...)
-			pads = append(pads, pad)
+			st := append([]string{}, it.stmts...)
+			st = append(st, chain([]string{it.out}, tail, pad))
+			out = append(out, sfxPlacement{stmts: st, pad: pad, atMs: sfx.AtMs, durMs: dur, targetDB: sfxTargetDB[it.cat]})
 		}
 	}
-	return stmts, pads, nil
+	return out
+}
+
+// SFXPreviewGraph returns the filter graph (one statement per element, ending in [aout]) of one effect rendered alone, the way it
+// is mixed into a render: stereo at 48 kHz, at sfxBaseDB plus gainDB, then the limiter, starting at time 0. id drives the jitter
+// and the "auto" variant. It also returns the effect's length in ms. It is for the gallery (cfctl sfx gallery) and the tests.
+func SFXPreviewGraph(category, variant, id string, gainDB float64) (graph string, ms int64, err error) {
+	it, err := buildItem("fx0", &timeline.SFX{ID: id, Sfx: category, Variant: variant, Export: timeline.ExportLicensed})
+	if err != nil {
+		return "", 0, err
+	}
+	if gainDB != gainDB || gainDB < -30 || gainDB > 6 {
+		return "", 0, fmt.Errorf("%w: gain %s dB is outside -30 to 6", ErrInvalidSpec, num(gainDB))
+	}
+	tail := []string{stereo48, "volume=" + f(sfxBaseDB+gainDB) + "dB", sfxLimiter}
+	st := append([]string{}, it.stmts...)
+	st = append(st, chain([]string{it.out}, tail, "aout"))
+	return joinStmts(st), it.ms, nil
+}
+
+// SFXRawGraph is SFXPreviewGraph without the base level and the limiter: the effect as the recipe makes it, at its matched
+// level, mono or stereo as built. The tests measure the design with it.
+func SFXRawGraph(category, variant, id string) (graph string, ms int64, err error) {
+	it, err := buildItem("fx0", &timeline.SFX{ID: id, Sfx: category, Variant: variant, Export: timeline.ExportLicensed})
+	if err != nil {
+		return "", 0, err
+	}
+	st := append([]string{}, it.stmts...)
+	st = append(st, chain([]string{it.out}, []string{stereo48}, "aout"))
+	return joinStmts(st), it.ms, nil
+}
+
+func joinStmts(st []string) string {
+	out := ""
+	for i, s := range st {
+		if i > 0 {
+			out += ";"
+		}
+		out += s
+	}
+	return out
+}
+
+// The ducking of the programme under the effects (P3-11). Where an effect overlaps speech from a clip's own sound, the programme is
+// compressed a few dB by a sidechain compressor keyed on the effect, so that a hit does not bury a word: the gain reduction follows
+// the effect's own level (a riser ducks more at its peak than at its start), it is the same on every render (no randomness, no
+// look at the audio), and with no overlap the programme is not touched at all. Earshot's rule is 3 to 6 dB under voice
+// (launch-video-sound.md section 9); the threshold and ratio below give 3 to 5 dB for a hit at its default level and at most 6 dB
+// at +6 dB of gain.
+const (
+	duckThreshold = "0.05" // -26 dBFS: about 20 dB under a hit's peak at the default level
+	duckRatio     = "1.25" // 20 dB over the threshold is a reduction of 4 dB
+	duckAttackMs  = 8
+	duckReleaseMs = 200
+	// speechGapMs is the pause between two words under which they are one stretch of speech.
+	speechGapMs = 250
+	// duckMinTargetDB is the quietest category that ducks: the accents (impact, sting, sub drop, riser, downlifter, whoosh, glitch),
+	// not the detail (swish, shimmer, pop, click), which are too small to cover a word.
+	duckMinTargetDB = -13
+)
+
+// speechSpans returns where, in output ms, a clip's own sound carries speech: the transcript words of every clip whose source audio
+// is in the mix (a clip with a speed ramp plays none, see audioGraph), merged when the pause between two words is short.
+func (c *compiler) speechSpans() [][2]int64 {
+	var spans [][2]int64
+	for _, w := range c.mapWords() {
+		cl := c.clips[w.clip]
+		a := cl.item.Audio
+		if a == nil || !a.UseSourceOrDefault() || !cl.asset.HasAudio || cl.item.HasRamp() {
+			continue
+		}
+		start, end := timeline.FrameStartMs(w.startF, c.fps), timeline.FrameStartMs(w.endF, c.fps)
+		if n := len(spans); n > 0 && start-spans[n-1][1] <= speechGapMs {
+			spans[n-1][1] = max(spans[n-1][1], end)
+			continue
+		}
+		spans = append(spans, [2]int64{start, end})
+	}
+	return spans
+}
+
+// duck returns the statements that duck the programme (the pad prog) under the effects of places that overlap speech, the pad of
+// the ducked programme and the pads of the effects for the final mix (the ones that feed the key are split first: a pad can be read
+// once). With nothing to duck it returns no statements, prog and pads as they were.
+func (c *compiler) duck(prog string, places []sfxPlacement, pads []string) (stmts []string, out string, newPads []string) {
+	spans := c.speechSpans()
+	if len(spans) == 0 {
+		return nil, prog, pads
+	}
+	newPads = slices.Clone(pads)
+	var keys []string
+	for i, p := range places {
+		if p.targetDB < duckMinTargetDB {
+			continue
+		}
+		overlaps := false
+		for _, s := range spans {
+			if s[0] < p.atMs+p.durMs && s[1] > p.atMs {
+				overlaps = true
+				break
+			}
+		}
+		if !overlaps {
+			continue
+		}
+		mixCopy, keyCopy := p.pad+"m", p.pad+"k"
+		stmts = append(stmts, fmt.Sprintf("[%s]asplit=2[%s][%s]", p.pad, mixCopy, keyCopy))
+		newPads[i] = mixCopy
+		keys = append(keys, keyCopy)
+	}
+	if len(keys) == 0 {
+		return nil, prog, pads
+	}
+	// The key is the sum of those effects, as long as the programme (the compressor ends with its shortest input otherwise).
+	var in string
+	for _, k := range keys {
+		in += "[" + k + "]"
+	}
+	keyStmt := in
+	if len(keys) > 1 {
+		keyStmt += fmt.Sprintf("amix=inputs=%d:duration=longest:normalize=0:dropout_transition=0,", len(keys))
+	}
+	keyStmt += fmt.Sprintf("apad=whole_dur=%s[fxkey]", secs(c.totalMs))
+	stmts = append(stmts, keyStmt,
+		fmt.Sprintf("[%s][fxkey]sidechaincompress=threshold=%s:ratio=%s:attack=%d:release=%d:makeup=1:knee=4:detection=peak[aduck]",
+			prog, duckThreshold, duckRatio, duckAttackMs, duckReleaseMs))
+	return stmts, "aduck", newPads
 }

@@ -179,8 +179,28 @@ func (p Plan) SourceTimeMs(outMs int64) (entry TimeMapEntry, sourceMs int64, ok 
 	return TimeMapEntry{}, 0, false
 }
 
-// PrettyFilter puts one filter_complex statement on each line, for golden files and logs. The graph itself is never
-// written with newlines, and none of its expressions contain a semicolon.
+// PrettyFilter puts one filter_complex statement on each line, for golden files and logs. The graph itself is never written
+// with newlines. A semicolon inside single quotes is not a statement end: the sound effects' asendcmd commands are quoted lists
+// separated by semicolons.
 func PrettyFilter(filterComplex string) string {
-	return strings.ReplaceAll(filterComplex, ";", ";\n")
+	return strings.Join(splitStatements(filterComplex), "\n")
+}
+
+// splitStatements splits a filter_complex at the semicolons that are not inside single quotes; every piece but the last keeps
+// its semicolon.
+func splitStatements(g string) []string {
+	var out []string
+	quoted, start := false, 0
+	for i := 0; i < len(g); i++ {
+		switch g[i] {
+		case '\'':
+			quoted = !quoted
+		case ';':
+			if !quoted {
+				out = append(out, g[start:i+1])
+				start = i + 1
+			}
+		}
+	}
+	return append(out, g[start:])
 }

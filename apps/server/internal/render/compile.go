@@ -43,6 +43,8 @@ type compiler struct {
 	// inputs are the ffmpeg inputs: one per clip, then one per audio track item.
 	inputs []Input
 	plan   Plan
+	// sfxErr is the first error of the generated sound effects (see sfx.go).
+	sfxErr error
 }
 
 // Compile builds the Plan for rendering spec with profile. It is pure and deterministic: no process is started and

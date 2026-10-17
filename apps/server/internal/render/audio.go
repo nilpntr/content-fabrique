@@ -181,9 +181,21 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 	// timeline are not boosted to -14 LUFS.
 	guide := c.beatGuide()
 	// The sound effects are the same kind of thing: an accent mixed in after the normalisation, at a fixed level.
-	sfxStmts, sfxPads, err := c.sfxGraph()
-	if err != nil {
-		return audioResult{}, err
+	places := c.sfxPlacements()
+	if c.sfxErr != nil {
+		return audioResult{}, c.sfxErr
+	}
+	var sfxStmts, sfxPads []string
+	for _, p := range places {
+		sfxStmts = append(sfxStmts, p.stmts...)
+		sfxPads = append(sfxPads, p.pad)
+	}
+	// Where an effect overlaps speech from a clip's own sound, the programme is ducked a few dB under it (sfx.go, duck). Only a
+	// programme that has sound to duck is: a timeline whose only sound is effects has nothing under them.
+	var duckStmts []string
+	duckedProg := ""
+	if len(mixPads) > 0 {
+		duckStmts, duckedProg, sfxPads = c.duck("aprog", places, sfxPads)
 	}
 	post := slices.Clone(sfxPads)
 	if len(guide) > 0 {
@@ -222,17 +234,20 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 	case len(post) > 0:
 		stmts = append(stmts, guide...)
 		stmts = append(stmts, sfxStmts...)
+		if len(duckStmts) > 0 {
+			stmts = append(stmts, duckStmts...)
+			prog = duckedProg
+		}
 		in := "[" + prog + "]"
 		for _, p := range post {
 			in += "[" + p + "]"
 		}
 		mix := fmt.Sprintf("%samix=inputs=%d:duration=first:normalize=0:dropout_transition=0", in, len(post)+1)
 		if len(sfxPads) > 0 {
-			// A limiter at -1 dBFS, so the effects cannot push the mix past the true-peak target (auto level off: it would
-			// normalise the mix).
-			// The limiter delays its output by sfxLimiterDelay samples and does not say so: the input gets that much silence at the
-			// end, and the same number of samples are cut at the start, so that the sound stays where it was and keeps its length.
-			mix += fmt.Sprintf(",apad=pad_len=%d,alimiter=limit=%s:attack=5:release=50:level=false,atrim=start_sample=%d,asetpts=PTS-STARTPTS", sfxLimiterDelay, sfxLimitLin, sfxLimiterDelay)
+			// A limiter at sfxLimitDB (-1.5 dBFS: headroom under the -1 dBTP target for inter-sample peaks), so the effects cannot
+			// push the mix past the peak ceiling. alimiter compensates its own look-ahead delay (latency=1), so the sound stays
+			// where it was and keeps its length (see sfx.go).
+			mix += "," + sfxLimiter
 		}
 		stmts = append(stmts, mix+"[aout]")
 	case prog == "abed":
