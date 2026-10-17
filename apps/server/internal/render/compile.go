@@ -71,8 +71,14 @@ func Compile(spec *timeline.Spec, profile Profile, resolver AssetResolver) (Plan
 		return Plan{}, err
 	}
 
+	// Text, captions and the preview watermark are one generated ASS script, burned in after the clips are joined.
+	subs, err := c.subtitles()
+	if err != nil {
+		return Plan{}, err
+	}
+
 	// The video graph uses inputs 0..n-1 (one per clip); the audio graph appends the audio track items.
-	video, err := c.videoGraph()
+	video, err := c.videoGraph(subs)
 	if err != nil {
 		return Plan{}, err
 	}
@@ -87,13 +93,14 @@ func Compile(spec *timeline.Spec, profile Profile, resolver AssetResolver) (Plan
 	c.plan.TotalFrames = c.total
 	c.plan.DurationMs = c.totalMs
 	c.plan.Inputs = c.inputs
+	c.plan.Subtitles = subs
 	c.plan.FilterComplex = strings.Join(append(video, audio.statements...), ";")
 	c.plan.Loudnorm = audio.loudnorm
 	c.plan.Args = c.args()
 	if audio.loudnorm != nil {
 		audio.loudnorm.Pass1Args = c.pass1Args(audio.pass1Graph)
 	}
-	c.collectMapsAndPending()
+	c.collectMaps()
 	return c.plan, nil
 }
 
@@ -281,13 +288,12 @@ func (c *compiler) inputArgs(only []int) []string {
 	return args
 }
 
-// collectMapsAndPending fills the cut list, time map and the pending text of the plan.
-func (c *compiler) collectMapsAndPending() {
+// collectMaps fills the cut list and the time map of the plan.
+func (c *compiler) collectMaps() {
 	p := &c.plan
 	p.CutList = []Cut{}
 	p.TimeMap = []TimeMapEntry{}
 	p.SoundCues = append([]SoundCue{}, p.SoundCues...)
-	p.PendingText = []PendingText{}
 
 	for i, cl := range c.clips {
 		if i > 0 {
@@ -313,25 +319,20 @@ func (c *compiler) collectMapsAndPending() {
 	}
 
 	for _, t := range c.spec.Tracks {
-		switch tr := t.(type) {
-		case *timeline.TextTrack:
-			for _, it := range tr.Items {
-				start := timeline.Frame(it.AtMs, c.fps)
-				end := timeline.Frame(it.AtMs+it.DurationMs, c.fps)
-				p.TimeMap = append(p.TimeMap, TimeMapEntry{
-					OutStartMs: timeline.FrameStartMs(start, c.fps),
-					OutEndMs:   timeline.FrameStartMs(end, c.fps),
-					ItemID:     it.ID,
-				})
-				p.PendingText = append(p.PendingText, PendingText{ItemID: it.ID, AtMs: it.AtMs, DurationMs: it.DurationMs, Style: it.Style})
-			}
-		case *timeline.CaptionsTrack:
-			if tr.Enabled {
-				p.PendingCaptions = true
-			}
+		tr, ok := t.(*timeline.TextTrack)
+		if !ok {
+			continue
+		}
+		for _, it := range tr.Items {
+			start := timeline.Frame(it.AtMs, c.fps)
+			end := timeline.Frame(it.AtMs+it.DurationMs, c.fps)
+			p.TimeMap = append(p.TimeMap, TimeMapEntry{
+				OutStartMs: timeline.FrameStartMs(start, c.fps),
+				OutEndMs:   timeline.FrameStartMs(end, c.fps),
+				ItemID:     it.ID,
+			})
 		}
 	}
-	p.PendingWatermark = c.profile.Watermark
 }
 
 // secs formats milliseconds as seconds with three decimals, the form ffmpeg reads exactly.

@@ -50,7 +50,7 @@ BANNED = re.compile(
 # "binaryLicence", not Debian's copyright tokens.
 PERMISSIVE = {
     "MIT", "Expat", "BSD-2-clause", "BSD-3-clause", "BSD-variant", "Apache-2.0", "ISC", "Zlib", "libpng", "FTL",
-    "HPND-sell-variant", "WTFPL", "public-domain", "0BSD",
+    "HPND-sell-variant", "WTFPL", "public-domain", "0BSD", "OFL-1.1",
 }
 
 TOKEN_SPLIT = re.compile(r"\s+(?:or|and|with)\s+|[,()]", re.IGNORECASE)
@@ -136,7 +136,7 @@ def check(policy: dict, comps: list[Component], ffmpeg_conf: str) -> tuple[list[
         if c.copyright_sha256 != e.get("copyrightSha256"):
             fails.append(f"{c.name} {c.version}: its copyright file changed since the last review (now {c.copyright_sha256}). "
                          f"Read the diff of the licences, then update copyrightSha256 in licenses/policy.json")
-        if c.kind == "source" and c.declared_sha256 != e.get("sourceSha256"):
+        if c.kind in ("source", "font") and c.declared_sha256 != e.get("sourceSha256"):
             fails.append(f"{c.name}: source checksum {c.declared_sha256} is not the reviewed {e.get('sourceSha256')}")
     for name in sorted(set(entries) - names):
         warns.append(f"allowlist entry {name} matches nothing in the image (stale?)")

@@ -49,7 +49,8 @@ filter_complex:
   [b0b]scale=540:960:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=540:960,scale=44:80:flags=bicubic,gblur=sigma=2,scale=540:960:flags=bicubic[b0bg];
   [b0a]scale=540:960:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=bicubic[b0fg];
   [b0bg][b0fg]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2,format=yuv420p,setsar=1,fps=30,settb=AVTB[v0];
-  [v0]null[vout];
+  [v0]null[vj];
+  [vj]ass=filename=subs.ass:fontsdir=fonts[vout];
   anullsrc=r=48000:cl=stereo:d=3.000[abed];
   [abed]anull[aout]
 
@@ -84,8 +85,21 @@ time_map:
 sound_cues:
 []
 
-pending_text:
-[]
+subtitles: subs.ass in fonts/ (fonts Inter-Bold.ttf), 0 text events, 0 caption events, watermark true
 
-pending_captions: false
-pending_watermark: true
+ass:
+  [Script Info]
+  ScriptType: v4.00+
+  PlayResX: 1080
+  PlayResY: 1920
+  WrapStyle: 2
+  ScaledBorderAndShadow: yes
+  YCbCr Matrix: None
+  
+  [V4+ Styles]
+  Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+  Style: watermark,Inter,37,&H55FFFFFF,&H55FFFFFF,&H87000000,&HFF000000,-1,0,0,0,100,100,0,0,1,2,0,5,0,0,0,1
+  
+  [Events]
+  Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+  Dialogue: 2,0:00:00.00,0:00:02.98,watermark,,0,0,0,,{\an5\pos(886.5,261.5)}PREVIEW

@@ -179,5 +179,14 @@
   },
   "i47_transitions_in_and_out_too_long_for_clip.json": {
     "code": "transition_too_long"
+  },
+  "i48_unknown_style.json": {
+    "code": "unknown_style"
+  },
+  "i49_unsupported_character_emoji.json": {
+    "code": "unsupported_character"
+  },
+  "i50_text_overlaps_captions.json": {
+    "code": "text_overlaps_captions"
   }
 }

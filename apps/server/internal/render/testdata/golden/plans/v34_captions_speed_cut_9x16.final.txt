@@ -1,0 +1,197 @@
+fixture: v34_captions_speed_cut_9x16
+profile: final
+output: 1080x1920 at 30 fps, 246 frames, 8200 ms
+
+args:
+  -protocol_whitelist
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
+  -t
+  3.000
+  -i
+  /assets/original/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4
+  -protocol_whitelist
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
+  -ss
+  5.000
+  -t
+  3.000
+  -i
+  /assets/original/ast_01jex6xx15ayjx8epfhfjj9s11.mp4
+  -protocol_whitelist
+  file
+  -format_whitelist
+  mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg
+  -ss
+  20.000
+  -t
+  2.000
+  -i
+  /assets/original/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4
+  -filter_complex
+  <filter_complex>
+  -map
+  [vout]
+  -map
+  [aout]
+  -c:v
+  libx264
+  -preset
+  medium
+  -crf
+  18
+  -profile:v
+  high
+  -pix_fmt
+  yuv420p
+  -c:a
+  aac
+  -b:a
+  192k
+  -ar
+  48000
+  -ac
+  2
+  -map_metadata
+  -1
+  -map_chapters
+  -1
+  -fflags
+  +bitexact
+  -flags:v
+  +bitexact
+  -flags:a
+  +bitexact
+  -movflags
+  +faststart
+
+filter_complex:
+  [0:v]trim=end=3.000,setpts=PTS-STARTPTS,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=90,setpts=PTS-STARTPTS,scale=1080:1920:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=1080:1920:x='clip(0.5*iw-540,0,iw-1080)':y='clip(0.5*ih-960,0,ih-1920)',setsar=1,format=yuv420p,setsar=1,fps=30,settb=AVTB[v0];
+  [1:v]trim=end=3.000,setpts=PTS-STARTPTS,setpts=PTS/2,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=45,setpts=PTS-STARTPTS,scale=1080:1920:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=1080:1920:x='clip(0.5*iw-540,0,iw-1080)':y='clip(0.5*ih-960,0,ih-1920)',setsar=1,format=yuv420p,setsar=1,fps=30,settb=AVTB[v1];
+  [2:v]trim=end=2.000,setpts=PTS-STARTPTS,setpts=PTS/0.5,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=120,setpts=PTS-STARTPTS,scale=1080:1920:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=1080:1920:x='clip(0.5*iw-540,0,iw-1080)':y='clip(0.5*ih-960,0,ih-1920)',setsar=1,format=yuv420p,setsar=1,fps=30,settb=AVTB[v2];
+  [v0][v1]xfade=transition=fade:duration=0.300000:offset=2.700000[j1];
+  [j1][v2]concat=n=2:v=1:a=0[vj];
+  [vj]ass=filename=subs.ass:fontsdir=fonts[vout];
+  anullsrc=r=48000:cl=stereo:d=8.200[abed];
+  [abed]anull[aout]
+
+inputs:
+[
+  {
+    "index": 0,
+    "role": "clip",
+    "item_id": "c1",
+    "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+    "location": "/assets/original/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4",
+    "seek_ms": 0,
+    "duration_ms": 3000
+  },
+  {
+    "index": 1,
+    "role": "clip",
+    "item_id": "c2",
+    "asset_id": "ast_01jex6xx15ayjx8epfhfjj9s11",
+    "location": "/assets/original/ast_01jex6xx15ayjx8epfhfjj9s11.mp4",
+    "seek_ms": 5000,
+    "duration_ms": 3000
+  },
+  {
+    "index": 2,
+    "role": "clip",
+    "item_id": "c3",
+    "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+    "location": "/assets/original/ast_01j3er3kwcgrasdgd4aznmxxe0.mp4",
+    "seek_ms": 20000,
+    "duration_ms": 2000
+  }
+]
+
+cut_list:
+[
+  {
+    "index": 1,
+    "item_id": "c2",
+    "frame": 81,
+    "at_ms": 2700,
+    "transition": "crossfade",
+    "transition_frames": 9
+  },
+  {
+    "index": 2,
+    "item_id": "c3",
+    "frame": 126,
+    "at_ms": 4200,
+    "transition": "cut",
+    "transition_frames": 0
+  }
+]
+
+time_map:
+[
+  {
+    "out_start_ms": 0,
+    "out_end_ms": 2700,
+    "item_id": "c1",
+    "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+    "source_in_ms": 0,
+    "speed": 1
+  },
+  {
+    "out_start_ms": 2700,
+    "out_end_ms": 4200,
+    "item_id": "c2",
+    "asset_id": "ast_01jex6xx15ayjx8epfhfjj9s11",
+    "source_in_ms": 5000,
+    "speed": 2
+  },
+  {
+    "out_start_ms": 4200,
+    "out_end_ms": 8200,
+    "item_id": "c3",
+    "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+    "source_in_ms": 20000,
+    "speed": 0.5
+  },
+  {
+    "out_start_ms": 0,
+    "out_end_ms": 1500,
+    "item_id": "t1"
+  }
+]
+
+sound_cues:
+[]
+
+subtitles: subs.ass in fonts/ (fonts Inter-Bold.ttf, Montserrat-ExtraBold.ttf), 1 text events, 11 caption events, watermark false
+
+ass:
+  [Script Info]
+  ScriptType: v4.00+
+  PlayResX: 1080
+  PlayResY: 1920
+  WrapStyle: 2
+  ScaledBorderAndShadow: yes
+  YCbCr Matrix: None
+  
+  [V4+ Styles]
+  Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+  Style: caption_plain,Montserrat ExtraBold,132,&H00FFFFFF,&H00FFFFFF,&H00000000,&H73000000,0,0,0,0,100,100,0,0,1,11,3,5,0,0,0,1
+  Style: label_box,Inter,70,&H00FFFFFF,&H00FFFFFF,&H32000000,&HFF000000,-1,0,0,0,100,100,0,0,3,17,0,5,0,0,0,1
+  
+  [Events]
+  Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+  Dialogue: 0,0:00:00.00,0:00:01.18,caption_plain,,0,0,0,,{\an5\pos(540,872)}SQUAT DEEP\NAND
+  Dialogue: 1,0:00:00.00,0:00:01.48,label_box,,0,0,0,,{\an5\pos(540,293)\fad(150,150)}Leg day
+  Dialogue: 0,0:00:01.25,0:00:02.45,caption_plain,,0,0,0,,{\an5\pos(539.5,872)}STAY TIGHT\NDRIVE
+  Dialogue: 0,0:00:02.52,0:00:02.72,caption_plain,,0,0,0,,{\an5\pos(540,872)}THROUGH.
+  Dialogue: 0,0:00:02.72,0:00:02.88,caption_plain,,0,0,0,,{\an5\pos(540,872)}DAY
+  Dialogue: 0,0:00:02.92,0:00:02.95,caption_plain,,0,0,0,,{\an5\pos(539.5,872)}YOUR
+  Dialogue: 0,0:00:02.95,0:00:03.08,caption_plain,,0,0,0,,{\an5\pos(540,872)}SQUAT.
+  Dialogue: 0,0:00:03.12,0:00:03.72,caption_plain,,0,0,0,,{\an5\pos(539.5,872)}DEEP AND\NSTAY
+  Dialogue: 0,0:00:03.75,0:00:04.15,caption_plain,,0,0,0,,{\an5\pos(540,872)}TIGHT DRIVE
+  Dialogue: 0,0:00:04.18,0:00:05.22,caption_plain,,0,0,0,,{\an5\pos(539.5,872)}DAY SQUAT.
+  Dialogue: 0,0:00:05.35,0:00:07.75,caption_plain,,0,0,0,,{\an5\pos(539.5,872)}DEEP AND\NSTAY
+  Dialogue: 0,0:00:07.85,0:00:08.18,caption_plain,,0,0,0,,{\an5\pos(539.5,872)}TIGHT

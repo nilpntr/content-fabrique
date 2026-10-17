@@ -46,7 +46,8 @@ args:
 
 filter_complex:
   [0:v]trim=end=5.000,setpts=PTS-STARTPTS,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=150,setpts=PTS-STARTPTS,scale=540:960:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=540:960:x='clip(0.5*iw-270,0,iw-540)':y='clip(0.5*ih-480,0,ih-960)',setsar=1,format=yuv420p,setsar=1,fps=30,settb=AVTB[v0];
-  [v0]null[vout];
+  [v0]null[vj];
+  [vj]ass=filename=subs.ass:fontsdir=fonts[vout];
   anullsrc=r=48000:cl=stereo:d=5.000[abed];
   [0:a]atrim=end=5.000,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=5.000,asetpts=PTS-STARTPTS[as0];
   [abed][as0]amix=inputs=2:duration=first:normalize=0:dropout_transition=0,loudnorm=I=-14:TP=-1:LRA=11,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[aout]
@@ -93,8 +94,42 @@ time_map:
 sound_cues:
 []
 
-pending_text:
-[]
+subtitles: subs.ass in fonts/ (fonts Inter-Bold.ttf, Montserrat-ExtraBold.ttf), 0 text events, 20 caption events, watermark true
 
-pending_captions: true
-pending_watermark: true
+ass:
+  [Script Info]
+  ScriptType: v4.00+
+  PlayResX: 1080
+  PlayResY: 1920
+  WrapStyle: 2
+  ScaledBorderAndShadow: yes
+  YCbCr Matrix: None
+  
+  [V4+ Styles]
+  Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+  Style: caption_highlight,Montserrat ExtraBold,132,&H00FFFFFF,&H00FFFFFF,&H00000000,&H73000000,0,0,0,0,100,100,0,0,1,11,3,5,0,0,0,1
+  Style: watermark,Inter,37,&H55FFFFFF,&H55FFFFFF,&H87000000,&HFF000000,-1,0,0,0,100,100,0,0,1,2,0,5,0,0,0,1
+  
+  [Events]
+  Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+  Dialogue: 0,0:00:00.00,0:00:00.35,caption_highlight,,0,0,0,,{\an5\pos(539.5,872)}{\1c&H0AD6FF&}squat{\1c&HFFFFFF&} deep\Nand stay
+  Dialogue: 2,0:00:00.00,0:00:04.98,watermark,,0,0,0,,{\an5\pos(886.5,261.5)}PREVIEW
+  Dialogue: 0,0:00:00.35,0:00:00.42,caption_highlight,,0,0,0,,{\an5\pos(539.5,872)}squat deep\Nand stay
+  Dialogue: 0,0:00:00.42,0:00:00.75,caption_highlight,,0,0,0,,{\an5\pos(539.5,872)}squat {\1c&H0AD6FF&}deep{\1c&HFFFFFF&}\Nand stay
+  Dialogue: 0,0:00:00.75,0:00:00.82,caption_highlight,,0,0,0,,{\an5\pos(539.5,872)}squat deep\Nand stay
+  Dialogue: 0,0:00:00.82,0:00:01.18,caption_highlight,,0,0,0,,{\an5\pos(539.5,872)}squat deep\N{\1c&H0AD6FF&}and{\1c&HFFFFFF&} stay
+  Dialogue: 0,0:00:01.18,0:00:01.25,caption_highlight,,0,0,0,,{\an5\pos(539.5,872)}squat deep\Nand stay
+  Dialogue: 0,0:00:01.25,0:00:01.62,caption_highlight,,0,0,0,,{\an5\pos(539.5,872)}squat deep\Nand {\1c&H0AD6FF&}stay{\1c&HFFFFFF&}
+  Dialogue: 0,0:00:01.65,0:00:02.02,caption_highlight,,0,0,0,,{\an5\pos(539.5,872)}{\1c&H0AD6FF&}tight{\1c&HFFFFFF&} drive\Nthrough.
+  Dialogue: 0,0:00:02.02,0:00:02.08,caption_highlight,,0,0,0,,{\an5\pos(539.5,872)}tight drive\Nthrough.
+  Dialogue: 0,0:00:02.08,0:00:02.45,caption_highlight,,0,0,0,,{\an5\pos(539.5,872)}tight {\1c&H0AD6FF&}drive{\1c&HFFFFFF&}\Nthrough.
+  Dialogue: 0,0:00:02.45,0:00:02.52,caption_highlight,,0,0,0,,{\an5\pos(539.5,872)}tight drive\Nthrough.
+  Dialogue: 0,0:00:02.52,0:00:02.85,caption_highlight,,0,0,0,,{\an5\pos(539.5,872)}tight drive\N{\1c&H0AD6FF&}through.{\1c&HFFFFFF&}
+  Dialogue: 0,0:00:02.92,0:00:03.28,caption_highlight,,0,0,0,,{\an5\pos(539.5,872)}{\1c&H0AD6FF&}your{\1c&HFFFFFF&} heels\Nevery single
+  Dialogue: 0,0:00:03.28,0:00:03.35,caption_highlight,,0,0,0,,{\an5\pos(539.5,872)}your heels\Nevery single
+  Dialogue: 0,0:00:03.35,0:00:03.72,caption_highlight,,0,0,0,,{\an5\pos(539.5,872)}your {\1c&H0AD6FF&}heels{\1c&HFFFFFF&}\Nevery single
+  Dialogue: 0,0:00:03.72,0:00:03.75,caption_highlight,,0,0,0,,{\an5\pos(539.5,872)}your heels\Nevery single
+  Dialogue: 0,0:00:03.75,0:00:04.12,caption_highlight,,0,0,0,,{\an5\pos(539.5,872)}your heels\N{\1c&H0AD6FF&}every{\1c&HFFFFFF&} single
+  Dialogue: 0,0:00:04.12,0:00:04.18,caption_highlight,,0,0,0,,{\an5\pos(539.5,872)}your heels\Nevery single
+  Dialogue: 0,0:00:04.18,0:00:04.55,caption_highlight,,0,0,0,,{\an5\pos(539.5,872)}your heels\Nevery {\1c&H0AD6FF&}single{\1c&HFFFFFF&}
+  Dialogue: 0,0:00:04.62,0:00:04.95,caption_highlight,,0,0,0,,{\an5\pos(540,872)}{\1c&H0AD6FF&}rep{\1c&HFFFFFF&}
