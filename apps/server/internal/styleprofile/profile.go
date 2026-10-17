@@ -20,11 +20,32 @@ import (
 // ProfileVersion is the version of the Profile shape. A reader checks it before it reads the rest.
 const ProfileVersion = 1
 
-// Range is a median with the smallest and the largest value seen.
+// Range is a median with the smallest and the largest value seen, and the quartiles. The thresholds are made from the quartiles, not
+// from the extremes (thresholds.go): the minimum and the maximum are for the reader.
 type Range struct {
 	Median float64 `json:"median"`
 	Min    float64 `json:"min"`
 	Max    float64 `json:"max"`
+	P25    float64 `json:"p25"`
+	P75    float64 `json:"p75"`
+}
+
+// Lower is the 25th percentile and Upper the 75th: what the thresholds are made from.
+func (r Range) Lower() float64 { return r.P25 }
+
+// Upper is the 75th percentile (see Lower).
+func (r Range) Upper() float64 { return r.P75 }
+
+// percentile is the linear-interpolated percentile (0 to 1) of sorted values.
+func percentile(sorted []float64, q float64) float64 {
+	n := len(sorted)
+	if n == 0 {
+		return 0
+	}
+	pos := q * float64(n-1)
+	lo := int(math.Floor(pos))
+	hi := min(lo+1, n-1)
+	return sorted[lo] + (sorted[hi]-sorted[lo])*(pos-float64(lo))
 }
 
 func (r Range) String() string {
@@ -41,7 +62,7 @@ func RangeOf(values []float64) Range {
 	}
 	s := slices.Clone(values)
 	slices.Sort(s)
-	return Range{Median: round2(median(s)), Min: round2(s[0]), Max: round2(s[len(s)-1])}
+	return Range{Median: round2(median(s)), Min: round2(s[0]), Max: round2(s[len(s)-1]), P25: round2(percentile(s, 0.25)), P75: round2(percentile(s, 0.75))}
 }
 
 func median(sorted []float64) float64 {
@@ -359,8 +380,10 @@ func Aggregate(refs []Measures) *Profile {
 		s := slices.Clone(m.ShotsS)
 		slices.Sort(s)
 		if len(s) > 0 {
-			shotMed = append(shotMed, median(s))
 			longest = append(longest, s[len(s)-1])
+		}
+		if len(s) > 0 && len(m.CutsS) > 0 { // shot-length statistics come from the references that have a cut: a video that is one take is no shot-length sample
+			shotMed = append(shotMed, median(s))
 			shortest = append(shortest, s[0])
 		}
 		for _, l := range m.ShotsS {
@@ -385,6 +408,8 @@ func Aggregate(refs []Measures) *Profile {
 		pace.LongTakeShare = round2(longTime / allTime)
 	}
 	pace.HasLongTakes = pace.LongestShotS.Median >= 6
+	// The classification is on purpose: the longest takes and the cut counts are those of every reference, so a creator whose videos are
+	// mostly single takes is long takes however few references have a cut; only the shot-length criteria use the references with a cut.
 	switch {
 	case pace.LongestShotS.Median >= 6 && pace.CutsPerVideo.Median <= 5, pace.ShotMedianS.Median >= 6:
 		pace.Style = PaceLongTake // every video lets a take run, and the cuts are few
@@ -401,7 +426,7 @@ func Aggregate(refs []Measures) *Profile {
 	switch {
 	case fxr.Median >= 8:
 		verdict = EffectsBusy
-	case fxr.Median >= 1.5 || fxr.Max >= 6:
+	case fxr.Median >= 1.5 || fxr.Upper() >= 6: // the quartile, so one odd reference does not make a creator of none "light"
 		verdict = EffectsLight
 	}
 	p.Effects = EffectsProfile{Verdict: verdict, PerMinute: fxr, PushInShare: RangeOf(push)}

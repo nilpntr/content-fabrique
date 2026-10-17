@@ -232,25 +232,27 @@ func applyStyle(l limits, p *styleprofile.Profile) limits {
 		return l // a profile of one or two videos is a hint for the prompt, not a rule for the checks
 	}
 	l.styled = true
-	pc := p.Pacing
-	// The median shot: what the creator's videos have, with room (a video with no cut is one shot as long as the video).
-	l.medianShotMs = max(l.medianShotMs, int64(pc.ShotMedianS.Max*1.5*1000))
-	l.minEffects = 0
-	l.paceBuilds = false
+	pc, th := p.Pacing, p.Thresholds()
+	// The median shot: what the creator's videos have, with room, from quartiles and capped (thresholds.go), never under the default.
+	l.medianShotMs = max(l.medianShotMs, int64(th.MedianShotMaxS*1000))
+	// The checks that assume a fast edit are loosened for a creator of long takes or of few effects; a montage or busy-effects profile
+	// keeps the minimum effect rate and the building pace.
+	if pc.Style == styleprofile.PaceLongTake || p.Effects.Verdict == styleprofile.EffectsNone || p.Effects.Verdict == styleprofile.EffectsLight {
+		l.minEffects = 0
+		l.paceBuilds = false
+	}
 	if p.Effects.Verdict == styleprofile.EffectsNone {
 		l.noEffects = true
 	}
 	if p.CutsOffBeat() {
 		l.beatGrid, l.gridRequired, l.looseBeat = false, false, true
 	}
-	if p.Hook.FirstCutS.Max > 0 {
-		l.hookMaxMs = max(hookMaxMs, int64((p.Hook.FirstCutS.Max+0.5)*1000))
-	}
+	l.hookMaxMs = max(hookMaxMs, int64(th.HookMaxS*1000))
 	if p.Text != nil && p.Text.TitleShare == 0 {
 		l.noTitle = true
 	}
-	if p.Format.DurationS.Max > 0 {
-		l.durLo, l.durHi = int64(p.Format.DurationS.Min*0.8*1000), int64(p.Format.DurationS.Max*1.25*1000)
+	if th.DurHiS > 0 {
+		l.durLo, l.durHi = int64(th.DurLoS*1000), int64(th.DurHiS*1000)
 	}
 	return l
 }

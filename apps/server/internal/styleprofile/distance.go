@@ -95,14 +95,15 @@ func (p *Profile) Compare(e EditStats) Distance {
 	pc := p.Pacing
 
 	// Cuts: the count a video has, and the pace.
-	lo, hi := math.Max(pc.CutsPerVideo.Min-1, 0), pc.CutsPerVideo.Max+2
+	th := p.Thresholds()
+	lo, hi := th.CutsLo, th.CutsHi
 	perMin := 0.0
 	if e.DurationS > 0 {
 		perMin = float64(cuts) / e.DurationS * 60
 	}
 	add("cuts", fmt.Sprintf("%d cuts (%.0f a minute)", cuts, perMin), fmt.Sprintf("%.0f to %.0f cuts, %s a minute", lo, hi, pc.CutsPerMinute),
-		inRange(float64(cuts), lo, hi) && perMin <= pc.CutsPerMinute.Max*1.5+2,
-		fmt.Sprintf("the creator cuts %s times a video: %s", pc.CutsPerVideo, map[bool]string{true: "merge shots and let the takes run", false: "add cuts"}[float64(cuts) > hi]))
+		inRange(float64(cuts), lo, hi) && perMin <= th.CutsPerMinHi,
+		cutsFix(pc, float64(cuts), perMin, lo, hi, th.CutsPerMinHi))
 
 	// Long takes: when the creator lets takes run, so should the edit.
 	if pc.HasLongTakes {
@@ -110,7 +111,7 @@ func (p *Profile) Compare(e EditStats) Distance {
 		for _, s := range e.ShotsS {
 			longest = math.Max(longest, s)
 		}
-		need := math.Max(math.Min(math.Min(pc.LongestShotS.Min*0.9, pc.LongestShotS.Median*0.5), 12), 4)
+		need := th.LongTakeNeedS
 		add("long_takes", fmt.Sprintf("longest shot %.1f s", longest), fmt.Sprintf("a shot of %.0f s or more (the creator's longest is %s s)", need, pc.LongestShotS),
 			longest >= need, fmt.Sprintf("keep one take running for %.0f s or more (a full set), instead of cutting it up", need))
 	} else if pc.ShotMedianS.Median > 0 {
@@ -120,13 +121,13 @@ func (p *Profile) Compare(e EditStats) Distance {
 		if len(shorts) > 0 {
 			med = shorts[len(shorts)/2]
 		}
-		add("shot_length", fmt.Sprintf("median shot %.1f s", med), fmt.Sprintf("about %.1f s (%.1f to %.1f)", pc.ShotMedianS.Median, pc.ShotMedianS.Min*0.7, pc.ShotMedianS.Max*1.4),
-			inRange(med, pc.ShotMedianS.Min*0.7, pc.ShotMedianS.Max*1.4), "match the creator's shot lengths")
+		add("shot_length", fmt.Sprintf("median shot %.1f s", med), fmt.Sprintf("about %.1f s (%.1f to %.1f)", pc.ShotMedianS.Median, th.ShotLenLoS, th.ShotLenHiS),
+			inRange(med, th.ShotLenLoS, th.ShotLenHiS), "match the creator's shot lengths")
 	}
 
 	// The hook: where the first cut comes.
 	if pc.CutsPerVideo.Max > 0 && p.Hook.FirstCutS.Max > 0 && e.FirstCutS >= 0 {
-		flo, fhi := math.Max(p.Hook.FirstCutS.Min-0.8, 0.5), p.Hook.FirstCutS.Max+1.2
+		flo, fhi := th.FirstCutLoS, th.FirstCutHiS
 		add("first_cut", fmt.Sprintf("first cut at %.1f s", e.FirstCutS), fmt.Sprintf("%.1f to %.1f s", flo, fhi), inRange(e.FirstCutS, flo, fhi),
 			fmt.Sprintf("make the opening shot about %s s long, the creator's first cut", p.Hook.FirstCutS))
 	}
@@ -140,7 +141,7 @@ func (p *Profile) Compare(e EditStats) Distance {
 		add("effects", fmt.Sprintf("%d effects", e.Effects), "none (the creator uses no effects)", e.Effects == 0,
 			"take the motion presets, transitions and speed ramps out: the creator's videos have none")
 	} else {
-		fhi := math.Max(p.Effects.PerMinute.Max*1.5, 3)
+		fhi := th.FxPerMinHi
 		add("effects", fmt.Sprintf("%.1f a minute", perMinFx), fmt.Sprintf("up to %.1f a minute", fhi), perMinFx <= fhi, "use fewer effects")
 	}
 
@@ -170,7 +171,7 @@ func (p *Profile) Compare(e EditStats) Distance {
 
 	// Length.
 	if p.Format.DurationS.Max > 0 {
-		dlo, dhi := p.Format.DurationS.Min*0.8, p.Format.DurationS.Max*1.25
+		dlo, dhi := th.DurLoS, th.DurHiS
 		add("duration", fmt.Sprintf("%.1f s", e.DurationS), fmt.Sprintf("%.0f to %.0f s", dlo, dhi), inRange(e.DurationS, dlo, dhi), "bring the length into the creator's range")
 	}
 
@@ -185,6 +186,20 @@ func (p *Profile) Compare(e EditStats) Distance {
 		score = round2(float64(ok) / float64(len(dims)))
 	}
 	return Distance{Dimensions: dims, Score: score}
+}
+
+// cutsFix is the one-line fix for the cuts dimension, chosen from the bound that failed: too many cuts, a pace that is too fast for
+// the number of cuts, or too few cuts.
+func cutsFix(pc PacingProfile, cuts, perMin, lo, hi, perMinHi float64) string {
+	switch {
+	case cuts > hi:
+		return fmt.Sprintf("the creator cuts %s times a video: use fewer cuts, merge shots and let the takes run", pc.CutsPerVideo)
+	case cuts < lo:
+		return fmt.Sprintf("the creator cuts %s times a video: add cuts", pc.CutsPerVideo)
+	case perMin > perMinHi:
+		return fmt.Sprintf("the creator cuts %s a minute: use fewer cuts or longer takes", pc.CutsPerMinute)
+	}
+	return fmt.Sprintf("the creator cuts %s times a video: match the number and the pace of their cuts", pc.CutsPerVideo)
 }
 
 // Text is the distance as the editor and cfctl read it.

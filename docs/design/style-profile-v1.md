@@ -74,7 +74,9 @@ What it says about the hypotheses we went in with: a quiet intro and a lift at 2
 
 ### The profile of the five, in words (`cfctl style show`)
 
-> Creator style, from 5 reference videos (confidence 90 %). Pacing: long takes. 3.0 (0.0 to 5.0) cuts a video (7.1 (0.0 to 16.2) a minute), shots 3.0 (1.8 to 43.8) s long at the median, the longest 20.5 (7.4 to 43.8) s; 40 % of the videos have no cut at all. Hook: the first cut comes at 2.3 (2.1 to 2.5) s. Effects: none. Look: none grade, low-key footage. Sound: Quiet 2.9 s intro, then the music lifts (by 2.9 LU); cuts sit loosely near onsets (not beat-locked); energy builds to the end; no fade-out; music only at about -17 LUFS, no sound effects; tempo 70 to 124 BPM (about 73 for the long takes, 117 for the cut-up ones).
+> Creator style, from 5 reference videos (confidence 90 %). Pacing: long takes. 3.0 (0.0 to 5.0) cuts a video (7.1 (0.0 to 16.2) a minute), shots 1.9 (1.8 to 3.0) s long at the median (of the videos that have a cut), the longest 20.5 (7.4 to 43.8) s; 40 % of the videos have no cut at all. Hook: the first cut comes at 2.3 (2.1 to 2.5) s. Effects: none. Look: none grade, low-key footage. Sound: Quiet 2.9 s intro, then the music lifts (by 2.9 LU); cuts sit loosely near onsets (not beat-locked); energy builds to the end; no fade-out; music only at about -17 LUFS, no sound effects; tempo 70 to 124 BPM (about 73 for the long takes, 117 for the cut-up ones).
+
+The thresholds that profile sets for an edit (`Profile.Thresholds`): the first shot at most 2.9 s, the first cut between 1.4 and 3.6 s, 0 to 6.5 cuts (at most 20 a minute), a shot of at least 7 s somewhere in the edit, a length of 13 to 40 s, no effects, no minimum effect rate, no building pace.
 
 ### Recommending a trend sound by structure (input to P5-02, docs only)
 
@@ -97,16 +99,18 @@ A finished video's sound is described by a structure we can compute from any aud
 
 | Check | Without a profile | With one |
 |---|---|---|
-| `hook_length` | at most 2.0 s | up to the creator's latest first cut plus 0.5 s |
+| `hook_length` | at most 2.0 s | the 75th percentile of the creator's first cut plus 0.5 s, within 1.5 s of the median first cut, at least 2 s and at most 4 s |
 | `hook_title` | a title by 0.5 s | not asked for when no reference has a title |
-| `shot_pacing` | the median shot at most 3 to 6 s by type | up to 1.5 times the creator's longest median shot (a video with no cut is one shot as long as the video) |
-| `pace_builds` | shots get shorter | does not apply |
-| `effect_density` | at least 0.15 effects a cut for a fast type | none when the creator uses none: any effect fails |
+| `shot_pacing` | the median shot at most 3 to 6 s by type | a creator of long takes: up to the 75th percentile of their longest takes; any other: 1.5 times the 75th percentile of the median shot, at most 2.5 times its median (never under the default) |
+| `pace_builds` | shots get shorter | does not apply to a creator of long takes or of no or light effects; a montage or busy-effects creator keeps it |
+| `effect_density` | at least 0.15 effects a cut for a fast type | none when the creator uses none: any effect fails; no minimum for long takes or light effects; a montage or busy-effects creator keeps the minimum |
 | `beat_sync` | a grid for workouts | skipped when the cuts are not on the beat |
-| `duration` | the plan's length, or 15 to 45 s | the creator's range, 0.8 to 1.25 times |
+| `duration` | the plan's length, or 15 to 45 s | 0.7 times the 25th percentile to 1.4 times the 75th percentile of the creator's lengths, within 0.4 and 2.5 times the median |
 | `style_match` | skipped | per-dimension distance (below) |
 
-The `style_match` dimensions are cuts (count and pace), long takes (a shot at least 90 % of the creator's shortest longest shot, capped at 12 s), shot length (for a fast creator), the first cut, effects, title, labels, title case, captions, grade, sound effects and duration. Each carries the value, what was expected, and a one-line fix; the check fails when any is out of range and the report holds the score (the share in range). `cfctl eval editor` prints the distance.
+**The thresholds come from robust statistics** (`Profile.Thresholds`, `thresholds.go`), not from the extremes: each bound is a quartile with room, capped by a multiple of the median and by hard limits (the hook at most 4 s, the first cut at most 4.5 s), so one odd reference (a single 44 s take in a montage creator's set, a video whose first cut comes at 30 s) moves a bound by a rank and never opens it. The shot-length statistics (`shot_median_s`, `shortest_shot_s`) come only from the references that have a cut; a creator of long takes is represented by `Pacing.Style` and the longest-take statistics. Every `Range` carries `p25` and `p75` next to the median, minimum and maximum, which are for the reader.
+
+The `style_match` dimensions are cuts (count and pace; the fix says fewer cuts, fewer cuts or longer takes, or add cuts, by the bound that failed), long takes (a shot at least 75 % of the 25th percentile of the creator's longest takes, between 4 and 12 s), shot length (for a fast creator), the first cut, effects, title, labels, title case, captions, grade, sound effects and duration. Each carries the value, what was expected, and a one-line fix; the check fails when any is out of range and the report holds the score (the share in range). `cfctl eval editor` prints the distance.
 
 The audio checks of P3-12 (`audio_level`, `audio_bed`, `audio_effects`) listen to our export (a bed at about -24 LUFS under the effects) and not to the creator's finished video, whose -15 to -19 LUFS is the trending sound they add afterwards; so they are not changed by the profile.
 
