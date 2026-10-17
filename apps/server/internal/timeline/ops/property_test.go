@@ -189,7 +189,7 @@ func (g *generator) op(k *known) Op {
 				o.Match = &m
 			}
 			if g.chance(20) {
-				ev := float64(g.r.IntN(7)-3) / 2
+				ev := float64(g.r.IntN(7)-3) / 3
 				o.ExposureEv = &ev
 			}
 			return o

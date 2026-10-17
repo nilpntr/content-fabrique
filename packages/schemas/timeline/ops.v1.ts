@@ -1508,7 +1508,7 @@ export interface SnapOptions {
   write_markers?: WriteMarkers;
 }
 /**
- * Set the colour look of a clip. Without id it applies to every clip on the main track. Presets: none, punchy, warm, cool, bw, matte, auto (a mild contrast curve that keeps blacks and whites, plus each clip's exposure_ev nudge, so shots from different angles meet at one exposure) and gym_moody (deep blacks, warm skin, a slight vignette: the grade for gym footage). match true also corrects each clip's exposure by its exposure_ev hint (a nudge of at most 0.7 stops, black point kept; auto always does) before the preset (left out, match keeps what the clip had). exposure_ev sets that hint on one clip (it needs id); the analysis writes it, so only give it when you know the clip's exposure; it is -1 to 1 and must not come from a clip's mean brightness (low-key footage is dark and correct).
+ * Set the colour look of a clip. Without id it applies to every clip on the main track. Presets: none, punchy, warm, cool, bw, matte, auto (a mild contrast curve that keeps blacks and whites, plus each clip's exposure_ev nudge, so shots from different angles meet at one exposure) and gym_moody (deep blacks, warm skin, a slight vignette: the grade for gym footage). match true also corrects each clip's exposure by its exposure_ev hint (a nudge of at most 0.7 stops, black point kept; auto always does) before the preset (left out, match keeps what the clip had). exposure_ev sets that hint on one clip (it needs id; 0 clears it, and replace_source clears it too); the analysis writes it, so only give it when you know the clip's exposure; it is -1 to 1 and must not come from a clip's mean brightness (low-key footage is dark and correct).
  */
 export interface SetLook {
   op: Op16;

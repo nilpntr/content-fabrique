@@ -232,7 +232,7 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 			// normalise the mix).
 			// The limiter delays its output by sfxLimiterDelay samples and does not say so: the input gets that much silence at the
 			// end, and the same number of samples are cut at the start, so that the sound stays where it was and keeps its length.
-			mix += fmt.Sprintf(",apad=pad_len=%d,alimiter=limit=%s:level=false,atrim=start_sample=%d,asetpts=PTS-STARTPTS", sfxLimiterDelay, sfxLimitLin, sfxLimiterDelay)
+			mix += fmt.Sprintf(",apad=pad_len=%d,alimiter=limit=%s:attack=5:release=50:level=false,atrim=start_sample=%d,asetpts=PTS-STARTPTS", sfxLimiterDelay, sfxLimitLin, sfxLimiterDelay)
 		}
 		stmts = append(stmts, mix+"[aout]")
 	case prog == "abed":

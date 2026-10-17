@@ -50,6 +50,9 @@ func (a *applier) snapCuts(o *SnapCutsToBeats) bool {
 		if !ok {
 			return false
 		}
+		if _, isSFX := a.audioTrack().Items[i].(*timeline.SFX); isSFX {
+			return a.errf(CodeBadArgument, "%q is a sound effect, which has no beats; give the id of the music track the grid belongs to, or leave sound_id out", o.SoundID)
+		}
 		c := a.audioTrack().Items[i].Common()
 		p := beats.Placement{AtMs: c.AtMs, SourceOffsetMs: c.SourceOffsetMs}
 		if c.DurationMs != nil {

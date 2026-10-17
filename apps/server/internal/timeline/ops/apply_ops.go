@@ -275,6 +275,7 @@ func (a *applier) replaceSource(o *ReplaceSource) bool {
 	}
 	it := &a.main.Items[i]
 	it.AssetID, it.Source, it.MomentID = o.AssetID, o.Source, o.MomentID
+	it.ExposureEv = nil // a hint measured on other footage means nothing on this
 	a.ripple()
 	a.touch(o.ID)
 	return true
@@ -381,6 +382,9 @@ func (a *applier) setLook(o *SetLook) bool {
 	a.main.Items[i].Look = newLook(a.main.Items[i].Look, o)
 	if o.ExposureEv != nil {
 		a.main.Items[i].ExposureEv = copyPtr(o.ExposureEv)
+		if *o.ExposureEv == 0 { // 0 clears the hint
+			a.main.Items[i].ExposureEv = nil
+		}
 	}
 	a.touch(o.ID)
 	return true

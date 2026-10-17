@@ -162,7 +162,7 @@ func (c *compiler) clipGraph(cl clip) ([]string, error) {
 	}
 	tail = append(tail, cam.filters()...)
 	// look.match, and the preset auto: correct the clip's exposure by its hint, before the preset.
-	if it.Look != nil && (it.Look.MatchOrDefault() || it.Look.Preset == timeline.LookAuto) && it.ExposureEv != nil {
+	if it.Look != nil && it.Look.AppliesExposure() && it.ExposureEv != nil {
 		ev := *it.ExposureEv
 		if math.IsNaN(ev) || ev < -1 || ev > 1 {
 			return nil, fmt.Errorf("%w: clip %s has exposure_ev %s outside -1 to 1", ErrInvalidSpec, it.ID, num(ev))

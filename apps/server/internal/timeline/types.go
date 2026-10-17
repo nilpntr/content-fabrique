@@ -390,6 +390,9 @@ type Look struct {
 	Match *bool `json:"match,omitempty"`
 }
 
+// AppliesExposure is whether the clip's exposure_ev hint is applied: when match is true, and always for the preset auto.
+func (l Look) AppliesExposure() bool { return l.MatchOrDefault() || l.Preset == LookAuto }
+
 // MatchOrDefault is whether the look matches exposure: false when the spec leaves it out.
 func (l Look) MatchOrDefault() bool { return l.Match != nil && *l.Match }
 

@@ -22,7 +22,7 @@ import (
 const (
 	sfxBaseDB   = -6
 	sfxLimitLin = "0.891251" // -1 dBFS
-	// sfxLimiterDelay is the latency of alimiter at its default 5 ms attack and 48 kHz, in samples (an impulse comes out 239
+	// sfxLimiterDelay is the latency of alimiter at its 5 ms attack (written into the filter, so no default can change it) and 48 kHz, in samples (an impulse comes out 239
 	// samples late, in ffmpeg 7.1 and 8.1 alike). TestSoundEffectsLeaveTheProgrammeAlone fails if another ffmpeg changes it.
 	sfxLimiterDelay = 239
 )
@@ -112,7 +112,7 @@ func (c *compiler) sfxGraph() (stmts, pads []string, err error) {
 			if gain != nil {
 				db += *gain
 			}
-			tail := []string{"volume=" + num(db) + "dB", "atrim=end=" + secs(dur), "asetpts=PTS-STARTPTS"}
+			tail := []string{"volume=" + num(round6(db)) + "dB", "atrim=end=" + secs(dur), "asetpts=PTS-STARTPTS"}
 			if dur < natural { // cut by the end of the timeline: a short fade instead of a click
 				fade := min(dur, 10)
 				tail = append(tail, fmt.Sprintf("afade=t=out:st=%s:d=%s", secs(dur-fade), secs(fade)))

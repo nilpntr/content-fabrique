@@ -124,6 +124,27 @@ func TestSetLookMatchAndExposure(t *testing.T) {
 			t.Fatalf("%+v", res.Issues)
 		}
 	})
+	t.Run("0 clears the hint, and replace_source does", func(t *testing.T) {
+		spec := mustApply(t, base, `[{"op":"set_look","id":"c2","preset":"auto","exposure_ev":0.5}]`)
+		if clips(t, spec)[1].ExposureEv == nil {
+			t.Fatal("no hint")
+		}
+		cleared := mustApply(t, spec, `[{"op":"set_look","id":"c2","preset":"auto","exposure_ev":0}]`)
+		if clips(t, cleared)[1].ExposureEv != nil {
+			t.Fatal("0 did not clear the hint")
+		}
+		swapped := mustApply(t, spec, `[{"op":"replace_source","id":"c2","asset_id":"`+vid60+`","source":{"in_ms":0,"out_ms":3000}}]`)
+		if clips(t, swapped)[1].ExposureEv != nil {
+			t.Fatal("a hint measured on other footage stayed")
+		}
+	})
+	t.Run("snap_cuts_to_beats refuses a sound effect as the sound of the grid", func(t *testing.T) {
+		spec := mustApply(t, base, `[{"op":"add_sfx","id":"fx1","sfx":"whoosh","at_ms":1000}]`)
+		_, res := apply(t, spec, `[{"op":"snap_cuts_to_beats","sound_id":"fx1","grid":{"bpm":120,"first_beat_ms":0}}]`)
+		if res.OK() || res.Errors()[0].Code != CodeBadArgument || !strings.Contains(res.Errors()[0].Message, "sound effect") {
+			t.Fatalf("%+v", res.Issues)
+		}
+	})
 	t.Run("add_clip takes a look with match and a hint, copied", func(t *testing.T) {
 		on := true
 		ev := 0.7

@@ -646,7 +646,7 @@ func (s *summarizer) finalLook(id string) {
 		return
 	}
 	if m, ok := it["look"].(map[string]any); ok {
-		if match, _ := m["match"].(bool); match {
+		if match, _ := m["match"].(bool); match || str(m["preset"]) == timeline.LookAuto {
 			s.say("set the look of %s to %s, matching exposure", id, str(m["preset"]))
 			return
 		}

@@ -252,9 +252,15 @@ func decodeAudioItem(raw json.RawMessage) (AudioItem, error) {
 	}
 	switch a.Kind {
 	case AudioSFX:
-		for field, set := range map[string]bool{"asset_id": a.AssetID != nil, "license_id": a.LicenseID != nil, "trend_id": a.TrendID != nil} {
-			if set {
-				return nil, notAllowed(field)
+		for _, f := range []struct {
+			name string
+			set  bool
+		}{
+			{"asset_id", a.AssetID != nil}, {"license_id", a.LicenseID != nil}, {"trend_id", a.TrendID != nil},
+			{"duration_ms", a.DurationMs != nil}, {"fade_in_ms", a.FadeInMs != nil}, {"fade_out_ms", a.FadeOutMs != nil},
+		} {
+			if f.set {
+				return nil, notAllowed(f.name)
 			}
 		}
 		return &SFX{ID: a.ID, Sfx: str(a.Sfx), AtMs: a.AtMs, Export: a.Export, GainDB: a.GainDB}, nil
