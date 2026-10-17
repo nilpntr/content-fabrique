@@ -1,0 +1,6 @@
+{
+  "op": "set_transition",
+  "id": "c2",
+  "type": "flash;drawtext",
+  "duration_ms": 200
+}

@@ -140,8 +140,16 @@ func timeMap(spec *timeline.Spec, limit int) string {
 			break
 		}
 		fmt.Fprintf(&b, "%s: %s to %s, asset %s %d-%d ms", it.ID, secs2(it.AtMs), secs2(timeline.EndMs(it)), it.AssetID, it.Source.InMs, it.Source.OutMs)
-		if sp := it.SpeedOrDefault(); sp != 1 {
+		if it.HasRamp() {
+			fmt.Fprintf(&b, " on a %d-point speed ramp", len(it.SpeedRamp))
+		} else if sp := it.SpeedOrDefault(); sp != 1 {
 			fmt.Fprintf(&b, " at speed %s", strconv.FormatFloat(sp, 'f', -1, 64))
+		}
+		if it.Motion.Active() {
+			fmt.Fprintf(&b, ", motion %s", it.Motion.Preset)
+		}
+		if tr := it.TransitionIn; tr != nil && tr.Type != timeline.TransitionCut && tr.Type != "" {
+			fmt.Fprintf(&b, ", %s in (%d ms)", tr.Type, tr.DurationMs)
 		}
 		b.WriteByte('\n')
 	}

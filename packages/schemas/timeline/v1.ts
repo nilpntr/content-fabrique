@@ -109,9 +109,597 @@ export type OutPoint = number;
  */
 export type StartOnTheTimeline = number;
 /**
- * Playback speed from 0.25 (slow motion) to 4 (fast). Default 1.
+ * Playback speed from 0.25 (slow motion) to 4 (fast). Default 1. A clip has either speed or speed_ramp, not both (checked by the Go layer).
  */
 export type Speed = number;
+/**
+ * A speed that changes along the clip, as 2 to 16 points {at_ms, speed}. at_ms is a source offset: milliseconds into the clip's source range, counted from source.in_ms (0 to out_ms - in_ms), strictly increasing. The speed (0.25 to 4) changes linearly in source time between two points, is the first point's speed before the first and the last point's speed after the last. The clip's output duration is the integral of 1/speed over its source range. It replaces speed: give one of the two. The clip's own audio is muted (it cannot follow the ramp). Sorted points and the range are checked by the Go layer.
+ *
+ * @minItems 2
+ * @maxItems 16
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "speedRamp".
+ */
+export type SpeedRamp =
+  | [
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      }
+    ]
+  | [
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      }
+    ]
+  | [
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      }
+    ]
+  | [
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      }
+    ]
+  | [
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      }
+    ]
+  | [
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      }
+    ]
+  | [
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      }
+    ]
+  | [
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      }
+    ]
+  | [
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      }
+    ]
+  | [
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      }
+    ]
+  | [
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      }
+    ]
+  | [
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      }
+    ]
+  | [
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      }
+    ]
+  | [
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      }
+    ]
+  | [
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      },
+      {
+        at_ms: SourceOffset;
+        speed: Speed1;
+      }
+    ];
+/**
+ * Where the point is, in ms from source.in_ms (in source time).
+ */
+export type SourceOffset = number;
+/**
+ * The playback speed at the point, 0.25 to 4.
+ */
+export type Speed1 = number;
 /**
  * cover fills the frame and crops around the focus point. contain fits the whole source and pads with the background colour. blur_fill fits the whole source over a blurred, scaled copy of itself.
  */
@@ -129,9 +717,21 @@ export type FocusY = number;
  */
 export type Zoom = number;
 /**
+ * none, punch_in, push_in, pull_back or shake.
+ */
+export type Preset = "none" | "punch_in" | "push_in" | "pull_back" | "shake";
+/**
+ * Only for punch_in (where the zoom has landed) and shake (where it starts): milliseconds from the clip's first frame, inside the clip. Without it punch_in zooms over the first frames of the clip and shake starts at its first frame.
+ */
+export type At = number;
+/**
+ * The peak scale increase, 0.05 (5 % bigger) to 0.35. Defaults: punch_in 0.15, push_in 0.1, pull_back 0.15, shake 0.08 (also the size of the shake).
+ */
+export type Strength = number;
+/**
  * A fixed colour preset: none, punchy (more contrast and saturation), warm, cool, bw (black and white) or matte (lifted blacks).
  */
-export type Preset = "none" | "punchy" | "warm" | "cool" | "bw" | "matte";
+export type Preset1 = "none" | "punchy" | "warm" | "cool" | "bw" | "matte";
 /**
  * How the clip begins. A cut is instant. The other types blend with the previous clip over duration_ms, and the clip then starts that long before the previous one ends. The first clip must have a cut.
  *
@@ -151,9 +751,9 @@ export type TransitionIn =
  */
 export type Type = "cut";
 /**
- * crossfade blends the two clips. dip_to_black fades out to black and in again. whip is a fast sideways slide with motion blur.
+ * crossfade blends the two clips. dip_to_black fades out to black and in again. whip_left is a fast slide to the left with motion blur (whip is the same, kept for older edits); whip_right slides to the right. zoom_through zooms into the outgoing clip and out of the incoming one through a blur. flash dips to white.
  */
-export type Type1 = "crossfade" | "dip_to_black" | "whip";
+export type Type1 = "crossfade" | "dip_to_black" | "whip" | "whip_left" | "whip_right" | "zoom_through" | "flash";
 /**
  * Length of the transition in ms, 100 to 1000. It must be shorter than both clips it joins (checked by the Go layer).
  */
@@ -296,7 +896,7 @@ export type Start1 = number;
 /**
  * Where in the sound to start playing, in ms.
  */
-export type SourceOffset = number;
+export type SourceOffset1 = number;
 /**
  * Always "cue_only" for a trend sound: it is never reproduced by us.
  */
@@ -341,7 +941,7 @@ export type Start2 = number;
 /**
  * Where in the track to start playing, in ms.
  */
-export type SourceOffset1 = number;
+export type SourceOffset2 = number;
 /**
  * Always "licensed": the track is mixed into the render.
  */
@@ -357,7 +957,7 @@ export type Start3 = number;
 /**
  * Where in the audio to start playing, in ms.
  */
-export type SourceOffset2 = number;
+export type SourceOffset3 = number;
 /**
  * Always "licensed": the audio is mixed into the render.
  */
@@ -377,7 +977,7 @@ export type Kind3 = "beat" | "downbeat" | "drop" | "section";
 /**
  * How strong the marker is, from 0 to 1. Default 1.
  */
-export type Strength = number;
+export type Strength1 = number;
 /**
  * Beat grid and section marks that the editor uses to place cuts. They are never rendered.
  */
@@ -466,7 +1066,9 @@ export interface VideoClip {
   source: SourceRange;
   at_ms: StartOnTheTimeline;
   speed?: Speed;
+  speed_ramp?: SpeedRamp;
   reframe?: Reframe;
+  motion?: Motion;
   look?: Look;
   transition_in?: TransitionIn;
   audio?: ClipAudio;
@@ -498,13 +1100,24 @@ export interface FocusPoint {
   y: FocusY;
 }
 /**
+ * A camera move on the clip, applied as a digital zoom on the already-reframed frame (after reframe, so it composes with every reframe mode and never shows a border). punch_in is a fast zoom (about 5 frames) that lands at at_ms and holds, push_in a slow continuous zoom over the whole clip, pull_back the reverse (starts zoomed, pulls back to the full frame) and shake a short camera shake that starts at at_ms and dies out (deterministic: the pattern comes from the clip's id). Needs a clip of at least 400 ms (checked by the Go layer).
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "motion".
+ */
+export interface Motion {
+  preset: Preset;
+  at_ms?: At;
+  strength?: Strength;
+}
+/**
  * A colour treatment for the clip. Without it, the clip has no treatment.
  *
  * This interface was referenced by `Timeline`'s JSON-Schema
  * via the `definition` "look".
  */
 export interface Look {
-  preset: Preset;
+  preset: Preset1;
 }
 /**
  * Whether the clip's own sound is in the mix. Without it, the clip is silent.
@@ -581,7 +1194,7 @@ export interface TrendSound {
   kind: Kind;
   trend_id: TrendId;
   at_ms: Start1;
-  source_offset_ms: SourceOffset;
+  source_offset_ms: SourceOffset1;
   export: ExportPolicy;
   duration_ms?: Duration2;
   gain_db?: GainInDB;
@@ -600,7 +1213,7 @@ export interface LicensedTrack {
   asset_id: AssetId;
   license_id: LicenceId;
   at_ms: Start2;
-  source_offset_ms: SourceOffset1;
+  source_offset_ms: SourceOffset2;
   export: ExportPolicy1;
   duration_ms?: Duration2;
   gain_db?: GainInDB;
@@ -618,7 +1231,7 @@ export interface CreatorAudio {
   kind: Kind2;
   asset_id: AssetId;
   at_ms: Start3;
-  source_offset_ms: SourceOffset2;
+  source_offset_ms: SourceOffset3;
   export: ExportPolicy2;
   duration_ms?: Duration2;
   gain_db?: GainInDB;
@@ -634,7 +1247,7 @@ export interface CreatorAudio {
 export interface Marker {
   at_ms: Time;
   kind: Kind3;
-  strength?: Strength;
+  strength?: Strength1;
 }
 /**
  * Links back to the idea and concept this edit was made for.

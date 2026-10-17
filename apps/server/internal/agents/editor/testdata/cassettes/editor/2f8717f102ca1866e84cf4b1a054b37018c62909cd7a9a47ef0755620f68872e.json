@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "stage": "editor",
+  "key": "2f8717f102ca1866e84cf4b1a054b37018c62909cd7a9a47ef0755620f68872e",
+  "recorded_at": "2026-10-17T15:23:59Z",
+  "request": {
+    "model": "claude-haiku-5-5",
+    "max_tokens": 16000,
+    "effort": "medium",
+    "system_blocks": 1,
+    "messages": [
+      {
+        "role": "user",
+        "blocks": [
+          "text",
+          "text",
+          "text",
+          "text",
+          "text",
+          "text",
+          "text",
+          "text"
+        ]
+      }
+    ],
+    "tools": [
+      "get_brief",
+      "list_footage",
+      "view_clip",
+      "get_timeline",
+      "get_comments",
+      "edit_timeline",
+      "render_preview",
+      "finish"
+    ]
+  },
+  "response": {
+    "id": "msg_fake",
+    "model": "claude-haiku-5-5",
+    "stop_reason": "tool_use",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_ed_1",
+        "name": "list_footage",
+        "input": {}
+      }
+    ],
+    "usage": {
+      "input_tokens": 410,
+      "cache_write_tokens": 9200,
+      "cache_write_1h_tokens": 0,
+      "cache_read_tokens": 0,
+      "output_tokens": 61
+    }
+  }
+}

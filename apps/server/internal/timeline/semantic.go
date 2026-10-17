@@ -118,6 +118,8 @@ func (c *checker) checkMain(main *VideoTrack) {
 				"item %s plays for %d ms (source %d to %d ms at speed %s); a shot must play for at least %d ms. Lengthen its source range or slow it down",
 				it.ID, dur, it.Source.InMs, it.Source.OutMs, num(it.SpeedOrDefault()), MinShotMs)
 		}
+		c.checkSpeedRamp(it, path)
+		c.checkMotion(it, path, dur)
 		c.clips = append(c.clips, clip{item: it, index: i, dur: dur, end: EndMs(it)})
 	}
 	// Timeline order is at_ms order; equal at_ms keeps the order of the array.
@@ -133,6 +135,79 @@ func (c *checker) checkMain(main *VideoTrack) {
 	c.total = PlayableEnd(main.Items)
 	c.checkContiguity()
 	c.checkTransitionFit()
+}
+
+// ---- speed ramps and motion (P3-10) ------------------------------------------------------------------------------
+
+// checkSpeedRamp checks a clip's speed ramp: it replaces speed, so the clip may not have both; its points are sorted by
+// at_ms, and at_ms is a source offset, so it must lie inside the clip's own source range. The speed of each point is
+// range-checked by the schema. The clip's source audio does not follow a ramp (atempo cannot ramp), so it is muted, which
+// is a warning.
+func (c *checker) checkSpeedRamp(it VideoItem, path string) {
+	if !it.HasRamp() {
+		return
+	}
+	if it.Speed != nil {
+		c.add(CodeInvalidSpeedRamp, path+"/speed_ramp",
+			"item %s has both speed and speed_ramp; the ramp replaces the speed, so give only one. Remove speed (the ramp sets the speed along the clip), or remove speed_ramp",
+			it.ID)
+	}
+	span := it.Source.OutMs - it.Source.InMs
+	for i, p := range it.SpeedRamp {
+		pp := fmt.Sprintf("%s/speed_ramp/%d/at_ms", path, i)
+		if i > 0 && p.AtMs <= it.SpeedRamp[i-1].AtMs {
+			c.add(CodeInvalidSpeedRamp, pp,
+				"speed_ramp point %d of item %s is at %d ms, not after point %d at %d ms; the points must be sorted with strictly increasing at_ms",
+				i, it.ID, p.AtMs, i-1, it.SpeedRamp[i-1].AtMs)
+		}
+		if p.AtMs > span {
+			c.add(CodeInvalidSpeedRamp, pp,
+				"speed_ramp point %d of item %s is at %d ms, but at_ms counts from source.in_ms and the source range is only %d ms long (%d to %d); use an at_ms from 0 to %d",
+				i, it.ID, p.AtMs, span, it.Source.InMs, it.Source.OutMs, span)
+		}
+	}
+	if a := it.Audio; a != nil && a.UseSourceOrDefault() {
+		c.addSeverity(SeverityWarning, CodeRampAudioMuted, path+"/audio/use_source",
+			"item %s has a speed ramp, so its own audio is muted: the audio cannot follow a changing speed. Turn use_source off, or give the clip a constant speed to keep its sound",
+			it.ID)
+	}
+}
+
+// checkMotion checks a clip's motion preset: the clip must play for at least MinMotionShotMs, at_ms (where punch_in lands or
+// shake starts, in ms from the clip's first frame) must lie inside the clip and is only for punch_in and shake.
+func (c *checker) checkMotion(it VideoItem, path string, dur int64) {
+	m := it.Motion
+	if m == nil {
+		return
+	}
+	mp := path + "/motion"
+	if !m.Active() {
+		if m.AtMs != nil || m.Strength != nil {
+			c.add(CodeInvalidMotion, mp,
+				"item %s has motion preset none with at_ms or strength; none takes no parameters. Leave them out, or choose punch_in, push_in, pull_back or shake",
+				it.ID)
+		}
+		return
+	}
+	if dur < MinMotionShotMs {
+		c.add(CodeInvalidMotion, mp+"/preset",
+			"item %s plays for %d ms, too short for the motion preset %s, which needs a shot of at least %d ms. Lengthen the clip or remove the motion",
+			it.ID, dur, m.Preset, MinMotionShotMs)
+	}
+	if m.AtMs == nil {
+		return
+	}
+	if m.Preset != MotionPunchIn && m.Preset != MotionShake {
+		c.add(CodeInvalidMotion, mp+"/at_ms",
+			"item %s has at_ms on the motion preset %s, which runs over the whole clip and has no moment to land on; at_ms is only for punch_in and shake. Remove at_ms",
+			it.ID, m.Preset)
+		return
+	}
+	if *m.AtMs >= dur {
+		c.add(CodeInvalidMotion, mp+"/at_ms",
+			"item %s has motion at_ms %d, but the clip plays for only %d ms and at_ms counts from the clip's first frame; use an at_ms from 0 to %d",
+			it.ID, *m.AtMs, dur, dur-1)
+	}
 }
 
 // checkClipAsset looks the clip's asset up once. It raises unknown_asset when the catalog does not know the asset and

@@ -11,6 +11,10 @@ func OutputDuration(it VideoItem) int64 {
 	if span <= 0 {
 		return 0
 	}
+	if it.HasRamp() {
+		// The integral of the ramp (ramp.go), rounded half up like the constant speed.
+		return int64(math.Floor(RampOutMs(it.SpeedRamp, float64(span)) + 0.5))
+	}
 	speed := it.SpeedOrDefault()
 	if speed <= 0 || math.IsNaN(speed) {
 		return 0

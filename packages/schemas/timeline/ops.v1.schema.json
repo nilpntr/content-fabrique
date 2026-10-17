@@ -55,6 +55,12 @@
     },
     {
       "$ref": "#/$defs/set_clip_audio"
+    },
+    {
+      "$ref": "#/$defs/set_motion"
+    },
+    {
+      "$ref": "#/$defs/set_speed_ramp"
     }
   ],
   "$defs": {
@@ -218,10 +224,14 @@
               "enum": [
                 "crossfade",
                 "dip_to_black",
-                "whip"
+                "whip",
+                "whip_left",
+                "whip_right",
+                "zoom_through",
+                "flash"
               ],
               "title": "Type",
-              "description": "crossfade blends the two clips. dip_to_black fades out to black and in again. whip is a fast sideways slide with motion blur."
+              "description": "crossfade blends the two clips. dip_to_black fades out to black and in again. whip_left is a fast slide to the left with motion blur (whip is the same, kept for older edits); whip_right slides to the right. zoom_through zooms into the outgoing clip and out of the incoming one through a blur. flash dips to white."
             },
             "duration_ms": {
               "type": "integer",
@@ -277,7 +287,7 @@
       "maximum": 4,
       "default": 1,
       "title": "Speed",
-      "description": "Playback speed from 0.25 (slow motion) to 4 (fast). Default 1."
+      "description": "Playback speed from 0.25 (slow motion) to 4 (fast). Default 1. A clip has either speed or speed_ramp, not both (checked by the Go layer)."
     },
     "sourceRange": {
       "type": "object",
@@ -384,7 +394,7 @@
     "add_clip": {
       "type": "object",
       "title": "add_clip",
-      "description": "Add a clip from a source asset to the main track. Give the part of the asset to use as source.in_ms and source.out_ms (in the asset's own time; in_ms below out_ms, out_ms within the asset's duration). Say where it goes with index (the position it will have, 0 is the start) or after_id (right after that clip); without either it goes at the end. The clips after it move later (ripple) and their at_ms is recomputed. Without id, the clip gets the next free id such as \"c7\"; the result reports it. speed, reframe, look, transition_in and audio are optional and default as in the timeline spec. A transition_in on a clip that ends up first is an error.",
+      "description": "Add a clip from a source asset to the main track. Give the part of the asset to use as source.in_ms and source.out_ms (in the asset's own time; in_ms below out_ms, out_ms within the asset's duration). Say where it goes with index (the position it will have, 0 is the start) or after_id (right after that clip); without either it goes at the end. The clips after it move later (ripple) and their at_ms is recomputed. Without id, the clip gets the next free id such as \"c7\"; the result reports it. speed (or speed_ramp), reframe, motion, look, transition_in and audio are optional and default as in the timeline spec. A transition_in on a clip that ends up first is an error.",
       "additionalProperties": false,
       "required": [
         "op",
@@ -423,8 +433,14 @@
         "speed": {
           "$ref": "#/$defs/speed"
         },
+        "speed_ramp": {
+          "$ref": "#/$defs/speedRamp"
+        },
         "reframe": {
           "$ref": "#/$defs/reframe"
+        },
+        "motion": {
+          "$ref": "#/$defs/motion"
         },
         "look": {
           "$ref": "#/$defs/look"
@@ -639,7 +655,7 @@
     "set_speed": {
       "type": "object",
       "title": "set_speed",
-      "description": "Set the playback speed of a clip, from 0.25 (slow motion) to 4 (fast). A faster speed makes the clip shorter and the clips after it ripple earlier.",
+      "description": "Set the playback speed of a clip, from 0.25 (slow motion) to 4 (fast). A faster speed makes the clip shorter and the clips after it ripple earlier. It also removes a speed_ramp the clip had, since the ramp replaces the speed.",
       "additionalProperties": false,
       "required": [
         "op",
@@ -928,7 +944,7 @@
     "set_transition": {
       "type": "object",
       "title": "set_transition",
-      "description": "Set how a clip begins. cut is instant. crossfade, dip_to_black and whip blend with the previous clip over duration_ms (100 to 1000) and the clip then starts that long before the previous one ends, so the clips after it ripple earlier. The first clip must have a cut, and a transition must be shorter than both clips it joins.",
+      "description": "Set how a clip begins. cut is instant. crossfade, dip_to_black, whip_left (whip is the same), whip_right, zoom_through and flash blend with the previous clip over duration_ms (100 to 1000) and the clip then starts that long before the previous one ends, so the clips after it ripple earlier. whip_left and whip_right are fast slides with motion blur, zoom_through zooms into the outgoing clip and out of the incoming one, flash dips to white. The first clip must have a cut, and a transition must be shorter than both clips it joins.",
       "additionalProperties": false,
       "required": [
         "op",
@@ -951,10 +967,14 @@
             "cut",
             "crossfade",
             "dip_to_black",
-            "whip"
+            "whip",
+            "whip_left",
+            "whip_right",
+            "zoom_through",
+            "flash"
           ],
           "title": "Type",
-          "description": "cut, crossfade, dip_to_black or whip."
+          "description": "cut, crossfade, dip_to_black, whip (same as whip_left), whip_left, whip_right, zoom_through or flash."
         },
         "duration_ms": {
           "type": "integer",
@@ -986,7 +1006,11 @@
               "enum": [
                 "crossfade",
                 "dip_to_black",
-                "whip"
+                "whip",
+                "whip_left",
+                "whip_right",
+                "zoom_through",
+                "flash"
               ]
             }
           },
@@ -1507,6 +1531,141 @@
       "description": "A batch of edit ops, applied in order and atomically: all of them or none. At most 100 ops.",
       "items": {
         "$ref": "#"
+      }
+    },
+    "motion": {
+      "type": "object",
+      "title": "Motion",
+      "description": "A camera move on the clip, applied as a digital zoom on the already-reframed frame (after reframe, so it composes with every reframe mode and never shows a border). punch_in is a fast zoom (about 5 frames) that lands at at_ms and holds, push_in a slow continuous zoom over the whole clip, pull_back the reverse (starts zoomed, pulls back to the full frame) and shake a short camera shake that starts at at_ms and dies out (deterministic: the pattern comes from the clip's id). Needs a clip of at least 400 ms (checked by the Go layer).",
+      "additionalProperties": false,
+      "required": [
+        "preset"
+      ],
+      "properties": {
+        "preset": {
+          "enum": [
+            "none",
+            "punch_in",
+            "push_in",
+            "pull_back",
+            "shake"
+          ],
+          "title": "Preset",
+          "description": "none, punch_in, push_in, pull_back or shake."
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms",
+          "title": "At",
+          "description": "Only for punch_in (where the zoom has landed) and shake (where it starts): milliseconds from the clip's first frame, inside the clip. Without it punch_in zooms over the first frames of the clip and shake starts at its first frame."
+        },
+        "strength": {
+          "type": "number",
+          "minimum": 0.05,
+          "maximum": 0.35,
+          "title": "Strength",
+          "description": "The peak scale increase, 0.05 (5 % bigger) to 0.35. Defaults: punch_in 0.15, push_in 0.1, pull_back 0.15, shake 0.08 (also the size of the shake)."
+        }
+      }
+    },
+    "speedRamp": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 16,
+      "title": "Speed ramp",
+      "description": "A speed that changes along the clip, as 2 to 16 points {at_ms, speed}. at_ms is a source offset: milliseconds into the clip's source range, counted from source.in_ms (0 to out_ms - in_ms), strictly increasing. The speed (0.25 to 4) changes linearly in source time between two points, is the first point's speed before the first and the last point's speed after the last. The clip's output duration is the integral of 1/speed over its source range. It replaces speed: give one of the two. The clip's own audio is muted (it cannot follow the ramp). Sorted points and the range are checked by the Go layer.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "at_ms",
+          "speed"
+        ],
+        "properties": {
+          "at_ms": {
+            "$ref": "#/$defs/ms",
+            "title": "Source offset",
+            "description": "Where the point is, in ms from source.in_ms (in source time)."
+          },
+          "speed": {
+            "type": "number",
+            "minimum": 0.25,
+            "maximum": 4,
+            "title": "Speed",
+            "description": "The playback speed at the point, 0.25 to 4."
+          }
+        }
+      }
+    },
+    "set_motion": {
+      "type": "object",
+      "title": "set_motion",
+      "description": "Set the camera move of a clip: a digital zoom or a shake on the already-reframed frame. punch_in is a fast zoom (about 5 frames) that lands at at_ms and holds: use it on a beat. push_in is a slow zoom over the whole clip, pull_back starts zoomed and pulls back to the full frame, shake is a short camera shake that starts at at_ms. This replaces the clip's whole motion, so fields you leave out go back to their defaults; none removes it. The clip must play for at least 400 ms, and at_ms (only for punch_in and shake) counts from the clip's own first frame, so it stays right when the clip moves.",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "id",
+        "preset"
+      ],
+      "properties": {
+        "op": {
+          "const": "set_motion",
+          "title": "Op",
+          "description": "\"set_motion\"."
+        },
+        "id": {
+          "$ref": "#/$defs/itemId",
+          "title": "Clip id",
+          "description": "The id of the main-track clip."
+        },
+        "preset": {
+          "enum": [
+            "none",
+            "punch_in",
+            "push_in",
+            "pull_back",
+            "shake"
+          ],
+          "title": "Preset",
+          "description": "none, punch_in, push_in, pull_back or shake."
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms",
+          "title": "At",
+          "description": "Only for punch_in (where the zoom has landed) and shake (where it starts): milliseconds from the clip's first frame, inside the clip. Without it punch_in zooms over the first frames of the clip and shake starts at its first frame."
+        },
+        "strength": {
+          "type": "number",
+          "minimum": 0.05,
+          "maximum": 0.35,
+          "title": "Strength",
+          "description": "The peak scale increase, 0.05 (5 % bigger) to 0.35. Defaults: punch_in 0.15, push_in 0.1, pull_back 0.15, shake 0.08 (also the size of the shake)."
+        }
+      }
+    },
+    "set_speed_ramp": {
+      "type": "object",
+      "title": "set_speed_ramp",
+      "description": "Give a clip a speed that changes along it, for example fast into slow at the peak of a lift: points [{at_ms: 0, speed: 3}, {at_ms: 1500, speed: 3}, {at_ms: 2200, speed: 0.4}]. at_ms is a source offset: milliseconds from the clip's source.in_ms, strictly increasing and within the source range. Between points the speed changes linearly. The clip's length is the integral of the ramp, so it ripples the clips after it. It replaces speed (a set_speed later replaces the ramp), and the clip's own audio is muted while it has a ramp.",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "id",
+        "points"
+      ],
+      "properties": {
+        "op": {
+          "const": "set_speed_ramp",
+          "title": "Op",
+          "description": "\"set_speed_ramp\"."
+        },
+        "id": {
+          "$ref": "#/$defs/itemId",
+          "title": "Clip id",
+          "description": "The id of the main-track clip."
+        },
+        "points": {
+          "$ref": "#/$defs/speedRamp"
+        }
       }
     }
   }

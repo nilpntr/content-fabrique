@@ -76,6 +76,11 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 		if a == nil || !a.UseSourceOrDefault() || !cl.asset.HasAudio {
 			continue
 		}
+		if cl.item.HasRamp() {
+			// atempo cannot follow a changing speed, so a clip with a speed ramp plays no sound of its own (Validate warns
+			// with ramp_audio_muted). It gets no input in the mix either.
+			continue
+		}
 		it := cl.item
 		start := timeline.FrameStartMs(cl.startFrame, c.fps)
 		dur := timeline.FrameStartMs(cl.endFrame, c.fps) - start

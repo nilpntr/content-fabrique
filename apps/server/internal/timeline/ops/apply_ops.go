@@ -23,6 +23,13 @@ func cloneReframe(r *timeline.Reframe) *timeline.Reframe {
 	return &timeline.Reframe{Mode: r.Mode, Focus: copyPtr(r.Focus), Zoom: copyPtr(r.Zoom)}
 }
 
+func cloneMotion(m *timeline.Motion) *timeline.Motion {
+	if m == nil {
+		return nil
+	}
+	return &timeline.Motion{Preset: m.Preset, AtMs: copyPtr(m.AtMs), Strength: copyPtr(m.Strength)}
+}
+
 func cloneVideoAudio(v *timeline.VideoAudio) *timeline.VideoAudio {
 	if v == nil {
 		return nil
@@ -59,7 +66,7 @@ func (a *applier) addClip(o *AddClip) bool {
 	}
 	it := timeline.VideoItem{
 		ID: id, AssetID: o.AssetID, MomentID: o.MomentID, Source: o.Source,
-		Speed: copyPtr(o.Speed), Reframe: cloneReframe(o.Reframe), Look: copyPtr(o.Look),
+		Speed: copyPtr(o.Speed), SpeedRamp: slices.Clone(o.SpeedRamp), Reframe: cloneReframe(o.Reframe), Motion: cloneMotion(o.Motion), Look: copyPtr(o.Look),
 		TransitionIn: copyPtr(o.TransitionIn), Audio: cloneVideoAudio(o.Audio), Why: copyPtr(o.Why),
 	}
 	a.main.Items = slices.Insert(a.main.Items, pos, it)
@@ -219,7 +226,39 @@ func (a *applier) setSpeed(o *SetSpeed) bool {
 	}
 	v := o.Speed
 	a.main.Items[i].Speed = &v
+	a.main.Items[i].SpeedRamp = nil // a ramp replaces the speed, and so does a speed the ramp
 	a.ripple()
+	a.touch(o.ID)
+	return true
+}
+
+func (a *applier) setSpeedRamp(o *SetSpeedRamp) bool {
+	a.ensureSorted()
+	i, ok := a.clip(o.ID)
+	if !ok {
+		return false
+	}
+	it := &a.main.Items[i]
+	it.SpeedRamp = slices.Clone(o.Points)
+	it.Speed = nil // the ramp replaces the speed
+	a.ripple()
+	a.touch(o.ID)
+	return true
+}
+
+func (a *applier) setMotion(o *SetMotion) bool {
+	i, ok := a.clip(o.ID)
+	if !ok {
+		return false
+	}
+	if o.Preset == timeline.MotionNone {
+		if o.AtMs != nil || o.Strength != nil {
+			return a.errf(CodeBadArgument, "the preset none takes no at_ms or strength; leave them out, or choose punch_in, push_in, pull_back or shake")
+		}
+		a.main.Items[i].Motion = nil
+	} else {
+		a.main.Items[i].Motion = &timeline.Motion{Preset: o.Preset, AtMs: copyPtr(o.AtMs), Strength: copyPtr(o.Strength)}
+	}
 	a.touch(o.ID)
 	return true
 }
@@ -243,7 +282,7 @@ func (a *applier) setTransition(o *SetTransition) bool {
 	t := &timeline.Transition{Type: o.Type, DurationMs: o.DurationMs}
 	if o.Type == timeline.TransitionCut {
 		if o.DurationMs != 0 {
-			return a.errf(CodeBadArgument, "a cut has no duration; leave duration_ms out, or choose crossfade, dip_to_black or whip")
+			return a.errf(CodeBadArgument, "a cut has no duration; leave duration_ms out, or choose crossfade, dip_to_black, whip_left, whip_right, zoom_through or flash")
 		}
 		t.DurationMs = 0
 	}

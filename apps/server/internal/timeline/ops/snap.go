@@ -162,7 +162,17 @@ func (a *applier) rolled(orig []timeline.VideoItem, cuts, target []int64) ([]tim
 		leftMoved := j > 0 && target[j-1] != cuts[j-1]
 		rightMoved := j < n-1 && target[j] != cuts[j]
 		next := it
-		if leftMoved || rightMoved {
+		if it.HasRamp() && (leftMoved || rightMoved) {
+			// A speed ramp is tied to the clip's source range (its points are offsets from the in point), so the source range
+			// cannot be rolled to fit a new length without changing the ramp: the cuts at this clip stay where they are.
+			why := "change the length of " + it.ID + ", which has a speed ramp that a snap cannot lengthen or shorten"
+			if leftMoved {
+				bad[j-1] = why
+			}
+			if rightMoved {
+				bad[j] = why
+			}
+		} else if leftMoved || rightMoved {
 			targetEnd := origEnd
 			if j < n-1 {
 				targetEnd = target[j] + orig[j+1].TransitionDurationMs()
