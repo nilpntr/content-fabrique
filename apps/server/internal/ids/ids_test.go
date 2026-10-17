@@ -29,7 +29,7 @@ func TestPrefixesAreValidTypeIDPrefixes(t *testing.T) {
 
 func TestRoundTrip(t *testing.T) {
 	for _, p := range Prefixes {
-		u, err := NewUUID()
+		u, err := newUUID()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -62,7 +62,7 @@ func TestSpecVector(t *testing.T) {
 }
 
 func TestDecodeRejects(t *testing.T) {
-	u, _ := NewUUID()
+	u, _ := newUUID()
 	good := Encode(PrefixWorkspace, u)
 	cases := map[string]string{
 		"wrong prefix":   Encode(PrefixUser, u),
@@ -86,7 +86,7 @@ func TestDecodeRejects(t *testing.T) {
 }
 
 func TestTypedIDs(t *testing.T) {
-	w, err := NewWorkspaceID()
+	w, err := newWorkspaceID()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestTypedIDs(t *testing.T) {
 		t.Fatalf("ParseWorkspaceID = %v, %v", got, err)
 	}
 	// A user TypeID is not a workspace ID.
-	u, _ := NewUserID()
+	u, _ := newUserID()
 	if _, err := ParseWorkspaceID(u.String()); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("a usr_ id parsed as a workspace id: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestJSONAndSQLForms(t *testing.T) {
 	type doc struct {
 		ID WorkspaceID `json:"id"`
 	}
-	w, _ := NewWorkspaceID()
+	w, _ := newWorkspaceID()
 	b, err := json.Marshal(doc{w})
 	if err != nil || string(b) != `{"id":"`+w.String()+`"}` {
 		t.Fatalf("json = %s, %v", b, err)
@@ -123,7 +123,7 @@ func TestJSONAndSQLForms(t *testing.T) {
 	if err := json.Unmarshal(b, &back); err != nil || back.ID != w {
 		t.Fatalf("unmarshal = %+v, %v", back, err)
 	}
-	u, _ := NewUserID()
+	u, _ := newUserID()
 	if err := json.Unmarshal([]byte(`{"id":"`+u.String()+`"}`), &back); err == nil {
 		t.Fatal("a usr_ id was accepted for a workspace field")
 	}
@@ -139,13 +139,15 @@ func TestJSONAndSQLForms(t *testing.T) {
 	}
 }
 
-func TestNewUUIDIsV7AndOrdered(t *testing.T) {
-	a, _ := NewUUID()
-	b, _ := NewUUID()
-	if a.Version() != 7 || b.Version() != 7 {
-		t.Fatalf("versions %d %d", a.Version(), b.Version())
-	}
-	if strings.Compare(a.String(), b.String()) >= 0 {
-		t.Fatalf("UUIDv7 values should sort by creation time: %s >= %s", a, b)
-	}
+// Postgres generates the keys in production; the tests make their own.
+func newUUID() (uuid.UUID, error) { return uuid.NewV7() }
+
+func newWorkspaceID() (WorkspaceID, error) {
+	u, err := newUUID()
+	return FromUUID[workspaceKind](u), err
+}
+
+func newUserID() (UserID, error) {
+	u, err := newUUID()
+	return FromUUID[userKind](u), err
 }

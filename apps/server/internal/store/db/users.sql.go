@@ -7,26 +7,23 @@ package db
 
 import (
 	"context"
-
-	"github.com/nilpntr/content-fabrique/internal/ids"
 )
 
 const upsertUserByClerkID = `-- name: UpsertUserByClerkID :one
-INSERT INTO users (id, clerk_user_id, email)
-VALUES ($1, $2, $3)
+INSERT INTO users (clerk_user_id, email)
+VALUES ($1, $2)
 ON CONFLICT (clerk_user_id) DO UPDATE SET email = EXCLUDED.email
 RETURNING id, clerk_user_id, email, created_at, updated_at
 `
 
 type UpsertUserByClerkIDParams struct {
-	ID          ids.UserID
 	ClerkUserID string
 	Email       string
 }
 
-// Idempotent for Clerk webhooks: a user keeps its first id, and the email follows Clerk.
+// Idempotent for Clerk webhooks: a user keeps its first id (the uuidv7() default), and the email follows Clerk.
 func (q *Queries) UpsertUserByClerkID(ctx context.Context, arg UpsertUserByClerkIDParams) (User, error) {
-	row := q.db.QueryRow(ctx, upsertUserByClerkID, arg.ID, arg.ClerkUserID, arg.Email)
+	row := q.db.QueryRow(ctx, upsertUserByClerkID, arg.ClerkUserID, arg.Email)
 	var i User
 	err := row.Scan(
 		&i.ID,

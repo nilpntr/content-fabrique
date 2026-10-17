@@ -66,7 +66,7 @@ type NewWorkspace struct {
 	BillingMode BillingMode
 }
 
-// CreateWorkspace inserts a workspace with a fresh UUIDv7 key. A second call for the same Clerk organization
+// CreateWorkspace inserts a workspace; Postgres 18's uuidv7() makes its key. A second call for the same Clerk organization
 // returns ErrConflict; the Clerk webhook handler decides whether that means "already synced".
 func (s *Store) CreateWorkspace(ctx context.Context, in NewWorkspace) (Workspace, error) {
 	if strings.TrimSpace(in.ClerkOrgID) == "" || strings.TrimSpace(in.Name) == "" {
@@ -84,12 +84,8 @@ func (s *Store) CreateWorkspace(ctx context.Context, in NewWorkspace) (Workspace
 	if in.BillingMode != BillingManaged && in.BillingMode != BillingBYOK {
 		return Workspace{}, fmt.Errorf("%w: billing mode %q", ErrInvalid, in.BillingMode)
 	}
-	id, err := ids.NewWorkspaceID()
-	if err != nil {
-		return Workspace{}, fmt.Errorf("new workspace id: %w", err)
-	}
 	w, err := s.q.CreateWorkspace(ctx, db.CreateWorkspaceParams{
-		ID: id, ClerkOrgID: in.ClerkOrgID, Name: in.Name, Plan: in.Plan, Region: in.Region, BillingMode: string(in.BillingMode),
+		ClerkOrgID: in.ClerkOrgID, Name: in.Name, Plan: in.Plan, Region: in.Region, BillingMode: string(in.BillingMode),
 	})
 	return w, mapErr(err)
 }
@@ -112,11 +108,7 @@ func (s *Store) UpsertUserByClerkID(ctx context.Context, clerkUserID, email stri
 	if strings.TrimSpace(clerkUserID) == "" || strings.TrimSpace(email) == "" {
 		return User{}, fmt.Errorf("%w: clerk user id and email are required", ErrInvalid)
 	}
-	id, err := ids.NewUserID()
-	if err != nil {
-		return User{}, fmt.Errorf("new user id: %w", err)
-	}
-	u, err := s.q.UpsertUserByClerkID(ctx, db.UpsertUserByClerkIDParams{ID: id, ClerkUserID: clerkUserID, Email: email})
+	u, err := s.q.UpsertUserByClerkID(ctx, db.UpsertUserByClerkIDParams{ClerkUserID: clerkUserID, Email: email})
 	return u, mapErr(err)
 }
 
@@ -204,6 +196,11 @@ func mapErr(err error) error {
 			return fmt.Errorf("%w: referenced row does not exist", ErrNotFound)
 		case "23514", "23502": // check_violation, not_null_violation
 			return fmt.Errorf("%w: %s", ErrInvalid, pgErr.ConstraintName)
+		}
+		// Class 22, data exceptions: input the column cannot hold, such as a NUL byte in text (22021) or \u0000 in
+		// jsonb (22P05). The message is left out because it can quote the value.
+		if strings.HasPrefix(pgErr.Code, "22") {
+			return fmt.Errorf("%w: value rejected by the database (SQLSTATE %s)", ErrInvalid, pgErr.Code)
 		}
 	}
 	return err

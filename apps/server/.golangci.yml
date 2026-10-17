@@ -1,0 +1,65 @@
+# golangci-lint v2 config. CI runs it from apps/server (.github/workflows/ci.yml); `task lint` does the same locally.
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # default: standard already enables errcheck, govet, ineffassign, staticcheck and unused.
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - misspell
+    - revive
+  settings:
+    errcheck:
+      check-type-assertions: true
+    govet:
+      enable-all: true
+      disable:
+        # Struct field alignment is a micro-optimisation that makes structs harder to read.
+        - fieldalignment
+        # Shadowing `err` in an `if err := ...; err != nil` is idiomatic Go.
+        - shadow
+    gosec:
+      excludes:
+        # G104 (unhandled errors) duplicates errcheck.
+        - G104
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+        - name: increment-decrement
+        - name: var-declaration
+        - name: package-comments
+          disabled: true
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unused-parameter
+        - name: unreachable-code
+        - name: redefines-builtin-id
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      # Test fixtures hold fake credentials, fixed file modes and temp paths, which gosec reads as findings
+      # (G101, G302, G703). Production code stays fully checked.
+      - path: _test\.go
+        linters:
+          - gosec

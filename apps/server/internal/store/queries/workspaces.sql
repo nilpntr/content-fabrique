@@ -1,6 +1,7 @@
+-- The id comes from the column default, uuidv7() (Postgres 18).
 -- name: CreateWorkspace :one
-INSERT INTO workspaces (id, clerk_org_id, name, plan, region, billing_mode)
-VALUES (@id, @clerk_org_id, @name, @plan, @region, @billing_mode)
+INSERT INTO workspaces (clerk_org_id, name, plan, region, billing_mode)
+VALUES (@clerk_org_id, @name, @plan, @region, @billing_mode)
 RETURNING *;
 
 -- name: GetWorkspace :one

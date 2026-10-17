@@ -1,5 +1,5 @@
-// Package storetest starts a throwaway Postgres in Docker for tests (image pgvector/pgvector:pg17, the one compose.yaml
-// and CI use). One container serves a whole test binary; every test gets its own database in it.
+// Package storetest starts a throwaway Postgres in Docker for tests: the image compose.yaml and CI use, by the same
+// digest (change all together). One container serves a whole test binary; every test gets its own database in it.
 //
 // Roles are cluster-wide in Postgres, so tests that create roles (the migrate/app split) must run one after another
 // and remove what they made. Do not call t.Parallel in such a test.
@@ -25,8 +25,9 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 )
 
-// Image is the Postgres image of the tests.
-const Image = "pgvector/pgvector:pg17"
+// Image is the Postgres image of the tests: Postgres 18 (native uuidv7()), pinned like compose.yaml and
+// .github/workflows/ci.yml, which use the same digest.
+const Image = "pgvector/pgvector:pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11"
 
 // The superuser of the container.
 const (

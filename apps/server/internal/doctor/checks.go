@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -107,9 +108,13 @@ func bearer(token string) map[string]string {
 
 // ---- Postgres --------------------------------------------------------------------------------------------------
 
+// minPostgresVersionNum is Postgres 18, the first with a native uuidv7().
+const minPostgresVersionNum = 180000
+
 // postgres connects, runs SELECT 1 and, for the direct URL, LISTEN (which PgBouncer-style poolers cannot do).
 func (r *run) postgres(name, envName string, listen bool) job {
-	if res, bad := r.problem("service", name, envName); bad {
+	// gate: a variable that is not required here (DATABASE_MIGRATE_URL on an app server) and not set is skipped.
+	if res, ok := r.gate(name, envName); !ok {
 		return static(res)
 	}
 	dsn := r.vars[envName]
@@ -133,6 +138,14 @@ func (r *run) postgres(name, envName string, listen bool) job {
 		var one int
 		if err := conn.QueryRow(ctx, "SELECT 1").Scan(&one); err != nil {
 			return failed(name, "SELECT 1: "+classify(err))
+		}
+		// The schema's id defaults call uuidv7(), which Postgres 18 added (D-24).
+		var versionNum string
+		if err := conn.QueryRow(ctx, "SHOW server_version_num").Scan(&versionNum); err != nil {
+			return failed(name, "server version: "+classify(err))
+		}
+		if n, err := strconv.Atoi(versionNum); err != nil || n < minPostgresVersionNum {
+			return failed(name, "Postgres 18 or newer required")
 		}
 		if listen {
 			if _, err := conn.Exec(ctx, "LISTEN cf_doctor"); err != nil {

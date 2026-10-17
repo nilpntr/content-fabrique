@@ -51,8 +51,8 @@ func TestMigrationsRoundTrip(t *testing.T) {
 	if res, err := m.Up(ctx); err != nil || len(res) == 0 {
 		t.Fatalf("up = %v, %v", res, err)
 	}
-	if v, err := m.Version(ctx); err != nil || v != store.Latest() {
-		t.Fatalf("version after up = %d (want %d), %v", v, store.Latest(), err)
+	if v, err := m.Version(ctx); err != nil || v != m.Latest() {
+		t.Fatalf("version after up = %d (want %d), %v", v, m.Latest(), err)
 	}
 	if got := publicTables(t, dsn); !slices.Equal(got, appTables) {
 		t.Fatalf("tables after up = %v, want %v", got, appTables)
@@ -88,13 +88,51 @@ func TestMigrationsRoundTrip(t *testing.T) {
 		t.Fatalf("redo = %v, %v", res, err)
 	}
 	ss, err := m.Status(ctx)
-	if err != nil || len(ss) != int(store.Latest()) {
+	if err != nil || len(ss) != int(m.Latest()) {
 		t.Fatalf("status = %v, %v", ss, err)
 	}
 	for _, s := range ss {
 		if !s.Applied {
 			t.Errorf("%s is not applied", s.Name)
 		}
+	}
+}
+
+// Redo rolls back the latest applied migration and applies that one again. It must not go on to apply others that
+// are pending: here migration 2 is pending while 1 is redone.
+func TestRedoRedoesExactlyOne(t *testing.T) {
+	srv := storetest.Start(t)
+	dsn := srv.SuperDSN(srv.NewDatabase(t, ""))
+	ctx := context.Background()
+	m, err := store.NewMigrator(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = m.Close() }()
+
+	if _, err := m.UpTo(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	res, err := m.Redo(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 2 || res[0].Direction != "down" || res[0].Version != 1 || res[1].Direction != "up" || res[1].Version != 1 {
+		t.Fatalf("redo = %+v, want down 1 then up 1", res)
+	}
+	if v, _ := m.Version(ctx); v != 1 {
+		t.Fatalf("version after redo = %d, want 1 (migration 2 must stay pending)", v)
+	}
+	if got := publicTables(t, dsn); len(got) != 0 {
+		t.Fatalf("redo applied more than one migration: tables %v", got)
+	}
+
+	// Nothing applied: redo has nothing to roll back after a down to 0.
+	if _, err := m.DownTo(ctx, 0); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := m.Redo(ctx); err != nil || len(res) != 0 {
+		t.Fatalf("redo at version 0 = %+v, %v", res, err)
 	}
 }
 

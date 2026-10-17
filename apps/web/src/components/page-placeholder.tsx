@@ -22,6 +22,7 @@ export function PagePlaceholder({
       </div>
       <div className="grid gap-4 md:grid-cols-3">
         {Array.from({ length: cards }, (_, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: static skeleton cards, the list never reorders.
           <div key={i} className={`${CARD} space-y-3`} style={{ animationDelay: `${50 + i * 45}ms` }}>
             <Skeleton className="h-4 w-1/3" />
             <Skeleton className="h-8 w-1/2" />

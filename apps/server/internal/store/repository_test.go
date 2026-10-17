@@ -7,7 +7,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/store/storetest"
@@ -26,18 +28,14 @@ func TestRepository(t *testing.T) {
 // so it can run twice against one database.
 func repositorySuite(t *testing.T, st *store.Store) {
 	ctx := context.Background()
-	u, err := ids.NewUUID()
-	if err != nil {
-		t.Fatal(err)
-	}
-	suffix := u.String() // unique per run of the suite, so the suite can run twice on one database
+	suffix := uuid.NewString() // unique per run of the suite, so the suite can run twice on one database
 
 	t.Run("workspaces", func(t *testing.T) {
 		w, err := st.CreateWorkspace(ctx, store.NewWorkspace{ClerkOrgID: "org_" + suffix, Name: "Fit Studio"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if w.ID.IsZero() || w.ID.UUID.Version() != 7 || !strings.HasPrefix(w.ID.String(), "wks_") {
+		if w.ID.IsZero() || w.ID.Version() != 7 || !strings.HasPrefix(w.ID.String(), "wks_") {
 			t.Fatalf("id = %v", w.ID)
 		}
 		if w.Plan != store.DefaultPlan || w.Region != store.DefaultRegion || w.BillingMode != string(store.BillingManaged) {
@@ -143,11 +141,11 @@ func repositorySuite(t *testing.T, st *store.Store) {
 		if _, err := st.AddMember(ctx, w.ID, ada.ID, "admin"); !errors.Is(err, store.ErrInvalid) {
 			t.Fatalf("unknown role: err = %v, want ErrInvalid", err)
 		}
-		ghostUser, _ := ids.NewUserID()
+		ghostUser := ghostUserID(t)
 		if _, err := st.AddMember(ctx, w.ID, ghostUser, store.RoleViewer); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("unknown user: err = %v, want ErrNotFound", err)
 		}
-		ghostWS, _ := ids.NewWorkspaceID()
+		ghostWS := ghostWorkspaceID(t)
 		if _, err := st.AddMember(ctx, ghostWS, ada.ID, store.RoleViewer); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("unknown workspace: err = %v, want ErrNotFound", err)
 		}
@@ -205,9 +203,46 @@ func repositorySuite(t *testing.T, st *store.Store) {
 		if _, err := st.UpsertCreatorProfile(ctx, w.ID, store.ProfileInput{Brand: json.RawMessage(`{not json`)}); !errors.Is(err, store.ErrInvalid) {
 			t.Fatalf("invalid JSON: err = %v, want ErrInvalid", err)
 		}
-		ghost, _ := ids.NewWorkspaceID()
-		if _, err := st.UpsertCreatorProfile(ctx, ghost, store.ProfileInput{}); !errors.Is(err, store.ErrNotFound) {
+		if _, err := st.UpsertCreatorProfile(ctx, ghostWorkspaceID(t), store.ProfileInput{}); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("profile for a missing workspace: err = %v, want ErrNotFound", err)
+		}
+	})
+
+	// Input the database refuses is the caller's problem (ErrInvalid), not an internal error: a NUL byte cannot be
+	// stored in text (SQLSTATE 22021) and \u0000 cannot be stored in jsonb (22P05).
+	t.Run("data exceptions", func(t *testing.T) {
+		if _, err := st.CreateWorkspace(ctx, store.NewWorkspace{ClerkOrgID: "org_nul_" + suffix, Name: "a\x00b"}); !errors.Is(err, store.ErrInvalid) {
+			t.Fatalf("NUL in text: err = %v, want ErrInvalid", err)
+		}
+		w, err := st.CreateWorkspace(ctx, store.NewWorkspace{ClerkOrgID: "org_u0_" + suffix, Name: "u0"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = st.UpsertCreatorProfile(ctx, w.ID, store.ProfileInput{Niche: json.RawMessage(`{"a":"\u0000"}`)})
+		if !errors.Is(err, store.ErrInvalid) {
+			t.Fatalf("\\u0000 in jsonb: err = %v, want ErrInvalid", err)
+		}
+		if strings.Contains(err.Error(), "u0000") {
+			t.Errorf("the error quotes the value: %v", err)
+		}
+	})
+
+	// Postgres 18 makes the keys (uuidv7()). The first 48 bits are a millisecond timestamp, so the key says when the
+	// row was made, and it matches created_at (both are the statement's time).
+	t.Run("uuidv7 keys", func(t *testing.T) {
+		w, err := st.CreateWorkspace(ctx, store.NewWorkspace{ClerkOrgID: "org_v7_" + suffix, Name: "v7"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var extracted time.Time
+		if err := st.Pool().QueryRow(ctx, `SELECT uuid_extract_timestamp(id) FROM workspaces WHERE id = $1`, w.ID).Scan(&extracted); err != nil {
+			t.Fatal(err)
+		}
+		if d := extracted.Sub(w.CreatedAt).Abs(); d > 2*time.Second {
+			t.Fatalf("uuid_extract_timestamp(id) = %v but created_at = %v", extracted, w.CreatedAt)
+		}
+		if v := w.ID.Version(); v != 7 {
+			t.Fatalf("version = %d", v)
 		}
 	})
 
@@ -281,6 +316,25 @@ func repositorySuite(t *testing.T, st *store.Store) {
 			t.Fatalf("the committed workspace is missing: %v", err)
 		}
 	})
+}
+
+// ghostUserID and ghostWorkspaceID are well-formed keys that no row has.
+func ghostUserID(t *testing.T) ids.UserID {
+	t.Helper()
+	id, err := ids.ParseUserID(ids.Encode(ids.PrefixUser, uuid.Must(uuid.NewV7())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func ghostWorkspaceID(t *testing.T) ids.WorkspaceID {
+	t.Helper()
+	id, err := ids.ParseWorkspaceID(ids.Encode(ids.PrefixWorkspace, uuid.Must(uuid.NewV7())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
 
 func jsonEqual(t *testing.T, a, b json.RawMessage) bool {

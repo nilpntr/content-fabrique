@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"flag"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/doctor"
 	"github.com/nilpntr/content-fabrique/internal/envfile"
 	"github.com/nilpntr/content-fabrique/internal/store"
@@ -25,7 +27,7 @@ const migrateUsage = `Usage:
 
 Applies the SQL migrations embedded in the binary (internal/store/migrations) to the database named by
 DATABASE_MIGRATE_URL: a direct connection as the role that owns the schema. Nothing else reads that variable.
-Each migration grants the app role cf_app its rights, so the app's own login role never needs DDL.
+Each migration grants the app's group role (<database>_app, cf_app locally) its rights, so the app's own login role never needs DDL.
 
 Commands:
   up        apply every pending migration (--to VERSION stops after that version)
@@ -39,8 +41,11 @@ Commands:
               environment fills a name the file lacks or leaves empty (the same rule as cfctl doctor).
               Staging: --env-file .env.staging
   --to        a target version, for up and down
+  --yes       required for down and redo when CF_ENV (in the env file or the environment) is staging or production
+  --allow-production
+              required as well for down and redo when CF_ENV is production; without it they are refused
 
-Never prints the URL or the password.
+Every run prints the target as host:port/database with CF_ENV and the env file. Never prints the URL or the password.
 `
 
 func cmdMigrate(args []string, stdout, stderr io.Writer, lookup lookupEnv) int {
@@ -49,6 +54,8 @@ func cmdMigrate(args []string, stdout, stderr io.Writer, lookup lookupEnv) int {
 	flags.Usage = func() { _, _ = fmt.Fprint(stderr, migrateUsage) }
 	envFileArg := flags.String("env-file", "", "env file")
 	toArg := flags.String("to", "", "target version")
+	yes := flags.Bool("yes", false, "confirm down and redo on staging or production")
+	allowProd := flags.Bool("allow-production", false, "allow down and redo on production")
 
 	// Flags may come before or after the command: `migrate --env-file x down --to 0` and `migrate down --to 0`.
 	if err := flags.Parse(args); err != nil {
@@ -132,10 +139,24 @@ func cmdMigrate(args []string, stdout, stderr io.Writer, lookup lookupEnv) int {
 		_, _ = fmt.Fprintf(errOut, "cfctl migrate: DATABASE_MIGRATE_URL is not set in %s or the environment\n", displayPath(root, path))
 		return 2
 	}
-	target, err := describeTarget(dsn)
-	if err != nil {
-		_, _ = fmt.Fprintln(errOut, "cfctl migrate: DATABASE_MIGRATE_URL: must be a postgres:// or postgresql:// URL")
+	if err := config.ValidatePostgresURL(dsn); err != nil {
+		_, _ = fmt.Fprintf(errOut, "cfctl migrate: DATABASE_MIGRATE_URL: %v\n", err)
 		return 2
+	}
+	target := describeTarget(dsn)
+
+	// Rolling back drops tables and their data, so on a shared environment it must be asked for twice: by CF_ENV in
+	// the env file (a staging file says staging whatever the shell is pointed at) and by a flag.
+	cfEnv := cmp.Or(vars["CF_ENV"], config.EnvLocal)
+	if command == "down" || command == "redo" {
+		switch {
+		case cfEnv == config.EnvProduction && !*allowProd:
+			_, _ = fmt.Fprintf(errOut, "cfctl migrate: refusing to %s with CF_ENV=production (env file %s). Pass --allow-production and --yes if you mean it\n", command, displayPath(root, path))
+			return 2
+		case (cfEnv == config.EnvStaging || cfEnv == config.EnvProduction) && !*yes:
+			_, _ = fmt.Fprintf(errOut, "cfctl migrate: refusing to %s with CF_ENV=%s (env file %s) without --yes: it drops tables and their data\n", command, cfEnv, displayPath(root, path))
+			return 2
+		}
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -148,7 +169,7 @@ func cmdMigrate(args []string, stdout, stderr io.Writer, lookup lookupEnv) int {
 	}
 	defer func() { _ = migrator.Close() }()
 
-	_, _ = fmt.Fprintf(out, "cfctl migrate %s on %s\n", command, target)
+	_, _ = fmt.Fprintf(out, "cfctl migrate %s on %s (CF_ENV=%s, env file %s)\n", command, target, cfEnv, displayPath(root, path))
 	if err := runMigrate(ctx, migrator, command, to, out); err != nil {
 		_, _ = fmt.Fprintf(errOut, "cfctl migrate: %s failed: %v\n", command, err)
 		return 1
@@ -207,11 +228,12 @@ func runMigrate(ctx context.Context, m *store.Migrator, command string, to *int6
 	return err
 }
 
-// describeTarget names the database as host:port/name, without the user or the password.
-func describeTarget(dsn string) (string, error) {
+// describeTarget names the database as host:port/name, without the user or the password. dsn must already have
+// passed config.ValidatePostgresURL.
+func describeTarget(dsn string) string {
 	u, err := url.Parse(dsn)
-	if err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") || u.Host == "" {
-		return "", errors.New("not a postgres URL")
+	if err != nil {
+		return "(unparsable)"
 	}
-	return u.Host + "/" + strings.TrimPrefix(u.Path, "/"), nil
+	return u.Host + "/" + strings.TrimPrefix(u.Path, "/")
 }

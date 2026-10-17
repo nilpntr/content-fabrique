@@ -38,14 +38,17 @@ var notUsedIn = map[string]map[string]string{
 		"CLERK_SECRET_KEY":           ciNotUsedReason,
 		"VITE_CLERK_PUBLISHABLE_KEY": ciNotUsedReason,
 	},
-	"staging":    dockerOnly,
-	"production": dockerOnly,
+	"staging":    appServer,
+	"production": appServer,
 }
 
-var dockerOnly = map[string]string{
-	"POSTGRES_USER":     dockerOnlyReason,
-	"POSTGRES_PASSWORD": dockerOnlyReason,
-	"POSTGRES_DB":       dockerOnlyReason,
+// appServer is what staging and production leave out. DATABASE_MIGRATE_URL, the schema owner's connection, never
+// reaches an app server, so doctor checks it there only when someone sets it (for example from a laptop).
+var appServer = map[string]string{
+	"POSTGRES_USER":        dockerOnlyReason,
+	"POSTGRES_PASSWORD":    dockerOnlyReason,
+	"POSTGRES_DB":          dockerOnlyReason,
+	"DATABASE_MIGRATE_URL": "not on app servers",
 }
 
 // enums are the variables with a fixed set of documented values. A value inside the set is not secret, so the

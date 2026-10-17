@@ -65,6 +65,32 @@ func TestOpenErrorsDoNotLeakThePassword(t *testing.T) {
 	}
 }
 
+// Our connect timeout and pool lifetimes are defaults: a URL that sets them wins.
+func TestOpenDefaultsYieldToTheURL(t *testing.T) {
+	ctx := context.Background()
+	cfgOf := func(dsn string) (connect, lifetime, health string) {
+		t.Helper()
+		st, err := store.Open(ctx, dsn, store.Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer st.Close()
+		c := st.Pool().Config()
+		return c.ConnConfig.ConnectTimeout.String(), c.MaxConnLifetime.String(), c.HealthCheckPeriod.String()
+	}
+	const base = "postgres://cf:cf@localhost:5432/cf?sslmode=disable"
+	if c, l, h := cfgOf(base); c != "5s" || l != "30m0s" || h != "30s" {
+		t.Errorf("defaults = %s %s %s", c, l, h)
+	}
+	if c, l, h := cfgOf(base + "&connect_timeout=11&pool_max_conn_lifetime=2h&pool_health_check_period=7s"); c != "11s" || l != "2h0m0s" || h != "7s" {
+		t.Errorf("URL values lost: %s %s %s", c, l, h)
+	}
+	// The keyword form names the same parameters.
+	if c, l, h := cfgOf("host=localhost user=cf password=cf dbname=cf sslmode=disable connect_timeout=3 pool_max_conn_lifetime=1h pool_health_check_period=1m"); c != "3s" || l != "1h0m0s" || h != "1m0s" {
+		t.Errorf("keyword form lost: %s %s %s", c, l, h)
+	}
+}
+
 // The pool must not create named prepared statements: PlanetScale's pooled endpoint is a transaction-mode PgBouncer,
 // where the next query can land on another server connection and fail with "prepared statement does not exist".
 // pg_prepared_statements lists the named ones of a session, so it must stay empty after repeated queries.

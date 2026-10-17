@@ -6,9 +6,10 @@
 name: content-fabrique
 
 services:
-  # System of record and, from P0-06, the River job queue. The same image the CI doctor job uses (.github/workflows/env.yml).
+  # System of record and, from P0-06, the River job queue. The same image, by the same digest, as the CI doctor and db jobs
+  # (.github/workflows/ci.yml; what `pg18` pointed to on 2026-10-17). Change both together.
   postgres:
-    image: pgvector/pgvector:pg17
+    image: pgvector/pgvector:pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is not set, run task env:init}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set, run task env:init}
@@ -16,7 +17,7 @@ services:
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres18-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 2s
@@ -25,7 +26,7 @@ services:
       start_period: 5s
 
   # Stands in for R2. MinIO no longer publishes public images, so this is Chainguard's build, pinned by the same digest as
-  # .github/workflows/env.yml (what `latest` pointed to on 2026-10-16). Change both together. The root user and password
+  # .github/workflows/ci.yml (what `latest` pointed to on 2026-10-16). Change both together. The root user and password
   # are R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY, which is also what the Go code signs requests with.
   minio:
     image: cgr.dev/chainguard/minio@sha256:2136d593beacf4461187035eca949fe49abd589d5079735025c711ca58fee0c8
@@ -76,5 +77,5 @@ services:
         fi
 
 volumes:
-  postgres-data:
+  postgres18-data:
   minio-data:

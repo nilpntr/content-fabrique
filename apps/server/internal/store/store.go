@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -59,15 +61,37 @@ func Open(ctx context.Context, dsn string, opts Options) (*Store, error) {
 	if opts.MaxConns > 0 {
 		cfg.MaxConns = opts.MaxConns
 	}
-	cfg.ConnConfig.ConnectTimeout = 5 * time.Second
-	cfg.MaxConnLifetime = 30 * time.Minute // lets a pooler or a failover replace connections without a restart
-	cfg.HealthCheckPeriod = 30 * time.Second
+	// Our defaults apply only where the URL (or the PG* environment, for the timeout) said nothing, so an operator can
+	// tune them without a code change: connect_timeout, pool_max_conn_lifetime and pool_health_check_period.
+	if cfg.ConnConfig.ConnectTimeout == 0 {
+		cfg.ConnConfig.ConnectTimeout = 5 * time.Second
+	}
+	if !dsnSets(dsn, "pool_max_conn_lifetime") {
+		cfg.MaxConnLifetime = 30 * time.Minute // lets a pooler or a failover replace connections without a restart
+	}
+	if !dsnSets(dsn, "pool_health_check_period") {
+		cfg.HealthCheckPeriod = 30 * time.Second
+	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("postgres pool: %w", err)
 	}
 	return &Store{pool: pool, q: db.New(pool)}, nil
+}
+
+// dsnSets reports whether the connection string names the parameter, in URL form (?name=value) or keyword form
+// (name=value name=value).
+func dsnSets(dsn, name string) bool {
+	if u, err := url.Parse(dsn); err == nil && (u.Scheme == "postgres" || u.Scheme == "postgresql") {
+		return u.Query().Has(name)
+	}
+	for _, field := range strings.Fields(dsn) {
+		if key, _, ok := strings.Cut(field, "="); ok && key == name {
+			return true
+		}
+	}
+	return false
 }
 
 // New wraps an existing pool, for tests and for callers that configure the pool themselves.

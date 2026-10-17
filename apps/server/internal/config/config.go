@@ -79,14 +79,24 @@ func Load(getenv Getenv) (Config, error) {
 	// The messages never repeat the value: it holds a password.
 	if c.DatabaseURL == "" {
 		errs = append(errs, errors.New("DATABASE_URL: required (see .env.example)"))
-	} else if u, err := url.Parse(c.DatabaseURL); err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") || u.Host == "" {
-		errs = append(errs, errors.New("DATABASE_URL: must be a postgres:// or postgresql:// URL"))
+	} else if err := ValidatePostgresURL(c.DatabaseURL); err != nil {
+		errs = append(errs, fmt.Errorf("DATABASE_URL: %w", err))
 	}
 
 	if len(errs) > 0 {
 		return Config{}, errors.Join(errs...)
 	}
 	return c, nil
+}
+
+// ValidatePostgresURL checks that raw is a postgres:// or postgresql:// URL with a host. The error never contains
+// raw, because a database URL carries a password. cfctl migrate uses it for DATABASE_MIGRATE_URL too.
+func ValidatePostgresURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") || u.Host == "" {
+		return errors.New("must be a postgres:// or postgresql:// URL")
+	}
+	return nil
 }
 
 // listenAddr derives the bind address from the API base URL: its explicit port, else DefaultAPIPort.

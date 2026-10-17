@@ -44,6 +44,8 @@
 - Postgres gives us River (transactional enqueue), `LISTEN/NOTIFY`, JSONB, full-text search and `pgvector`. PlanetScale Postgres supports pgvector ([PlanetScale docs](https://planetscale.com/docs/postgres/extensions/pgvector)).
 - Cost is not a blocker: PlanetScale's single-node Postgres starts at **$5/month** and the smallest HA cluster at **$15/month** ([PlanetScale plans](https://planetscale.com/docs/planetscale-plans)).
 
+**Consequences.** Postgres 18 from day one, for the native `uuidv7()` that the id columns default to ([D-24](#d-24-public-ids-are-typeids-over-uuidv7)); the local image, CI and `cfctl doctor` all require it, and the hosted database must offer it.
+
 **Alternatives.** D1 through the REST API (shares the 1,200-per-5-minutes API budget; SQLite dialect; 10 GB per database). Neon or Supabase (good fallbacks; same Postgres code). Turso/libSQL.
 
 **Revisit** if PlanetScale's EU regions or pricing don't fit. The code stays plain Postgres, so switching vendors is cheap.

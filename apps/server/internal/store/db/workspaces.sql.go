@@ -12,13 +12,12 @@ import (
 )
 
 const createWorkspace = `-- name: CreateWorkspace :one
-INSERT INTO workspaces (id, clerk_org_id, name, plan, region, billing_mode)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO workspaces (clerk_org_id, name, plan, region, billing_mode)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING id, clerk_org_id, name, plan, region, billing_mode, created_at, updated_at
 `
 
 type CreateWorkspaceParams struct {
-	ID          ids.WorkspaceID
 	ClerkOrgID  string
 	Name        string
 	Plan        string
@@ -26,9 +25,9 @@ type CreateWorkspaceParams struct {
 	BillingMode string
 }
 
+// The id comes from the column default, uuidv7() (Postgres 18).
 func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams) (Workspace, error) {
 	row := q.db.QueryRow(ctx, createWorkspace,
-		arg.ID,
 		arg.ClerkOrgID,
 		arg.Name,
 		arg.Plan,

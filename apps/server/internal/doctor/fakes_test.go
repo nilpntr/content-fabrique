@@ -112,7 +112,10 @@ func newFakeS3(t *testing.T, bucket string) *fakeS3 {
 }
 
 // fakePG speaks just enough of the Postgres wire protocol for pgx to connect, run SELECT 1 and LISTEN.
-func fakePG(t *testing.T) string {
+func fakePG(t *testing.T) string { return fakePGVersion(t, "180000") }
+
+// fakePGVersion is fakePG reporting server_version_num = versionNum.
+func fakePGVersion(t *testing.T, versionNum string) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -125,13 +128,13 @@ func fakePG(t *testing.T) string {
 			if err != nil {
 				return
 			}
-			go servePG(conn)
+			go servePG(conn, versionNum)
 		}
 	}()
 	return ln.Addr().String()
 }
 
-func servePG(conn net.Conn) {
+func servePG(conn net.Conn, versionNum string) {
 	defer func() { _ = conn.Close() }()
 	be := pgproto3.NewBackend(conn, conn)
 	if _, err := be.ReceiveStartupMessage(); err != nil {
@@ -153,7 +156,11 @@ func servePG(conn net.Conn) {
 		}
 		switch m := msg.(type) {
 		case *pgproto3.Query:
-			if strings.HasPrefix(strings.ToUpper(m.String), "SELECT") {
+			if strings.HasPrefix(strings.ToUpper(m.String), "SHOW SERVER_VERSION_NUM") {
+				be.Send(&pgproto3.RowDescription{Fields: []pgproto3.FieldDescription{{Name: []byte("server_version_num"), DataTypeOID: 25, DataTypeSize: -1, TypeModifier: -1}}})
+				be.Send(&pgproto3.DataRow{Values: [][]byte{[]byte(versionNum)}})
+				be.Send(&pgproto3.CommandComplete{CommandTag: []byte("SHOW")})
+			} else if strings.HasPrefix(strings.ToUpper(m.String), "SELECT") {
 				be.Send(&pgproto3.RowDescription{Fields: []pgproto3.FieldDescription{{Name: []byte("?column?"), DataTypeOID: 23, DataTypeSize: 4, TypeModifier: -1}}})
 				be.Send(&pgproto3.DataRow{Values: [][]byte{[]byte("1")}})
 				be.Send(&pgproto3.CommandComplete{CommandTag: []byte("SELECT 1")})

@@ -16,6 +16,7 @@ Needs Docker, [task](https://taskfile.dev), Go and bun. Details in [docs/06](doc
 task install   # bun install --frozen-lockfile at the root (plain `bun install` only when you change dependencies)
 task dev       # Postgres + MinIO in Docker, then web :3000, api :8080, worker :8081. Ctrl-C stops them
 task down      # stop the Docker services
+task lint      # golangci-lint (if installed) and Biome; CI runs the same checks, see docs/06 §6 (CI)
 ```
 
 ## FYI

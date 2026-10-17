@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path"
 	"time"
 
 	"github.com/pressly/goose/v3"
@@ -73,18 +74,9 @@ func results(rs []*goose.MigrationResult) []Result {
 		if r == nil {
 			continue
 		}
-		out = append(out, Result{Version: r.Source.Version, Name: baseName(r.Source.Path), Direction: r.Direction, Duration: r.Duration})
+		out = append(out, Result{Version: r.Source.Version, Name: path.Base(r.Source.Path), Direction: r.Direction, Duration: r.Duration})
 	}
 	return out
-}
-
-func baseName(p string) string {
-	for i := len(p) - 1; i >= 0; i-- {
-		if p[i] == '/' {
-			return p[i+1:]
-		}
-	}
-	return p
 }
 
 // Up applies every pending migration.
@@ -123,8 +115,12 @@ func (m *Migrator) Redo(ctx context.Context) ([]Result, error) {
 	if err != nil || len(down) == 0 {
 		return down, err
 	}
-	up, err := m.Up(ctx)
-	return append(down, up...), err
+	// Exactly the migration that was rolled back, not "everything pending".
+	up, err := m.p.ApplyVersion(ctx, down[0].Version, true)
+	if err != nil {
+		return down, err
+	}
+	return append(down, results([]*goose.MigrationResult{up})...), nil
 }
 
 // Version returns the latest applied migration, or 0 when none is.
@@ -149,24 +145,17 @@ func (m *Migrator) Status(ctx context.Context) ([]Status, error) {
 	out := make([]Status, 0, len(ss))
 	for _, s := range ss {
 		out = append(out, Status{
-			Version: s.Source.Version, Name: baseName(s.Source.Path), Applied: s.State == goose.StateApplied, AppliedAt: s.AppliedAt,
+			Version: s.Source.Version, Name: path.Base(s.Source.Path), Applied: s.State == goose.StateApplied, AppliedAt: s.AppliedAt,
 		})
 	}
 	return out, nil
 }
 
-// Latest is the highest version among the embedded files.
-func Latest() int64 {
-	entries, err := fs.ReadDir(MigrationsFS(), ".")
-	if err != nil {
-		return 0
+// Latest is the highest version among the embedded files, as goose lists them.
+func (m *Migrator) Latest() int64 {
+	var latest int64
+	for _, s := range m.p.ListSources() {
+		latest = max(latest, s.Version)
 	}
-	var max int64
-	for _, e := range entries {
-		var v int64
-		if _, err := fmt.Sscanf(e.Name(), "%d_", &v); err == nil && v > max {
-			max = v
-		}
-	}
-	return max
+	return latest
 }

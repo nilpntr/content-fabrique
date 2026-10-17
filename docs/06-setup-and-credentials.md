@@ -85,29 +85,33 @@ Tokens. Apart from the tunnel token, which `cfctl bootstrap` makes, you create e
 
 ### 3.4 Postgres
 
-- **Local:** docker compose with the image `pgvector/pgvector:pg17` △ and the `POSTGRES_*` values. Nothing to create, and all three database URLs point at the same local database and the same user (`cf`, a superuser), so the role split below does not apply locally. `task migrate` (or `task dev`, which runs it) creates the tables and, harmlessly, the unused group role `cf_app`.
-- **Staging and production:** PlanetScale Postgres. Create one database per environment in an EU region (the research couldn't confirm EU regions, so check when you create it) and **two login roles** △:
+**Postgres 18 or newer is required**: the schema's id columns default to the native `uuidv7()` that 18 added ([D-24](05-decisions.md#d-24-public-ids-are-typeids-over-uuidv7)). The first migration refuses an older server, and `cfctl doctor` fails a Postgres URL with "Postgres 18 or newer required".
+
+- **Local:** docker compose with the image `pgvector/pgvector:pg18` (pinned by digest, the same one as CI) and the `POSTGRES_*` values. Nothing to create, and all three database URLs point at the same local database and the same user (`cf`, a superuser), so the role split below does not apply locally. `task migrate` (or `task dev`, which runs it) creates the tables and, harmlessly, the unused group role `cf_app`. **Old data:** the volume is now `postgres18-data`, mounted at `/var/lib/postgresql` (Postgres 18 images moved their data directory), so an older Postgres 17 volume is left alone and unused. Run `task reset` to delete the old volumes, and `docker volume rm content-fabrique_postgres-data` for the Postgres 17 one.
+- **Staging and production:** PlanetScale Postgres. Create one database per environment in an EU region (the research couldn't confirm EU regions, so check when you create it). △ PlanetScale must offer Postgres 18: **check when you create the database**, and pick 18 or newer. Create **two login roles** △:
   - The **app role** can `SELECT`, `INSERT`, `UPDATE` and `DELETE` on the app tables and use the sequences. It has no DDL and no superuser. Its **pooled** and **direct** connection strings go in `DATABASE_URL` and `DATABASE_DIRECT_URL`. Request traffic uses the pooled URL, and the SSE broker's `LISTEN/NOTIFY` uses the direct one, because transaction-mode poolers don't support `LISTEN`. The Go pool is set up for such a pooler (it prepares no named statements).
-  - The **migrate role** owns the schema, so it can create, alter and drop. Its direct string goes in `DATABASE_MIGRATE_URL`, which only `cfctl migrate` reads, as a release step ([architecture §12](03-architecture.md#12-deployment-environments-observability)). It also migrates River's tables. It never reaches an app server, so a leaked server file or an injected query can't change the schema.
-- **How the app role gets its rights (P0-05).** The migrations never name your login roles. They grant the rights to a **group role `cf_app`**, and the app login role is a member of it. Every migration ends with a `GRANT SELECT, INSERT, UPDATE, DELETE` on the tables it creates (and `USAGE, SELECT` on any sequence), nothing more, so the app role cannot `TRUNCATE`, create, alter or drop. The first migration also revokes `CREATE` on schema `public` from everyone else. The one-time setup, as an administrator, in `psql`:
+  - The **migrate role** owns the schema, so it can create, alter and drop. Its string goes in `DATABASE_MIGRATE_URL`, which only `cfctl migrate` reads, as a release step ([architecture §12](03-architecture.md#12-deployment-environments-observability)). **It must be a direct connection, not the pooled one:** the migrations hold an advisory lock for their whole run, which a transaction-mode pooler does not keep. It also migrates River's tables. It never reaches an app server, so a leaked server file or an injected query can't change the schema. App servers do not get this variable at all, and `cfctl doctor --env staging|production` skips it ("not on app servers") unless you set it.
+- **How the app role gets its rights (P0-05).** The migrations never name your login roles. They grant the rights to a **group role named after the database: `<database>_app`** (`cf_app` for the local database `cf`), and the app login role is a member of it. Roles are cluster-wide in Postgres, so one shared group role would let the app login of one environment on a server reach the database of another; the first migration also revokes `CONNECT` on the database from everyone but the owner and this group. Every migration ends with `SELECT cf_grant_app_dml('table')` for each table it creates, a helper that grants `SELECT, INSERT, UPDATE, DELETE` (and `USAGE, SELECT` on sequences the table owns) and nothing more, so the app role cannot `TRUNCATE`, create, alter or drop. The first migration also revokes `CREATE` on schema `public` from everyone else. The one-time setup, as an administrator, in `psql`, with the real database name:
 
   ```sql
-  -- 1. Only if the migrate role lacks CREATEROLE; otherwise the first migration creates cf_app itself.
-  CREATE ROLE cf_app NOLOGIN;
-  -- 2. Always: make the app login role a member. Replace the name with the app role you created.
-  GRANT cf_app TO <app login role>;
+  -- 1. Only if the migrate role lacks CREATEROLE; otherwise the first migration creates the group role itself.
+  CREATE ROLE <database>_app NOLOGIN;
+  -- 2. Always: make the app login role a member. Replace the names with your database and the app role you created.
+  GRANT <database>_app TO <app login role>;
   ```
 
-  If the group role is missing and the migrate role cannot create it, `cfctl migrate up` stops in the first migration with a message that says exactly this, and changes nothing. The migrate role must be able to create objects in schema `public` (on Postgres 15 and later that means owning the database) and to run `REVOKE` on it. △ Whether PlanetScale's role UI offers `CREATEROLE`, group roles or membership wasn't checked: if not, run the two statements on its admin connection.
-- **Run the migrations:** `task migrate` (up; the local `.env`), `task migrate -- status`, `task migrate -- down` (one step) or `task migrate -- down --to 0` (everything), `task migrate -- redo`. For staging: `task migrate -- --env-file .env.staging up`. The same commands work without `task`: `cd apps/server && go run ./cmd/cfctl migrate …`, or a built `cfctl`. It prints each migration and the target as `host/database`, never the URL or the password.
-- **Check the split** after the first staging migration: connect with the app role's `DATABASE_URL` and run `INSERT`, `SELECT`, `UPDATE` and `DELETE` on `workspaces` (all work) and `CREATE TABLE x (id int);` (fails with `permission denied for schema public`). The test `TestRoleSplit` in `internal/store` proves the same on a local Postgres with a separate migrate and app role, on every CI run.
+  If the group role is missing and the migrate role cannot create it, `cfctl migrate up` stops in the first migration with a message that says exactly this, and changes nothing. The migrate role must own the database and its `public` schema (on Postgres 15 and later `public` belongs to the database owner): the first migration checks this up front and stops with a message if not, rather than leave DDL open to other roles. △ Whether PlanetScale's role UI offers `CREATEROLE`, group roles, membership or database ownership wasn't checked: if not, run the statements on its admin connection.
+- **Run the migrations:** `task migrate` (up; the local `.env`), `task migrate -- status`, `task migrate -- down` (one step) or `task migrate -- down --to 0` (everything), `task migrate -- redo` (rolls back the latest migration and applies that same one again). For staging: `task migrate -- --env-file .env.staging up`. The same commands work without `task`: `cd apps/server && go run ./cmd/cfctl migrate …`, or a built `cfctl`. Every run prints the target as `host:port/database` with the `CF_ENV` and the env file it read, never the URL or the password.
+- **`down` and `redo` drop tables and their data**, so they are guarded by `CF_ENV` (from the env file, else the environment): on `staging` they need `--yes`, and on `production` they are refused unless you pass both `--allow-production` and `--yes`. `up`, `status` and `version` are never guarded.
+- **Check the split** after the first staging migration: connect with the app role's `DATABASE_URL` and run `INSERT`, `SELECT`, `UPDATE` and `DELETE` on `workspaces` (all work) and `CREATE TABLE x (id int);` (fails with `permission denied for schema public`). The test `TestRoleSplit` in `internal/store` proves the same on a local Postgres with a separate migrate and app role, on every CI run, and that one database's app role cannot connect to another database on the same server.
 - Cost: from $5 a month per database ([D-01](05-decisions.md#d-01-database-postgres-from-day-one-skip-d1-for-the-go-backend)).
 
 ### 3.5 Servers, CI and GitHub
 
 - **EU servers** ([D-09](05-decisions.md#d-09-hosting)). You order one for staging and one for production and create an SSH user with Docker access. The agent installs Docker and `cloudflared` over SSH. The research priced a Hetzner AX102 at about $115 a month for production. Staging is a smaller box and wasn't priced. Values: `DEPLOY_HOST`, `DEPLOY_SSH_USER` and `DEPLOY_SSH_PRIVATE_KEY`, an ed25519 key pair made only for deploys ([§3.9](#39-scopes-and-permissions-per-token)).
 - **GitHub** → Settings → Environments: create `staging` and `production`, with a required reviewer on `production`. Secrets per environment: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` and the `DEPLOY_*` values. Images go to GitHub Container Registry with the built-in `GITHUB_TOKEN`, so they need no extra secret.
-- **Renovate:** install the Renovate GitHub App on the repository (P0-03).
+- **Renovate (your step, once):** install the [Renovate GitHub App](https://github.com/apps/renovate) on this repository only. `renovate.json` at the root is the config ([§6, CI](#ci-p0-03)). Renovate then opens a "Dependency Dashboard" issue and its first pull requests on the next Monday run.
+- **Branch protection (your step, once CI has run on `main`):** Settings → Branches → rule for `main` → require status checks → add only **`required`**. See [§6, CI](#ci-p0-03) for why it is the one check.
 
 ### 3.6 Observability
 
@@ -198,16 +202,16 @@ task down                # stop Postgres and MinIO (the data stays); `task reset
 | web | `APP_BASE_URL`, http://localhost:3000 | `vite dev` (the port is fixed in `apps/web/vite.config.ts` and fails if taken) |
 | api | `API_BASE_URL`, http://localhost:8080 | `/healthz`, `/readyz` |
 | worker | http://localhost:8081 | `/healthz`, `/readyz` (health only until P0-06) |
-| Postgres | `localhost:5432` | `compose.yaml`, `pgvector/pgvector:pg17`, `POSTGRES_*`, volume `postgres-data` |
+| Postgres | `localhost:5432` | `compose.yaml`, `pgvector/pgvector:pg18`, `POSTGRES_*`, volume `postgres18-data` |
 | MinIO | S3 API `R2_ENDPOINT` (http://localhost:9000), console http://localhost:9001 | `compose.yaml`, volume `minio-data` |
 
 - **`task dev` steps:** `task install`, `.env` creation if it is missing (`task env:init`: copies `.env.example`, fills the generated secrets; run it yourself to fill them in an existing file), `task up` (`docker compose up --wait` for Postgres and MinIO, then the one-shot `minio-init` that creates the `R2_BUCKET` bucket and is safe to run again), then `task migrate` (the database migrations, [§3.4](#34-postgres)), then `scripts/dev.sh`, which reads `.env`, builds the api and worker into `.dev/bin/` and runs the three processes. If one of them exits, the script stops the other two.
-- **MinIO.** MinIO no longer publishes public images, so `compose.yaml` uses Chainguard's `cgr.dev/chainguard/minio`, pinned by the same digest as `.github/workflows/env.yml` (change both together). Its root user and password are `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`, and the console accepts the same pair. The bucket is created with the AWS CLI image (`amazon/aws-cli`, pinned by digest), not `mc`.
+- **MinIO.** MinIO no longer publishes public images, so `compose.yaml` uses Chainguard's `cgr.dev/chainguard/minio`, pinned by the same digest as `.github/workflows/ci.yml` (change both together). Its root user and password are `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`, and the console accepts the same pair. The bucket is created with the AWS CLI image (`amazon/aws-cli`, pinned by digest), not `mc`.
 - **Which value wins.** Compose lets a variable exported in your shell override `.env`, while `scripts/dev.sh` lets a non-empty `.env` value win (the same rule as `cfctl doctor`). So do not export `POSTGRES_*`, `R2_*` or the other names from `.env.example` in your shell: the services and the processes would disagree. `DATABASE_URL` and the two other database URLs repeat the `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` values, so change them together.
 - Compose publishes the ports on `127.0.0.1` only, since the default credentials are `cf:cf` and `minioadmin`. A Postgres already running on your machine's port 5432 has to be stopped first, because `DATABASE_URL` in `.env.example` points there.
 - `/readyz` of the api and the worker has a `postgres` check (a pool ping with `DATABASE_URL`): `{"status":"ok","checks":{"postgres":"ok"}}`, and 503 while Postgres is down. Both processes need `DATABASE_URL` to start.
 - With the services up, `task doctor` reports Postgres and object storage as ok; Anthropic and Clerk stay missing until you fill the `[YOU-now]` lines.
-- Other tasks: `task build`, `task test` (the database tests start Postgres in Docker and skip without it), `task install`, `task up`, `task migrate`, `task gen:sql`. `task` alone lists them.
+- Other tasks: `task build`, `task test` (the database tests start Postgres in Docker and skip without it), `task lint`, `task install`, `task up`, `task migrate`, `task gen:sql`. `task` alone lists them. `task lint` runs the same pinned `golangci-lint` as CI (through `go run`, so nothing to install) and Biome for the web app.
 
 ## 6. Checking it
 
@@ -232,11 +236,11 @@ It prints nothing when the three start values are present.
 - **The AI Gateway is authenticated** ([D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)), so when `ANTHROPIC_BASE_URL` is set, `CF_AIG_TOKEN` is required in every environment. `OTEL_EXPORTER_OTLP_HEADERS` is not needed for the observability check: a local collector without authentication is valid.
 - **`ci` holds no Anthropic or Clerk secrets** (CI runs in replay mode, [D-22](05-decisions.md#d-22-cheap-first-testing-ladder)). For `--env ci`, `ANTHROPIC_API_KEY`, `VITE_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` are not required, and the Anthropic, AI Gateway and Clerk checks report `skipped`. If they are set anyway, they are checked like any other environment.
 - **Run it** with `task doctor` (`--env local`) or `task doctor -- --env staging --phase P4`. `task env:init` creates `.env` and fills the three generated secrets without printing them, and a second run changes nothing.
-- **`cfctl env lint`** (`task env:lint`, and the `env` workflow in CI) fails when the Go or web code reads a variable that `.env.example` doesn't list. Names the platform sets (Vite's `MODE`, `DEV`, `PROD`, `SSR`, `BASE_URL`, plus `NODE_ENV` and `CI`) are on a short allowlist in `internal/envlint`.
+- **`cfctl env lint`** (`task env:lint`, and the `env-lint` job in CI) fails when the Go or web code reads a variable that `.env.example` doesn't list. Names the platform sets (Vite's `MODE`, `DEV`, `PROD`, `SSR`, `BASE_URL`, plus `NODE_ENV` and `CI`) are on a short allowlist in `internal/envlint`.
 
 | Service | Call |
 |---|---|
-| Postgres | `SELECT 1` on the three URLs, and a `LISTEN` on the direct one |
+| Postgres | `SELECT 1` on the three URLs (the migrate URL only when set, on staging and production), a check that the server is Postgres 18 or newer, and a `LISTEN` on the direct one |
 | Object storage | put, get and delete a one-byte object with the credentials against `R2_ENDPOINT`, which proves the EU endpoint and signing |
 | Cloudflare token | the token-verify call, then list the EU R2 buckets and the AI Gateways △ |
 | Anthropic and model names | a token-count request for each model in the active profile by its native ID (`claude-opus-5-5`), with no generation cost. When `CF_AI_API_TOKEN` is set, a one-token request for the same models by their Cloudflare names (`anthropic/claude-opus-5.5`) on the REST API's Anthropic-compatible `/ai/v1/messages` △ |
@@ -247,6 +251,27 @@ It prints nothing when the three start values are present.
 | TikTok, billing | format checks only until their phase |
 
 **`cfctl bootstrap cloudflare --env <dev|staging|production>`** (P0-15) is idempotent. For `staging` and `production` it creates the EU R2 bucket with CORS and the lifecycle rule, the AI Gateway with the D-19 settings, the tunnel and the DNS records. For `dev` it creates only the `cf-dev` gateway. It then prints which values to add to `.env.<env>`, and which scoped tokens you create by hand next (the R2 credentials and the gateway token) with the permission to pick for each ([§3.9](#39-scopes-and-permissions-per-token)). It never prints the token, and running it twice changes nothing.
+
+### CI (P0-03)
+
+All of CI is one workflow, `.github/workflows/ci.yml`. It runs on every pull request, on every push to `main`, and by hand (`gh workflow run ci.yml`). It holds no secrets (replay mode, [D-22](05-decisions.md#d-22-cheap-first-testing-ladder)) and its token is read-only.
+
+| Job | Runs | When |
+|---|---|---|
+| `changes` | decides which of the jobs below have work (`dorny/paths-filter`) | always |
+| `go-lint` | `go vet ./...` and `golangci-lint` v2 with `apps/server/.golangci.yml` (errcheck, govet, staticcheck, unused, ineffassign, gosec, revive, bodyclose, errorlint, misspell) | `apps/server`, `go.work`, `.env.example` changed |
+| `go-test` | `go test -race ./...` (Docker is on the runner, so testcontainers tests run) | same |
+| `db` | `cfctl migrate` up, down to 0, up and redo against a Postgres 18 service, and a check that the committed sqlc output (`internal/store/db`) is current | same |
+| `web` | `bun install --frozen-lockfile`, then `@cf/web` typecheck, lint (Biome, `apps/web/biome.jsonc`), test, build, and a check that `routeTree.gen.ts` is up to date | `apps/web`, `packages`, `package.json`, `bun.lock` changed |
+| `env-lint` | `cfctl env lint` (scans the Go and web code) | `apps`, `packages`, `.env.example` changed |
+| `doctor` | `cfctl doctor --env ci` against Postgres and MinIO | `apps/server`, `.env.example`, `compose.yaml` changed |
+| `required` | passes when every job above succeeded or was skipped, fails on any failure or cancellation | always |
+
+- **Mark only `required` as a required check on `main`.** A required job that a path filter skips stays "pending" and blocks the pull request for good. `required` always runs, so a docs-only pull request skips the rest and still goes green. A new job must be added to `required`'s `needs:` list, or its failure won't block merging.
+- **On `main` and manual runs every job runs.** Path filtering applies to pull requests only.
+- **Speed.** The jobs run in parallel, Go modules and the `-race` build cache are cached on `go.sum` (only `go-test` saves it, `golangci-lint` has its own cache) and bun's download cache on `bun.lock`. A newer push to the same pull request cancels the older run; runs on `main` are never cancelled. The target is under 10 minutes on a cold cache.
+- **Actions and images are pinned by digest**, with the version in a trailing comment (`pgvector/pgvector:pg18` and MinIO are pinned the same way in `compose.yaml` and `ci.yml`, and the Postgres digest also in the `doctor` and `db` jobs and `internal/store/storetest`: change them all together). Renovate keeps them current. The `golangci-lint` version is pinned in `ci.yml`; use the same major locally.
+- **Renovate** (`renovate.json`): runs Monday before 06:00 Europe/Amsterdam, opens one pull request per ecosystem for minor and patch updates (Go modules, bun packages, GitHub Actions, Docker images), and separate pull requests for the Go toolchain (`go` directive), the bun version (`packageManager`) and `golangci-lint`. It runs `go mod tidy` after Go updates, never automerges, and keeps a Dependency Dashboard issue. Install the app first ([§3.5](#35-servers-ci-and-github)).
 
 ## 7. Prompt for the implementing agent
 
