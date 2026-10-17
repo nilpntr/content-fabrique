@@ -101,6 +101,14 @@ SELECT * FROM agent_events
 WHERE workspace_id = @workspace_id AND run_id = @run_id AND type = 'artifact' AND payload ->> 'kind' = @kind::text
 ORDER BY seq;
 
+-- A page of the artifact events of a run, oldest first, after a sequence number, of one kind (the payload's "kind") or of any kind when it is empty.
+-- name: ListAgentArtifactEventsPage :many
+SELECT * FROM agent_events
+WHERE workspace_id = @workspace_id AND run_id = @run_id AND type = 'artifact' AND seq > @after_seq
+  AND (@kind::text = '' OR payload ->> 'kind' = @kind::text)
+ORDER BY seq
+LIMIT @row_limit;
+
 -- name: GetLastAgentEvent :one
 SELECT * FROM agent_events
 WHERE workspace_id = @workspace_id AND run_id = @run_id

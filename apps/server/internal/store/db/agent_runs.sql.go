@@ -431,6 +431,56 @@ func (q *Queries) ListAgentArtifactEvents(ctx context.Context, arg ListAgentArti
 	return items, nil
 }
 
+const listAgentArtifactEventsPage = `-- name: ListAgentArtifactEventsPage :many
+SELECT run_id, seq, workspace_id, type, payload, created_at FROM agent_events
+WHERE workspace_id = $1 AND run_id = $2 AND type = 'artifact' AND seq > $3
+  AND ($4::text = '' OR payload ->> 'kind' = $4::text)
+ORDER BY seq
+LIMIT $5
+`
+
+type ListAgentArtifactEventsPageParams struct {
+	WorkspaceID ids.WorkspaceID
+	RunID       uuid.UUID
+	AfterSeq    int32
+	Kind        string
+	RowLimit    int32
+}
+
+// A page of the artifact events of a run, oldest first, after a sequence number, of one kind (the payload's "kind") or of any kind when it is empty.
+func (q *Queries) ListAgentArtifactEventsPage(ctx context.Context, arg ListAgentArtifactEventsPageParams) ([]AgentEvent, error) {
+	rows, err := q.db.Query(ctx, listAgentArtifactEventsPage,
+		arg.WorkspaceID,
+		arg.RunID,
+		arg.AfterSeq,
+		arg.Kind,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AgentEvent
+	for rows.Next() {
+		var i AgentEvent
+		if err := rows.Scan(
+			&i.RunID,
+			&i.Seq,
+			&i.WorkspaceID,
+			&i.Type,
+			&i.Payload,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAgentEvents = `-- name: ListAgentEvents :many
 SELECT run_id, seq, workspace_id, type, payload, created_at FROM agent_events
 WHERE workspace_id = $1 AND run_id = $2 AND seq > $3
