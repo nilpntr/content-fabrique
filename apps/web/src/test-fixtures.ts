@@ -1,5 +1,5 @@
 /** Canned API objects for tests, in the types of the contract. Each factory takes the fields a test cares about. */
-import type { Annotation, ApiAsset, Project, ProjectSummary, Render, Run, RunEvent, TimelineVersion, TimelineVersionSummary } from "@/lib/api/client";
+import type { Annotation, ApiAsset, Project, ProjectSummary, Render, Run, RunArtifact, RunArtifacts, RunEvent, TimelineVersion, TimelineVersionSummary } from "@/lib/api/client";
 
 const ID = "01jh6m00000000000000000000";
 const typeId = (prefix: string, n: number) => `${prefix}_${ID.slice(0, 26 - String(n).length)}${n}`;
@@ -329,11 +329,23 @@ export const V2_SUMMARY = [
   "- The posing clip was darker than the gym clips, so I evened out its brightness; the second check passed 13 of 13.",
 ].join("\n");
 
-const call = (seq: number, tool: string, input: string) => event(seq, "tool_call", summarize(`${tool} ${input}`), { tool });
-const answer = (seq: number, tool: string, text: string, over: Partial<RunEvent> = {}) => event(seq, "tool_result", summarize(text), { tool, ...over });
+/** The model's id of the tool call that is event `seq`; its result and its artifact carry the same one. */
+export const callIdOf = (seq: number): string => `toolu_${String(seq).padStart(4, "0")}`;
+const call = (seq: number, tool: string, input: string) => event(seq, "tool_call", summarize(`${tool} ${input}`), { tool, call_id: callIdOf(seq) });
+/** A result: the call it answers is the event before it (`seq - 1`). */
+const answer = (seq: number, tool: string, text: string, over: Partial<RunEvent> = {}) => event(seq, "tool_result", summarize(text), { tool, call_id: callIdOf(seq - 1), ...over });
+const artifactEvent = (seq: number, kind: string, callSeq: number) => event(seq, "artifact", kind, { kind, call_id: callIdOf(callSeq) });
 
-/** The events of a finished v2 run, oldest first (see the header of this section). */
-export function v2RunEvents(): RunEvent[] {
+/**
+ * The events of a finished v2 run, oldest first (see the header of this section). They carry `call_id` and `kind`;
+ * `{ legacy: true }` is the run as it was before the API had them (paired by order).
+ */
+export function v2RunEvents({ legacy = false }: { legacy?: boolean } = {}): RunEvent[] {
+  const events = v2RunEventsWithIds();
+  return legacy ? events.map(({ call_id: _call, kind: _kind, ...rest }) => rest) : events;
+}
+
+function v2RunEventsWithIds(): RunEvent[] {
   const view = (seq: number, n: number) => [call(seq, "view_clip", `{"asset_id":"${assetId(n)}"}`), answer(seq + 1, "view_clip", "[1 images]")];
   return [
     event(1, "status", "running"),
@@ -348,25 +360,45 @@ export function v2RunEvents(): RunEvent[] {
     ...view(12, 3),
     call(14, "plan_edit", PLAN_CALL.slice("plan_edit ".length)),
     answer(15, "plan_edit", PLAN_RESULT),
-    event(16, "artifact", "creative_plan"),
+    artifactEvent(16, "creative_plan", 14),
     call(17, "edit_timeline", '{"base_version":0,"ops":[{"op":"add_clip"}]}'),
     answer(18, "edit_timeline", "v1 made"),
     call(19, "render_preview", "{}"),
     answer(20, "render_preview", "preview of v1 is ready"),
     call(21, "check_edit", "{}"),
     answer(22, "check_edit", checkText(CHECKS_ROUND_1)),
-    event(23, "artifact", "edit_check"),
+    artifactEvent(23, "edit_check", 21),
     call(24, "match_exposure", "{}"),
     answer(25, "match_exposure", MATCH_RESULT),
     call(26, "render_preview", "{}"),
     answer(27, "render_preview", "preview of v2 is ready"),
     call(28, "check_edit", "{}"),
     answer(29, "check_edit", checkText(CHECKS_ROUND_2)),
-    event(30, "artifact", "edit_check"),
+    artifactEvent(30, "edit_check", 28),
     call(31, "finish", JSON.stringify({ summary: V2_SUMMARY, no_edit_needed: false })),
     answer(32, "finish", V2_SUMMARY),
     event(33, "status", "succeeded"),
   ];
+}
+
+const stored = (seq: number, kind: string, callSeq: number | null, data: unknown): RunArtifact => ({
+  seq,
+  kind,
+  call_id: callSeq === null ? null : callIdOf(callSeq),
+  data: data as RunArtifact["data"],
+  created_at: NOW,
+});
+
+/** What `GET /v1/runs/{id}/artifacts` returns for the v2 run: the whole plan and both rounds of checks (the artifact events are the ones at seq 16, 23 and 30 of `v2RunEvents`). */
+export function v2Artifacts(): RunArtifacts {
+  return {
+    artifacts: [
+      stored(16, "creative_plan", 14, PLAN_PAYLOAD),
+      stored(23, "edit_check", 21, CHECKS_ROUND_1),
+      stored(30, "edit_check", 28, CHECKS_ROUND_2),
+    ],
+    next_after_seq: null,
+  };
 }
 
 /** A finished v2 run with its plan, two rounds of checks and a finish. */
@@ -380,6 +412,7 @@ export function v2Run(over: Partial<Run> = {}): Run {
     tool_calls: 16,
     summary: V2_SUMMARY,
     timeline_version: 2,
+    credits: { state: "charged", action: "edit.first", credits: 6 },
     events,
     last_seq: events.length,
     ...over,

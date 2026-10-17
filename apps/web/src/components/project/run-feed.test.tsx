@@ -32,7 +32,8 @@ const noop = () => {};
 
 // ---- The whole feed, from the API's own summaries -----------------------------------------------------------------------
 
-test("the run feed of a v2 run shows the plan, the self-review in two rounds, the finish and what the run used", async () => {
+// With no artifacts endpoint to ask (an older server: 404), the cards are made from what the event summaries carry.
+test("the run feed of a v2 run, from the summaries alone, shows the plan, the self-review in two rounds, the finish and what the run used", async () => {
   installApi({ "GET /v1/runs/{id}": v2Run() });
   renderApp(<RunPanel runId={runId(1)} assetTitles={titles} />);
   await tick();
@@ -70,7 +71,14 @@ test("the run feed of a v2 run shows the plan, the self-review in two rounds, th
   expect(cost.getByText("16 tool calls")).toBeTruthy();
   expect(cost.getByText("$0.22")).toBeTruthy();
   expect(cost.getByText("of $5.00")).toBeTruthy();
-  // The API has no credits for a run yet: no invented line.
+  // The run was charged for its first edit.
+  expect(cost.getByText("6 credits")).toBeTruthy();
+});
+
+test("a run that took no credits (released, or on a workspace without them) has no credits on its cost line", async () => {
+  installApi({ "GET /v1/runs/{id}": v2Run({ credits: null }) });
+  renderApp(<RunPanel runId={runId(1)} assetTitles={titles} />);
+  await tick();
   expect(screen.getByTestId("run-cost").querySelector("[data-slot=credits]")).toBeNull();
 });
 
@@ -234,11 +242,16 @@ test("the cost line shows the credits of a run only when it is given them", () =
   const run = v2Run();
   const { rerender } = render(<RunCostLine run={run} />);
   expect(screen.getByTestId("run-cost").querySelector("[data-slot=credits]")).toBeNull();
-  rerender(<RunCostLine run={run} credits={{ state: "charged", credits: 6 }} />);
+  rerender(<RunCostLine run={run} credits={{ state: "charged", action: "edit.first", credits: 6 }} />);
   expect(screen.getByText("6 credits")).toBeTruthy();
-  rerender(<RunCostLine run={run} credits={{ state: "refunded" }} />);
-  expect(screen.getByText("Credits refunded")).toBeTruthy();
-  rerender(<RunCostLine run={{ ...run, tool_calls: 1 }} credits={{ state: "charged", credits: 1 }} />);
+  rerender(<RunCostLine run={run} credits={{ state: "charged", action: "edit.revision", credits: 2 }} />);
+  expect(screen.getByText("2 credits · revision")).toBeTruthy();
+  rerender(<RunCostLine run={run} credits={{ state: "held", action: "edit.first", credits: 6 }} />);
+  expect(screen.getByText("Holding 6 credits…")).toBeTruthy();
+  rerender(<RunCostLine run={run} credits={{ state: "refunded", action: "edit.first", credits: 6 }} />);
+  expect(screen.getByText("Refunded")).toBeTruthy();
+  expect(screen.getByTestId("run-cost").querySelector("[data-slot=credits]")?.getAttribute("title")).toBe("6 credits given back");
+  rerender(<RunCostLine run={{ ...run, tool_calls: 1 }} credits={{ state: "charged", action: "edit.first", credits: 1 }} />);
   expect(screen.getByText("1 tool call")).toBeTruthy();
   expect(screen.getByText("1 credit")).toBeTruthy();
 });

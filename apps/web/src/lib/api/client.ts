@@ -66,6 +66,11 @@ export type StartEditRequest = components["schemas"]["StartEditRequest"];
 export type RunProfile = components["schemas"]["RunProfile"];
 export type RunStatus = components["schemas"]["RunStatus"];
 export type RunEvent = components["schemas"]["RunEvent"];
+/** Something a run's tool recorded (the plan, a self-review, a preview, a version), with its whole `data`: untrusted text. */
+export type RunArtifact = components["schemas"]["RunArtifact"];
+export type RunArtifacts = components["schemas"]["RunArtifacts"];
+/** What a run costs in credits: held while it works, then charged or refunded. Absent for a run that took none. */
+export type RunCredits = components["schemas"]["RunCredits"];
 /** An agent run, with its cost, budgets and a summary of its events. */
 export type Run = components["schemas"]["Run"];
 
@@ -200,6 +205,13 @@ export const startEdit = async (client: ApiClient, id: string, body: StartEditRe
 /** The run, with its events after `afterSeq`. */
 export const fetchRun = async (client: ApiClient, id: string, afterSeq = 0, signal?: AbortSignal): Promise<Run> =>
   unwrap(await client.GET("/v1/runs/{id}", { params: { path: { id }, query: { after_seq: afterSeq, limit: RUN_EVENTS_PAGE } }, signal }));
+
+/** How many artifacts one GET /v1/runs/{id}/artifacts asks for (the most the API gives). */
+export const RUN_ARTIFACTS_PAGE = 50;
+
+/** The artifacts of a run after `afterSeq`, oldest first, one page. `next_after_seq` is null on the last page so far. */
+export const fetchRunArtifacts = async (client: ApiClient, id: string, afterSeq = 0, signal?: AbortSignal): Promise<RunArtifacts> =>
+  unwrap(await client.GET("/v1/runs/{id}/artifacts", { params: { path: { id }, query: { after_seq: afterSeq, limit: RUN_ARTIFACTS_PAGE } }, signal }));
 
 /** How many events one GET /v1/runs/{id} asks for. */
 export const RUN_EVENTS_PAGE = 200;

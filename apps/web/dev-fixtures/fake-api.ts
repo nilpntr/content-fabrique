@@ -1,9 +1,13 @@
-import { annotation, apiAsset, assetId, event, project, projectId, projectSummary, readyRender, renderId, run, runId, timelineVersion, v2Run, v2Spec, versionSummary } from "@/test-fixtures";
+import { annotation, apiAsset, assetId, event, project, projectId, projectSummary, readyRender, renderId, run, runId, callIdOf, timelineVersion, v2Artifacts, v2Run, v2Spec, versionSummary } from "@/test-fixtures";
 
-/** The scenario of a page, from its address: `?credits=ok|low|empty|none&run=done|working|failed|question&video=<url>`. */
+/** The scenario of a page, from its address: `?credits=ok|low|empty|none&run=done|working|failed|question&runcredits=charged|revision|refunded|none&artifacts=api|none&video=<url>`. */
 export interface Scenario {
   credits: "none" | "ok" | "low" | "empty";
   run: "done" | "working" | "failed" | "question";
+  /** What the run's own credits say, for a run that finished: charged for its first edit, charged for a revision, refunded, or nothing (released). */
+  runCredits: "charged" | "revision" | "refunded" | "none";
+  /** `none`: the artifacts endpoint is not there (an older server), so the feed is made from the event summaries. */
+  artifacts: "api" | "none";
   /** An MP4 to play as the preview (the viewer has none of its own). */
   video?: string;
 }
@@ -16,6 +20,8 @@ export function scenarioOf(search: URLSearchParams): Scenario {
   return {
     credits: pick("credits", ["none", "ok", "low", "empty"], "none"),
     run: pick("run", ["done", "working", "failed", "question"], "done"),
+    runCredits: pick("runcredits", ["charged", "revision", "refunded", "none"], "charged"),
+    artifacts: pick("artifacts", ["api", "none"], "api"),
     video: search.get("video") ?? undefined,
   };
 }
@@ -64,18 +70,24 @@ function creditsFor(kind: Scenario["credits"]) {
   return { available: 0, allowance: 60, period_end: periodEnd, low: true, top_ups: [] };
 }
 
-function runFor(kind: Scenario["run"]) {
-  if (kind === "done") return v2Run();
+/** The events of the run in a scenario, up to the one it has reached. */
+const LAST_SEQ: Record<Scenario["run"], number> = { done: 99, working: 26, question: 16, failed: 23 };
+
+function runFor(kind: Scenario["run"], runCredits: Scenario["runCredits"]) {
+  if (kind === "done") {
+    const credits = runCredits === "none" ? null : runCredits === "revision" ? { state: "charged" as const, action: "edit.revision" as const, credits: 2 } : runCredits === "refunded" ? { state: "refunded" as const, action: "edit.first" as const, credits: 6 } : undefined;
+    return runCredits === "charged" ? v2Run() : v2Run({ credits });
+  }
   const finished = v2Run().events;
   if (kind === "working") {
     // Up to the second render: the plan, one round of checks, the brightness match, and the preview that is being made.
-    const events = finished.filter((e) => e.seq <= 26).concat(event(27, "tool_call", "render_preview {}", { tool: "render_preview" }));
-    return run({ ...v2Run(), status: "running", summary: null, timeline_version: null, cost_micros: 148_000, active_ms: 61_000, tool_calls: 11, events, last_seq: 27 });
+    const events = finished.filter((e) => e.seq <= 26).concat(event(27, "tool_call", "render_preview {}", { tool: "render_preview", call_id: callIdOf(27) }));
+    return run({ ...v2Run({ credits: { state: "held", action: "edit.first", credits: 6 } }), status: "running", summary: null, timeline_version: null, cost_micros: 148_000, active_ms: 61_000, tool_calls: 11, events, last_seq: 27 });
   }
   if (kind === "question") {
-    return run({ ...v2Run(), status: "waiting_input", question: "The back pose clip is much brighter than the rest. Should I even it out, or keep it as it is?", summary: null, timeline_version: null, events: finished.filter((e) => e.seq <= 16), last_seq: 16 });
+    return run({ ...v2Run({ credits: { state: "held", action: "edit.first", credits: 6 } }), status: "waiting_input", question: "The back pose clip is much brighter than the rest. Should I even it out, or keep it as it is?", summary: null, timeline_version: null, events: finished.filter((e) => e.seq <= 16), last_seq: 16 });
   }
-  return run({ ...v2Run(), status: "failed", failure_reason: "budget", summary: "I made v1 and previewed it, but ran out of steps before the second check.", events: [...finished.filter((e) => e.seq <= 23), event(24, "status", "failed reason=budget limit=tool_calls")], last_seq: 24 });
+  return run({ ...v2Run({ credits: null }), status: "failed", failure_reason: "budget", summary: "I made v1 and previewed it, but ran out of steps before the second check.", events: [...finished.filter((e) => e.seq <= 23), event(24, "status", "failed reason=budget limit=tool_calls")], last_seq: 24 });
 }
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -114,7 +126,12 @@ export function installFakeApi(scenario: Scenario): void {
       }
       if (path === `/v1/projects/${projectId(1)}/renders`) return json({ items: [render] });
       if (path === `/v1/renders/${renderId(1)}`) return json(render);
-      if (path === `/v1/runs/${runId(1)}`) return json(runFor(scenario.run));
+      if (path === `/v1/runs/${runId(1)}`) return json(runFor(scenario.run, scenario.runCredits));
+      if (path === `/v1/runs/${runId(1)}/artifacts`) {
+        if (scenario.artifacts === "none") return notFound();
+        const after = Number(url.searchParams.get("after_seq") ?? 0);
+        return json({ artifacts: v2Artifacts().artifacts.filter((artifact) => artifact.seq > after && artifact.seq <= LAST_SEQ[scenario.run]), next_after_seq: null });
+      }
       if (path === "/v1/annotations") return json({ items: [annotation(1, { timeline_version: 2, start_ms: 2900, end_ms: 4400, body: "The ramp on the cable row is great. Hold the slow part a beat longer." }), annotation(2, { timeline_version: 2, start_ms: 6200, end_ms: 6200, body: "Title here, please." })], next_cursor: null });
       if (path === "/v1/library/summary") return json({ total: CLIPS.length });
     }
