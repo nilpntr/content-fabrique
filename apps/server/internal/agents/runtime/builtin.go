@@ -120,6 +120,8 @@ func NewEchoAgent(sink NoteSink) Agent {
 	}
 }
 
-// DefaultAgents are the agents every process that runs them (the worker, cfctl) knows. Later tasks add theirs here, once, so
-// the processes cannot disagree about what a run's agent name means.
-func DefaultAgents() []Agent { return []Agent{NewEchoAgent(nil)} }
+// DefaultAgents are the agents every process that runs them (the worker, cfctl) knows: the echo agent, then extra. An agent
+// that needs services (the editor needs the projects, storage and the sandbox) cannot be built here, because its package
+// imports this one; package agentset builds the whole list for a process and is the one place the processes get it from, so
+// they cannot disagree about what a run's agent name means.
+func DefaultAgents(extra ...Agent) []Agent { return append([]Agent{NewEchoAgent(nil)}, extra...) }

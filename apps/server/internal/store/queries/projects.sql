@@ -82,8 +82,8 @@ WHERE pa.workspace_id = @workspace_id AND pa.project_id = @project_id
   AND a.status = 'ready' AND a.deleted_at IS NULL AND a.duration_ms IS NOT NULL;
 
 -- name: InsertTimelineVersion :one
-INSERT INTO timeline_versions (workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id)
-VALUES (@workspace_id, @project_id, @version, @parent_version, @spec, @ops, @diff, @summary, @author_kind, @author_id)
+INSERT INTO timeline_versions (workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id, idempotency_key, result)
+VALUES (@workspace_id, @project_id, @version, @parent_version, @spec, @ops, @diff, @summary, @author_kind, @author_id, sqlc.narg('idempotency_key')::text, sqlc.narg('result')::jsonb)
 RETURNING *;
 
 -- name: GetTimelineVersion :one
@@ -98,3 +98,27 @@ WHERE workspace_id = @workspace_id AND project_id = @project_id
   AND (sqlc.narg('before')::integer IS NULL OR version < sqlc.narg('before')::integer)
 ORDER BY version DESC
 LIMIT @row_limit;
+
+-- The footage of a project as the editor agent sees it: the library's title and description (text a creator wrote, untrusted),
+-- the probed size and rotation, and whether there is sound. Only ready, not deleted assets with a duration are returned, in
+-- the creator's order: the same set the edit catalog holds.
+-- name: ListProjectFootage :many
+SELECT pa.position, a.id AS asset_id, a.kind, a.title, a.description, a.duration_ms, a.width, a.height, a.rotation, a.has_audio
+FROM project_assets pa
+JOIN assets a ON a.workspace_id = pa.workspace_id AND a.id = pa.asset_id
+WHERE pa.workspace_id = @workspace_id AND pa.project_id = @project_id
+  AND a.status = 'ready' AND a.deleted_at IS NULL AND a.duration_ms IS NOT NULL
+ORDER BY pa.position;
+
+-- The latest version a given author made, if there is one: for the editor agent the author id is the run's TypeID, so this says
+-- whether the run has made a version.
+-- name: GetTimelineVersionByAuthor :one
+SELECT * FROM timeline_versions
+WHERE workspace_id = @workspace_id AND project_id = @project_id AND author_kind = @author_kind AND author_id = @author_id
+ORDER BY version DESC
+LIMIT 1;
+
+-- The version a tool call made, by the call's idempotency key: how a repeated call finds what the first one did.
+-- name: GetTimelineVersionByIdempotencyKey :one
+SELECT * FROM timeline_versions
+WHERE workspace_id = @workspace_id AND project_id = @project_id AND idempotency_key = @idempotency_key;

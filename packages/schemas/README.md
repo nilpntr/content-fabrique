@@ -1,6 +1,6 @@
 # @cf/schemas
 
-JSON Schemas shared by the Go server and the web app. Today that is the OpenAPI 3.1 contract of the Go API (`openapi.yaml`, P0-08), the timeline spec v1 (P3-01) and its edit ops (P3-02).
+JSON Schemas shared by the Go server and the web app. Today that is the OpenAPI 3.1 contract of the Go API (`openapi.yaml`, P0-08), the timeline spec v1 (P3-01), its edit ops (P3-02) and the tool contract of the editor agent (P4-02a).
 
 The rules of the spec are in the [timeline design note](../../docs/design/timeline-v1.md). The schema is the source of truth for structure; read its `title` and `description` fields, because the editor agent will use them as tool documentation.
 
@@ -27,6 +27,9 @@ timeline/
     expect.json         invalid fixture file -> { code, path?, keyword? }
     render.txt          the 20 valid fixtures that are also render fixtures (P3-03)
     assets.json         the asset catalog the semantic fixtures assume (asset_id -> duration_ms)
+agents/
+  editor-tools.v1.json  the editor agent's tools as the model sees them: name, description, strict flag and input schema (edit_timeline refers to the ops schema by its $id); the Go package internal/agents/editor embeds a copy
+  editor-tools.v1.test.ts  Ajv tests: the schemas compile, accept and refuse the right arguments, strict tools stay inside what strict tool use supports
 scripts/
   gen.ts                writes timeline/v1.ts and timeline/ops.v1.ts
   gen-api.ts            writes api/schema.ts from openapi.yaml (operations tagged webhooks are left out)

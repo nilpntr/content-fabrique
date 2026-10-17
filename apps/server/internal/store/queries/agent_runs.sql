@@ -130,3 +130,11 @@ UPDATE agent_runs SET resume_enqueued_at = now()
 WHERE workspace_id = @workspace_id AND id = @id AND status = 'running'
   AND heartbeat_at < now() - make_interval(secs => @stale_seconds::int)
   AND (resume_enqueued_at IS NULL OR resume_enqueued_at < now() - interval '5 minutes');
+
+-- The run of an agent that is not finished yet on a project, if there is one (the edit endpoint allows one at a time).
+-- name: GetActiveAgentRunForProject :one
+SELECT * FROM agent_runs
+WHERE workspace_id = @workspace_id AND project_id = @project_id AND agent = @agent
+  AND status IN ('queued', 'running', 'waiting_input')
+ORDER BY created_at
+LIMIT 1;

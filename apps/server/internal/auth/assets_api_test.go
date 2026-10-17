@@ -21,6 +21,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nilpntr/content-fabrique/internal/agents/agentset"
+	"github.com/nilpntr/content-fabrique/internal/agents/runapi"
+	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/api"
 	"github.com/nilpntr/content-fabrique/internal/assets"
 	"github.com/nilpntr/content-fabrique/internal/config"
@@ -59,6 +62,8 @@ type assetsEnv struct {
 type assetsEnvOptions struct {
 	noStorage   bool                                // Mount without an assets service
 	wrapObjects func(assets.Objects) assets.Objects // sits between the service and the S3 client
+	runs        bool                                // Mount with the agent runs service (the editor agent, definition only, replay mode)
+	runOptions  runapi.Options
 }
 
 func newAssetsEnv(t *testing.T, opts ...func(*assetsEnvOptions)) *assetsEnv {
@@ -105,12 +110,25 @@ func newAssetsEnv(t *testing.T, opts ...func(*assetsEnvOptions)) *assetsEnv {
 	dir.orgs["org_ada"] = ClerkOrg{ID: "org_ada", Name: "Ada Studio", UpdatedAt: 1}
 	dir.orgs["org_bob"] = ClerkOrg{ID: "org_bob", Name: "Bob Studio", UpdatedAt: 1}
 	e.mux = http.NewServeMux()
+	var runs *runtime.Service
+	if o.runs {
+		vars := map[string]string{"CF_ENV": "ci", "LLM_MODE": "replay", "ROUTING_PROFILE": "dev-cheap"}
+		rt, err := agentset.Open(agentset.Options{
+			Store: st, Logger: quiet(), Getenv: func(k string) string { return vars[k] }, Enqueuer: jobs.NewEnqueuer(client, nil), DefinitionOnly: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		runs = rt.Service
+	}
 	if _, err := Mount(e.mux, Deps{
 		Config:     config.Config{AppOrigin: testOrigin, ClerkSecretKey: "sk_test_unused", ClerkWebhookSecret: testWebhookSecret},
 		Store:      st,
 		Directory:  dir,
 		JWKSClient: &jwks.Client{Backend: e.f.backend},
 		Assets:     e.svc,
+		Runs:       runs,
+		RunOptions: o.runOptions,
 	}); err != nil {
 		t.Fatal(err)
 	}

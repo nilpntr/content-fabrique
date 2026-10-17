@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/clerk/clerk-sdk-go/v2/jwks"
+	"github.com/nilpntr/content-fabrique/internal/agents/runapi"
+	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/assets"
 	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/projects"
@@ -25,6 +27,11 @@ type Deps struct {
 	// Assets is the assets service (object storage and the job enqueuer behind it). Nil means object storage is not
 	// configured: the assets operations answer 503 storage_not_configured.
 	Assets *assets.Service
+	// Runs starts, reads, cancels and answers agent runs (agentset builds it, definition only: the worker executes them). Nil
+	// means agent runs are not configured: the runs operations answer 503 model_not_configured.
+	Runs *runtime.Service
+	// RunOptions tune the budgets of an edit run; the zero value is the default ($5, at most $5).
+	RunOptions runapi.Options
 }
 
 // V1 is the router of the paid-only API. Every route added with Handle sits behind the authentication middleware and
@@ -106,6 +113,7 @@ func Mount(mux *http.ServeMux, d Deps) (*V1, error) {
 		return nil, err
 	}
 	srv.API = projects.NewAPI(projectsSvc, callerOf, logger)
+	srv.Runs = runapi.New(d.Runs, callerOf, d.RunOptions, logger)
 	for pattern, h := range apiRoutes(srv, logger) {
 		if open[pattern] {
 			mux.Handle(pattern, mw(h))

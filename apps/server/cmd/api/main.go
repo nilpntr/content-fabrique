@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/nilpntr/content-fabrique/internal/agents/agentset"
+	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/app"
 	"github.com/nilpntr/content-fabrique/internal/assets"
 	"github.com/nilpntr/content-fabrique/internal/auth"
@@ -52,9 +54,20 @@ func main() {
 			} else {
 				logger.Warn("R2_* is not set: the assets API answers 503 storage_not_configured")
 			}
+			// Agent runs: the api only starts, reads, cancels and answers them (the worker executes them), so it needs the agent
+			// definitions and the model settings, not object storage or a sandbox. A bad model setting turns the runs operations off
+			// (503 model_not_configured) and nothing else.
+			var runs *runtime.Service
+			if rt, err := agentset.Open(agentset.Options{
+				Store: st, Logger: logger, Getenv: os.Getenv, Enqueuer: jobs.NewEnqueuer(river, logger), DefinitionOnly: true,
+			}); err != nil {
+				logger.Warn("agent runs are off on the api: the model-access settings do not load", "error", err)
+			} else {
+				runs = rt.Service
+			}
 			// Mount registers every route of the OpenAPI contract (GET /v1/library/summary included); the V1 router it
 			// returns is for routes that are not in the contract yet.
-			_, err = auth.Mount(mux, auth.Deps{Config: cfg, Store: st, Logger: logger, Assets: assetsSvc})
+			_, err = auth.Mount(mux, auth.Deps{Config: cfg, Store: st, Logger: logger, Assets: assetsSvc, Runs: runs})
 			return err
 		},
 		// The CORS allowlist is the web app's origin, APP_BASE_URL, and nothing else.
