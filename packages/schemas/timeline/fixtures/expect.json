@@ -59,8 +59,8 @@
   "i20_unlicensed_audio_licensed_track_no_licence_record.json": {
     "code": "unlicensed_audio"
   },
-  "i21_unlicensed_audio_licensed_track_not_an_audio_asset.json": {
-    "code": "unlicensed_audio"
+  "i21_wrong_asset_kind_licensed_track_not_an_audio_asset.json": {
+    "code": "wrong_asset_kind"
   },
   "i22_unlicensed_audio_creator_audio_no_attestation.json": {
     "code": "unlicensed_audio"
@@ -167,5 +167,14 @@
     "code": "schema",
     "path": "/tracks/1/items/0",
     "keyword": "required"
+  },
+  "i44_wrong_asset_kind_video_item_on_audio_asset.json": {
+    "code": "wrong_asset_kind"
+  },
+  "i45_wrong_asset_kind_creator_audio_on_video_asset.json": {
+    "code": "wrong_asset_kind"
+  },
+  "i46_first_transition_first_in_time_not_first_in_array.json": {
+    "code": "first_transition"
   }
 }

@@ -44,8 +44,12 @@ func checkSemantics(spec *Spec, assets AssetCatalog) []Issue {
 }
 
 func (c *checker) add(code Code, path, format string, args ...any) {
+	c.addSeverity(SeverityError, code, path, format, args...)
+}
+
+func (c *checker) addSeverity(sev Severity, code Code, path, format string, args ...any) {
 	c.issues = append(c.issues, Issue{
-		Code: code, Path: path, Severity: SeverityError, Message: fmt.Sprintf(format, args...),
+		Code: code, Path: path, Severity: sev, Message: fmt.Sprintf(format, args...),
 	})
 }
 
@@ -70,15 +74,15 @@ func (c *checker) checkDuplicateIDs() {
 		tp := fmt.Sprintf("/tracks/%d", ti)
 		use(t.TrackID(), tp)
 		switch t := t.(type) {
-		case VideoTrack:
+		case *VideoTrack:
 			for i, it := range t.Items {
 				use(it.ID, fmt.Sprintf("%s/items/%d", tp, i))
 			}
-		case TextTrack:
+		case *TextTrack:
 			for i, it := range t.Items {
 				use(it.ID, fmt.Sprintf("%s/items/%d", tp, i))
 			}
-		case AudioTrack:
+		case *AudioTrack:
 			for i, it := range t.Items {
 				use(it.Common().ID, fmt.Sprintf("%s/items/%d", tp, i))
 			}
@@ -88,11 +92,11 @@ func (c *checker) checkDuplicateIDs() {
 
 // ---- main track -------------------------------------------------------------------------------------------------
 
-func (c *checker) checkMain(main VideoTrack) {
+func (c *checker) checkMain(main *VideoTrack) {
 	for i, it := range main.Items {
 		path := c.mainPath(i)
-		known := c.checkClipAsset(it, path)
-		if it.Source.InMs >= it.Source.OutMs {
+		asset, known := c.checkClipAsset(it, path)
+		if !Playable(it) {
 			c.add(CodeSourceOutOfRange, path+"/source",
 				"item %s has source.in_ms %d, which is not below source.out_ms %d; a clip needs in_ms < out_ms",
 				it.ID, it.Source.InMs, it.Source.OutMs)
@@ -100,15 +104,17 @@ func (c *checker) checkMain(main VideoTrack) {
 			continue // left out of the length, contiguity and total-duration checks
 		}
 		dur := OutputDuration(it)
-		if known {
-			c.checkClipRange(it, path)
+		if known && it.Source.OutMs > asset.DurationMs {
+			c.add(CodeSourceOutOfRange, path+"/source/out_ms",
+				"item %s ends at %d ms but asset %s is %d ms long; set source.out_ms to at most %d",
+				it.ID, it.Source.OutMs, it.AssetID, asset.DurationMs, asset.DurationMs)
 		}
 		if dur < MinShotMs {
 			c.add(CodeShotTooShort, path,
 				"item %s plays for %d ms (source %d to %d ms at speed %s); a shot must play for at least %d ms. Lengthen its source range or slow it down",
 				it.ID, dur, it.Source.InMs, it.Source.OutMs, num(it.SpeedOrDefault()), MinShotMs)
 		}
-		c.clips = append(c.clips, clip{item: it, index: i, dur: dur, end: it.AtMs + dur})
+		c.clips = append(c.clips, clip{item: it, index: i, dur: dur, end: EndMs(it)})
 	}
 	// Timeline order is at_ms order; equal at_ms keeps the order of the array.
 	slices.SortStableFunc(c.clips, func(a, b clip) int {
@@ -120,30 +126,26 @@ func (c *checker) checkMain(main VideoTrack) {
 		}
 		return a.index - b.index
 	})
-	for _, cl := range c.clips {
-		c.total = max(c.total, cl.end)
-	}
+	c.total = PlayableEnd(main.Items)
 	c.checkContiguity()
 }
 
-// checkClipAsset raises unknown_asset for a clip whose asset the catalog does not know, and reports whether it does.
-func (c *checker) checkClipAsset(it VideoItem, path string) bool {
-	if _, ok := c.assets.Duration(it.AssetID); !ok {
+// checkClipAsset looks the clip's asset up once. It raises unknown_asset when the catalog does not know the asset and
+// wrong_asset_kind when it is not a video asset, and returns the asset for the range check.
+func (c *checker) checkClipAsset(it VideoItem, path string) (Asset, bool) {
+	asset, ok := c.assets.Lookup(it.AssetID)
+	if !ok {
 		c.add(CodeUnknownAsset, path+"/asset_id",
 			"item %s uses asset %s, which is not in the catalog; use the id of an asset of this project",
 			it.ID, it.AssetID)
-		return false
+		return Asset{}, false
 	}
-	return true
-}
-
-func (c *checker) checkClipRange(it VideoItem, path string) {
-	dur, _ := c.assets.Duration(it.AssetID)
-	if it.Source.OutMs > int64(dur) {
-		c.add(CodeSourceOutOfRange, path+"/source/out_ms",
-			"item %s ends at %d ms but asset %s is %d ms long; set source.out_ms to at most %d",
-			it.ID, it.Source.OutMs, it.AssetID, dur, dur)
+	if asset.Kind != AssetVideo {
+		c.add(CodeWrongAssetKind, path+"/asset_id",
+			"item %s is a video clip but asset %s is a %s asset; use a video asset",
+			it.ID, it.AssetID, asset.Kind)
 	}
+	return asset, true
 }
 
 // checkContiguity checks the main track against the design note's formula: the first clip starts at 0, and each next
@@ -158,6 +160,11 @@ func (c *checker) checkContiguity() {
 				c.add(CodeGap, path,
 					"the first item %s starts at %d ms; the main track starts at 0, so set at_ms to 0",
 					it.ID, it.AtMs)
+			}
+			if it.TransitionIn != nil && it.TransitionIn.Type != TransitionCut {
+				c.add(CodeFirstTransition, c.mainPath(cl.index)+"/transition_in",
+					"item %s is the first clip in time (at_ms %d) but has a %s transition_in; nothing comes before it to transition from. Remove transition_in or make it a cut",
+					it.ID, it.AtMs, it.TransitionIn.Type)
 			}
 			continue
 		}
@@ -225,7 +232,7 @@ func (c *checker) hasTimeline() bool { return len(c.clips) > 0 }
 func (c *checker) checkText() {
 	zone, zoneOK := SafeZoneFor(c.spec.Output.Format)
 	for ti, t := range c.spec.Tracks {
-		tt, ok := t.(TextTrack)
+		tt, ok := t.(*TextTrack)
 		if !ok {
 			continue
 		}
@@ -233,7 +240,8 @@ func (c *checker) checkText() {
 			path := fmt.Sprintf("/tracks/%d/items/%d", ti, i)
 			style, styleOK := LookupStyle(it.Style)
 			if !styleOK {
-				c.add(CodeUnknownStyle, path+"/style",
+				// A warning until P3-04 adds the real registry; P3-04 makes it an error.
+				c.addSeverity(SeverityWarning, CodeUnknownStyle, path+"/style",
 					"text item %s uses style %q, which is not in the style registry; use one of: %s",
 					it.ID, it.Style, strings.Join(StyleIDs(), ", "))
 			}
@@ -290,7 +298,7 @@ func (c *checker) checkTextBox(it TextItem, style Style, zone SafeZone, path str
 
 func (c *checker) checkAudio() {
 	for ti, t := range c.spec.Tracks {
-		at, ok := t.(AudioTrack)
+		at, ok := t.(*AudioTrack)
 		if !ok {
 			continue
 		}
@@ -328,35 +336,35 @@ func (c *checker) checkAudioInside(com AudioCommon, path string) {
 
 func (c *checker) checkAudioAsset(item AudioItem, assetID string, eff int64, path string) {
 	com := item.Common()
-	dur, known := c.assets.Duration(assetID)
+	asset, known := c.assets.Lookup(assetID)
 	if !known {
 		c.add(CodeUnknownAsset, path+"/asset_id",
 			"audio item %s uses asset %s, which is not in the catalog; use the id of an asset of this project", com.ID, assetID)
 		return
 	}
-	if eff > 0 && com.SourceOffsetMs+eff > int64(dur) {
+	if eff > 0 && com.SourceOffsetMs+eff > asset.DurationMs {
 		c.add(CodeSourceOutOfRange, path+"/source_offset_ms",
 			"audio item %s needs the asset from %d to %d ms (source_offset_ms plus the %d ms it plays) but asset %s is %d ms long; lower source_offset_ms to at most %d or shorten the item",
-			com.ID, com.SourceOffsetMs, com.SourceOffsetMs+eff, eff, assetID, dur, max(int64(dur)-eff, 0))
+			com.ID, com.SourceOffsetMs, com.SourceOffsetMs+eff, eff, assetID, asset.DurationMs, max(asset.DurationMs-eff, 0))
 	}
-	kind, rights, _ := c.assets.Rights(assetID)
+	if asset.Kind != AssetAudio {
+		c.add(CodeWrongAssetKind, path+"/asset_id",
+			"audio item %s (%s) uses asset %s, which is a %s asset; use an audio asset",
+			com.ID, item.AudioKind(), assetID, asset.Kind)
+		return // its rights say nothing about audio
+	}
 	switch item.AudioKind() {
 	case AudioLicensedTrack:
-		switch {
-		case kind != AssetAudio:
-			c.add(CodeUnlicensedAudio, path+"/asset_id",
-				"audio item %s is a licensed_track but asset %s is a %s asset, not audio; use a licensed audio asset",
-				com.ID, assetID, kind)
-		case rights != RightsLicensed:
+		if asset.Rights != RightsLicensed {
 			c.add(CodeUnlicensedAudio, path+"/license_id",
 				"audio item %s is a licensed_track but asset %s has no licence record (rights: %s); use a track with a licence, or a trend_sound as a cue (it is not mixed into the export)",
-				com.ID, assetID, rights)
+				com.ID, assetID, asset.Rights)
 		}
 	case AudioCreatorAudio:
-		if rights != RightsAttested {
+		if asset.Rights != RightsAttested {
 			c.add(CodeUnlicensedAudio, path+"/asset_id",
 				"audio item %s is creator_audio but asset %s has no rights attestation from the creator (rights: %s); the creator must attest that they own it first",
-				com.ID, assetID, rights)
+				com.ID, assetID, asset.Rights)
 		}
 	}
 }

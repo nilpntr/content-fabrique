@@ -6,12 +6,42 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-// Parse decodes a spec strictly: an unknown field anywhere, a wrong type, a track "type" or audio "kind" the spec
-// does not define, or trailing data after the document is an error. It does not check ranges or semantics; use
-// Validate for that (Validate calls Parse after the schema has passed).
+// DecodeError is a decoding problem at a known place in the document.
+type DecodeError struct {
+	// Path is a JSON Pointer into the document.
+	Path    string
+	Message string
+}
+
+func (e *DecodeError) Error() string {
+	if e.Path == "" {
+		return e.Message
+	}
+	return e.Path + ": " + e.Message
+}
+
+// Parse decodes a spec strictly: an unknown field anywhere, a key written in another case ("ID" for "id": Go's
+// encoding/json would accept it, the schema does not), a whole number written as 3000.0, a wrong type, a track "type"
+// or audio "kind" the spec does not define, or trailing data after the document is an error. It does not check
+// ranges or semantics; use Validate for that.
 func Parse(data []byte) (*Spec, error) {
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	return parseDoc(doc, data)
+}
+
+// parseDoc is Parse for a caller that has already decoded data into a generic document (numbers as json.Number), as
+// Validate has for the schema: the shape check runs on that document, so it is not decoded a third time.
+func parseDoc(doc any, data []byte) (*Spec, error) {
+	if err := shapeCheck(doc); err != nil {
+		return nil, err
+	}
 	var s Spec
 	if err := decodeStrict(data, &s); err != nil {
 		return nil, err
@@ -21,6 +51,7 @@ func Parse(data []byte) (*Spec, error) {
 
 // decodeStrict unmarshals one JSON value into v with unknown fields disallowed and no trailing data. The custom
 // UnmarshalJSON methods below call it too, because encoding/json does not pass DisallowUnknownFields down to them.
+// Key case is checked separately, by shapeCheck, which Parse runs first.
 func decodeStrict(data []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
@@ -70,55 +101,175 @@ func (s *Spec) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func decodeTrack(raw json.RawMessage) (Track, error) {
-	var d struct {
-		Type TrackType `json:"type"`
+// trackAux has the discriminator and the fields of every track type, so that one strict pass reads any of them. The
+// fields of the other types are pointers (or raw), so that a field on the wrong type can be told from an absent one.
+type trackAux struct {
+	Type      TrackType       `json:"type"`
+	ID        string          `json:"id"`
+	Items     json.RawMessage `json:"items"`
+	From      *string         `json:"from"`
+	Style     *string         `json:"style"`
+	Enabled   *bool           `json:"enabled"`
+	Uppercase *bool           `json:"uppercase"`
+	MaxWords  *int            `json:"max_words"`
+}
+
+func (a *trackAux) captionsField() string {
+	switch {
+	case a.From != nil:
+		return "from"
+	case a.Style != nil:
+		return "style"
+	case a.Enabled != nil:
+		return "enabled"
+	case a.Uppercase != nil:
+		return "uppercase"
+	case a.MaxWords != nil:
+		return "max_words"
 	}
-	if err := json.Unmarshal(raw, &d); err != nil {
+	return ""
+}
+
+func decodeTrack(raw json.RawMessage) (Track, error) {
+	var a trackAux
+	if err := decodeStrict(raw, &a); err != nil {
 		return nil, err
 	}
-	switch d.Type {
+	if a.Type != TrackCaptions {
+		if f := a.captionsField(); f != "" {
+			return nil, fmt.Errorf("field %q is only allowed on a captions track, not on a %s track", f, a.Type)
+		}
+	}
+	switch a.Type {
 	case TrackVideo:
-		var t VideoTrack
-		if err := decodeTagged(raw, "type", &t); err != nil {
+		t := &VideoTrack{ID: a.ID}
+		if err := decodeItems(a.Items, &t.Items); err != nil {
 			return nil, err
 		}
 		return t, nil
 	case TrackText:
-		var t TextTrack
-		if err := decodeTagged(raw, "type", &t); err != nil {
-			return nil, err
-		}
-		return t, nil
-	case TrackCaptions:
-		var t CaptionsTrack
-		if err := decodeTagged(raw, "type", &t); err != nil {
+		t := &TextTrack{ID: a.ID}
+		if err := decodeItems(a.Items, &t.Items); err != nil {
 			return nil, err
 		}
 		return t, nil
 	case TrackAudio:
-		var t AudioTrack
-		if err := decodeTagged(raw, "type", &t); err != nil {
+		t := &AudioTrack{ID: a.ID}
+		items, err := decodeAudioItems(a.Items)
+		if err != nil {
 			return nil, err
+		}
+		t.Items = items
+		return t, nil
+	case TrackCaptions:
+		if a.Items != nil {
+			return nil, errors.New(`field "items" is not allowed on a captions track`)
+		}
+		t := &CaptionsTrack{ID: a.ID, Uppercase: a.Uppercase, MaxWords: a.MaxWords}
+		if a.From != nil {
+			t.From = *a.From
+		}
+		if a.Style != nil {
+			t.Style = *a.Style
+		}
+		if a.Enabled != nil {
+			t.Enabled = *a.Enabled
 		}
 		return t, nil
 	}
-	return nil, fmt.Errorf("unknown track type %q", d.Type)
+	return nil, fmt.Errorf("unknown track type %q", a.Type)
 }
 
-// decodeTagged decodes an object that carries a discriminator field next to the fields of v. The caller has already
-// read the discriminator; here it only has to be accepted as a known field, so it is dropped before the strict decode.
-func decodeTagged(raw json.RawMessage, field string, v any) error {
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &obj); err != nil {
+func decodeItems[T any](raw json.RawMessage, into *[]T) error {
+	if raw == nil {
+		return nil
+	}
+	return decodeStrict(raw, into)
+}
+
+// UnmarshalJSON decodes the items by their "kind".
+func (t *AudioTrack) UnmarshalJSON(data []byte) error {
+	var aux struct {
+		ID    string          `json:"id"`
+		Items json.RawMessage `json:"items"`
+	}
+	if err := decodeStrict(data, &aux); err != nil {
 		return err
 	}
-	delete(obj, field)
-	rest, err := json.Marshal(obj)
+	items, err := decodeAudioItems(aux.Items)
 	if err != nil {
 		return err
 	}
-	return decodeStrict(rest, v)
+	t.ID, t.Items = aux.ID, items
+	return nil
+}
+
+func decodeAudioItems(raw json.RawMessage) ([]AudioItem, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	var raws []json.RawMessage
+	if err := decodeStrict(raw, &raws); err != nil {
+		return nil, err
+	}
+	items := make([]AudioItem, 0, len(raws))
+	for i, r := range raws {
+		it, err := decodeAudioItem(r)
+		if err != nil {
+			return nil, fmt.Errorf("items[%d]: %w", i, err)
+		}
+		items = append(items, it)
+	}
+	return items, nil
+}
+
+// audioAux has the discriminator and the fields of every audio kind, for one strict pass.
+type audioAux struct {
+	Kind AudioKind `json:"kind"`
+	AudioCommon
+	TrendID   *string `json:"trend_id"`
+	AssetID   *string `json:"asset_id"`
+	LicenseID *string `json:"license_id"`
+}
+
+func decodeAudioItem(raw json.RawMessage) (AudioItem, error) {
+	var a audioAux
+	if err := decodeStrict(raw, &a); err != nil {
+		return nil, err
+	}
+	notAllowed := func(field string) error {
+		return fmt.Errorf("field %q is not allowed on a %s item", field, a.Kind)
+	}
+	str := func(p *string) string {
+		if p == nil {
+			return ""
+		}
+		return *p
+	}
+	switch a.Kind {
+	case AudioTrendSound:
+		if a.AssetID != nil {
+			return nil, notAllowed("asset_id")
+		}
+		if a.LicenseID != nil {
+			return nil, notAllowed("license_id")
+		}
+		return &TrendSound{AudioCommon: a.AudioCommon, TrendID: str(a.TrendID)}, nil
+	case AudioLicensedTrack:
+		if a.TrendID != nil {
+			return nil, notAllowed("trend_id")
+		}
+		return &LicensedTrack{AudioCommon: a.AudioCommon, AssetID: str(a.AssetID), LicenseID: str(a.LicenseID)}, nil
+	case AudioCreatorAudio:
+		if a.TrendID != nil {
+			return nil, notAllowed("trend_id")
+		}
+		if a.LicenseID != nil {
+			return nil, notAllowed("license_id")
+		}
+		return &CreatorAudio{AudioCommon: a.AudioCommon, AssetID: str(a.AssetID)}, nil
+	}
+	return nil, fmt.Errorf("unknown audio kind %q", a.Kind)
 }
 
 // withTag encodes v with the discriminator field first.
@@ -173,60 +324,6 @@ func (t AudioTrack) MarshalJSON() ([]byte, error) {
 		t.Items = []AudioItem{}
 	}
 	return withTag("type", string(TrackAudio), plain(t))
-}
-
-// UnmarshalJSON decodes the items by their "kind".
-func (t *AudioTrack) UnmarshalJSON(data []byte) error {
-	var aux struct {
-		ID    string            `json:"id"`
-		Items []json.RawMessage `json:"items"`
-	}
-	if err := decodeStrict(data, &aux); err != nil {
-		return err
-	}
-	t.ID = aux.ID
-	t.Items = nil
-	if aux.Items != nil {
-		t.Items = make([]AudioItem, 0, len(aux.Items))
-	}
-	for i, raw := range aux.Items {
-		it, err := decodeAudioItem(raw)
-		if err != nil {
-			return fmt.Errorf("items[%d]: %w", i, err)
-		}
-		t.Items = append(t.Items, it)
-	}
-	return nil
-}
-
-func decodeAudioItem(raw json.RawMessage) (AudioItem, error) {
-	var d struct {
-		Kind AudioKind `json:"kind"`
-	}
-	if err := json.Unmarshal(raw, &d); err != nil {
-		return nil, err
-	}
-	switch d.Kind {
-	case AudioTrendSound:
-		var it TrendSound
-		if err := decodeTagged(raw, "kind", &it); err != nil {
-			return nil, err
-		}
-		return it, nil
-	case AudioLicensedTrack:
-		var it LicensedTrack
-		if err := decodeTagged(raw, "kind", &it); err != nil {
-			return nil, err
-		}
-		return it, nil
-	case AudioCreatorAudio:
-		var it CreatorAudio
-		if err := decodeTagged(raw, "kind", &it); err != nil {
-			return nil, err
-		}
-		return it, nil
-	}
-	return nil, fmt.Errorf("unknown audio kind %q", d.Kind)
 }
 
 // MarshalJSON writes the item with its "kind".

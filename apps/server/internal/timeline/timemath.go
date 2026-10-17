@@ -20,34 +20,45 @@ func OutputDuration(it VideoItem) int64 {
 
 // MainTrack returns the video track and its index in spec.Tracks. The schema guarantees exactly one; ok is false on a
 // spec that has none.
-func MainTrack(spec *Spec) (track VideoTrack, index int, ok bool) {
+func MainTrack(spec *Spec) (track *VideoTrack, index int, ok bool) {
 	if spec == nil {
-		return VideoTrack{}, 0, false
+		return nil, 0, false
 	}
 	for i, t := range spec.Tracks {
-		if v, isVideo := t.(VideoTrack); isVideo {
+		if v, isVideo := t.(*VideoTrack); isVideo {
 			return v, i, true
 		}
 	}
-	return VideoTrack{}, 0, false
+	return nil, 0, false
 }
 
-// TotalDuration is the end of the timeline: the latest end (at_ms plus output duration) of a clip on the main track,
-// or 0 when the track has no playable clip. A clip with out_ms <= in_ms is not playable and is left out, as in
-// Validate.
+// Playable reports whether a clip plays at all: its source range has in_ms < out_ms. A clip that does not is left out
+// of the length, contiguity and total-duration checks (Validate raises source_out_of_range for it and nothing else).
+func Playable(it VideoItem) bool { return it.Source.InMs < it.Source.OutMs }
+
+// EndMs is where a clip ends on the timeline: at_ms plus its output duration.
+func EndMs(it VideoItem) int64 { return it.AtMs + OutputDuration(it) }
+
+// PlayableEnd is the latest end of a playable clip in items, or 0 when there is none. It is the one definition of the
+// timeline's end, shared by TotalDuration and Validate.
+func PlayableEnd(items []VideoItem) int64 {
+	var end int64
+	for _, it := range items {
+		if Playable(it) {
+			end = max(end, EndMs(it))
+		}
+	}
+	return end
+}
+
+// TotalDuration is the end of the timeline: the latest end (at_ms plus output duration) of a playable clip on the main
+// track, or 0 when the track has none.
 func TotalDuration(spec *Spec) int64 {
 	main, _, ok := MainTrack(spec)
 	if !ok {
 		return 0
 	}
-	var total int64
-	for _, it := range main.Items {
-		if it.Source.OutMs <= it.Source.InMs {
-			continue
-		}
-		total = max(total, it.AtMs+OutputDuration(it))
-	}
-	return total
+	return PlayableEnd(main.Items)
 }
 
 // Frame converts a time to a frame number at fps: floor(ms * fps / 1000 + 0.5), in integers. The compiler snaps item

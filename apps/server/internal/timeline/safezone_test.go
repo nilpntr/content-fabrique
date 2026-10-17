@@ -112,18 +112,49 @@ func TestTextBoxEstimate(t *testing.T) {
 	if got := EstimateTextBox("ééé", style, Point{X: 0.5, Y: 0.5}, 1080, 1920, zone).width(); got != roundHalfUp(0.6*72*3) {
 		t.Fatalf("width %d", got)
 	}
-	// A very long line is capped at the width of the zone (840 px on 9:16).
-	long := strings.Repeat("W", 120)
-	if got := EstimateTextBox(long, style, Point{X: 0.5, Y: 0.5}, 1080, 1920, zone).width(); got != 840 {
-		t.Fatalf("capped width %d", got)
+	// A line wider than the zone wraps at the zone's width (840 px on 9:16) and the box grows taller instead:
+	// 20 W are 864 px wide, so two lines of 86 px.
+	mid := Point{X: 0.5, Y: 0.5}
+	if b := EstimateTextBox(strings.Repeat("W", 20), style, mid, 1080, 1920, zone); b.width() != 840 || b.height() != 172 {
+		t.Fatalf("20 characters: %+v", b)
 	}
-	// ... so a capped line centred on the screen fits exactly, and shifted by 1 px it does not.
-	s := baseSpec()
-	centred := TextItem{ID: "t1", AtMs: 0, DurationMs: 1000, Text: long, Style: "title_bold", Position: &Point{X: 0.5, Y: 0.3}}
-	wantCodes(t, validateSpec(t, addTrack(s, textTrack(centred))))
-	shifted := centred
-	shifted.Position = pos(541, 576, Format9x16)
-	wantCodes(t, validateSpec(t, addTrack(baseSpec(), textTrack(shifted))), CodeUnsafeText)
+	// 120 W are 5184 px wide: ceil(5184 / 840) = 7 lines, 602 px.
+	long := strings.Repeat("W", 120)
+	if b := EstimateTextBox(long, style, mid, 1080, 1920, zone); b.width() != 840 || b.height() != 7*86 {
+		t.Fatalf("120 characters: %+v", b)
+	}
+	// Explicit lines add up: one line that wraps in two plus one short line is three lines.
+	if b := EstimateTextBox(strings.Repeat("W", 20)+"\nHi", style, mid, 1080, 1920, zone); b.height() != 3*86 {
+		t.Fatalf("wrapped plus explicit line: %+v", b)
+	}
+	// An empty line still takes a line.
+	if b := EstimateTextBox("Hi\n\nHi", style, mid, 1080, 1920, zone); b.height() != 3*86 {
+		t.Fatalf("empty line: %+v", b)
+	}
+}
+
+// The wrapped height decides the verdict: 20 W at y = 754 px end at 840 px, just above the action column's top edge,
+// and one pixel lower they run into it. Without wrapping (one 86 px line) both would fit.
+func TestWrappedTextGrowsTaller(t *testing.T) {
+	item := TextItem{ID: "t1", AtMs: 0, DurationMs: 1000, Text: strings.Repeat("W", 20), Style: "title_bold"}
+	item.Position = pos(540, 754, Format9x16)
+	wantCodes(t, validateSpec(t, addTrack(baseSpec(), textTrack(item))))
+	item.Position = pos(540, 755, Format9x16)
+	res := validateSpec(t, addTrack(baseSpec(), textTrack(item)))
+	wantCodes(t, res, CodeUnsafeText)
+	if !strings.Contains(res.Issues[0].Message, "action column") {
+		t.Fatalf("message %q", res.Issues[0].Message)
+	}
+	// 120 characters need seven lines (602 px) of the 600 px between the top margin and the action column: nowhere
+	// to put them by position, whatever the position.
+	item.Text = strings.Repeat("W", 120)
+	for _, y := range []float64{0.2, 0.3, 0.4, 0.5} {
+		item.Position = &Point{X: 0.5, Y: y}
+		wantCodes(t, validateSpec(t, addTrack(baseSpec(), textTrack(item))), CodeUnsafeText)
+	}
+	// An anchor takes the same text.
+	item.Position, item.Anchor = nil, AnchorCenter
+	wantCodes(t, validateSpec(t, addTrack(baseSpec(), textTrack(item))))
 }
 
 func TestAnchorsAreNeverUnsafe(t *testing.T) {

@@ -62,19 +62,22 @@ func percent(v, pct int) int { return (v*pct + 50) / 100 }
 // roundHalfUp is floor(x + 0.5).
 func roundHalfUp(x float64) int { return int(math.Floor(x + 0.5)) }
 
-// EstimateTextBox estimates the pixel box a text item takes when it is placed by position: the style's line height
-// times the number of lines tall, and 0.6 em per character of the widest line wide (an em is the font size), capped
-// at the width of the safe zone, centred on the point (x, y) of the output. P3-04 replaces the width with libass
-// font metrics; the issue code stays the same. The three anchors are boxes inside the safe zone by construction, so
-// they are not estimated.
+// EstimateTextBox estimates the pixel box a text item takes when it is placed by position, centred on the point
+// (x, y) of the output. Each explicit line is 0.6 em per character wide (an em is the font size). A line wider than
+// the safe zone wraps there: it takes ceil(width / safe width) lines, so the box grows taller instead of wider than
+// the zone. The box is as wide as the widest line, capped at the safe width, and as tall as the style's line height
+// times the total number of lines. P3-04 replaces the width with libass font metrics; the issue code stays the same.
+// The three anchors are boxes inside the safe zone by construction, so they are not estimated.
 func EstimateTextBox(text string, style Style, pos Point, outW, outH int, zone SafeZone) Rect {
-	lines := strings.Split(text, "\n")
-	widest := 0
-	for _, l := range lines {
-		widest = max(widest, utf8.RuneCountInString(l))
+	safeW := max(zone.Inner.width(), 1)
+	widest, lines := 0, 0
+	for _, l := range strings.Split(text, "\n") {
+		w := roundHalfUp(0.6 * float64(style.FontSizePx) * float64(utf8.RuneCountInString(l)))
+		widest = max(widest, w)
+		lines += max((w+safeW-1)/safeW, 1) // an empty line still takes a line
 	}
-	w := min(roundHalfUp(0.6*float64(style.FontSizePx)*float64(widest)), zone.Inner.width())
-	h := style.LineHeightPx * len(lines)
+	w := min(widest, safeW)
+	h := style.LineHeightPx * lines
 	cx := roundHalfUp(pos.X * float64(outW))
 	cy := roundHalfUp(pos.Y * float64(outH))
 	left := cx - w/2

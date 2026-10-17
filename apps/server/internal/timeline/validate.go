@@ -2,6 +2,7 @@ package timeline
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -41,8 +42,16 @@ const (
 	CodeUnlicensedAudio Code = "unlicensed_audio"
 	// CodeFadeTooLong is a fade in plus fade out that is longer than the sound.
 	CodeFadeTooLong Code = "fade_too_long"
-	// CodeUnknownStyle is a text style the style registry does not know.
+	// CodeUnknownStyle is a text style the style registry does not know. Until P3-04 adds the real registry it is a
+	// warning, not an error: the stub registry may lag behind the styles the agent was told about. P3-04 makes it an
+	// error.
 	CodeUnknownStyle Code = "unknown_style"
+	// CodeWrongAssetKind is a video clip on an audio asset, or a licensed_track or creator_audio item on an asset that
+	// is not audio.
+	CodeWrongAssetKind Code = "wrong_asset_kind"
+	// CodeFirstTransition is a transition_in on the first clip in time order. The schema only checks the first clip of
+	// the array; an array that is out of order but contiguous by time can put another clip first.
+	CodeFirstTransition Code = "first_transition"
 )
 
 // Severity says whether an issue blocks a version.
@@ -125,13 +134,17 @@ func Validate(spec []byte, assets AssetCatalog) Result {
 	if issues := validateStructure(doc); len(issues) > 0 {
 		return Result{Issues: issues}
 	}
-	parsed, err := Parse(spec)
+	// The document is decoded twice, once into generic values for the schema and once into the Go types: the schema
+	// library validates generic values, and the typed decode is what the semantic layer reads. The shape check runs on
+	// the generic document, so nothing is decoded a third time.
+	parsed, err := parseDoc(doc, spec)
 	if err != nil {
-		// The schema accepts a whole number written as 3000.0; the Go types want it as 3000.
-		return Result{Issues: []Issue{{
-			Code: CodeSchema, Severity: SeverityError,
-			Message: fmt.Sprintf("the spec could not be read: %v; write whole numbers without a decimal point", err),
-		}}}
+		issue := Issue{Code: CodeSchema, Severity: SeverityError, Message: err.Error()}
+		var de *DecodeError
+		if errors.As(err, &de) {
+			issue.Path, issue.Message = de.Path, de.Message
+		}
+		return Result{Issues: []Issue{issue}}
 	}
 	if assets == nil {
 		assets = MemoryCatalog(nil)

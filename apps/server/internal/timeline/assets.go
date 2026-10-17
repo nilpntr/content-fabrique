@@ -25,42 +25,34 @@ const (
 	RightsNone     Rights = "none"
 )
 
-// AssetCatalog is what Validate needs to know about the platform's assets. The server implements it over the assets
-// table; tests use MemoryCatalog.
-type AssetCatalog interface {
-	// Duration returns the asset's duration in milliseconds, and false if the asset is not known.
-	Duration(assetID string) (ms int, ok bool)
-	// Rights returns the asset's kind and rights, and false if the asset is not known.
-	Rights(assetID string) (kind AssetKind, rights Rights, ok bool)
-}
-
-// AssetInfo is one asset of a MemoryCatalog. The JSON tags match fixtures/assets.json.
-type AssetInfo struct {
-	DurationMs int       `json:"duration_ms"`
+// Asset is what Validate needs to know about one platform asset. The JSON tags match fixtures/assets.json.
+type Asset struct {
+	DurationMs int64     `json:"duration_ms"`
 	Kind       AssetKind `json:"kind"`
 	Rights     Rights    `json:"rights"`
 }
 
-// MemoryCatalog is an in-memory AssetCatalog keyed by asset id.
-type MemoryCatalog map[string]AssetInfo
-
-// Duration implements AssetCatalog.
-func (c MemoryCatalog) Duration(assetID string) (int, bool) {
-	a, ok := c[assetID]
-	return a.DurationMs, ok
+// AssetCatalog is what Validate needs to know about the platform's assets. The server implements it over the assets
+// table; tests use MemoryCatalog. Validate looks each asset up once per item.
+type AssetCatalog interface {
+	// Lookup returns the asset with the given id, and false if the asset is not known.
+	Lookup(assetID string) (Asset, bool)
 }
 
-// Rights implements AssetCatalog.
-func (c MemoryCatalog) Rights(assetID string) (AssetKind, Rights, bool) {
+// MemoryCatalog is an in-memory AssetCatalog keyed by asset id.
+type MemoryCatalog map[string]Asset
+
+// Lookup implements AssetCatalog.
+func (c MemoryCatalog) Lookup(assetID string) (Asset, bool) {
 	a, ok := c[assetID]
-	return a.Kind, a.Rights, ok
+	return a, ok
 }
 
 // ParseMemoryCatalog reads the format of fixtures/assets.json: {"assets": {"<asset id>": {"duration_ms", "kind",
 // "rights"}}}. Other top-level keys (the file's description) are ignored.
 func ParseMemoryCatalog(data []byte) (MemoryCatalog, error) {
 	var f struct {
-		Assets map[string]AssetInfo `json:"assets"`
+		Assets map[string]Asset `json:"assets"`
 	}
 	if err := json.Unmarshal(data, &f); err != nil {
 		return nil, fmt.Errorf("asset catalog: %w", err)

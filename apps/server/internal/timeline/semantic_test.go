@@ -39,7 +39,7 @@ func baseSpec() *Spec {
 	return &Spec{
 		Schema:  SchemaVersion,
 		Output:  Output{Format: Format9x16, Width: 1080, Height: 1920, FPS: 30, Background: "#000000"},
-		Tracks:  []Track{VideoTrack{ID: "main", Items: []VideoItem{clipAt("c1", 0, 5000, 0)}}},
+		Tracks:  []Track{&VideoTrack{ID: "main", Items: []VideoItem{clipAt("c1", 0, 5000, 0)}}},
 		Markers: []Marker{},
 	}
 }
@@ -52,7 +52,7 @@ func withFormat(s *Spec, f Format) *Spec {
 }
 
 func withClips(s *Spec, clips ...VideoItem) *Spec {
-	s.Tracks[0] = VideoTrack{ID: "main", Items: clips}
+	s.Tracks[0] = &VideoTrack{ID: "main", Items: clips}
 	return s
 }
 
@@ -61,32 +61,32 @@ func addTrack(s *Spec, t Track) *Spec {
 	return s
 }
 
-func textTrack(items ...TextItem) TextTrack { return TextTrack{ID: "text", Items: items} }
+func textTrack(items ...TextItem) *TextTrack { return &TextTrack{ID: "text", Items: items} }
 
 func anchored(id string, at, dur int64) TextItem {
 	return TextItem{ID: id, AtMs: at, DurationMs: dur, Text: "Hello", Style: "title_bold", Anchor: AnchorCenter}
 }
 
-func audioTrack(items ...AudioItem) AudioTrack { return AudioTrack{ID: "sound", Items: items} }
+func audioTrack(items ...AudioItem) *AudioTrack { return &AudioTrack{ID: "sound", Items: items} }
 
 func ptr[T any](v T) *T { return &v }
 
-func trend(id string, at, offset int64, dur *int64) TrendSound {
-	return TrendSound{
+func trend(id string, at, offset int64, dur *int64) *TrendSound {
+	return &TrendSound{
 		AudioCommon: AudioCommon{ID: id, AtMs: at, SourceOffsetMs: offset, Export: ExportCueOnly, DurationMs: dur},
 		TrendID:     trendID,
 	}
 }
 
-func licensed(id, asset string, at, offset int64, dur *int64) LicensedTrack {
-	return LicensedTrack{
+func licensed(id, asset string, at, offset int64, dur *int64) *LicensedTrack {
+	return &LicensedTrack{
 		AudioCommon: AudioCommon{ID: id, AtMs: at, SourceOffsetMs: offset, Export: ExportLicensed, DurationMs: dur},
 		AssetID:     asset, LicenseID: licenseID,
 	}
 }
 
-func creator(id, asset string, at, offset int64, dur *int64) CreatorAudio {
-	return CreatorAudio{
+func creator(id, asset string, at, offset int64, dur *int64) *CreatorAudio {
+	return &CreatorAudio{
 		AudioCommon: AudioCommon{ID: id, AtMs: at, SourceOffsetMs: offset, Export: ExportLicensed, DurationMs: dur},
 		AssetID:     asset,
 	}
@@ -231,7 +231,8 @@ func TestAudioChecks(t *testing.T) {
 		{"licensed track with a licence", licensed("s1", assetLicensed, 0, 0, nil), nil},
 		{"licensed track on an asset without a licence record", licensed("s1", assetNoRights, 0, 0, nil), []Code{CodeUnlicensedAudio}},
 		{"licensed track on an attested asset", licensed("s1", assetAttested, 0, 0, nil), []Code{CodeUnlicensedAudio}},
-		{"licensed track on a video asset", licensed("s1", assetVideo60, 0, 0, nil), []Code{CodeUnlicensedAudio}},
+		{"licensed track on a video asset", licensed("s1", assetVideo60, 0, 0, nil), []Code{CodeWrongAssetKind}},
+		{"creator audio on a video asset", creator("s1", assetVideo60, 0, 0, nil), []Code{CodeWrongAssetKind}},
 		{"licensed track on an unknown asset", licensed("s1", assetUnknown, 0, 0, nil), []Code{CodeUnknownAsset}},
 		{"creator audio with an attestation", creator("s1", assetAttested, 0, 0, nil), nil},
 		{"creator audio without an attestation", creator("s1", assetNoRights, 0, 0, nil), []Code{CodeUnlicensedAudio}},
@@ -278,7 +279,7 @@ func TestAudioChecks(t *testing.T) {
 
 func TestDuplicateIDs(t *testing.T) {
 	t.Run("track id equals an item id", func(t *testing.T) {
-		s := addTrack(baseSpec(), TextTrack{ID: "c1", Items: nil})
+		s := addTrack(baseSpec(), &TextTrack{ID: "c1", Items: nil})
 		wantCodes(t, validateSpec(t, s), CodeDuplicateID)
 	})
 	t.Run("three uses report two issues", func(t *testing.T) {
@@ -401,7 +402,7 @@ func TestSchemaIssueCapAndPaths(t *testing.T) {
 
 func TestMarshalNormalisesNilSlices(t *testing.T) {
 	b, err := json.Marshal(&Spec{Schema: SchemaVersion, Output: Output{Format: Format1x1, Width: 1080, Height: 1080, FPS: 30, Background: "#ffffff"},
-		Tracks: []Track{VideoTrack{ID: "main"}, TextTrack{ID: "text"}, AudioTrack{ID: "sound"}, CaptionsTrack{ID: "caps", From: "transcript", Style: "chunk", Enabled: true}}})
+		Tracks: []Track{&VideoTrack{ID: "main"}, &TextTrack{ID: "text"}, &AudioTrack{ID: "sound"}, &CaptionsTrack{ID: "caps", From: "transcript", Style: "chunk", Enabled: true}}})
 	if err != nil {
 		t.Fatal(err)
 	}

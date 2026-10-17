@@ -25,6 +25,8 @@ const SEMANTIC_CODES = [
   "transition_too_long",
   "unlicensed_audio",
   "fade_too_long",
+  "wrong_asset_kind",
+  "first_transition",
 ];
 
 interface Expect {

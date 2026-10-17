@@ -197,16 +197,13 @@ func marshalCompact(s *Spec) ([]byte, error) { return s.MarshalJSON() }
 
 func TestMemoryCatalog(t *testing.T) {
 	cat := fixtureCatalog(t)
-	if d, ok := cat.Duration("ast_01j3er3kwcgrasdgd4aznmxxe0"); !ok || d != 60000 {
-		t.Fatalf("duration %d %v", d, ok)
+	if a, ok := cat.Lookup("ast_01j3er3kwcgrasdgd4aznmxxe0"); !ok || a != (Asset{DurationMs: 60000, Kind: AssetVideo, Rights: RightsAttested}) {
+		t.Fatalf("lookup %+v %v", a, ok)
 	}
-	if k, r, ok := cat.Rights("ast_01j0h9rew727hk2pt0v5b31h44"); !ok || k != AssetAudio || r != RightsLicensed {
-		t.Fatalf("rights %v %v %v", k, r, ok)
+	if a, ok := cat.Lookup("ast_01j0h9rew727hk2pt0v5b31h44"); !ok || a.Kind != AssetAudio || a.Rights != RightsLicensed {
+		t.Fatalf("lookup %+v %v", a, ok)
 	}
-	if _, ok := cat.Duration(assetUnknown); ok {
-		t.Fatal("unknown asset reported as known")
-	}
-	if _, _, ok := cat.Rights(assetUnknown); ok {
+	if _, ok := cat.Lookup(assetUnknown); ok {
 		t.Fatal("unknown asset reported as known")
 	}
 	if _, err := ParseMemoryCatalog([]byte(`{`)); err == nil {

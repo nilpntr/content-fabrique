@@ -153,8 +153,10 @@ const (
 	TrackAudio    TrackType = "audio"
 )
 
-// Track is one of VideoTrack, TextTrack, CaptionsTrack and AudioTrack (all value types). The "type" field tells them
-// apart in JSON; Spec's decoder picks the Go type from it, and each type writes its own "type" when encoded.
+// Track is one of *VideoTrack, *TextTrack, *CaptionsTrack and *AudioTrack. The "type" field tells them apart in JSON;
+// Spec's decoder picks the Go type from it, and each type writes its own "type" when encoded. The interface methods
+// have pointer receivers on purpose: a value (VideoTrack{...}) does not satisfy Track, so it cannot be put in
+// Spec.Tracks by mistake, and a type switch on the pointer types sees every track.
 type Track interface {
 	// TrackID is the track's id.
 	TrackID() string
@@ -191,28 +193,28 @@ type AudioTrack struct {
 }
 
 // TrackID implements Track.
-func (t VideoTrack) TrackID() string { return t.ID }
+func (t *VideoTrack) TrackID() string { return t.ID }
 
 // TrackID implements Track.
-func (t TextTrack) TrackID() string { return t.ID }
+func (t *TextTrack) TrackID() string { return t.ID }
 
 // TrackID implements Track.
-func (t CaptionsTrack) TrackID() string { return t.ID }
+func (t *CaptionsTrack) TrackID() string { return t.ID }
 
 // TrackID implements Track.
-func (t AudioTrack) TrackID() string { return t.ID }
+func (t *AudioTrack) TrackID() string { return t.ID }
 
 // TrackType implements Track.
-func (VideoTrack) TrackType() TrackType { return TrackVideo }
+func (*VideoTrack) TrackType() TrackType { return TrackVideo }
 
 // TrackType implements Track.
-func (TextTrack) TrackType() TrackType { return TrackText }
+func (*TextTrack) TrackType() TrackType { return TrackText }
 
 // TrackType implements Track.
-func (CaptionsTrack) TrackType() TrackType { return TrackCaptions }
+func (*CaptionsTrack) TrackType() TrackType { return TrackCaptions }
 
 // TrackType implements Track.
-func (AudioTrack) TrackType() TrackType { return TrackAudio }
+func (*AudioTrack) TrackType() TrackType { return TrackAudio }
 
 // UppercaseOrDefault is the captions' uppercase flag, or true when the spec leaves it out.
 func (t CaptionsTrack) UppercaseOrDefault() bool {
@@ -362,8 +364,8 @@ const (
 	AudioCreatorAudio  AudioKind = "creator_audio"
 )
 
-// AudioItem is one of TrendSound, LicensedTrack and CreatorAudio (all value types). The "kind" field tells them
-// apart in JSON; each type writes its own "kind" when encoded.
+// AudioItem is one of *TrendSound, *LicensedTrack and *CreatorAudio. The "kind" field tells them apart in JSON; each
+// type writes its own "kind" when encoded. As with Track, the interface is satisfied by the pointer types only.
 type AudioItem interface {
 	// AudioKind is the item's discriminator.
 	AudioKind() AudioKind
@@ -437,19 +439,19 @@ type CreatorAudio struct {
 }
 
 // AudioKind implements AudioItem.
-func (TrendSound) AudioKind() AudioKind { return AudioTrendSound }
+func (*TrendSound) AudioKind() AudioKind { return AudioTrendSound }
 
 // AudioKind implements AudioItem.
-func (LicensedTrack) AudioKind() AudioKind { return AudioLicensedTrack }
+func (*LicensedTrack) AudioKind() AudioKind { return AudioLicensedTrack }
 
 // AudioKind implements AudioItem.
-func (CreatorAudio) AudioKind() AudioKind { return AudioCreatorAudio }
+func (*CreatorAudio) AudioKind() AudioKind { return AudioCreatorAudio }
 
 // AssetRef implements AudioItem.
-func (TrendSound) AssetRef() (string, bool) { return "", false }
+func (*TrendSound) AssetRef() (string, bool) { return "", false }
 
 // AssetRef implements AudioItem.
-func (l LicensedTrack) AssetRef() (string, bool) { return l.AssetID, true }
+func (l *LicensedTrack) AssetRef() (string, bool) { return l.AssetID, true }
 
 // AssetRef implements AudioItem.
-func (c CreatorAudio) AssetRef() (string, bool) { return c.AssetID, true }
+func (c *CreatorAudio) AssetRef() (string, bool) { return c.AssetID, true }
