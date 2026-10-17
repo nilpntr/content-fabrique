@@ -118,7 +118,7 @@ func TestPlanGrantRevokeShow(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("grant = %d\n%s%s", code, out, errOut)
 	}
-	for _, want := range []string{"\"Fit Studio\" (wks_", "plan        creator", "status      active", "period end  none (does not end)", "active      yes"} {
+	for _, want := range []string{"\"Fit Studio\" (wks_", "plan        creator", "status      active", "period end  none (does not end)", "active      yes", "credits     150 granted (allowance of creator)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("grant output lacks %q:\n%s", want, out)
 		}
@@ -143,6 +143,14 @@ func TestPlanGrantRevokeShow(t *testing.T) {
 	code, out, errOut = r.run("grant", "--user", email, "--plan", "pro", "--until", "2999-12-31", "--yes")
 	if code != 0 || !strings.Contains(out, "plan        pro") || !strings.Contains(out, "period end  3000-01-01T00:00:00Z") || !strings.Contains(out, "active      yes") {
 		t.Fatalf("grant --until = %d\n%s%s", code, out, errOut)
+	}
+	// A different plan replaces the allowance: pro's 400 are granted and what was left of creator's 150 expires.
+	if !strings.Contains(out, "credits     400 granted (allowance of pro)") || !strings.Contains(out, "150 left of the previous plan's allowance expired") {
+		t.Errorf("a plan change did not grant the new allowance:\n%s", out)
+	}
+	// The same plan again (to move the end, say) adds nothing.
+	if code, out, _ := r.run("grant", "--user", email, "--plan", "pro", "--until", "2999-12-31", "--yes"); code != 0 || !strings.Contains(out, "credits     0 granted") {
+		t.Errorf("a second grant of the same plan granted credits again:\n%s", out)
 	}
 	// A date in the past is accepted and says so: the plan is not active (that is how expiry is tried out).
 	code, out, errOut = r.run("grant", "--user", email, "--plan", "pro", "--until", "2020-01-01", "--yes")
@@ -416,7 +424,7 @@ func TestPlanCandidateNamesAreQuoted(t *testing.T) {
 	}
 	// The same for the result of a grant.
 	code, out, errOut := r.run("grant", "--user", both, "--plan", "pro", "--workspace", r.workspace(evil).ID.String(), "--yes")
-	if code != 0 || strings.ContainsAny(out, "\x1b\r") || len(strings.Split(strings.TrimSpace(out), "\n")) != 6 {
+	if code != 0 || strings.ContainsAny(out, "\x1b\r") || len(strings.Split(strings.TrimSpace(out), "\n")) != 7 {
 		t.Fatalf("grant for the evil name = %d\n%q%s", code, out, errOut)
 	}
 }

@@ -88,7 +88,7 @@ SET status = 'running', epoch = epoch + 1, started_at = COALESCE(started_at, now
 WHERE workspace_id = $1 AND id = $2
   AND (status = 'queued'
        OR (status = 'running' AND COALESCE(heartbeat_at, '-infinity'::timestamptz) < now() - make_interval(secs => $3::int)))
-RETURNING id, workspace_id, agent, stage, parent_run_id, project_id, status, input, output, routing_profile, model, effort, max_tokens, escalated, input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, tool_calls, cost_micros, active_ms, budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to, failure_reason, cancel_requested_at, heartbeat_at, epoch, resumes, resume_enqueued_at, last_seq, started_at, finished_at, created_at, updated_at, started_by
+RETURNING id, workspace_id, agent, stage, parent_run_id, project_id, status, input, output, routing_profile, model, effort, max_tokens, escalated, input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, tool_calls, cost_micros, active_ms, budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to, failure_reason, cancel_requested_at, heartbeat_at, epoch, resumes, resume_enqueued_at, last_seq, started_at, finished_at, created_at, updated_at, started_by, min_output_tokens
 `
 
 type ClaimAgentRunParams struct {
@@ -143,6 +143,7 @@ func (q *Queries) ClaimAgentRun(ctx context.Context, arg ClaimAgentRunParams) (A
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.StartedBy,
+		&i.MinOutputTokens,
 	)
 	return i, err
 }
@@ -150,13 +151,13 @@ func (q *Queries) ClaimAgentRun(ctx context.Context, arg ClaimAgentRunParams) (A
 const createAgentRun = `-- name: CreateAgentRun :one
 
 INSERT INTO agent_runs (
-    workspace_id, agent, stage, parent_run_id, project_id, input, routing_profile, model, effort, max_tokens,
+    workspace_id, agent, stage, parent_run_id, project_id, input, routing_profile, model, effort, max_tokens, min_output_tokens,
     budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to, started_by
 ) VALUES (
-    $1, $2, $3, $4, NULLIF($5::uuid, '00000000-0000-0000-0000-000000000000'::uuid), $6, $7, $8, $9, $10,
-    $11, $12, $13, $14, $15, $16
+    $1, $2, $3, $4, NULLIF($5::uuid, '00000000-0000-0000-0000-000000000000'::uuid), $6, $7, $8, $9, $10, $11,
+    $12, $13, $14, $15, $16, $17
 )
-RETURNING id, workspace_id, agent, stage, parent_run_id, project_id, status, input, output, routing_profile, model, effort, max_tokens, escalated, input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, tool_calls, cost_micros, active_ms, budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to, failure_reason, cancel_requested_at, heartbeat_at, epoch, resumes, resume_enqueued_at, last_seq, started_at, finished_at, created_at, updated_at, started_by
+RETURNING id, workspace_id, agent, stage, parent_run_id, project_id, status, input, output, routing_profile, model, effort, max_tokens, escalated, input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, tool_calls, cost_micros, active_ms, budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to, failure_reason, cancel_requested_at, heartbeat_at, epoch, resumes, resume_enqueued_at, last_seq, started_at, finished_at, created_at, updated_at, started_by, min_output_tokens
 `
 
 type CreateAgentRunParams struct {
@@ -170,6 +171,7 @@ type CreateAgentRunParams struct {
 	Model             string
 	Effort            string
 	MaxTokens         int32
+	MinOutputTokens   int32
 	BudgetMicros      int64
 	BudgetTokens      int64
 	BudgetToolCalls   int32
@@ -192,6 +194,7 @@ func (q *Queries) CreateAgentRun(ctx context.Context, arg CreateAgentRunParams) 
 		arg.Model,
 		arg.Effort,
 		arg.MaxTokens,
+		arg.MinOutputTokens,
 		arg.BudgetMicros,
 		arg.BudgetTokens,
 		arg.BudgetToolCalls,
@@ -239,12 +242,13 @@ func (q *Queries) CreateAgentRun(ctx context.Context, arg CreateAgentRunParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.StartedBy,
+		&i.MinOutputTokens,
 	)
 	return i, err
 }
 
 const getActiveAgentRunForProject = `-- name: GetActiveAgentRunForProject :one
-SELECT id, workspace_id, agent, stage, parent_run_id, project_id, status, input, output, routing_profile, model, effort, max_tokens, escalated, input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, tool_calls, cost_micros, active_ms, budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to, failure_reason, cancel_requested_at, heartbeat_at, epoch, resumes, resume_enqueued_at, last_seq, started_at, finished_at, created_at, updated_at, started_by FROM agent_runs
+SELECT id, workspace_id, agent, stage, parent_run_id, project_id, status, input, output, routing_profile, model, effort, max_tokens, escalated, input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, tool_calls, cost_micros, active_ms, budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to, failure_reason, cancel_requested_at, heartbeat_at, epoch, resumes, resume_enqueued_at, last_seq, started_at, finished_at, created_at, updated_at, started_by, min_output_tokens FROM agent_runs
 WHERE workspace_id = $1 AND project_id = $2 AND agent = $3
   AND status IN ('queued', 'running', 'waiting_input')
 ORDER BY created_at
@@ -300,12 +304,13 @@ func (q *Queries) GetActiveAgentRunForProject(ctx context.Context, arg GetActive
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.StartedBy,
+		&i.MinOutputTokens,
 	)
 	return i, err
 }
 
 const getAgentRun = `-- name: GetAgentRun :one
-SELECT id, workspace_id, agent, stage, parent_run_id, project_id, status, input, output, routing_profile, model, effort, max_tokens, escalated, input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, tool_calls, cost_micros, active_ms, budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to, failure_reason, cancel_requested_at, heartbeat_at, epoch, resumes, resume_enqueued_at, last_seq, started_at, finished_at, created_at, updated_at, started_by FROM agent_runs WHERE workspace_id = $1 AND id = $2
+SELECT id, workspace_id, agent, stage, parent_run_id, project_id, status, input, output, routing_profile, model, effort, max_tokens, escalated, input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, tool_calls, cost_micros, active_ms, budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to, failure_reason, cancel_requested_at, heartbeat_at, epoch, resumes, resume_enqueued_at, last_seq, started_at, finished_at, created_at, updated_at, started_by, min_output_tokens FROM agent_runs WHERE workspace_id = $1 AND id = $2
 `
 
 type GetAgentRunParams struct {
@@ -355,6 +360,7 @@ func (q *Queries) GetAgentRun(ctx context.Context, arg GetAgentRunParams) (Agent
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.StartedBy,
+		&i.MinOutputTokens,
 	)
 	return i, err
 }
@@ -537,7 +543,7 @@ func (q *Queries) MarkAgentRunForResume(ctx context.Context, arg MarkAgentRunFor
 const queueAgentRunAfterReply = `-- name: QueueAgentRunAfterReply :one
 UPDATE agent_runs SET status = 'queued'
 WHERE workspace_id = $1 AND id = $2 AND status = 'waiting_input'
-RETURNING id, workspace_id, agent, stage, parent_run_id, project_id, status, input, output, routing_profile, model, effort, max_tokens, escalated, input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, tool_calls, cost_micros, active_ms, budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to, failure_reason, cancel_requested_at, heartbeat_at, epoch, resumes, resume_enqueued_at, last_seq, started_at, finished_at, created_at, updated_at, started_by
+RETURNING id, workspace_id, agent, stage, parent_run_id, project_id, status, input, output, routing_profile, model, effort, max_tokens, escalated, input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, tool_calls, cost_micros, active_ms, budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to, failure_reason, cancel_requested_at, heartbeat_at, epoch, resumes, resume_enqueued_at, last_seq, started_at, finished_at, created_at, updated_at, started_by, min_output_tokens
 `
 
 type QueueAgentRunAfterReplyParams struct {
@@ -588,6 +594,7 @@ func (q *Queries) QueueAgentRunAfterReply(ctx context.Context, arg QueueAgentRun
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.StartedBy,
+		&i.MinOutputTokens,
 	)
 	return i, err
 }
@@ -627,7 +634,7 @@ SET cancel_requested_at = COALESCE(cancel_requested_at, now()),
     finished_at = CASE WHEN status IN ('queued', 'waiting_input') THEN now() ELSE finished_at END,
     output = CASE WHEN status IN ('queued', 'waiting_input') THEN $1::jsonb ELSE output END
 WHERE workspace_id = $2 AND id = $3 AND status IN ('queued', 'running', 'waiting_input')
-RETURNING id, workspace_id, agent, stage, parent_run_id, project_id, status, input, output, routing_profile, model, effort, max_tokens, escalated, input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, tool_calls, cost_micros, active_ms, budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to, failure_reason, cancel_requested_at, heartbeat_at, epoch, resumes, resume_enqueued_at, last_seq, started_at, finished_at, created_at, updated_at, started_by
+RETURNING id, workspace_id, agent, stage, parent_run_id, project_id, status, input, output, routing_profile, model, effort, max_tokens, escalated, input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, tool_calls, cost_micros, active_ms, budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to, failure_reason, cancel_requested_at, heartbeat_at, epoch, resumes, resume_enqueued_at, last_seq, started_at, finished_at, created_at, updated_at, started_by, min_output_tokens
 `
 
 type RequestAgentRunCancelParams struct {
@@ -680,6 +687,7 @@ func (q *Queries) RequestAgentRunCancel(ctx context.Context, arg RequestAgentRun
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.StartedBy,
+		&i.MinOutputTokens,
 	)
 	return i, err
 }
@@ -694,7 +702,7 @@ SET status = CASE WHEN $1::text = 'waiting_input' AND cancel_requested_at IS NOT
     finished_at = CASE WHEN $1::text IN ('succeeded', 'failed', 'cancelled')
                          OR ($1::text = 'waiting_input' AND cancel_requested_at IS NOT NULL) THEN now() ELSE finished_at END
 WHERE workspace_id = $4 AND id = $5 AND epoch = $6 AND status = 'running'
-RETURNING id, workspace_id, agent, stage, parent_run_id, project_id, status, input, output, routing_profile, model, effort, max_tokens, escalated, input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, tool_calls, cost_micros, active_ms, budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to, failure_reason, cancel_requested_at, heartbeat_at, epoch, resumes, resume_enqueued_at, last_seq, started_at, finished_at, created_at, updated_at, started_by
+RETURNING id, workspace_id, agent, stage, parent_run_id, project_id, status, input, output, routing_profile, model, effort, max_tokens, escalated, input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, tool_calls, cost_micros, active_ms, budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to, failure_reason, cancel_requested_at, heartbeat_at, epoch, resumes, resume_enqueued_at, last_seq, started_at, finished_at, created_at, updated_at, started_by, min_output_tokens
 `
 
 type SetAgentRunStateParams struct {
@@ -757,6 +765,7 @@ func (q *Queries) SetAgentRunState(ctx context.Context, arg SetAgentRunStatePara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.StartedBy,
+		&i.MinOutputTokens,
 	)
 	return i, err
 }

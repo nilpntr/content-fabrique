@@ -15,6 +15,9 @@ export interface paths {
          * The signed-in user, the active workspace and its plan
          * @description Open to a workspace without a plan: it is how the web app finds out. A plan that cannot be read does not fail the
          *     request; it is reported as `entitlements.status = "unknown"` (never active).
+         *
+         *     `credits` is the workspace's credit balance (spend control, D-31). It is left out when the balance cannot be read, which
+         *     does not fail the request either.
          */
         get: operations["getMe"];
         put?: never;
@@ -420,8 +423,27 @@ export interface paths {
          *     (`422 assets_not_usable`; an audio file is not a clip to cut).
          *     `instructions` is the creator's extra instruction for this run (text, at most 2,000 characters; the model treats it as data
          *     that steers the content of the video, nothing else). `profile` picks the model profile of the run; the default is the
-         *     server's. `budget_usd` is the run's spend cap in dollars: the default is $5, and a larger value is cut to the server's maximum
-         *     (also $5 unless the operator raised it). The cap is enforced before every model call.
+         *     server's.
+         *
+         *     **Credits.** The run costs credits, set aside (held) in the same step that creates the run: the server decides from the
+         *     project whether it is the first edit (6 credits: the project has no charged edit yet) or a revision (2 credits), and the
+         *     price comes from the server's price list, never from the request. A workspace with fewer credits available than that gets
+         *     `402 credits_exhausted` and no run is created (a workspace with no active plan gets `402 plan_required`, as everywhere). A workspace
+         *     on a BYOK plan (studio) pays for the model with its own Anthropic key: until it has one the start is refused with
+         *     `402 byok_key_required` and no run is created.
+         *
+         *     A run that is cancelled before it made anything, finds nothing to change, or fails for a reason of the creator's own (it used
+         *     its whole budget without anything usable, the model declined the content, the project no longer fits the model) is released:
+         *     no credits are charged, but it has used model time. A workspace may have 5 such runs per UTC day on every plan, counting the runs
+         *     it has in progress and the new one; the next start is refused with `429 too_many_uncharged_runs` until the next UTC day. Runs
+         *     that cost nothing, runs that are charged, and failures on our side do not count. (A workspace that is out of credits is told
+         *     that first, with `402 credits_exhausted`.)
+         *     The credits are charged when the run succeeds and released when it fails. When the creator cancels it they are charged if the
+         *     run had already made a timeline version (the work is in the project), and released if it had not. `GET /v1/me` has the balance.
+         *
+         *     The run's spend cap is set by the server from the workspace's plan and the kind of edit; the request cannot change it. It is
+         *     enforced before every model call. `budget_usd` is accepted for compatibility (and still has to be a positive number) but is
+         *     ignored.
          */
         post: operations["startEdit"];
         delete?: never;
@@ -531,6 +553,13 @@ export interface paths {
          *     The version must exist and validate against the project's footage as it is now (`422 timeline_invalid` otherwise: an asset
          *     deleted since the edit, say). At most 5 renders per workspace are in flight at once (`429 too_many_renders`). Only
          *     owners and editors may render.
+         *
+         *     A `final` render (the export) costs no credits but must be of paid-for work. The project needs an edit that was charged (no
+         *     successful editor run: `422 edit_not_charged`), and the version must be covered: the last editor-made version at or before
+         *     it must come from a run that was charged. A person's own edits on top of a charged version are free to export; a version
+         *     made by a run that failed or was released, and edits made on top of it, are refused with `422 version_not_charged` until a
+         *     later editor run is charged. A queued final render is recorded on the credit ledger as the `export.final` action at 0
+         *     credits. Previews of any version are never refused.
          */
         post: operations["createRender"];
         delete?: never;
@@ -643,7 +672,7 @@ export interface components {
          *     code as a generic failure of its HTTP status.
          * @enum {string}
          */
-        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured" | "assets_not_usable" | "version_conflict" | "invalid_ops" | "no_change" | "timeline_invalid" | "too_many_renders" | "run_in_progress" | "run_not_waiting" | "model_not_configured";
+        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "credits_exhausted" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured" | "assets_not_usable" | "version_conflict" | "invalid_ops" | "no_change" | "timeline_invalid" | "too_many_renders" | "run_in_progress" | "run_not_waiting" | "model_not_configured" | "edit_not_charged" | "too_many_uncharged_runs" | "byok_key_required" | "version_not_charged";
         ErrorDetail: {
             code: components["schemas"]["ErrorCode"];
             /** @description For people. It may change; do not branch on it. */
@@ -733,6 +762,33 @@ export interface components {
             user: components["schemas"]["MeUser"];
             workspace: components["schemas"]["MeWorkspace"];
             entitlements: components["schemas"]["Entitlements"];
+            credits?: components["schemas"]["Credits"];
+        };
+        /** @description Credits that are not the period's allowance (bought or given) and when they expire. */
+        CreditTopUp: {
+            /** @description What is left of this top-up. */
+            credits: number;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        /**
+         * @description The workspace's credits (1 video = 10 credits). Credits in use by a run that has not finished are already taken out of
+         *     `available`. Allowance that is not used by the end of its period expires; top-ups last 12 months. The allowance is used first,
+         *     then the top-ups, earliest expiry first.
+         */
+        Credits: {
+            /** @description What a new action can use now, allowance and top-ups together. */
+            available: number;
+            /** @description The size of the current period's allowance; 0 when the workspace has none. */
+            allowance: number;
+            /**
+             * Format: date-time
+             * @description When the current allowance expires and the next is granted. `null` when there is none, or it does not end (a trial's).
+             */
+            period_end: string | null;
+            /** @description At least 80 % of the allowance is used (`available` is at most a fifth of `allowance`). Always false without an allowance. */
+            low: boolean;
+            top_ups: components["schemas"]["CreditTopUp"][];
         };
         /** @description The entitlements, flattened, plus where the plan came from and what it includes. */
         WorkspacePlanResponse: components["schemas"]["Entitlements"] & {
@@ -1227,7 +1283,7 @@ export interface components {
             /** @description Extra instructions for this run, in the creator's words. Data for the model, not commands. */
             instructions?: string;
             profile?: components["schemas"]["RunProfile"];
-            /** @description The run's spend cap in dollars. Default 5; a larger value is cut to the server's maximum. */
+            /** @description Ignored. The run's spend cap is set by the server from the plan (it used to be the caller's, up to $5). */
             budget_usd?: number;
         };
         ReplyRequest: {
@@ -2412,6 +2468,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description `too_many_uncharged_runs`: the workspace has had today's editor runs that spent money and ended without a charge. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             500: components["responses"]["InternalError"];
             503: components["responses"]["Unavailable"];
         };
@@ -2602,7 +2667,11 @@ export interface operations {
             402: components["responses"]["PlanRequired"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `timeline_invalid`: the version does not validate against the project's footage now. */
+            /**
+             * @description `timeline_invalid`: the version does not validate against the project's footage now. Or `edit_not_charged`: a final
+             *     render of a project that has no charged edit. Or `version_not_charged`: a final render of a version that holds editor
+             *     work that was not charged.
+             */
             422: {
                 headers: {
                     [name: string]: unknown;

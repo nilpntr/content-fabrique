@@ -17,6 +17,10 @@ sql:
           # Nullable ids stay pgtype.UUID: ids.ID writes the nil UUID, not NULL, for its zero value.
           - column: "usage_ledger.project_id"
             go_type: { import: "github.com/jackc/pgx/v5/pgtype", type: "UUID" }
+          - column: "credit_ledger.project_id"
+            go_type: { import: "github.com/jackc/pgx/v5/pgtype", type: "UUID" }
+          - column: "credit_holds.project_id"
+            go_type: { import: "github.com/jackc/pgx/v5/pgtype", type: "UUID" }
           - column: "spend_holds.workspace_id"
             go_type: { import: "github.com/jackc/pgx/v5/pgtype", type: "UUID" }
           - column: "spend_counters.workspace_id"

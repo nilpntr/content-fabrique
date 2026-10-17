@@ -2,9 +2,11 @@ package auth
 
 import (
 	"context"
+	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/api"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
+	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
@@ -24,9 +26,34 @@ func (s *apiServer) GetMe(ctx context.Context, _ api.GetMeRequestObject) (api.Ge
 		s.logger.ErrorContext(ctx, "reading the workspace plan failed", "error", err)
 		e = store.Unknown(p.WorkspaceID)
 	}
-	return api.GetMe200JSONResponse{
+	out := api.GetMe200JSONResponse{
 		User:         api.MeUser{Id: p.UserID.String(), Email: p.Email},
 		Workspace:    api.MeWorkspace{Id: p.WorkspaceID.String(), Name: p.WorkspaceName, Role: api.Role(p.Role)},
 		Entitlements: entitlementsOf(e),
-	}, nil
+	}
+	// The credits are the workspace's own (the Principal's workspace, nothing from the request). A balance that cannot be read is left
+	// out, like an unreadable plan is reported as unknown: who the caller is does not depend on it.
+	if s.credits != nil {
+		if b, err := s.credits.CreditBalance(ctx, p.WorkspaceID, time.Now()); err != nil {
+			s.logger.ErrorContext(ctx, "reading the workspace credits failed", "error", err)
+		} else {
+			c := creditsOf(b)
+			out.Credits = &c
+		}
+	}
+	return out, nil
+}
+
+// CreditReader reads the credit balance of a workspace. *store.Store is the real one.
+type CreditReader interface {
+	CreditBalance(ctx context.Context, ws ids.WorkspaceID, now time.Time) (store.CreditBalance, error)
+}
+
+// creditsOf is the balance as the API shows it. low is "at least 80 % of the allowance is used": what is available is at most a fifth of it.
+func creditsOf(b store.CreditBalance) api.Credits {
+	top := make([]api.CreditTopUp, 0, len(b.TopUps))
+	for _, t := range b.TopUps {
+		top = append(top, api.CreditTopUp{Credits: t.Credits, ExpiresAt: t.ExpiresAt})
+	}
+	return api.Credits{Available: b.Available, Allowance: b.Allowance, PeriodEnd: b.PeriodEnd, Low: b.Allowance > 0 && b.Available*5 <= b.Allowance, TopUps: top}
 }

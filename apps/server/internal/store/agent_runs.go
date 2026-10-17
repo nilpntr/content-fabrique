@@ -67,6 +67,8 @@ type NewAgentRun struct {
 	Model          string
 	Effort         string
 	MaxTokens      int
+	// MinOutputTokens is the smallest max_tokens a call of the run may be shortened to (0: the llm client's default).
+	MinOutputTokens int
 
 	BudgetMicros      int64
 	BudgetTokens      int64
@@ -84,7 +86,7 @@ func (s *Store) CreateAgentRun(ctx context.Context, ws ids.WorkspaceID, in NewAg
 	}
 	r, err := s.q.CreateAgentRun(ctx, db.CreateAgentRunParams{
 		WorkspaceID: ws, Agent: in.Agent, Stage: in.Stage, ParentRunID: pgUUID(in.ParentRunID), ProjectID: in.ProjectID,
-		Input: in.Input, RoutingProfile: in.RoutingProfile, Model: in.Model, Effort: in.Effort, MaxTokens: int32(in.MaxTokens), //nolint:gosec // checked by the caller and the table
+		Input: in.Input, RoutingProfile: in.RoutingProfile, Model: in.Model, Effort: in.Effort, MaxTokens: int32(in.MaxTokens), MinOutputTokens: int32(in.MinOutputTokens), //nolint:gosec // checked by the caller and the table
 		BudgetMicros: in.BudgetMicros, BudgetTokens: in.BudgetTokens, BudgetToolCalls: int32(in.BudgetToolCalls), //nolint:gosec // checked by the caller and the table
 		BudgetWallClockMs: in.BudgetWallClockMs, BilledTo: in.BilledTo, StartedBy: pgUUID(in.StartedBy.UUID),
 	})
@@ -225,9 +227,13 @@ func (s *Store) EndAgentRun(ctx context.Context, ws ids.WorkspaceID, run uuid.UU
 		}
 		if end.Status == AgentWaitingInput && r.Status == AgentCancelled {
 			// A cancel was requested while the run was asking: the cancel wins (the query did it).
-			_, err = tx.AppendAgentEventUnfenced(ctx, ws, run, EventStatus, json.RawMessage(`{"state":"cancelled"}`))
+			if _, err = tx.AppendAgentEventUnfenced(ctx, ws, run, EventStatus, json.RawMessage(`{"state":"cancelled"}`)); err != nil {
+				return err
+			}
 		}
-		return err
+		// The credit hold of the run is settled in the same transaction as its end (P7-01a): the run is finished exactly when its
+		// credits are charged or released, and a replay of the end cannot charge twice.
+		return tx.settleRunCredits(ctx, ws, r, time.Now())
 	})
 	return out, err
 }
@@ -248,9 +254,13 @@ func (s *Store) RequestAgentRunCancel(ctx context.Context, ws ids.WorkspaceID, i
 		}
 		out = r
 		if r.Status == AgentCancelled {
-			_, err = tx.AppendAgentEventUnfenced(ctx, ws, id, EventStatus, event)
+			if _, err = tx.AppendAgentEventUnfenced(ctx, ws, id, EventStatus, event); err != nil {
+				return err
+			}
+			// Cancelled before it ever ran, or while it waited for an answer: charged if the run made a timeline version, released if not.
+			return tx.settleRunCredits(ctx, ws, r, time.Now())
 		}
-		return err
+		return nil
 	})
 	return out, err
 }
@@ -320,6 +330,9 @@ func (s *Store) TouchAgentRun(ctx context.Context, ws ids.WorkspaceID, run uuid.
 	if n == 0 {
 		return ErrRunFenced
 	}
+	// The run is alive: so is its credit hold. A no-op unless the hold is within twenty minutes of its expiry. Best effort: a hold also
+	// lives as long as its run is active, so a failure here must never fail the heartbeat of a healthy run.
+	_ = s.RenewCreditHold(ctx, ws, run, time.Now())
 	return nil
 }
 

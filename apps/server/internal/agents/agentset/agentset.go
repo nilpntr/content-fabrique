@@ -21,6 +21,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/annotations"
 	"github.com/nilpntr/content-fabrique/internal/config"
+	"github.com/nilpntr/content-fabrique/internal/credits"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
 	"github.com/nilpntr/content-fabrique/internal/media"
@@ -73,6 +74,8 @@ type Runtime struct {
 	// Frames is the frame service the editor looks at footage with (and the quick look cuts its candidates with): the same
 	// cache of pictures in object storage. Nil when the process has no object storage and sandbox for it.
 	Frames *editor.FrameService
+	// Credits prices the editor's runs and sets their credits aside (the price list of config/plans over the store).
+	Credits *credits.Service
 	// Service starts, answers and cancels runs.
 	Service *runtime.Service
 	// Runner executes runs; nil for a DefinitionOnly runtime.
@@ -95,6 +98,11 @@ func Open(o Options) (*Runtime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("price table: %w", err)
 	}
+	priceList, err := credits.LoadDefault()
+	if err != nil {
+		return nil, fmt.Errorf("price list: %w", err)
+	}
+	creditsSvc := credits.NewService(o.Store, priceList)
 	router, err := llm.NewRouter(configfiles.Routing(), cmp.Or(settings.RoutingProfile, o.DefaultProfile, "dev-cheap"))
 	if err != nil {
 		return nil, fmt.Errorf("routing: %w", err)
@@ -146,8 +154,8 @@ func Open(o Options) (*Runtime, error) {
 		return nil, err
 	}
 	rt := &Runtime{
-		Settings: settings, Router: router, Factory: factory, Agents: agents, Frames: frames,
-		Service: &runtime.Service{Store: o.Store, Enqueuer: o.Enqueuer, Router: router, Factory: factory, Agents: agents, Inline: o.Inline},
+		Settings: settings, Router: router, Factory: factory, Agents: agents, Frames: frames, Credits: creditsSvc,
+		Service: &runtime.Service{Store: o.Store, Enqueuer: o.Enqueuer, Router: router, Factory: factory, Agents: agents, Credits: creditsSvc, Inline: o.Inline},
 	}
 	if !o.DefinitionOnly {
 		if rt.Runner, err = runtime.NewRunner(runtime.Deps{Store: o.Store, Factory: factory, Agents: agents, Logger: o.Logger}); err != nil {

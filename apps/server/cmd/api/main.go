@@ -13,6 +13,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/assets"
 	"github.com/nilpntr/content-fabrique/internal/auth"
 	"github.com/nilpntr/content-fabrique/internal/config"
+	"github.com/nilpntr/content-fabrique/internal/credits"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
 	"github.com/nilpntr/content-fabrique/internal/renderjobs"
@@ -46,6 +47,11 @@ func main() {
 				assetsSvc  *assets.Service
 				rendersSvc *renderjobs.Service
 			)
+			// The price list and the plans (config/plans): a final export needs a charged edit and is recorded on the credit ledger.
+			priceList, err := credits.LoadDefault()
+			if err != nil {
+				return err
+			}
 			if cfg.ObjectStorageConfigured() {
 				objects, err := storage.New(cfg.Storage())
 				if err != nil {
@@ -58,6 +64,7 @@ func main() {
 				if rendersSvc, err = renderjobs.NewService(st, objects, jobs.NewEnqueuer(river, logger), logger); err != nil {
 					return err
 				}
+				rendersSvc.Credits = credits.NewService(st, priceList)
 			} else {
 				logger.Warn("R2_* is not set: the assets and renders APIs answer 503 storage_not_configured")
 			}

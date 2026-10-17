@@ -22,13 +22,15 @@ type Route struct {
 	// Effort is low, medium, high, xhigh or max; empty leaves the model's default.
 	Effort    string
 	MaxTokens int
+	// MinOutputTokens is the smallest max_tokens a call may be shortened to when the run's budget runs low; 0 is the client's default.
+	MinOutputTokens int
 	// Batch says the stage runs through the Batch API where it can.
 	Batch bool
 }
 
 // Apply sets the model, effort and max_tokens of the request from the route and returns the request.
 func (r Route) Apply(req Request) Request {
-	req.Model, req.Effort, req.MaxTokens = r.Model, r.Effort, r.MaxTokens
+	req.Model, req.Effort, req.MaxTokens, req.MinOutputTokens = r.Model, r.Effort, r.MaxTokens, r.MinOutputTokens
 	return req
 }
 
@@ -95,7 +97,7 @@ func (r *Router) Resolve(profile, stage string) (Route, error) {
 	if _, ok := r.catalog[e.Model]; !ok {
 		return Route{}, fmt.Errorf("llm: profile %q stage %q uses model %q, which config/routing/models.yaml does not list", profile, stage, e.Model)
 	}
-	route := Route{Profile: profile, Stage: stage, Model: e.Model, Effort: e.Effort, MaxTokens: e.MaxTokens, Batch: e.Batch}
+	route := Route{Profile: profile, Stage: stage, Model: e.Model, Effort: e.Effort, MaxTokens: e.MaxTokens, MinOutputTokens: e.MinOutputTokens, Batch: e.Batch}
 	if route.MaxTokens == 0 {
 		route.MaxTokens = DefaultMaxTokens
 	}

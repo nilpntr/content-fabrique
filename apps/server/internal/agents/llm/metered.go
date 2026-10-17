@@ -64,6 +64,8 @@ type reservation struct {
 	// est is the worst-case cost; tokens the input tokens it was worked out from (counted, or an upper bound).
 	est    int64
 	tokens int64
+	// shortened says the request's max_tokens was reduced to fit the run's budget.
+	shortened bool
 
 	budget func(actual int64) // settles the run budget; nil without one
 	hold   *spend.Hold        // the database hold; nil in replay and for an unpriced call
@@ -103,15 +105,17 @@ func (m *metered) Messages(ctx context.Context, req Request) (Response, error) {
 			return Response{}, &UnpricedError{Model: req.Model, TableVersion: m.prices.Version}
 		}
 		m.log.Warn("llm: calling an unpriced model (LLM_ALLOW_UNPRICED=1): spend caps cannot be checked and the ledger records cost 0", "model", req.Model, "stage", m.stage)
-	} else if rsv, err = m.reserveCaps(ctx, req, rsv); err != nil {
+	} else if rsv, err = m.reserveCaps(ctx, &req, rsv); err != nil {
 		return Response{}, err
 	}
+	shortened := rsv.shortened
 	// Whatever happens, a reservation that was not settled is given back (the budget with 0, the hold released), unless the ledger
 	// row could not be written.
 	defer m.done(rsv)
 
 	marks := cacheMarks(req)
 	resp, callErr := m.inner.Messages(ctx, req)
+	resp.Shortened = shortened
 	if resp.Usage.IsZero() {
 		// The request went out and nothing came back (a timeout, a reset, a cut-off body): it may have run and been billed. Charge the
 		// worst case, so caps and budgets stay conservative, and say so in the ledger.
@@ -242,12 +246,25 @@ func upperBoundTokens(req Request) (int64, error) {
 // reserveCaps works out the request's worst-case cost and sets it aside against every cap, before anything is sent.
 // It tries a cheap upper bound of the input tokens first and asks count_tokens only when that does not clear the
 // per-request cap, or when the run budget or the database caps cannot cover the (inflated) bound.
-func (m *metered) reserveCaps(ctx context.Context, req Request, rsv *reservation) (*reservation, error) {
+//
+// When the worst case of the call, at the max_tokens asked for, does not fit what the run's budget has left, max_tokens is cut to the
+// most that does fit (the input's worst case is paid first, the rest buys output), as long as that is at least MinOutputTokens. The
+// budget stays a hard cap: the reservation is of the cut worst case, so the call can never cost more than the run has left. Below
+// the minimum the call is refused with the run-budget error, as before, which the runtime takes as the budget limit. req is changed to
+// what will be sent.
+func (m *metered) reserveCaps(ctx context.Context, reqp *Request, rsv *reservation) (*reservation, error) {
+	req := *reqp
 	marks := cacheMarks(req)
 	tokens, err := upperBoundTokens(req)
 	if err != nil {
 		return nil, err
 	}
+	asked := int64(req.MaxTokens)
+	minOut := int64(req.MinOutputTokens)
+	if minOut <= 0 {
+		minOut = DefaultMinOutputTokens
+	}
+	maxTokens := asked
 	counted := false
 	count := func() error {
 		n, err := m.inner.CountTokens(ctx, req)
@@ -257,7 +274,35 @@ func (m *metered) reserveCaps(ctx context.Context, req Request, rsv *reservation
 		tokens, counted = n, true
 		return nil
 	}
-	estimate := func() (int64, error) { return m.prices.EstimateMax(req.Model, tokens, int64(req.MaxTokens), marks) }
+	estimate := func() (int64, error) {
+		maxTokens = asked
+		if rb, ok := req.Run.Budget.(RemainingBudget); ok {
+			full, err := m.prices.EstimateMax(req.Model, tokens, asked, marks)
+			if err != nil {
+				return 0, err
+			}
+			room := max(rb.Remaining(), 0)
+			if full > room && !counted {
+				// The local bound of the input leans very high; do not give up output room for it. Count the input exactly first.
+				if err := count(); err != nil {
+					return 0, err
+				}
+				if full, err = m.prices.EstimateMax(req.Model, tokens, asked, marks); err != nil {
+					return 0, err
+				}
+			}
+			if full > room {
+				fit, err := m.prices.FitOutputTokens(req.Model, tokens, asked, marks, room)
+				if err != nil {
+					return 0, err
+				}
+				if fit = fit - fit%16; fit >= minOut && thinkingFits(req.Thinking, fit) { // whole sixteens: tidier requests, never more than fit
+					maxTokens = fit
+				}
+			}
+		}
+		return m.prices.EstimateMax(req.Model, tokens, maxTokens, marks)
+	}
 
 	// The local bound is for text. What an image costs depends on its size (up to about 4,800 tokens at the largest
 	// size the models accept, and we send images at full size), so any request with an image is always counted.
@@ -285,6 +330,10 @@ func (m *metered) reserveCaps(ctx context.Context, req Request, rsv *reservation
 		}
 		got, err := m.take(ctx, req, rsv, est, tokens)
 		if err == nil {
+			if maxTokens < asked {
+				reqp.MaxTokens, got.shortened = int(maxTokens), true
+				reqp.Thinking = fitThinking(req.Thinking, maxTokens)
+			}
 			return got, nil
 		}
 		var ce *CapError
@@ -366,6 +415,28 @@ func (m *metered) take(ctx context.Context, req Request, rsv *reservation, est, 
 	rsv.budget, rsv.hold = release, hold
 	rsv.stopBeat = hold.KeepAlive(ctx)
 	return rsv, nil
+}
+
+// minThinkingBudget is the smallest budget_tokens the API accepts for manual extended thinking.
+const minThinkingBudget = 1024
+
+// thinkingFits says manual extended thinking can be kept valid inside maxTokens: its budget counts toward max_tokens, must be below
+// it, and is at least minThinkingBudget. Other thinking modes have no budget to fit.
+func thinkingFits(th *Thinking, maxTokens int64) bool {
+	return th == nil || th.Mode != ThinkingEnabled || maxTokens > minThinkingBudget
+}
+
+// fitThinking returns the thinking setting to send with a shortened maxTokens: a manual budget is cut to at most half of it (at least the
+// minimum, always below maxTokens), so that the answer keeps room after the thinking and a tool call is not cut off. The caller's
+// setting is not changed. (A changed thinking budget costs the cached message prefix; only a shortened call, which is short of money
+// anyway, pays that.)
+func fitThinking(th *Thinking, maxTokens int64) *Thinking {
+	if th == nil || th.Mode != ThinkingEnabled {
+		return th
+	}
+	cut := *th
+	cut.BudgetTokens = min(th.BudgetTokens, max(minThinkingBudget, maxTokens/2))
+	return &cut
 }
 
 // hasImage reports whether any block of the request, at any depth, is an image.

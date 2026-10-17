@@ -35,8 +35,6 @@ type Deps struct {
 	// Runs starts, reads, cancels and answers agent runs (agentset builds it, definition only: the worker executes them). Nil
 	// means agent runs are not configured: the runs operations answer 503 model_not_configured.
 	Runs *runtime.Service
-	// RunOptions tune the budgets of an edit run; the zero value is the default ($5, at most $5).
-	RunOptions runapi.Options
 }
 
 // V1 is the router of the paid-only API. Every route added with Handle sits behind the authentication middleware and
@@ -118,7 +116,7 @@ func Mount(mux *http.ServeMux, d Deps) (*V1, error) {
 		return nil, err
 	}
 	srv.API = projects.NewAPI(projectsSvc, callerOf, logger)
-	srv.Runs = runapi.New(d.Runs, callerOf, d.RunOptions, logger)
+	srv.Runs = runapi.New(d.Runs, callerOf, logger)
 	srv.RenderAPI = renderjobs.NewAPI(d.Renders, callerOf, logger)
 	annotationsSvc, err := annotations.NewService(d.Store, logger)
 	if err != nil {

@@ -482,7 +482,7 @@ func (l *loop) toolContext(toolUseID string, resumed bool) RunContext {
 		Logger: l.log.With("tool_use_id", toolUseID),
 		Left: BudgetLeft{
 			Known: true, ToolCalls: int(l.run.BudgetToolCalls) - l.toolCalls,
-			Wall: time.Until(l.wallDeadline()), Micros: l.budget.remaining(),
+			Wall: time.Until(l.wallDeadline()), Micros: l.budget.Remaining(),
 		},
 	}
 	if toolUseID != "" {
@@ -500,7 +500,7 @@ func (l *loop) toolContext(toolUseID string, resumed bool) RunContext {
 func (l *loop) overBudget() string {
 	run := l.run
 	switch {
-	case l.budget.remaining() <= 0:
+	case l.budget.Remaining() <= 0:
 		return LimitDollars
 	case l.tokens >= run.BudgetTokens:
 		return LimitTokens
@@ -555,8 +555,10 @@ func (l *loop) request() llm.Request {
 		Messages:  msgs,
 		Tools:     l.agent.registry.Definitions(),
 		MaxTokens: int(l.run.MaxTokens),
-		Effort:    l.run.Effort,
-		Thinking:  l.agent.Thinking,
+		// The client shortens a call to what the run's budget can pay for, down to this many output tokens.
+		MinOutputTokens: int(l.run.MinOutputTokens),
+		Effort:          l.run.Effort,
+		Thinking:        l.agent.Thinking,
 		Run: llm.RunInfo{
 			ID: l.run.ID, Profile: l.run.RoutingProfile, Budget: l.budget,
 			// The ledger attributes the call to the project and the member who started the run (P7-09a).
@@ -592,7 +594,7 @@ func (l *loop) modelStep(ctx context.Context) (Outcome, bool, error) {
 	}
 
 	payload := assistantPayload{
-		StopReason: resp.StopReason, Model: cmpOr(resp.Model, l.run.Model), RequestID: resp.RequestID, CostMicros: cost,
+		StopReason: resp.StopReason, Model: cmpOr(resp.Model, l.run.Model), RequestID: resp.RequestID, CostMicros: cost, Shortened: resp.Shortened,
 		Usage: usagePayload{InputTokens: resp.Usage.InputTokens, CacheWriteTokens: resp.Usage.CacheWriteTokens, CacheReadTokens: resp.Usage.CacheReadTokens, OutputTokens: resp.Usage.OutputTokens},
 	}
 	content := make([]llm.Block, 0, len(resp.Content))
@@ -688,6 +690,12 @@ const CutOffMessage = "Your answer was cut off at the output limit before this c
 // run with max_tokens.
 func (l *loop) recoverCutOff(ctx context.Context, t *turn) (Outcome, bool, error) {
 	if l.cv.cutOffs > MaxCutOffRecoveries {
+		if l.cv.lastCutOffShortened {
+			// The answer stopped where it did because the budget could not pay for more, not because of the stage's own limit: this is the
+			// budget limit, which an agent whose work is usable ends gracefully (OnLimit) instead of failing.
+			out, ferr := l.stopBudget(ctx, LimitDollars)
+			return out, true, ferr
+		}
 		out, ferr := l.fail(ctx, FailMaxTokens, fmt.Sprintf("the model's answer was cut off at max_tokens %d times", l.cv.cutOffs), nil)
 		return out, true, ferr
 	}
@@ -1190,7 +1198,8 @@ func (b *budgetTracker) takeHookErr() error {
 	return err
 }
 
-func (b *budgetTracker) remaining() int64 { return b.inner.Remaining() }
+// Remaining is what the run can still spend (llm.RemainingBudget: the client shortens a call's max_tokens to what it can pay for).
+func (b *budgetTracker) Remaining() int64 { return b.inner.Remaining() }
 
 // takeSettled returns what calls have settled at since the last time, and resets it.
 func (b *budgetTracker) takeSettled() int64 {
