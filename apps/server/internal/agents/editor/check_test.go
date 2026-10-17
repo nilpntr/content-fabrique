@@ -48,6 +48,9 @@ func specOf(t *testing.T, shots []shot, texts []timeline.TextItem, markers []tim
 		}
 		items = append(items, it)
 		at += timeline.OutputDuration(it)
+		if i+1 < len(shots) && shots[i+1].trans != "" {
+			at -= 150 // the next shot starts this much before this one ends
+		}
 	}
 	tracks := []timeline.Track{&timeline.VideoTrack{ID: "main", Items: items}}
 	if texts != nil {
@@ -267,25 +270,110 @@ func TestTextAndDurationChecks(t *testing.T) {
 	wantStatus(t, RunChecks(CheckInput{Spec: short}), CheckDuration, CheckFail)
 }
 
-func TestBrightnessJumpCheck(t *testing.T) {
-	dark := AssetAnalysis{Analysed: true, Series: flatSeries2(100, 24, 40), HasSeries: true}     // mean 0.04, p90 0.11: low-key
-	dark2 := AssetAnalysis{Analysed: true, Series: flatSeries2(100, 22, 56), HasSeries: true}    // p90 0.18
-	bright := AssetAnalysis{Analysed: true, Series: flatSeries2(100, 120, 200), HasSeries: true} // p90 0.84
-	shots := []shot{{asset: assetA, in: 0, out: 2000}, {asset: assetB, in: 0, out: 2000}, {asset: assetA, in: 2000, out: 4000}}
+// renderedFlat is the luma series of a rendered preview whose shots each have a constant brightness: segs gives, per shot in order,
+// its length in ms, the mean luma and the p90 luma (8-bit limited range).
+func renderedFlat(segs ...[3]float64) *analysis.Series {
+	s := &analysis.Series{StepMs: 200}
+	for _, seg := range segs {
+		for range int(seg[0]) / 200 {
+			s.Luma, s.High = append(s.Luma, seg[1]), append(s.High, seg[2])
+		}
+	}
+	return s
+}
 
-	// Two low-key angles of different mean brightness are not a jump: judged by the lit part, 0.11 against 0.18.
-	r := RunChecks(CheckInput{Spec: specOf(t, shots, title(0), nil), Assets: map[string]AssetAnalysis{assetA: dark, assetB: dark2}})
+// The cuts are judged by the picture the render shows, not by the footage.
+func TestBrightnessJumpCheckUsesTheRender(t *testing.T) {
+	shots := []shot{{asset: assetA, in: 0, out: 2000}, {asset: assetB, in: 0, out: 2000}, {asset: assetA, in: 2000, out: 4000}}
+	spec := func() *timeline.Spec { return specOf(t, shots, title(0), nil) }
+
+	// Two low-key shots, p90 luma 0.11 and 0.14: not a jump (and no ratio of 1.8).
+	r := RunChecks(CheckInput{Spec: spec(), Rendered: renderedFlat([3]float64{2000, 24, 40}, [3]float64{2000, 26, 47}, [3]float64{2000, 24, 40})})
 	c := wantStatus(t, r, CheckBrightness, CheckPass)
-	if r.Metrics.BrightnessJump != 0.07 || !strings.Contains(c.Detail, "0.07") {
+	if r.Metrics.BrightnessJump != 0.03 || !strings.Contains(c.Detail, "0.03") {
 		t.Errorf("jump %v: %s", r.Metrics.BrightnessJump, c.Detail)
 	}
-	// A dark angle next to a lit one is.
-	r = RunChecks(CheckInput{Spec: specOf(t, shots, title(0), nil), Assets: map[string]AssetAnalysis{assetA: dark, assetB: bright}})
+	// A dark shot next to a lit one is a jump in absolute terms (0.11 to 0.84).
+	r = RunChecks(CheckInput{Spec: spec(), Rendered: renderedFlat([3]float64{2000, 24, 40}, [3]float64{2000, 120, 200}, [3]float64{2000, 24, 40})})
 	if c := wantStatus(t, r, CheckBrightness, CheckFail); !strings.Contains(c.Detail, "c1 to c2 jumps 0.73") {
 		t.Errorf("brightness reason: %s", c.Detail)
 	}
-	// Without the series there is nothing to measure.
-	wantStatus(t, RunChecks(CheckInput{Spec: specOf(t, shots, title(0), nil), Assets: map[string]AssetAnalysis{assetA: {Analysed: true}, assetB: {Analysed: true}}}), CheckBrightness, CheckSkip)
+	// In low-key footage the numbers are small: the founder's posing clip (p90 0.37) next to the gym clips (0.20) is only 0.17 apart,
+	// and is a jump because it is 1.9 times as bright.
+	r = RunChecks(CheckInput{Spec: spec(), Rendered: renderedFlat([3]float64{2000, 45, 98}, [3]float64{2000, 35, 60}, [3]float64{2000, 45, 98})})
+	if c := wantStatus(t, r, CheckBrightness, CheckFail); !strings.Contains(c.Detail, "jumps 0.17") || !strings.Contains(c.Detail, "1.8 times") {
+		t.Errorf("ratio reason: %s", c.Detail)
+	}
+	// Without a render there is nothing to measure, and the check says so instead of passing.
+	c = wantStatus(t, RunChecks(CheckInput{Spec: spec()}), CheckBrightness, CheckSkip)
+	if !strings.Contains(c.Detail, "render_preview") {
+		t.Errorf("no preview: %s", c.Detail)
+	}
+}
+
+// crushed compares the render with the footage. The numbers are the founder's: his ungraded render keeps all of its brightness, the
+// first gym_moody left 0.24 to 0.40 of the p90 and none of the mean.
+func TestCrushedCheck(t *testing.T) {
+	// Source: the lit part (p90) at luma 60 (0.20) and a mean of 8-bit 35 (0.087).
+	src := AssetAnalysis{Analysed: true, Series: flatSeries2(100, 35, 60), HasSeries: true}
+	assets := map[string]AssetAnalysis{assetA: src}
+	shots := []shot{{asset: assetA, in: 0, out: 2000}, {asset: assetA, in: 2000, out: 4000}}
+	spec := func() *timeline.Spec { return specOf(t, shots, title(0), nil) }
+
+	ungraded := renderedFlat([3]float64{2000, 35, 60}, [3]float64{2000, 34, 59})
+	r := RunChecks(CheckInput{Spec: spec(), Assets: assets, Rendered: ungraded})
+	c := wantStatus(t, r, CheckCrushed, CheckPass)
+	if r.Metrics.RenderedKept < 0.98 || !strings.Contains(c.Detail, "2 shots rendered") {
+		t.Errorf("ungraded: kept %v: %s", r.Metrics.RenderedKept, c.Detail)
+	}
+
+	// The graded render: p90 luma 26 (0.05), mean 13 (nothing): about a quarter of the lit part, none of the mean.
+	graded := renderedFlat([3]float64{2000, 13, 27}, [3]float64{2000, 13, 29})
+	r = RunChecks(CheckInput{Spec: spec(), Assets: assets, Rendered: graded})
+	c = wantStatus(t, r, CheckCrushed, CheckFail)
+	for _, want := range []string{"2 of 2 shots", "c1 keeps 25 %", "set_look none"} {
+		if !strings.Contains(c.Detail, want) {
+			t.Errorf("crushed reason lacks %q: %s", want, c.Detail)
+		}
+	}
+	// A shot that is nearly black fails whatever its footage says.
+	black := renderedFlat([3]float64{2000, 17, 22}, [3]float64{2000, 34, 59})
+	if c := wantStatus(t, RunChecks(CheckInput{Spec: spec(), Rendered: black}), CheckCrushed, CheckFail); !strings.Contains(c.Detail, "near black") {
+		t.Errorf("black: %s", c.Detail)
+	}
+	// A shot that renders as dark as it was, a dark clip being dark, is not crushed: no ratio is held against a footage this dark.
+	darkSrc := map[string]AssetAnalysis{assetA: {Analysed: true, Series: flatSeries2(100, 17, 36), HasSeries: true}}
+	wantStatus(t, RunChecks(CheckInput{Spec: spec(), Assets: darkSrc, Rendered: renderedFlat([3]float64{2000, 17, 36}, [3]float64{2000, 17, 36})}), CheckCrushed, CheckPass)
+
+	// A hint the clip carries is allowed for: a clip darkened on purpose by its exposure hint (a stop brighter than the target, so a
+	// gain of 0.62 at the strongest) is not crushed when it renders at that gain, and is when it renders far below it.
+	hinted := spec()
+	ev, match := 0.7, true
+	vt, _, _ := timeline.MainTrack(hinted)
+	for i := range vt.Items {
+		vt.Items[i].ExposureEv, vt.Items[i].Look = &ev, &timeline.Look{Preset: "none", Match: &match}
+	}
+	// p90 0.20 x 0.616 = 0.123 expected; 0.12 rendered is on target.
+	onTarget := renderedFlat([3]float64{2000, 24, 43}, [3]float64{2000, 24, 43})
+	wantStatus(t, RunChecks(CheckInput{Spec: hinted, Assets: assets, Rendered: onTarget}), CheckCrushed, CheckPass)
+	wantStatus(t, RunChecks(CheckInput{Spec: hinted, Assets: assets, Rendered: graded}), CheckCrushed, CheckFail)
+
+	// No render, no judgement.
+	if c := wantStatus(t, RunChecks(CheckInput{Spec: spec(), Assets: assets}), CheckCrushed, CheckSkip); !strings.Contains(c.Detail, "render_preview") {
+		t.Errorf("no preview: %s", c.Detail)
+	}
+}
+
+// Only the middle of a shot is measured, away from the transitions at its ends.
+func TestRenderedShotsAreMeasuredMidShot(t *testing.T) {
+	shots := []shot{{asset: assetA, in: 0, out: 2000}, {asset: assetA, in: 0, out: 2000}}
+	// The first shot is dark at its edges (a dip) and bright in the middle: 0 to 500 ms and 1500 to 2000 ms at 16, the rest at 120.
+	rs := renderedFlat([3]float64{500, 16, 16}, [3]float64{1000, 120, 200}, [3]float64{500, 16, 16}, [3]float64{2000, 120, 200})
+	r := RunChecks(CheckInput{Spec: specOf(t, shots, title(0), nil), Rendered: rs})
+	wantStatus(t, r, CheckBrightness, CheckPass)
+	if r.Metrics.BrightnessJump != 0 {
+		t.Errorf("the edges of the shot were measured: jump %v", r.Metrics.BrightnessJump)
+	}
 }
 
 func TestBeatSyncCheck(t *testing.T) {
@@ -319,7 +407,7 @@ func TestBeatSyncCheck(t *testing.T) {
 func TestReportText(t *testing.T) {
 	r := RunChecks(CheckInput{Version: 3, Spec: specOf(t, []shot{{asset: assetA, in: 0, out: 3500}, {asset: assetA, in: 0, out: 1000}}, nil, nil), Plan: &Plan{ContentType: TypeWorkout, TargetLengthS: 5}})
 	pass, fail, skip := r.Counts()
-	if pass+fail+skip != 12 || fail == 0 {
+	if pass+fail+skip != 13 || fail == 0 {
 		t.Errorf("counts %d %d %d", pass, fail, skip)
 	}
 	text := r.Text()
@@ -335,5 +423,46 @@ func TestReportText(t *testing.T) {
 	empty := RunChecks(CheckInput{Spec: &timeline.Spec{Tracks: []timeline.Track{&timeline.VideoTrack{ID: "main"}}}})
 	if len(empty.Checks) != 1 || empty.Checks[0].Status != CheckFail {
 		t.Errorf("empty: %+v", empty.Checks)
+	}
+}
+
+// A transition into the next shot overlaps the end of this one: the shot's length is what it is on screen, from its start to the next
+// shot's start, so a 1.95 s hook with a 250 ms whip out of it is a 1.95 s hook and not a 2.2 s one.
+func TestShotLengthsCountTheTransitionOverlap(t *testing.T) {
+	sp := specOf(t, []shot{{asset: assetA, in: 0, out: 2100}, {asset: assetA, in: 0, out: 2000, trans: timeline.TransitionFlash}}, title(0), nil)
+	// The first shot plays for 2100 ms and the flash starts 150 ms before it ends: 1950 ms on screen.
+	r := RunChecks(CheckInput{Spec: sp})
+	if c := wantStatus(t, r, CheckHookLength, CheckPass); !strings.Contains(c.Detail, "1.95 s") {
+		t.Errorf("hook: %s", c.Detail)
+	}
+	if r.Metrics.ShotMinMs != 1950 || r.Metrics.ShotMaxMs != 2000 {
+		t.Errorf("shot lengths %d to %d", r.Metrics.ShotMinMs, r.Metrics.ShotMaxMs)
+	}
+	// Without the transition the same hook is 2.1 s and fails.
+	plain := specOf(t, []shot{{asset: assetA, in: 0, out: 2100}, {asset: assetA, in: 0, out: 2000}}, title(0), nil)
+	wantStatus(t, RunChecks(CheckInput{Spec: plain}), CheckHookLength, CheckFail)
+}
+
+// Dead time is mapped through the clip's own time: a stretch of dead time that a speed ramp rushes through counts for what it plays
+// for, not for its share of the source.
+func TestDeadTimeIsMappedThroughTheSpeedRamp(t *testing.T) {
+	// 6 s of source. The first 2 s are dead and play at 3x (the ramp: 3x, then slow for the middle, then 3x); the clip's output is longer
+	// than 2/6 of it would suggest.
+	assets := map[string]AssetAnalysis{assetA: {Analysed: true, Dead: []Span{{0, 2000}}}}
+	ramped := specOf(t, []shot{{asset: assetA, in: 0, out: 6000, ramp: true}}, title(0), nil)
+	rt, _, _ := timeline.MainTrack(ramped)
+	it := rt.Items[0]
+	it.SpeedRamp = []timeline.SpeedPoint{{AtMs: 0, Speed: 3}, {AtMs: 2000, Speed: 3}, {AtMs: 2500, Speed: 0.5}, {AtMs: 6000, Speed: 0.5}}
+	rt.Items[0] = it
+	r := RunChecks(CheckInput{Spec: ramped, Assets: assets})
+	// The dead 2 s play for 667 ms of a clip of about 8.1 s: 8 %, where a linear share of the source would say 33 %.
+	if r.Metrics.DeadShare < 0.06 || r.Metrics.DeadShare > 0.1 {
+		t.Errorf("dead share %v, want about 0.08 (a linear share would be 0.33)", r.Metrics.DeadShare)
+	}
+	wantStatus(t, r, CheckDeadTime, CheckFail)
+	// The same clip at a constant speed has the linear share.
+	plain := specOf(t, []shot{{asset: assetA, in: 0, out: 6000, speed: 2}}, title(0), nil)
+	if r := RunChecks(CheckInput{Spec: plain, Assets: assets}); r.Metrics.DeadShare != 0.333 {
+		t.Errorf("constant speed: dead share %v", r.Metrics.DeadShare)
 	}
 }

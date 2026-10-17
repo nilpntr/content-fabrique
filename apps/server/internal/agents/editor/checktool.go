@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -102,7 +104,10 @@ func LoadAssetAnalysis(ctx context.Context, src AnalysisSource, ws ids.Workspace
 }
 
 // CheckVersion runs the checks over one stored version of a project: what check_edit does, and what cfctl eval editor prints.
-func CheckVersion(ctx context.Context, projects Projects, src AnalysisSource, ws ids.WorkspaceID, pid ids.ProjectID, version int, plan *Plan) (Report, error) {
+//
+// sampler measures the version's preview render for the checks that look at the rendered picture; nil, or a version with no preview,
+// leaves those checks "not applicable".
+func CheckVersion(ctx context.Context, projects Projects, src AnalysisSource, ws ids.WorkspaceID, pid ids.ProjectID, version int, plan *Plan, sampler RenderSampler) (Report, error) {
 	vd, perr := projects.Version(ctx, actor(ws), pid, version)
 	if perr != nil {
 		return Report{}, projectErr(perr)
@@ -115,7 +120,17 @@ func CheckVersion(ctx context.Context, projects Projects, src AnalysisSource, ws
 	if err != nil {
 		return Report{}, err
 	}
-	return RunChecks(CheckInput{Version: version, Spec: spec, Plan: plan, Assets: assets, Issues: vd.Issues}), nil
+	in := CheckInput{Version: version, Spec: spec, Plan: plan, Assets: assets, Issues: vd.Issues}
+	if sampler != nil {
+		switch series, err := sampler.Rendered(ctx, ws, pid, version); {
+		case err == nil:
+			in.Rendered = &series
+		case errors.Is(err, ErrNoPreview):
+		default:
+			slog.WarnContext(ctx, "editor: the preview render could not be measured; the rendered-brightness checks do not apply", "project_id", pid.String(), "version", version, "error", err)
+		}
+	}
+	return RunChecks(in), nil
 }
 
 // checkEdit is the check_edit tool.
@@ -144,7 +159,12 @@ func (d Deps) checkEdit(ctx context.Context, rc runtime.RunContext, _ noArgs) (r
 	if p, ok := d.planOf(ctx, rc); ok {
 		plan = &p
 	}
-	report, err := CheckVersion(ctx, d.Projects, d.Store, ws, pid, v, plan)
+	// The checks measure the rendered picture, so the version is previewed first (a run with no working renderer is let off, as it is
+	// for finish).
+	if d.previewsOn() && !d.previewOK(ctx, rc, v) {
+		return runtime.Result{}, runtime.UserErrorf("version %d has not been previewed. Call render_preview first, then check_edit: the checks measure the rendered picture (a look can crush the footage), not only the timeline", v)
+	}
+	report, err := CheckVersion(ctx, d.Projects, d.Store, ws, pid, v, plan, d.Rendered)
 	if err != nil {
 		return runtime.Result{}, err
 	}
@@ -157,19 +177,89 @@ func (d Deps) checkEdit(ctx context.Context, rc runtime.RunContext, _ noArgs) (r
 		}
 	}
 	d.previews.checkRun(rc.RunID, v, nth, rc.ToolUseID)
+	d.previews.checkOutcome(rc.RunID, v, report.Failed())
 
 	var b strings.Builder
 	b.WriteString(report.Text())
 	b.WriteString("\n\n")
+	low := budgetLow(rc.Left)
 	switch {
 	case fail == 0:
 		b.WriteString("All the checks that apply pass. Call finish.")
+	case nth == 1 && low:
+		b.WriteString("Some checks fail, but you are close to your limits: do not start a revision. Call finish now and say in your message what is not as good as it should be.")
 	case nth == 1:
 		b.WriteString("Fix the failing checks in one batch (after a change to a shot's length, snap again with a small max_shift_ms, 60 or less: a snap moves an edge each time it runs), then render_preview and check_edit once more, and finish. This is your one revision pass: skip it if you are short of tool calls or time, or if the footage cannot fix a check, and say so in finish.")
 	default:
 		b.WriteString("This was the check after your revision pass. Do not revise again: call finish, and say in your message what is still not as it should be and why.")
 	}
+	b.WriteString(budgetNote(rc.Left))
 	return runtime.Result{Content: []llm.Block{llm.TextBlock(b.String())}}, nil
+}
+
+// budgetLow says the run is close to a limit: few tool calls, or little time, left. A revision pass needs about five calls
+// (an edit, a preview, a check, a finish) and the preview takes up to a minute.
+func budgetLow(l runtime.BudgetLeft) bool {
+	return l.Known && (l.ToolCalls <= 7 || l.Wall < 3*time.Minute)
+}
+
+// budgetNote is what the run has left, for the end of a tool's answer ("" when it is not known): the model that sees its limits
+// coming skips the revision and finishes.
+func budgetNote(l runtime.BudgetLeft) string {
+	if !l.Known {
+		return ""
+	}
+	s := fmt.Sprintf("\n\nLeft of your budget: %d tool calls and %s.", max(l.ToolCalls, 0), approxDuration(l.Wall))
+	if budgetLow(l) {
+		s += " That is not much: finish soon, and do not start work you cannot complete."
+	}
+	return s
+}
+
+func approxDuration(d time.Duration) string {
+	switch {
+	case d <= 0:
+		return "no time"
+	case d < time.Minute:
+		return fmt.Sprintf("%d seconds", int(d.Seconds()))
+	}
+	return fmt.Sprintf("%d minutes", int(d.Round(time.Minute).Minutes()))
+}
+
+// onLimit ends a run that reached a limit gracefully when its work is usable: it made a version, and a version of it was previewed (or
+// there is no renderer to preview with). The output is the one finish writes, with a plain note for the creator of what was not done,
+// so the run succeeds instead of failing with "budget". A run that made no version, or never previewed one, fails as before.
+func (d Deps) onLimit(ctx context.Context, rc runtime.RunContext, limit string) (json.RawMessage, bool) {
+	pid, ws, err := project(rc)
+	if err != nil {
+		return nil, false
+	}
+	made, err := d.Store.GetTimelineVersionByAuthor(ctx, ws, pid, string(ops.AuthorAgent), ids.Encode(ids.PrefixRun, rc.RunID))
+	if err != nil {
+		return nil, false
+	}
+	v := int(made.Version)
+	if d.previewsOn() && !d.anyPreview(ctx, rc) && !d.previewOK(ctx, rc, v) {
+		return nil, false
+	}
+	what := map[string]string{"tool_calls": "steps", "wall_clock": "time", "dollars": "budget", "tokens": "budget"}[limit]
+	if what == "" {
+		what = "room"
+	}
+	var note strings.Builder
+	fmt.Fprintf(&note, "I ran out of %s before I could finish polishing this video, so this is the version as it stood. It is saved as version %d.", what, v)
+	switch {
+	case d.previewsOn() && !d.previewOK(ctx, rc, v):
+		note.WriteString(" My last change to it was not previewed, so look at it before you use it.")
+	case !d.noCheckGate && !d.checked(ctx, rc, v):
+		note.WriteString(" I did not get to the final checks of it.")
+	default:
+		if cv, failed := d.previews.lastCheck(rc.RunID); cv == v && len(failed) > 0 {
+			note.WriteString(" The final checks still found something to improve: " + strings.ReplaceAll(strings.Join(failed, ", "), "_", " ") + ".")
+		}
+	}
+	out, _ := json.Marshal(map[string]any{"summary": note.String(), "timeline_version": v, "implicit_finish": true, "limit": limit})
+	return out, true
 }
 
 // checkNth is which check of the run this call is, and whether the call has been through before (a call that is run again after a

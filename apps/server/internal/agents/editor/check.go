@@ -42,19 +42,33 @@ const (
 	CheckTextSafe      = "text_safe_zone"
 	CheckDuration      = "duration"
 	CheckBrightness    = "brightness_jump"
+	CheckCrushed       = "crushed"
 	CheckBeatSync      = "beat_sync"
 )
 
 // The thresholds that do not depend on the kind of video.
 const (
-	hookMaxMs           = 2000
-	hookTitleByMs       = 500
-	repToleranceMs      = 150
-	repEdgesShare       = 0.85
-	deadShareMax        = 0.05
-	effectsMax          = 0.5
-	rampsMax            = 4
-	brightnessJumpMax   = 0.25
+	hookMaxMs         = 2000
+	hookTitleByMs     = 500
+	repToleranceMs    = 150
+	repEdgesShare     = 0.85
+	deadShareMax      = 0.05
+	effectsMax        = 0.5
+	rampsMax          = 4
+	brightnessJumpMax = 0.25
+	// brightnessRatioMin and brightnessRatioDelta: in low-key footage the p90 luma of every shot is small, so an absolute jump of 0.25
+	// never happens; a cut is also a jump when the lit part of one shot is 1.8 times (0.85 stops) the other's and they differ by at
+	// least 0.10 (the posing clip of the founder's footage is 1.9 times the gym clips).
+	brightnessRatioMax   = 1.8
+	brightnessRatioDelta = 0.10
+	// crushedRatio is how much of its source's brightness a rendered shot must keep (the p90 or the mean of the luma): the look that
+	// crushed the founder's footage left 0.24 to 0.40 of the p90 and none of the mean, ungraded renders keep all of it. crushedBlack is
+	// a rendered p90 under which a shot is near black whatever its source. minSourceP90 and minSourceMean keep the ratios to shots
+	// whose source is bright enough for a ratio to mean something.
+	crushedRatio        = 0.7
+	crushedBlack        = 0.04
+	minSourceP90        = 0.06
+	minSourceMean       = 0.03
 	beatToleranceFrames = 2
 	beatShareMin        = 0.7
 	// durationLoPct and durationHiPct are the share of the plan's target length that a video may be: the same tolerance as plan_edit's
@@ -102,6 +116,9 @@ type CheckInput struct {
 	Assets map[string]AssetAnalysis
 	// Issues are the validation issues of the version (the safe zone of the texts is the validator's).
 	Issues []timeline.Issue
+	// Rendered is the luma of the version's preview render (a mean in Luma and a 90th percentile in High per sample, as the analysis
+	// series), nil when there is no preview of the version yet: the checks that look at the rendered picture do not apply then.
+	Rendered *analysis.Series
 }
 
 // Metrics are the numbers behind the checks, for the run feed and for comparing runs.
@@ -127,6 +144,9 @@ type Metrics struct {
 	Cuts            int     `json:"cuts"`
 	BrightnessJump  float64 `json:"brightness_max_jump"`
 	BrightnessRange float64 `json:"brightness_range"`
+	// RenderedKept is the lowest share of its source's p90 luma that a rendered shot keeps (1 is as bright as the source), 0 when the
+	// preview was not measured.
+	RenderedKept float64 `json:"rendered_kept"`
 }
 
 // Report is the result of Check.
@@ -202,14 +222,22 @@ func RunChecks(in CheckInput) Report {
 	}
 	c := &checker{in: in, items: items, lim: lim, typ: typ, m: &r.Metrics}
 	c.total = timeline.TotalDuration(in.Spec)
+	// A shot's length is what it is on screen: from where it starts to where the next one starts, so the overlap of a transition
+	// into the next shot is not counted (a 1.95 s hook with a 250 ms whip out of it is still a 1.95 s hook). The last shot runs to
+	// the end of the video.
 	c.durs = make([]int64, len(items))
 	for i, it := range items {
-		c.durs[i] = timeline.OutputDuration(it)
+		if i+1 < len(items) {
+			c.durs[i] = items[i+1].AtMs - it.AtMs
+		} else {
+			c.durs[i] = c.total - it.AtMs
+		}
+		c.durs[i] = max(c.durs[i], 0)
 	}
 	r.Metrics.DurationMs, r.Metrics.Shots = c.total, len(items)
 	r.Checks = []Check{
 		c.hookLength(), c.hookTitle(), c.shotPacing(), c.shotVariety(), c.paceBuilds(), c.repBoundaries(), c.deadTime(),
-		c.effectDensity(), c.textSafe(), c.duration(targetS), c.brightness(), c.beatSync(),
+		c.effectDensity(), c.textSafe(), c.duration(targetS), c.brightness(), c.crushed(), c.beatSync(),
 	}
 	return r
 }
@@ -421,8 +449,6 @@ func absI(v int64) int64 {
 	return v
 }
 
-func overlap(a0, a1, b0, b1 int64) int64 { return max(0, min(a1, b1)-max(a0, b0)) }
-
 func (c *checker) deadTime() Check {
 	c.m.DeadShare = -1
 	var deadOut, measured float64
@@ -436,12 +462,22 @@ func (c *checker) deadTime() Check {
 		if span <= 0 {
 			continue
 		}
-		var dead int64
+		// The dead stretches are mapped through the clip's own time (its speed, or its speed ramp: a ramp that slows the peak and
+		// rushes the rest plays a dead stretch at the rush for far less than its share of the source), and scaled to the part of the
+		// clip that is on screen.
+		var dead float64
 		for _, d := range a.Dead {
-			dead += overlap(it.Source.InMs, it.Source.OutMs, d.StartMs, d.EndMs)
+			lo, hi := max(d.StartMs, it.Source.InMs), min(d.EndMs, it.Source.OutMs)
+			if hi > lo {
+				dead += it.OutOffsetMs(float64(hi-it.Source.InMs)) - it.OutOffsetMs(float64(lo-it.Source.InMs))
+			}
+		}
+		full := float64(timeline.OutputDuration(it))
+		if full <= 0 {
+			continue
 		}
 		measured += float64(c.durs[i])
-		out := float64(c.durs[i]) * float64(dead) / float64(span)
+		out := dead * float64(c.durs[i]) / full
 		deadOut += out
 		if int64(out) > worstMs {
 			worst, worstMs = it.ID, int64(out)
@@ -529,42 +565,151 @@ func (c *checker) duration(targetS int) Check {
 	return c.pass(CheckDuration, "the video is %s long (%s to %s: %s)", secs2(c.total), secs2(lo), secs2(hi), what)
 }
 
+// renderedShot is the exposure of the rendered picture of shot i, from the middle half of its time on screen (away from the
+// transitions at its ends), at least one sample.
+func (c *checker) renderedShot(i int) (analysis.Exposure, bool) {
+	if c.in.Rendered == nil {
+		return analysis.Exposure{}, false
+	}
+	start, d := c.items[i].AtMs, c.durs[i]
+	lo, hi := start+d/4, start+d-d/4
+	if hi-lo < int64(c.in.Rendered.StepMs) {
+		mid := start + d/2
+		lo, hi = mid-int64(c.in.Rendered.StepMs)/2, mid+int64(c.in.Rendered.StepMs)/2
+	}
+	return c.in.Rendered.ExposureBetween(int(lo), int(hi))
+}
+
+const noPreviewNote = "the preview of this version has not been rendered (or could not be read); call render_preview, then check_edit again"
+
+// brightness judges the cuts by what the render shows (the source analysis says how bright the footage is, not the picture: a look
+// changes it). A cut is a jump when the lit part of the two shots differs a lot in absolute terms, or by 1.8 times and at least 0.10:
+// low-key footage has small numbers everywhere.
 func (c *checker) brightness() Check {
+	if c.in.Rendered == nil {
+		return c.skip(CheckBrightness, "%s", noPreviewNote)
+	}
 	type lvl struct {
 		e  analysis.Exposure
 		ok bool
 	}
 	lv := make([]lvl, len(c.items))
-	for i, it := range c.items {
-		if a, ok := c.asset(it); ok && a.HasSeries {
-			lv[i].e, lv[i].ok = a.Series.ExposureBetween(int(it.Source.InMs), int(it.Source.OutMs))
-		}
-	}
 	lo, hi := 2.0, -1.0
-	for _, l := range lv {
-		if l.ok {
-			lo, hi = math.Min(lo, l.e.P90), math.Max(hi, l.e.P90)
+	for i := range c.items {
+		lv[i].e, lv[i].ok = c.renderedShot(i)
+		if lv[i].ok {
+			lo, hi = math.Min(lo, lv[i].e.P90), math.Max(hi, lv[i].e.P90)
 		}
 	}
-	worst, worstAt, pairs := 0.0, -1, 0
+	worst, pairs := 0.0, 0
+	jump := func(a, b analysis.Exposure) (float64, bool) {
+		d := analysis.Jump(a, b)
+		small, big := math.Min(a.P90, b.P90), math.Max(a.P90, b.P90)
+		bad := d > brightnessJumpMax || (d >= brightnessRatioDelta && big >= brightnessRatioMax*math.Max(small, 0.01))
+		return d, bad
+	}
+	badAt, worstBad := -1, 0.0
 	for i := 1; i < len(lv); i++ {
 		if !lv[i].ok || !lv[i-1].ok {
 			continue
 		}
 		pairs++
-		if j := analysis.Jump(lv[i-1].e, lv[i].e); j > worst {
-			worst, worstAt = j, i
+		d, bad := jump(lv[i-1].e, lv[i].e)
+		if bad && (badAt < 0 || d > worstBad) {
+			badAt, worstBad = i, d
 		}
+		worst = math.Max(worst, d)
 	}
 	if pairs == 0 {
-		return c.skip(CheckBrightness, "the clips' brightness is not in the analysis")
+		return c.skip(CheckBrightness, "no shot of the preview could be measured")
 	}
 	c.m.BrightnessJump, c.m.BrightnessRange = math.Round(worst*100)/100, math.Round((hi-lo)*100)/100
-	if worst > brightnessJumpMax {
-		return c.fail(CheckBrightness, "the cut from %s to %s jumps %.2f in the brightness of the lit part (p90 luma %.2f to %.2f; at most %.2f). Pick another moment for one of them, or move one of them away from the other",
-			c.items[worstAt-1].ID, c.items[worstAt].ID, worst, lv[worstAt-1].e.P90, lv[worstAt].e.P90, brightnessJumpMax)
+	if badAt >= 0 {
+		return c.fail(CheckBrightness, "the cut from %s to %s jumps %.2f in the rendered brightness of the lit part (p90 luma %.2f to %.2f; a jump is over %.2f, or %.1f times with at least %.2f). Call match_exposure to darken the brighter shot, or pick another moment for one of them",
+			c.items[badAt-1].ID, c.items[badAt].ID, analysis.Jump(lv[badAt-1].e, lv[badAt].e), lv[badAt-1].e.P90, lv[badAt].e.P90,
+			brightnessJumpMax, brightnessRatioMax, brightnessRatioDelta)
 	}
-	return c.pass(CheckBrightness, "the largest jump at a cut is %.2f in p90 luma (at most %.2f; the shots range from %.2f to %.2f)", worst, brightnessJumpMax, lo, hi)
+	return c.pass(CheckBrightness, "the largest jump at a cut is %.2f in the rendered p90 luma (the shots range from %.2f to %.2f)", worst, lo, hi)
+}
+
+// expectedGain is the gain the clip's own exposure hint is meant to apply (look.match, or the auto preset, with a hint that is not
+// too small to matter): the render is allowed to differ from the source by that much.
+func expectedGain(it timeline.VideoItem) float64 {
+	if it.ExposureEv == nil || it.Look == nil || !it.Look.AppliesExposure() {
+		return 1
+	}
+	ev := *it.ExposureEv
+	if math.Abs(ev) < 0.15 {
+		return 1
+	}
+	return math.Exp2(-math.Max(-0.7, math.Min(0.7, ev)))
+}
+
+// crushed compares each shot's rendered brightness (the p90 and the mean of the luma) with its source's (the analysis of the part of
+// the clip the shot plays), allowing for the exposure hint the clip carries. A look that darkens low-key footage, like the first
+// gym_moody, fails it.
+func (c *checker) crushed() Check {
+	if c.in.Rendered == nil {
+		return c.skip(CheckCrushed, "%s", noPreviewNote)
+	}
+	type bad struct {
+		id   string
+		text string
+		kept float64
+	}
+	var misses []bad
+	measured := 0
+	kept := math.Inf(1)
+	for i, it := range c.items {
+		r, ok := c.renderedShot(i)
+		if !ok {
+			continue
+		}
+		measured++
+		if r.P90 < crushedBlack {
+			misses = append(misses, bad{it.ID, fmt.Sprintf("%s renders at p90 luma %.2f, near black", it.ID, r.P90), 0})
+			kept = 0
+			continue
+		}
+		a, has := c.asset(it)
+		if !has || !a.HasSeries {
+			continue
+		}
+		src, ok := a.Series.ExposureBetween(int(it.Source.InMs), int(it.Source.OutMs))
+		if !ok {
+			continue
+		}
+		g := expectedGain(it)
+		if src.P90 >= minSourceP90 {
+			ratio := r.P90 / (src.P90 * g)
+			kept = math.Min(kept, ratio)
+			if ratio < crushedRatio {
+				misses = append(misses, bad{it.ID, fmt.Sprintf("%s keeps %.0f %% of its source's p90 luma (%.2f from %.2f)", it.ID, ratio*100, r.P90, src.P90*g), ratio})
+				continue
+			}
+		}
+		if src.Mean >= minSourceMean && r.Mean < crushedRatio*src.Mean*g {
+			misses = append(misses, bad{it.ID, fmt.Sprintf("%s keeps %.0f %% of its source's mean luma (%.2f from %.2f)", it.ID, 100*r.Mean/(src.Mean*g), r.Mean, src.Mean*g), r.Mean / (src.Mean * g)})
+		}
+	}
+	if measured == 0 {
+		return c.skip(CheckCrushed, "no shot of the preview could be measured")
+	}
+	if !math.IsInf(kept, 1) {
+		c.m.RenderedKept = math.Round(kept*100) / 100
+	}
+	if len(misses) > 0 {
+		slices.SortStableFunc(misses, func(a, b bad) int { return cmp.Compare(a.kept, b.kept) })
+		var parts []string
+		for _, m := range misses[:min(3, len(misses))] {
+			parts = append(parts, m.text)
+		}
+		return c.fail(CheckCrushed, "%d of %d shots render much darker than their footage: %s. The look is crushing the shadows; set_look none, or use auto (a lighter grade), and render_preview again", len(misses), measured, strings.Join(parts, "; "))
+	}
+	if math.IsInf(kept, 1) {
+		return c.pass(CheckCrushed, "%d shots rendered, none near black (no source analysis to compare with)", measured)
+	}
+	return c.pass(CheckCrushed, "%d shots rendered; the darkest keeps %.0f %% of its source's p90 luma (at least %.0f %%)", measured, kept*100, crushedRatio*100)
 }
 
 func (c *checker) beatSync() Check {

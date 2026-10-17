@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -42,6 +43,9 @@ type previewState struct {
 	plan       *Plan // the run's latest creative plan
 	checked    int   // the newest version check_edit ran on, 0 for none
 	checkCalls int   // how many times check_edit ran in this run
+	// lastCheckVersion and lastCheckFailed are what the latest check_edit found: the version, and the checks that failed.
+	lastCheckVersion int
+	lastCheckFailed  []string
 	// checkByCall is the nth check each check_edit call (by tool_use_id) was, so a call that is run again gets the same answer.
 	checkByCall map[string]int
 }
@@ -140,6 +144,34 @@ func (l *previewLog) checkRun(run uuid.UUID, version, n int, toolUseID string) {
 	}
 }
 
+// checkOutcome records which checks failed in the latest check_edit, of version.
+func (l *previewLog) checkOutcome(run uuid.UUID, version int, failed []string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	s := l.state(run)
+	s.lastCheckVersion, s.lastCheckFailed = version, slices.Clone(failed)
+}
+
+// lastCheck returns the version of the latest check_edit and the checks that failed in it (0 and nil for none).
+func (l *previewLog) lastCheck(run uuid.UUID) (int, []string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if s := l.runs[run]; s != nil {
+		return s.lastCheckVersion, slices.Clone(s.lastCheckFailed)
+	}
+	return 0, nil
+}
+
+// previewedVersion is the newest version this worker has seen a preview of, 0 for none.
+func (l *previewLog) previewedVersion(run uuid.UUID) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if s := l.runs[run]; s != nil {
+		return s.version
+	}
+	return 0
+}
+
 // checkNth is the nth check the tool call toolUseID was, when this worker saw it.
 func (l *previewLog) checkNth(run uuid.UUID, toolUseID string) (int, bool) {
 	l.mu.Lock()
@@ -192,9 +224,40 @@ func (d Deps) previewsOn() bool {
 	return !none
 }
 
+// PreviewArtifact is the kind of the artifact event render_preview records for a version it rendered: {"kind": "preview", "data":
+// {"version": N, "duration_ms": D}}. It is how a worker that takes a run over knows which versions the run has previewed (the gate is
+// not asked to preview again), next to the creative_plan and edit_check events.
+const PreviewArtifact = "preview"
+
+// previewOK says the run has previewed version (or a later one), or has been let off for it: this worker's record, or the run's
+// preview events when this worker has none (a takeover).
+func (d Deps) previewOK(ctx context.Context, rc runtime.RunContext, version int) bool {
+	if d.previews.ok(rc.RunID, version) {
+		return true
+	}
+	for _, art := range runArtifacts(ctx, d.Store, rc.WorkspaceID, rc.RunID, PreviewArtifact) {
+		var p struct {
+			Version int `json:"version"`
+		}
+		if json.Unmarshal(art.Data, &p) == nil && p.Version >= version {
+			d.previews.previewed(rc.RunID, p.Version)
+			return true
+		}
+	}
+	return false
+}
+
+// anyPreview says the run has previewed some version.
+func (d Deps) anyPreview(ctx context.Context, rc runtime.RunContext) bool {
+	if d.previews.previewedVersion(rc.RunID) > 0 {
+		return true
+	}
+	return len(runArtifacts(ctx, d.Store, rc.WorkspaceID, rc.RunID, PreviewArtifact)) > 0
+}
+
 // previewGate returns the refusal for finish when the run's newest version has not been previewed, or "" when it may finish.
-func (d Deps) previewGate(run uuid.UUID, version int) string {
-	if !d.previewsOn() || d.previews.ok(run, version) {
+func (d Deps) previewGate(ctx context.Context, rc runtime.RunContext, version int) string {
+	if !d.previewsOn() || d.previewOK(ctx, rc, version) {
 		return ""
 	}
 	return fmt.Sprintf("you cannot finish yet: you have not looked at version %d. Call render_preview and look at the contact sheet (black frames, a cropped-off subject, text over a face or outside the safe area, a weak hook), then call check_edit. If something is wrong, fix it with edit_timeline and preview again. Then call finish.", version)
@@ -225,7 +288,7 @@ func (d Deps) endTurn(ctx context.Context, rc runtime.RunContext, text string, n
 		return runtime.EndTurn{}, fmt.Errorf("look for the run's versions: %w", err)
 	}
 	v := int(made.Version)
-	previewed := !d.previewsOn() || d.previews.ok(rc.RunID, v)
+	previewed := !d.previewsOn() || d.previewOK(ctx, rc, v)
 	switch {
 	case nudges > 0:
 		// Asked, and it did not: end the run rather than fail it.

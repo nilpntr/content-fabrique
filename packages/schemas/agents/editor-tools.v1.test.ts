@@ -42,6 +42,7 @@ describe("editor tools contract", () => {
       "get_timeline",
       "get_comments",
       "edit_timeline",
+      "match_exposure",
       "render_preview",
       "check_edit",
       "finish",
@@ -103,7 +104,7 @@ describe("editor tools contract", () => {
 
 describe("tool arguments", () => {
   it("accepts no arguments for the tools that take none, and nothing else", () => {
-    for (const name of ["get_brief", "list_footage", "get_timeline", "render_preview", "check_edit"]) {
+    for (const name of ["get_brief", "list_footage", "get_timeline", "match_exposure", "render_preview", "check_edit"]) {
       expect(check(name, {}), name).toBe(true);
       expect(check(name, { x: 1 }), name).toBe(false);
     }

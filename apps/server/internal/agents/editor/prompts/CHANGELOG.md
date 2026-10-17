@@ -55,6 +55,14 @@ gym footage after clip analysis had every cut on a rep boundary and no dead time
   exposure correction" line is gone with the gain wording.
 - The result of `edit_timeline` and `get_timeline` now list where every clip plays (start, end, speed, motion, transition), which
   the beat arithmetic needs.
+- **Review round 1** (after the first live Opus run of v2.0, which put `gym_moody` on low-key footage and crushed it): the
+  looks paragraph and the workout playbook now choose the grade from the clips' exposure notes (no look or `auto` on low-key
+  footage, `gym_moody` only for clips with no note or a bright one) and say to take a look off when `check_edit`'s new `crushed`
+  check fails; `check_edit` refuses a version that was not previewed, because its brightness checks measure the rendered picture;
+  new tool `match_exposure` (bounded exposure hints computed from the analysis, only darkening the brighter clips) for a clip much
+  brighter than its neighbours; `render_preview` and `check_edit` report what is left of the tool calls and time, and the editor
+  is told that a limit that comes after a preview ends the run with the version as it stands. `gym_moody` itself was retuned (no
+  toe, a gentle S, a soft vignette).
 - **Playbook for talking video** has a TODO: the transcripts (P2-05) exist, but the editor has no tool to read them yet.
 - Cassettes re-recorded (the prompt, the tool list and the run context changed).
 

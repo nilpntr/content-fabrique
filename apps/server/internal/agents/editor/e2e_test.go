@@ -363,7 +363,7 @@ func TestEditorRecordedRequests(t *testing.T) {
 		}
 	}
 	first := api.requests[0]
-	if tools, _ := first["tools"].([]any); len(tools) != 11 {
+	if tools, _ := first["tools"].([]any); len(tools) != 12 {
 		t.Errorf("%d tools sent", len(tools))
 	} else {
 		var names []string
@@ -372,7 +372,7 @@ func TestEditorRecordedRequests(t *testing.T) {
 			name, _ := m["name"].(string)
 			names = append(names, name)
 		}
-		if strings.Join(names, ",") != "get_brief,list_footage,view_clip,find_moments,plan_edit,get_timeline,get_comments,edit_timeline,render_preview,check_edit,finish" {
+		if strings.Join(names, ",") != "get_brief,list_footage,view_clip,find_moments,plan_edit,get_timeline,get_comments,edit_timeline,match_exposure,render_preview,check_edit,finish" {
 			t.Errorf("tools: %v", names)
 		}
 		editTool, _ := tools[7].(map[string]any)

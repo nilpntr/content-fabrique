@@ -36,7 +36,7 @@ func TestLooksAndExposureInTheGraph(t *testing.T) {
 	}
 	for preset, want := range map[string]string{
 		timeline.LookAuto:     "curves=all='0/0 0.25/0.235 0.75/0.765 1/1'",
-		timeline.LookGymMoody: "vignette=angle=0.8:dither=0",
+		timeline.LookGymMoody: "vignette=angle=0.28:dither=0",
 	} {
 		if g := graph(withLook(preset, false)); !strings.Contains(g, want) {
 			t.Errorf("%s: want %s in %s", preset, want, g)
@@ -271,9 +271,34 @@ func TestLooksOnTheScreen(t *testing.T) {
 		if corner > centre-15 {
 			t.Errorf("corner luma %.1f is not darker than the centre %.1f", corner, centre)
 		}
-		// Blacks go down: a dim source gets darker, not lighter.
-		if after, before := frameLuma(t, ffmpeg, render(dim, withLook("gym_moody", false)), "100:100:220:430"), frameLuma(t, ffmpeg, render(dim), "100:100:220:430"); after > before {
-			t.Errorf("shadows got lighter: %.1f from %.1f", after, before)
+		// The shadows are left alone: a dim source (luma 40 to 90) does not get darker, and not noticeably lighter.
+		after, before := frameLuma(t, ffmpeg, render(dim, withLook("gym_moody", false)), "100:100:220:430"), frameLuma(t, ffmpeg, render(dim), "100:100:220:430")
+		if after > before+3 || after < before*0.93 {
+			t.Errorf("the shadows moved: luma %.1f from %.1f", after, before)
+		}
+	})
+
+	// gym_moody is the grade for gym footage, which is low-key: it must not crush it. The first version took the rendered YAVG of a
+	// real clip from 17 to 5 of 255 (a toe from 0.12 to 0.07, eq contrast 1.08). On low-key frames the median and the 90th percentile
+	// of the luma may not drop by more than 12 %.
+	t.Run("gym_moody does not crush a low-key frame", func(t *testing.T) {
+		// A dark gym: a dim gradient (luma 28 to 60) behind a lit subject (luma 110), and the black wall with a lit disc.
+		gym := genSource(t, ffmpeg, "gym", "color=c=black:s=640x360:r=30:d=3,format=yuv420p,geq=lum='if(lt(hypot(X-320,Y-200),90),110,28+32*X/W)':cb=128:cr=128")
+		w, h := 540, 960
+		for name, src := range map[string]string{"black wall and disc": lowKey, "dark gym": gym} {
+			before := render(src)
+			after := render(src, withLook("gym_moody", false))
+			// The median, the 90th percentile and the mean may not fall by more than 12 %; the 5th percentile is the corners, which the
+			// vignette darkens on purpose, so it has more room.
+			for _, c := range []struct{ p, keep float64 }{{5, 0.75}, {50, 0.88}, {90, 0.88}} {
+				b, a := percentile(t, ffmpeg, before, w, h, c.p), percentile(t, ffmpeg, after, w, h, c.p)
+				if a < b*c.keep {
+					t.Errorf("%s: the %.0fth percentile of the luma fell from %.0f to %.0f (more than %.0f %%)", name, c.p, b, a, 100*(1-c.keep))
+				}
+			}
+			if b, a := frameLuma(t, ffmpeg, before, whole), frameLuma(t, ffmpeg, after, whole); a < b*0.88 {
+				t.Errorf("%s: the mean luma fell from %.1f to %.1f (more than 12 %%)", name, b, a)
+			}
 		}
 	})
 

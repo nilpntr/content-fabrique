@@ -68,6 +68,9 @@ type Deps struct {
 	Frames   FrameSource
 	// Preview renders previews; nil means UnavailablePreviews.
 	Preview PreviewRenderer
+	// Rendered measures the preview render of a version for check_edit (a look can crush the picture, which the source analysis cannot
+	// see); nil leaves the rendered-brightness checks "not applicable".
+	Rendered RenderSampler
 	// Comments is where the creator's open comments come from (and where the end of a run reports to); nil means a run has none.
 	Comments CommentSource
 
@@ -109,6 +112,7 @@ const (
 	ToolPlanEdit      = "plan_edit"
 	ToolGetTimeline   = "get_timeline"
 	ToolEditTimeline  = "edit_timeline"
+	ToolMatchExposure = "match_exposure"
 	ToolRenderPreview = "render_preview"
 	ToolCheckEdit     = "check_edit"
 	ToolFinish        = "finish"
@@ -136,6 +140,7 @@ func Tools(d Deps) ([]runtime.Tool, error) {
 		{ToolGetTimeline, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getTimeline) }},
 		{ToolGetComments, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getComments) }},
 		{ToolEditTimeline, true, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.editTimeline) }},
+		{ToolMatchExposure, true, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.matchExposure) }},
 		{ToolRenderPreview, true, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.renderPreview) }},
 		{ToolCheckEdit, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.checkEdit) }},
 		{ToolFinish, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.finish) }},
@@ -564,9 +569,12 @@ func (d Deps) renderPreview(ctx context.Context, rc runtime.RunContext, _ noArgs
 		return runtime.Result{}, fail(fmt.Errorf("parse stored spec: %w", err))
 	}
 	d.previews.previewed(rc.RunID, v)
+	if err := rc.Artifact(ctx, PreviewArtifact, map[string]any{"version": v, "duration_ms": int64(dur)}); err != nil {
+		return runtime.Result{}, fmt.Errorf("record the preview: %w", err)
+	}
 	return runtime.Result{Content: []llm.Block{
-		llm.TextBlock(fmt.Sprintf("Preview of version %d: the video is %d ms (%s) long. The contact sheet below shows frames from the whole video, each labelled with its time. Where the clips play:\n%s",
-			v, int64(dur), secs2(int64(dur)), timeMap(spec, maxTimeMapLines))),
+		llm.TextBlock(fmt.Sprintf("Preview of version %d: the video is %d ms (%s) long. The contact sheet below shows frames from the whole video, each labelled with its time. Where the clips play:\n%s%s",
+			v, int64(dur), secs2(int64(dur)), timeMap(spec, maxTimeMapLines), budgetNote(rc.Left))),
 		{Type: llm.BlockImage, Image: &llm.Image{MediaType: "image/jpeg", Ref: string(sheet)}},
 	}}, nil
 }
@@ -601,7 +609,7 @@ func (d Deps) finish(ctx context.Context, rc runtime.RunContext, in finishArgs) 
 	switch {
 	case err == nil:
 		version = made.Version
-		if msg := d.previewGate(rc.RunID, int(made.Version)); msg != "" {
+		if msg := d.previewGate(ctx, rc, int(made.Version)); msg != "" {
 			return runtime.Errorf("%s", msg), nil
 		}
 		if msg := d.checkGate(ctx, rc, int(made.Version)); msg != "" {

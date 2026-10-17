@@ -204,6 +204,16 @@
       }
     },
     {
+      "name": "match_exposure",
+      "description": "Match the brightness of the clips at the cuts, computed from the clip analysis, so you never have to invent a number. It measures the lit part of each clip's used range (the p90 luma, never the mean: low-key footage is dark and correct), takes the brightness most of the timeline has as the target, and sets a bounded exposure hint (at most 0.7 stops, nothing under 0.15) on each clip that is brighter than that, which the render applies as a gentle darkening that keeps the blacks. Clips that are darker than the target are left alone, so low-key footage is never lifted. A clip keeps the look it has. Call it once the cuts are final, when check_edit or the analysis lines show that one clip is much brighter than the others (for example a posing clip among gym clips); it makes a new version. It does nothing when the clips already match. After it, render_preview and check_edit again: the checks measure the rendered picture. It takes no arguments.",
+      "strict": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "render_preview",
       "description": "Render a fast, low-resolution preview of the current version and get back a contact sheet (a grid of frames from the whole video, each labelled with its time) to check your work by eye, plus the length. It can take up to a minute, so use it when the timeline looks right, not after every edit. It may not be available; then check with get_timeline instead. It takes no arguments.",
       "strict": true,

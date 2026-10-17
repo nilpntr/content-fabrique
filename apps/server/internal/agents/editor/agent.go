@@ -45,6 +45,7 @@ func NewAgent(d Deps) (runtime.Agent, error) {
 		Opening: opening,
 		Context: d.runContext,
 		EndTurn: d.endTurn,
+		OnLimit: d.onLimit,
 		OnEnd: func(run uuid.UUID) {
 			d.previews.forget(run) // what the run kept in memory
 			d.endRun(run)          // and its comments, now that its result is stored

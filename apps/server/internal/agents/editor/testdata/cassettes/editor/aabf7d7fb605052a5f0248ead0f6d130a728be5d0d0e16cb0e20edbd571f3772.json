@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "598cdb8d414ed5f151a6f5c3038e6263b3f4c5da594936538d8f10866118a048",
-  "recorded_at": "2026-10-17T16:31:46Z",
+  "key": "aabf7d7fb605052a5f0248ead0f6d130a728be5d0d0e16cb0e20edbd571f3772",
+  "recorded_at": "2026-10-17T16:54:17Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 16000,
@@ -46,90 +46,6 @@
         "blocks": [
           "tool_result"
         ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
       }
     ],
     "tools": [
@@ -141,6 +57,7 @@
       "get_timeline",
       "get_comments",
       "edit_timeline",
+      "match_exposure",
       "render_preview",
       "check_edit",
       "finish"
@@ -175,16 +92,6 @@
         "sha256": "c1a2c1dd9e9b679be49eb3856f237cf0984ba86e667f45e56d1a9934a461dcba",
         "media_type": "image/jpeg",
         "bytes": 4825
-      },
-      {
-        "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
-        "media_type": "image/jpeg",
-        "bytes": 9284
-      },
-      {
-        "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
-        "media_type": "image/jpeg",
-        "bytes": 9284
       }
     ]
   },
@@ -195,19 +102,67 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_10",
-        "name": "finish",
+        "id": "toolu_ed_3",
+        "name": "plan_edit",
         "input": {
-          "summary": "I cut a 12 second video from your three clips. It opens on half of the heaviest lat pulldown rep with the words HEAVY LAT DAY and a punch-in on the beat, then the cable row, the pulldown again, the wide gym with a flash and a last rep. Check the wide shot: I framed it with a blurred fill so nobody is cropped out."
+          "content_type": "workout",
+          "story": "A heavy lat day in six quick cuts, ending on the wide gym.",
+          "hook": "The lat pulldown at full stretch, with the words HEAVY LAT DAY.",
+          "arc": "Hook on the heaviest rep, the cable row, a second look at the pulldown, the wide gym and a last pulldown rep.",
+          "ending": "Back to the cable row, held a little longer.",
+          "playbook": "workout",
+          "target_length_s": 14,
+          "tempo_bpm": 124,
+          "pace": "building",
+          "shots": [
+            {
+              "role": "hook",
+              "what": "Heaviest pulldown rep, first half",
+              "asset_id": "ast_01jc000000e00800000000000a",
+              "beats": 3,
+              "effect": "punch_in"
+            },
+            {
+              "role": "build",
+              "what": "Cable row",
+              "asset_id": "ast_01jc000000e00800000000000b",
+              "beats": 4
+            },
+            {
+              "role": "peak",
+              "what": "The first pulldown rep, first half",
+              "asset_id": "ast_01jc000000e00800000000000a",
+              "beats": 3
+            },
+            {
+              "role": "detail",
+              "what": "The wide gym",
+              "asset_id": "ast_01jc000000e00800000000000c",
+              "beats": 6,
+              "effect": "flash"
+            },
+            {
+              "role": "peak",
+              "what": "Last pulldown rep, second half",
+              "asset_id": "ast_01jc000000e00800000000000a",
+              "beats": 3
+            },
+            {
+              "role": "ending",
+              "what": "Cable row, held",
+              "asset_id": "ast_01jc000000e00800000000000b",
+              "beats": 6
+            }
+          ]
         }
       }
     ],
     "usage": {
-      "input_tokens": 400,
-      "cache_write_tokens": 650,
+      "input_tokens": 430,
+      "cache_write_tokens": 700,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 16300,
-      "output_tokens": 92
+      "cache_read_tokens": 10100,
+      "output_tokens": 210
     }
   },
   "count_tokens": 9000

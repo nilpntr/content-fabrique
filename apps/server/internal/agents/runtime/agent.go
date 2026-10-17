@@ -103,6 +103,12 @@ type Agent struct {
 	// model instead of ending the run (a nudge), or with the output the run ends with. Nil ends the run with the text as its
 	// summary. See EndTurn.
 	EndTurn func(ctx context.Context, rc RunContext, text string, nudges int) (EndTurn, error)
+	// OnLimit, when set, is asked when the run reaches a budget limit (limit is one of the Limit* names), before the run is failed
+	// for it. The agent may end the run gracefully instead: it returns the output the run succeeds with and true, and the run ends
+	// succeeded, with a status event that names the limit. False fails the run with reason budget, as it does without the hook. It
+	// is for an agent whose work is already in a usable state when the limit comes (the editor, whose newest timeline version
+	// has been previewed), and it must not make model calls or spend anything.
+	OnLimit func(ctx context.Context, rc RunContext, limit string) (output json.RawMessage, ok bool)
 	// OnEnd, when set, is called after a run of this agent has ended in any way (finished, failed, stopped, cancelled), with the
 	// run's id, so the agent can drop what it kept for the run in memory. It runs in the worker that ended the run.
 	OnEnd func(run uuid.UUID)

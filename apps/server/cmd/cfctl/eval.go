@@ -1,17 +1,23 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/nilpntr/content-fabrique/internal/agents/agentset"
 	"github.com/nilpntr/content-fabrique/internal/agents/editor"
+	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/projects"
+	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
@@ -121,7 +127,8 @@ func cmdEvalEditor(args []string, stdout, stderr io.Writer, lookup lookupEnv, de
 		return 1
 	}
 	plan, author := planOfVersion(ctx, st, ws.ID, vd.Version)
-	report, err := editor.CheckVersion(ctx, svc, st, ws.ID, pid, v, plan)
+	sampler, note := renderSamplerFor(env, st)
+	report, err := editor.CheckVersion(ctx, svc, st, ws.ID, pid, v, plan, sampler)
 	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "cfctl %s: %v\n", name, err)
 		return 1
@@ -144,6 +151,9 @@ func cmdEvalEditor(args []string, stdout, stderr io.Writer, lookup lookupEnv, de
 		_, _ = fmt.Fprintln(out, "plan: none found, judged as a general video")
 	}
 	_, _ = fmt.Fprintln(out, report.Text())
+	if note != "" {
+		_, _ = fmt.Fprintln(out, note)
+	}
 	m := report.Metrics
 	_, _ = fmt.Fprintf(out, "\nmetrics: duration %d ms, %d shots (shortest %d ms, median %d ms, longest %d ms), longest equal run %d, rep edges %d/%d, dead share %.3f, effects %d (%.2f per cut, %d ramps), cuts on beat %d/%d, brightness jump %.2f (range %.2f)\n",
 		m.DurationMs, m.Shots, m.ShotMinMs, m.ShotMedianMs, m.ShotMaxMs, m.LongestEqualRun, m.RepEdgesOn, m.RepEdgesTotal, m.DeadShare,
@@ -166,4 +176,28 @@ func planOfVersion(ctx context.Context, st *store.Store, ws ids.WorkspaceID, v s
 		return &p, author
 	}
 	return nil, author
+}
+
+// renderSamplerFor builds the sampler that measures the version's preview render (the rendered-brightness checks), from the same
+// settings `cfctl agent run` takes its frames with: object storage and the media sandbox. Without them the checks that need the
+// render do not apply, and the note says so.
+func renderSamplerFor(env *agentEnv, st *store.Store) (editor.RenderSampler, string) {
+	cfg := storage.Config{
+		Endpoint: env.get("R2_ENDPOINT"), Bucket: env.get("R2_BUCKET"), AccessKeyID: env.get("R2_ACCESS_KEY_ID"),
+		SecretAccessKey: env.get("R2_SECRET_ACCESS_KEY"), Jurisdiction: strings.ToLower(env.get("R2_JURISDICTION")),
+	}
+	if !cfg.Configured() {
+		return nil, "note: no object storage is configured (R2_*), so the preview render was not measured and the rendered-brightness checks do not apply"
+	}
+	objects, err := storage.New(cfg)
+	if err != nil {
+		return nil, fmt.Sprintf("note: object storage: %v; the rendered-brightness checks do not apply", err)
+	}
+	provider := cmp.Or(env.get("MEDIA_SANDBOX_PROVIDER"), config.SandboxDocker)
+	tempDir := cmp.Or(env.get("MEDIA_TEMP_DIR"), filepath.Join(os.TempDir(), "cf-media"))
+	runner, dir, err := agentset.NewFrameRunner(provider, env.get("MEDIA_TOOLS_IMAGE"), tempDir, env.get("CF_ENV"))
+	if err != nil {
+		return nil, fmt.Sprintf("note: the media sandbox: %v; the rendered-brightness checks do not apply", err)
+	}
+	return &editor.RenderMeasurer{Store: st, Objects: objects, Runner: runner, TempDir: dir}, ""
 }
