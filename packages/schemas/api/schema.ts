@@ -361,6 +361,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/projects/{id}/renders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The project's TypeID. */
+                id: components["parameters"]["ProjectIdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The renders of a project, newest first
+         * @description Page with `cursor` (the `next_cursor` of the previous page). `version` and `profile` narrow the list.
+         */
+        get: operations["listRenders"];
+        put?: never;
+        /**
+         * Render a version of the project's timeline
+         * @description Queues a render of `version` with `profile`: `preview` (half size, from the 720p proxies, with the beat guide) or
+         *     `final` (full size, from the originals). The answer is the render, usually `queued`; poll `GET /v1/renders/{id}` for
+         *     `progress` and the files. Asking again for a version and profile that has a render waiting, running or ready returns
+         *     that render (`200`) and queues nothing; a failed render does not count, so asking again after a failure starts a new one.
+         *     The version must exist and validate against the project's footage as it is now (`422 timeline_invalid` otherwise: an asset
+         *     deleted since the edit, say). At most 5 renders per workspace are in flight at once (`429 too_many_renders`). Only
+         *     owners and editors may render.
+         */
+        post: operations["createRender"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/renders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The render's TypeID. */
+                id: components["parameters"]["RenderIdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * One render, with its progress and, once ready, presigned URLs for its files
+         * @description A render of another workspace, of a deleted project, or one that does not exist is `404 not_found`. While `status` is
+         *     `queued` or `rendering`, `progress` (0 to 100) and `stage` say how far it is. Once `ready`, `files` holds a presigned GET
+         *     URL for the MP4, the contact sheet (a JPEG) and the time map (JSON), each valid for 30 minutes (`urls_expires_at`);
+         *     fetch the render again for fresh ones. `failure_reason` is a code that is safe to show when `status` is `failed`.
+         */
+        get: operations["getRender"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -370,7 +429,7 @@ export interface components {
          *     code as a generic failure of its HTTP status.
          * @enum {string}
          */
-        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured" | "assets_not_usable" | "version_conflict" | "invalid_ops" | "no_change";
+        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured" | "assets_not_usable" | "version_conflict" | "invalid_ops" | "no_change" | "timeline_invalid" | "too_many_renders";
         ErrorDetail: {
             code: components["schemas"]["ErrorCode"];
             /** @description For people. It may change; do not branch on it. */
@@ -810,6 +869,122 @@ export interface components {
             error: components["schemas"]["ErrorDetail"];
             issues: components["schemas"]["OpIssue"][];
         };
+        /**
+         * @description `preview`: half the format's size, from the 720p proxies, x264 veryfast, with the beat guide. `final`: the format's size, from the originals, x264 medium, two-pass loudness.
+         * @enum {string}
+         */
+        RenderProfile: "preview" | "final";
+        /** @enum {string} */
+        RenderStatus: "queued" | "rendering" | "ready" | "failed";
+        CreateRenderRequest: {
+            /** @description The timeline version to render. */
+            version: number;
+            profile: components["schemas"]["RenderProfile"];
+        };
+        RenderFile: {
+            /** @description A presigned GET URL. Treat it as a secret until it expires. */
+            url: string;
+            content_type: string;
+            /** Format: int64 */
+            size_bytes: number;
+        };
+        ContactSheetTile: {
+            /** @description The tile's place in the sheet, row by row, from 0. */
+            index: number;
+            /**
+             * Format: int64
+             * @description The output time of the frame shown, the timestamp drawn on the tile.
+             */
+            out_ms: number;
+            /**
+             * Format: int64
+             * @description The output frame number.
+             */
+            frame: number;
+            /** @description The main-track item that owns that time (the shot). */
+            item_id?: string;
+            /**
+             * @description `shot`: 100 ms after the shot starts (the first shot starts at 0, the others at each cut). `last`: the last frame of the video.
+             * @enum {string}
+             */
+            kind: "shot" | "last";
+        };
+        /**
+         * @description The layout of the contact sheet: one tile per shot (the frame 100 ms after the cut that starts it) and the last frame,
+         *     tiled `columns` across, each with its output timestamp (`m:ss.mmm`) drawn on it.
+         */
+        ContactSheet: {
+            columns: number;
+            tile_width: number;
+            tile_height: number;
+            tiles: components["schemas"]["ContactSheetTile"][];
+        };
+        RenderFiles: {
+            mp4: components["schemas"]["RenderFile"];
+            contact_sheet: components["schemas"]["RenderFile"];
+            /** @description A JSON array of `{out_start_ms, out_end_ms, item_id, asset_id?, source_in_ms?, speed?}`: main items carry the asset, the source in point and the speed, text items the first three fields only. An output time `t` inside an item is the source time `source_in_ms + (t - out_start_ms) * speed`. */
+            time_map: components["schemas"]["RenderFile"];
+        };
+        /** @description A sound the timeline asks for that is never mixed in (decision D-03); the creator adds it in the app. */
+        SoundCue: {
+            item_id: string;
+            /** @description The trend's TypeID. */
+            trend_id: string;
+            /** Format: int64 */
+            at_ms: number;
+            /** Format: int64 */
+            source_offset_ms: number;
+            /** Format: int64 */
+            duration_ms: number;
+            gain_db: number;
+        };
+        RequestedBy: {
+            kind: components["schemas"]["AuthorKind"];
+            /** @description The user's TypeID, or the editor run's id. */
+            id: string;
+        };
+        Render: {
+            id: components["schemas"]["RenderId"];
+            project_id: components["schemas"]["ProjectId"];
+            timeline_version: number;
+            profile: components["schemas"]["RenderProfile"];
+            status: components["schemas"]["RenderStatus"];
+            progress: number;
+            /** @description What a running render is doing: `staging` (fetching the footage), `measuring` (the loudness pass of the final profile), `rendering`, `contact_sheet`, `uploading`. Null otherwise. */
+            stage: string | null;
+            /**
+             * Format: int64
+             * @description The length of the video. Null until ready.
+             */
+            duration_ms: number | null;
+            width: number | null;
+            height: number | null;
+            /**
+             * Format: int64
+             * @description The size of the MP4. Null until ready.
+             */
+            size_bytes: number | null;
+            contact_sheet: components["schemas"]["ContactSheet"] | null;
+            sound_cues: components["schemas"]["SoundCue"][];
+            /** @description Null until the render is ready. */
+            files: components["schemas"]["RenderFiles"] | null;
+            /** Format: date-time */
+            urls_expires_at: string | null;
+            /** @description When `failed`: `invalid_timeline`, `source_unavailable` (an asset or its proxy is gone), `inputs_too_large`, `render_failed` (ffmpeg could not make the video), `project_deleted`, `timeout`, `interrupted` or `processing_failed`. */
+            failure_reason: string | null;
+            requested_by: components["schemas"]["RequestedBy"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            started_at: string | null;
+            /** Format: date-time */
+            finished_at: string | null;
+        };
+        ListRendersResponse: {
+            items: components["schemas"]["Render"][];
+            /** @description Pass it as `cursor` for the next page. Null on the last page. */
+            next_cursor: string | null;
+        };
         WebhookResult: {
             /**
              * @description `applied`: the event changed something. `duplicate`: a replay of a delivery already applied. `ignored`: an event
@@ -912,6 +1087,8 @@ export interface components {
         AssetIdPath: components["schemas"]["AssetId"];
         /** @description The project's TypeID. */
         ProjectIdPath: components["schemas"]["ProjectId"];
+        /** @description The render's TypeID. */
+        RenderIdPath: components["schemas"]["RenderId"];
     };
     requestBodies: never;
     headers: never;
@@ -1547,6 +1724,136 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TimelineVersion"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    listRenders: {
+        parameters: {
+            query?: {
+                /** @description How many renders to return (default 50). */
+                limit?: number;
+                /** @description The `next_cursor` of the previous page. */
+                cursor?: string;
+                /** @description Only renders of this timeline version. */
+                version?: number;
+                /** @description Only renders of this profile. */
+                profile?: components["schemas"]["RenderProfile"];
+            };
+            header?: never;
+            path: {
+                /** @description The project's TypeID. */
+                id: components["parameters"]["ProjectIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of renders. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListRendersResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    createRender: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The project's TypeID. */
+                id: components["parameters"]["ProjectIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateRenderRequest"];
+            };
+        };
+        responses: {
+            /** @description The existing render of that version and profile. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Render"];
+                };
+            };
+            /** @description A new render was queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Render"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `timeline_invalid`: the version does not validate against the project's footage now. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `too_many_renders`: the workspace already has 5 renders waiting or running. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getRender: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The render's TypeID. */
+                id: components["parameters"]["RenderIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The render. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Render"];
                 };
             };
             400: components["responses"]["BadRequest"];

@@ -13,6 +13,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
+	"github.com/nilpntr/content-fabrique/internal/renderjobs"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/telemetry"
@@ -39,7 +40,10 @@ func main() {
 			health.AddCheck(httpapi.Check{Name: "river-tables", Fn: jobs.MigratedCheck(st.Pool())})
 			// The assets API needs object storage (R2, or MinIO locally). Without the R2_* settings the process still
 			// starts and the assets operations answer 503 storage_not_configured.
-			var assetsSvc *assets.Service
+			var (
+				assetsSvc  *assets.Service
+				rendersSvc *renderjobs.Service
+			)
 			if cfg.ObjectStorageConfigured() {
 				objects, err := storage.New(cfg.Storage())
 				if err != nil {
@@ -49,12 +53,15 @@ func main() {
 				if assetsSvc, err = assets.NewService(st, objects, jobs.NewEnqueuer(river, logger), logger); err != nil {
 					return err
 				}
+				if rendersSvc, err = renderjobs.NewService(st, objects, jobs.NewEnqueuer(river, logger), logger); err != nil {
+					return err
+				}
 			} else {
-				logger.Warn("R2_* is not set: the assets API answers 503 storage_not_configured")
+				logger.Warn("R2_* is not set: the assets and renders APIs answer 503 storage_not_configured")
 			}
 			// Mount registers every route of the OpenAPI contract (GET /v1/library/summary included); the V1 router it
 			// returns is for routes that are not in the contract yet.
-			_, err = auth.Mount(mux, auth.Deps{Config: cfg, Store: st, Logger: logger, Assets: assetsSvc})
+			_, err = auth.Mount(mux, auth.Deps{Config: cfg, Store: st, Logger: logger, Assets: assetsSvc, Renders: rendersSvc})
 			return err
 		},
 		// The CORS allowlist is the web app's origin, APP_BASE_URL, and nothing else.

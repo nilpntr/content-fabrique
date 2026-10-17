@@ -20,6 +20,10 @@ func (c Catalog) Lookup(assetID string) (timeline.Asset, bool) {
 	return a, ok
 }
 
+// CatalogOf builds the catalog from the rows ListProjectCatalogAssets returned, for the other packages that validate a stored
+// version against the project's footage as it is now (the render jobs).
+func CatalogOf(rows []store.ProjectCatalogRow) Catalog { return catalogOf(rows) }
+
 // catalogOf builds the catalog from the rows ListProjectCatalogAssets returned.
 //
 // Rights: the rights field applies to audio (D-03). A creator's own upload is not licensed, and the attestation that

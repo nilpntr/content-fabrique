@@ -81,6 +81,11 @@ var periodicRegistry = []periodic{
 		schedule: river.PeriodicInterval(UploadsExpireInterval),
 		args:     func() river.JobArgs { return UploadsExpireArgs{} },
 	},
+	{
+		id:       rendersPurgeID,
+		schedule: river.PeriodicInterval(RendersPurgeInterval),
+		args:     func() river.JobArgs { return RendersPurgeArgs{} },
+	},
 }
 
 // PeriodicJobs builds the River periodic jobs of the registry.

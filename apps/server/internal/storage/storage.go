@@ -161,6 +161,28 @@ func ValidDerivativeName(name string) bool {
 	return true
 }
 
+// The files of a render (P3-06), under RenderPrefix. The names are fixed: a render writes each once.
+const (
+	RenderMP4Name          = "render.mp4"
+	RenderContactSheetName = "contact_sheet.jpg"
+	RenderTimeMapName      = "time_map.json"
+)
+
+// RenderPrefix is the prefix of every object of one render: ws/{workspace}/projects/{project}/renders/{render}/. It is under
+// the project, not the asset, because a render belongs to a project's timeline and outlives none of it.
+func RenderPrefix(ws ids.WorkspaceID, project ids.ProjectID, render ids.RenderID) string {
+	return "ws/" + ws.String() + "/projects/" + project.String() + "/renders/" + render.String() + "/"
+}
+
+// RenderKey is the key of one file of a render. name must be one of the three RenderXxxName constants.
+func RenderKey(ws ids.WorkspaceID, project ids.ProjectID, render ids.RenderID, name string) (string, error) {
+	switch name {
+	case RenderMP4Name, RenderContactSheetName, RenderTimeMapName:
+		return RenderPrefix(ws, project, render) + name, nil
+	}
+	return "", fmt.Errorf("storage: %q is not a file of a render", name)
+}
+
 // Part is one uploaded part of a multipart upload.
 type Part struct {
 	Number int
@@ -340,6 +362,16 @@ func (c *Client) DeletePrefix(ctx context.Context, prefix string) (int, error) {
 	if _, _, ok := ParseAssetPrefix(prefix); !ok {
 		return 0, fmt.Errorf("delete prefix: %q is not the prefix of one asset", prefix)
 	}
+	return c.deletePrefix(ctx, prefix)
+}
+
+// DeleteRenderObjects deletes every object of one render (ws/{workspace}/projects/{project}/renders/{render}/) and returns
+// how many it deleted. The prefix is built from the three ids, so it can never reach another render, project or workspace.
+func (c *Client) DeleteRenderObjects(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, render ids.RenderID) (int, error) {
+	return c.deletePrefix(ctx, RenderPrefix(ws, project, render))
+}
+
+func (c *Client) deletePrefix(ctx context.Context, prefix string) (int, error) {
 	deleted := 0
 	pager := s3.NewListObjectsV2Paginator(c.s3, &s3.ListObjectsV2Input{Bucket: aws.String(c.bucket), Prefix: aws.String(prefix)})
 	for pager.HasMorePages() {

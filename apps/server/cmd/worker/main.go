@@ -45,6 +45,7 @@ func run(args []string) error {
 			var (
 				objects  jobs.ObjectStore
 				ingester jobs.AssetIngester // nil without storage: asset_ingest jobs then wait (snoozed)
+				renderer jobs.Renderer      // nil without storage: render jobs then wait (snoozed)
 			)
 			if cfg.ObjectStorageConfigured() {
 				client, err := storage.New(cfg.Storage())
@@ -58,10 +59,15 @@ func run(args []string) error {
 					return nil, err
 				}
 				ingester = pipeline
+				rp, err := newRenderPipeline(cfg, st, client, logger)
+				if err != nil {
+					return nil, err
+				}
+				renderer = rp
 				logger.Info("media pipeline ready", "sandbox", cfg.MediaSandboxProvider, "image", cfg.MediaToolsImage, "temp_dir", cfg.MediaTempDir, "concurrency", cfg.MediaConcurrency)
 				warnIfImageMissing(ctx, cfg, logger)
 			} else {
-				logger.Warn("R2_* is not set: the jobs that delete objects, clean up uploads or ingest assets wait (snoozed, no attempt used) until a worker has it")
+				logger.Warn("R2_* is not set: the jobs that delete objects, clean up uploads ingest assets or render timelines wait (snoozed, no attempt used) until a worker has it")
 			}
 			queues := jobs.DefaultConfig()
 			for i := range queues.Queues {
@@ -75,6 +81,7 @@ func run(args []string) error {
 				Store:      st,
 				Objects:    objects,
 				Ingest:     ingester,
+				Render:     renderer,
 				Logger:     logger,
 				UIAddr:     *riverUIAddr,
 				UIPassword: cfg.RiverUIPassword,

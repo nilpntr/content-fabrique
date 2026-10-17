@@ -93,6 +93,38 @@ type ProjectAsset struct {
 	CreatedAt   time.Time
 }
 
+type Render struct {
+	ID                ids.RenderID
+	WorkspaceID       ids.WorkspaceID
+	ProjectID         ids.ProjectID
+	TimelineVersion   int32
+	Profile           string
+	Status            string
+	Progress          int16
+	Stage             *string
+	Mp4Key            *string
+	ContactSheetKey   *string
+	TimeMapKey        *string
+	DurationMs        *int64
+	Width             *int32
+	Height            *int32
+	SizeBytes         *int64
+	ContactSheetBytes *int64
+	TimeMapBytes      *int64
+	ContactSheet      []byte
+	SoundCues         json.RawMessage
+	CpuMs             *int64
+	WallMs            *int64
+	FailureReason     *string
+	RequestedByKind   string
+	RequestedByID     string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	StartedAt         *time.Time
+	FinishedAt        *time.Time
+	ObjectsPurgedAt   *time.Time
+}
+
 type TimelineVersion struct {
 	ID            ids.TimelineID
 	WorkspaceID   ids.WorkspaceID

@@ -29,6 +29,8 @@ type ObjectStore interface {
 	Head(ctx context.Context, key string) (storage.ObjectInfo, error)
 	// DeletePrefix deletes every object of one asset (ws/{workspace}/assets/{asset}/) and returns how many.
 	DeletePrefix(ctx context.Context, prefix string) (int, error)
+	// DeleteRenderObjects deletes every object of one render (ws/{workspace}/projects/{project}/renders/{render}/).
+	DeleteRenderObjects(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, render ids.RenderID) (int, error)
 }
 
 // noObjectStoreSnooze is how long a job waits when the worker has no object storage settings.
