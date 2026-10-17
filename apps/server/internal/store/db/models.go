@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 )
 
@@ -119,6 +120,26 @@ type Upload struct {
 	AbortedAt   *time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+}
+
+type UsageLedger struct {
+	ID                 uuid.UUID
+	WorkspaceID        ids.WorkspaceID
+	RunID              pgtype.UUID
+	Stage              string
+	Kind               string
+	Model              string
+	InputTokens        int64
+	CacheWriteTokens   int64
+	CacheWrite1hTokens int64
+	CacheReadTokens    int64
+	OutputTokens       int64
+	ListCostMicros     int64
+	PriceTableVersion  string
+	BilledTo           string
+	RequestID          string
+	Estimated          bool
+	CreatedAt          time.Time
 }
 
 type User struct {
