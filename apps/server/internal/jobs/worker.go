@@ -7,12 +7,21 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/riverqueue/river"
 
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
+
+// DirectPoolSize is the size of the worker's pool on DATABASE_DIRECT_URL, and it is small on purpose. The pool exists
+// for what needs a session a transaction pooler does not keep: River's listener (one connection, held for as long as
+// the worker runs) and its short bookkeeping queries (fetch, complete, leader election, maintenance). The jobs' own
+// reads and writes go through the pooled Store, not through this pool, so it does not grow with the number of workers,
+// and a managed Postgres has a low connection limit that direct connections count against.
+const DirectPoolSize = 6
 
 // WorkerOptions configures StartWorker.
 type WorkerOptions struct {
@@ -27,12 +36,18 @@ type WorkerOptions struct {
 	UIAddr string
 	// UIPassword is RIVER_UI_PASSWORD. River UI refuses to start without it.
 	UIPassword string
+	// CheckLogin, when set, is called with a Store over the direct pool before anything starts; an error stops
+	// StartWorker. cmd/worker uses it for the privileged-login check on staging and production.
+	CheckLogin func(ctx context.Context, direct *store.Store) error
+	// Register adds workers to the bundle (tests).
+	Register func(*river.Workers) error
 }
 
 // Worker is the running job side of the worker process: the River client, its pool and, when asked for, River UI.
 type Worker struct {
 	runner *Runner
 	pool   *pgxpool.Pool
+	direct *store.Store
 	logger *slog.Logger
 
 	ui       *http.Server
@@ -43,7 +58,7 @@ type Worker struct {
 
 // StartWorker builds the River client over a pool on the direct URL, starts it (it keeps retrying in the background
 // while Postgres is unreachable) and, when UIAddr is set, serves River UI behind Basic auth. It fails before starting
-// anything when the options cannot work: no direct URL, or River UI asked for without a password.
+// anything when the options cannot work: no direct URL, River UI asked for without a password, or CheckLogin refusing.
 func StartWorker(ctx context.Context, opts WorkerOptions) (*Worker, error) {
 	logger := opts.Logger
 	if logger == nil {
@@ -64,12 +79,7 @@ func StartWorker(ctx context.Context, opts WorkerOptions) (*Worker, error) {
 	if err != nil {
 		return nil, fmt.Errorf("DATABASE_DIRECT_URL: %w", err) // pgx masks the password
 	}
-	// One connection per running job at most, plus the listener, the leader election and the maintenance services.
-	workers := 0
-	for _, q := range cfg.Queues {
-		workers += q.MaxWorkers
-	}
-	pcfg.MaxConns = int32(workers + 6)
+	pcfg.MaxConns = DirectPoolSize
 	pcfg.ConnConfig.RuntimeParams["application_name"] = "worker-river"
 	if pcfg.ConnConfig.ConnectTimeout == 0 {
 		pcfg.ConnConfig.ConnectTimeout = 5 * time.Second
@@ -78,13 +88,20 @@ func StartWorker(ctx context.Context, opts WorkerOptions) (*Worker, error) {
 	if err != nil {
 		return nil, fmt.Errorf("river pool: %w", err)
 	}
+	direct := store.New(pool)
+	if opts.CheckLogin != nil {
+		if err := opts.CheckLogin(ctx, direct); err != nil {
+			pool.Close()
+			return nil, fmt.Errorf("DATABASE_DIRECT_URL: %w", err)
+		}
+	}
 
-	client, err := NewWorkerClient(pool, cfg, Deps{Store: opts.Store, Logger: logger})
+	client, err := NewWorkerClient(pool, cfg, Deps{Store: opts.Store, Logger: logger, Register: opts.Register})
 	if err != nil {
 		pool.Close()
 		return nil, err
 	}
-	w := &Worker{runner: NewRunner(client, pool, logger), pool: pool, logger: logger}
+	w := &Worker{runner: NewRunner(client, pool, logger), pool: pool, direct: direct, logger: logger}
 
 	if opts.UIAddr != "" {
 		if err := w.startUI(ctx, opts.UIAddr, opts.UIPassword); err != nil {
@@ -125,24 +142,44 @@ func (w *Worker) startUI(ctx context.Context, addr, password string) error {
 // UIAddr is the address River UI listens on ("" when it is off). With ":0" it holds the port that was picked.
 func (w *Worker) UIAddr() string { return w.uiAddr }
 
+// Direct is a Store over the worker's direct pool, for its readiness check and login check.
+func (w *Worker) Direct() *store.Store { return w.direct }
+
 // Ready is the "river" readiness check.
 func (w *Worker) Ready(ctx context.Context) error { return w.runner.Ready(ctx) }
 
-// Stop shuts the job side down: River UI first, then the client with its drain budget (StopTimeout), then the pool.
+// Stop shuts the job side down inside StopTimeout (see the budget in jobs.go): River UI and the River client stop at
+// the same time, then the pool closes. A slow River UI client or a job that ignores cancellation costs at most its
+// share of the budget; it is reported or cut off, not waited for.
 func (w *Worker) Stop(ctx context.Context) error {
-	var errs []error
+	ctx, cancel := context.WithTimeout(ctx, StopTimeout)
+	defer cancel()
+
+	var (
+		wg      sync.WaitGroup
+		riverEr error
+	)
 	if w.ui != nil {
-		shut, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-		if err := w.ui.Shutdown(shut); err != nil {
-			_ = w.ui.Close()
-		}
-		cancel()
-		w.uiCancel()
-		<-w.uiDone
+		wg.Go(func() {
+			shut, cancel := context.WithTimeout(ctx, UIShutdownTimeout)
+			defer cancel()
+			if err := w.ui.Shutdown(shut); err != nil {
+				_ = w.ui.Close() // a client that will not finish is cut off
+			}
+			w.uiCancel()
+			<-w.uiDone
+		})
 	}
-	if err := w.runner.Stop(ctx); err != nil {
-		errs = append(errs, err)
+	wg.Go(func() { riverEr = w.runner.Stop(ctx) })
+	wg.Wait()
+
+	// Closing the pool waits for connections that are checked out; a job that ignored its cancellation may hold one.
+	closed := make(chan struct{})
+	go func() { w.pool.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(PoolCloseGrace):
+		w.logger.Warn("river pool still has connections in use; leaving them to the process exit")
 	}
-	w.pool.Close()
-	return errors.Join(errs...)
+	return riverEr
 }

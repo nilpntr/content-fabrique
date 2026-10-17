@@ -59,6 +59,11 @@ func (s *Store) Tx() (pgx.Tx, error) {
 // ErrNoTx is returned by Tx outside a transaction.
 var ErrNoTx = errors.New("store: not inside a transaction")
 
+// ErrQueueNotMigrated is what a hook reports when it cannot enqueue because River's tables are missing: the release
+// step skipped `cfctl migrate up` (or ran `up --to N`). The transaction rolls back, so nothing is half-written; callers
+// map it to a 503 with a clear code and a loud log line.
+var ErrQueueNotMigrated = errors.New("store: the job queue tables are missing (run cfctl migrate up)")
+
 // Open creates the pool for DATABASE_URL, the pooled (request traffic) URL of the app role. It does not connect:
 // the pool dials on first use, so a process can start, report not-ready on /readyz and recover while Postgres is
 // down. Call Ping to check.

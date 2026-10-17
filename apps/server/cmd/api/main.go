@@ -22,7 +22,7 @@ func main() {
 		Addr:    func(c config.Config) string { return c.APIListenAddr },
 		// app.Run registers the Postgres readiness check. The health endpoints stay unauthenticated; everything under
 		// /v1 sits behind the Clerk middleware, except the Svix-signed webhook.
-		Routes: func(cfg config.Config, mux *http.ServeMux, _ *httpapi.Health, logger *slog.Logger, st *store.Store) error {
+		Routes: func(cfg config.Config, mux *http.ServeMux, health *httpapi.Health, logger *slog.Logger, st *store.Store) error {
 			// The insert-only River client over the pooled pool: the api never works jobs and holds no listener. A job is
 			// enqueued in the transaction of the write it belongs to; a new workspace (just-in-time sync or Clerk
 			// webhook) enqueues its welcome job that way.
@@ -30,7 +30,9 @@ func main() {
 			if err != nil {
 				return err
 			}
-			st.SetWorkspaceCreatedHook(jobs.NewEnqueuer(river).WorkspaceCreated)
+			st.SetWorkspaceCreatedHook(jobs.NewEnqueuer(river, logger).WorkspaceCreated)
+			// Creating a workspace needs River's tables, so an api without them is not ready (the check is cached).
+			health.AddCheck(httpapi.Check{Name: "river-tables", Fn: jobs.MigratedCheck(st.Pool())})
 			_, err = auth.Mount(mux, auth.Deps{Config: cfg, Store: st, Logger: logger})
 			return err
 		},

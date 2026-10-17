@@ -31,13 +31,13 @@ DATABASE_MIGRATE_URL: a direct connection as the role that owns the schema. Noth
 Each migration grants the app's group role (<database>_app, cf_app locally) its rights, so the app's own login role never needs DDL.
 
 River's job-queue tables are migrated here too, as a second line that River versions itself ("river/001_..."): after the app
-migrations on up, and before them when down removes everything. After every up the app's group role gets its rights on River's
+migrations on up, and after them when down removes everything. After every up the app's group role gets its rights on River's
 tables (and only reads river_migration), so the worker and the api need no DDL either.
 
 Commands:
   up        apply every pending migration, River's included (--to VERSION stops after that app version and leaves River alone)
   down      roll back the latest app migration (--to VERSION rolls back everything above it; --to 0, or a down that
-            reaches 0, removes River's tables first, then everything else)
+            reaches 0, then also removes River's tables, after the app migrations are gone)
   redo      roll back the latest app migration and apply it again (River is not touched)
   status    list every migration, River's included, and whether it is applied
   version   print the latest applied app version (0 when none)
@@ -239,8 +239,9 @@ func runMigrate(ctx context.Context, m *store.Migrator, riverOf func(context.Con
 			res, err = m.UpTo(ctx, *to)
 			printResults(out, res)
 			if err == nil && len(res) == 0 {
-				_, _ = fmt.Fprintln(out, "  nothing to do (River's tables are migrated by an up without --to)")
+				_, _ = fmt.Fprintln(out, "  nothing to do")
 			}
+			_, _ = fmt.Fprintln(out, "  WARNING: River's tables were NOT migrated: --to stops the app migrations only. The api cannot create workspaces, and its /readyz fails, until you run `cfctl migrate up` without --to")
 			return err
 		}
 		res, err = m.Up(ctx)
@@ -259,8 +260,9 @@ func runMigrate(ctx context.Context, m *store.Migrator, riverOf func(context.Con
 		}
 		return err
 	case "down":
-		// River's tables depend on the app migrations (the grants use cf_grant_app_dml from the first one), so they go
-		// first whenever this down would leave nothing of the app schema.
+		// The app migrations go first. River's tables are dropped only once they have reached 0, so a goose down that
+		// fails never leaves the queue gone while the app schema (and its api) remains. If River's own down fails after
+		// that, the next `down` finds nothing applied and finishes the job.
 		reachesZero := to != nil && *to == 0
 		if to == nil {
 			ss, err := m.Status(ctx)
@@ -273,24 +275,33 @@ func runMigrate(ctx context.Context, m *store.Migrator, riverOf func(context.Con
 					applied++
 				}
 			}
-			reachesZero = applied == 1
-		}
-		if reachesZero {
-			rm, err := riverOf(ctx)
-			if err != nil {
-				return err
-			}
-			rres, err := rm.Down(ctx)
-			printRiver(out, rres)
-			if err != nil {
-				return err
-			}
+			reachesZero = applied <= 1
 		}
 		if to != nil {
 			res, err = m.DownTo(ctx, *to)
 		} else {
 			res, err = m.Down(ctx)
 		}
+		printResults(out, res)
+		if err != nil {
+			return err
+		}
+		var rres []jobs.Result
+		if reachesZero {
+			rm, err := riverOf(ctx)
+			if err != nil {
+				return err
+			}
+			if rres, err = rm.Down(ctx); err != nil {
+				printRiver(out, rres)
+				return err
+			}
+			printRiver(out, rres)
+		}
+		if len(res) == 0 && len(rres) == 0 {
+			_, _ = fmt.Fprintln(out, "  nothing to do")
+		}
+		return nil
 	case "redo":
 		res, err = m.Redo(ctx)
 	case "version":

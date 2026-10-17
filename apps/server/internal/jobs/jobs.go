@@ -33,15 +33,22 @@ const (
 	QueueMaintenance = "maintenance"
 )
 
-// Shutdown budget of the worker's River client. It sits inside the process budget documented in package httpapi
-// (the HTTP drain and shutdown run at the same time as this, then 2 s of telemetry flush, about 9 s in all):
-// running jobs get SoftStopTimeout to finish after the client stops fetching, then their contexts are cancelled and
-// they get CancelGrace to return. A cancelled job is retried later by whichever worker is next.
+// Shutdown budget of the worker's job side. The process budget of package httpapi is about 9 s: 1 s drain delay plus
+// 6 s HTTP shutdown, which run at the same time as this, then 2 s of telemetry flush. Worker.Stop therefore finishes
+// inside StopTimeout (6 s), whatever the jobs and the River UI clients do:
+//
+//   - a start attempt still in progress gets StartWait to end;
+//   - running jobs get SoftStopTimeout after the client stops fetching, then River cancels their contexts and they get
+//     CancelGrace to return (a cancelled job is retried later by whichever worker is next);
+//   - River UI shuts down at the same time as all of that, in at most UIShutdownTimeout;
+//   - the pool is closed last and is given PoolCloseGrace (a job that ignores cancellation may still hold a connection).
 const (
-	SoftStopTimeout = 5 * time.Second
-	CancelGrace     = 1 * time.Second
-	// StopTimeout is the whole budget handed to Runner.Stop.
-	StopTimeout = SoftStopTimeout + CancelGrace
+	StartWait         = 500 * time.Millisecond
+	SoftStopTimeout   = 4 * time.Second
+	CancelGrace       = 1 * time.Second
+	PoolCloseGrace    = 500 * time.Millisecond
+	UIShutdownTimeout = 2 * time.Second
+	StopTimeout       = StartWait + SoftStopTimeout + CancelGrace + PoolCloseGrace
 )
 
 // Queue is the concurrency of one queue.

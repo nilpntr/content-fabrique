@@ -109,13 +109,6 @@ func (m *Migrator) Status(ctx context.Context) ([]Status, error) {
 	return out, nil
 }
 
-// Applied reports whether any River migration is applied: `cfctl migrate down` uses it to know that River's tables
-// must go before the goose migrations are rolled back to 0.
-func (m *Migrator) Applied(ctx context.Context) (bool, error) {
-	existing, err := m.m.ExistingVersions(ctx)
-	return len(existing) > 0, err
-}
-
 // locked runs fn holding the advisory lock on a connection of its own.
 func (m *Migrator) locked(ctx context.Context, fn func(ctx context.Context) error) error {
 	conn, err := m.pool.Acquire(ctx)

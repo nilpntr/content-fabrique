@@ -67,7 +67,7 @@ func connect(t *testing.T, appDSN, superDSN string) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &env{dsn: appDSN, super: superPool, api: st, enq: jobs.NewEnqueuer(client)}
+	return &env{dsn: appDSN, super: superPool, api: st, enq: jobs.NewEnqueuer(client, quiet)}
 }
 
 // startWorker runs the worker side against the database, the way cmd/worker does, and stops it with the test.
@@ -493,8 +493,8 @@ func TestRiverMigrationsRoundTrip(t *testing.T) {
 	if res, err := rm.Down(ctx); err != nil || len(res) != len(status) {
 		t.Fatalf("down = %d results, %v; want %d", len(res), err, len(status))
 	}
-	if applied, err := rm.Applied(ctx); err != nil || applied {
-		t.Fatalf("applied after down = %v, %v", applied, err)
+	if st, err := rm.Status(ctx); err != nil || slices.ContainsFunc(st, func(s jobs.Status) bool { return s.Applied }) {
+		t.Fatalf("status after down = %v, %v", st, err)
 	}
 	var n int
 	if err := queryRow(t, dsn, `SELECT count(*) FROM pg_tables WHERE tablename LIKE 'river\_%'`, &n); err != nil || n != 0 {

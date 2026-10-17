@@ -69,6 +69,29 @@ func TestMigrateCLI(t *testing.T) {
 	if code, out, errOut := migrateCLI(t, url, "redo", "--yes"); code != 0 || !strings.Contains(out, "down") || !strings.Contains(out, "up") {
 		t.Fatalf("redo = %d\n%s\n%s", code, out, errOut)
 	}
+	// up --to N leaves River alone and says so.
+	if code, _, _ := migrateCLI(t, url, "down", "--to", "0", "--yes"); code != 0 {
+		t.Fatal("down --to 0 before the --to test")
+	}
+	if code, out, _ := migrateCLI(t, url, "up", "--to", "2"); code != 0 || !strings.Contains(out, "WARNING: River's tables were NOT migrated") || countRiverTables(t, url) != 0 {
+		t.Fatalf("up --to 2 = %d\n%s", code, out)
+	}
+	if code, _, _ := migrateCLI(t, url, "up"); code != 0 || countRiverTables(t, url) == 0 {
+		t.Fatal("up after up --to 2 must migrate River")
+	}
+	// A down that does not reach 0 keeps River; the one that does removes it after the app schema.
+	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || countRiverTables(t, url) == 0 || strings.Contains(out, "river/") {
+		t.Fatalf("down one removed River too: %d %s", code, out)
+	}
+	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00003_clerk_sync.sql") {
+		t.Fatalf("down one = %d %s", code, out)
+	}
+	if code, out, _ := migrateCLI(t, url, "down", "--to", "0", "--yes"); code != 0 || strings.Index(out, "00001_app_role.sql") > strings.Index(out, "river/001_") {
+		t.Fatalf("down --to 0 must drop River after the app migrations: %d\n%s", code, out)
+	}
+	if code, _, _ := migrateCLI(t, url, "up"); code != 0 {
+		t.Fatal("up")
+	}
 	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00004_webhook_event_status.sql") {
 		t.Fatalf("down one = %d %s", code, out)
 	}

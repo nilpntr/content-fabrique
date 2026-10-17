@@ -11,6 +11,7 @@ import (
 	clerkhttp "github.com/clerk/clerk-sdk-go/v2/http"
 	"github.com/clerk/clerk-sdk-go/v2/jwks"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
+	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
 // Error codes of the authentication middleware. They are part of the API: the web client branches on them.
@@ -23,6 +24,7 @@ const (
 	CodeNotMember            = "not_a_member"           // 403: removed from the workspace
 	CodeIdentityProvider     = "identity_unavailable"   // 503: Clerk's Backend API did not answer
 	CodeNotConfigured        = "auth_not_configured"    // 503: no CLERK_SECRET_KEY
+	CodeQueueNotMigrated     = "queue_not_migrated"     // 503: River's tables are missing, so a new workspace cannot be created
 	CodeInternal             = "internal_error"         // 500
 	CodeWebhookNotConfigured = "webhook_not_configured" // 503: no CLERK_WEBHOOK_SECRET
 )
@@ -157,6 +159,9 @@ func writeResolveError(w http.ResponseWriter, r *http.Request, logger *slog.Logg
 	case errors.Is(err, ErrDirectoryUnavailable):
 		logger.WarnContext(r.Context(), "clerk backend api unavailable", "error", err)
 		httpapi.WriteError(w, http.StatusServiceUnavailable, CodeIdentityProvider, "the sign-in service is unavailable; try again")
+	case errors.Is(err, store.ErrQueueNotMigrated):
+		// The enqueuer already logged the cause loudly. Nothing was written: the workspace insert rolled back with the job.
+		httpapi.WriteError(w, http.StatusServiceUnavailable, CodeQueueNotMigrated, "the server is not fully set up yet; try again later")
 	default:
 		logger.ErrorContext(r.Context(), "resolving the session failed", "error", err)
 		httpapi.WriteError(w, http.StatusInternalServerError, CodeInternal, "something went wrong")

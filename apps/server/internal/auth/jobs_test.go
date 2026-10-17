@@ -29,7 +29,7 @@ func newJobsStore(t *testing.T) (*store.Store, *pgxpool.Pool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.SetWorkspaceCreatedHook(jobs.NewEnqueuer(client).WorkspaceCreated)
+	st.SetWorkspaceCreatedHook(jobs.NewEnqueuer(client, nil).WorkspaceCreated)
 	return st, pool
 }
 

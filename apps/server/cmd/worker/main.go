@@ -46,10 +46,15 @@ func run(args []string) error {
 				Logger:     logger,
 				UIAddr:     *riverUIAddr,
 				UIPassword: cfg.RiverUIPassword,
+				// The direct URL is the same app role: on staging and production a privileged login is refused here too.
+				CheckLogin: func(ctx context.Context, direct *store.Store) error {
+					return app.StartupLoginCheck(ctx, direct, cfg.Env, logger)
+				},
 			})
 			if err != nil {
 				return nil, err
 			}
+			health.AddCheck(httpapi.Check{Name: "postgres-direct", Fn: app.PostgresCheck(w.Direct(), cfg.Env, logger)})
 			health.AddCheck(httpapi.Check{Name: "river", Fn: w.Ready})
 			return w.Stop, nil
 		},

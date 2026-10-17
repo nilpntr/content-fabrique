@@ -60,21 +60,45 @@ func (w *WebhookEventsPruneWorker) Work(ctx context.Context, _ *river.Job[Webhoo
 	return river.RecordOutput(ctx, map[string]int64{"deleted": n})
 }
 
-// PeriodicJobs is the registry of periodic jobs: add a river.NewPeriodicJob here and the worker runs it. River runs
-// the schedules on the elected leader only, so several workers do not multiply the work; a new leader starts the
-// schedules over, so every job here must be safe to run twice.
-func PeriodicJobs() []*river.PeriodicJob {
-	return []*river.PeriodicJob{
-		river.NewPeriodicJob(
-			dailyAt{hour: pruneHour, minute: pruneMinute},
-			func() (river.JobArgs, *river.InsertOpts) { return WebhookEventsPruneArgs{}, nil },
-			&river.PeriodicJobOpts{ID: webhookEventsPruneID},
-		),
-	}
+// periodic is one entry of the registry: a stable ID, a schedule and the job it enqueues.
+type periodic struct {
+	id       string
+	schedule river.PeriodicSchedule
+	args     func() river.JobArgs
 }
 
-// PeriodicJobIDs lists the IDs of PeriodicJobs, for tests and docs.
-func PeriodicJobIDs() []string { return []string{webhookEventsPruneID} }
+// periodicRegistry is the registry of periodic jobs: add an entry and the worker runs it; PeriodicJobIDs follows. River
+// runs the schedules on the elected leader only, so several workers do not multiply the work; a new leader starts the
+// schedules over, so every job here must be safe to run twice.
+var periodicRegistry = []periodic{
+	{
+		id:       webhookEventsPruneID,
+		schedule: dailyAt{hour: pruneHour, minute: pruneMinute},
+		args:     func() river.JobArgs { return WebhookEventsPruneArgs{} },
+	},
+}
+
+// PeriodicJobs builds the River periodic jobs of the registry.
+func PeriodicJobs() []*river.PeriodicJob {
+	out := make([]*river.PeriodicJob, 0, len(periodicRegistry))
+	for _, p := range periodicRegistry {
+		out = append(out, river.NewPeriodicJob(
+			p.schedule,
+			func() (river.JobArgs, *river.InsertOpts) { return p.args(), nil },
+			&river.PeriodicJobOpts{ID: p.id},
+		))
+	}
+	return out
+}
+
+// PeriodicJobIDs lists the IDs of the registry, for tests and docs.
+func PeriodicJobIDs() []string {
+	ids := make([]string, 0, len(periodicRegistry))
+	for _, p := range periodicRegistry {
+		ids = append(ids, p.id)
+	}
+	return ids
+}
 
 // dailyAt is a river.PeriodicSchedule that fires once a day at a fixed UTC time. River's PeriodicInterval counts from
 // the moment the leader starts, so a restart would move "daily" around the clock.

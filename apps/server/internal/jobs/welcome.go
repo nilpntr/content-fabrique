@@ -20,6 +20,8 @@ type Deps struct {
 	Logger *slog.Logger
 	// Now replaces time.Now (tests).
 	Now func() time.Time
+	// Register optionally adds more workers to the bundle (tests, and packages with jobs of their own later).
+	Register func(*river.Workers) error
 }
 
 func (d Deps) logger() *slog.Logger {
@@ -47,6 +49,11 @@ func Workers(deps Deps) (*river.Workers, error) {
 	}
 	if err := river.AddWorkerSafely(w, &WebhookEventsPruneWorker{deps: deps}); err != nil {
 		return nil, err
+	}
+	if deps.Register != nil {
+		if err := deps.Register(w); err != nil {
+			return nil, err
+		}
 	}
 	return w, nil
 }

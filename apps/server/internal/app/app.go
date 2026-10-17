@@ -82,11 +82,11 @@ func Run(opts Options) error {
 	}
 	defer st.Close()
 
-	if err := startupLoginCheck(ctx, st, cfg.Env, logger); err != nil {
+	if err := StartupLoginCheck(ctx, st, cfg.Env, logger); err != nil {
 		return err
 	}
 
-	health := httpapi.NewHealth(logger, httpapi.Check{Name: "postgres", Fn: postgresCheck(st, cfg.Env, logger)})
+	health := httpapi.NewHealth(logger, httpapi.Check{Name: "postgres", Fn: PostgresCheck(st, cfg.Env, logger)})
 	mux := httpapi.NewMux(health)
 	if opts.Routes != nil {
 		if err := opts.Routes(cfg, mux, health, logger, st); err != nil {
