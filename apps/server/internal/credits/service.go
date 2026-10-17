@@ -68,7 +68,7 @@ type Quote struct {
 // usually done so already), so two requests for one project cannot both be the first edit.
 //
 // The first edit is the run on a project that has no charged edit yet. A run that failed was released and never charged, so after a failed
-// first run the next one is the first edit again; a run that was cancelled after a preview was charged, so the next one is a revision.
+// first run the next one is the first edit again; a run that was cancelled after it made a version was charged, so the next one is a revision (a cancel after a preview of earlier work was released).
 //
 // With free set (cfctl agent run --no-credits) the workspace need not have a plan and the run costs no credits.
 func (s *Service) QuoteEdit(ctx context.Context, tx *store.Store, ws ids.WorkspaceID, project ids.ProjectID, free bool) (Quote, error) {

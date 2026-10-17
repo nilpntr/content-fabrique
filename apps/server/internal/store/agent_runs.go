@@ -257,7 +257,7 @@ func (s *Store) RequestAgentRunCancel(ctx context.Context, ws ids.WorkspaceID, i
 			if _, err = tx.AppendAgentEventUnfenced(ctx, ws, id, EventStatus, event); err != nil {
 				return err
 			}
-			// Cancelled before it ever ran, or while it waited for an answer: charged if the creator was shown a preview, released if not.
+			// Cancelled before it ever ran, or while it waited for an answer: charged if the run made a timeline version, released if not.
 			return tx.settleRunCredits(ctx, ws, r, time.Now())
 		}
 		return nil

@@ -759,6 +759,45 @@ func (q *Queries) ListDueCreditExpiries(ctx context.Context, arg ListDueCreditEx
 	return items, nil
 }
 
+const listDueCreditExpiriesOfWorkspace = `-- name: ListDueCreditExpiriesOfWorkspace :many
+SELECT s.id, s.expires_at
+FROM credit_ledger s
+WHERE s.workspace_id = $1 AND s.credits > 0 AND s.kind IN ('grant_allowance', 'grant_topup', 'adjust') AND s.expires_at IS NOT NULL AND s.expires_at <= $2
+  AND NOT EXISTS (SELECT 1 FROM credit_ledger e WHERE e.grant_id = s.id AND e.kind = 'expire')
+ORDER BY s.expires_at, s.id
+`
+
+type ListDueCreditExpiriesOfWorkspaceParams struct {
+	WorkspaceID ids.WorkspaceID
+	Now         *time.Time
+}
+
+type ListDueCreditExpiriesOfWorkspaceRow struct {
+	ID        uuid.UUID
+	ExpiresAt *time.Time
+}
+
+// The same for one workspace (a settle takes care of its own workspace's expiries before it charges).
+func (q *Queries) ListDueCreditExpiriesOfWorkspace(ctx context.Context, arg ListDueCreditExpiriesOfWorkspaceParams) ([]ListDueCreditExpiriesOfWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listDueCreditExpiriesOfWorkspace, arg.WorkspaceID, arg.Now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDueCreditExpiriesOfWorkspaceRow
+	for rows.Next() {
+		var i ListDueCreditExpiriesOfWorkspaceRow
+		if err := rows.Scan(&i.ID, &i.ExpiresAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listExpiredCreditHoldsWithFrozen = `-- name: ListExpiredCreditHoldsWithFrozen :many
 SELECT h.id, h.workspace_id, h.action_id
 FROM credit_holds h

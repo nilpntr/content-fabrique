@@ -183,6 +183,14 @@ WHERE s.credits > 0 AND s.kind IN ('grant_allowance', 'grant_topup', 'adjust') A
 ORDER BY s.expires_at, s.id
 LIMIT @row_limit;
 
+-- The same for one workspace (a settle takes care of its own workspace's expiries before it charges).
+-- name: ListDueCreditExpiriesOfWorkspace :many
+SELECT s.id, s.expires_at
+FROM credit_ledger s
+WHERE s.workspace_id = @workspace_id AND s.credits > 0 AND s.kind IN ('grant_allowance', 'grant_topup', 'adjust') AND s.expires_at IS NOT NULL AND s.expires_at <= @now
+  AND NOT EXISTS (SELECT 1 FROM credit_ledger e WHERE e.grant_id = s.id AND e.kind = 'expire')
+ORDER BY s.expires_at, s.id;
+
 -- A source, with what is left of it.
 -- name: GetCreditSource :one
 SELECT s.id, s.kind, s.credits AS granted, s.expires_at, s.created_at, s.plan,

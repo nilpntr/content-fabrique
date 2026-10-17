@@ -257,3 +257,10 @@ func TestAByokRunOnOurKeyIsRefused(t *testing.T) {
 		t.Fatalf("a free run on a studio workspace: %v", err)
 	}
 }
+
+// The credits package and the llm layer name the creator's own key the same way: a BYOK run is refused unless the factory says this.
+func TestRequiredBillingIsTheLlmWorkspaceKey(t *testing.T) {
+	if credits.RequiredBilling(credits.BYOK) != string(llm.BilledToWorkspaceKey) || credits.BilledToWorkspaceKey != string(llm.BilledToWorkspaceKey) {
+		t.Fatalf("credits says %q, llm says %q", credits.RequiredBilling(credits.BYOK), llm.BilledToWorkspaceKey)
+	}
+}

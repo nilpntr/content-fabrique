@@ -1966,3 +1966,42 @@ func TestCreditsFrozenCreditsFollowTheHoldsThatRestOnThem(t *testing.T) {
 	}
 	rig.checkLedger(t, ws)
 }
+
+// A run that ends after the period but before the expiry job has run (the job runs about once a minute) is settled as if the job had run
+// first: charged from the old allowance, not short and not from the next one.
+func TestCreditsSettleInTheGapBeforeTheExpiryJob(t *testing.T) { settleInTheGap(t, false) }
+
+// The same when the next period's allowance has been granted already.
+func TestCreditsSettleInTheGapAfterTheNextAllowance(t *testing.T) { settleInTheGap(t, true) }
+
+func settleInTheGap(t *testing.T, nextGranted bool) {
+	{
+		x := newRollover(t, fmt.Sprintf("gap%v", nextGranted))
+		ctx := context.Background()
+		rig := x.rig
+		at := x.end.Add(30 * time.Second)
+		if nextGranted {
+			if _, err := rig.a.SyncAllowance(ctx, x.ws.ID, x.specs, at); err != nil {
+				t.Fatal(err)
+			}
+		}
+		res, err := rig.a.SettleCredits(ctx, x.ws.ID, x.action, true, at)
+		if err != nil || res.Charged != 6 || res.Short != 0 {
+			t.Fatalf("next allowance granted=%v: settle = %+v, %v; want 6 charged, none short", nextGranted, res, err)
+		}
+		// The old allowance paid the 6, and the settle expired the other 144 on the way: nothing is left for the job.
+		if got := rig.remaining(t, x.old); got != 0 {
+			t.Fatalf("granted=%v: the old allowance has %d left, want 0 (6 charged to it, 144 expired)", nextGranted, got)
+		}
+		if _, left, err := rig.a.ExpireDueCredits(ctx, at.Add(time.Minute), 10); err != nil || left != 0 {
+			t.Fatalf("granted=%v: the job expired %d, %v; the settle expired the rest already", nextGranted, left, err)
+		}
+		if _, err := rig.a.SyncAllowance(ctx, x.ws.ID, x.specs, at.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		if got := available(t, rig.a, x.ws, at.Add(2*time.Minute)); got != 150 {
+			t.Fatalf("granted=%v: available = %d, want the whole new allowance", nextGranted, got)
+		}
+		rig.checkLedger(t, x.ws)
+	}
+}
