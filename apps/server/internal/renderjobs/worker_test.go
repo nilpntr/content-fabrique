@@ -149,9 +149,9 @@ func TestRenderAndWait(t *testing.T) {
 	}
 }
 
-// The clean-up job removes the objects of renders whose project was deleted, and only those: not another project's, not another
-// workspace's. It marks them, so a second run does nothing.
-func TestRendersPurgeJob(t *testing.T) {
+// The sweep removes the objects of failed renders and of ready renders of deleted projects, and only those: not another project's,
+// not another workspace's, not a render that is still waiting. It marks them, so a second run does nothing.
+func TestRendersSweepPurgesWhatNobodyCanUse(t *testing.T) {
 	ctx := context.Background()
 	e := newEnv(t)
 	doomed := e.fixture(t, "org_purge_a")
@@ -195,12 +195,12 @@ func TestRendersPurgeJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.Insert(ctx, jobs.RendersPurgeArgs{}, nil); err != nil {
+	if _, err := client.Insert(ctx, jobs.RendersSweepArgs{}, nil); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "the purge job to complete", 30*time.Second, func() bool {
+	eventually(t, "the sweep job to complete", 30*time.Second, func() bool {
 		var n int
-		err := e.super.QueryRow(ctx, `SELECT count(*) FROM river_job WHERE kind = 'renders_purge' AND state = 'completed'`).Scan(&n)
+		err := e.super.QueryRow(ctx, `SELECT count(*) FROM river_job WHERE kind = 'renders_sweep' AND state = 'completed'`).Scan(&n)
 		return err == nil && n == 1
 	})
 	for _, k := range goneKeys {
@@ -224,7 +224,7 @@ func TestRendersPurgeJob(t *testing.T) {
 		t.Errorf("purged: ready %v, failed %v; live %v, queued %v", purged(gone.ID), purged(failedRender.ID), purged(kept.ID), purged(queued.ID))
 	}
 	var out string
-	if err := e.super.QueryRow(ctx, `SELECT metadata->'output'::text FROM river_job WHERE kind = 'renders_purge'`).Scan(&out); err != nil || !strings.Contains(out, `"purged": 2`) {
+	if err := e.super.QueryRow(ctx, `SELECT metadata->'output'::text FROM river_job WHERE kind = 'renders_sweep'`).Scan(&out); err != nil || !strings.Contains(out, `"purged": 2`) {
 		t.Errorf("output %s (%v)", out, err)
 	}
 }

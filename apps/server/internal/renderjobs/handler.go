@@ -64,8 +64,10 @@ func apiFile(f File) api.RenderFile {
 	return api.RenderFile{Url: f.URL, ContentType: f.ContentType, SizeBytes: f.SizeBytes}
 }
 
-// renderOf converts a render to its API form. A ready render carries presigned URLs, made now.
-func (h *RenderAPI) renderOf(ctx context.Context, r Render) (api.Render, *Error) {
+// renderOf converts a render to its API form. With files, a ready render carries presigned URLs, made now; a list leaves them out
+// (files and urls_expires_at are null), because signing every row of a page is work nobody asked for: the reader fetches the render
+// it wants.
+func (h *RenderAPI) renderOf(ctx context.Context, r Render, withFiles bool) (api.Render, *Error) {
 	out := api.Render{
 		Id: r.ID.String(), ProjectId: r.ProjectID.String(), TimelineVersion: int(r.TimelineVersion),
 		Profile: api.RenderProfile(r.Profile), Status: api.RenderStatus(r.Status), Progress: int(r.Progress), Stage: r.Stage,
@@ -101,6 +103,9 @@ func (h *RenderAPI) renderOf(ctx context.Context, r Render) (api.Render, *Error)
 		}
 		out.ContactSheet = &cs
 	}
+	if !withFiles {
+		return out, nil
+	}
 	files, e := h.svc.Files(ctx, r)
 	if e != nil {
 		return api.Render{}, e
@@ -135,7 +140,7 @@ func (h *RenderAPI) CreateRender(ctx context.Context, req api.CreateRenderReques
 	}
 	var out api.Render
 	if e == nil {
-		out, e = h.renderOf(ctx, r)
+		out, e = h.renderOf(ctx, r, true)
 	}
 	if e != nil {
 		switch e.Status {
@@ -202,7 +207,7 @@ func (h *RenderAPI) ListRenders(ctx context.Context, req api.ListRendersRequestO
 			break
 		}
 		var item api.Render
-		if item, e = h.renderOf(ctx, r); e == nil {
+		if item, e = h.renderOf(ctx, r, false); e == nil {
 			items = append(items, item)
 		}
 	}
@@ -241,7 +246,7 @@ func (h *RenderAPI) GetRender(ctx context.Context, req api.GetRenderRequestObjec
 		} else {
 			var r Render
 			if r, e = h.svc.Get(ctx, who.Workspace, id); e == nil {
-				out, e = h.renderOf(ctx, r)
+				out, e = h.renderOf(ctx, r, true)
 			}
 		}
 	}

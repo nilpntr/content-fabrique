@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/nilpntr/content-fabrique/internal/jobs"
 	"github.com/nilpntr/content-fabrique/internal/sandbox"
 )
 
@@ -44,6 +45,8 @@ const (
 	ReasonTimeout           = "timeout"
 	ReasonInterrupted       = "interrupted"
 	ReasonProcessing        = "processing_failed"
+	// ReasonJobLost is set by the sweeper on a render whose job is gone (jobs.RenderJobLost).
+	ReasonJobLost = jobs.RenderJobLost
 )
 
 // Limits of the renders.

@@ -9,10 +9,11 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
-// The jobs of the renders (P3-06): the render job a request enqueues, and the periodic clean-up of the objects of renders
-// whose project was deleted.
+// The jobs of the renders (P3-06): the render job a request enqueues, and the periodic sweep that fails renders whose job is gone and
+// removes the objects nobody can use.
 
 // ErrRenderGone is returned by a Renderer when there is nothing left to render: the render does not exist in the workspace,
 // finished or failed already, or its project was deleted. Retrying cannot help.
@@ -33,11 +34,25 @@ type RenderArgs struct {
 // Kind implements river.JobArgs.
 func (RenderArgs) Kind() string { return "render" }
 
-// InsertOpts makes the job unique by render and puts it on the media queue, with the ingests: a render is minutes of CPU in a
-// sandbox, so few at a time, and it must not delay the short jobs.
+// InsertOpts makes the job unique by render and puts it on the render queue: a render is minutes of CPU in a sandbox, so few at a
+// time, and an ingest that runs for hours must not hold up the preview someone waits for. The priority is set per insert
+// (RenderPriority).
 func (RenderArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: QueueMedia, MaxAttempts: 5, UniqueOpts: river.UniqueOpts{ByArgs: true}}
+	return river.InsertOpts{Queue: QueueRender, MaxAttempts: 5, UniqueOpts: river.UniqueOpts{ByArgs: true}}
 }
+
+// RenderPriority is the River priority of a render of the profile (1 is first): a preview, which an editor or the agent waits for,
+// goes before a final render, which is a batch job.
+func RenderPriority(profile string) int {
+	if profile == "preview" {
+		return 1
+	}
+	return 3
+}
+
+// RenderJobLost is the failure reason of a render whose job is gone: discarded after its last attempt, cancelled or removed while
+// the render was still queued or rendering (the sweeper fails it).
+const RenderJobLost = "job_lost"
 
 // RenderOutcome is what a render job that ended normally records as its River output.
 type RenderOutcome struct {
@@ -96,49 +111,86 @@ func (w *RenderWorker) Work(ctx context.Context, job *river.Job[RenderArgs]) err
 	return river.RecordOutput(ctx, res)
 }
 
-// RendersPurgeInterval is how often the clean-up of the objects of deleted projects' renders runs.
-const RendersPurgeInterval = 30 * time.Minute
+// RendersSweepInterval is how often the sweep of the renders runs.
+const RendersSweepInterval = 5 * time.Minute
 
 const (
-	rendersPurgeID = "renders_purge"
-	// purgePage is how many renders one query returns.
-	purgePage = 100
+	rendersSweepID = "renders_sweep"
+	// sweepPage is how many renders one query returns.
+	sweepPage = 100
+	// RenderSweepGrace is how old a queued or rendering render must be before the sweeper asks whether its job is alive. The job is
+	// enqueued in the transaction that creates the render, so it exists from the first moment; the grace is for clock and commit
+	// slack only.
+	RenderSweepGrace = 2 * time.Minute
 )
 
-// RendersPurgeArgs is the periodic job that removes the objects of finished renders whose project was deleted.
-type RendersPurgeArgs struct{}
+// RendersSweepArgs is the periodic job that keeps the renders table honest: it fails renders whose job is gone, and removes the
+// objects of renders nobody can use.
+type RendersSweepArgs struct{}
 
 // Kind implements river.JobArgs.
-func (RendersPurgeArgs) Kind() string { return "renders_purge" }
+func (RendersSweepArgs) Kind() string { return "renders_sweep" }
 
 // InsertOpts runs it on the maintenance queue, once per period however it was enqueued.
-func (RendersPurgeArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: QueueMaintenance, MaxAttempts: 3, UniqueOpts: river.UniqueOpts{ByPeriod: RendersPurgeInterval / 2}}
+func (RendersSweepArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: QueueMaintenance, MaxAttempts: 3, UniqueOpts: river.UniqueOpts{ByPeriod: RendersSweepInterval / 2}}
 }
 
-// RendersPurgeWorker works RendersPurgeArgs.
-type RendersPurgeWorker struct {
-	river.WorkerDefaults[RendersPurgeArgs]
+// RendersSweepWorker works RendersSweepArgs.
+type RendersSweepWorker struct {
+	river.WorkerDefaults[RendersSweepArgs]
 	deps Deps
 }
 
-// RendersPurgeOutput is what a finished run records.
-type RendersPurgeOutput struct {
-	Purged int `json:"purged"`
-	Failed int `json:"failed"` // storage refused; the next run tries again
+// RendersSweepOutput is what a finished run records.
+type RendersSweepOutput struct {
+	Orphans     int `json:"orphans"`      // queued or rendering renders whose job was gone, now failed
+	Purged      int `json:"purged"`       // renders whose objects were removed
+	PurgeFailed int `json:"purge_failed"` // storage refused; the next run tries again
 }
 
-// Work deletes the objects of every finished render of a deleted project and marks the row. The prefix of each render is built
-// from the ids of its row, which the query joined with a deleted project of the same workspace, so the job cannot remove the
-// objects of a live project. Safe to run twice and from several workers: deleting a prefix that is already empty is a no-op.
-func (w *RendersPurgeWorker) Work(ctx context.Context, _ *river.Job[RendersPurgeArgs]) error {
+// Work does two things, in this order, so that the second sees the result of the first.
+//
+// First it fails the renders that can never finish: queued or rendering, older than RenderSweepGrace, with no River job that can
+// still run them (the job was discarded after its last attempt, cancelled, deleted, or its worker died on the last attempt). Without
+// this a ghost would hold its place in the workspace's in-flight count, and in the dedupe index, for ever. A render whose job is
+// merely waiting or running is left alone however old it is: River's own rescue and the job's timeout deal with those.
+//
+// Then it removes the objects of the renders that are over and that nobody can use: failed renders (an attempt may have left
+// files behind) and ready renders of deleted projects. The prefix is built from the ids of the row, and the row's workspace and
+// project are the ones the query joined, so the job cannot remove the objects of a live render. Safe to run twice and from several
+// workers: deleting a prefix that is already empty is a no-op.
+func (w *RendersSweepWorker) Work(ctx context.Context, _ *river.Job[RendersSweepArgs]) error {
 	if w.deps.Objects == nil {
 		return noObjectStore()
 	}
-	var out RendersPurgeOutput
+	var out RendersSweepOutput
+	before := w.deps.now().Add(-RenderSweepGrace)
+	stale, err := w.deps.Store.ListStaleRenders(ctx, before, sweepPage)
+	if err != nil {
+		return fmt.Errorf("list stale renders: %w", err)
+	}
+	for _, r := range stale {
+		alive, err := w.deps.Store.RenderJobAlive(ctx, r.ID)
+		if err != nil {
+			return fmt.Errorf("render job: %w", err)
+		}
+		if alive {
+			continue
+		}
+		if _, err := w.deps.Store.FailRender(ctx, r.WorkspaceID, r.ID, RenderJobLost, -1, -1); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				continue // it finished meanwhile
+			}
+			return fmt.Errorf("fail orphaned render: %w", err)
+		}
+		out.Orphans++
+		w.deps.logger().WarnContext(ctx, "failed a render whose job is gone", "workspace_id", r.WorkspaceID.String(), "render_id", r.ID.String(), "status", r.Status)
+	}
+
 	seen := map[ids.RenderID]bool{}
 	for {
-		rows, err := w.deps.Store.ListRendersToPurge(ctx, purgePage)
+		rows, err := w.deps.Store.ListRendersToPurge(ctx, sweepPage)
 		if err != nil {
 			return fmt.Errorf("list renders to purge: %w", err)
 		}
@@ -150,27 +202,27 @@ func (w *RendersPurgeWorker) Work(ctx context.Context, _ *river.Job[RendersPurge
 			seen[r.ID] = true
 			progressed = true
 			if _, err := w.deps.Objects.DeleteRenderObjects(ctx, r.WorkspaceID, r.ProjectID, r.ID); err != nil {
-				out.Failed++
-				w.deps.logger().WarnContext(ctx, "could not remove the objects of a render of a deleted project", "workspace_id", r.WorkspaceID.String(), "render_id", r.ID.String(), "error", err)
+				out.PurgeFailed++
+				w.deps.logger().WarnContext(ctx, "could not remove the objects of a render", "workspace_id", r.WorkspaceID.String(), "render_id", r.ID.String(), "error", err)
 				continue
 			}
 			if err := w.deps.Store.MarkRenderObjectsPurged(ctx, r.WorkspaceID, r.ID); err != nil {
-				out.Failed++
+				out.PurgeFailed++
 				w.deps.logger().WarnContext(ctx, "could not mark a render purged", "render_id", r.ID.String(), "error", err)
 				continue
 			}
 			out.Purged++
 		}
-		if len(rows) < purgePage || !progressed {
+		if len(rows) < sweepPage || !progressed {
 			break
 		}
 	}
-	w.deps.logger().InfoContext(ctx, "renders of deleted projects cleaned up", "purged", out.Purged, "failed", out.Failed)
+	w.deps.logger().InfoContext(ctx, "renders swept", "orphans", out.Orphans, "purged", out.Purged, "purge_failed", out.PurgeFailed)
 	if err := river.RecordOutput(ctx, out); err != nil {
 		return err
 	}
-	if out.Failed > 0 {
-		return fmt.Errorf("%d renders could not be cleaned up", out.Failed)
+	if out.PurgeFailed > 0 {
+		return fmt.Errorf("%d renders could not be cleaned up", out.PurgeFailed)
 	}
 	return nil
 }

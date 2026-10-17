@@ -820,7 +820,9 @@ paths:
       operationId: listRenders
       tags: [renders]
       summary: The renders of a project, newest first
-      description: Page with `cursor` (the `next_cursor` of the previous page). `version` and `profile` narrow the list.
+      description: |
+        Page with `cursor` (the `next_cursor` of the previous page). `version` and `profile` narrow the list. The renders in a list
+        carry no presigned URLs (`files` and `urls_expires_at` are `null`); fetch the one you want with `GET /v1/renders/{id}`.
       parameters:
         - name: limit
           in: query
@@ -2124,13 +2126,13 @@ components:
           oneOf:
             - $ref: "#/components/schemas/RenderFiles"
             - type: "null"
-          description: Null until the render is ready.
+          description: Null until the render is ready, and in lists (fetch the render itself for the URLs).
         urls_expires_at:
           type: [string, "null"]
           format: date-time
         failure_reason:
           type: [string, "null"]
-          description: "When `failed`: `invalid_timeline`, `source_unavailable` (an asset or its proxy is gone), `inputs_too_large`, `render_failed` (ffmpeg could not make the video), `project_deleted`, `timeout`, `interrupted` or `processing_failed`."
+          description: "When `failed`: `invalid_timeline`, `source_unavailable` (an asset or its proxy is gone), `inputs_too_large`, `render_failed` (ffmpeg could not make the video), `project_deleted`, `job_lost` (the job that should have rendered it was gone), `timeout`, `interrupted` or `processing_failed`."
         requested_by:
           $ref: "#/components/schemas/RequestedBy"
         created_at:

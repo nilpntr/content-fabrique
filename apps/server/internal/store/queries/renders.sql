@@ -2,6 +2,12 @@
 -- turns "no rows" into ErrNotFound, so it is a 404 and not a 403). A render of a deleted project is no row for the API
 -- (GetRender, ListRenders), and the worker cannot claim or finish it.
 
+-- Serialises the requesters of renders in one workspace until the end of the transaction, so counting the renders in flight and
+-- inserting a new one cannot interleave with another requester (the cap is exact). A transaction-level lock works behind a
+-- transaction pooler.
+-- name: LockWorkspaceRenders :exec
+SELECT pg_advisory_xact_lock(hashtextextended('renders:' || @workspace_id::text, 0));
+
 -- name: CreateRender :one
 INSERT INTO renders (workspace_id, project_id, timeline_version, profile, requested_by_kind, requested_by_id)
 VALUES (@workspace_id, @project_id, @timeline_version, @profile, @requested_by_kind, @requested_by_id)
@@ -58,7 +64,7 @@ RETURNING renders.id;
 -- rendering -> ready with the files. No row: the render failed meanwhile, or its project was deleted while the job worked.
 -- name: FinishRender :one
 UPDATE renders
-SET status = 'ready', progress = 100, stage = NULL, finished_at = now(), failure_reason = NULL,
+SET status = 'ready', progress = 100, stage = NULL, finished_at = now(), failure_reason = NULL, objects_purged_at = NULL,
     mp4_key = @mp4_key, contact_sheet_key = @contact_sheet_key, time_map_key = @time_map_key,
     duration_ms = @duration_ms, width = @width, height = @height, size_bytes = @size_bytes,
     contact_sheet_bytes = @contact_sheet_bytes, time_map_bytes = @time_map_bytes,
@@ -87,13 +93,21 @@ LEFT JOIN asset_derivatives d ON d.workspace_id = a.workspace_id AND d.asset_id 
 WHERE pa.workspace_id = @workspace_id AND pa.project_id = @project_id
   AND a.status = 'ready' AND a.deleted_at IS NULL AND a.duration_ms IS NOT NULL;
 
--- Finished renders of deleted projects whose objects are still in storage: the clean-up removes them.
+-- Renders whose objects the clean-up removes: a failed render (an attempt may have left files behind) and a ready render of a deleted
+-- project, while their objects are not marked purged. Across workspaces: the clean-up acts for none in particular.
 -- name: ListRendersToPurge :many
 SELECT r.*
 FROM renders r
 JOIN projects p ON p.workspace_id = r.workspace_id AND p.id = r.project_id
-WHERE p.deleted_at IS NOT NULL AND r.objects_purged_at IS NULL AND r.status IN ('ready', 'failed')
+WHERE r.objects_purged_at IS NULL AND (r.status = 'failed' OR (r.status = 'ready' AND p.deleted_at IS NOT NULL))
 ORDER BY r.id
+LIMIT @row_limit;
+
+-- Renders that were queued or rendering before the given time: the sweeper looks for the ones whose job is gone. Across workspaces.
+-- name: ListStaleRenders :many
+SELECT * FROM renders
+WHERE status IN ('queued', 'rendering') AND created_at < @before::timestamptz
+ORDER BY id
 LIMIT @row_limit;
 
 -- name: MarkRenderObjectsPurged :exec

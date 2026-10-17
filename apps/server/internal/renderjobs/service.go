@@ -111,7 +111,8 @@ func NewService(st *store.Store, objects Objects, enq Enqueuer, logger *slog.Log
 // nothing is queued (created is false). The version must exist and validate against the project's footage as it is now, and the
 // workspace may have MaxInFlight renders in flight.
 //
-// It is serialised per project (the project row is locked, as the edit of a timeline does), so two requests for the same
+// It is serialised per workspace (an advisory lock, as the cap on uploads is), so the cap on renders in flight is exact however
+// many requests race, and per project (the project row is locked, as the edit of a timeline does), so two requests for the same
 // version cannot both queue a render; the partial unique index of the table is the backstop. The job is enqueued in the same
 // transaction as the row: the row exists exactly when the job does.
 func (s *Service) Request(ctx context.Context, who Caller, project ids.ProjectID, version int, profile string) (r Render, created bool, e *Error) {
@@ -122,6 +123,11 @@ func (s *Service) Request(ctx context.Context, who Caller, project ids.ProjectID
 		return Render{}, false, invalid("version must be a timeline version number")
 	}
 	err := s.store.InTx(ctx, func(tx *store.Store) error {
+		// The requests of one workspace take turns, so the count of renders in flight below is exact; then the project, so the
+		// requests for one version take turns too. Always in this order.
+		if err := tx.LockWorkspaceRenders(ctx, who.Workspace); err != nil {
+			return err
+		}
 		if _, err := tx.GetProjectForUpdate(ctx, who.Workspace, project); err != nil {
 			return err
 		}
@@ -158,7 +164,7 @@ func (s *Service) Request(ctx context.Context, who Caller, project ids.ProjectID
 		}); err != nil {
 			return err
 		}
-		if _, err := s.enq.InsertInStore(ctx, tx, jobs.RenderArgs{WorkspaceID: who.Workspace, RenderID: r.ID}, nil); err != nil {
+		if _, err := s.enq.InsertInStore(ctx, tx, jobs.RenderArgs{WorkspaceID: who.Workspace, RenderID: r.ID}, &river.InsertOpts{Priority: jobs.RenderPriority(profile)}); err != nil {
 			return err
 		}
 		created = true

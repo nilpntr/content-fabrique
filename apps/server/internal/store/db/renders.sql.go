@@ -8,6 +8,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nilpntr/content-fabrique/internal/ids"
@@ -80,7 +81,6 @@ func (q *Queries) CountRendersInFlight(ctx context.Context, workspaceID ids.Work
 }
 
 const createRender = `-- name: CreateRender :one
-
 INSERT INTO renders (workspace_id, project_id, timeline_version, profile, requested_by_kind, requested_by_id)
 VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, workspace_id, project_id, timeline_version, profile, status, progress, stage, mp4_key, contact_sheet_key, time_map_key, duration_ms, width, height, size_bytes, contact_sheet_bytes, time_map_bytes, contact_sheet, sound_cues, cpu_ms, wall_ms, failure_reason, requested_by_kind, requested_by_id, created_at, updated_at, started_at, finished_at, objects_purged_at
@@ -95,9 +95,6 @@ type CreateRenderParams struct {
 	RequestedByID   string
 }
 
-// Renders (P3-06). EVERY query filters by workspace_id: a row of another workspace is never returned or changed (the repository
-// turns "no rows" into ErrNotFound, so it is a 404 and not a 403). A render of a deleted project is no row for the API
-// (GetRender, ListRenders), and the worker cannot claim or finish it.
 func (q *Queries) CreateRender(ctx context.Context, arg CreateRenderParams) (Render, error) {
 	row := q.db.QueryRow(ctx, createRender,
 		arg.WorkspaceID,
@@ -204,7 +201,7 @@ func (q *Queries) FailRender(ctx context.Context, arg FailRenderParams) (Render,
 
 const finishRender = `-- name: FinishRender :one
 UPDATE renders
-SET status = 'ready', progress = 100, stage = NULL, finished_at = now(), failure_reason = NULL,
+SET status = 'ready', progress = 100, stage = NULL, finished_at = now(), failure_reason = NULL, objects_purged_at = NULL,
     mp4_key = $1, contact_sheet_key = $2, time_map_key = $3,
     duration_ms = $4, width = $5, height = $6, size_bytes = $7,
     contact_sheet_bytes = $8, time_map_bytes = $9,
@@ -532,12 +529,13 @@ const listRendersToPurge = `-- name: ListRendersToPurge :many
 SELECT r.id, r.workspace_id, r.project_id, r.timeline_version, r.profile, r.status, r.progress, r.stage, r.mp4_key, r.contact_sheet_key, r.time_map_key, r.duration_ms, r.width, r.height, r.size_bytes, r.contact_sheet_bytes, r.time_map_bytes, r.contact_sheet, r.sound_cues, r.cpu_ms, r.wall_ms, r.failure_reason, r.requested_by_kind, r.requested_by_id, r.created_at, r.updated_at, r.started_at, r.finished_at, r.objects_purged_at
 FROM renders r
 JOIN projects p ON p.workspace_id = r.workspace_id AND p.id = r.project_id
-WHERE p.deleted_at IS NOT NULL AND r.objects_purged_at IS NULL AND r.status IN ('ready', 'failed')
+WHERE r.objects_purged_at IS NULL AND (r.status = 'failed' OR (r.status = 'ready' AND p.deleted_at IS NOT NULL))
 ORDER BY r.id
 LIMIT $1
 `
 
-// Finished renders of deleted projects whose objects are still in storage: the clean-up removes them.
+// Renders whose objects the clean-up removes: a failed render (an attempt may have left files behind) and a ready render of a deleted
+// project, while their objects are not marked purged. Across workspaces: the clean-up acts for none in particular.
 func (q *Queries) ListRendersToPurge(ctx context.Context, rowLimit int32) ([]Render, error) {
 	rows, err := q.db.Query(ctx, listRendersToPurge, rowLimit)
 	if err != nil {
@@ -586,6 +584,85 @@ func (q *Queries) ListRendersToPurge(ctx context.Context, rowLimit int32) ([]Ren
 		return nil, err
 	}
 	return items, nil
+}
+
+const listStaleRenders = `-- name: ListStaleRenders :many
+SELECT id, workspace_id, project_id, timeline_version, profile, status, progress, stage, mp4_key, contact_sheet_key, time_map_key, duration_ms, width, height, size_bytes, contact_sheet_bytes, time_map_bytes, contact_sheet, sound_cues, cpu_ms, wall_ms, failure_reason, requested_by_kind, requested_by_id, created_at, updated_at, started_at, finished_at, objects_purged_at FROM renders
+WHERE status IN ('queued', 'rendering') AND created_at < $1::timestamptz
+ORDER BY id
+LIMIT $2
+`
+
+type ListStaleRendersParams struct {
+	Before   time.Time
+	RowLimit int32
+}
+
+// Renders that were queued or rendering before the given time: the sweeper looks for the ones whose job is gone. Across workspaces.
+func (q *Queries) ListStaleRenders(ctx context.Context, arg ListStaleRendersParams) ([]Render, error) {
+	rows, err := q.db.Query(ctx, listStaleRenders, arg.Before, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Render
+	for rows.Next() {
+		var i Render
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.TimelineVersion,
+			&i.Profile,
+			&i.Status,
+			&i.Progress,
+			&i.Stage,
+			&i.Mp4Key,
+			&i.ContactSheetKey,
+			&i.TimeMapKey,
+			&i.DurationMs,
+			&i.Width,
+			&i.Height,
+			&i.SizeBytes,
+			&i.ContactSheetBytes,
+			&i.TimeMapBytes,
+			&i.ContactSheet,
+			&i.SoundCues,
+			&i.CpuMs,
+			&i.WallMs,
+			&i.FailureReason,
+			&i.RequestedByKind,
+			&i.RequestedByID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.ObjectsPurgedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockWorkspaceRenders = `-- name: LockWorkspaceRenders :exec
+
+SELECT pg_advisory_xact_lock(hashtextextended('renders:' || $1::text, 0))
+`
+
+// Renders (P3-06). EVERY query filters by workspace_id: a row of another workspace is never returned or changed (the repository
+// turns "no rows" into ErrNotFound, so it is a 404 and not a 403). A render of a deleted project is no row for the API
+// (GetRender, ListRenders), and the worker cannot claim or finish it.
+// Serialises the requesters of renders in one workspace until the end of the transaction, so counting the renders in flight and
+// inserting a new one cannot interleave with another requester (the cap is exact). A transaction-level lock works behind a
+// transaction pooler.
+func (q *Queries) LockWorkspaceRenders(ctx context.Context, workspaceID string) error {
+	_, err := q.db.Exec(ctx, lockWorkspaceRenders, workspaceID)
+	return err
 }
 
 const markRenderObjectsPurged = `-- name: MarkRenderObjectsPurged :exec

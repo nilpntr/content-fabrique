@@ -27,8 +27,9 @@ import (
 type PipelineObjects interface {
 	Get(ctx context.Context, key string) (storage.Object, error)
 	Put(ctx context.Context, key string, body io.ReadSeeker, size int64, contentType string) error
-	// Delete removes one object; one that is not there is not an error.
-	Delete(ctx context.Context, key string) error
+	// DeleteRenderObjects removes every object of one render (its whole prefix); a prefix with nothing in it is not an error. It is the
+	// one way the pipeline removes anything.
+	DeleteRenderObjects(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, render ids.RenderID) (int, error)
 }
 
 // Config builds a Pipeline.
@@ -82,8 +83,9 @@ func New(cfg Config) (*Pipeline, error) {
 const jobDirPrefix = "render-"
 
 // sweepStale removes the job directories of runs that died without cleaning up (a crashed or killed worker). A directory
-// counts as stale when nothing in it changed for longer than jobs.RenderTimeout, which is longer than any run lives, so a
-// directory of a run on another worker that shares the temp dir is never touched.
+// counts as stale when nothing in it changed for longer than jobs.RenderTimeout (lastActivity), which is longer than any run
+// lives, so a directory of a run on another worker that shares the temp dir is never touched. A running job also touches its
+// directory every minute (heartbeat), so a long sandbox run that writes nothing is not mistaken for a dead one.
 func (p *Pipeline) sweepStale(now time.Time) {
 	entries, err := os.ReadDir(p.cfg.TempDir)
 	if err != nil {
@@ -94,8 +96,8 @@ func (p *Pipeline) sweepStale(now time.Time) {
 		if !e.IsDir() || !strings.HasPrefix(e.Name(), jobDirPrefix) {
 			continue
 		}
-		fi, err := e.Info()
-		if err != nil || now.Sub(fi.ModTime()) <= jobs.RenderTimeout {
+		last, err := lastActivity(filepath.Join(p.cfg.TempDir, e.Name()))
+		if err != nil || now.Sub(last) <= jobs.RenderTimeout {
 			continue
 		}
 		if err := os.RemoveAll(filepath.Join(p.cfg.TempDir, e.Name())); err != nil {
@@ -117,22 +119,73 @@ func (p *Pipeline) Fail(ctx context.Context, ws ids.WorkspaceID, id ids.RenderID
 	if err != nil {
 		return err
 	}
-	p.deleteObjects(ctx, r.WorkspaceID, r.ProjectID, r.ID, storage.RenderMP4Name, storage.RenderContactSheetName, storage.RenderTimeMapName)
+	p.removeObjects(ctx, r.WorkspaceID, r.ProjectID, r.ID, true)
 	return nil
 }
 
-// deleteObjects removes files of a render, best effort: a failure is logged, and the clean-up of a deleted project's renders
-// removes the prefix in the end.
-func (p *Pipeline) deleteObjects(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, id ids.RenderID, names ...string) {
+// removeObjects removes every object of a render: the one cleanup path of the pipeline (DeleteRenderObjects, the whole prefix).
+// purged says the render is over, so that its row is marked and the sweeper does not look at it again; an attempt that is going to
+// be retried removes what it wrote without marking. Best effort: a failure is logged, and the sweeper, which finds every failed
+// render whose row is not marked, removes the prefix in the end.
+func (p *Pipeline) removeObjects(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, id ids.RenderID, purged bool) {
 	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	for _, name := range names {
-		key, err := storage.RenderKey(ws, project, id, name)
+	if _, err := p.cfg.Objects.DeleteRenderObjects(cctx, ws, project, id); err != nil {
+		p.cfg.Logger.Warn("could not remove the files of a render that did not finish", "render_id", id.String(), "error", err)
+		return
+	}
+	if purged {
+		if err := p.cfg.Store.MarkRenderObjectsPurged(cctx, ws, id); err != nil {
+			p.cfg.Logger.Warn("could not mark the files of a render removed", "render_id", id.String(), "error", err)
+		}
+	}
+}
+
+// lastActivity is the newest modification time in a job directory: the directory itself and what is in it, two levels deep (the
+// staged footage, the work directory, the output). Files being written and the heartbeat both move it.
+func lastActivity(dir string) (time.Time, error) {
+	fi, err := os.Stat(dir)
+	if err != nil {
+		return time.Time{}, err
+	}
+	newest := fi.ModTime()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return newest, nil //nolint:nilerr // the directory's own time is what there is
+	}
+	for _, e := range entries {
+		if info, err := e.Info(); err == nil && info.ModTime().After(newest) {
+			newest = info.ModTime()
+		}
+		if !e.IsDir() {
+			continue
+		}
+		sub, err := os.ReadDir(filepath.Join(dir, e.Name()))
 		if err != nil {
 			continue
 		}
-		if err := p.cfg.Objects.Delete(cctx, key); err != nil {
-			p.cfg.Logger.Warn("could not remove a file of a render that did not finish", "render_id", id.String(), "name", name, "error", err)
+		for _, se := range sub {
+			if info, err := se.Info(); err == nil && info.ModTime().After(newest) {
+				newest = info.ModTime()
+			}
+		}
+	}
+	return newest, nil
+}
+
+// heartbeatEvery is how often a running job touches its directory.
+const heartbeatEvery = time.Minute
+
+// heartbeat touches dir every heartbeatEvery until ctx ends, so that lastActivity of a live job is never old.
+func heartbeat(ctx context.Context, dir string) {
+	t := time.NewTicker(heartbeatEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-t.C:
+			_ = os.Chtimes(dir, now, now)
 		}
 	}
 }
@@ -158,6 +211,9 @@ func (p *Pipeline) Run(ctx context.Context, ws ids.WorkspaceID, id ids.RenderID)
 		return jobs.RenderOutcome{}, fmt.Errorf("temp dir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
+	hbCtx, stopHeartbeat := context.WithCancel(ctx)
+	defer stopHeartbeat()
+	go heartbeat(hbCtx, dir)
 
 	runner := p.cfg.Runner
 	if lr, ok := runner.(interface {
@@ -173,17 +229,22 @@ func (p *Pipeline) Run(ctx context.Context, ws ids.WorkspaceID, id ids.RenderID)
 	switch {
 	case errors.As(err, &fe):
 		log.WarnContext(ctx, "render failed: the timeline or its footage cannot be rendered", "reason", fe.reason, "error", fe.err)
-		r.removeUploaded(ctx)
-		return jobs.RenderOutcome{Status: store.RenderFailed, Reason: fe.reason, WallMs: wall.Milliseconds()}, r.markFailed(ctx, fe.reason, wall)
+		merr := r.markFailed(ctx, fe.reason, wall)
+		r.removeObjects(ctx, true)
+		return jobs.RenderOutcome{Status: store.RenderFailed, Reason: fe.reason, WallMs: wall.Milliseconds()}, merr
 	case errors.Is(err, jobs.ErrRenderGone):
 		// Its project was deleted (or it failed) while the job worked: nobody will use what it wrote. A row that is still
 		// running is failed, so that it does not hold a place in the workspace's in-flight count for ever.
-		r.removeUploaded(ctx)
-		if merr := r.markFailed(ctx, ReasonProjectDeleted, wall); merr != nil {
+		merr := r.markFailed(ctx, ReasonProjectDeleted, wall)
+		r.removeObjects(ctx, true)
+		if merr != nil {
 			return jobs.RenderOutcome{}, merr
 		}
 		return jobs.RenderOutcome{}, err
 	case err != nil:
+		// A problem of ours: the job is retried and the attempt's files are no use to it, so they go now (the retry writes them
+		// again under the same names). The last attempt's Fail marks the render failed.
+		r.removeObjects(ctx, false)
 		return jobs.RenderOutcome{}, err
 	}
 	log.InfoContext(ctx, "render ready", "wall", wall.Round(time.Millisecond), "sandbox", r.sandbox.Round(time.Millisecond), "duration_ms", done.durationMs, "size_bytes", done.sizeBytes)
@@ -445,13 +506,14 @@ func (r *run) put(ctx context.Context, name string, body io.ReadSeeker, size int
 	return key, nil
 }
 
-// removeUploaded deletes the files this run wrote, for a run that ended without making the render ready. It uses a fresh
-// context, as the run's may be the thing that ended.
-func (r *run) removeUploaded(ctx context.Context) {
-	if len(r.uploaded) == 0 {
+// removeObjects removes the render's files after a run that did not make it ready; purged says the render is over (see
+// Pipeline.removeObjects). Nothing is asked of storage when this run wrote nothing and the render is not over: a failed render
+// is always cleaned, as an earlier attempt may have left files.
+func (r *run) removeObjects(ctx context.Context, purged bool) {
+	if len(r.uploaded) == 0 && !purged {
 		return
 	}
-	r.p.deleteObjects(ctx, r.ws, r.render.ProjectID, r.render.ID, r.uploaded...)
+	r.p.removeObjects(ctx, r.ws, r.render.ProjectID, r.render.ID, purged)
 }
 
 // errKilled marks a tool that was killed by a signal (the out-of-memory killer's 137, a 143 from a stopping container): the

@@ -18,10 +18,11 @@ type Requester interface {
 
 var _ Requester = (*Service)(nil)
 
-// RenderAndWait looks at the render after pollFirst, then waits twice as long each time, up to pollLongest.
+// RenderAndWait looks at the render after pollFirst, then waits longer each time, up to pollLongest: a render is seen ready at most
+// half a second after it is.
 const (
-	pollFirst = 250 * time.Millisecond
-	pollLongest = 2 * time.Second
+	pollFirst   = 100 * time.Millisecond
+	pollLongest = 500 * time.Millisecond
 )
 
 // RenderAndWait asks for a render of the version of the project (see Service.Request: an existing render of that version and

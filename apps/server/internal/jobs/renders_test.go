@@ -95,8 +95,8 @@ func TestRenderJobIsUniqueByRender(t *testing.T) {
 		t.Fatalf("%d jobs for one render (%v)", n, err)
 	}
 	var queue string
-	if err := e.super.QueryRow(ctx, `SELECT queue FROM river_job WHERE kind = 'render' AND args->>'render_id' = $1`, id.String()).Scan(&queue); err != nil || queue != jobs.QueueMedia {
-		t.Errorf("queue %q (%v), want the media queue", queue, err)
+	if err := e.super.QueryRow(ctx, `SELECT queue FROM river_job WHERE kind = 'render' AND args->>'render_id' = $1`, id.String()).Scan(&queue); err != nil || queue != jobs.QueueRender {
+		t.Errorf("queue %q (%v), want the render queue", queue, err)
 	}
 }
 
@@ -190,8 +190,8 @@ func TestRenderIsNeverRescuedWhileItRuns(t *testing.T) {
 	}
 }
 
-// Without object storage the clean-up of deleted projects' renders snoozes, like the other jobs that need it.
-func TestRendersPurgeWithoutObjectStorageSnoozes(t *testing.T) {
+// Without object storage the sweep of the renders snoozes, like the other jobs that need it.
+func TestRendersSweepWithoutObjectStorageSnoozes(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 	e.startWorker(t, jobs.WorkerOptions{})
@@ -199,12 +199,12 @@ func TestRendersPurgeWithoutObjectStorageSnoozes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.Insert(ctx, jobs.RendersPurgeArgs{}, nil); err != nil {
+	if _, err := client.Insert(ctx, jobs.RendersSweepArgs{}, nil); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "the purge job to be snoozed", func() bool {
+	eventually(t, "the sweep job to be snoozed", func() bool {
 		var n int
-		err := e.super.QueryRow(ctx, `SELECT count(*) FROM river_job WHERE kind = 'renders_purge' AND state = 'scheduled' AND scheduled_at > now() + interval '4 minutes' AND attempt = 0`).Scan(&n)
+		err := e.super.QueryRow(ctx, `SELECT count(*) FROM river_job WHERE kind = 'renders_sweep' AND state = 'scheduled' AND scheduled_at > now() + interval '4 minutes' AND attempt = 0`).Scan(&n)
 		return err == nil && n == 1
 	})
 }

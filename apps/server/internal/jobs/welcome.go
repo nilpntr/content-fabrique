@@ -74,7 +74,7 @@ func Workers(deps Deps) (*river.Workers, error) {
 	if err := river.AddWorkerSafely(w, &RenderWorker{deps: deps}); err != nil {
 		return nil, err
 	}
-	if err := river.AddWorkerSafely(w, &RendersPurgeWorker{deps: deps}); err != nil {
+	if err := river.AddWorkerSafely(w, &RendersSweepWorker{deps: deps}); err != nil {
 		return nil, err
 	}
 	if deps.Register != nil {

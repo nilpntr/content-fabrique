@@ -51,11 +51,11 @@ func (f *flakyObjects) Put(ctx context.Context, key string, body io.ReadSeeker, 
 	return nil
 }
 
-func (f *flakyObjects) Delete(ctx context.Context, key string) error {
+func (f *flakyObjects) DeleteRenderObjects(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, render ids.RenderID) (int, error) {
 	f.mu.Lock()
-	f.deleted = append(f.deleted, key)
+	f.deleted = append(f.deleted, render.String())
 	f.mu.Unlock()
-	return f.PipelineObjects.Delete(ctx, key)
+	return f.PipelineObjects.DeleteRenderObjects(ctx, ws, project, render)
 }
 
 // hookRunner runs fn before the first tool run of a job (the render), then goes on with the real runner.
@@ -180,6 +180,12 @@ func TestRenderRetriesWhatIsNotTheTimelinesFault(t *testing.T) {
 		if status, _, _ := e.row(t, r.ID); status != store.RenderRendering {
 			t.Errorf("status %s, want rendering until the last attempt", status)
 		}
+		// The attempt took back what it had uploaded; the row is not marked purged, as the retry will write them again.
+		f.noObjects(t, r)
+		var marked *time.Time
+		if err := e.super.QueryRow(ctx, `SELECT objects_purged_at FROM renders WHERE id = $1`, r.ID).Scan(&marked); err != nil || marked != nil {
+			t.Errorf("objects_purged_at = %v after a retried attempt (%v)", marked, err)
+		}
 		e.tempDirEmpty(t)
 		// The retry (storage is back) renders it.
 		flaky.failPut = ""
@@ -213,6 +219,7 @@ func TestRenderRetriesWhatIsNotTheTimelinesFault(t *testing.T) {
 			if len(flaky.puts) != 2 {
 				t.Fatalf("%s: the attempt uploaded %v, want the video and the sheet before the failure", c.name, flaky.puts)
 			}
+			f.noObjects(t, r) // already taken back by the failed attempt
 			if err := e.pipe.Fail(ctx, f.w.ID, r.ID, c.cause); err != nil {
 				t.Fatalf("%s: Fail: %v", c.name, err)
 			}
@@ -343,8 +350,10 @@ func TestNewSweepsStaleJobDirectories(t *testing.T) {
 			t.Fatal(err)
 		}
 		when := time.Now().Add(-age)
-		if err := os.Chtimes(p, when, when); err != nil {
-			t.Fatal(err)
+		for _, d := range []string{filepath.Join(p, "in"), p} { // the child first: it is what makes a directory look alive
+			if err := os.Chtimes(d, when, when); err != nil {
+				t.Fatal(err)
+			}
 		}
 		return p
 	}

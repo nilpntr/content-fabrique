@@ -31,6 +31,9 @@ const (
 	QueueDefault = "default"
 	// QueueMedia holds the asset ingest: minutes of CPU per job in a sandbox, so few at a time.
 	QueueMedia = "media"
+	// QueueRender holds the renders (P3-06): a queue of its own, so that an ingest that runs for hours never holds up the preview an
+	// editor waits for. Previews go first within it (RenderPriority).
+	QueueRender = "render"
 	// QueueMaintenance holds housekeeping, so a flood of other work never delays it and it never uses much.
 	QueueMaintenance = "maintenance"
 )
@@ -67,12 +70,16 @@ type Config struct {
 // DefaultMediaConcurrency is how many ingests run at once on one worker unless MEDIA_CONCURRENCY says otherwise.
 const DefaultMediaConcurrency = 2
 
+// DefaultRenderConcurrency is how many renders run at once on one worker unless RENDER_CONCURRENCY says otherwise.
+const DefaultRenderConcurrency = 2
+
 // DefaultConfig is the queue layout of the worker.
 func DefaultConfig() Config {
 	return Config{Queues: []Queue{
 		{Name: QueueDefault, MaxWorkers: 10},
 		{Name: QueueMaintenance, MaxWorkers: 2},
 		{Name: QueueMedia, MaxWorkers: DefaultMediaConcurrency},
+		{Name: QueueRender, MaxWorkers: DefaultRenderConcurrency},
 		{Name: QueueAgents, MaxWorkers: DefaultAgentConcurrency},
 	}}
 }

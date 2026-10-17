@@ -87,9 +87,9 @@ var periodicRegistry = []periodic{
 		args:     func() river.JobArgs { return AgentRunsResumeArgs{} },
 	},
 	{
-		id:       rendersPurgeID,
-		schedule: river.PeriodicInterval(RendersPurgeInterval),
-		args:     func() river.JobArgs { return RendersPurgeArgs{} },
+		id:       rendersSweepID,
+		schedule: river.PeriodicInterval(RendersSweepInterval),
+		args:     func() river.JobArgs { return RendersSweepArgs{} },
 	},
 }
 

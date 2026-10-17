@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -191,6 +193,35 @@ func (s *Store) ListRendersToPurge(ctx context.Context, limit int) ([]Render, er
 	}
 	rows, err := s.q.ListRendersToPurge(ctx, int32(min(limit, maxRenderRowLimit))) //nolint:gosec // capped
 	return rows, mapErr(err)
+}
+
+// ListStaleRenders returns up to limit renders that are queued or rendering and were made before the given time, across workspaces: it
+// serves the sweeper, which then asks RenderJobAlive about each.
+func (s *Store) ListStaleRenders(ctx context.Context, before time.Time, limit int) ([]Render, error) {
+	if limit < 1 {
+		return nil, fmt.Errorf("%w: limit %d", ErrInvalid, limit)
+	}
+	rows, err := s.q.ListStaleRenders(ctx, db.ListStaleRendersParams{Before: before, RowLimit: int32(min(limit, maxRenderRowLimit))}) //nolint:gosec // capped
+	return rows, mapErr(err)
+}
+
+// RenderJobAlive reports whether River still holds a job that can render the render: waiting, scheduled, running or to be retried.
+// A render that is queued or rendering without one (its job was discarded after its last attempt, cancelled, or removed) will
+// never finish. It reads River's table, which the app role may do, so it needs the pool Store.
+func (s *Store) RenderJobAlive(ctx context.Context, id ids.RenderID) (bool, error) {
+	if s.pool == nil {
+		return false, errors.New("store: RenderJobAlive needs the pool store")
+	}
+	var alive bool
+	err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM river_job WHERE kind = 'render' AND args->>'render_id' = $1
+		AND state IN ('available', 'pending', 'running', 'retryable', 'scheduled'))`, id.String()).Scan(&alive)
+	return alive, mapErr(err)
+}
+
+// LockWorkspaceRenders takes the transaction-scoped advisory lock of the workspace's renders: requests for renders of one workspace
+// take turns, so counting the renders in flight and inserting a new one cannot interleave (the cap is exact). Use it inside InTx.
+func (s *Store) LockWorkspaceRenders(ctx context.Context, ws ids.WorkspaceID) error {
+	return mapErr(s.q.LockWorkspaceRenders(ctx, ws.UUID.String()))
 }
 
 // MarkRenderObjectsPurged records that the objects of a render are gone.

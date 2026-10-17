@@ -373,7 +373,8 @@ export interface paths {
         };
         /**
          * The renders of a project, newest first
-         * @description Page with `cursor` (the `next_cursor` of the previous page). `version` and `profile` narrow the list.
+         * @description Page with `cursor` (the `next_cursor` of the previous page). `version` and `profile` narrow the list. The renders in a list
+         *     carry no presigned URLs (`files` and `urls_expires_at` are `null`); fetch the one you want with `GET /v1/renders/{id}`.
          */
         get: operations["listRenders"];
         put?: never;
@@ -966,11 +967,11 @@ export interface components {
             size_bytes: number | null;
             contact_sheet: components["schemas"]["ContactSheet"] | null;
             sound_cues: components["schemas"]["SoundCue"][];
-            /** @description Null until the render is ready. */
+            /** @description Null until the render is ready, and in lists (fetch the render itself for the URLs). */
             files: components["schemas"]["RenderFiles"] | null;
             /** Format: date-time */
             urls_expires_at: string | null;
-            /** @description When `failed`: `invalid_timeline`, `source_unavailable` (an asset or its proxy is gone), `inputs_too_large`, `render_failed` (ffmpeg could not make the video), `project_deleted`, `timeout`, `interrupted` or `processing_failed`. */
+            /** @description When `failed`: `invalid_timeline`, `source_unavailable` (an asset or its proxy is gone), `inputs_too_large`, `render_failed` (ffmpeg could not make the video), `project_deleted`, `job_lost` (the job that should have rendered it was gone), `timeout`, `interrupted` or `processing_failed`. */
             failure_reason: string | null;
             requested_by: components["schemas"]["RequestedBy"];
             /** Format: date-time */
