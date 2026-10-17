@@ -155,6 +155,12 @@ func (s *Store) GetAssetUpload(ctx context.Context, ws ids.WorkspaceID, id ids.A
 
 // ListAssets returns up to limit assets of the workspace, newest first, those older than before when it is not nil.
 func (s *Store) ListAssets(ctx context.Context, ws ids.WorkspaceID, before *ids.AssetID, limit int) ([]Asset, error) {
+	return s.SearchAssets(ctx, ws, nil, before, limit)
+}
+
+// SearchAssets is ListAssets limited to the assets that match all the search words (SearchWords makes them from what a person
+// typed). No words list everything.
+func (s *Store) SearchAssets(ctx context.Context, ws ids.WorkspaceID, words []string, before *ids.AssetID, limit int) ([]Asset, error) {
 	if limit < 1 {
 		return nil, fmt.Errorf("%w: limit %d", ErrInvalid, limit)
 	}
@@ -162,7 +168,10 @@ func (s *Store) ListAssets(ctx context.Context, ws ids.WorkspaceID, before *ids.
 	if before != nil {
 		cursor = pgtype.UUID{Bytes: before.UUID, Valid: true}
 	}
-	rows, err := s.q.ListAssets(ctx, db.ListAssetsParams{WorkspaceID: ws, Before: cursor, RowLimit: int32(min(limit, 1000))}) //nolint:gosec // capped
+	if len(words) == 0 {
+		words = nil // NULL: no filter
+	}
+	rows, err := s.q.ListAssets(ctx, db.ListAssetsParams{WorkspaceID: ws, Before: cursor, Words: words, RowLimit: int32(min(limit, 1000))}) //nolint:gosec // capped
 	return rows, mapErr(err)
 }
 

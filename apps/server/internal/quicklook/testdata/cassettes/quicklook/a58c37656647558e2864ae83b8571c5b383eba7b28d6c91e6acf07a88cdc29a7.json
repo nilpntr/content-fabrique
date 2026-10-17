@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "stage": "quicklook",
+  "key": "a58c37656647558e2864ae83b8571c5b383eba7b28d6c91e6acf07a88cdc29a7",
+  "recorded_at": "2026-10-17T12:35:37Z",
+  "request": {
+    "model": "claude-haiku-5-5",
+    "max_tokens": 400,
+    "thinking": "disabled",
+    "system_blocks": 1,
+    "messages": [
+      {
+        "role": "user",
+        "blocks": [
+          "text",
+          "image",
+          "text",
+          "image",
+          "text",
+          "image",
+          "text",
+          "image",
+          "text"
+        ]
+      }
+    ],
+    "tools": [
+      "describe_clip"
+    ],
+    "images": [
+      {
+        "sha256": "2fa2ba10f36c852454325fffab7034370bd62de3ec34e70bdba5ed4d54598e6b",
+        "media_type": "image/jpeg",
+        "bytes": 888
+      },
+      {
+        "sha256": "465229b77b664a39569c7d90daf1c85b63e805d7bfa4d4cccca592b3c43fdf04",
+        "media_type": "image/jpeg",
+        "bytes": 888
+      },
+      {
+        "sha256": "77f1f6fe4d2b0de8dab25d67843800f0f2a6ba41ec66a1a9e42f90bb742c9e93",
+        "media_type": "image/jpeg",
+        "bytes": 888
+      },
+      {
+        "sha256": "c07b4dd5a9427e59612de238c1cef396e17f4eab88f37862d024712e04fd25d7",
+        "media_type": "image/jpeg",
+        "bytes": 888
+      }
+    ]
+  },
+  "response": {
+    "id": "msg_fake",
+    "model": "claude-haiku-5-5",
+    "stop_reason": "tool_use",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_1",
+        "name": "describe_clip",
+        "input": {
+          "title": "Barbell row",
+          "description": "A lifter does bent-over barbell rows in a gym, filmed from the side.",
+          "tags": [
+            "barbell row",
+            "back",
+            "gym",
+            "side view",
+            "lats"
+          ]
+        }
+      }
+    ],
+    "usage": {
+      "input_tokens": 1750,
+      "cache_write_tokens": 0,
+      "cache_write_1h_tokens": 0,
+      "cache_read_tokens": 0,
+      "output_tokens": 110
+    }
+  },
+  "count_tokens": 1750
+}

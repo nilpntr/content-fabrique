@@ -71,6 +71,14 @@ func run(args []string) error {
 			} else {
 				logger.Warn("R2_* is not set: the jobs that delete objects, clean up uploads ingest assets or render timelines wait (snoozed, no attempt used) until a worker has it")
 			}
+			// The agent runtime and the quick look share their model access and frame cache; both wait when it is off.
+			var (
+				runner      *runtime.Runner
+				quickLooker jobs.QuickLooker
+			)
+			if rt := newAgentRuntime(cfg, st, storageC, logger); rt != nil {
+				runner, quickLooker = rt.Runner, newQuickLook(rt, st, storageC, logger)
+			}
 			queues := jobs.DefaultConfig()
 			for i := range queues.Queues {
 				switch queues.Queues[i].Name {
@@ -87,7 +95,8 @@ func run(args []string) error {
 				Objects:    objects,
 				Ingest:     ingester,
 				Render:     renderer,
-				Register:   runtime.Register(newAgentRunner(cfg, st, storageC, logger)),
+				Register:   runtime.Register(runner),
+				QuickLook:  quickLooker,
 				Logger:     logger,
 				UIAddr:     *riverUIAddr,
 				UIPassword: cfg.RiverUIPassword,

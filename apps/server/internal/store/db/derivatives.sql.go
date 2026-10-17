@@ -13,13 +13,84 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/ids"
 )
 
+const applyQuickLook = `-- name: ApplyQuickLook :one
+UPDATE assets
+SET title = CASE WHEN title_source = 'user' THEN title ELSE $1::text END,
+    title_source = CASE WHEN title_source = 'user' THEN title_source ELSE 'quicklook' END,
+    description = $2::text, tags = $3::text[],
+    quick_look_status = 'succeeded', quick_look = $4::jsonb, quick_look_at = now()
+WHERE workspace_id = $5 AND id = $6 AND status = 'ready' AND deleted_at IS NULL
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search
+`
+
+type ApplyQuickLookParams struct {
+	Title       string
+	Description string
+	Tags        []string
+	Detail      json.RawMessage
+	WorkspaceID ids.WorkspaceID
+	ID          ids.AssetID
+}
+
+// The quick look succeeded. The title changes only while it is not the user's; the description and tags are the quick look's.
+// One statement, so a title edited at the same moment wins: the CASE sees the row as it is when the update applies.
+func (q *Queries) ApplyQuickLook(ctx context.Context, arg ApplyQuickLookParams) (Asset, error) {
+	row := q.db.QueryRow(ctx, applyQuickLook,
+		arg.Title,
+		arg.Description,
+		arg.Tags,
+		arg.Detail,
+		arg.WorkspaceID,
+		arg.ID,
+	)
+	var i Asset
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Kind,
+		&i.Status,
+		&i.Filename,
+		&i.ContentType,
+		&i.SizeBytes,
+		&i.Sha256,
+		&i.Title,
+		&i.Description,
+		&i.Tags,
+		&i.R2Key,
+		&i.FailureReason,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DurationMs,
+		&i.Width,
+		&i.Height,
+		&i.Fps,
+		&i.Rotation,
+		&i.VideoCodec,
+		&i.AudioCodec,
+		&i.HasAudio,
+		&i.Hdr,
+		&i.Probe,
+		&i.IngestProgress,
+		&i.IngestStage,
+		&i.IngestedAt,
+		&i.TitleSource,
+		&i.QuickLookStatus,
+		&i.QuickLook,
+		&i.QuickLookAt,
+		&i.Search,
+	)
+	return i, err
+}
+
 const claimAssetForIngest = `-- name: ClaimAssetForIngest :one
 
 UPDATE assets
 SET status = 'processing', failure_reason = NULL, ingest_progress = 0, ingest_stage = 'starting'
 WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL
   AND status IN ('uploaded', 'processing', 'ready')
-RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search
 `
 
 type ClaimAssetForIngestParams struct {
@@ -65,6 +136,11 @@ func (q *Queries) ClaimAssetForIngest(ctx context.Context, arg ClaimAssetForInge
 		&i.IngestProgress,
 		&i.IngestStage,
 		&i.IngestedAt,
+		&i.TitleSource,
+		&i.QuickLookStatus,
+		&i.QuickLook,
+		&i.QuickLookAt,
+		&i.Search,
 	)
 	return i, err
 }
@@ -105,7 +181,7 @@ const failAssetIngest = `-- name: FailAssetIngest :one
 UPDATE assets
 SET status = 'failed', failure_reason = $1::text, ingest_stage = NULL
 WHERE workspace_id = $2 AND id = $3 AND status IN ('uploaded', 'processing') AND deleted_at IS NULL
-RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search
 `
 
 type FailAssetIngestParams struct {
@@ -150,6 +226,68 @@ func (q *Queries) FailAssetIngest(ctx context.Context, arg FailAssetIngestParams
 		&i.IngestProgress,
 		&i.IngestStage,
 		&i.IngestedAt,
+		&i.TitleSource,
+		&i.QuickLookStatus,
+		&i.QuickLook,
+		&i.QuickLookAt,
+		&i.Search,
+	)
+	return i, err
+}
+
+const failQuickLook = `-- name: FailQuickLook :one
+UPDATE assets SET quick_look_status = 'failed', quick_look = $1::jsonb, quick_look_at = now()
+WHERE workspace_id = $2 AND id = $3 AND deleted_at IS NULL
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search
+`
+
+type FailQuickLookParams struct {
+	Detail      json.RawMessage
+	WorkspaceID ids.WorkspaceID
+	ID          ids.AssetID
+}
+
+// The quick look failed: nothing but the status and the detail (an error code, the frames if they were cut) is written. Any
+// state of the asset: a job that gave up waiting for an asset that never became ready marks it too.
+func (q *Queries) FailQuickLook(ctx context.Context, arg FailQuickLookParams) (Asset, error) {
+	row := q.db.QueryRow(ctx, failQuickLook, arg.Detail, arg.WorkspaceID, arg.ID)
+	var i Asset
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Kind,
+		&i.Status,
+		&i.Filename,
+		&i.ContentType,
+		&i.SizeBytes,
+		&i.Sha256,
+		&i.Title,
+		&i.Description,
+		&i.Tags,
+		&i.R2Key,
+		&i.FailureReason,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DurationMs,
+		&i.Width,
+		&i.Height,
+		&i.Fps,
+		&i.Rotation,
+		&i.VideoCodec,
+		&i.AudioCodec,
+		&i.HasAudio,
+		&i.Hdr,
+		&i.Probe,
+		&i.IngestProgress,
+		&i.IngestStage,
+		&i.IngestedAt,
+		&i.TitleSource,
+		&i.QuickLookStatus,
+		&i.QuickLook,
+		&i.QuickLookAt,
+		&i.Search,
 	)
 	return i, err
 }
@@ -161,7 +299,7 @@ SET status = 'ready', failure_reason = NULL, ingest_progress = 100, ingest_stage
     rotation = $5::integer, video_codec = $6::text, audio_codec = $7::text,
     has_audio = $8::boolean, hdr = $9::boolean, probe = $10::jsonb
 WHERE workspace_id = $11 AND id = $12 AND status = 'processing' AND deleted_at IS NULL
-RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search
 `
 
 type FinishAssetIngestParams struct {
@@ -227,6 +365,11 @@ func (q *Queries) FinishAssetIngest(ctx context.Context, arg FinishAssetIngestPa
 		&i.IngestProgress,
 		&i.IngestStage,
 		&i.IngestedAt,
+		&i.TitleSource,
+		&i.QuickLookStatus,
+		&i.QuickLook,
+		&i.QuickLookAt,
+		&i.Search,
 	)
 	return i, err
 }
@@ -273,6 +416,136 @@ func (q *Queries) ListAssetDerivatives(ctx context.Context, arg ListAssetDerivat
 	return items, nil
 }
 
+const listAssetsForQuickLook = `-- name: ListAssetsForQuickLook :many
+SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search FROM assets
+WHERE workspace_id = $1 AND kind = 'video' AND status = 'ready' AND deleted_at IS NULL
+  AND ($2::boolean OR quick_look_status IS DISTINCT FROM 'succeeded')
+ORDER BY id
+LIMIT $3
+`
+
+type ListAssetsForQuickLookParams struct {
+	WorkspaceID ids.WorkspaceID
+	IncludeDone bool
+	RowLimit    int32
+}
+
+// The ready videos of a workspace for cfctl's backfill, oldest first; only those without a successful quick look unless include_done.
+func (q *Queries) ListAssetsForQuickLook(ctx context.Context, arg ListAssetsForQuickLookParams) ([]Asset, error) {
+	rows, err := q.db.Query(ctx, listAssetsForQuickLook, arg.WorkspaceID, arg.IncludeDone, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Asset
+	for rows.Next() {
+		var i Asset
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Kind,
+			&i.Status,
+			&i.Filename,
+			&i.ContentType,
+			&i.SizeBytes,
+			&i.Sha256,
+			&i.Title,
+			&i.Description,
+			&i.Tags,
+			&i.R2Key,
+			&i.FailureReason,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.DurationMs,
+			&i.Width,
+			&i.Height,
+			&i.Fps,
+			&i.Rotation,
+			&i.VideoCodec,
+			&i.AudioCodec,
+			&i.HasAudio,
+			&i.Hdr,
+			&i.Probe,
+			&i.IngestProgress,
+			&i.IngestStage,
+			&i.IngestedAt,
+			&i.TitleSource,
+			&i.QuickLookStatus,
+			&i.QuickLook,
+			&i.QuickLookAt,
+			&i.Search,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markQuickLookPending = `-- name: MarkQuickLookPending :one
+
+UPDATE assets SET quick_look_status = 'pending'
+WHERE workspace_id = $1 AND id = $2 AND kind = 'video' AND deleted_at IS NULL
+  AND (quick_look_status IS NULL OR quick_look_status = 'pending')
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search
+`
+
+type MarkQuickLookPendingParams struct {
+	WorkspaceID ids.WorkspaceID
+	ID          ids.AssetID
+}
+
+// The quick look (P1-04b). EVERY query filters by workspace_id like the rest.
+// Inside the transaction that marks a video ready: the quick look is now owed. No row: it is not a video, or the quick look
+// has run already (succeeded or failed), so no job is enqueued.
+func (q *Queries) MarkQuickLookPending(ctx context.Context, arg MarkQuickLookPendingParams) (Asset, error) {
+	row := q.db.QueryRow(ctx, markQuickLookPending, arg.WorkspaceID, arg.ID)
+	var i Asset
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Kind,
+		&i.Status,
+		&i.Filename,
+		&i.ContentType,
+		&i.SizeBytes,
+		&i.Sha256,
+		&i.Title,
+		&i.Description,
+		&i.Tags,
+		&i.R2Key,
+		&i.FailureReason,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DurationMs,
+		&i.Width,
+		&i.Height,
+		&i.Fps,
+		&i.Rotation,
+		&i.VideoCodec,
+		&i.AudioCodec,
+		&i.HasAudio,
+		&i.Hdr,
+		&i.Probe,
+		&i.IngestProgress,
+		&i.IngestStage,
+		&i.IngestedAt,
+		&i.TitleSource,
+		&i.QuickLookStatus,
+		&i.QuickLook,
+		&i.QuickLookAt,
+		&i.Search,
+	)
+	return i, err
+}
+
 const setIngestProgress = `-- name: SetIngestProgress :one
 UPDATE assets SET ingest_progress = $1::smallint, ingest_stage = $2::text
 WHERE workspace_id = $3 AND id = $4 AND status = 'processing' AND deleted_at IS NULL
@@ -297,6 +570,118 @@ func (q *Queries) SetIngestProgress(ctx context.Context, arg SetIngestProgressPa
 	var id ids.AssetID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const skipQuickLook = `-- name: SkipQuickLook :one
+UPDATE assets SET quick_look_status = 'skipped'
+WHERE workspace_id = $1 AND id = $2 AND quick_look_status = 'pending' AND deleted_at IS NULL
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search
+`
+
+type SkipQuickLookParams struct {
+	WorkspaceID ids.WorkspaceID
+	ID          ids.AssetID
+}
+
+// The asset failed its ingest (or the job could not run for a day) while its quick look was owed: nothing is owed any more.
+// No row: the quick look was not pending.
+func (q *Queries) SkipQuickLook(ctx context.Context, arg SkipQuickLookParams) (Asset, error) {
+	row := q.db.QueryRow(ctx, skipQuickLook, arg.WorkspaceID, arg.ID)
+	var i Asset
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Kind,
+		&i.Status,
+		&i.Filename,
+		&i.ContentType,
+		&i.SizeBytes,
+		&i.Sha256,
+		&i.Title,
+		&i.Description,
+		&i.Tags,
+		&i.R2Key,
+		&i.FailureReason,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DurationMs,
+		&i.Width,
+		&i.Height,
+		&i.Fps,
+		&i.Rotation,
+		&i.VideoCodec,
+		&i.AudioCodec,
+		&i.HasAudio,
+		&i.Hdr,
+		&i.Probe,
+		&i.IngestProgress,
+		&i.IngestStage,
+		&i.IngestedAt,
+		&i.TitleSource,
+		&i.QuickLookStatus,
+		&i.QuickLook,
+		&i.QuickLookAt,
+		&i.Search,
+	)
+	return i, err
+}
+
+const updateAssetTitle = `-- name: UpdateAssetTitle :one
+UPDATE assets SET title = $1::text, title_source = 'user'
+WHERE workspace_id = $2 AND id = $3 AND deleted_at IS NULL
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search
+`
+
+type UpdateAssetTitleParams struct {
+	Title       string
+	WorkspaceID ids.WorkspaceID
+	ID          ids.AssetID
+}
+
+// PATCH /v1/assets/{id}: a person edited the title, which the quick look never overwrites after this.
+func (q *Queries) UpdateAssetTitle(ctx context.Context, arg UpdateAssetTitleParams) (Asset, error) {
+	row := q.db.QueryRow(ctx, updateAssetTitle, arg.Title, arg.WorkspaceID, arg.ID)
+	var i Asset
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Kind,
+		&i.Status,
+		&i.Filename,
+		&i.ContentType,
+		&i.SizeBytes,
+		&i.Sha256,
+		&i.Title,
+		&i.Description,
+		&i.Tags,
+		&i.R2Key,
+		&i.FailureReason,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DurationMs,
+		&i.Width,
+		&i.Height,
+		&i.Fps,
+		&i.Rotation,
+		&i.VideoCodec,
+		&i.AudioCodec,
+		&i.HasAudio,
+		&i.Hdr,
+		&i.Probe,
+		&i.IngestProgress,
+		&i.IngestStage,
+		&i.IngestedAt,
+		&i.TitleSource,
+		&i.QuickLookStatus,
+		&i.QuickLook,
+		&i.QuickLookAt,
+		&i.Search,
+	)
+	return i, err
 }
 
 const upsertAssetDerivative = `-- name: UpsertAssetDerivative :one
