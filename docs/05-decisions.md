@@ -32,6 +32,7 @@
 | D-25 | Four output formats in v1: 9:16, 1:1, 4:5 and 16:9, chosen per project; TikTok stays the only publishing target | Accepted (founder decision, 2026-10-17) |
 | D-26 | Video effects are curated presets (camera moves, transitions, graphic templates) the agent and the creator pick; bespoke effects only through the flagged sandbox | Accepted (director, 2026-10-17; founder to confirm the first templates) |
 | D-27 | Transcription: whisper.cpp in the media-tools sandbox locally; Workers AI `whisper-large-v3-turbo` through Cloudflare on staging and production; one provider interface | Accepted (founder decision, 2026-10-17) |
+| D-28 | The editor is content-aware across genres (talking, unboxing/product, workout, vlog, tutorial); fitness stays the launch niche for trends and marketing | Accepted (founder direction, 2026-10-17) |
 
 ---
 
@@ -598,6 +599,37 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 - Transcripts are comparable across environments because the same model family is used everywhere.
 
 **Revisit** if quality on gym audio (music, noise) is poor; if Workers AI can't stay in the EU; or if a cheaper, better hosted model appears.
+
+## D-28 Content-aware editing across genres
+
+**Context.** v1 was scoped to fitness creators. After the first live edits, the founder wants the editor to *understand* whatever people upload (unboxings, talking-to-camera videos, vlogs, tutorials, workouts) and edit each one the way a good editor of that genre would. "It needs to get that feeling that it understands content."
+
+**Decision.**
+- **The editor is genre-aware.** Every run starts with an **understand step**: from the quick look, the transcript, the analysis signals and the brief, it decides the content type and the story. It writes a short creative plan (hook, arc, ending) and picks a **genre playbook**. The plan is shown to the creator in the run feed.
+- **Genre playbooks** live in the repo as versioned prompt modules, next to the base editor prompt:
+  - talking/opinion
+  - unboxing/product
+  - workout/fitness
+  - vlog/lifestyle
+  - tutorial/how-to
+  - a general fallback
+- **Perception is genre-neutral.** It needs:
+  - **transcripts with word timings** (P2-05, so its priority rises);
+  - **speech structure**: sentence boundaries, filler words and pauses for jump cuts;
+  - **faces and subjects**, for 9:16 reframing that keeps the speaker or the product centred;
+  - **motion and scene signals** (already in progress);
+  - **generic visual tags** from the quick look (already generic, not fitness-only);
+  - **audio events** (laughs, impacts) later.
+- **Fitness stays the launch niche** for the trend board, marketing and the first beta creators ([product plan](01-product-plan.md)). The editor doesn't assume fitness.
+
+**Alternatives.** A fitness-only editor would be simpler but would feel dumb on the first unboxing. Separate products per genre would split the work.
+
+**Consequences.**
+- The eval set (P4-07) gets scenarios per genre.
+- Face and subject detection needs a permissively licensed model ([D-16](#d-16-licensing-policy-for-ml-and-media-components)); MediaPipe face detection (Apache-2.0) is the default candidate.
+- Transcription moves up the queue.
+
+**Revisit** when a genre's results lag the others in the evals, or when the beta shows which genres creators actually upload.
 
 ## Template for new decisions
 

@@ -21,8 +21,8 @@ import (
 
 	"github.com/nilpntr/content-fabrique/internal/api"
 	"github.com/nilpntr/content-fabrique/internal/ids"
-	"github.com/nilpntr/content-fabrique/internal/projects"
 	"github.com/nilpntr/content-fabrique/internal/store"
+	"github.com/nilpntr/content-fabrique/internal/textclean"
 )
 
 // Limits of the API.
@@ -155,13 +155,16 @@ func needsBody(kind string) bool {
 	return kind == store.AnnotationComment || kind == store.AnnotationInstruction
 }
 
-// cleanBody makes the text safe to store, show and hand to a model (the policy of a project's brief: NFC, no control or format
-// characters, line breaks kept), and checks its length and, for a note, that there is some.
+// cleanBody makes the text safe to store, show and hand to a model (textclean.User, the policy of a title a person types: NFC, no
+// control or format characters, white space turned into single spaces, so a comment is one line), and checks its length and, for a
+// note, that there is some. Text that is not UTF-8 is refused.
 func cleanBody(raw, kind string) (string, *Error) {
-	body, ok := projects.CleanText(raw, true)
+	if !utf8.ValidString(raw) {
+		return "", invalid("body is not valid text")
+	}
+	// textclean cuts at its own bound (4096); a body that long is refused here, not shortened.
+	body, _ := textclean.User(raw, 4096)
 	switch {
-	case !ok:
-		return "", invalid("body is not valid text: it has a control character or is not UTF-8")
 	case utf8.RuneCountInString(body) > MaxBodyChars:
 		return "", invalid(fmt.Sprintf("body is over %d characters", MaxBodyChars))
 	case body == "" && needsBody(kind):

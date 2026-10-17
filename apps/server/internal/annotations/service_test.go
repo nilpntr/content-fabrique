@@ -31,7 +31,7 @@ func TestCreateStoresTheTargetsFactsNotTheRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(c.ID.String(), "ann_") || c.ID.UUID.Version() != 7 || c.WorkspaceID != a.ws.ID || c.TargetType != "render" || c.TargetID != a.render.ID.UUID ||
+	if !strings.HasPrefix(c.ID.String(), "ann_") || c.ID.Version() != 7 || c.WorkspaceID != a.ws.ID || c.TargetType != "render" || c.TargetID != a.render.ID.UUID ||
 		c.ProjectID != a.project.ID || c.TimelineVersion == nil || *c.TimelineVersion != 2 || c.StartMs != 4000 || c.EndMs != 6000 || c.Kind != "comment" ||
 		c.Body != "make this tighter" || c.Status != "open" || c.AuthorKind != "user" || c.AuthorID != a.editor.User.String() || !c.ParentID.IsZero() ||
 		c.Pin != nil || c.AppliedInRunID.Valid || c.AddressedInVersion != nil || c.DeletedAt != nil {
@@ -160,11 +160,12 @@ func TestCreateValidation(t *testing.T) {
 	good("a bare exclude marker", func(in *CreateInput) { in.Kind, in.Body = "exclude", "" })
 	bad("a body over 2000 characters", func(in *CreateInput) { in.Body = strings.Repeat("é", 2001) })
 	good("a body of exactly 2000 characters", func(in *CreateInput) { in.Body = strings.Repeat("é", 2000) })
-	bad("a body with a control character", func(in *CreateInput) { in.Body = "a\u0007b" })
-	bad("a body with a NUL byte", func(in *CreateInput) { in.Body = "a\x00b" })
+	if c := good("a body with a control character and a NUL byte (dropped, as in a title)", func(in *CreateInput) { in.Body = "a\u0007b\x00c" }); c.Body != "abc" {
+		t.Errorf("control characters: %q", c.Body)
+	}
 	bad("a body that is not UTF-8", func(in *CreateInput) { in.Body = "a\xffb" })
-	bad("a body of invisible characters only", func(in *CreateInput) { in.Body = "​‮" })
-	if c := good("a body with bidi and zero-width characters", func(in *CreateInput) { in.Body = "gnp.‮exe ​ok\nnext line" }); c.Body != "gnp.exe ok\nnext line" {
+	bad("a body of invisible characters only", func(in *CreateInput) { in.Body = "\u200b\u202e" })
+	if c := good("a body with bidi and zero-width characters, and a line break", func(in *CreateInput) { in.Body = "gnp.\u202eexe \u200bok\nnext   line" }); c.Body != "gnp.exe ok next line" {
 		t.Errorf("cleaned body: %q", c.Body)
 	}
 
@@ -402,7 +403,7 @@ func TestUpdateRules(t *testing.T) {
 		"kind junk":                  {Kind: str("love")},
 		"an empty body":              {Body: str(" ")},
 		"a long body":                {Body: str(strings.Repeat("a", 2001))},
-		"a control character":        {Body: str("a\x07")},
+		"text that is not UTF-8":     {Body: str("a\xffb")},
 		"an end before the start":    {StartMs: i64(9000), EndMs: i64(8000)},
 		"a start past the old end":   {StartMs: i64(9000)},
 		"past the end of the render": {EndMs: i64(30001)},

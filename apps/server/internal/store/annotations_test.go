@@ -125,7 +125,7 @@ func annotationsSuite(t *testing.T, st *store.Store, suffix string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.HasPrefix(c.ID.String(), "ann_") || c.ID.UUID.Version() != 7 || c.WorkspaceID != a.ws.ID || c.ProjectID != a.project.ID || c.TimelineVersion == nil || *c.TimelineVersion != 1 ||
+		if !strings.HasPrefix(c.ID.String(), "ann_") || c.ID.Version() != 7 || c.WorkspaceID != a.ws.ID || c.ProjectID != a.project.ID || c.TimelineVersion == nil || *c.TimelineVersion != 1 ||
 			c.Status != store.AnnotationOpen || c.Kind != store.AnnotationComment || !c.ParentID.IsZero() || c.Pin == nil {
 			t.Fatalf("created: %+v", c)
 		}

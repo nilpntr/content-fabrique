@@ -12,6 +12,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/api"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
+	"github.com/nilpntr/content-fabrique/internal/textclean"
 )
 
 // Limits of the upload API.
@@ -103,7 +104,7 @@ func sanitizeFilename(raw string) (string, bool) {
 	}
 	name = strings.Map(func(r rune) rune {
 		switch {
-		case unicode.IsControl(r), unicode.Is(unicode.Cf, r), unicode.Is(unicode.Zl, r), unicode.Is(unicode.Zp, r), r == utf8.RuneError:
+		case textclean.Invisible(r): // the one definition of "invisible" that titles use too
 			return -1
 		case unicode.Is(unicode.Zs, r):
 			return ' '
@@ -138,20 +139,21 @@ func capBytes(name string, limit int) string {
 	return stem + ext
 }
 
-// titleOf is the file name without its extension (the whole name when that leaves nothing), at most MaxTitleChars.
+// titleOf is the file name without its extension (the whole name when that leaves nothing), cleaned as user text (the same
+// policy as a title a person types: package textclean) and at most MaxTitleChars.
 func titleOf(filename string) string {
 	title := filename
 	if i := strings.LastIndex(filename, "."); i > 0 {
 		title = filename[:i]
 	}
-	title = strings.TrimSpace(title)
-	if title == "" {
-		title = filename
+	clean, ok := textclean.User(title, MaxTitleChars)
+	if !ok {
+		clean, ok = textclean.User(filename, MaxTitleChars)
 	}
-	if utf8.RuneCountInString(title) > MaxTitleChars {
-		title = string([]rune(title)[:MaxTitleChars])
+	if !ok {
+		return "untitled" // a file name is never empty after sanitising, so this is unreachable in practice
 	}
-	return title
+	return clean
 }
 
 // sha256Hex matches a hex SHA-256 in either case.

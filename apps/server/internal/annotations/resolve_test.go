@@ -59,7 +59,7 @@ func TestResolve(t *testing.T) {
 	}
 	for _, c := range cases {
 		got := summary(Resolve(tm, c.start, c.end))
-		if !reflect.DeepEqual(got, c.want) && !(len(got) == 0 && len(c.want) == 0) {
+		if !reflect.DeepEqual(got, c.want) && (len(got) != 0 || len(c.want) != 0) {
 			t.Errorf("%s: %v, want %v", c.name, got, c.want)
 		}
 	}

@@ -240,9 +240,6 @@ func cleanText(raw string, multiline bool) (string, bool) {
 	return strings.TrimSpace(b.String()), true
 }
 
-// CleanText is cleanText for the other packages that store what a creator typed (annotations): the policy of a project's brief.
-func CleanText(raw string, multiline bool) (string, bool) { return cleanText(raw, multiline) }
-
 // ---- Read ------------------------------------------------------------------------------------------------------
 
 // Get returns one project of the workspace.

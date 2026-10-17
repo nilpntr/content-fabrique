@@ -42,7 +42,7 @@ func Resolve(entries []render.TimeMapEntry, startMs, endMs int64) []Span {
 		var lo, hi int64
 		if endMs == startMs {
 			// A moment: on screen when start <= t < end; the final instant belongs to the item that ends there.
-			if !(startMs >= e.OutStartMs && (startMs < e.OutEndMs || (startMs == e.OutEndMs && e.OutEndMs == lastEnd(entries)))) {
+			if startMs < e.OutStartMs || (startMs >= e.OutEndMs && (startMs != e.OutEndMs || e.OutEndMs != lastEnd(entries))) {
 				continue
 			}
 			lo, hi = startMs, startMs

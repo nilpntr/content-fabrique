@@ -14,5 +14,8 @@ research:
   lead:    { model: claude-haiku-5-5, effort: medium }
   workers: { model: claude-haiku-5-5, max_parallel: 6, budget_micros: 150000 }
 ideation: { model: claude-haiku-5-5, effort: medium }
+# The quick look (P1-04b): a title, description and tags for each new clip from four small frames. Haiku 5.5 in every
+# profile: the call has a budget of $0.003, so no profile routes it higher.
+quicklook: { model: claude-haiku-5-5, max_tokens: 400 }
 tagging:  { model: claude-haiku-5-5, batch: true }
 judge:    { model: claude-haiku-5-5, effort: high, batch: true }
