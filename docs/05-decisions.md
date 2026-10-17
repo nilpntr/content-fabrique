@@ -711,6 +711,7 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
   - Creators see credits, usage by day, by project and by member, and their activity. BYOK creators also see the estimated cost on their own key. Managed creators never see our COGS or margin.
   - The founder gets `cfctl spend report` (margin per workspace, plan and action, plus unbilled COGS), typed `spend.alert` events, and a daily reconciliation against the provider's usage report.
 - **Ledgers are append-only** for the app role. Money is stored as integers.
+- **Built in P7-01a** ([spend control v1, "As built (P7-01a)"](design/spend-control-v1.md#as-built-p7-01a)): the price list and plans in `config/plans`, the profit-invariant test, the credit ledger with consumption tracked per grant, the hold-settle-release on editor runs, the allowance periods, `402 credits_exhausted`, `cfctl credits`. Its deviations from the text above are listed there.
 
 **Alternatives.**
 - Pass-through token pricing to customers: unpredictable for creators, and it exposes our margin.

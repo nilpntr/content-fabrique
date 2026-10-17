@@ -58,7 +58,7 @@ CREATE TABLE credit_ledger (
     workspace_id     uuid        NOT NULL REFERENCES workspaces (id) ON DELETE RESTRICT,
     kind             text        NOT NULL,
     credits          integer     NOT NULL,
-    grant_id         uuid        REFERENCES credit_ledger (id),
+    grant_id         uuid,
     action           text,
     action_id        uuid,
     project_id       uuid,
@@ -70,6 +70,10 @@ CREATE TABLE credit_ledger (
     reason           text,
     idempotency_key  text        NOT NULL,
     created_at       timestamptz NOT NULL DEFAULT now(),
+    -- A row that names a source names one of the same workspace: the composite key refuses any other, so credits cannot cross workspaces
+    -- even through a bug (a null grant_id is not checked).
+    CONSTRAINT credit_ledger_workspace_id_key UNIQUE (workspace_id, id),
+    CONSTRAINT credit_ledger_grant_fkey FOREIGN KEY (workspace_id, grant_id) REFERENCES credit_ledger (workspace_id, id),
     CONSTRAINT credit_ledger_kind_check CHECK (kind IN ('grant_allowance', 'grant_topup', 'charge', 'refund', 'expire', 'adjust')),
     -- The sign of each kind. A charge or an expiry may be zero (a free action; nothing left to expire).
     CONSTRAINT credit_ledger_sign_check CHECK (
@@ -100,6 +104,7 @@ CREATE TABLE credit_ledger (
     CONSTRAINT credit_ledger_adjust_check CHECK (kind <> 'adjust' OR (char_length(btrim(coalesce(actor, ''))) > 0 AND char_length(btrim(coalesce(reason, ''))) > 0)),
     CONSTRAINT credit_ledger_action_check CHECK (action IS NULL OR action IN ('edit.first', 'edit.revision', 'export.final', 'ideation.run')),
     CONSTRAINT credit_ledger_charge_action_check CHECK (kind NOT IN ('charge', 'refund') OR (action IS NOT NULL AND action_id IS NOT NULL)),
+    CONSTRAINT credit_ledger_text_check CHECK (char_length(coalesce(actor, '')) <= 200 AND char_length(coalesce(reason, '')) <= 1000),
     CONSTRAINT credit_ledger_key_check CHECK (char_length(idempotency_key) BETWEEN 1 AND 200)
 );
 

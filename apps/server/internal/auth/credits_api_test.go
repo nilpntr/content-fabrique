@@ -154,6 +154,19 @@ func TestStartEditChargesFirstThenRevision(t *testing.T) {
 	if first.BudgetMicros != 960_000 || avail() != 14 {
 		t.Fatalf("first edit: budget %d, available %d", first.BudgetMicros, avail())
 	}
+	// The hold is attributed to the project, the member who started it and the plan and list that priced it.
+	runID, _ := ids.Decode(ids.PrefixRun, first.Id)
+	var holdProject, holdMember *string
+	var holdCredits int
+	var holdAction, holdPlan, holdVersion string
+	if err := e.pool.QueryRow(context.Background(), `SELECT credits, action, project_id::text, member_user_id::text, plan, plan_list_version FROM credit_holds WHERE action_id = $1`, runID).
+		Scan(&holdCredits, &holdAction, &holdProject, &holdMember, &holdPlan, &holdVersion); err != nil {
+		t.Fatal(err)
+	}
+	pid, _ := ids.ParseProjectID(p.Id)
+	if holdCredits != 6 || holdAction != "edit.first" || holdProject == nil || *holdProject != pid.UUID.String() || holdMember == nil || holdPlan != "creator" || holdVersion != "2026-10" {
+		t.Fatalf("hold = %d %s project %v member %v plan %s list %s", holdCredits, holdAction, holdProject, holdMember, holdPlan, holdVersion)
+	}
 	e.endRun("ada", first, store.AgentFailed)
 	if avail() != 20 {
 		t.Fatalf("a failed first edit cost %d", 20-avail())
