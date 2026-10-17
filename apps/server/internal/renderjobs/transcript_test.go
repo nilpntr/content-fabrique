@@ -58,8 +58,8 @@ func TestCaptionsRenderGetsTheTranscriptOfTheAsset(t *testing.T) {
 
 	words := `[{"text":"Zebra","start_ms":100,"end_ms":500,"confidence":0.9},{"text":"quokka","start_ms":600,"end_ms":1000,"confidence":0.9}]`
 	if _, err := e.st.SaveTranscript(context.Background(), w.ID, a.ID, store.NewTranscript{
-		Speech: true, Language: "en", Words: []byte(words), Provider: "whispercpp", Model: "m", AudioMs: 10000, SpeechMs: 800,
-	}, nil); err != nil {
+		SourceIngestedAt: a.IngestedAt, Speech: true, Language: "en", Words: []byte(words), Provider: "whispercpp", Model: "m", AudioMs: 10000, SpeechMs: 800,
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -75,7 +75,7 @@ func TestCaptionsRenderGetsTheTranscriptOfTheAsset(t *testing.T) {
 	}
 
 	// The same timeline, the asset has no speech: no captions are drawn, and the render still succeeds.
-	if _, err := e.st.SaveTranscript(context.Background(), w.ID, a.ID, store.NewTranscript{Speech: false, Provider: "whispercpp", Model: "m", AudioMs: 10000}, nil); err != nil {
+	if _, err := e.st.SaveTranscript(context.Background(), w.ID, a.ID, store.NewTranscript{SourceIngestedAt: a.IngestedAt, Speech: false, Provider: "whispercpp", Model: "m", AudioMs: 10000}); err != nil {
 		t.Fatal(err)
 	}
 	rec2 := &scriptRecorder{Runner: e.runner}

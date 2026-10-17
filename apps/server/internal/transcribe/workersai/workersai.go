@@ -56,6 +56,10 @@ type Config struct {
 	// PriceMicrosPerMinute is the list price of a minute of audio in millionths of a US dollar. Zero means the price has not been
 	// verified: the ledger records the call as unpriced (D-27, "never guess a price").
 	PriceMicrosPerMinute int64
+	// RequirePrice makes an unset price fatal: the provider reports transcribe.ErrNotConfigured and sends nothing. Staging and
+	// production set it (D-27): without a price the ledger would record every call at 0, the daily spend cap could never trip and
+	// the cost of a flood of uploads would be invisible until the Cloudflare invoice.
+	RequirePrice bool
 }
 
 // Provider calls Workers AI.
@@ -79,8 +83,14 @@ func New(cfg Config) *Provider {
 	return &Provider{cfg: cfg}
 }
 
-// Configured reports whether an account and a token are set.
-func (p *Provider) Configured() bool { return p.cfg.AccountID != "" && p.cfg.APIToken != "" }
+// Configured reports whether the provider may be called: an account and a token are set, and, when the price is required, so is
+// the price.
+func (p *Provider) Configured() bool {
+	if p.cfg.RequirePrice && p.cfg.PriceMicrosPerMinute <= 0 {
+		return false
+	}
+	return p.cfg.AccountID != "" && p.cfg.APIToken != ""
+}
 
 // Name implements transcribe.Provider.
 func (p *Provider) Name() string { return Name }
@@ -145,8 +155,10 @@ func (p *Provider) Transcribe(ctx context.Context, audio transcribe.Audio, opts 
 		offset := transcribe.DurationMsOf(from)
 		res, err := p.call(ctx, part, lang)
 		if err != nil {
-			return transcribe.Transcript{}, err
+			// The chunks before this one were answered, so they were billed: report them with the error.
+			return out, err
 		}
+		out.Calls = append(out.Calls, transcribe.Call{AudioMs: transcribe.DurationMsOf(len(part))})
 		if out.Language == "" {
 			out.Language = res.Result.Info.Language
 			if lang == "" {

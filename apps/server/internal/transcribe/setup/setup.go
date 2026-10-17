@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/media"
 	"github.com/nilpntr/content-fabrique/internal/sandbox"
@@ -88,6 +89,8 @@ func Build(cfg config.Config) (Parts, error) {
 	if cfg.TranscribeProvider == config.TranscribeWorkersAI {
 		parts.Provider = workersai.New(workersai.Config{
 			AccountID: cfg.WorkersAIAccountID, APIToken: cfg.WorkersAIAPIToken, PriceMicrosPerMinute: cfg.WorkersAIPriceMicrosPerMinute,
+			// Staging and production never call a provider whose spend cannot be capped (D-27).
+			RequirePrice: cfg.Env == config.EnvStaging || cfg.Env == config.EnvProduction,
 		})
 	}
 	return parts, nil
@@ -103,11 +106,12 @@ func BilledTo(env string) string {
 	return store.BilledToTest
 }
 
-// Pipeline builds the job's pipeline over the parts.
-func Pipeline(cfg config.Config, parts Parts, st transcribe.Store, objects transcribe.Objects, logger *slog.Logger) (*transcribe.Pipeline, error) {
-	billedTo := BilledTo(cfg.Env)
+// Pipeline builds the job's pipeline over the parts. The daily spend cap is the one the model client uses
+// (DAILY_SPEND_CAP_MICROS, dailyCapMicros), read from the same ledger.
+func Pipeline(cfg config.Config, parts Parts, st *store.Store, objects transcribe.Objects, dailyCapMicros int64, logger *slog.Logger) (*transcribe.Pipeline, error) {
 	return transcribe.New(transcribe.Config{
 		Store: st, Objects: objects, Provider: parts.Provider, Detector: parts.Detector, Language: cfg.TranscribeLanguage,
-		BilledTo: billedTo, TempDir: parts.TempDir, Logger: logger,
+		Spend: llm.NewDailyGuard(st, dailyCapMicros), DailyMinutes: cfg.TranscribeDailyMinutes,
+		BilledTo: BilledTo(cfg.Env), TempDir: parts.TempDir, Logger: logger,
 	})
 }

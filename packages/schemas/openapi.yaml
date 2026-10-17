@@ -1868,6 +1868,13 @@ components:
           description: What the ingest is doing while `status` is `processing` (`starting`, `downloading`, `probing`, `proxy`, `derivatives`, `uploading`). Null otherwise.
         transcript_status:
           $ref: "#/components/schemas/TranscriptStatus"
+        transcript_failure_reason:
+          type: [string, "null"]
+          description: |
+            Why the transcript is `failed`, as a code that is safe to show: `spend_cap` (the workspace's daily spend cap could not
+            cover the transcription), `minutes_cap` (the workspace had its daily minutes of transcription already), `price_unset`
+            (the hosted provider has no verified price), `unusable_audio`, `gave_up` (every attempt failed). Null otherwise. Absent
+            on older responses.
         media:
           $ref: "#/components/schemas/MediaInfo"
         derivatives:

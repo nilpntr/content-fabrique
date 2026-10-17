@@ -103,6 +103,8 @@ type Config struct {
 	TranscribeLanguage string
 	// TranscribeConcurrency is TRANSCRIBE_CONCURRENCY: transcriptions that run at once on one worker.
 	TranscribeConcurrency int
+	// TranscribeDailyMinutes is TRANSCRIBE_DAILY_MINUTES: the audio one workspace may have transcribed per UTC day.
+	TranscribeDailyMinutes int
 	// WhisperModelsDir is WHISPER_MODELS_DIR: where the whisper.cpp models are downloaded to and mounted from. Empty means a
 	// "whisper-models" directory inside MEDIA_TEMP_DIR.
 	WhisperModelsDir string

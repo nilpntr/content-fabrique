@@ -19,7 +19,10 @@ const (
 const (
 	DefaultTranscribeModel       = "large-v3-turbo-q5_0"
 	DefaultTranscribeConcurrency = 1
-	maxTranscribeConcurrency     = 8
+	// DefaultTranscribeDailyMinutes is the default of TRANSCRIBE_DAILY_MINUTES: four hours of audio per workspace per UTC day.
+	DefaultTranscribeDailyMinutes = 240
+	maxTranscribeDailyMinutes     = 100_000
+	maxTranscribeConcurrency      = 8
 )
 
 var transcribeLanguageRE = regexp.MustCompile(`^[a-z]{2,3}$`)
@@ -68,6 +71,15 @@ func (c *Config) loadTranscribe(getenv Getenv) []error {
 			c.TranscribeConcurrency = n
 		}
 	}
+	c.TranscribeDailyMinutes = DefaultTranscribeDailyMinutes
+	if raw := strings.TrimSpace(getenv("TRANSCRIBE_DAILY_MINUTES")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > maxTranscribeDailyMinutes {
+			errs = append(errs, fmt.Errorf("TRANSCRIBE_DAILY_MINUTES: must be a whole number from 1 to %d", maxTranscribeDailyMinutes))
+		} else {
+			c.TranscribeDailyMinutes = n
+		}
+	}
 	c.WhisperModelsDir = strings.TrimSpace(getenv("WHISPER_MODELS_DIR"))
 	switch {
 	case c.WhisperModelsDir == "":
@@ -87,6 +99,13 @@ func (c *Config) loadTranscribe(getenv Getenv) []error {
 	}
 	if (c.WorkersAIAccountID == "") != (c.WorkersAIAPIToken == "") {
 		errs = append(errs, errors.New("WORKERS_AI_ACCOUNT_ID and WORKERS_AI_API_TOKEN: set both or neither"))
+	}
+	// A hosted provider that is switched on must have a price (D-27): without one the ledger records every call at 0, the daily
+	// spend cap could never trip, and a flood of uploads would cost money nobody sees. Not having an account yet is fine (staging
+	// today): the transcribe jobs wait.
+	if c.TranscribeProvider == TranscribeWorkersAI && (c.Env == EnvStaging || c.Env == EnvProduction) &&
+		(c.WorkersAIAccountID != "" || c.WorkersAIAPIToken != "") && c.WorkersAIPriceMicrosPerMinute == 0 {
+		errs = append(errs, errors.New("WORKERS_AI_PRICE_MICROS_PER_MINUTE: required in staging and production once Workers AI has an account (the spend cap needs a price; D-27)"))
 	}
 	return errs
 }

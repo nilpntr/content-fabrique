@@ -12,7 +12,7 @@ func TestTranscribeDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.TranscribeProvider != TranscribeWhisperCPP || c.TranscribeModel != "large-v3-turbo-q5_0" || c.TranscribeLanguage != "" || c.TranscribeConcurrency != 1 ||
+	if c.TranscribeProvider != TranscribeWhisperCPP || c.TranscribeModel != "large-v3-turbo-q5_0" || c.TranscribeLanguage != "" || c.TranscribeConcurrency != 1 || c.TranscribeDailyMinutes != 240 ||
 		c.WhisperModelsDir != filepath.Join(os.TempDir(), "cf-media", "whisper-models") || c.WorkersAIAccountID != "" || c.WorkersAIPriceMicrosPerMinute != 0 {
 		t.Fatalf("%+v", c)
 	}
@@ -34,13 +34,13 @@ func TestTranscribeDefaults(t *testing.T) {
 
 func TestTranscribeSettings(t *testing.T) {
 	c, err := Load(mediaEnv(map[string]string{
-		"TRANSCRIBE_PROVIDER": " WorkersAI ", "TRANSCRIBE_MODEL": "tiny.en", "TRANSCRIBE_LANGUAGE": "NL", "TRANSCRIBE_CONCURRENCY": "3",
+		"TRANSCRIBE_PROVIDER": " WorkersAI ", "TRANSCRIBE_MODEL": "tiny.en", "TRANSCRIBE_LANGUAGE": "NL", "TRANSCRIBE_CONCURRENCY": "3", "TRANSCRIBE_DAILY_MINUTES": "90",
 		"WHISPER_MODELS_DIR": "/models", "WORKERS_AI_ACCOUNT_ID": " acct ", "WORKERS_AI_API_TOKEN": "tok", "WORKERS_AI_PRICE_MICROS_PER_MINUTE": "1500",
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.TranscribeProvider != "workersai" || c.TranscribeModel != "tiny.en" || c.TranscribeLanguage != "nl" || c.TranscribeConcurrency != 3 ||
+	if c.TranscribeProvider != "workersai" || c.TranscribeModel != "tiny.en" || c.TranscribeLanguage != "nl" || c.TranscribeConcurrency != 3 || c.TranscribeDailyMinutes != 90 ||
 		c.WhisperModelsDir != "/models" || c.WorkersAIAccountID != "acct" || c.WorkersAIAPIToken != "tok" || c.WorkersAIPriceMicrosPerMinute != 1500 {
 		t.Fatalf("%+v", c)
 	}
@@ -56,6 +56,8 @@ func TestTranscribeSettingsAreValidated(t *testing.T) {
 		"TRANSCRIBE_LANGUAGE":                {"TRANSCRIBE_LANGUAGE": "english"},
 		"TRANSCRIBE_CONCURRENCY":             {"TRANSCRIBE_CONCURRENCY": "0"},
 		"TRANSCRIBE_CONCURRENCY high":        {"TRANSCRIBE_CONCURRENCY": "99"},
+		"TRANSCRIBE_DAILY_MINUTES":           {"TRANSCRIBE_DAILY_MINUTES": "0"},
+		"TRANSCRIBE_DAILY_MINUTES words":     {"TRANSCRIBE_DAILY_MINUTES": "lots"},
 		"WHISPER_MODELS_DIR":                 {"WHISPER_MODELS_DIR": "models"},
 		"WORKERS_AI_PRICE_MICROS_PER_MINUTE": {"WORKERS_AI_PRICE_MICROS_PER_MINUTE": "-1"},
 		"WORKERS_AI_ACCOUNT_ID":              {"WORKERS_AI_ACCOUNT_ID": "acct"},
@@ -70,5 +72,33 @@ func TestTranscribeSettingsAreValidated(t *testing.T) {
 	_, err := Load(mediaEnv(map[string]string{"WORKERS_AI_API_TOKEN": "super-secret-token"}))
 	if err == nil || strings.Contains(err.Error(), "super-secret-token") {
 		t.Errorf("%v", err)
+	}
+}
+
+// D-27: a hosted provider that is switched on must have a price, or its spend cannot be capped. Having no account yet is fine.
+func TestWorkersAIWithAnAccountNeedsAPriceInStagingAndProduction(t *testing.T) {
+	for _, env := range []string{EnvStaging, EnvProduction} {
+		base := map[string]string{"CF_ENV": env, "WORKERS_AI_ACCOUNT_ID": "acct", "WORKERS_AI_API_TOKEN": "tok"}
+		_, err := Load(mediaEnv(base))
+		if err == nil || !strings.Contains(err.Error(), "WORKERS_AI_PRICE_MICROS_PER_MINUTE") {
+			t.Errorf("%s without a price: %v", env, err)
+		}
+		withPrice := map[string]string{"CF_ENV": env, "WORKERS_AI_ACCOUNT_ID": "acct", "WORKERS_AI_API_TOKEN": "tok", "WORKERS_AI_PRICE_MICROS_PER_MINUTE": "6000"}
+		if _, err := Load(mediaEnv(withPrice)); err != nil {
+			t.Errorf("%s with a price: %v", env, err)
+		}
+		// Not switched on yet (staging today has no account): the worker starts and the jobs wait.
+		if _, err := Load(mediaEnv(map[string]string{"CF_ENV": env})); err != nil {
+			t.Errorf("%s without an account: %v", env, err)
+		}
+		// A price of 0 is no price.
+		base["WORKERS_AI_PRICE_MICROS_PER_MINUTE"] = "0"
+		if _, err := Load(mediaEnv(base)); err == nil {
+			t.Errorf("%s with a price of 0", env)
+		}
+	}
+	// Development may run the provider unpriced.
+	if _, err := Load(mediaEnv(map[string]string{"TRANSCRIBE_PROVIDER": "workersai", "WORKERS_AI_ACCOUNT_ID": "acct", "WORKERS_AI_API_TOKEN": "tok"})); err != nil {
+		t.Errorf("local without a price: %v", err)
 	}
 }

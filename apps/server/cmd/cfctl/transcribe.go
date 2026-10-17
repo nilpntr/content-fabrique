@@ -20,6 +20,7 @@ import (
 const transcribeUsage = `Usage:
   cfctl transcribe file <audio.wav> [flags]
   cfctl transcribe models [flags]
+  cfctl transcribe run --workspace <wks_... or org_...> --asset <ast_...> [--force]   (run "cfctl transcribe run -h")
 
 file runs the transcription pipeline's steps on one 16 kHz mono WAV file (the audio_16k.wav derivative; make one with
 ffmpeg -i in.mp4 -ar 16000 -ac 1 -c:a pcm_s16le out.wav) the way the worker does: whisper.cpp's voice-activity check, then
@@ -49,6 +50,13 @@ func cmdTranscribe(args []string, stdout, stderr io.Writer, lookupEnv func(strin
 		return 0
 	}
 	sub := args[0]
+	if sub == "run" {
+		if len(args) > 1 && (args[1] == "help" || args[1] == "-h" || args[1] == "--help") {
+			_, _ = fmt.Fprint(stdout, transcribeRunUsage)
+			return 0
+		}
+		return cmdTranscribeRun(args[1:], stdout, stderr, lookupEnv)
+	}
 	if sub != "file" && sub != "models" {
 		_, _ = fmt.Fprintf(stderr, "cfctl transcribe: unknown subcommand %q\n\n%s", sub, transcribeUsage)
 		return 2

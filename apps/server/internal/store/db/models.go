@@ -93,42 +93,43 @@ type AnnotationHandoff struct {
 }
 
 type Asset struct {
-	ID               ids.AssetID
-	WorkspaceID      ids.WorkspaceID
-	Kind             string
-	Status           string
-	Filename         string
-	ContentType      string
-	SizeBytes        int64
-	Sha256           *string
-	Title            string
-	Description      string
-	Tags             []string
-	R2Key            string
-	FailureReason    *string
-	CreatedBy        ids.UserID
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	DeletedAt        *time.Time
-	DurationMs       *int64
-	Width            *int32
-	Height           *int32
-	Fps              *float64
-	Rotation         *int32
-	VideoCodec       *string
-	AudioCodec       *string
-	HasAudio         *bool
-	Hdr              *bool
-	Probe            []byte
-	IngestProgress   int16
-	IngestStage      *string
-	IngestedAt       *time.Time
-	TitleSource      string
-	QuickLookStatus  *string
-	QuickLook        []byte
-	QuickLookAt      *time.Time
-	Search           pgtype.TSVector
-	TranscriptStatus string
+	ID                      ids.AssetID
+	WorkspaceID             ids.WorkspaceID
+	Kind                    string
+	Status                  string
+	Filename                string
+	ContentType             string
+	SizeBytes               int64
+	Sha256                  *string
+	Title                   string
+	Description             string
+	Tags                    []string
+	R2Key                   string
+	FailureReason           *string
+	CreatedBy               ids.UserID
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+	DeletedAt               *time.Time
+	DurationMs              *int64
+	Width                   *int32
+	Height                  *int32
+	Fps                     *float64
+	Rotation                *int32
+	VideoCodec              *string
+	AudioCodec              *string
+	HasAudio                *bool
+	Hdr                     *bool
+	Probe                   []byte
+	IngestProgress          int16
+	IngestStage             *string
+	IngestedAt              *time.Time
+	TitleSource             string
+	QuickLookStatus         *string
+	QuickLook               []byte
+	QuickLookAt             *time.Time
+	Search                  pgtype.TSVector
+	TranscriptStatus        string
+	TranscriptFailureReason *string
 }
 
 type AssetDerivative struct {
@@ -273,19 +274,20 @@ type TimelineVersion struct {
 }
 
 type Transcript struct {
-	ID          uuid.UUID
-	WorkspaceID ids.WorkspaceID
-	AssetID     ids.AssetID
-	Speech      bool
-	Language    string
-	Words       json.RawMessage
-	Structure   json.RawMessage
-	Provider    string
-	Model       string
-	AudioMs     int64
-	SpeechMs    int64
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID               uuid.UUID
+	WorkspaceID      ids.WorkspaceID
+	AssetID          ids.AssetID
+	SourceIngestedAt *time.Time
+	Speech           bool
+	Language         string
+	Words            json.RawMessage
+	Structure        json.RawMessage
+	Provider         string
+	Model            string
+	AudioMs          int64
+	SpeechMs         int64
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type Upload struct {

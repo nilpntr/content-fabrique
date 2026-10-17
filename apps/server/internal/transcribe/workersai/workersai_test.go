@@ -133,6 +133,53 @@ func TestNotConfiguredIsSwitchedOffWithoutCallingAnything(t *testing.T) {
 	}
 }
 
+func TestEveryChunkIsACallAndPaidChunksSurviveAFailure(t *testing.T) {
+	ok := `{"success":true,"errors":[],"result":{"words":[{"word":"een","start":0.1,"end":0.4}],"transcription_info":{"language":"nl"}}}`
+	f := &fake{replies: []string{ok, ok}}
+	p := newProvider(t, f, Config{ChunkSeconds: 2})
+	tr, err := p.Transcribe(context.Background(), writeWAV(t, 5), transcribe.Options{})
+	if err != nil || len(tr.Calls) != 3 || tr.Calls[0].AudioMs != 2000 || tr.Calls[1].AudioMs != 2000 || tr.Calls[2].AudioMs != 1000 {
+		t.Fatalf("calls %+v, err %v: the last chunk is a call of its own length", tr.Calls, err)
+	}
+
+	// The third request fails: the two that were answered were billed and are reported with the error.
+	f = &fake{replies: []string{ok, ok, `{"success":false,"errors":[{"code":5,"message":"overloaded"}]}`}}
+	p = newProvider(t, f, Config{ChunkSeconds: 2})
+	tr, err = p.Transcribe(context.Background(), writeWAV(t, 5), transcribe.Options{})
+	if err == nil || len(tr.Calls) != 2 || len(tr.Words) != 2 {
+		t.Fatalf("err %v, calls %+v, words %d", err, tr.Calls, len(tr.Words))
+	}
+	// A request that is refused with an HTTP error was not billed.
+	f = &fake{status: 500}
+	tr, err = newProvider(t, f, Config{}).Transcribe(context.Background(), writeWAV(t, 1), transcribe.Options{})
+	if err == nil || len(tr.Calls) != 0 {
+		t.Fatalf("err %v, calls %+v", err, tr.Calls)
+	}
+}
+
+func TestAHostedProviderWithoutAPriceSendsNothing(t *testing.T) {
+	f := &fake{}
+	p := newProvider(t, f, Config{RequirePrice: true})
+	if p.Configured() {
+		t.Error("a provider that requires a price is configured without one")
+	}
+	if _, err := p.Transcribe(context.Background(), writeWAV(t, 1), transcribe.Options{}); !errors.Is(err, transcribe.ErrNotConfigured) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(f.requests) != 0 {
+		t.Errorf("%d requests were sent without a price", len(f.requests))
+	}
+	// With a price it works, and the price is used.
+	p = newProvider(t, f, Config{RequirePrice: true, PriceMicrosPerMinute: 1500})
+	if _, err := p.Transcribe(context.Background(), writeWAV(t, 1), transcribe.Options{}); err != nil || len(f.requests) != 1 {
+		t.Fatalf("%v, %d requests", err, len(f.requests))
+	}
+	// Local development may run unpriced (no real call is made without an account anyway).
+	if !newProvider(t, f, Config{}).Configured() {
+		t.Error("an unpriced provider is configured when the price is not required")
+	}
+}
+
 func TestErrorsAreClassified(t *testing.T) {
 	for _, tc := range []struct {
 		status    int

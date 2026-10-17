@@ -35,10 +35,14 @@ func TestAssetTranscript(t *testing.T) {
 	structure := `{"sentences":[{"first_word":0,"last_word":2,"start_ms":500,"end_ms":2400,"text":"Hello, um world."}],` +
 		`"fillers":[{"first_word":1,"last_word":1,"start_ms":1000,"end_ms":1300,"text":"um","kind":"hesitation","strength":"strong"}],` +
 		`"pauses":[{"after_word":1,"start_ms":1300,"end_ms":1900,"duration_ms":600,"sentence_break":false}]}`
+	row, err := e.st.GetAsset(ctx, e.ws["ada"], id)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := e.st.SaveTranscript(ctx, e.ws["ada"], id, store.NewTranscript{
-		Speech: true, Language: "en", Words: []byte(words), Structure: []byte(structure),
+		SourceIngestedAt: row.IngestedAt, Speech: true, Language: "en", Words: []byte(words), Structure: []byte(structure),
 		Provider: "whispercpp", Model: "ggml-tiny.en", AudioMs: 3000, SpeechMs: 1800,
-	}, nil); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -81,12 +85,37 @@ func TestAssetTranscript(t *testing.T) {
 	b := e.uploadedAsset("ada", "silent.mp4")
 	e.ingested("ada", b)
 	bid, _ := ids.ParseAssetID(b.Id)
-	if _, err := e.st.SaveTranscript(ctx, e.ws["ada"], bid, store.NewTranscript{Speech: false, Provider: "whispercpp", Model: "m", AudioMs: 3000}, nil); err != nil {
+	brow, err := e.st.GetAsset(ctx, e.ws["ada"], bid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.SaveTranscript(ctx, e.ws["ada"], bid, store.NewTranscript{SourceIngestedAt: brow.IngestedAt, Speech: false, Provider: "whispercpp", Model: "m", AudioMs: 3000}); err != nil {
 		t.Fatal(err)
 	}
 	var none api.Transcript
 	e.call(http.MethodGet, "/v1/assets/"+b.Id+"/transcript", "ada", nil, http.StatusOK, &none)
 	if none.Status != api.TranscriptStatus(store.TranscriptNoSpeech) || none.Speech || none.Words == nil || len(none.Words) != 0 || none.Structure.Fillers == nil {
 		t.Fatalf("no speech: %+v", none)
+	}
+
+	// A transcript that failed says why, in a code that is safe to show; a later status clears it.
+	c := e.uploadedAsset("ada", "capped.mp4")
+	e.ingested("ada", c)
+	cid, _ := ids.ParseAssetID(c.Id)
+	crow, err := e.st.GetAsset(ctx, e.ws["ada"], cid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.FailTranscript(ctx, e.ws["ada"], cid, store.TranscriptSpendCap, crow.IngestedAt); err != nil {
+		t.Fatal(err)
+	}
+	var capped api.Asset
+	e.call(http.MethodGet, "/v1/assets/"+c.Id, "ada", nil, http.StatusOK, &capped)
+	if capped.TranscriptStatus != api.TranscriptStatus(store.TranscriptFailed) || capped.TranscriptFailureReason == nil || *capped.TranscriptFailureReason != "spend_cap" {
+		t.Fatalf("failed transcript: %q %v", capped.TranscriptStatus, capped.TranscriptFailureReason)
+	}
+	e.call(http.MethodGet, "/v1/assets/"+c.Id+"/transcript", "ada", nil, http.StatusNotFound, &errBody)
+	if got.TranscriptFailureReason != nil {
+		t.Errorf("a ready transcript carries a failure reason: %v", *got.TranscriptFailureReason)
 	}
 }

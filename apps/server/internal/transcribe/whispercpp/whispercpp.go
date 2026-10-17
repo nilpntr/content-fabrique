@@ -133,7 +133,12 @@ func (p *Provider) Transcribe(ctx context.Context, audio transcribe.Audio, opts 
 	if err != nil {
 		return transcribe.Transcript{}, err
 	}
-	return ParseJSON(raw)
+	tr, err := ParseJSON(raw)
+	if err != nil {
+		return transcribe.Transcript{Calls: []transcribe.Call{{AudioMs: audio.DurationMs}}}, err
+	}
+	tr.Calls = []transcribe.Call{{AudioMs: audio.DurationMs}}
+	return tr, nil
 }
 
 var langRE = regexp.MustCompile(`^[a-z]{2,3}$`)

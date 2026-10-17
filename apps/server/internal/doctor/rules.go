@@ -171,6 +171,24 @@ var validators = map[string]validator{
 		}
 		return ""
 	},
+	"TRANSCRIBE_DAILY_MINUTES": func(_ *run, val string) string {
+		if n, err := strconv.Atoi(val); err != nil || n < 1 || n > 100000 {
+			return "bad format (expected a whole number from 1 to 100000)"
+		}
+		return ""
+	},
+	// Hosted transcription is capped by price (D-27): an unpriced Workers AI call would be recorded at 0 and the daily spend cap
+	// could never trip, so a price of 0 is refused in staging and production, where Workers AI is the provider.
+	"WORKERS_AI_PRICE_MICROS_PER_MINUTE": func(r *run, val string) string {
+		n, err := strconv.Atoi(val)
+		if err != nil || n < 0 || n > 1000000 {
+			return "bad format (expected millionths of a dollar per minute, 1 to 1000000)"
+		}
+		if n == 0 && (r.opts.Env == "staging" || r.opts.Env == "production") {
+			return "must be a verified price above 0 in " + r.opts.Env + ": the daily spend cap cannot count unpriced transcription (D-27)"
+		}
+		return ""
+	},
 	"WHISPER_MODELS_DIR": func(_ *run, val string) string {
 		if !strings.HasPrefix(val, "/") {
 			return "bad format (expected an absolute path)"

@@ -79,7 +79,7 @@ func assetOf(a store.Asset) api.Asset {
 		Id: a.ID.String(), Kind: api.AssetKind(a.Kind), Status: api.AssetStatus(a.Status), Filename: a.Filename,
 		ContentType: a.ContentType, SizeBytes: a.SizeBytes, Sha256: a.Sha256, Title: a.Title, TitleSource: &titleSource,
 		Description: a.Description, Tags: tags, FailureReason: a.FailureReason, IngestProgress: int(a.IngestProgress), IngestStage: a.IngestStage,
-		TranscriptStatus: api.TranscriptStatus(a.TranscriptStatus), CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt,
+		TranscriptStatus: api.TranscriptStatus(a.TranscriptStatus), TranscriptFailureReason: a.TranscriptFailureReason, CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt,
 	}
 	if a.QuickLookStatus != nil {
 		qs := api.QuickLookStatus(*a.QuickLookStatus)

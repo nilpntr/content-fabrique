@@ -158,6 +158,9 @@ func TestTranscribeRunsWhisperCLIWithWordAlignment(t *testing.T) {
 	if err != nil || len(tr.Words) != 4 {
 		t.Fatalf("%+v %v", tr, err)
 	}
+	if len(tr.Calls) != 1 || tr.Calls[0].AudioMs != 60_000 {
+		t.Errorf("calls %+v: one run over the whole audio", tr.Calls)
+	}
 	args := strings.Join(r.inv.Args, " ")
 	for _, want := range []string{"whisper-cli", "-m /in/0", "-f /in/1", "-ojf", "-of /work/out", "-l auto", "-t 3", "-nfa", "-dtw large.v3.turbo", "-np"} {
 		if !strings.Contains(args, want) {

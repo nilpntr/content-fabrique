@@ -37,6 +37,16 @@ type Transcript struct {
 	// Language is the ISO 639-1 code of the spoken language ("en"), as detected or as asked for.
 	Language string
 	Words    []Word
+	// Calls are the requests the provider made that were, or may have been, billed: one for a local run, one per chunk for a hosted
+	// one. A provider that fails part way returns the calls it had already made together with the error, so paid work is always
+	// metered (the pipeline writes one ledger row per call). A call that failed before the provider answered is not listed.
+	Calls []Call
+}
+
+// Call is one billed request to a provider.
+type Call struct {
+	// AudioMs is the length of the audio the request carried.
+	AudioMs int64
 }
 
 // Audio is the input of a provider: a 16 kHz mono signed 16-bit PCM WAV file on the host (the audio_16k.wav derivative).
@@ -60,7 +70,8 @@ type Provider interface {
 	// Model names the model that does the work ("ggml-large-v3-turbo-q5_0"), for the transcript and the ledger.
 	Model() string
 	// Transcribe returns the words of the audio, in order. A clip with no speech may come back with no words (a hallucination
-	// filter is the caller's business: the pipeline only calls it after a speech check).
+	// filter is the caller's business: the pipeline only calls it after a speech check). On an error it still returns the
+	// Transcript's Calls, for the billed work that was done before the failure.
 	Transcribe(ctx context.Context, audio Audio, opts Options) (Transcript, error)
 	// CostMicros is what transcribing audioMs of audio costs at list price, in millionths of a US dollar, and the version of the
 	// price table that says so. Local providers cost 0 ("local"); a hosted provider without a verified price reports
@@ -84,7 +95,8 @@ var (
 	// ErrUnusableAudio is audio the provider cannot work with and never will (not 16 kHz PCM, empty, too large). The job gives up
 	// instead of retrying.
 	ErrUnusableAudio = errors.New("transcribe: the audio cannot be transcribed")
-	// ErrNotConfigured is a provider that is switched off: no account, no token. The job waits (snoozes) instead of failing.
+	// ErrNotConfigured is a provider that is switched off: no account, no token, or (hosted, staging and production) no verified
+	// price, so its spend could not be capped. The job waits (snoozes) instead of failing, and nothing is sent.
 	ErrNotConfigured = errors.New("transcribe: the provider is not configured")
 )
 

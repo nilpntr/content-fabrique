@@ -37,13 +37,21 @@ const noTranscribeSnooze = 5 * time.Minute
 type TranscribeArgs struct {
 	WorkspaceID ids.WorkspaceID `json:"workspace_id"`
 	AssetID     ids.AssetID     `json:"asset_id"`
+	// Generation is the ingest the job was enqueued for (assets.ingested_at in microseconds). It is part of the job's unique key, so
+	// an asset that is ingested again gets a new transcription instead of being deduplicated against the old job (River keeps
+	// finished jobs unique for a day), and a job of an old ingest that runs late does nothing (transcribe.Pipeline.Run).
+	Generation int64 `json:"generation"`
+	// Force is a nonce `cfctl transcribe run --force` sets to enqueue a job that is not deduplicated against the finished one of
+	// the same ingest. Zero for every job the ingest enqueues.
+	Force int64 `json:"force,omitempty"`
 }
 
 // Kind implements river.JobArgs.
 func (TranscribeArgs) Kind() string { return "transcribe" }
 
-// InsertOpts puts the job on its own queue and makes it unique by asset, whatever its state, so an asset that is ingested again does
-// not transcribe again (and does not meter a second time). `cfctl transcribe run` transcribes on demand.
+// InsertOpts puts the job on its own queue and makes it unique by its arguments, which include the ingest generation: a double
+// enqueue for one ingest runs once (and meters once), and a re-ingest is never deduplicated away. `cfctl transcribe run`
+// transcribes on demand.
 func (TranscribeArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: QueueTranscribe, MaxAttempts: 3, UniqueOpts: river.UniqueOpts{ByArgs: true}}
 }
@@ -51,7 +59,7 @@ func (TranscribeArgs) InsertOpts() river.InsertOpts {
 // EnqueueTranscribe is the store's transcribe hook (Store.SetTranscribeHook): it inserts the job in the transaction that marks the
 // asset ready, and says whether it inserted one (false: a job for this asset exists already).
 func (e *Enqueuer) EnqueueTranscribe(ctx context.Context, tx *store.Store, a store.Asset) (bool, error) {
-	res, err := e.InsertInStore(ctx, tx, TranscribeArgs{WorkspaceID: a.WorkspaceID, AssetID: a.ID}, nil)
+	res, err := e.InsertInStore(ctx, tx, TranscribeArgs{WorkspaceID: a.WorkspaceID, AssetID: a.ID, Generation: generationOf(a)}, nil)
 	if err != nil {
 		return false, fmt.Errorf("enqueue transcribe: %w", err)
 	}
@@ -68,11 +76,12 @@ var (
 
 // Transcriber is the transcription pipeline (package transcribe) as the worker sees it.
 type Transcriber interface {
-	// Run transcribes the asset and returns what the job records. ErrTranscribeGone and ErrTranscribeNotConfigured are the errors
-	// the worker acts on; any other error is retried.
-	Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (output any, err error)
-	// Fail marks the transcript failed, for a job that has used its last attempt.
-	Fail(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) error
+	// Run transcribes the asset for the ingest generation and returns what the job records. A run for an ingest that is no longer the
+	// asset's does nothing and says so in its output. ErrTranscribeGone and ErrTranscribeNotConfigured are the errors the worker
+	// acts on; any other error is retried.
+	Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, generation int64) (output any, err error)
+	// Fail marks the transcript failed, for a job that has used its last attempt (only if the asset is still at that generation).
+	Fail(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, generation int64) error
 }
 
 // TranscribeWorker works TranscribeArgs. It is always registered, so the ingest can enqueue the job on a worker that cannot run it:
@@ -94,7 +103,7 @@ func (w *TranscribeWorker) Work(ctx context.Context, job *river.Job[TranscribeAr
 	if w.deps.Transcribe == nil {
 		return w.snooze(ctx, job, "this worker cannot transcribe (no object storage or sandbox)")
 	}
-	out, err := w.deps.Transcribe.Run(ctx, ws, id)
+	out, err := w.deps.Transcribe.Run(ctx, ws, id, job.Args.Generation)
 	switch {
 	case errors.Is(err, ErrTranscribeGone):
 		return river.JobCancel(fmt.Errorf("asset %s is gone from workspace %s", id, ws))
@@ -103,7 +112,7 @@ func (w *TranscribeWorker) Work(ctx context.Context, job *river.Job[TranscribeAr
 	case err != nil:
 		w.deps.logger().WarnContext(ctx, "transcribe attempt failed", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "attempt", job.Attempt, "error", err)
 		if job.Attempt >= job.MaxAttempts {
-			w.giveUp(ctx, ws, id)
+			w.giveUp(ctx, ws, id, job.Args.Generation)
 		}
 		return err
 	}
@@ -115,7 +124,7 @@ func (w *TranscribeWorker) snooze(ctx context.Context, job *river.Job[Transcribe
 	age := w.deps.now().Sub(job.CreatedAt)
 	if age >= TranscribeMaxAge {
 		w.deps.logger().ErrorContext(ctx, "transcribe gives up after waiting", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "age", age.Round(time.Minute), "detail", why)
-		w.giveUp(ctx, ws, id)
+		w.giveUp(ctx, ws, id, job.Args.Generation)
 		return river.JobCancel(fmt.Errorf("transcribe gave up after %s: %s", age.Round(time.Minute), why))
 	}
 	w.deps.logger().WarnContext(ctx, "transcribe waits", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "retry_in", noTranscribeSnooze, "age", age.Round(time.Minute), "detail", why)
@@ -123,16 +132,21 @@ func (w *TranscribeWorker) snooze(ctx context.Context, job *river.Job[Transcribe
 }
 
 // giveUp marks the transcript failed with a fresh context (the job's may be what ended).
-func (w *TranscribeWorker) giveUp(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) {
+func (w *TranscribeWorker) giveUp(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, generation int64) {
 	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	if w.deps.Transcribe != nil {
-		if err := w.deps.Transcribe.Fail(fctx, ws, id); err != nil {
+		if err := w.deps.Transcribe.Fail(fctx, ws, id, generation); err != nil {
 			w.deps.logger().ErrorContext(ctx, "could not mark a transcript whose job gave up as failed", "asset_id", id.String(), "error", err)
 		}
 		return
 	}
-	if err := w.deps.Store.SetTranscriptStatus(fctx, ws, id, store.TranscriptFailed); err != nil && !errors.Is(err, store.ErrNotFound) {
+	var source *time.Time
+	if generation != 0 {
+		t := time.UnixMicro(generation).UTC()
+		source = &t
+	}
+	if err := w.deps.Store.FailTranscript(fctx, ws, id, store.TranscriptGaveUp, source); err != nil && !errors.Is(err, store.ErrNotFound) {
 		w.deps.logger().ErrorContext(ctx, "could not mark a transcript whose job gave up as failed", "asset_id", id.String(), "error", err)
 	}
 }
