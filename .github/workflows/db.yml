@@ -4,7 +4,7 @@ name: db
 on:
   pull_request:
   push:
-    branches: [main, p0-05-postgres]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
