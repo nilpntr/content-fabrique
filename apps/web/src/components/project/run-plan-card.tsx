@@ -1,4 +1,5 @@
-import { ClipboardList, Gauge, Music2, Timer } from "lucide-react";
+import { ChevronDown, ClipboardList, Gauge, Music2, Timer } from "lucide-react";
+import * as React from "react";
 import { EffectIcon, MOTION, TRANSITIONS, effectName, RampIcon } from "@/components/editor/effects";
 import { cn } from "@/lib/utils";
 import { Pill } from "./badges";
@@ -80,6 +81,10 @@ function Story({ label, children }: { label: string; children: string }) {
   );
 }
 
+/** A shot list longer than this folds to its first `FOLD_TO` shots. */
+const FOLD_ABOVE = 8;
+const FOLD_TO = 6;
+
 const seconds = (ms: number): string => `${(ms / 1000).toFixed(1)} s`;
 
 /**
@@ -90,7 +95,12 @@ const seconds = (ms: number): string => `${(ms / 1000).toFixed(1)} s`;
 export function CreativePlanCard({ plan, assetTitles, className }: { plan: CreativePlan; assetTitles?: ReadonlyMap<string, string>; className?: string }) {
   const playbook = plan.playbook ?? plan.contentType;
   const hasStory = plan.hook || plan.arc || plan.ending;
+  // Shots the plan has and the card does not know (a plan read from the event summaries, which stop after the first shots).
   const unknown = plan.shotCount !== undefined ? plan.shotCount - plan.shots.length : 0;
+  // A long list folds to its first shots; the creator opens it.
+  const [expanded, setExpanded] = React.useState(false);
+  const folded = plan.shots.length > FOLD_ABOVE && !expanded;
+  const shown = folded ? plan.shots.slice(0, FOLD_TO) : plan.shots;
   return (
     <section aria-label="Creative plan" data-testid="creative-plan" className={cn("space-y-3 rounded-xl bg-well p-3.5 shadow-well", className)}>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
@@ -146,11 +156,22 @@ export function CreativePlanCard({ plan, assetTitles, className }: { plan: Creat
             Shot list{plan.shotCount ? <span className="tracking-normal normal-case"> · {plan.shotCount} shots</span> : null}
           </h4>
           <ol className="divide-y divide-hairline">
-            {plan.shots.map((shot, index) => (
+            {shown.map((shot, index) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: a shot has no id, and the list is read-only.
               <ShotRow key={`${shot.role}-${index}`} shot={shot} index={index} title={shot.assetId ? assetTitles?.get(shot.assetId) : undefined} />
             ))}
           </ol>
+          {plan.shots.length > FOLD_ABOVE ? (
+            <button
+              type="button"
+              aria-expanded={expanded}
+              onClick={() => setExpanded((open) => !open)}
+              className="mt-1 inline-flex cursor-pointer items-center gap-1 rounded-md py-0.5 text-[12px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand"
+            >
+              <ChevronDown aria-hidden className={cn("size-3.5 transition-transform", expanded && "rotate-180")} />
+              {expanded ? "Show fewer shots" : `Show all ${plan.shots.length} shots`}
+            </button>
+          ) : null}
           {unknown > 0 ? <p className="pt-1 text-[12px] text-subtle-foreground">+ {unknown} more {unknown === 1 ? "shot" : "shots"}</p> : null}
         </div>
       ) : null}

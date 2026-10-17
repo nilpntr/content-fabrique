@@ -1,5 +1,5 @@
 import type { Run, RunEvent } from "@/lib/api/client";
-import { answerTo, checkRoundFromSummary, matchFromSummary, planFromSummaries } from "./run-artifacts";
+import { answerTo, isSettled, checkRoundFromSummary, matchFromSummary, planFromSummaries } from "./run-artifacts";
 
 /** What a step is about, which picks its icon in the feed. */
 export type StepKind =
@@ -145,14 +145,6 @@ export function describeEvent(event: RunEvent, titles: ReadonlyMap<string, strin
 
 const withoutEllipsis = (label: string): string => label.replace(/…$/, "");
 
-/** Whether a later event answers (or fails) a call of `tool`: the editor runs one call at a time, so any later result of the tool is the call's. */
-function hasLaterResult(events: readonly RunEvent[], index: number, tool: string | null | undefined): boolean {
-  for (let i = index + 1; i < events.length; i++) {
-    const later = events[i];
-    if (later?.type === "tool_result" && later.tool === tool) return true;
-  }
-  return false;
-}
 
 /** "Row 1, Row 2 and 3 more". */
 function nameList(names: readonly string[]): string {
@@ -178,7 +170,7 @@ export function runSteps(events: readonly RunEvent[], titles: ReadonlyMap<string
       if (detail) step.detail = detail;
       // Only a run that is working has a call in flight; a run that was stopped, failed or waits for the creator has none.
       // A tool that failed has no `answer` here; its failure is its own step right after, so the call is not left spinning.
-      if (live && !answer && !hasLaterResult(events, index, event.tool)) step.pending = true;
+      if (live && !answer && !isSettled(events, index)) step.pending = true;
     }
     if (step.kind === "view_clip") {
       const id = ASSET_ID.exec(event.text)?.[0];

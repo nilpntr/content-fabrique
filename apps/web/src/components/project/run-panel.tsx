@@ -2,10 +2,10 @@ import { ChevronRight, CircleAlert, CircleCheck, CircleStop, Loader2, MessageCir
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ApiError, type Run } from "@/lib/api/client";
-import { isRunActive, useCancelRun, useReplyToRun, useRunQuery } from "@/lib/api/project-hooks";
+import { ApiError, type Run, type RunArtifact } from "@/lib/api/client";
+import { isRunActive, useCancelRun, useReplyToRun, useRunArtifacts, useRunQuery } from "@/lib/api/project-hooks";
 import { cn } from "@/lib/utils";
-import { runArtifacts } from "./run-artifacts";
+import { hasArtifactEvents, runArtifacts } from "./run-artifacts";
 import { EditChecksCard } from "./run-checks";
 import { CreativePlanCard } from "./run-plan-card";
 import { RunStepList } from "./run-step-list";
@@ -33,6 +33,9 @@ export function RunPanel({ runId, assetTitles, className }: { runId: string; ass
   const cancel = useCancelRun();
   const reply = useReplyToRun();
   const run = query.data;
+  // The whole plan and self-review: asked for once the run's events show it has some, while its panel is on screen. If the endpoint
+  // fails the cards are made from the event summaries.
+  const stored = useRunArtifacts(runId, { wanted: run ? hasArtifactEvents(run.events ?? []) : false, status: run?.status });
 
   if (!run) {
     if (query.isError) {
@@ -58,11 +61,13 @@ export function RunPanel({ runId, assetTitles, className }: { runId: string; ass
     );
   }
 
-  return <RunView run={run} assetTitles={assetTitles} className={className} onCancel={() => cancel.mutate({ runId, text: "" })} cancelling={cancel.isPending || cancel.isSuccess} cancelError={cancel.isError} onReply={(text) => reply.mutate({ runId, text })} replying={reply.isPending} replyError={reply.isError ? replyErrorMessage(reply.error) : undefined} />;
+  return <RunView run={run} artifacts={stored.data} assetTitles={assetTitles} className={className} onCancel={() => cancel.mutate({ runId, text: "" })} cancelling={cancel.isPending || cancel.isSuccess} cancelError={cancel.isError} onReply={(text) => reply.mutate({ runId, text })} replying={reply.isPending} replyError={reply.isError ? replyErrorMessage(reply.error) : undefined} />;
 }
 
 export interface RunViewProps {
   run: Run;
+  /** What the run recorded, whole (`GET /v1/runs/{id}/artifacts`). Without it the plan and the checks come from the event summaries. */
+  artifacts?: readonly RunArtifact[] | undefined;
   assetTitles: ReadonlyMap<string, string>;
   onCancel: () => void;
   cancelling?: boolean;
@@ -74,12 +79,12 @@ export interface RunViewProps {
 }
 
 /** The run panel for a run that is already loaded. */
-export function RunView({ run, assetTitles, onCancel, cancelling = false, cancelError = false, onReply, replying = false, replyError, className }: RunViewProps) {
+export function RunView({ run, artifacts: stored, assetTitles, onCancel, cancelling = false, cancelError = false, onReply, replying = false, replyError, className }: RunViewProps) {
   const active = isRunActive(run.status);
   const working = run.status === "queued" || run.status === "running";
   const steps = React.useMemo(() => runSteps(run.events ?? [], assetTitles, { live: working }), [run.events, assetTitles, working]);
   const activity = currentActivity({ status: run.status, events: run.events ?? [], question: run.question }, assetTitles);
-  const artifacts = React.useMemo(() => runArtifacts(run.events ?? []), [run.events]);
+  const artifacts = React.useMemo(() => runArtifacts(run.events ?? [], stored), [run.events, stored]);
   // The steps are open while the editor works and fold away when it is done; the creator's own choice wins.
   const [stepsOpen, setStepsOpen] = React.useState<boolean | undefined>(undefined);
   const titleId = React.useId();
