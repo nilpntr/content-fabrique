@@ -2,7 +2,7 @@
   "version": 1,
   "stage": "editor",
   "key": "1ce81f76a3e9f733dc5385821d1e36c87e6e1eda48210b3b6534a6e44e74cdca",
-  "recorded_at": "2026-10-17T17:11:29Z",
+  "recorded_at": "2026-10-17T17:20:48Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,

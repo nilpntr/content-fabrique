@@ -56,6 +56,8 @@ type Store interface {
 	// ListAssetSpans and ListAssetExposureSeries are what check_edit judges the edit against (the reps, the dead time, the luma).
 	ListAssetSpans(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.AssetSpanRow, error)
 	ListAssetExposureSeries(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.ExposureSeriesRow, error)
+	// GetAgentRun reads the run's row (its model and max_tokens, for the worst-case cost of a call).
+	GetAgentRun(ctx context.Context, ws ids.WorkspaceID, id uuid.UUID) (store.AgentRun, error)
 	// AgentArtifactEvents reads a run's artifact events of one kind: the plan and the checks of a run that resumed in another worker
 	// are found there.
 	AgentArtifactEvents(ctx context.Context, ws ids.WorkspaceID, run uuid.UUID, kind string) ([]store.AgentEvent, error)
@@ -68,6 +70,9 @@ type Deps struct {
 	Frames   FrameSource
 	// Preview renders previews; nil means UnavailablePreviews.
 	Preview PreviewRenderer
+	// OutputCost is the worst-case cost of the output of one call, maxTokens at the model's output price (the price table); nil leaves
+	// the "low on dollars" warning off. The dollars left are shown either way.
+	OutputCost func(model string, maxTokens int64) (int64, error)
 	// Rendered measures the preview render of a version for check_edit (a look can crush the picture, which the source analysis cannot
 	// see); nil leaves the rendered-brightness checks "not applicable".
 	Rendered RenderSampler
@@ -574,7 +579,7 @@ func (d Deps) renderPreview(ctx context.Context, rc runtime.RunContext, _ noArgs
 	}
 	return runtime.Result{Content: []llm.Block{
 		llm.TextBlock(fmt.Sprintf("Preview of version %d: the video is %d ms (%s) long. The contact sheet below shows frames from the whole video, each labelled with its time. Where the clips play:\n%s%s",
-			v, int64(dur), secs2(int64(dur)), timeMap(spec, maxTimeMapLines), budgetNote(rc.Left))),
+			v, int64(dur), secs2(int64(dur)), timeMap(spec, maxTimeMapLines), budgetNote(rc.Left, d.worstCallMicros(ctx, rc)))),
 		{Type: llm.BlockImage, Image: &llm.Image{MediaType: "image/jpeg", Ref: string(sheet)}},
 	}}, nil
 }

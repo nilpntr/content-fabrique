@@ -131,14 +131,14 @@ func TestBudgetNoteAndGracefulEnd(t *testing.T) {
 	// The preview and the check tell the model what is left, and say so when it is not much.
 	few := r.next()
 	few.Left = runtime.BudgetLeft{Known: true, ToolCalls: 5, Wall: 2 * time.Minute, Micros: 100_000}
-	if text := textOf(r.ok(few, ToolRenderPreview, `{}`)); !strings.Contains(text, "Left of your budget: 5 tool calls and 2 minutes") || !strings.Contains(text, "finish soon") {
+	if text := textOf(r.ok(few, ToolRenderPreview, `{}`)); !strings.Contains(text, "Left of your budget: $0.10, 5 tool calls and 2 minutes") || !strings.Contains(text, "finish soon") {
 		t.Errorf("a preview near the limit:\n%s", text)
 	}
 	plenty := r.next()
 	plenty.Left = runtime.BudgetLeft{Known: true, ToolCalls: 40, Wall: 12 * time.Minute, Micros: 4_000_000}
 	r.smp.series = renderedFlat([3]float64{3000, 13, 27}, [3]float64{3000, 13, 27}) // crushed
 	text := textOf(r.ok(plenty, ToolCheckEdit, `{}`))
-	if !strings.Contains(text, "Left of your budget: 40 tool calls and 12 minutes") || strings.Contains(text, "finish soon") || !strings.Contains(text, "your one revision pass") {
+	if !strings.Contains(text, "Left of your budget: $4.00, 40 tool calls and 12 minutes") || strings.Contains(text, "finish soon") || !strings.Contains(text, "your one revision pass") {
 		t.Errorf("a check with room:\n%s", text)
 	}
 	low := r.next()
@@ -175,10 +175,19 @@ func TestBudgetNoteAndGracefulEnd(t *testing.T) {
 		t.Errorf("the runtime reads the output as %q %v", summary, version)
 	}
 
-	// The same after a change of worker: the preview is in the events.
+	// The same after a change of worker: the preview and the failed checks are in the events, so the note still names them.
 	r.newWorker()
-	if _, ok := ag.OnLimit(ctx, r.rc, runtime.LimitWallClock); !ok {
-		t.Error("a change of worker lost the preview")
+	if v, failed := r.deps.previews.lastCheck(r.run.ID); v != 0 || failed != nil {
+		t.Fatal("the last check is still in memory")
+	}
+	out, ok = ag.OnLimit(ctx, r.rc, runtime.LimitWallClock)
+	if !ok {
+		t.Fatal("a change of worker lost the preview")
+	}
+	for _, want := range []string{"ran out of time", "version 2", "The final checks still found something to improve", "crushed"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("after a change of worker the note lacks %q: %s", want, out)
+		}
 	}
 }
 
@@ -197,5 +206,62 @@ func TestGracefulEndOfAnUnpreviewedLastEdit(t *testing.T) {
 	out, ok := ag.OnLimit(context.Background(), r.rc, runtime.LimitWallClock)
 	if !ok || !strings.Contains(string(out), "was not previewed") || !strings.Contains(string(out), "ran out of time") {
 		t.Fatalf("%v %s", ok, out)
+	}
+}
+
+func TestBudgetLowCountsTheDollars(t *testing.T) {
+	left := func(micros int64) runtime.BudgetLeft {
+		return runtime.BudgetLeft{Known: true, ToolCalls: 40, Wall: 12 * time.Minute, Micros: micros}
+	}
+	for _, c := range []struct {
+		name   string
+		l      runtime.BudgetLeft
+		worst  int64
+		wantLo bool
+	}{
+		{"plenty of everything", left(2_000_000), 480_000, false},
+		{"two worst-case calls left", left(960_000), 480_000, false},
+		{"fewer than two worst-case calls left", left(900_000), 480_000, true},
+		{"no price known: dollars do not count", left(1_000), 0, false},
+		{"few tool calls", runtime.BudgetLeft{Known: true, ToolCalls: 7, Wall: 12 * time.Minute, Micros: 2_000_000}, 480_000, true},
+		{"little time", runtime.BudgetLeft{Known: true, ToolCalls: 40, Wall: 2 * time.Minute, Micros: 2_000_000}, 480_000, true},
+		{"not known", runtime.BudgetLeft{}, 480_000, false},
+	} {
+		if got := budgetLow(c.l, c.worst); got != c.wantLo {
+			t.Errorf("%s: low = %v, want %v", c.name, got, c.wantLo)
+		}
+	}
+	if got := budgetNote(left(900_000), 480_000); !strings.Contains(got, "Left of your budget: $0.90, 40 tool calls and 12 minutes.") || !strings.Contains(got, "finish soon") {
+		t.Errorf("a note near the dollar limit: %q", got)
+	}
+	if got := budgetNote(left(3_500_000), 480_000); !strings.Contains(got, "$3.50") || strings.Contains(got, "finish soon") {
+		t.Errorf("a note with room: %q", got)
+	}
+	if got := budgetNote(runtime.BudgetLeft{}, 0); got != "" {
+		t.Errorf("an unknown budget: %q", got)
+	}
+}
+
+// The tools work out the worst-case call of the run from its row (max_tokens, model) and the price function: with fewer than two of them
+// left in dollars the preview and the check say so, and a failing first check says not to revise.
+func TestToolsWarnWhenTheDollarsRunLow(t *testing.T) {
+	r := newDBRun(t)
+	// The run row has max_tokens 1000; at 20 micros a token a call is 20000 micros, so under 40000 is low.
+	r.deps.OutputCost = func(_ string, maxTokens int64) (int64, error) { return maxTokens * 20, nil }
+	r.rebuild()
+	r.ok(r.next(), ToolPlanEdit, planCall(validPlanArgs(r.clip.String())))
+	r.ok(r.next(), ToolEditTimeline, r.opsArgs(r.prj, addClipOp(r.clip, 6000, 9000), addClipOp(r.clip, 9000, 12000)))
+
+	rich := r.next()
+	rich.Left = runtime.BudgetLeft{Known: true, ToolCalls: 40, Wall: 12 * time.Minute, Micros: 500_000}
+	if text := textOf(r.ok(rich, ToolRenderPreview, `{}`)); !strings.Contains(text, "Left of your budget: $0.50") || strings.Contains(text, "finish soon") {
+		t.Errorf("a preview with money left:\n%s", text)
+	}
+	poor := r.next()
+	poor.Left = runtime.BudgetLeft{Known: true, ToolCalls: 40, Wall: 12 * time.Minute, Micros: 30_000}
+	r.smp.series = renderedFlat([3]float64{3000, 24, 40}, [3]float64{3000, 24, 40})
+	text := textOf(r.ok(poor, ToolCheckEdit, `{}`))
+	if !strings.Contains(text, "$0.03") || !strings.Contains(text, "finish soon") || !strings.Contains(text, "do not start a revision") {
+		t.Errorf("a check with the dollars nearly gone:\n%s", text)
 	}
 }

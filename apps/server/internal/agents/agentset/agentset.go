@@ -105,6 +105,9 @@ func Open(o Options) (*Runtime, error) {
 		return nil, err
 	}
 	deps := editor.Deps{Projects: projectsSvc, Store: o.Store, Preview: o.Preview}
+	deps.OutputCost = func(model string, maxTokens int64) (int64, error) {
+		return prices.EstimateMax(model, 0, maxTokens, llm.CacheMarks{})
+	}
 	// The creator's comments reach the editor through the time maps of the renders they were made on, read from object storage; a
 	// process without storage still lists them, unmapped.
 	comments := &annotations.Source{Store: o.Store, Logger: o.Logger}
