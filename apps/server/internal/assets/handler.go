@@ -14,22 +14,17 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
-// Caller is the authenticated caller of a request: the workspace and user the verified token resolved to, and the role.
-type Caller struct {
-	Workspace ids.WorkspaceID
-	User      ids.UserID
-	Role      store.Role
-}
-
-// CallerFunc reads the Caller from the request context (internal/auth supplies it from the Principal). ok is false when the
-// request did not pass the authentication middleware.
-type CallerFunc func(ctx context.Context) (Caller, bool)
+// Caller and CallerFunc are the shared ones of package httpapi: the workspace, user and role the verified token resolved to.
+type (
+	Caller     = httpapi.Caller
+	CallerFunc = httpapi.CallerFunc
+)
 
 // Handler implements the assets operations of the generated api.StrictServerInterface. The workspace of every call comes
 // from the Caller and nowhere else: no request field names a workspace.
 type Handler struct {
 	svc    *Service // nil when object storage is not configured
-	caller CallerFunc
+	caller httpapi.CallerFunc
 	logger *slog.Logger
 }
 
@@ -44,12 +39,9 @@ func NewHandler(svc *Service, caller CallerFunc, logger *slog.Logger) *Handler {
 
 // begin authorises a call. Reads are open to every role, changes need an owner or an editor (a viewer only looks).
 func (h *Handler) begin(ctx context.Context, write bool) (Actor, *Error) {
-	c, ok := h.caller(ctx)
-	if !ok {
-		return Actor{}, &Error{Status: http.StatusUnauthorized, Code: api.ErrorCodeUnauthenticated, Message: "sign in to use the API"}
-	}
-	if write && c.Role != store.RoleOwner && c.Role != store.RoleEditor {
-		return Actor{}, &Error{Status: http.StatusForbidden, Code: api.ErrorCodeInsufficientRole, Message: "your role in this workspace cannot change assets"}
+	c, r := h.caller.Authorize(ctx, write, "assets")
+	if r != nil {
+		return Actor{}, &Error{Status: r.Status, Code: r.Code, Message: r.Message}
 	}
 	if h.svc == nil {
 		return Actor{}, &Error{Status: http.StatusServiceUnavailable, Code: api.ErrorCodeStorageNotConfigured, Message: "object storage is not configured on this server"}

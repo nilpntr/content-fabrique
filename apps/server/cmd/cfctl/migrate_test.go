@@ -9,10 +9,15 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/nilpntr/content-fabrique/internal/storage/storagetest"
 	"github.com/nilpntr/content-fabrique/internal/store/storetest"
 )
 
-func TestMain(m *testing.M) { os.Exit(storetest.Run(m)) }
+func TestMain(m *testing.M) {
+	code := storetest.Run(m)
+	storagetest.Stop() // the MinIO of the assets import tests, if one was started
+	os.Exit(code)
+}
 
 // migrateCLI runs `cfctl migrate args...` with an env file that holds url and returns the exit code and output.
 func migrateCLI(t *testing.T, url string, args ...string) (code int, stdout, stderr string) {
@@ -45,7 +50,7 @@ func TestMigrateCLI(t *testing.T) {
 	if code, out, _ := migrateCLI(t, url, "up"); code != 0 || !strings.Contains(out, "nothing to do") {
 		t.Fatalf("second up = %d %s", code, out)
 	}
-	if n := countTables(t, url); n != 12 {
+	if n := countTables(t, url); n != 15 {
 		t.Fatalf("tables after up = %d", n)
 	}
 	if n := countRiverTables(t, url); n == 0 {
@@ -83,7 +88,7 @@ func TestMigrateCLI(t *testing.T) {
 	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || countRiverTables(t, url) == 0 || strings.Contains(out, "river/") {
 		t.Fatalf("down one removed River too: %d %s", code, out)
 	}
-	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00009_") {
+	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00009_projects.sql") {
 		t.Fatalf("down one (00009) = %d %s", code, out)
 	}
 	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00008_usage_ledger.sql") {

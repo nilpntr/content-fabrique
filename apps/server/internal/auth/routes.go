@@ -9,6 +9,7 @@ import (
 	"github.com/clerk/clerk-sdk-go/v2/jwks"
 	"github.com/nilpntr/content-fabrique/internal/assets"
 	"github.com/nilpntr/content-fabrique/internal/config"
+	"github.com/nilpntr/content-fabrique/internal/projects"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
@@ -100,6 +101,11 @@ func Mount(mux *http.ServeMux, d Deps) (*V1, error) {
 	v1 := &V1{mux: http.NewServeMux()}
 	srv := newAPIServer(d.Store, logger)
 	srv.Handler = assets.NewHandler(d.Assets, callerOf, logger)
+	projectsSvc, err := projects.NewService(d.Store, logger)
+	if err != nil {
+		return nil, err
+	}
+	srv.API = projects.NewAPI(projectsSvc, callerOf, logger)
 	for pattern, h := range apiRoutes(srv, logger) {
 		if open[pattern] {
 			mux.Handle(pattern, mw(h))

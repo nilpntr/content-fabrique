@@ -40,6 +40,8 @@ tags:
     description: The creator's library (paid-only).
   - name: assets
     description: Footage, audio and images, and their resumable multipart upload to object storage (paid-only).
+  - name: projects
+    description: Projects (a video job with its format, footage and brief) and their timeline versions (paid-only).
   - name: webhooks
     description: Called by other services, not by the web app. Not part of the generated TypeScript client or of the generated Go server interface.
 
@@ -465,6 +467,293 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /v1/projects:
+    post:
+      operationId: createProject
+      tags: [projects]
+      summary: Start a project
+      description: |
+        Creates a project from the new-project flow (P4-04b): the output `format`, the selected footage (`asset_ids`, 1 to 50,
+        in the order given) and the optional `brief`. Every asset must exist in this workspace and be `ready` (probed and
+        ingested) and a video or an audio file. An asset id that is unknown, deleted or belongs to another workspace is
+        `404 not_found` (the same answer for all three, so an id from another workspace cannot be told from one that never
+        existed); assets that exist but are not usable (still uploading or processing, failed, or an image) make it
+        `422 assets_not_usable`.
+        The project starts with no timeline: `current_timeline_version` is `null`. A timeline needs at least one clip, so
+        version 1 is made by the first edit (`POST /v1/projects/{id}/timelines` with `base_version` 0, or the editor run).
+        Only owners and editors may create projects.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProjectRequest"
+      responses:
+        "201":
+          description: The project.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: "`assets_not_usable`: an asset is not `ready`, or is an image. The message names the assets."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    get:
+      operationId: listProjects
+      tags: [projects]
+      summary: List the workspace's projects, newest first
+      description: Cursor pagination. Deleted projects are not listed.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: How many projects to return (default 50).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          description: The `next_cursor` of the previous page. Opaque.
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        "200":
+          description: A page of projects.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListProjectsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/projects/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectIdPath"
+    get:
+      operationId: getProject
+      tags: [projects]
+      summary: One project, with its footage and current timeline version
+      description: |
+        A project of another workspace, a deleted one, or one that does not exist is `404 not_found`. `assets` lists the
+        footage in order (an asset deleted since is still listed, with `available` false). `current_version` is the summary
+        of the latest timeline version, `null` before the first edit.
+      responses:
+        "200":
+          description: The project.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    delete:
+      operationId: deleteProject
+      tags: [projects]
+      summary: Delete a project
+      description: Soft-deletes the project. Its assets stay in the library. Only owners and editors may delete.
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/projects/{id}/timelines:
+    parameters:
+      - $ref: "#/components/parameters/ProjectIdPath"
+    get:
+      operationId: listTimelineVersions
+      tags: [projects]
+      summary: The versions of a project's timeline, newest first
+      description: |
+        One entry per version, without the spec: its number, parent, author, the summary lines of what changed
+        (`diff.Summarize`) and when it was made. Page with `before` (the `next_before` of the previous page).
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: How many versions to return (default 100).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+        - name: before
+          in: query
+          required: false
+          description: Only versions below this number.
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: A page of versions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListTimelineVersionsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    post:
+      operationId: applyTimelineOps
+      tags: [projects]
+      summary: Edit the timeline with ops (a manual tweak, or the editor agent's tool)
+      description: |
+        Applies a batch of edit ops (`packages/schemas/timeline/ops.v1.schema.json`, 1 to 100) to version `base_version`,
+        atomically, and stores the result as the next version, with its diff and summary; the author is the caller (`user`).
+        `base_version` is the version the client was looking at, and 0 for a project that has no timeline yet (the first
+        batch builds version 1 from an empty timeline of the project's format and size). If it is not the current version
+        the answer is `409 version_conflict` and nothing is stored: fetch the project again and decide.
+        The ops may only use the project's own footage that is `ready`: an op that names any other asset (another project's,
+        another workspace's, one that does not exist) fails with an `unknown_asset` issue. A batch the engine refuses, or that
+        leaves the timeline invalid, is `422 invalid_ops` with the issues (each names the op); a batch that changes nothing is
+        `422 no_change`. Only owners and editors may edit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplyTimelineOpsRequest"
+      responses:
+        "201":
+          description: The new version.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyTimelineOpsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "`version_conflict`: `base_version` is not the project's current version."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: "`invalid_ops` or `no_change`, with the issues the engine found."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpsRejected"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/projects/{id}/timelines/{version}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectIdPath"
+      - name: version
+        in: path
+        required: true
+        description: The version number, from 1.
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      operationId: getTimelineVersion
+      tags: [projects]
+      summary: One version of a project's timeline, with its spec and validation issues
+      description: |
+        The full spec (`packages/schemas/timeline/v1.schema.json`), the ops and the diff that made it, and the issues of
+        validating the spec now against the project's footage (a clip whose asset was deleted since is reported as
+        `unknown_asset`; the stored version itself never changes).
+      responses:
+        "200":
+          description: The version.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimelineVersion"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
   /v1/webhooks/clerk:
     post:
       operationId: receiveClerkWebhook
@@ -550,6 +839,14 @@ components:
       description: The asset's TypeID.
       schema:
         $ref: "#/components/schemas/AssetId"
+
+    ProjectIdPath:
+      name: id
+      in: path
+      required: true
+      description: The project's TypeID.
+      schema:
+        $ref: "#/components/schemas/ProjectId"
 
   responses:
     Unauthenticated:
@@ -648,6 +945,10 @@ components:
         - too_many_uploads # 429: 25 uploads are already in progress
         - storage_unavailable # 503: object storage did not answer
         - storage_not_configured # 503: no R2_* settings
+        - assets_not_usable # 422: a project's asset is not ready, or is an image
+        - version_conflict # 409: the timeline moved on since base_version
+        - invalid_ops # 422: an edit batch was refused (see its issues)
+        - no_change # 422: an edit batch changed nothing
 
     ErrorDetail:
       type: object
@@ -1175,6 +1476,323 @@ components:
         next_cursor:
           type: [string, "null"]
           description: Pass it as `cursor` for the next page. Null on the last page.
+
+    # ── Projects and timelines ──────────────────────────────────────────────────
+
+    ProjectFormat:
+      type: string
+      description: The output format (D-25). It fixes the size of the rendered video (1080x1920, 1080x1080, 1080x1350, 1920x1080).
+      enum: ["9:16", "1:1", "4:5", "16:9"]
+
+    ProjectStatus:
+      type: string
+      enum: [draft, editing, review, approved, exported]
+
+    AuthorKind:
+      type: string
+      enum: [user, agent]
+
+    CreateProjectRequest:
+      type: object
+      required: [format, asset_ids]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Defaults to "Untitled project".
+        format:
+          $ref: "#/components/schemas/ProjectFormat"
+        asset_ids:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          description: The footage the editor may use, in order. Each must be a `ready` video or audio asset of this workspace.
+          items:
+            $ref: "#/components/schemas/AssetId"
+        brief:
+          type: string
+          maxLength: 4000
+          description: The creator's instructions, free text.
+
+    ProjectAsset:
+      type: object
+      required: [asset_id, position, title, kind, status, duration_ms, available]
+      properties:
+        asset_id:
+          $ref: "#/components/schemas/AssetId"
+        position:
+          type: integer
+          minimum: 0
+        title:
+          type: string
+        kind:
+          $ref: "#/components/schemas/AssetKind"
+        status:
+          $ref: "#/components/schemas/AssetStatus"
+        duration_ms:
+          type: [integer, "null"]
+          format: int64
+        available:
+          type: boolean
+          description: False when the asset was deleted or is no longer `ready`; the editor cannot use it then.
+
+    TimelineVersionSummary:
+      type: object
+      required: [id, version, parent_version, author_kind, author_id, summary, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/TimelineId"
+        version:
+          type: integer
+          minimum: 1
+        parent_version:
+          type: [integer, "null"]
+          description: The version this one was made from. Null for version 1.
+        author_kind:
+          $ref: "#/components/schemas/AuthorKind"
+        author_id:
+          type: string
+          description: The user's TypeID, or the editor run's id.
+        summary:
+          type: array
+          description: One line per change, for the version list and the run feed.
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ProjectSummary:
+      type: object
+      required: [id, title, format, status, asset_count, current_timeline_version, created_at, updated_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/ProjectId"
+        title:
+          type: string
+        format:
+          $ref: "#/components/schemas/ProjectFormat"
+        status:
+          $ref: "#/components/schemas/ProjectStatus"
+        asset_count:
+          type: integer
+          minimum: 0
+        current_timeline_version:
+          type: [integer, "null"]
+          description: Null until the first edit.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Project:
+      type: object
+      required: [id, title, format, brief, status, asset_count, current_timeline_version, current_version, assets, created_at, updated_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/ProjectId"
+        title:
+          type: string
+        format:
+          $ref: "#/components/schemas/ProjectFormat"
+        brief:
+          type: string
+        status:
+          $ref: "#/components/schemas/ProjectStatus"
+        asset_count:
+          type: integer
+          minimum: 0
+          description: The footage that is not deleted (`assets` also lists an asset deleted since, with `available` false). The list shows the same count.
+        current_timeline_version:
+          type: [integer, "null"]
+          description: Null until the first edit creates version 1.
+        current_version:
+          oneOf:
+            - $ref: "#/components/schemas/TimelineVersionSummary"
+            - type: "null"
+        assets:
+          type: array
+          description: The footage, in the order the creator chose.
+          items:
+            $ref: "#/components/schemas/ProjectAsset"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ListProjectsResponse:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectSummary"
+        next_cursor:
+          type: [string, "null"]
+          description: Pass it as `cursor` for the next page. Null on the last page.
+
+    ListTimelineVersionsResponse:
+      type: object
+      required: [items, next_before]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimelineVersionSummary"
+        next_before:
+          type: [integer, "null"]
+          description: Pass it as `before` for the next page. Null on the last page.
+
+    TimelineIssue:
+      type: object
+      description: One finding of validating a timeline spec (docs/design/timeline-v1.md, section 3).
+      required: [code, path, message, severity]
+      properties:
+        code:
+          type: string
+          description: "`schema`, `duplicate_id`, `gap`, `overlap`, `source_out_of_range`, `unknown_asset`, ..."
+        path:
+          type: string
+          description: A JSON Pointer into the spec. Empty for the whole document.
+        message:
+          type: string
+        severity:
+          type: string
+          enum: [error, warning]
+
+    OpIssue:
+      type: object
+      description: One problem with an edit batch. It names the op that caused it when that is known.
+      required: [op_index, code, message, severity]
+      properties:
+        op_index:
+          type: integer
+          description: The index in the batch of the op that caused the issue, -1 when no op in particular did.
+        op:
+          type: string
+          description: The name of that op.
+        code:
+          type: string
+          description: "An op code (`invalid_op`, `unknown_op`, `unknown_item`, `bad_position`, `id_taken`, ...) or a timeline code (`unknown_asset`, `shot_too_short`, ...)."
+        field:
+          type: string
+          description: A JSON Pointer into the op, for a problem with the op itself.
+        path:
+          type: string
+          description: A JSON Pointer into the resulting spec, for a problem the validator found.
+        message:
+          type: string
+        severity:
+          type: string
+          enum: [error, warning]
+
+    CreatedItem:
+      type: object
+      description: An item an `add_*` or `set_sound` op made, with the id it got.
+      required: [op_index, kind, id]
+      properties:
+        op_index:
+          type: integer
+        kind:
+          type: string
+          enum: [clip, text, sound]
+        id:
+          type: string
+
+    TimelineVersion:
+      allOf:
+        - $ref: "#/components/schemas/TimelineVersionSummary"
+        - type: object
+          required: [spec, ops, diff, issues]
+          properties:
+            spec:
+              type: object
+              description: The timeline, as defined by `packages/schemas/timeline/v1.schema.json`.
+              additionalProperties: true
+              x-go-type: rawjson.RawMessage
+              x-go-type-import:
+                path: encoding/json
+                name: rawjson
+            ops:
+              type: array
+              description: The batch that made this version from its parent. Empty for version 1 when it did not come from ops.
+              items:
+                type: object
+                additionalProperties: true
+              x-go-type: rawjson.RawMessage
+              x-go-type-import:
+                path: encoding/json
+                name: rawjson
+            diff:
+              type: array
+              description: The RFC 6902 JSON Patch from the parent's spec to this one's.
+              items:
+                type: object
+                additionalProperties: true
+              x-go-type: rawjson.RawMessage
+              x-go-type-import:
+                path: encoding/json
+                name: rawjson
+            issues:
+              type: array
+              description: What validating the spec against the project's footage finds now. Empty for a clean version.
+              items:
+                $ref: "#/components/schemas/TimelineIssue"
+
+    ApplyTimelineOpsRequest:
+      type: object
+      required: [base_version, ops]
+      properties:
+        base_version:
+          type: integer
+          minimum: 0
+          description: The version the ops are meant for; 0 when the project has no timeline yet.
+        ops:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: The edit ops, each an object with an `op` field (see `ops.v1.schema.json`). They are checked strictly.
+          items:
+            type: object
+            additionalProperties: true
+          x-go-type: rawjson.RawMessage
+          x-go-type-import:
+            path: encoding/json
+            name: rawjson
+
+    ApplyTimelineOpsResponse:
+      type: object
+      required: [version, created, warnings]
+      properties:
+        version:
+          $ref: "#/components/schemas/TimelineVersion"
+        created:
+          type: array
+          items:
+            $ref: "#/components/schemas/CreatedItem"
+        warnings:
+          type: array
+          items:
+            $ref: "#/components/schemas/OpIssue"
+
+    OpsRejected:
+      type: object
+      description: The error body of a batch that was refused. `issues` says why, op by op.
+      required: [error, issues]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+        issues:
+          type: array
+          items:
+            $ref: "#/components/schemas/OpIssue"
 
     # ── Webhooks ────────────────────────────────────────────────────────────────
 

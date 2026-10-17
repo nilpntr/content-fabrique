@@ -122,7 +122,7 @@ This is enough for a first edit of a few short clips. It is not the product's fi
 The goal: Gino's clips, imported into the founder's local workspace, edited by Opus 5.5 into a 9:16 short, previewed on the review screen. The steps:
 
 1. `cfctl assets import --workspace <wks_…> <files…>` (dev only, refused on staging and production) uploads through the same storage and ingest path as the browser.
-2. A `POST /v1/projects` endpoint backs the new-project flow (P4-04b): the format, the selected assets and the brief. It creates the project and its first, empty timeline.
+2. A `POST /v1/projects` endpoint backs the new-project flow (P4-04b): the format, the selected assets and the brief. It creates the project with no timeline yet (`current_timeline_version` is `null`): a timeline needs at least one clip, so version 1 is made by the first edit, which starts from an empty timeline of the project's format (`POST /v1/projects/{id}/timelines` with `base_version` 0, which is also what the agent's `edit_timeline` calls through `projects.Service.ApplyOps`). The edit's catalog holds only the project's own `ready` footage.
 3. `POST /v1/projects/{id}/edit` starts an editor run. For this test it uses the `v1-start` profile (Opus 5.5) with a **$5 run budget**.
 4. The preview render and the review screen show the result.
 
