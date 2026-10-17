@@ -2,6 +2,7 @@ package renderjobs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -32,17 +33,19 @@ type stager struct {
 	inputs map[ids.AssetID]store.RenderInput
 	cache  map[string]render.ResolvedAsset
 	total  int64
+	// captions says whether the timeline has an enabled captions track: only then does a clip need the transcript of its asset.
+	captions bool
 
 	fatal *fileError
 	infra error
 }
 
-func newStager(ctx context.Context, r *run, in []store.RenderInput) *stager {
+func newStager(ctx context.Context, r *run, in []store.RenderInput, captions bool) *stager {
 	m := make(map[ids.AssetID]store.RenderInput, len(in))
 	for _, i := range in {
 		m[i.AssetID] = i
 	}
-	return &stager{r: r, ctx: ctx, inputs: m, cache: map[string]render.ResolvedAsset{}}
+	return &stager{r: r, ctx: ctx, inputs: m, cache: map[string]render.ResolvedAsset{}, captions: captions}
 }
 
 // Resolve implements render.AssetResolver.
@@ -109,7 +112,33 @@ func (s *stager) stage(assetID string, variant render.Variant) (render.ResolvedA
 		s.infra = perr // the render is gone: the job ends
 		return render.ResolvedAsset{}, perr
 	}
-	return render.ResolvedAsset{Location: dest, HasAudio: in.HasAudio != nil && *in.HasAudio}, nil
+	ra := render.ResolvedAsset{Location: dest, HasAudio: in.HasAudio != nil && *in.HasAudio}
+	if s.captions {
+		words, err := s.transcript(id)
+		if err != nil {
+			s.infra = fmt.Errorf("transcript of asset %s: %w", assetID, err)
+			return render.ResolvedAsset{}, s.infra
+		}
+		ra.Transcript = words
+	}
+	return ra, nil
+}
+
+// transcript loads the words of the asset's transcript for the captions track. An asset without one (a clip without speech, a
+// transcription that has not run or failed) has no captions: the renderer draws none for its clips.
+func (s *stager) transcript(id ids.AssetID) ([]render.Word, error) {
+	t, err := s.r.p.cfg.Store.GetTranscript(s.ctx, s.r.ws, id)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !t.Speech) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var words []render.Word
+	if err := json.Unmarshal(t.Words, &words); err != nil {
+		return nil, fmt.Errorf("decode words: %w", err)
+	}
+	return words, nil
 }
 
 // refuse records a failure that is the timeline's or the footage's, and returns the error for the compiler.

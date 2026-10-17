@@ -82,6 +82,7 @@ func DefaultConfig() Config {
 		{Name: QueueRender, MaxWorkers: DefaultRenderConcurrency},
 		{Name: QueueAgents, MaxWorkers: DefaultAgentConcurrency},
 		{Name: QueueQuickLook, MaxWorkers: DefaultQuickLookConcurrency},
+		{Name: QueueTranscribe, MaxWorkers: DefaultTranscribeConcurrency},
 	}}
 }
 

@@ -1,7 +1,7 @@
 # media-tools
 
-The container image for everything that parses untrusted media: ffmpeg 8 and ffprobe (P1-03), later the Python analysis tools
-(scene detection, pose, beats, transcription). It runs under the sandbox providers in `apps/server/internal/sandbox`.
+The container image for everything that parses untrusted media: ffmpeg 8 and ffprobe (P1-03), whisper.cpp for transcription
+(P2-05), later the Python analysis tools (scene detection, pose, beats). It runs under the sandbox providers in `apps/server/internal/sandbox`.
 
 ```sh
 docker build -t media-tools:dev packages/media-tools
@@ -33,10 +33,19 @@ go run ./cmd/cfctl media bench                                   # docker vs har
   `fonts/manifest.tsv`); fontconfig reads only that directory. A render stages the same files next to its `.ass` file and points
   the `ass` filter at them, so the output does not depend on which fonts a provider has installed.
 
+## Transcription (P2-05, D-27)
+
+`whisper-cli` and `whisper-vad-speech-segments` (whisper.cpp v1.9.5, MIT, CPU only, ggml linked statically; amd64 builds with
+AVX2/FMA/F16C, arm64 with the compiler's NEON baseline) run in the same sandbox as ffmpeg. The image holds no models. They sit
+read-only at `/in/0` (and the audio at `/in/1`), downloaded by the worker into `WHISPER_MODELS_DIR` and checked against a pinned
+SHA-256 first: `large-v3-turbo-q5_0` (574 MB, the default), `tiny.en` (78 MB, CI) and the Silero voice-activity model (1 MB).
+`cfctl transcribe models` fetches them ahead of time; `cfctl transcribe file clip.wav` runs the pipeline's steps on a file;
+`scripts/transcribe-eval` measures the word timing error.
+
 ## Contents
 
-- `Dockerfile`: multi-stage; builds ffmpeg from a checksummed tarball, then assembles a `FROM scratch` image from the binaries,
-  the exact shared libraries they load and the licence texts. Pins: base image digest, Debian snapshot date, ffmpeg checksum.
+- `Dockerfile`: multi-stage; builds ffmpeg and whisper.cpp from checksummed tarballs, then assembles a `FROM scratch` image from the binaries,
+  the exact shared libraries they load and the licence texts. Pins: base image digest, Debian snapshot date, ffmpeg and whisper.cpp checksums.
 - `scripts/assemble-rootfs.sh`: the root filesystem assembly and the inventory. `scripts/smoke-charsets.sh`: the charset test.
 - `licenses/`: the allowlist (`policy.json`), the check (`check.py`) and its tests. `LICENSES.md` explains the policy and holds the
   generated inventory.

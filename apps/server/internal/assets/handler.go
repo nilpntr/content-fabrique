@@ -79,7 +79,7 @@ func assetOf(a store.Asset) api.Asset {
 		Id: a.ID.String(), Kind: api.AssetKind(a.Kind), Status: api.AssetStatus(a.Status), Filename: a.Filename,
 		ContentType: a.ContentType, SizeBytes: a.SizeBytes, Sha256: a.Sha256, Title: a.Title, TitleSource: &titleSource,
 		Description: a.Description, Tags: tags, FailureReason: a.FailureReason, IngestProgress: int(a.IngestProgress), IngestStage: a.IngestStage,
-		CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt,
+		TranscriptStatus: api.TranscriptStatus(a.TranscriptStatus), CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt,
 	}
 	if a.QuickLookStatus != nil {
 		qs := api.QuickLookStatus(*a.QuickLookStatus)
@@ -325,6 +325,36 @@ func (h *Handler) GetAssetSpriteVtt(ctx context.Context, req api.GetAssetSpriteV
 		return nil, undocumented("getAssetSpriteVtt", e)
 	}
 	return api.GetAssetSpriteVtt200TextvttResponse{Body: strings.NewReader(vtt), ContentLength: int64(len(vtt))}, nil
+}
+
+// GetAssetTranscript is GET /v1/assets/{id}/transcript.
+func (h *Handler) GetAssetTranscript(ctx context.Context, req api.GetAssetTranscriptRequestObject) (api.GetAssetTranscriptResponseObject, error) {
+	who, e := h.begin(ctx, false)
+	var t api.Transcript
+	if e == nil {
+		var id ids.AssetID
+		if id, e = parseID(req.Id); e == nil {
+			t, e = h.svc.Transcript(ctx, who, id)
+		}
+	}
+	if e != nil {
+		switch e.Status {
+		case 400:
+			return api.GetAssetTranscript400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body(e))}, nil
+		case 401:
+			return api.GetAssetTranscript401JSONResponse{UnauthenticatedJSONResponse: api.UnauthenticatedJSONResponse(body(e))}, nil
+		case 403:
+			return api.GetAssetTranscript403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(body(e))}, nil
+		case 404:
+			return api.GetAssetTranscript404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(body(e))}, nil
+		case 500:
+			return api.GetAssetTranscript500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(body(e))}, nil
+		case 503:
+			return api.GetAssetTranscript503JSONResponse{UnavailableJSONResponse: api.UnavailableJSONResponse(body(e))}, nil
+		}
+		return nil, undocumented("getAssetTranscript", e)
+	}
+	return api.GetAssetTranscript200JSONResponse(t), nil
 }
 
 // DeleteAsset is DELETE /v1/assets/{id}.

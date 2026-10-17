@@ -5,10 +5,10 @@
 -- name: InsertUsageLedger :exec
 INSERT INTO usage_ledger (
     workspace_id, run_id, stage, kind, model, input_tokens, cache_write_tokens, cache_write_1h_tokens,
-    cache_read_tokens, output_tokens, list_cost_micros, price_table_version, billed_to, request_id, estimated, created_at
+    cache_read_tokens, output_tokens, list_cost_micros, price_table_version, billed_to, request_id, estimated, provider, audio_ms, created_at
 ) VALUES (
     @workspace_id, @run_id, @stage, @kind, @model, @input_tokens, @cache_write_tokens, @cache_write_1h_tokens,
-    @cache_read_tokens, @output_tokens, @list_cost_micros, @price_table_version, @billed_to, @request_id, @estimated, @created_at
+    @cache_read_tokens, @output_tokens, @list_cost_micros, @price_table_version, @billed_to, @request_id, @estimated, @provider, @audio_ms, @created_at
 )
 ON CONFLICT (request_id) WHERE request_id <> '' DO NOTHING;
 

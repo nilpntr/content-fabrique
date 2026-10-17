@@ -39,6 +39,9 @@ type UsageEntry struct {
 	RequestID          string
 	// Estimated marks a row written for a call whose usage never came back: ListCostMicros is the reserved worst case.
 	Estimated bool
+	// Provider and AudioMs describe a transcription row (Kind "transcription"): who transcribed, and how much audio was metered.
+	Provider  string
+	AudioMs   int64
 	CreatedAt time.Time
 }
 
@@ -73,6 +76,8 @@ func (s *Store) InsertUsage(ctx context.Context, e UsageEntry) error {
 		BilledTo:           e.BilledTo,
 		RequestID:          e.RequestID,
 		Estimated:          e.Estimated,
+		Provider:           e.Provider,
+		AudioMs:            e.AudioMs,
 		CreatedAt:          e.CreatedAt,
 	})
 	return mapErr(err)
@@ -116,7 +121,7 @@ func usageRows(rows []db.UsageLedger) []UsageRow {
 			WorkspaceID: r.WorkspaceID, RunID: run, Stage: r.Stage, Kind: r.Kind, Model: r.Model,
 			InputTokens: r.InputTokens, CacheWriteTokens: r.CacheWriteTokens, CacheWrite1hTokens: r.CacheWrite1hTokens,
 			CacheReadTokens: r.CacheReadTokens, OutputTokens: r.OutputTokens, ListCostMicros: r.ListCostMicros,
-			PriceTableVersion: r.PriceTableVersion, BilledTo: r.BilledTo, RequestID: r.RequestID, Estimated: r.Estimated, CreatedAt: r.CreatedAt,
+			PriceTableVersion: r.PriceTableVersion, BilledTo: r.BilledTo, RequestID: r.RequestID, Estimated: r.Estimated, Provider: r.Provider, AudioMs: r.AudioMs, CreatedAt: r.CreatedAt,
 		}})
 	}
 	return out

@@ -758,6 +758,123 @@ func assetsSuite(t *testing.T, st *store.Store, suffix string) {
 		}
 	})
 
+	t.Run("transcripts: pending after the ingest, saved with their ledger row, tenant-scoped", func(t *testing.T) {
+		finish := func(w store.Workspace, user ids.UserID, name string, kinds ...string) store.Asset {
+			t.Helper()
+			a, _ := newAsset(w, user, name, future)
+			if err := st.InTx(ctx, func(tx *store.Store) error { _, err := tx.CompleteUpload(ctx, w.ID, a.ID); return err }); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.ClaimAssetForIngest(ctx, w.ID, a.ID); err != nil {
+				t.Fatal(err)
+			}
+			res := store.IngestResult{DurationMs: 5000, Width: 720, Height: 1280, FPS: 30, HasAudio: len(kinds) > 1, Probe: []byte(`{}`)}
+			for _, k := range kinds {
+				res.Derivatives = append(res.Derivatives, store.NewDerivative{Kind: k, Key: "ws/" + w.ID.String() + "/assets/" + a.ID.String() + "/" + k + "-" + suffix, ContentType: "x", SizeBytes: 1})
+			}
+			done, err := st.FinishAssetIngest(ctx, w.ID, a.ID, res)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return done
+		}
+		silent := finish(wa, ua, "tr-silent", store.DerivativePoster)
+		if silent.TranscriptStatus != store.TranscriptNone {
+			t.Fatalf("a clip without audio: %q", silent.TranscriptStatus)
+		}
+		voiced := finish(wa, ua, "tr-voiced", store.DerivativePoster, store.DerivativeAudio16k)
+		if voiced.TranscriptStatus != store.TranscriptPending {
+			t.Fatalf("a clip with audio: %q", voiced.TranscriptStatus)
+		}
+		if got, _ := st.GetAsset(ctx, wa.ID, voiced.ID); got.TranscriptStatus != store.TranscriptPending {
+			t.Fatalf("read back: %q", got.TranscriptStatus)
+		}
+
+		// The hook decides whether a job was inserted; a duplicate leaves the status alone.
+		var hooked []ids.AssetID
+		skip := false
+		st.SetTranscribeHook(func(_ context.Context, _ *store.Store, a store.Asset) (bool, error) {
+			hooked = append(hooked, a.ID)
+			return !skip, nil
+		})
+		defer st.SetTranscribeHook(nil)
+		hookedAsset := finish(wa, ua, "tr-hook", store.DerivativeAudio16k)
+		skip = true
+		skipped := finish(wa, ua, "tr-skip", store.DerivativeAudio16k)
+		if len(hooked) != 2 || hookedAsset.TranscriptStatus != store.TranscriptPending || skipped.TranscriptStatus != store.TranscriptNone {
+			t.Fatalf("hook calls %v, statuses %q %q", hooked, hookedAsset.TranscriptStatus, skipped.TranscriptStatus)
+		}
+
+		// Nothing before the job has saved: no transcript.
+		if _, err := st.GetTranscript(ctx, wa.ID, voiced.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("a transcript before the job: %v", err)
+		}
+		words := []byte(`[{"text":"Hello","start_ms":500,"end_ms":900,"confidence":0.9}]`)
+		usage := &store.UsageEntry{Stage: "transcription", Model: "ggml-tiny.en", Provider: "whispercpp", AudioMs: 5000, PriceTableVersion: "local", BilledTo: store.BilledToTest}
+		tr, err := st.SaveTranscript(ctx, wa.ID, voiced.ID, store.NewTranscript{
+			Speech: true, Language: "en", Words: words, Structure: []byte(`{"sentences":[],"fillers":[],"pauses":[]}`),
+			Provider: "whispercpp", Model: "ggml-tiny.en", AudioMs: 5000, SpeechMs: 400,
+		}, usage)
+		if err != nil || !tr.Speech || tr.Language != "en" || tr.AssetID != voiced.ID {
+			t.Fatalf("save = %+v %v", tr, err)
+		}
+		got, err := st.GetTranscript(ctx, wa.ID, voiced.ID)
+		if err != nil || string(got.Words) != `[{"text": "Hello", "end_ms": 900, "start_ms": 500, "confidence": 0.9}]` || got.AudioMs != 5000 {
+			t.Fatalf("read back = %+v %v", got, err)
+		}
+		if a, _ := st.GetAsset(ctx, wa.ID, voiced.ID); a.TranscriptStatus != store.TranscriptReady {
+			t.Fatalf("status after saving: %q", a.TranscriptStatus)
+		}
+		rows, err := st.RecentUsage(ctx, wa.ID, 5)
+		if err != nil || len(rows) == 0 || rows[0].Kind != store.KindTranscription || rows[0].Provider != "whispercpp" || rows[0].AudioMs != 5000 || rows[0].ListCostMicros != 0 || rows[0].InputTokens != 0 {
+			t.Fatalf("ledger = %+v %v", rows, err)
+		}
+
+		// Saved again (a re-run) replaces the transcript, with no speech this time.
+		if _, err := st.SaveTranscript(ctx, wa.ID, voiced.ID, store.NewTranscript{Speech: false, Provider: "whispercpp", Model: "m", AudioMs: 5000}, nil); err != nil {
+			t.Fatal(err)
+		}
+		got, _ = st.GetTranscript(ctx, wa.ID, voiced.ID)
+		if got.Speech || got.Language != "" || string(got.Words) != "[]" {
+			t.Fatalf("no speech: %+v", got)
+		}
+		if a, _ := st.GetAsset(ctx, wa.ID, voiced.ID); a.TranscriptStatus != store.TranscriptNoSpeech {
+			t.Fatalf("status: %q", a.TranscriptStatus)
+		}
+		// The database refuses words for a clip without speech.
+		if _, err := st.SaveTranscript(ctx, wa.ID, voiced.ID, store.NewTranscript{Speech: false, Language: "en", Words: words, Provider: "p", Model: "m"}, nil); err == nil {
+			t.Fatal("words without speech were accepted")
+		}
+
+		// Workspace B sees nothing and writes nothing, and a refused save leaves no ledger row behind.
+		before, _ := st.RecentUsage(ctx, wb.ID, 5)
+		if _, err := st.GetTranscript(ctx, wb.ID, voiced.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("workspace B read A's transcript: %v", err)
+		}
+		if _, err := st.SaveTranscript(ctx, wb.ID, voiced.ID, store.NewTranscript{Speech: true, Language: "en", Words: words, Provider: "p", Model: "m"}, usage); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("workspace B saved a transcript for A's asset: %v", err)
+		}
+		if after, _ := st.RecentUsage(ctx, wb.ID, 5); len(after) != len(before) {
+			t.Fatalf("a refused save left %d ledger rows", len(after)-len(before))
+		}
+		if err := st.SetTranscriptStatus(ctx, wb.ID, voiced.ID, store.TranscriptFailed); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("workspace B set A's status: %v", err)
+		}
+		if err := st.SetTranscriptStatus(ctx, wa.ID, voiced.ID, "bogus"); !errors.Is(err, store.ErrInvalid) {
+			t.Fatalf("a bogus status: %v", err)
+		}
+		if err := st.SetTranscriptStatus(ctx, wa.ID, voiced.ID, store.TranscriptFailed); err != nil {
+			t.Fatal(err)
+		}
+
+		// A deleted asset has no readable transcript.
+		if _, err := st.SoftDeleteAsset(ctx, wa.ID, voiced.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.GetTranscript(ctx, wa.ID, voiced.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("a deleted asset's transcript: %v", err)
+		}
+	})
 	t.Run("search words", func(t *testing.T) {
 		for in, want := range map[string][]string{
 			"row":                       {"row"},

@@ -5,6 +5,8 @@
 --               shape. A clip with no speech has a row too, with speech = false, an empty language and no words, so "checked, nothing
 --               to transcribe" is told apart from "not checked yet" (assets.transcript_status).
 --   words:      a jsonb array of {text, start_ms, end_ms, confidence}, in order, times in milliseconds from the start of the asset.
+--   structure:  the speech structure computed from the words (D-28): {"sentences": [...], "fillers": [...], "pauses": [...]}, word
+--               indexes into words. The editor reads it for jump cuts; it is derived, so a newer rule set can recompute it.
 --   speech_ms:  how much speech the voice-activity check found; audio_ms the length of the audio that was checked.
 --   language:   the language the provider detected or was told (ISO 639-1, 'en'); empty when there is no speech.
 --
@@ -27,6 +29,7 @@ CREATE TABLE transcripts (
     speech       boolean     NOT NULL,
     language     text        NOT NULL DEFAULT '',
     words        jsonb       NOT NULL DEFAULT '[]',
+    structure    jsonb       NOT NULL DEFAULT '{}',
     provider     text        NOT NULL,
     model        text        NOT NULL,
     audio_ms     bigint      NOT NULL,

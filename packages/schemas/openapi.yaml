@@ -428,6 +428,42 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /v1/assets/{id}/transcript:
+    parameters:
+      - $ref: "#/components/parameters/AssetIdPath"
+    get:
+      operationId: getAssetTranscript
+      tags: [assets]
+      summary: The words spoken in an asset, with timings and speech structure
+      description: |
+        The transcript of an asset whose `transcript_status` is `ready` or `no_speech`. The transcription job runs after the
+        ingest, on clips with speech only (a voice-activity check comes first), so a clip without speech has a transcript with
+        `speech: false` and no words. Word times are milliseconds from the start of the asset. `structure` is derived from the
+        words: sentence boundaries, filler words (um, uh, "you know" ...) and pauses longer than 400 ms, with indexes into `words`,
+        for jump cuts and captions. `404 not_found` when the asset does not exist in the workspace or has no transcript yet
+        (`transcript_status` is `none`, `pending` or `failed`: read it from the asset).
+      responses:
+        "200":
+          description: The transcript.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transcript"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
   /v1/assets/{id}/parts:
     parameters:
       - $ref: "#/components/parameters/AssetIdPath"
@@ -1595,7 +1631,7 @@ components:
 
     Asset:
       type: object
-      required: [id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, failure_reason, ingest_progress, ingest_stage, created_at, updated_at]
+      required: [id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, failure_reason, ingest_progress, ingest_stage, transcript_status, created_at, updated_at]
       properties:
         id:
           $ref: "#/components/schemas/AssetId"
@@ -1649,6 +1685,8 @@ components:
         ingest_stage:
           type: [string, "null"]
           description: What the ingest is doing while `status` is `processing` (`starting`, `downloading`, `probing`, `proxy`, `derivatives`, `uploading`). Null otherwise.
+        transcript_status:
+          $ref: "#/components/schemas/TranscriptStatus"
         media:
           $ref: "#/components/schemas/MediaInfo"
         derivatives:
@@ -1663,6 +1701,158 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    TranscriptStatus:
+      type: string
+      description: |
+        Where the transcript of the asset stands. `none`: there is none and none is coming (a picture, a clip without an audio
+        track, or the ingest has not finished). `pending`: the transcription job is queued or running. `no_speech`: the clip was
+        checked and has no speech. `ready`: the words are available at `GET /v1/assets/{id}/transcript`. `failed`: the job gave up.
+      enum: [none, pending, no_speech, ready, failed]
+
+    Transcript:
+      type: object
+      required: [asset_id, status, speech, language, words, structure, provider, model, audio_ms, speech_ms, created_at, updated_at]
+      properties:
+        asset_id:
+          $ref: "#/components/schemas/AssetId"
+        status:
+          $ref: "#/components/schemas/TranscriptStatus"
+        speech:
+          type: boolean
+          description: False when the voice-activity check found no speech; `words` is then empty.
+        language:
+          type: string
+          description: The spoken language as an ISO 639-1 code (`en`, `nl`); empty without speech.
+        words:
+          type: array
+          items:
+            $ref: "#/components/schemas/TranscriptWord"
+        structure:
+          $ref: "#/components/schemas/SpeechStructure"
+        provider:
+          type: string
+          description: Who transcribed it (`whispercpp`, `workersai`). The words have the same shape whichever it was.
+        model:
+          type: string
+        audio_ms:
+          type: integer
+          format: int64
+          description: The length of the audio that was checked.
+        speech_ms:
+          type: integer
+          format: int64
+          description: How much speech the voice-activity check found.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    TranscriptWord:
+      type: object
+      required: [text, start_ms, end_ms, confidence]
+      properties:
+        text:
+          type: string
+          description: The word as written, with its punctuation (`Hello,`).
+        start_ms:
+          type: integer
+          format: int64
+          description: Milliseconds from the start of the asset. Placed on the audio itself, not only on the model's estimate.
+        end_ms:
+          type: integer
+          format: int64
+        confidence:
+          type: number
+          format: double
+          description: The model's probability for the word, 0 to 1; 0 when the provider does not report one.
+
+    SpeechStructure:
+      type: object
+      description: |
+        Derived from the words (so it is the same for every provider): where sentences end, which words are fillers, where the
+        speaker pauses. Word indexes are positions in `words`.
+      required: [sentences, fillers, pauses]
+      properties:
+        sentences:
+          type: array
+          items:
+            $ref: "#/components/schemas/SpeechSentence"
+        fillers:
+          type: array
+          items:
+            $ref: "#/components/schemas/SpeechFiller"
+        pauses:
+          type: array
+          description: Silences between two words that last longer than 400 ms.
+          items:
+            $ref: "#/components/schemas/SpeechPause"
+
+    SpeechSentence:
+      type: object
+      required: [first_word, last_word, start_ms, end_ms, text]
+      properties:
+        first_word:
+          type: integer
+        last_word:
+          type: integer
+          description: Included.
+        start_ms:
+          type: integer
+          format: int64
+        end_ms:
+          type: integer
+          format: int64
+        text:
+          type: string
+
+    SpeechFiller:
+      type: object
+      required: [first_word, last_word, start_ms, end_ms, text, kind, strength]
+      properties:
+        first_word:
+          type: integer
+        last_word:
+          type: integer
+          description: Included; a phrase such as "you know" spans two words.
+        start_ms:
+          type: integer
+          format: int64
+        end_ms:
+          type: integer
+          format: int64
+        text:
+          type: string
+        kind:
+          type: string
+          enum: [hesitation, discourse]
+          description: "`hesitation` is a sound without meaning (um, uh, eh); `discourse` is a word or phrase that is empty here but a word elsewhere (like, you know, zeg maar)."
+        strength:
+          type: string
+          enum: [strong, weak]
+          description: "`strong` fillers are nearly always safe to cut; `weak` ones depend on context."
+
+    SpeechPause:
+      type: object
+      required: [after_word, start_ms, end_ms, duration_ms, sentence_break]
+      properties:
+        after_word:
+          type: integer
+          description: The index of the word before the pause.
+        start_ms:
+          type: integer
+          format: int64
+        end_ms:
+          type: integer
+          format: int64
+        duration_ms:
+          type: integer
+          format: int64
+        sentence_break:
+          type: boolean
+          description: True when the pause falls between two sentences, false when the speaker stopped mid-sentence.
 
     MediaInfo:
       type: object

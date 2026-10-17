@@ -91,6 +91,28 @@ type Config struct {
 	MediaConcurrency int
 	// RenderConcurrency is RENDER_CONCURRENCY: renders that run at once on one worker (they have a queue of their own).
 	RenderConcurrency int
+
+	// Transcription (P2-05, D-27); see loadTranscribe.
+	//
+	// TranscribeProvider is TRANSCRIBE_PROVIDER: "whispercpp" (whisper.cpp in the media-tools sandbox; the default in local, ci and
+	// bench) or "workersai" (Cloudflare Workers AI; the default in staging and production).
+	TranscribeProvider string
+	// TranscribeModel is TRANSCRIBE_MODEL, the whisper.cpp model: "large-v3-turbo-q5_0" (the default) or "tiny.en" (ci).
+	TranscribeModel string
+	// TranscribeLanguage is TRANSCRIBE_LANGUAGE, an ISO 639-1 code; empty detects the language of each clip.
+	TranscribeLanguage string
+	// TranscribeConcurrency is TRANSCRIBE_CONCURRENCY: transcriptions that run at once on one worker.
+	TranscribeConcurrency int
+	// WhisperModelsDir is WHISPER_MODELS_DIR: where the whisper.cpp models are downloaded to and mounted from. Empty means a
+	// "whisper-models" directory inside MEDIA_TEMP_DIR.
+	WhisperModelsDir string
+	// WorkersAIAccountID and WorkersAIAPIToken are WORKERS_AI_ACCOUNT_ID and WORKERS_AI_API_TOKEN. Both empty keeps the Workers AI
+	// provider switched off.
+	WorkersAIAccountID string
+	WorkersAIAPIToken  string
+	// WorkersAIPriceMicrosPerMinute is WORKERS_AI_PRICE_MICROS_PER_MINUTE: the verified list price of a minute of audio, in
+	// millionths of a US dollar. 0 records the usage as unpriced (D-27: the price is checked before production uses it).
+	WorkersAIPriceMicrosPerMinute int64
 }
 
 // The sandbox providers MEDIA_SANDBOX_PROVIDER accepts.
@@ -199,6 +221,7 @@ func Load(getenv Getenv) (Config, error) {
 	}
 
 	errs = append(errs, c.loadMedia(getenv)...)
+	errs = append(errs, c.loadTranscribe(getenv)...)
 
 	if c.OTLPEndpoint != "" {
 		if u, err := url.Parse(c.OTLPEndpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {

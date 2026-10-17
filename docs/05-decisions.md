@@ -590,6 +590,12 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
   1. Where inference runs, and whether EU-only processing is available (D-15). If it isn't, production falls back to whisper.cpp on our EU servers, or this decision is revisited. The founder's alternative is OpenRouter; before choosing it, check whether it serves a Whisper-class model with word timestamps, and note that it adds a US processor. Workers AI also offers batch mode for this model, which fits a job that isn't time-critical.
   2. The per-minute price. It goes into the price table, and usage is metered in `usage_ledger` with kind `transcription`.
 
+**As built (P2-05).**
+- **Speech check:** whisper.cpp's own voice-activity tool with the Silero VAD v6.2.0 model (MIT, 1 MB), in the same sandbox, about 0.2 s for a 7 s clip. Under 500 ms of speech means `no_speech`: the provider is not called and nothing is metered.
+- **Word timing:** the model's attention based timestamps are 200 ms or more off a word's start, so the provider returns an anchor per word (whisper.cpp: the DTW alignment of the model's alignment heads) and `transcribe.Refine` moves each boundary onto the audio (the longest silence, or the quietest 10 ms frame, between two anchors). It runs for every provider, hosted ones included. Measured median start error against known timings: 6 ms on synthesised speech with known gaps, 50 ms on LibriSpeech test-clean against forced alignments (large-v3-turbo q5_0).
+- **Speech structure** (D-28): sentence boundaries, filler words (hesitations such as um, uh, eh, äh; phrases such as "you know", "zeg maar"; English, Dutch, German, French and Spanish rules) and pauses over 400 ms are computed from the words, not by the provider, and stored with the transcript.
+- **Ledger:** `usage_ledger` kind `transcription` holds the provider and the audio milliseconds metered. Workers AI is `unpriced` until `WORKERS_AI_PRICE_MICROS_PER_MINUTE` is set.
+
 **Alternatives.**
 - ElevenLabs Scribe: the best quality and audio events, but higher cost and another processor.
 - whisper.cpp everywhere: free, but uses CPU on our servers.
