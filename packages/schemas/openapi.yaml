@@ -42,6 +42,8 @@ tags:
     description: Footage, audio and images, and their resumable multipart upload to object storage (paid-only).
   - name: projects
     description: Projects (a video job with its format, footage and brief) and their timeline versions (paid-only).
+  - name: runs
+    description: Agent runs. The editor agent edits a project's timeline in a run; the run is a record of every step, its cost and its result (paid-only).
   - name: webhooks
     description: Called by other services, not by the web app. Not part of the generated TypeScript client or of the generated Go server interface.
 
@@ -800,6 +802,192 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /v1/projects/{id}/edit:
+    parameters:
+      - $ref: "#/components/parameters/ProjectIdPath"
+    post:
+      operationId: startEdit
+      tags: [runs]
+      summary: Start an editor run on the project
+      description: |
+        Starts the editor agent on the project: it looks at the project's footage, builds the timeline with edit ops (each one a
+        new timeline version, authored by the run) and ends with a message for the creator. The call only creates the run and
+        returns it (`202`, status `queued`); follow it with `GET /v1/runs/{id}`. Only owners and editors may start a run.
+        A project has at most one unfinished editor run (`409 run_in_progress`), and needs at least one ready video clip
+        (`422 assets_not_usable`; an audio file is not a clip to cut).
+        `instructions` is the creator's extra instruction for this run (text, at most 2,000 characters; the model treats it as data
+        that steers the content of the video, nothing else). `profile` picks the model profile of the run; the default is the
+        server's. `budget_usd` is the run's spend cap in dollars: the default is $5, and a larger value is cut to the server's maximum
+        (also $5 unless the operator raised it). The cap is enforced before every model call.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartEditRequest"
+      responses:
+        "202":
+          description: The run, queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "`run_in_progress`: the project's editor run has not finished."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: "`assets_not_usable`: the project has no ready video clip to edit."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/runs/{id}:
+    parameters:
+      - $ref: "#/components/parameters/RunIdPath"
+    get:
+      operationId: getRun
+      tags: [runs]
+      summary: A run, with its cost and a summary of its events
+      description: |
+        The run's status, what it cost (at list price) and used (tokens, with the prompt cache's share), its budgets, and its
+        events as one-line summaries, oldest first, after `after_seq` (default: from the start), at most `limit`. Poll with
+        `after_seq` set to the last `seq` you have. A run of another workspace is `404 not_found`. Any member may read.
+        The text of a summary was written by a model or a tool, and may quote the creator's own text: show it as text.
+      parameters:
+        - name: after_seq
+          in: query
+          required: false
+          description: Only events after this sequence number.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          required: false
+          description: How many events to return (default 200).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 200
+      responses:
+        "200":
+          description: The run.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/runs/{id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/RunIdPath"
+    post:
+      operationId: cancelRun
+      tags: [runs]
+      summary: Cancel a run
+      description: |
+        A queued run, or one that waits for an answer, is cancelled at once; a running one stops between two steps, so its status
+        may still say `running` in the answer. Cancelling a run that has finished changes nothing. Only owners and editors may cancel.
+      responses:
+        "200":
+          description: The run as it is after the request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/runs/{id}/reply:
+    parameters:
+      - $ref: "#/components/parameters/RunIdPath"
+    post:
+      operationId: replyToRun
+      tags: [runs]
+      summary: Answer a question of a run that waits for input
+      description: |
+        When a run asks the creator a question its status is `waiting_input` and `question` holds it. The reply is the answer
+        (text, at most 16 KB; the model treats it as data) and puts the run back in the queue. A run that is not waiting is
+        `409 run_not_waiting`. Only owners and editors may reply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplyRequest"
+      responses:
+        "200":
+          description: The run, queued again.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "`run_not_waiting`: the run is not waiting for an answer."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
   /v1/webhooks/clerk:
     post:
       operationId: receiveClerkWebhook
@@ -893,6 +1081,14 @@ components:
       description: The project's TypeID.
       schema:
         $ref: "#/components/schemas/ProjectId"
+
+    RunIdPath:
+      name: id
+      in: path
+      required: true
+      description: The run's TypeID.
+      schema:
+        $ref: "#/components/schemas/RunId"
 
   responses:
     Unauthenticated:
@@ -995,6 +1191,9 @@ components:
         - version_conflict # 409: the timeline moved on since base_version
         - invalid_ops # 422: an edit batch was refused (see its issues)
         - no_change # 422: an edit batch changed nothing
+        - run_in_progress # 409: the project already has an editor run that has not finished
+        - run_not_waiting # 409: the run is not waiting for an answer
+        - model_not_configured # 503: the server has no model access (ANTHROPIC_API_KEY or LLM_MODE) or no such routing profile
 
     ErrorDetail:
       type: object
@@ -1632,7 +1831,9 @@ components:
           $ref: "#/components/schemas/AuthorKind"
         author_id:
           type: string
-          description: The user's TypeID, or the editor run's id.
+          description: |
+            For `user`, the TypeID of the user (`usr_...`). For `agent`, the TypeID of the editor run (`run_...`) that made the
+            version; `GET /v1/runs/{id}` shows the run. (The key that makes a repeated tool call idempotent is stored apart from it.)
         summary:
           type: array
           description: One line per change, for the version list and the run feed.
@@ -1871,6 +2072,165 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/OpIssue"
+
+    # ── Agent runs ──────────────────────────────────────────────────────────────
+
+    RunProfile:
+      type: string
+      description: |
+        A model routing profile (config/routing): `dev-cheap` (Haiku, cents per run), `dev-mid` or `v1-start` (the editor on Opus).
+      enum: [dev-cheap, dev-mid, v1-start]
+
+    StartEditRequest:
+      type: object
+      properties:
+        instructions:
+          type: string
+          maxLength: 2000
+          description: Extra instructions for this run, in the creator's words. Data for the model, not commands.
+        profile:
+          $ref: "#/components/schemas/RunProfile"
+        budget_usd:
+          type: number
+          exclusiveMinimum: 0
+          description: The run's spend cap in dollars. Default 5; a larger value is cut to the server's maximum.
+
+    ReplyRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          description: The answer to the run's question.
+
+    RunStatus:
+      type: string
+      enum: [queued, running, waiting_input, succeeded, failed, cancelled]
+
+    RunEventType:
+      type: string
+      enum: [status, assistant_message, tool_call, tool_result, error, artifact]
+
+    RunEvent:
+      type: object
+      description: One step of a run, as a line of text.
+      required: [seq, type, text, created_at]
+      properties:
+        seq:
+          type: integer
+          description: The event's place in the run, from 1.
+        type:
+          $ref: "#/components/schemas/RunEventType"
+        text:
+          type: string
+          description: One line, at most 400 bytes. Text a model or a tool wrote; show it as text.
+        tool:
+          type: [string, "null"]
+          description: The tool of a `tool_call` or `tool_result`.
+        is_error:
+          type: boolean
+          description: A failed tool call, or an `error` event.
+        created_at:
+          type: string
+          format: date-time
+
+    RunTokens:
+      type: object
+      description: |
+        What the run's model calls used. `cache_hit_rate` is `cache_read` over all prompt tokens (`input` + `cache_write` +
+        `cache_read`), `null` before the first call.
+      required: [input, cache_write, cache_read, output, cache_hit_rate]
+      properties:
+        input:
+          type: integer
+          format: int64
+        cache_write:
+          type: integer
+          format: int64
+        cache_read:
+          type: integer
+          format: int64
+        output:
+          type: integer
+          format: int64
+        cache_hit_rate:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 1
+
+    Run:
+      type: object
+      required: [id, agent, status, routing_profile, model, effort, billed_to, cost_micros, budget_micros, tokens, tool_calls, budget_tool_calls, active_ms, budget_wall_clock_ms, created_at, events, last_seq]
+      properties:
+        id:
+          $ref: "#/components/schemas/RunId"
+        agent:
+          type: string
+          description: The agent, such as `editor`.
+        project_id:
+          $ref: "#/components/schemas/ProjectId"
+        status:
+          $ref: "#/components/schemas/RunStatus"
+        failure_reason:
+          type: [string, "null"]
+          description: |
+            Why a `failed` run failed, such as `budget`, `model_error`, `daily_cap` or `internal_error`. `null` otherwise.
+        question:
+          type: [string, "null"]
+          description: The question of a run that is `waiting_input`; answer it with `POST /v1/runs/{id}/reply`.
+        summary:
+          type: [string, "null"]
+          description: The message for the creator that a finished run ended with (for a run that stopped early, why it did).
+        timeline_version:
+          type: [integer, "null"]
+          description: The timeline version the run finished on, for a run that finished the edit.
+        routing_profile:
+          type: string
+        model:
+          type: string
+        effort:
+          type: string
+        billed_to:
+          type: string
+          description: Who pays for the run's model calls (`platform`, `workspace_key` or `test`).
+        cost_micros:
+          type: integer
+          format: int64
+          description: What the run's model calls cost at list price, in millionths of a dollar.
+        budget_micros:
+          type: integer
+          format: int64
+          description: The run's spend cap, in millionths of a dollar.
+        tokens:
+          $ref: "#/components/schemas/RunTokens"
+        tool_calls:
+          type: integer
+        budget_tool_calls:
+          type: integer
+        active_ms:
+          type: integer
+          format: int64
+          description: How long the run has been running (waiting for an answer does not count).
+        budget_wall_clock_ms:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: [string, "null"]
+          format: date-time
+        finished_at:
+          type: [string, "null"]
+          format: date-time
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunEvent"
+        last_seq:
+          type: integer
+          description: The sequence number of the run's last event (not only of the ones returned), 0 before the first.
 
     # ── Webhooks ────────────────────────────────────────────────────────────────
 

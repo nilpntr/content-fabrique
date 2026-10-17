@@ -239,6 +239,66 @@ func (q *Queries) CreateAgentRun(ctx context.Context, arg CreateAgentRunParams) 
 	return i, err
 }
 
+const getActiveAgentRunForProject = `-- name: GetActiveAgentRunForProject :one
+SELECT id, workspace_id, agent, stage, parent_run_id, project_id, status, input, output, routing_profile, model, effort, max_tokens, escalated, input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, tool_calls, cost_micros, active_ms, budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to, failure_reason, cancel_requested_at, heartbeat_at, epoch, resumes, resume_enqueued_at, last_seq, started_at, finished_at, created_at, updated_at FROM agent_runs
+WHERE workspace_id = $1 AND project_id = $2 AND agent = $3
+  AND status IN ('queued', 'running', 'waiting_input')
+ORDER BY created_at
+LIMIT 1
+`
+
+type GetActiveAgentRunForProjectParams struct {
+	WorkspaceID ids.WorkspaceID
+	ProjectID   ids.ProjectID
+	Agent       string
+}
+
+// The run of an agent that is not finished yet on a project, if there is one (the edit endpoint allows one at a time).
+func (q *Queries) GetActiveAgentRunForProject(ctx context.Context, arg GetActiveAgentRunForProjectParams) (AgentRun, error) {
+	row := q.db.QueryRow(ctx, getActiveAgentRunForProject, arg.WorkspaceID, arg.ProjectID, arg.Agent)
+	var i AgentRun
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Agent,
+		&i.Stage,
+		&i.ParentRunID,
+		&i.ProjectID,
+		&i.Status,
+		&i.Input,
+		&i.Output,
+		&i.RoutingProfile,
+		&i.Model,
+		&i.Effort,
+		&i.MaxTokens,
+		&i.Escalated,
+		&i.InputTokens,
+		&i.CacheWriteTokens,
+		&i.CacheReadTokens,
+		&i.OutputTokens,
+		&i.ToolCalls,
+		&i.CostMicros,
+		&i.ActiveMs,
+		&i.BudgetMicros,
+		&i.BudgetTokens,
+		&i.BudgetToolCalls,
+		&i.BudgetWallClockMs,
+		&i.BilledTo,
+		&i.FailureReason,
+		&i.CancelRequestedAt,
+		&i.HeartbeatAt,
+		&i.Epoch,
+		&i.Resumes,
+		&i.ResumeEnqueuedAt,
+		&i.LastSeq,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getAgentRun = `-- name: GetAgentRun :one
 SELECT id, workspace_id, agent, stage, parent_run_id, project_id, status, input, output, routing_profile, model, effort, max_tokens, escalated, input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, tool_calls, cost_micros, active_ms, budget_micros, budget_tokens, budget_tool_calls, budget_wall_clock_ms, billed_to, failure_reason, cancel_requested_at, heartbeat_at, epoch, resumes, resume_enqueued_at, last_seq, started_at, finished_at, created_at, updated_at FROM agent_runs WHERE workspace_id = $1 AND id = $2
 `

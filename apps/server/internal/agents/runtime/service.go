@@ -97,8 +97,20 @@ func (s *Service) Create(ctx context.Context, tx *store.Store, p StartParams) (s
 
 // Start creates a run and enqueues its agent_run job in one transaction.
 func (s *Service) Start(ctx context.Context, p StartParams) (store.AgentRun, error) {
+	return s.StartGuarded(ctx, p, nil)
+}
+
+// StartGuarded is Start with a check that runs first, inside the same transaction: guard receives the transaction's Store and
+// may refuse the run by returning an error, which is returned as it is and creates nothing. A guard that locks a row (the
+// project, say) makes "no other run is active" and "create this one" a single step, so two requests cannot both pass it.
+func (s *Service) StartGuarded(ctx context.Context, p StartParams, guard func(ctx context.Context, tx *store.Store) error) (store.AgentRun, error) {
 	var run store.AgentRun
 	err := s.Store.InTx(ctx, func(tx *store.Store) error {
+		if guard != nil {
+			if err := guard(ctx, tx); err != nil {
+				return err
+			}
+		}
 		var err error
 		if run, err = s.Create(ctx, tx, p); err != nil {
 			return err

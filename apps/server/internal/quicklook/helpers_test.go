@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"github.com/google/uuid"
 
 	configfiles "github.com/nilpntr/content-fabrique/config"
+	"github.com/nilpntr/content-fabrique/internal/agents/editor"
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/media"
@@ -50,6 +52,16 @@ func (m *memObjects) Get(_ context.Context, key string) (storage.Object, error) 
 	return storage.Object{Body: io.NopCloser(bytes.NewReader(b)), Size: int64(len(b)), ContentType: "application/octet-stream"}, nil
 }
 
+func (m *memObjects) Head(_ context.Context, key string) (storage.ObjectInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, ok := m.objs[key]
+	if !ok {
+		return storage.ObjectInfo{}, storage.ErrNotFound
+	}
+	return storage.ObjectInfo{Size: int64(len(b)), ContentType: "image/jpeg"}, nil
+}
+
 func (m *memObjects) Put(_ context.Context, key string, body io.ReadSeeker, size int64, _ string) error {
 	b, err := io.ReadAll(body)
 	if err != nil {
@@ -77,14 +89,15 @@ func (m *memObjects) keys() []string {
 
 // ---- A fake sandbox ----------------------------------------------------------------------------------------------------
 
-// fakeRunner stands in for the sandbox: it writes fixtureFrame(i) for every output c<ii>.jpg of the ffmpeg command it is given.
+// fakeRunner stands in for the sandbox: for every output f<n>.jpg of the ffmpeg command it writes the fixture frame of the
+// candidate time of the n-th -ss (the frame service names its outputs f0, f1 ... in the order of its inputs).
 type fakeRunner struct {
 	mu    sync.Mutex
 	calls []media.Invocation
 	// exit and stderr make the "tool" fail.
 	exit   int
 	stderr string
-	// skip names outputs that are not written.
+	// skip names candidates (by index) whose picture is not written.
 	skip map[int]bool
 }
 
@@ -95,12 +108,30 @@ func (f *fakeRunner) Run(_ context.Context, inv media.Invocation) (sandbox.Resul
 	if f.exit != 0 {
 		return sandbox.Result{ExitCode: f.exit, Stderr: []byte(f.stderr)}, nil
 	}
+	var times []float64
+	for i, a := range inv.Args {
+		if a == "-ss" && i+1 < len(inv.Args) {
+			var sec float64
+			if _, err := fmt.Sscanf(inv.Args[i+1], "%f", &sec); err != nil {
+				return sandbox.Result{}, err
+			}
+			times = append(times, sec)
+		}
+	}
+	candidates := CandidateTimes(12_000)
 	for _, a := range inv.Args {
-		var i int
-		if _, err := fmt.Sscanf(a, sandbox.WorkDir+"/c%02d.jpg", &i); err != nil || f.skip[i] {
+		var n int
+		if _, err := fmt.Sscanf(a, sandbox.WorkDir+"/f%d.jpg", &n); err != nil || n >= len(times) {
 			continue
 		}
-		if err := os.WriteFile(filepath.Join(inv.OutputDir, fmt.Sprintf("c%02d.jpg", i)), fixtureFrame(i), 0o644); err != nil {
+		idx := slices.Index(candidates, int64(times[n]*1000+0.5))
+		if idx < 0 {
+			idx = 0
+		}
+		if f.skip[idx] {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(inv.OutputDir, fmt.Sprintf("f%d.jpg", n)), fixtureFrame(idx), 0o644); err != nil {
 			return sandbox.Result{}, err
 		}
 	}
@@ -186,7 +217,10 @@ func newReadyVideo(t *testing.T, objs *memObjects) (*fakeStore, store.Asset) {
 	}
 	proxyKey := storage.AssetPrefix(ws, id) + "proxy_720.mp4"
 	objs.objs[proxyKey] = []byte("not really an mp4: the fake sandbox never reads it")
-	return &fakeStore{asset: a, derivs: []store.Derivative{{WorkspaceID: ws, AssetID: id, Kind: store.DerivativeProxy720, R2Key: proxyKey, ContentType: "video/mp4", SizeBytes: 50}}}, a
+	return &fakeStore{asset: a, derivs: []store.Derivative{{
+		WorkspaceID: ws, AssetID: id, Kind: store.DerivativeProxy720, R2Key: proxyKey, ContentType: "video/mp4", SizeBytes: 50,
+		Meta: json.RawMessage(`{"duration_ms":12000}`),
+	}}}, a
 }
 
 // ---- A fake Anthropic API and ledger -----------------------------------------------------------------------------------
@@ -381,8 +415,9 @@ func newRig(t *testing.T, o rigOptions) *rig {
 	if tempDir == "" {
 		tempDir = t.TempDir()
 	}
+	frames := &editor.FrameService{Store: st, Objects: objs, Runner: run, TempDir: tempDir, Logger: quiet}
 	svc, err := New(Config{
-		Store: st, Objects: objs, Runner: run, TempDir: tempDir, Models: newFactory(t, o, ledger, o.api),
+		Store: st, Objects: objs, Frames: frames, Models: newFactory(t, o, ledger, o.api),
 		Router: route, Logger: quiet,
 	})
 	if err != nil {

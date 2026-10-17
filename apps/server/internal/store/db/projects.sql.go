@@ -137,7 +137,7 @@ func (q *Queries) GetProjectForUpdate(ctx context.Context, arg GetProjectForUpda
 }
 
 const getTimelineVersion = `-- name: GetTimelineVersion :one
-SELECT id, workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id, created_at FROM timeline_versions
+SELECT id, workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id, created_at, idempotency_key, result FROM timeline_versions
 WHERE workspace_id = $1 AND project_id = $2 AND version = $3
 `
 
@@ -163,39 +163,32 @@ func (q *Queries) GetTimelineVersion(ctx context.Context, arg GetTimelineVersion
 		&i.AuthorKind,
 		&i.AuthorID,
 		&i.CreatedAt,
+		&i.IdempotencyKey,
+		&i.Result,
 	)
 	return i, err
 }
 
-const insertTimelineVersion = `-- name: InsertTimelineVersion :one
-INSERT INTO timeline_versions (workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id, created_at
+const getTimelineVersionByAuthor = `-- name: GetTimelineVersionByAuthor :one
+SELECT id, workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id, created_at, idempotency_key, result FROM timeline_versions
+WHERE workspace_id = $1 AND project_id = $2 AND author_kind = $3 AND author_id = $4
+ORDER BY version DESC
+LIMIT 1
 `
 
-type InsertTimelineVersionParams struct {
-	WorkspaceID   ids.WorkspaceID
-	ProjectID     ids.ProjectID
-	Version       int32
-	ParentVersion *int32
-	Spec          json.RawMessage
-	Ops           json.RawMessage
-	Diff          json.RawMessage
-	Summary       []string
-	AuthorKind    string
-	AuthorID      string
+type GetTimelineVersionByAuthorParams struct {
+	WorkspaceID ids.WorkspaceID
+	ProjectID   ids.ProjectID
+	AuthorKind  string
+	AuthorID    string
 }
 
-func (q *Queries) InsertTimelineVersion(ctx context.Context, arg InsertTimelineVersionParams) (TimelineVersion, error) {
-	row := q.db.QueryRow(ctx, insertTimelineVersion,
+// The latest version a given author made, if there is one: for the editor agent the author id is the run's TypeID, so this says
+// whether the run has made a version.
+func (q *Queries) GetTimelineVersionByAuthor(ctx context.Context, arg GetTimelineVersionByAuthorParams) (TimelineVersion, error) {
+	row := q.db.QueryRow(ctx, getTimelineVersionByAuthor,
 		arg.WorkspaceID,
 		arg.ProjectID,
-		arg.Version,
-		arg.ParentVersion,
-		arg.Spec,
-		arg.Ops,
-		arg.Diff,
-		arg.Summary,
 		arg.AuthorKind,
 		arg.AuthorID,
 	)
@@ -213,6 +206,98 @@ func (q *Queries) InsertTimelineVersion(ctx context.Context, arg InsertTimelineV
 		&i.AuthorKind,
 		&i.AuthorID,
 		&i.CreatedAt,
+		&i.IdempotencyKey,
+		&i.Result,
+	)
+	return i, err
+}
+
+const getTimelineVersionByIdempotencyKey = `-- name: GetTimelineVersionByIdempotencyKey :one
+SELECT id, workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id, created_at, idempotency_key, result FROM timeline_versions
+WHERE workspace_id = $1 AND project_id = $2 AND idempotency_key = $3
+`
+
+type GetTimelineVersionByIdempotencyKeyParams struct {
+	WorkspaceID    ids.WorkspaceID
+	ProjectID      ids.ProjectID
+	IdempotencyKey *string
+}
+
+// The version a tool call made, by the call's idempotency key: how a repeated call finds what the first one did.
+func (q *Queries) GetTimelineVersionByIdempotencyKey(ctx context.Context, arg GetTimelineVersionByIdempotencyKeyParams) (TimelineVersion, error) {
+	row := q.db.QueryRow(ctx, getTimelineVersionByIdempotencyKey, arg.WorkspaceID, arg.ProjectID, arg.IdempotencyKey)
+	var i TimelineVersion
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.Version,
+		&i.ParentVersion,
+		&i.Spec,
+		&i.Ops,
+		&i.Diff,
+		&i.Summary,
+		&i.AuthorKind,
+		&i.AuthorID,
+		&i.CreatedAt,
+		&i.IdempotencyKey,
+		&i.Result,
+	)
+	return i, err
+}
+
+const insertTimelineVersion = `-- name: InsertTimelineVersion :one
+INSERT INTO timeline_versions (workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id, idempotency_key, result)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::text, $12::jsonb)
+RETURNING id, workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id, created_at, idempotency_key, result
+`
+
+type InsertTimelineVersionParams struct {
+	WorkspaceID    ids.WorkspaceID
+	ProjectID      ids.ProjectID
+	Version        int32
+	ParentVersion  *int32
+	Spec           json.RawMessage
+	Ops            json.RawMessage
+	Diff           json.RawMessage
+	Summary        []string
+	AuthorKind     string
+	AuthorID       string
+	IdempotencyKey *string
+	Result         []byte
+}
+
+func (q *Queries) InsertTimelineVersion(ctx context.Context, arg InsertTimelineVersionParams) (TimelineVersion, error) {
+	row := q.db.QueryRow(ctx, insertTimelineVersion,
+		arg.WorkspaceID,
+		arg.ProjectID,
+		arg.Version,
+		arg.ParentVersion,
+		arg.Spec,
+		arg.Ops,
+		arg.Diff,
+		arg.Summary,
+		arg.AuthorKind,
+		arg.AuthorID,
+		arg.IdempotencyKey,
+		arg.Result,
+	)
+	var i TimelineVersion
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.Version,
+		&i.ParentVersion,
+		&i.Spec,
+		&i.Ops,
+		&i.Diff,
+		&i.Summary,
+		&i.AuthorKind,
+		&i.AuthorID,
+		&i.CreatedAt,
+		&i.IdempotencyKey,
+		&i.Result,
 	)
 	return i, err
 }
@@ -368,6 +453,67 @@ func (q *Queries) ListProjectCatalogAssets(ctx context.Context, arg ListProjectC
 	for rows.Next() {
 		var i ListProjectCatalogAssetsRow
 		if err := rows.Scan(&i.AssetID, &i.Kind, &i.DurationMs); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjectFootage = `-- name: ListProjectFootage :many
+SELECT pa.position, a.id AS asset_id, a.kind, a.title, a.description, a.duration_ms, a.width, a.height, a.rotation, a.has_audio
+FROM project_assets pa
+JOIN assets a ON a.workspace_id = pa.workspace_id AND a.id = pa.asset_id
+WHERE pa.workspace_id = $1 AND pa.project_id = $2
+  AND a.status = 'ready' AND a.deleted_at IS NULL AND a.duration_ms IS NOT NULL
+ORDER BY pa.position
+`
+
+type ListProjectFootageParams struct {
+	WorkspaceID ids.WorkspaceID
+	ProjectID   ids.ProjectID
+}
+
+type ListProjectFootageRow struct {
+	Position    int32
+	AssetID     ids.AssetID
+	Kind        string
+	Title       string
+	Description string
+	DurationMs  *int64
+	Width       *int32
+	Height      *int32
+	Rotation    *int32
+	HasAudio    *bool
+}
+
+// The footage of a project as the editor agent sees it: the library's title and description (text a creator wrote, untrusted),
+// the probed size and rotation, and whether there is sound. Only ready, not deleted assets with a duration are returned, in
+// the creator's order: the same set the edit catalog holds.
+func (q *Queries) ListProjectFootage(ctx context.Context, arg ListProjectFootageParams) ([]ListProjectFootageRow, error) {
+	rows, err := q.db.Query(ctx, listProjectFootage, arg.WorkspaceID, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListProjectFootageRow
+	for rows.Next() {
+		var i ListProjectFootageRow
+		if err := rows.Scan(
+			&i.Position,
+			&i.AssetID,
+			&i.Kind,
+			&i.Title,
+			&i.Description,
+			&i.DurationMs,
+			&i.Width,
+			&i.Height,
+			&i.Rotation,
+			&i.HasAudio,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

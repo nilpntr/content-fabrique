@@ -2,6 +2,7 @@ package quicklook
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	configfiles "github.com/nilpntr/content-fabrique/config"
+	"github.com/nilpntr/content-fabrique/internal/agents/editor"
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
 	"github.com/nilpntr/content-fabrique/internal/jobs/jobstest"
@@ -147,7 +149,8 @@ func TestReplayEndToEndFromIngestReadyToSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc, err := New(Config{Store: st, Objects: objs, Runner: &fakeRunner{}, TempDir: t.TempDir(), Models: factory, Router: router, Logger: quiet})
+	frames := &editor.FrameService{Store: st, Objects: objs, Runner: &fakeRunner{}, TempDir: t.TempDir(), Logger: quiet}
+	svc, err := New(Config{Store: st, Objects: objs, Frames: frames, Models: factory, Router: router, Logger: quiet})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +168,7 @@ func TestReplayEndToEndFromIngestReadyToSearch(t *testing.T) {
 	// The ingest finishes: ready, the quick look owed and its job enqueued in the same transaction.
 	finish := store.IngestResult{
 		DurationMs: 12_000, Width: 1080, Height: 1920, FPS: 30, VideoCodec: "h264",
-		Derivatives: []store.NewDerivative{{Kind: store.DerivativeProxy720, Key: proxyKey, ContentType: "video/mp4", SizeBytes: 33}},
+		Derivatives: []store.NewDerivative{{Kind: store.DerivativeProxy720, Key: proxyKey, ContentType: "video/mp4", SizeBytes: 33, Meta: []byte(`{"duration_ms":12000}`)}},
 	}
 	start := time.Now()
 	ready, err := st.FinishAssetIngest(ctx, ws.ID, id, finish)
@@ -226,10 +229,14 @@ func TestReplayEndToEndFromIngestReadyToSearch(t *testing.T) {
 		t.Errorf("replay reached the API %d times and wrote %d ledger rows", api.total(), len(ledger.snapshot()))
 	}
 
-	// The frames are cached for the editor to reuse, inside the asset's prefix.
-	for i := range Frames {
-		if _, ok := objs.objs[storage.AssetPrefix(ws.ID, id)+FrameName(i)]; !ok {
-			t.Errorf("frame %d was not cached", i)
+	// The frames are cached for the editor to reuse, in the asset's own frames/ prefix, and the detail lists the four chosen.
+	var d detail
+	if err := json.Unmarshal(got.QuickLook, &d); err != nil || len(d.Frames) != Frames {
+		t.Fatalf("detail = %s %v", got.QuickLook, err)
+	}
+	for _, f := range d.Frames {
+		if _, ok := objs.objs[f.Ref]; !ok || !strings.HasPrefix(f.Ref, storage.FramePrefix(ws.ID, id)) || !strings.HasSuffix(f.Ref, "_512.jpg") {
+			t.Errorf("frame %+v is not cached under the asset's frames/ prefix at 512 px", f)
 		}
 	}
 

@@ -50,6 +50,8 @@ func CandidateTimes(durationMs int64) []int64 {
 // Candidate is a picture cut from the clip, with its sharpness when it could be measured.
 type Candidate struct {
 	AtMs int64
+	// Ref is the object key the picture is cached under.
+	Ref  string
 	JPEG []byte
 	// Sharpness is the variance of the picture's Laplacian, or a negative number when it could not be measured.
 	Sharpness float64

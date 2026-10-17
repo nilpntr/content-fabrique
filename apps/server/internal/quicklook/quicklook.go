@@ -4,10 +4,10 @@
 //
 // The steps of Service.Run:
 //
-//  1. Frames. The 720 px proxy is cut into twelve candidates at evenly spaced times (one ffmpeg process in the sandbox,
-//     512 px on the long side), each is scored for sharpness, and the sharpest of each quarter of the clip wins (Pick). The
-//     four pictures are cached in object storage under the asset's prefix (quicklook_0.jpg ...) and listed in the asset's
-//     quick_look detail, so the editor's keyframe grid (P2-04) can reuse them and a re-run does not cut them again.
+//  1. Frames. The editor's frame service (editor.FrameService.FramesSized) cuts twelve candidates from the 720 px proxy at
+//     evenly spaced times (one ffmpeg process in the sandbox, 512 px on the long side) and caches them in object storage under
+//     the asset's frames/ prefix; each is scored for sharpness, and the sharpest of each quarter of the clip wins (Pick). The
+//     four chosen are listed in the asset's quick_look detail, so the editor's keyframe grid (P2-04) and a re-run reuse them.
 //  2. One model call through the llm layer: stage "quicklook" (config/routing, claude-haiku-5-5 in every profile), a strict
 //     tool whose arguments are the answer, and a per-call budget of $0.003 reserved before sending (llm.Budget). The call is
 //     metered in usage_ledger like any other, with the asset's id as the run_id, so a clip's cost is one query.
@@ -22,18 +22,15 @@
 package quicklook
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
-	"time"
 
+	"github.com/nilpntr/content-fabrique/internal/agents/editor"
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
@@ -66,15 +63,19 @@ var ErrNotReady = jobs.ErrQuickLookNotReady
 // Store is what the quick look needs from the database. *store.Store is the real one.
 type Store interface {
 	GetAsset(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (store.Asset, error)
-	ListAssetDerivatives(ctx context.Context, ws ids.WorkspaceID, assetIDs []ids.AssetID) ([]store.Derivative, error)
 	ApplyQuickLook(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, r store.QuickLookResult) (store.Asset, error)
 	FailQuickLook(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, detail json.RawMessage) (store.Asset, error)
 }
 
-// Objects is the object storage the quick look needs. *storage.Client is the real one.
+// Objects is the object storage the quick look reads its frames from. *storage.Client is the real one.
 type Objects interface {
 	Get(ctx context.Context, key string) (storage.Object, error)
-	Put(ctx context.Context, key string, body io.ReadSeeker, size int64, contentType string) error
+}
+
+// FrameSource cuts frames of a clip and caches them in object storage. *editor.FrameService is the real one (its FramesSized): the
+// quick look and the editor use the same cache, so a frame is cut once however many look at it.
+type FrameSource interface {
+	FramesSized(ctx context.Context, ws ids.WorkspaceID, asset ids.AssetID, atMs []int64, longSide int) ([]editor.Frame, error)
 }
 
 // Router resolves the route of a stage. *llm.Router is the real one.
@@ -86,11 +87,7 @@ type Router interface {
 type Config struct {
 	Store   Store
 	Objects Objects
-	// Runner runs ffmpeg. A *media.SandboxRunner gets the job's labels.
-	Runner media.Runner
-	// TempDir holds one directory per running job. It must be inside the sandbox provider's allowed roots and its path must
-	// have no symlinks in it.
-	TempDir string
+	Frames  FrameSource
 	// Models hands out the model client for a workspace and stage.
 	Models llm.ClientFactory
 	Router Router
@@ -105,16 +102,11 @@ type Service struct {
 // New returns a Service.
 func New(cfg Config) (*Service, error) {
 	switch {
-	case cfg.Store == nil || cfg.Objects == nil || cfg.Runner == nil || cfg.Models == nil || cfg.Router == nil:
-		return nil, errors.New("quicklook: a store, object storage, a runner, a model factory and a router are required")
-	case !filepath.IsAbs(cfg.TempDir) || filepath.Clean(cfg.TempDir) != cfg.TempDir:
-		return nil, fmt.Errorf("quicklook: the temp dir %q must be an absolute, clean path", cfg.TempDir)
+	case cfg.Store == nil || cfg.Objects == nil || cfg.Frames == nil || cfg.Models == nil || cfg.Router == nil:
+		return nil, errors.New("quicklook: a store, object storage, a frame service, a model factory and a router are required")
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
-	}
-	if err := os.MkdirAll(cfg.TempDir, 0o750); err != nil {
-		return nil, fmt.Errorf("quicklook: temp dir: %w", err)
 	}
 	return &Service{cfg: cfg}, nil
 }
@@ -156,10 +148,11 @@ type Result struct {
 	Model string `json:"model,omitempty"`
 }
 
-// frameInfo is a cached frame as the asset's quick_look detail lists it.
+// frameInfo is a frame the model saw, as the asset's quick_look detail lists it: the time in the clip, the object key it is
+// cached under (the editor's frames/ cache, 512 px) and how sharp it measured.
 type frameInfo struct {
 	AtMs      int64   `json:"at_ms"`
-	Name      string  `json:"name"`
+	Ref       string  `json:"ref"`
 	Sharpness float64 `json:"sharpness"`
 }
 
@@ -362,14 +355,8 @@ func derefInt64(p *int64) int64 {
 
 // ---- Frames ----------------------------------------------------------------------------------------------------------
 
-// MaxFrameBytes is the largest picture accepted from the sandbox or from storage: a 512 px JPEG is tens of kilobytes.
+// MaxFrameBytes is the largest picture accepted from storage: a 512 px JPEG is tens of kilobytes.
 const MaxFrameBytes = 2 << 20
-
-// maxProxyBytes is the largest proxy downloaded to cut frames from.
-const maxProxyBytes = 4 << 30
-
-// FFmpegTimeout is how long cutting the candidates may take: it is a handful of short seeks in a 720 px file.
-const FFmpegTimeout = 2 * time.Minute
 
 // frameSet is the pictures the model sees, in time order.
 type frameSet struct {
@@ -378,217 +365,77 @@ type frameSet struct {
 	info  []frameInfo
 }
 
-// FrameName is the object name of the i-th cached frame: quicklook_0.jpg ...
-func FrameName(i int) string { return fmt.Sprintf("quicklook_%d.jpg", i) }
-
-// frames returns the pictures of the clip: the cached ones when the asset's detail lists them and they are all there, else
-// freshly cut. A non-empty reason means the clip cannot be shown to the model (no proxy, the tool failed).
+// frames returns the pictures of the clip. The candidates are cut (or found cached) by the editor's frame service, which
+// keeps them in object storage under the asset's frames/ prefix, so the editor's later looks and a re-run of the quick look
+// reuse them. A non-empty reason means the clip cannot be shown to the model (no proxy, no frame could be cut).
 func (s *Service) frames(ctx context.Context, a store.Asset, log *slog.Logger) (frameSet, string, error) {
-	if fr, ok := s.cached(ctx, a, log); ok {
-		return fr, "", nil
+	times := CandidateTimes(derefInt64(a.DurationMs))
+	if len(times) == 0 {
+		return frameSet{}, FailFrames, nil
 	}
-	proxy, ok, err := s.proxyKey(ctx, a)
-	if err != nil {
-		return frameSet{}, "", err
-	}
-	if !ok {
+	got, err := s.cfg.Frames.FramesSized(ctx, a.WorkspaceID, a.ID, times, LongSide)
+	var tool *media.ToolError
+	switch {
+	case errors.Is(err, editor.ErrNoVideo):
 		return frameSet{}, FailNoProxy, nil
+	case errors.As(err, &tool) && tool.ExitCode >= 129 && tool.ExitCode <= 143:
+		return frameSet{}, "", fmt.Errorf("ffmpeg was killed: %w", err) // the machine's doing, not the clip's: the job runs again
+	case errors.Is(err, editor.ErrNoFrames):
+		log.Warn("quick look: no frame could be cut", "error", err)
+		return frameSet{}, FailFrames, nil
+	case err != nil:
+		return frameSet{}, "", fmt.Errorf("frames: %w", err)
 	}
-	cands, reason, err := s.cut(ctx, a, proxy, log)
-	if err != nil || reason != "" {
-		return frameSet{}, reason, err
-	}
-	picked := Pick(cands)
-	var fr frameSet
-	for i, c := range picked {
-		key, err := storage.DerivativeKey(a.WorkspaceID, a.ID, FrameName(i))
+
+	prefix := storage.FramePrefix(a.WorkspaceID, a.ID)
+	var cands []Candidate
+	seen := map[int64]bool{}
+	for _, f := range got {
+		if f.Err != "" || seen[f.AtMs] {
+			continue // a moment that could not be decoded, or two requests that landed on one frame
+		}
+		if !strings.HasPrefix(f.Ref, prefix) {
+			return frameSet{}, "", fmt.Errorf("the frame service returned %q, which is not a frame of the asset", f.Ref)
+		}
+		b, err := s.read(ctx, f.Ref)
 		if err != nil {
 			return frameSet{}, "", err
 		}
-		if err := s.cfg.Objects.Put(ctx, key, bytes.NewReader(c.JPEG), int64(len(c.JPEG)), "image/jpeg"); err != nil {
-			return frameSet{}, "", fmt.Errorf("store frame %d: %w", i, err)
+		seen[f.AtMs] = true
+		sharp, err := Sharpness(b)
+		if err != nil {
+			sharp = -1
 		}
-		fr.jpegs = append(fr.jpegs, c.JPEG)
-		fr.at = append(fr.at, c.AtMs)
-		fr.info = append(fr.info, frameInfo{AtMs: c.AtMs, Name: FrameName(i), Sharpness: roundSharp(c.Sharpness)})
+		cands = append(cands, Candidate{AtMs: f.AtMs, Ref: f.Ref, JPEG: b, Sharpness: sharp})
+	}
+	if len(cands) == 0 {
+		return frameSet{}, FailFrames, nil
+	}
+	var fr frameSet
+	for _, c := range Pick(cands) {
+		fr.jpegs, fr.at = append(fr.jpegs, c.JPEG), append(fr.at, c.AtMs)
+		fr.info = append(fr.info, frameInfo{AtMs: c.AtMs, Ref: c.Ref, Sharpness: roundSharp(c.Sharpness)})
 	}
 	return fr, "", nil
 }
 
 func roundSharp(v float64) float64 { return float64(int64(v*10)) / 10 }
 
-// cached reads the frames the asset's quick_look detail lists. Any problem (no detail, a name that is not ours, a missing or
-// oversized object) means "not cached": the frames are cut again.
-func (s *Service) cached(ctx context.Context, a store.Asset, log *slog.Logger) (frameSet, bool) {
-	if len(a.QuickLook) == 0 {
-		return frameSet{}, false
-	}
-	var d detail
-	if err := json.Unmarshal(a.QuickLook, &d); err != nil || len(d.Frames) == 0 {
-		return frameSet{}, false
-	}
-	var fr frameSet
-	for i, f := range d.Frames {
-		if f.Name != FrameName(i) { // only the names we write: the detail is data, the key is built from the ids
-			return frameSet{}, false
-		}
-		key, err := storage.DerivativeKey(a.WorkspaceID, a.ID, f.Name)
-		if err != nil {
-			return frameSet{}, false
-		}
-		obj, err := s.cfg.Objects.Get(ctx, key)
-		if err != nil {
-			if !errors.Is(err, storage.ErrNotFound) {
-				log.Warn("quick look: a cached frame could not be read; cutting the frames again", "name", f.Name, "error", err)
-			}
-			return frameSet{}, false
-		}
-		b, err := readCapped(obj.Body, MaxFrameBytes)
-		_ = obj.Body.Close()
-		if err != nil || !isJPEG(b) {
-			return frameSet{}, false
-		}
-		fr.jpegs, fr.at, fr.info = append(fr.jpegs, b), append(fr.at, f.AtMs), append(fr.info, f)
-	}
-	return fr, true
-}
-
-func readCapped(r io.Reader, limit int64) ([]byte, error) {
-	b, err := io.ReadAll(io.LimitReader(r, limit+1))
+// read reads one cached picture: not too big, and a JPEG (what storage holds is ours, but it is cheap to check).
+func (s *Service) read(ctx context.Context, key string) ([]byte, error) {
+	obj, err := s.cfg.Objects.Get(ctx, key)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read frame: %w", err)
 	}
-	if int64(len(b)) > limit {
-		return nil, fmt.Errorf("more than %d bytes", limit)
+	defer func() { _ = obj.Body.Close() }()
+	b, err := io.ReadAll(io.LimitReader(obj.Body, MaxFrameBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read frame: %w", err)
+	}
+	if len(b) > MaxFrameBytes || !isJPEG(b) {
+		return nil, fmt.Errorf("the cached frame %s is not a JPEG of a plausible size (%d bytes)", key, len(b))
 	}
 	return b, nil
 }
 
 func isJPEG(b []byte) bool { return len(b) > 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF }
-
-// proxyKey is the object key of the asset's proxy, checked to be one of the asset's own objects.
-func (s *Service) proxyKey(ctx context.Context, a store.Asset) (string, bool, error) {
-	rows, err := s.cfg.Store.ListAssetDerivatives(ctx, a.WorkspaceID, []ids.AssetID{a.ID})
-	if err != nil {
-		return "", false, fmt.Errorf("list derivatives: %w", err)
-	}
-	for _, r := range rows {
-		if r.Kind != store.DerivativeProxy720 {
-			continue
-		}
-		name, ok := strings.CutPrefix(r.R2Key, storage.AssetPrefix(a.WorkspaceID, a.ID))
-		if !ok || !storage.ValidDerivativeName(name) || r.SizeBytes > maxProxyBytes {
-			return "", false, nil
-		}
-		return r.R2Key, true, nil
-	}
-	return "", false, nil
-}
-
-// cut downloads the proxy and cuts the candidates in the sandbox.
-func (s *Service) cut(ctx context.Context, a store.Asset, proxyKey string, log *slog.Logger) ([]Candidate, string, error) {
-	times := CandidateTimes(derefInt64(a.DurationMs))
-	if len(times) == 0 {
-		return nil, FailFrames, nil
-	}
-	dir, err := os.MkdirTemp(s.cfg.TempDir, "quicklook-")
-	if err != nil {
-		return nil, "", fmt.Errorf("temp dir: %w", err)
-	}
-	defer func() { _ = os.RemoveAll(dir) }()
-	in, out := filepath.Join(dir, "in"), filepath.Join(dir, "out")
-	for _, d := range []string{in, out} {
-		if err := os.Mkdir(d, 0o755); err != nil { // #nosec G301 -- the container user may be another uid
-			return nil, "", err
-		}
-	}
-	proxy := filepath.Join(in, "proxy.mp4")
-	if err := s.download(ctx, proxyKey, proxy); err != nil {
-		return nil, "", err
-	}
-
-	stills := make([]media.Still, len(times))
-	for i, at := range times {
-		stills[i] = media.Still{AtMs: at, Output: media.OutputPath(fmt.Sprintf("c%02d.jpg", i))}
-	}
-	args, err := media.StillsArgs(media.InputPath(0), stills, LongSide)
-	if err != nil {
-		return nil, "", err
-	}
-	runner := s.cfg.Runner
-	if lr, ok := runner.(interface {
-		WithLabels(map[string]string) media.Runner
-	}); ok {
-		runner = lr.WithLabels(map[string]string{"cf.job": "quick_look", "cf.workspace": a.WorkspaceID.String(), "cf.asset": a.ID.String()})
-	}
-	res, err := runner.Run(ctx, media.Invocation{Args: args, Inputs: []media.Input{{Host: proxy, Container: media.InputPath(0)}}, OutputDir: out, Timeout: FFmpegTimeout})
-	if err != nil {
-		return nil, "", fmt.Errorf("ffmpeg: %w", err)
-	}
-	if res.ExitCode >= 129 && res.ExitCode <= 143 {
-		return nil, "", fmt.Errorf("ffmpeg was killed (exit code %d): %s", res.ExitCode, media.StderrSnippet(res.Stderr))
-	}
-
-	var cands []Candidate
-	for i, at := range times {
-		b, ok := readOutput(filepath.Join(out, fmt.Sprintf("c%02d.jpg", i)))
-		if !ok {
-			continue // a time past the last frame of a clip with an odd tail: the other candidates carry on
-		}
-		sharp, err := Sharpness(b)
-		if err != nil {
-			sharp = -1
-		}
-		cands = append(cands, Candidate{AtMs: at, JPEG: b, Sharpness: sharp})
-	}
-	if len(cands) == 0 {
-		log.Warn("quick look: ffmpeg cut no frames", "exit_code", res.ExitCode, "stderr", media.StderrSnippet(res.Stderr))
-		return nil, FailFrames, nil
-	}
-	if res.ExitCode != 0 {
-		// A time at the very end of a clip can have no frame, which ffmpeg reports with a non-zero exit although the other
-		// pictures were cut: use what there is.
-		log.Info("quick look: ffmpeg could not cut every candidate", "exit_code", res.ExitCode, "cut", len(cands), "asked", len(times))
-	}
-	return cands, "", nil
-}
-
-// readOutput reads one picture the sandbox wrote: a regular file, not too big, a JPEG. Its output is untrusted.
-func readOutput(path string) ([]byte, bool) {
-	fi, err := os.Lstat(path)
-	if err != nil || !fi.Mode().IsRegular() || fi.Size() < 4 || fi.Size() > MaxFrameBytes {
-		return nil, false
-	}
-	b, err := os.ReadFile(path) // #nosec G304 -- a fixed name in the job's own output directory
-	if err != nil || !isJPEG(b) {
-		return nil, false
-	}
-	return b, true
-}
-
-// download copies the proxy to path.
-func (s *Service) download(ctx context.Context, key, path string) error {
-	obj, err := s.cfg.Objects.Get(ctx, key)
-	if err != nil {
-		return fmt.Errorf("download proxy: %w", err)
-	}
-	defer func() { _ = obj.Body.Close() }()
-	if obj.Size > maxProxyBytes {
-		return fmt.Errorf("download proxy: %d bytes is over the limit", obj.Size)
-	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) // #nosec G302,G304 -- a path in our job dir; the container user must read it
-	if err != nil {
-		return err
-	}
-	n, err := io.Copy(f, io.LimitReader(obj.Body, maxProxyBytes+1))
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return fmt.Errorf("download proxy: %w", err)
-	}
-	if obj.Size >= 0 && n != obj.Size {
-		return fmt.Errorf("download proxy: got %d bytes, storage said %d", n, obj.Size)
-	}
-	return nil
-}

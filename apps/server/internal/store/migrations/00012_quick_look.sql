@@ -40,9 +40,7 @@ ALTER TABLE assets
         || setweight(to_tsvector('english', regexp_replace(filename, '[._/-]+', ' ', 'g')), 'D')
     ) STORED,
     ADD CONSTRAINT assets_title_source_check CHECK (title_source IN ('filename', 'quicklook', 'user')),
-    ADD CONSTRAINT assets_quick_look_status_check CHECK (quick_look_status IS NULL OR quick_look_status IN ('pending', 'succeeded', 'failed')),
-    ADD CONSTRAINT assets_description_check CHECK (char_length(description) <= 1000),
-    ADD CONSTRAINT assets_tags_check CHECK (cardinality(tags) <= 32);
+    ADD CONSTRAINT assets_quick_look_status_check CHECK (quick_look_status IS NULL OR quick_look_status IN ('pending', 'succeeded', 'failed'));
 
 CREATE INDEX assets_search_idx ON assets USING gin (search);
 
@@ -50,8 +48,6 @@ CREATE INDEX assets_search_idx ON assets USING gin (search);
 
 DROP INDEX assets_search_idx;
 ALTER TABLE assets
-    DROP CONSTRAINT assets_tags_check,
-    DROP CONSTRAINT assets_description_check,
     DROP CONSTRAINT assets_quick_look_status_check,
     DROP CONSTRAINT assets_title_source_check,
     DROP COLUMN search,

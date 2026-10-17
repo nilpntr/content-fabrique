@@ -15,7 +15,6 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
-	"github.com/nilpntr/content-fabrique/internal/quicklook"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/telemetry"
@@ -46,33 +45,33 @@ func run(args []string) error {
 			// Object storage for the jobs that remove objects. Without the R2_* settings those jobs fail and are retried.
 			var (
 				objects  jobs.ObjectStore
+				storageC *storage.Client    // the same client, for the agents
 				ingester jobs.AssetIngester // nil without storage: asset_ingest jobs then wait (snoozed)
-				looker   *quicklook.Service // nil without storage or model access: quick_look jobs then wait (snoozed)
 			)
-			models := newModelAccess(st, logger)
 			if cfg.ObjectStorageConfigured() {
 				client, err := storage.New(cfg.Storage())
 				if err != nil {
 					return nil, err
 				}
-				objects = client
+				objects, storageC = client, client
 				health.AddCheck(httpapi.Check{Name: "object-storage", Fn: client.Ready})
 				pipeline, err := newIngestPipeline(cfg, st, client, logger)
 				if err != nil {
 					return nil, err
 				}
 				ingester = pipeline
-				if looker, err = newQuickLookService(cfg, st, client, models, logger); err != nil {
-					return nil, err
-				}
 				logger.Info("media pipeline ready", "sandbox", cfg.MediaSandboxProvider, "image", cfg.MediaToolsImage, "temp_dir", cfg.MediaTempDir, "concurrency", cfg.MediaConcurrency)
 				warnIfImageMissing(ctx, cfg, logger)
 			} else {
 				logger.Warn("R2_* is not set: the jobs that delete objects, clean up uploads or ingest assets wait (snoozed, no attempt used) until a worker has it")
 			}
-			var quickLooker jobs.QuickLooker // a nil *Service in the interface would not be nil
-			if looker != nil {
-				quickLooker = looker
+			// The agent runtime and the quick look share their model access and frame cache; both wait when it is off.
+			var (
+				runner      *runtime.Runner
+				quickLooker jobs.QuickLooker
+			)
+			if rt := newAgentRuntime(cfg, st, storageC, logger); rt != nil {
+				runner, quickLooker = rt.Runner, newQuickLook(rt, st, storageC, logger)
 			}
 			queues := jobs.DefaultConfig()
 			for i := range queues.Queues {
@@ -86,7 +85,7 @@ func run(args []string) error {
 				Store:      st,
 				Objects:    objects,
 				Ingest:     ingester,
-				Register:   runtime.Register(newAgentRunner(st, logger, models)),
+				Register:   runtime.Register(runner),
 				QuickLook:  quickLooker,
 				Logger:     logger,
 				UIAddr:     *riverUIAddr,

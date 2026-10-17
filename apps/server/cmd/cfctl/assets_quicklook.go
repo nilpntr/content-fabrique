@@ -1,25 +1,19 @@
 package main
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	configfiles "github.com/nilpntr/content-fabrique/config"
-	"github.com/nilpntr/content-fabrique/internal/agents/llm"
+	"github.com/nilpntr/content-fabrique/internal/agents/agentset"
 	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/ids"
-	"github.com/nilpntr/content-fabrique/internal/media"
 	"github.com/nilpntr/content-fabrique/internal/quicklook"
-	"github.com/nilpntr/content-fabrique/internal/sandbox"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
@@ -127,11 +121,6 @@ func cmdAssetsQuickLook(args []string, stdout, stderr io.Writer, lookup lookupEn
 		return 2
 	}
 
-	settings, err := llm.LoadSettings(env.get)
-	if err != nil {
-		_, _ = fmt.Fprintf(errOut, "cfctl %s: %v\n", name, err)
-		return 2
-	}
 	cfg, err := config.Load(env.get)
 	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "cfctl %s: %v\n", name, err)
@@ -141,34 +130,9 @@ func cmdAssetsQuickLook(args []string, stdout, stderr io.Writer, lookup lookupEn
 		_, _ = fmt.Fprintf(errOut, "cfctl %s: the R2_* settings (R2_ENDPOINT, R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY) are not set in %s or the environment\n", name, displayPath(env.root, env.path))
 		return 2
 	}
-	router, err := llm.NewRouter(configfiles.Routing(), cmp.Or(settings.RoutingProfile, "dev-cheap"))
-	if err != nil {
-		_, _ = fmt.Fprintf(errOut, "cfctl %s: routing: %v\n", name, err)
-		return 2
-	}
-	prices, err := llm.LoadPriceTable(configfiles.Pricing(), llm.PriceFile)
+	frames, framesDir, err := agentset.NewFrameRunner(cfg.MediaSandboxProvider, cfg.MediaToolsImage, cfg.MediaTempDir, cfg.Env)
 	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "cfctl %s: %v\n", name, err)
-		return 2
-	}
-	if cfg.MediaSandboxProvider == config.SandboxLocal {
-		if err := sandbox.CheckLocalAllowed(cfg.Env); err != nil {
-			_, _ = fmt.Fprintf(errOut, "cfctl %s: %v\n", name, err)
-			return 2
-		}
-	}
-	if err := os.MkdirAll(cfg.MediaTempDir, 0o750); err != nil {
-		_, _ = fmt.Fprintf(errOut, "cfctl %s: MEDIA_TEMP_DIR: %v\n", name, err)
-		return 1
-	}
-	root, err := filepath.EvalSymlinks(cfg.MediaTempDir)
-	if err != nil {
-		_, _ = fmt.Fprintf(errOut, "cfctl %s: MEDIA_TEMP_DIR: %v\n", name, err)
-		return 1
-	}
-	provider, err := newMediaProvider(cfg.MediaSandboxProvider, "docker", root)
-	if err != nil {
-		_, _ = fmt.Fprintf(errOut, "cfctl %s: MEDIA_SANDBOX_PROVIDER: %v\n", name, err)
 		return 2
 	}
 
@@ -201,17 +165,15 @@ func cmdAssetsQuickLook(args []string, stdout, stderr io.Writer, lookup lookupEn
 		return 1
 	}
 
-	factory, err := llm.NewFactory(llm.FactoryOptions{Settings: settings, Getenv: env.get, Prices: prices, Ledger: st, HTTPClient: quickLookHTTPClient})
+	// The same model access and frame cache as the worker's: agentset builds both.
+	rt, err := agentset.Open(agentset.Options{
+		Store: st, Getenv: env.get, Objects: objects, Frames: frames, TempDir: framesDir, DefinitionOnly: true, HTTPClient: quickLookHTTPClient,
+	})
 	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "cfctl %s: %v\n", name, err)
 		return 2
 	}
-	svc, err := quicklook.New(quicklook.Config{
-		Store: st, Objects: objects,
-		Runner:  &media.SandboxRunner{Provider: provider, Image: cfg.MediaToolsImage, Limits: sandbox.Limits{CPU: 2, MemoryMB: 3072, Timeout: quicklook.FFmpegTimeout, PIDs: 512}},
-		TempDir: filepath.Join(root, "quicklook"),
-		Models:  factory, Router: router,
-	})
+	svc, err := quicklook.New(quicklook.Config{Store: st, Objects: objects, Frames: rt.Frames, Models: rt.Factory, Router: rt.Router})
 	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "cfctl %s: %v\n", name, err)
 		return 1
@@ -231,7 +193,7 @@ func cmdAssetsQuickLook(args []string, stdout, stderr io.Writer, lookup lookupEn
 	}
 
 	_, _ = fmt.Fprintf(out, "cfctl %s (CF_ENV=%s, LLM_MODE=%s, profile %s)\n  workspace %q (%s)\n  %d video(s)\n",
-		name, settings.Env, settings.Mode, router.DefaultProfile(), ws.Name, ws.ID, len(targets))
+		name, rt.Settings.Env, rt.Settings.Mode, rt.Router.DefaultProfile(), ws.Name, ws.ID, len(targets))
 	force := *all || wantAsset != nil
 	failed, totalMicros := 0, int64(0)
 	for _, a := range targets {

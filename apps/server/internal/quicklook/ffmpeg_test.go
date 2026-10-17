@@ -43,7 +43,11 @@ func TestFramesFromARealClip(t *testing.T) {
 		Provider: sandbox.NewLocal(sandbox.Policy{AllowedRoots: []string{root}}), Image: "unused-by-the-local-provider",
 		Limits: sandbox.Limits{CPU: 2, MemoryMB: 1024, Timeout: time.Minute, PIDs: 256},
 	}
-	r := newRig(t, rigOptions{runner: runner, tempDir: filepath.Join(root, "quicklook")})
+	work := filepath.Join(root, "frames")
+	if err := os.Mkdir(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r := newRig(t, rigOptions{runner: runner, tempDir: work})
 	r.objs.objs[storage.AssetPrefix(r.asset.WorkspaceID, r.asset.ID)+"proxy_720.mp4"] = mp4
 	r.store.derivs[0].SizeBytes = int64(len(mp4))
 
@@ -69,7 +73,7 @@ func TestFramesFromARealClip(t *testing.T) {
 		if lo, hi := int64(i)*3000, int64(i+1)*3000; f.AtMs < lo || f.AtMs >= hi {
 			t.Errorf("frame %d at %d ms is outside its quarter [%d, %d)", i, f.AtMs, lo, hi)
 		}
-		b := r.objs.objs[storage.AssetPrefix(r.asset.WorkspaceID, r.asset.ID)+f.Name]
+		b := r.objs.objs[f.Ref]
 		cfg, err := jpeg.DecodeConfig(bytes.NewReader(b))
 		if err != nil {
 			t.Fatalf("frame %d is not a JPEG: %v", i, err)
@@ -82,8 +86,8 @@ func TestFramesFromARealClip(t *testing.T) {
 		}
 	}
 
-	// The job directory is gone and the original was never part of this.
-	if left, _ := filepath.Glob(filepath.Join(root, "quicklook", "quicklook-*")); len(left) != 0 {
+	// The frame service's job directory is gone.
+	if left, _ := filepath.Glob(filepath.Join(work, "frames-*")); len(left) != 0 {
 		t.Errorf("job directories left behind: %v", left)
 	}
 }

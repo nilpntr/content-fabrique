@@ -414,7 +414,7 @@ func (m *metered) resolveBlocks(ctx context.Context, blocks []Block) ([]Block, e
 			if m.images == nil {
 				return nil, errors.New("llm: a request carries an image reference but no ImageResolver is configured")
 			}
-			mediaType, data, err := m.images.ResolveImage(ctx, b.Image.Ref)
+			mediaType, data, err := m.images.ResolveImage(WithWorkspace(ctx, m.ws), b.Image.Ref)
 			if err != nil {
 				return nil, fmt.Errorf("llm: resolving image reference: %w", err)
 			}

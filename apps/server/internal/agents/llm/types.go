@@ -20,6 +20,8 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+
+	"github.com/nilpntr/content-fabrique/internal/ids"
 )
 
 // Client talks to the Messages API. A Client is bound to one workspace and one stage by the factory.
@@ -308,7 +310,22 @@ func (r Response) ToolUses() []Block {
 	return out
 }
 
-// ImageResolver turns an Image.Ref into bytes. The runtime supplies one over R2 (assets and keyframes).
+// ImageResolver turns an Image.Ref into bytes. The runtime supplies one over R2 (assets and keyframes). The context of
+// ResolveImage carries the workspace of the client that sends the request (WorkspaceFromContext), so a resolver can refuse
+// a reference that is not that workspace's.
 type ImageResolver interface {
 	ResolveImage(ctx context.Context, ref string) (mediaType string, data []byte, err error)
+}
+
+type workspaceKey struct{}
+
+// WithWorkspace returns a context that carries the workspace a client is bound to.
+func WithWorkspace(ctx context.Context, ws ids.WorkspaceID) context.Context {
+	return context.WithValue(ctx, workspaceKey{}, ws)
+}
+
+// WorkspaceFromContext returns the workspace of the client whose request is being sent, and false outside one.
+func WorkspaceFromContext(ctx context.Context) (ids.WorkspaceID, bool) {
+	ws, ok := ctx.Value(workspaceKey{}).(ids.WorkspaceID)
+	return ws, ok && !ws.IsZero()
 }

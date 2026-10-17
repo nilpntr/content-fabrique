@@ -46,19 +46,26 @@ func TestRunLabelsTheClip(t *testing.T) {
 	// those, at the candidate times of a 12 s clip.
 	times := CandidateTimes(12_000)
 	for i, c := range []int{1, 4, 7, 10} {
-		if d.Frames[i].AtMs != times[c] || d.Frames[i].Name != FrameName(i) || d.Frames[i].Sharpness <= 0 {
-			t.Errorf("frame %d = %+v, want candidate %d at %d ms", i, d.Frames[i], c, times[c])
+		wantKey, _ := storage.FrameKey(r.asset.WorkspaceID, r.asset.ID, times[c], LongSide)
+		if d.Frames[i].AtMs != times[c] || d.Frames[i].Ref != wantKey || d.Frames[i].Sharpness <= 0 {
+			t.Errorf("frame %d = %+v, want candidate %d at %d ms (%s)", i, d.Frames[i], c, times[c], wantKey)
 		}
-		got := r.objs.objs[storage.AssetPrefix(r.asset.WorkspaceID, r.asset.ID)+FrameName(i)]
-		if !bytes.Equal(got, fixtureFrame(c)) {
+		if got := r.objs.objs[d.Frames[i].Ref]; !bytes.Equal(got, fixtureFrame(c)) {
 			t.Errorf("cached frame %d is not candidate %d", i, c)
 		}
 	}
-	// The frames are in the asset's own prefix and nowhere else.
+	// All twelve candidates are cached by the editor's frame service, in the asset's own frames/ prefix and nowhere else.
+	cached := 0
 	for _, k := range r.objs.keys() {
 		if !strings.HasPrefix(k, storage.AssetPrefix(r.asset.WorkspaceID, r.asset.ID)) {
 			t.Errorf("object %s is outside the asset's prefix", k)
 		}
+		if strings.HasPrefix(k, storage.FramePrefix(r.asset.WorkspaceID, r.asset.ID)) {
+			cached++
+		}
+	}
+	if cached != Frames*CandidatesPerFrame {
+		t.Errorf("%d cached frames, want %d candidates", cached, Frames*CandidatesPerFrame)
 	}
 
 	// One ffmpeg run for all twelve candidates, from the proxy only, at 512 px.
@@ -236,11 +243,13 @@ func TestSkipsWhatSucceededAndForceRunsAgainFromTheCachedFrames(t *testing.T) {
 		t.Errorf("%d ledger rows, want 2", len(rows))
 	}
 
-	// A missing cached frame means: cut them again.
-	delete(r.objs.objs, storage.AssetPrefix(r.asset.WorkspaceID, r.asset.ID)+FrameName(2))
+	// A cached frame that went missing is cut again, and only that one.
+	var d detail
+	_ = json.Unmarshal(r.store.snapshot().QuickLook, &d)
+	delete(r.objs.objs, d.Frames[2].Ref)
 	mustRun(t, r, Options{Force: true})
-	if r.runner.count() != 2 {
-		t.Errorf("ffmpeg ran %d times, want 2 after a cached frame went missing", r.runner.count())
+	if r.runner.count() != 2 || strings.Count(strings.Join(r.runner.calls[1].Args, " "), "-ss") != 1 {
+		t.Errorf("ffmpeg ran %d times (last run: %v), want one more run for the one missing frame", r.runner.count(), r.runner.calls[len(r.runner.calls)-1].Args)
 	}
 }
 
@@ -295,8 +304,9 @@ func TestFramesFailures(t *testing.T) {
 	t.Run("a proxy key outside the asset's prefix is not followed", func(t *testing.T) {
 		r := newRig(t, rigOptions{})
 		r.store.derivs[0].R2Key = "ws/" + ids.WorkspaceID{}.String() + "/assets/someone-elses/proxy_720.mp4"
-		if res := mustRun(t, r, Options{}); res.Reason != FailNoProxy || r.runner.count() != 0 {
-			t.Errorf("%+v, %d ffmpeg runs", res, r.runner.count())
+		_, err := r.svc.Run(context.Background(), r.asset.WorkspaceID, r.asset.ID, Options{})
+		if err == nil || r.runner.count() != 0 || r.api.total() != 0 {
+			t.Errorf("a proxy of another asset must not be followed: err %v, %d ffmpeg runs", err, r.runner.count())
 		}
 	})
 	t.Run("the tool fails", func(t *testing.T) {
@@ -347,11 +357,6 @@ func TestFramesFailures(t *testing.T) {
 			if f.AtMs < 0 || f.AtMs > short {
 				t.Errorf("frame at %d ms of a %d ms clip", f.AtMs, short)
 			}
-		}
-	})
-	t.Run("a sandbox output that is not a JPEG is ignored", func(t *testing.T) {
-		if _, ok := readOutput(t.TempDir() + "/missing.jpg"); ok {
-			t.Error("a missing file was accepted")
 		}
 	})
 }

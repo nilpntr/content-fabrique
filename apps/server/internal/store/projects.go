@@ -19,6 +19,7 @@ type (
 	ProjectListRow       = db.ListProjectsRow
 	ProjectAssetRow      = db.ListProjectAssetsRow
 	ProjectCatalogRow    = db.ListProjectCatalogAssetsRow
+	ProjectFootageRow    = db.ListProjectFootageRow
 	TimelineVersion      = db.TimelineVersion
 	TimelineVersionBrief = db.ListTimelineVersionsRow
 )
@@ -150,6 +151,10 @@ type NewTimelineVersion struct {
 	Summary    []string
 	AuthorKind string
 	AuthorID   string
+	// IdempotencyKey and Result are set for a version an agent's tool call made: the call's key (unique per project), and the
+	// JSON object the repeat of the call answers with. Empty for a person's edit.
+	IdempotencyKey string
+	Result         json.RawMessage
 }
 
 // ErrVersionConflict is returned by AddTimelineVersion when the project is no longer at the version the new one was made
@@ -181,7 +186,7 @@ func (s *Store) AddTimelineVersion(ctx context.Context, ws ids.WorkspaceID, proj
 		v, err = tx.q.InsertTimelineVersion(ctx, db.InsertTimelineVersionParams{
 			WorkspaceID: ws, ProjectID: project, Version: int32(in.Version), //nolint:gosec // range checked above
 			ParentVersion: parent, Spec: in.Spec, Ops: orEmptyArray(in.Ops), Diff: orEmptyArray(in.Diff), Summary: summary,
-			AuthorKind: in.AuthorKind, AuthorID: in.AuthorID,
+			AuthorKind: in.AuthorKind, AuthorID: in.AuthorID, IdempotencyKey: nilIfEmpty(in.IdempotencyKey), Result: nilIfEmptyJSON(in.Result),
 		})
 		if err != nil {
 			if errors.Is(mapErr(err), ErrConflict) {
@@ -235,4 +240,32 @@ func (s *Store) ListTimelineVersions(ctx context.Context, ws ids.WorkspaceID, pr
 	}
 	rows, err := s.q.ListTimelineVersions(ctx, db.ListTimelineVersionsParams{WorkspaceID: ws, ProjectID: project, Before: cursor, RowLimit: int32(min(limit, 1000))}) //nolint:gosec // capped
 	return rows, mapErr(err)
+}
+
+// ListProjectFootage returns the footage of a project as the editor agent sees it, in the creator's order: the ready, not
+// deleted assets with their library title and description, probed size and rotation, and whether they have sound.
+func (s *Store) ListProjectFootage(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID) ([]ProjectFootageRow, error) {
+	rows, err := s.q.ListProjectFootage(ctx, db.ListProjectFootageParams{WorkspaceID: ws, ProjectID: project})
+	return rows, mapErr(err)
+}
+
+// GetTimelineVersionByIdempotencyKey returns the version a tool call made, or ErrNotFound. This is how a retried call finds
+// the version it made the first time.
+func (s *Store) GetTimelineVersionByIdempotencyKey(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, key string) (TimelineVersion, error) {
+	v, err := s.q.GetTimelineVersionByIdempotencyKey(ctx, db.GetTimelineVersionByIdempotencyKeyParams{WorkspaceID: ws, ProjectID: project, IdempotencyKey: &key})
+	return v, mapErr(err)
+}
+
+// GetTimelineVersionByAuthor returns the latest version of the project that the author made, or ErrNotFound. The editor
+// agent's author id is its run's TypeID, so this says whether a run has made a version.
+func (s *Store) GetTimelineVersionByAuthor(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, authorKind, authorID string) (TimelineVersion, error) {
+	v, err := s.q.GetTimelineVersionByAuthor(ctx, db.GetTimelineVersionByAuthorParams{WorkspaceID: ws, ProjectID: project, AuthorKind: authorKind, AuthorID: authorID})
+	return v, mapErr(err)
+}
+
+func nilIfEmptyJSON(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	return raw
 }

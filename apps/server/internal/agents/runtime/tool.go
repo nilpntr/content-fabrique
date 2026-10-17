@@ -78,6 +78,13 @@ type RunContext struct {
 	artifact func(ctx context.Context, payload json.RawMessage) error
 }
 
+// WithArtifacts returns a RunContext whose Artifact calls go to sink instead of the run's events. It is for tests of tools,
+// which have no run to write to.
+func (rc RunContext) WithArtifacts(sink func(ctx context.Context, payload json.RawMessage) error) RunContext {
+	rc.artifact = sink
+	return rc
+}
+
 // Artifact records something the tool made (a timeline version, a render, a file) as an artifact event, for the UI. kind
 // names it; data is any JSON-encodable value, small, with images by reference. Calling it twice with the same
 // IdempotencyKey is the tool's business: the event is appended each time.
@@ -115,6 +122,10 @@ type Spec struct {
 	Description string
 	Schema      json.RawMessage
 	Mutates     bool
+	// NotStrict sends the tool without strict tool use. Strict is the default; a tool opts out only when its schema uses
+	// keywords the API does not support under strict (ranges, patterns, oneOf). The arguments are validated against the full
+	// schema before the tool runs either way.
+	NotStrict bool
 }
 
 type typedTool[In any] struct {
@@ -132,6 +143,7 @@ func (t *typedTool[In]) Name() string            { return t.spec.Name }
 func (t *typedTool[In]) Description() string     { return t.spec.Description }
 func (t *typedTool[In]) Schema() json.RawMessage { return t.spec.Schema }
 func (t *typedTool[In]) Mutates() bool           { return t.spec.Mutates }
+func (t *typedTool[In]) Strict() bool            { return !t.spec.NotStrict }
 
 func (t *typedTool[In]) Run(ctx context.Context, rc RunContext, input json.RawMessage) (Result, error) {
 	var in In
@@ -170,7 +182,15 @@ func NewRegistry(tools ...Tool) (*Registry, error) {
 			return nil, fmt.Errorf("runtime: tool %q has no description", name)
 		}
 		schema := t.Schema()
-		if err := checkStrictObject(schema); err != nil {
+		strict := true
+		if st, ok := t.(interface{ Strict() bool }); ok {
+			strict = st.Strict()
+		}
+		check := checkStrictObject
+		if !strict {
+			check = checkTopObject // the API does not hold a non-strict schema to the closed-object rule
+		}
+		if err := check(schema); err != nil {
 			return nil, fmt.Errorf("runtime: tool %q: %w", name, err)
 		}
 		doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(schema))
@@ -189,9 +209,25 @@ func NewRegistry(tools ...Tool) (*Registry, error) {
 		r.by[name] = i
 		r.tools = append(r.tools, t)
 		r.sch = append(r.sch, compiled)
-		r.defs = append(r.defs, llm.Tool{Name: name, Description: t.Description(), InputSchema: schema, Strict: true})
+		r.defs = append(r.defs, llm.Tool{Name: name, Description: t.Description(), InputSchema: schema, Strict: strict})
 	}
 	return r, nil
+}
+
+// checkTopObject checks that the schema is an object schema that is closed at the top: the arguments of a non-strict tool may
+// not carry properties the schema does not name. What is inside it may use any construct the validator understands.
+func checkTopObject(raw json.RawMessage) error {
+	var root map[string]any
+	if err := json.Unmarshal(raw, &root); err != nil || root == nil {
+		return errors.New("the schema must be a JSON object")
+	}
+	if typ, _ := root["type"].(string); typ != "object" {
+		return errors.New(`the schema must have "type": "object" at the top`)
+	}
+	if ap, ok := root["additionalProperties"].(bool); !ok || ap {
+		return errors.New("the top-level object must set additionalProperties to false")
+	}
+	return nil
 }
 
 // checkStrictObject checks that the schema is an object schema and that every object in it (under properties, items, $defs
@@ -250,7 +286,8 @@ func pathOrRoot(p string) string {
 	return "the object at " + p
 }
 
-// Definitions returns the tools as the API takes them, in registration order, all strict.
+// Definitions returns the tools as the API takes them, in registration order. A tool is strict unless it says otherwise (a
+// Strict method that returns false, as Spec.NotStrict does).
 func (r *Registry) Definitions() []llm.Tool { return append([]llm.Tool(nil), r.defs...) }
 
 // Get returns the tool with this name.
