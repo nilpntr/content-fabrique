@@ -176,6 +176,9 @@ func BuildPlan(in planArgs, footage map[string]bool, f Features) (Plan, error) {
 	if in.TempoBPM != 0 && (in.TempoBPM < MinTempoBPM || in.TempoBPM > MaxTempoBPM) {
 		return fail("tempo_bpm is %d; use 0 for a video with no beat grid, or %d to %d (120 to 128 is the default for a short video)", in.TempoBPM, MinTempoBPM, MaxTempoBPM)
 	}
+	if in.TempoBPM == 0 && typeLimits[p.ContentType].beatGrid {
+		return fail("tempo_bpm 0 means no beat grid, which a %s video has: use 120 to 128 so the cuts land on the beat (only talking and tutorial videos, which follow speech, have none)", p.ContentType)
+	}
 	p.TempoBPM = in.TempoBPM
 	if !slices.Contains(PlanPaces, in.Pace) {
 		return fail("pace %q is not one of %s", in.Pace, strings.Join(PlanPaces, ", "))

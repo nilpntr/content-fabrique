@@ -96,13 +96,20 @@ func tidy(s string) string {
 // model, which decides. It returns "" unless one type is a clear winner. The text is the creator's, so it is only ever counted
 // for words, never read as an instruction.
 func LikelyContentType(text string) string {
-	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) && r != '-' })
-	padded := " " + strings.Join(words, " ") + " " // whole words only: "day in" is not in "today in"
+	// Whole words only ("day in" is not in "today in"), and a phrase does not run across a clause: the text is cut at punctuation and
+	// line ends first.
+	var clauses []string
+	for _, clause := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return strings.ContainsRune(".,;:!?()\n\r\"", r) }) {
+		words := strings.FieldsFunc(clause, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '-' })
+		clauses = append(clauses, " "+strings.Join(words, " ")+" ")
+	}
 	best, bestScore, second := "", 0, 0
 	for _, t := range ContentTypes {
 		score := 0
 		for _, kw := range typeKeywords[t] {
-			score += strings.Count(padded, " "+kw+" ") + strings.Count(padded, " "+kw+"s ")
+			for _, padded := range clauses {
+				score += strings.Count(padded, " "+kw+" ") + strings.Count(padded, " "+kw+"s ")
+			}
 		}
 		switch {
 		case score > bestScore:

@@ -396,7 +396,7 @@ func (q *Queries) ListAssetShots(ctx context.Context, arg ListAssetShotsParams) 
 
 const listAssetSpans = `-- name: ListAssetSpans :many
 SELECT asset_id, kind, start_ms, end_ms FROM moments
-WHERE workspace_id = $1 AND asset_id = ANY($2::uuid[]) AND source = 'analysis' AND kind IN ('rep', 'hold', 'dead')
+WHERE workspace_id = $1 AND asset_id = ANY($2::uuid[]) AND kind IN ('rep', 'hold', 'dead')
 ORDER BY asset_id, start_ms
 `
 

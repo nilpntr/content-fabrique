@@ -73,6 +73,7 @@ func TestBuildPlanRefusesWhatIsNotValid(t *testing.T) {
 		{"beats", func(p *planArgs) { p.Shots[1].Beats = 0 }, "shot 2: beats is 0"},
 		{"too many beats", func(p *planArgs) { p.Shots[1].Beats = 65 }, "shot 2: beats is 65"},
 		{"effect", func(p *planArgs) { p.Shots[2].Effect = "glitch" }, "shot 3: effect"},
+		{"no grid for a workout", func(p *planArgs) { p.TempoBPM = 0 }, "tempo_bpm 0 means no beat grid"},
 		{"foreign asset", func(p *planArgs) { p.Shots[0].AssetID = assetB }, "not one of this project's clips"},
 	}
 	for _, c := range cases {
@@ -209,8 +210,9 @@ func TestContentTypeHint(t *testing.T) {
 		"A day in Lisbon, my weekend trip vlog":                         TypeVlog,
 		"Rant to camera, my opinion on podcasts, story time":            TypeTalking,
 		"Some clips": "",
-		"Clips from today in the gym, a set of reps": TypeWorkout, // "day in" is not "today in"
-		"workout and unboxing and recipe":            "",
+		"Clips from today in the gym, a set of reps":       TypeWorkout, // "day in" is not "today in"
+		"What a great day. In the gym, bench press, squat": TypeWorkout, // a phrase does not run across a sentence
+		"workout and unboxing and recipe":                  "",
 	}
 	for text, want := range cases {
 		if got := LikelyContentType(text); got != want {

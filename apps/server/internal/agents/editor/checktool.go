@@ -278,7 +278,7 @@ func (d Deps) checkNth(ctx context.Context, rc runtime.RunContext) (nth int, see
 			if json.Unmarshal(art.Data, &c) != nil {
 				continue
 			}
-			if art.ToolUseID == rc.ToolUseID {
+			if rc.ToolUseID != "" && art.ToolUseID == rc.ToolUseID {
 				return c.Nth, true
 			}
 			calls = max(calls, c.Nth)
@@ -315,6 +315,9 @@ type artifact struct {
 func runArtifacts(ctx context.Context, st EventSource, ws ids.WorkspaceID, run uuid.UUID, kind string) []artifact {
 	events, err := st.AgentArtifactEvents(ctx, ws, run, kind)
 	if err != nil {
+		// The record of a run is rebuilt from its events when this worker has none; a read that fails leaves the gates asking the model
+		// again (harmless) and the counts starting over, so it is said.
+		slog.WarnContext(ctx, "editor: the run's artifact events could not be read", "run_id", run.String(), "kind", kind, "error", err)
 		return nil
 	}
 	var out []artifact
