@@ -44,6 +44,8 @@ func (r *run) serviceJobs() []job {
 	jobs = append(jobs,
 		r.postgres("postgres DATABASE_URL", "DATABASE_URL", false),
 		r.postgres("postgres DATABASE_DIRECT_URL", "DATABASE_DIRECT_URL", true),
+		// What `cfctl migrate` connects with. Doctor only proves it connects; the role split itself is tested in internal/store.
+		r.postgres("postgres DATABASE_MIGRATE_URL", "DATABASE_MIGRATE_URL", false),
 		r.storage(),
 		r.cloudflare(),
 	)

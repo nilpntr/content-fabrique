@@ -85,10 +85,22 @@ Tokens. Apart from the tunnel token, which `cfctl bootstrap` makes, you create e
 
 ### 3.4 Postgres
 
-- **Local:** docker compose with the image `pgvector/pgvector:pg17` △ and the `POSTGRES_*` values. Nothing to create, and all three database URLs point at the same local database.
-- **Staging and production:** PlanetScale Postgres. Create one database per environment in an EU region (the research couldn't confirm EU regions, so check when you create it) and **two roles** △:
-  - The **app role** can `SELECT`, `INSERT`, `UPDATE` and `DELETE` on the app tables and use the sequences. It has no DDL and no superuser. Its **pooled** and **direct** connection strings go in `DATABASE_URL` and `DATABASE_DIRECT_URL`. Request traffic uses the pooled URL, and the SSE broker's `LISTEN/NOTIFY` uses the direct one, because transaction-mode poolers don't support `LISTEN`.
-  - The **migrate role** owns the schema, so it can create, alter and drop. Its direct string goes in `DATABASE_MIGRATE_URL`, which only `cfctl migrate` reads, as a release step ([architecture §12](03-architecture.md#12-deployment-environments-observability)). It also migrates River's tables, and each migration grants the app role its rights on the new tables. It never reaches an app server, so a leaked server file or an injected query can't change the schema.
+- **Local:** docker compose with the image `pgvector/pgvector:pg17` △ and the `POSTGRES_*` values. Nothing to create, and all three database URLs point at the same local database and the same user (`cf`, a superuser), so the role split below does not apply locally. `task migrate` (or `task dev`, which runs it) creates the tables and, harmlessly, the unused group role `cf_app`.
+- **Staging and production:** PlanetScale Postgres. Create one database per environment in an EU region (the research couldn't confirm EU regions, so check when you create it) and **two login roles** △:
+  - The **app role** can `SELECT`, `INSERT`, `UPDATE` and `DELETE` on the app tables and use the sequences. It has no DDL and no superuser. Its **pooled** and **direct** connection strings go in `DATABASE_URL` and `DATABASE_DIRECT_URL`. Request traffic uses the pooled URL, and the SSE broker's `LISTEN/NOTIFY` uses the direct one, because transaction-mode poolers don't support `LISTEN`. The Go pool is set up for such a pooler (it prepares no named statements).
+  - The **migrate role** owns the schema, so it can create, alter and drop. Its direct string goes in `DATABASE_MIGRATE_URL`, which only `cfctl migrate` reads, as a release step ([architecture §12](03-architecture.md#12-deployment-environments-observability)). It also migrates River's tables. It never reaches an app server, so a leaked server file or an injected query can't change the schema.
+- **How the app role gets its rights (P0-05).** The migrations never name your login roles. They grant the rights to a **group role `cf_app`**, and the app login role is a member of it. Every migration ends with a `GRANT SELECT, INSERT, UPDATE, DELETE` on the tables it creates (and `USAGE, SELECT` on any sequence), nothing more, so the app role cannot `TRUNCATE`, create, alter or drop. The first migration also revokes `CREATE` on schema `public` from everyone else. The one-time setup, as an administrator, in `psql`:
+
+  ```sql
+  -- 1. Only if the migrate role lacks CREATEROLE; otherwise the first migration creates cf_app itself.
+  CREATE ROLE cf_app NOLOGIN;
+  -- 2. Always: make the app login role a member. Replace the name with the app role you created.
+  GRANT cf_app TO <app login role>;
+  ```
+
+  If the group role is missing and the migrate role cannot create it, `cfctl migrate up` stops in the first migration with a message that says exactly this, and changes nothing. The migrate role must be able to create objects in schema `public` (on Postgres 15 and later that means owning the database) and to run `REVOKE` on it. △ Whether PlanetScale's role UI offers `CREATEROLE`, group roles or membership wasn't checked: if not, run the two statements on its admin connection.
+- **Run the migrations:** `task migrate` (up; the local `.env`), `task migrate -- status`, `task migrate -- down` (one step) or `task migrate -- down --to 0` (everything), `task migrate -- redo`. For staging: `task migrate -- --env-file .env.staging up`. The same commands work without `task`: `cd apps/server && go run ./cmd/cfctl migrate …`, or a built `cfctl`. It prints each migration and the target as `host/database`, never the URL or the password.
+- **Check the split** after the first staging migration: connect with the app role's `DATABASE_URL` and run `INSERT`, `SELECT`, `UPDATE` and `DELETE` on `workspaces` (all work) and `CREATE TABLE x (id int);` (fails with `permission denied for schema public`). The test `TestRoleSplit` in `internal/store` proves the same on a local Postgres with a separate migrate and app role, on every CI run.
 - Cost: from $5 a month per database ([D-01](05-decisions.md#d-01-database-postgres-from-day-one-skip-d1-for-the-go-backend)).
 
 ### 3.5 Servers, CI and GitHub
@@ -169,7 +181,7 @@ Grant exactly this and nothing more. The same instruction sits above each token 
 
 ## 5. Tools to install
 
-Go 1.24 or newer (the Anthropic Go SDK needs it ◐), Node 22 LTS and bun 1.4 or newer (the JS package manager), Docker with compose, `wrangler` 4.141 or newer (the Sandbox base image needs it locally ◐), `cloudflared`, `sqlc`, `goose` or Atlas, `oapi-codegen`, `task` and `openssl` (only for making the generated secrets by hand: `task env:init` doesn't use it). ffmpeg 8 lives in the `media-tools` image. gVisor (`runsc`) is needed only on the Linux servers ([D-08](05-decisions.md#d-08-sandbox-pluggable-interface-default-provider)).
+Go 1.24 or newer (the Anthropic Go SDK needs it ◐), Node 22 LTS and bun 1.4 or newer (the JS package manager), Docker with compose, `wrangler` 4.141 or newer (the Sandbox base image needs it locally ◐), `cloudflared`, `oapi-codegen`, `task` and `openssl` (only for making the generated secrets by hand: `task env:init` doesn't use it). `sqlc` and `goose` need no install: they are pinned as `tool` dependencies in `apps/server/go.mod` and run as `go tool sqlc generate` (or `task gen:sql`) and `go tool goose`. ffmpeg 8 lives in the `media-tools` image. gVisor (`runsc`) is needed only on the Linux servers ([D-08](05-decisions.md#d-08-sandbox-pluggable-interface-default-provider)).
 
 ### Running it locally (P0-02)
 
@@ -189,12 +201,13 @@ task down                # stop Postgres and MinIO (the data stays); `task reset
 | Postgres | `localhost:5432` | `compose.yaml`, `pgvector/pgvector:pg17`, `POSTGRES_*`, volume `postgres-data` |
 | MinIO | S3 API `R2_ENDPOINT` (http://localhost:9000), console http://localhost:9001 | `compose.yaml`, volume `minio-data` |
 
-- **`task dev` steps:** `task install`, `.env` creation if it is missing (`task env:init`: copies `.env.example`, fills the generated secrets; run it yourself to fill them in an existing file), `task up` (`docker compose up --wait` for Postgres and MinIO, then the one-shot `minio-init` that creates the `R2_BUCKET` bucket and is safe to run again), then `scripts/dev.sh`, which reads `.env`, builds the api and worker into `.dev/bin/` and runs the three processes. If one of them exits, the script stops the other two.
+- **`task dev` steps:** `task install`, `.env` creation if it is missing (`task env:init`: copies `.env.example`, fills the generated secrets; run it yourself to fill them in an existing file), `task up` (`docker compose up --wait` for Postgres and MinIO, then the one-shot `minio-init` that creates the `R2_BUCKET` bucket and is safe to run again), then `task migrate` (the database migrations, [§3.4](#34-postgres)), then `scripts/dev.sh`, which reads `.env`, builds the api and worker into `.dev/bin/` and runs the three processes. If one of them exits, the script stops the other two.
 - **MinIO.** MinIO no longer publishes public images, so `compose.yaml` uses Chainguard's `cgr.dev/chainguard/minio`, pinned by the same digest as `.github/workflows/env.yml` (change both together). Its root user and password are `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`, and the console accepts the same pair. The bucket is created with the AWS CLI image (`amazon/aws-cli`, pinned by digest), not `mc`.
 - **Which value wins.** Compose lets a variable exported in your shell override `.env`, while `scripts/dev.sh` lets a non-empty `.env` value win (the same rule as `cfctl doctor`). So do not export `POSTGRES_*`, `R2_*` or the other names from `.env.example` in your shell: the services and the processes would disagree. `DATABASE_URL` and the two other database URLs repeat the `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` values, so change them together.
 - Compose publishes the ports on `127.0.0.1` only, since the default credentials are `cf:cf` and `minioadmin`. A Postgres already running on your machine's port 5432 has to be stopped first, because `DATABASE_URL` in `.env.example` points there.
+- `/readyz` of the api and the worker has a `postgres` check (a pool ping with `DATABASE_URL`): `{"status":"ok","checks":{"postgres":"ok"}}`, and 503 while Postgres is down. Both processes need `DATABASE_URL` to start.
 - With the services up, `task doctor` reports Postgres and object storage as ok; Anthropic and Clerk stay missing until you fill the `[YOU-now]` lines.
-- Other tasks: `task build`, `task test`, `task install`, `task up`. `task` alone lists them.
+- Other tasks: `task build`, `task test` (the database tests start Postgres in Docker and skip without it), `task install`, `task up`, `task migrate`, `task gen:sql`. `task` alone lists them.
 
 ## 6. Checking it
 
@@ -223,7 +236,7 @@ It prints nothing when the three start values are present.
 
 | Service | Call |
 |---|---|
-| Postgres | `SELECT 1` on both URLs, and a `LISTEN` on the direct one |
+| Postgres | `SELECT 1` on the three URLs, and a `LISTEN` on the direct one |
 | Object storage | put, get and delete a one-byte object with the credentials against `R2_ENDPOINT`, which proves the EU endpoint and signing |
 | Cloudflare token | the token-verify call, then list the EU R2 buckets and the AI Gateways △ |
 | Anthropic and model names | a token-count request for each model in the active profile by its native ID (`claude-opus-5-5`), with no generation cost. When `CF_AI_API_TOKEN` is set, a one-token request for the same models by their Cloudflare names (`anthropic/claude-opus-5.5`) on the REST API's Anthropic-compatible `/ai/v1/messages` △ |

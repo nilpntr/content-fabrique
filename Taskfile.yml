@@ -15,6 +15,7 @@ tasks:
       - task: install
       - task: env:ensure
       - task: up
+      - task: migrate:dev
       # Loads .env, builds the api and worker, runs the three processes and stops them together (see the script).
       - ./scripts/dev.sh
 
@@ -44,6 +45,27 @@ tasks:
     cmds:
       - docker compose down --volumes
 
+  # ── Database ────────────────────────────────────────────────────────────────
+
+  migrate:
+    desc: "Run the database migrations with DATABASE_MIGRATE_URL (default: up). Examples: task migrate -- status | task migrate -- down --to 0 | task migrate -- --env-file .env.staging up"
+    dir: apps/server
+    cmds:
+      - go run ./cmd/cfctl migrate {{if .CLI_ARGS}}{{.CLI_ARGS}}{{else}}up{{end}}
+
+  # `task dev` migrates the local database on every start; the arguments of `task dev` are not passed on.
+  migrate:dev:
+    internal: true
+    dir: apps/server
+    cmds:
+      - go run ./cmd/cfctl migrate up
+
+  gen:sql:
+    desc: Regenerate the sqlc code (apps/server/internal/store/db) from the migrations and queries. Commit the result
+    dir: apps/server
+    cmds:
+      - go tool sqlc generate
+
   # ── Build and test ──────────────────────────────────────────────────────────
 
   install:
@@ -58,7 +80,7 @@ tasks:
       - cd apps/server && go build ./...
 
   test:
-    desc: Run the web tests and the Go tests
+    desc: Run the web tests and the Go tests (the database tests need Docker and skip without it)
     cmds:
       - bun run --filter @cf/web typecheck
       - bun run --filter @cf/web test

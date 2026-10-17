@@ -103,7 +103,8 @@ apps/
       config/ telemetry/   # env config, slog + OpenTelemetry
       httpapi/             # handlers, middleware (auth, tenancy, rate limit), OpenAPI glue
       auth/                # Clerk JWT verification, Clerk webhooks (Svix)
-      store/               # pgx pool, sqlc queries, migrations
+      store/               # pgx pool, repository functions, goose migrations (migrations/), sqlc queries (queries/) and generated code (db/)
+      ids/                 # TypeID <-> UUIDv7 helpers and the typed IDs (WorkspaceID, UserID), D-24
       jobs/                # River job args, worker registration, periodic jobs
       storage/             # R2 (S3 API) client, presign, multipart, key layout
       media/               # ffprobe/ffmpeg wrappers: proxies, sprites, waveforms, keyframes
@@ -185,6 +186,8 @@ erDiagram
 | `credit_ledger` | `workspace_id`, `kind` (grant, spend, expire, refund, top_up), `credits`, `action` (first_edit, revision, ideation…), `usage_ref`, `created_at`. Append-only. |
 | `integrations` | `provider` (tiktok), `external_account_id`, `scopes`, encrypted tokens, `expires_at` |
 | `exports` | `render_id`, `destination` (download, tiktok_draft), `status`, `external_id` |
+
+**Schema v1 (P0-05).** The first four tables are `workspaces` (`clerk_org_id` unique), `users` (`clerk_user_id` unique), `workspace_members` (primary key on both ids, `ON DELETE CASCADE` from either side) and `creator_profiles` (one row per workspace, created on first save). They have no id defaults, because Go generates the UUIDv7 keys, and a trigger keeps `updated_at` current. `plan` and `region` are free text with defaults (`free`, `eu`); `billing_mode` and `role` are check-constrained. Migrations are goose files embedded in the binary and run by `cfctl migrate` as the schema-owning role. Each one grants the group role `cf_app` (which the app's login role belongs to) `SELECT, INSERT, UPDATE, DELETE` on its new tables and nothing else ([setup guide §3.4](06-setup-and-credentials.md#34-postgres)). sqlc compiles `store/queries/*.sql` against these migrations into `store/db`, using the typed IDs for key columns.
 
 **Tenancy.** Every query goes through repository functions that take a `WorkspaceID` resolved from the verified token, never from user input. Integration tests assert that cross-tenant reads fail. R2 keys are prefixed by workspace: `ws/{workspace_id}/assets/{asset_id}/original`, `…/proxy_720.mp4`, `…/renders/{render_id}.mp4`.
 

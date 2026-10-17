@@ -1,0 +1,78 @@
+# Database checks (P0-05). The main CI is P0-03's ci.yml; the director folds this file into it later.
+name: db
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # `cfctl migrate` against a real Postgres: up, down to 0, up again. The sqlc output must match what is committed.
+  migrate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: cf
+          POSTGRES_PASSWORD: cf
+          POSTGRES_DB: cf
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cf -d cf"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # The local default of .env.example. cfctl reads it from the process environment: there is no .env in CI.
+      DATABASE_MIGRATE_URL: postgres://cf:cf@localhost:5432/cf?sslmode=disable
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/server/go.mod
+          cache-dependency-path: apps/server/go.sum
+
+      - name: Build cfctl
+        working-directory: apps/server
+        run: go build -o "$RUNNER_TEMP/cfctl" ./cmd/cfctl
+
+      - name: cfctl migrate up
+        run: '"$RUNNER_TEMP/cfctl" migrate up'
+      - name: cfctl migrate down to 0
+        run: '"$RUNNER_TEMP/cfctl" migrate down --to 0'
+      - name: cfctl migrate up again
+        run: '"$RUNNER_TEMP/cfctl" migrate up'
+      - name: cfctl migrate status
+        run: '"$RUNNER_TEMP/cfctl" migrate status'
+
+      # sqlc is pinned by a `tool` directive in go.mod, so this needs no install.
+      - name: sqlc drift check
+        working-directory: apps/server
+        run: |
+          go tool sqlc generate
+          git diff --exit-code -- internal/store/db
+          test -z "$(git status --porcelain -- internal/store/db)" || { git status --porcelain -- internal/store/db; exit 1; }
+
+  # The repository tests, the up/down/up round trip and the migrate/app role split, on Postgres in Docker (testcontainers).
+  # In CI (CI=true) a missing Docker fails these tests instead of skipping them.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/server/go.mod
+          cache-dependency-path: apps/server/go.sum
+      - name: go test (store, cfctl)
+        working-directory: apps/server
+        run: go test -race -count=1 ./internal/store/... ./internal/ids/... ./cmd/cfctl/...
