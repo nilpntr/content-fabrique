@@ -7,6 +7,11 @@
 # not root. The root filesystem is meant to run read-only: /work (the job's output mount) and /tmp (a tmpfs) are the only
 # places a job writes.
 #
+# Two labels (last lines): org.contentfabrique.fonts=1 says the image holds the fonts (the worker warns about one without it;
+# anything that removes the fonts must drop it), and org.contentfabrique.src-hash is the git tree hash of this directory at the
+# time of the build (scripts/media-image.sh passes it as SRC_HASH), which `task dev` compares with the tree it has now to decide
+# whether the local image is stale. The ARG sits right before the label, so a new hash changes the last layer only.
+#
 # Reproducibility: the base image is pinned by digest, Debian packages come from a dated snapshot.debian.org archive, and
 # the ffmpeg and whisper.cpp sources are checked against pinned SHA-256 values. To bump: change the ARGs below together and rebuild.
 #
@@ -129,7 +134,10 @@ ENV PATH=/usr/local/bin \
     TMPDIR=/tmp
 USER 10001:10001
 WORKDIR /work
+ARG SRC_HASH=unknown
 LABEL org.opencontainers.image.title="media-tools" \
       org.opencontainers.image.description="ffmpeg 8, ffprobe and whisper.cpp for Content Fabrique sandboxes" \
       org.opencontainers.image.licenses="GPL-2.0-or-later" \
-      org.opencontainers.image.source="https://github.com/nilpntr/content-fabrique"
+      org.opencontainers.image.source="https://github.com/nilpntr/content-fabrique" \
+      org.contentfabrique.fonts="1" \
+      org.contentfabrique.src-hash="${SRC_HASH}"

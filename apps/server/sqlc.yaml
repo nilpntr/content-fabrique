@@ -35,6 +35,10 @@ sql:
             go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "TimelineID" }
           - column: "renders.id"
             go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "RenderID" }
+          - column: "annotations.id"
+            go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "AnnotationID" }
+          - column: "annotations.parent_id"
+            go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "AnnotationID" }
           - column: "projects.created_by"
             go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "UserID" }
           - column: "uploads.id"

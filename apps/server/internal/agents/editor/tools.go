@@ -58,11 +58,19 @@ type Deps struct {
 	Frames   FrameSource
 	// Preview renders previews; nil means UnavailablePreviews.
 	Preview PreviewRenderer
+	// Comments is where the creator's open comments come from (and where the end of a run reports to); nil means a run has none.
+	Comments CommentSource
+
+	// previews records which versions a run has previewed (the gate on finish, gate.go). withState sets it.
+	previews *previewLog
 }
 
 func (d Deps) check() error {
 	if d.Projects == nil || d.Store == nil || d.Frames == nil {
 		return errors.New("editor: the projects service, the store and the frame source are required")
+	}
+	if d.previews == nil {
+		return errors.New("editor: the preview record is missing: build the agent with NewAgent")
 	}
 	return nil
 }
@@ -103,6 +111,7 @@ func Tools(d Deps) ([]runtime.Tool, error) {
 		{ToolListFootage, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.listFootage) }},
 		{ToolViewClip, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.viewClip) }},
 		{ToolGetTimeline, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getTimeline) }},
+		{ToolGetComments, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getComments) }},
 		{ToolEditTimeline, true, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.editTimeline) }},
 		{ToolRenderPreview, true, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.renderPreview) }},
 		{ToolFinish, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.finish) }},
@@ -412,13 +421,21 @@ func (d Deps) editTimeline(ctx context.Context, rc runtime.RunContext, in editAr
 	if v.ParentVersion != nil {
 		parent = int(*v.ParentVersion)
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "Applied. The timeline is now %s (it was version %d).\n", timelineLine(int(v.Version), spec), parent)
+	// The summary names clips by the creator's titles and quotes their texts, so it goes in a data block, as it does in get_timeline
+	// and in a conflict; the lines we write ourselves stay outside it. (The stored summary stays plain for the UI.)
+	var blocks []llm.Block
+	head := fmt.Sprintf("Applied. The timeline is now %s (it was version %d).", timelineLine(int(v.Version), spec), parent)
 	if len(v.Summary) > 0 {
-		b.WriteString("Changes:\n")
-		for _, s := range v.Summary {
-			b.WriteString("- " + s + "\n")
+		lines := make([]string, len(v.Summary))
+		for i, s := range v.Summary {
+			lines[i] = "- " + s
 		}
+		blocks = append(blocks, llm.TextBlock(head+"\nChanges:"), runtime.UntrustedBlock("timeline_summary", strings.Join(lines, "\n")))
+		head = ""
+	}
+	var b strings.Builder
+	if head != "" {
+		b.WriteString(head + "\n")
 	}
 	if len(edit.Created) > 0 {
 		b.WriteString("New items:")
@@ -437,7 +454,10 @@ func (d Deps) editTimeline(ctx context.Context, rc runtime.RunContext, in editAr
 			return runtime.Result{}, fmt.Errorf("record the version: %w", err)
 		}
 	}
-	return runtime.Text(strings.TrimRight(b.String(), "\n")), nil
+	if rest := strings.TrimRight(b.String(), "\n"); rest != "" {
+		blocks = append(blocks, llm.TextBlock(rest))
+	}
+	return runtime.Result{Content: blocks}, nil
 }
 
 // conflict is the message for an edit based on a version that is no longer the current one: what the timeline is now and what
@@ -472,28 +492,39 @@ func (d Deps) renderPreview(ctx context.Context, rc runtime.RunContext, _ noArgs
 	}
 	v := int(*det.Project.CurrentTimelineVersion)
 
+	// Whatever goes wrong from here on is a failed preview for this version, and counts toward letting the model finish without
+	// one; a run that is being stopped (ctx) is not the renderer's failure.
+	fail := func(err error) error {
+		if ctx.Err() == nil {
+			d.previews.failed(rc.RunID, v, 1)
+		}
+		return err
+	}
 	waitCtx, cancel := context.WithTimeout(ctx, previewWait)
 	defer cancel()
 	sheet, dur, err := d.preview().RenderAndWait(waitCtx, ws, pid, v, rc.RunID)
 	switch {
 	case errors.Is(err, ErrPreviewUnavailable):
+		d.previews.failed(rc.RunID, v, maxPreviewFailures) // nothing to wait for: finish no longer needs a preview of this version
 		return runtime.Result{}, runtime.UserErrorf("previews are not available yet, so there is no contact sheet to look at. Check your work with get_timeline instead (its issues and its length), and carry on")
 	case err != nil && ctx.Err() == nil && waitCtx.Err() != nil:
+		d.previews.failed(rc.RunID, v, 1)
 		return runtime.Result{}, runtime.UserErrorf("the preview did not finish within %d seconds. Check your work with get_timeline instead, or try render_preview again later", int(previewWait.Seconds()))
 	case err != nil:
-		return runtime.Result{}, fmt.Errorf("render_preview: %w", err)
+		return runtime.Result{}, fail(fmt.Errorf("render_preview: %w", err))
 	}
 	if _, err := CheckImageRef(ws, string(sheet)); err != nil {
-		return runtime.Result{}, fmt.Errorf("render_preview: contact sheet reference: %w", err)
+		return runtime.Result{}, fail(fmt.Errorf("render_preview: contact sheet reference: %w", err))
 	}
 	vd, perr := d.Projects.Version(ctx, actor(ws), pid, v)
 	if perr != nil {
-		return runtime.Result{}, projectErr(perr)
+		return runtime.Result{}, fail(projectErr(perr))
 	}
 	spec, err := timeline.Parse(vd.Version.Spec)
 	if err != nil {
-		return runtime.Result{}, fmt.Errorf("parse stored spec: %w", err)
+		return runtime.Result{}, fail(fmt.Errorf("parse stored spec: %w", err))
 	}
+	d.previews.previewed(rc.RunID, v)
 	return runtime.Result{Content: []llm.Block{
 		llm.TextBlock(fmt.Sprintf("Preview of version %d: the video is %d ms (%s) long. The contact sheet below shows frames from the whole video, each labelled with its time. Where the clips play:\n%s",
 			v, int64(dur), secs2(int64(dur)), timeMap(spec, maxTimeMapLines))),
@@ -531,6 +562,9 @@ func (d Deps) finish(ctx context.Context, rc runtime.RunContext, in finishArgs) 
 	switch {
 	case err == nil:
 		version = made.Version
+		if msg := d.previewGate(rc.RunID, int(made.Version)); msg != "" {
+			return runtime.Errorf("%s", msg), nil
+		}
 	case !errors.Is(err, store.ErrNotFound):
 		return runtime.Result{}, fmt.Errorf("look for the run's versions: %w", err)
 	case det.Project.CurrentTimelineVersion == nil:

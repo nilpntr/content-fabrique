@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/config"
@@ -92,16 +93,36 @@ func newRenderPipeline(cfg config.Config, st *store.Store, objects *storage.Clie
 	})
 }
 
+// fontsLabel is the label the media-tools Dockerfile sets when the image holds the title and caption fonts (/usr/share/fonts/cf).
+// An image built before P3-04 lacks it, and every render with text on it would fail.
+const fontsLabel = "org.contentfabrique.fonts"
+
+// imageHasFonts reads the inspect output of imageInspectFormat: the image id, then the value of the fonts label.
+func imageHasFonts(inspectOutput string) bool {
+	f := strings.Fields(inspectOutput)
+	return len(f) >= 2 && f[1] == "1"
+}
+
+// imageInspectFormat prints the image id and the fonts label ("<no value>" when the image has none).
+const imageInspectFormat = `{{.Id}} {{index .Config.Labels "` + fontsLabel + `"}}`
+
 // warnIfImageMissing logs when a container provider is selected and the media-tools image is not on this machine: the
-// sandbox never pulls at job time, so every ingest would fail until the image is built or loaded.
+// sandbox never pulls at job time, so every ingest would fail until the image is built or loaded. It also logs when the image
+// is there but was built before the fonts were added to it (no fonts label), because renders with text would fail then.
 func warnIfImageMissing(ctx context.Context, cfg config.Config, logger *slog.Logger) {
 	if cfg.MediaSandboxProvider == config.SandboxLocal {
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if err := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "{{.Id}}", cfg.MediaToolsImage).Run(); err != nil { // #nosec G204 -- the image name is configuration
-		logger.Warn("the media-tools image is not available to Docker; asset ingests will fail until it is built (docker build -t media-tools:dev packages/media-tools) or MEDIA_TOOLS_IMAGE names an image that exists",
+	out, err := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", imageInspectFormat, cfg.MediaToolsImage).Output() // #nosec G204 -- the image name is configuration
+	if err != nil {
+		logger.Warn("the media-tools image is not available to Docker; asset ingests will fail until it is built (task media:build, or docker build -t media-tools:dev packages/media-tools) or MEDIA_TOOLS_IMAGE names an image that exists",
 			"image", cfg.MediaToolsImage, "provider", cfg.MediaSandboxProvider, "error", err)
+		return
+	}
+	if !imageHasFonts(string(out)) {
+		logger.Warn("the media-tools image has no title and caption fonts (it was built before they were added); renders with text will fail until it is rebuilt: task media:build",
+			"image", cfg.MediaToolsImage, "label", fontsLabel)
 	}
 }

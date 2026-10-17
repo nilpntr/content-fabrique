@@ -107,11 +107,15 @@ func TestIntegrationIsolation(t *testing.T) {
 func TestIntegrationTimeoutRemovesContainer(t *testing.T) {
 	root := tmpRoot(t)
 	d := integrationProvider(t, root)
+	label := "timeout-" + filepath.Base(root)
 	start := time.Now()
 	res, err := d.Run(context.Background(), Job{
 		Image:  *dockerImage,
 		Args:   []string{"ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=30", "-f", "null", "-"},
 		Limits: Limits{CPU: 1, MemoryMB: 512, Timeout: 3 * time.Second, PIDs: 128},
+		// Only this job's container is looked for: other packages' integration tests run containers at the same time (CI runs
+		// ./internal/sandbox and ./internal/media together), and all of them are named cf-sbx-*.
+		Labels: map[string]string{"test": label},
 	})
 	if !errors.Is(err, ErrTimeout) || !res.TimedOut {
 		t.Fatalf("want a timeout, got %+v, %v", res, err)
@@ -119,7 +123,7 @@ func TestIntegrationTimeoutRemovesContainer(t *testing.T) {
 	if time.Since(start) > 30*time.Second {
 		t.Fatalf("took %v to give up", time.Since(start))
 	}
-	left, err := exec.Command("docker", "ps", "-aq", "--filter", "name=cf-sbx-").Output() // #nosec G204 -- fixed arguments
+	left, err := exec.Command("docker", "ps", "-aq", "--filter", "label=cf.test="+label).Output() // #nosec G204 -- fixed arguments
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,6 +13,9 @@ var agent = Author{Kind: AuthorAgent, ID: "run_1"}
 
 func TestVersionChain(t *testing.T) {
 	cat := fixtureCatalog(t)
+	titled := cat[vid60]
+	titled.Title = "posing"
+	cat[vid60] = titled
 	v1, err := InitialVersion(baseSpec(t), agent)
 	if err != nil {
 		t.Fatal(err)
@@ -31,7 +34,7 @@ func TestVersionChain(t *testing.T) {
 		t.Fatalf("v2: %+v", v2)
 	}
 	wantSummary := []string{
-		"added clip c4 (" + vid60 + ")",
+		"added clip c4 (posing, asset " + vid60[len(vid60)-6:] + ", 0.0-2.0 s)",
 		"trimmed c3 by 400 ms at the end",
 		"moved t1 to 2.0 s",
 	}
@@ -122,9 +125,9 @@ func TestSummaryGoldens(t *testing.T) {
 		{"extend a clip", `[{"op":"trim_item","id":"c3","out_ms":3500}]`, []string{"extended c3 by 500 ms at the end"}},
 		{"move text", `[{"op":"move_item","id":"t1","at_ms":2000}]`, []string{"moved t1 to 2.0 s"}},
 		{"add a clip", `[{"op":"add_clip","asset_id":"` + vid60 + `","source":{"in_ms":0,"out_ms":2000}}]`,
-			[]string{"added clip c4 (" + vid60 + ")"}},
+			[]string{"added clip c4 (asset " + vid60[len(vid60)-6:] + ", 0.0-2.0 s)"}},
 		{"insert a clip", `[{"op":"add_clip","index":1,"asset_id":"` + vid60 + `","source":{"in_ms":0,"out_ms":2000}}]`,
-			[]string{"added clip c4 (" + vid60 + ")", "shifted c2, c3 by +2000 ms"}},
+			[]string{"added clip c4 (asset " + vid60[len(vid60)-6:] + ", 0.0-2.0 s)", "shifted c2, c3 by +2000 ms"}},
 		{"remove a clip", `[{"op":"remove_item","id":"c2"}]`, []string{"removed clip c2", "shifted c3 by -4000 ms"}},
 		{"reorder clips", `[{"op":"move_item","id":"c3","index":0}]`,
 			[]string{"moved c3 to position 1", "shifted c1, c2 by +3000 ms"}},
@@ -137,7 +140,7 @@ func TestSummaryGoldens(t *testing.T) {
 		{"text", `[{"op":"add_text","at_ms":3000,"duration_ms":1000,"text":"Back day","style":"title_bold","anchor":"upper_third"},{"op":"remove_text","id":"t1"}]`,
 			[]string{"removed text t1", `added text t2 "Back day" at 3.0 s`}},
 		{"sound", `[{"op":"set_sound","kind":"creator_audio","asset_id":"` + musicMine + `","gain_db":-6},{"op":"remove_sound","id":"s1"}]`,
-			[]string{"removed sound s1", "added sound s2 (creator_audio " + musicMine + ")"}},
+			[]string{"removed sound s1", "added sound s2 (creator_audio asset " + musicMine[len(musicMine)-6:] + ")"}},
 		{"captions", `[{"op":"set_captions","style":"chunk"}]`, []string{"added captions (chunk, on)"}},
 	}
 	base := baseSpec(t)

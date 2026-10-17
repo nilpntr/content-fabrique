@@ -321,6 +321,7 @@ func repositorySuite(t *testing.T, st *store.Store) {
 	t.Run("assets", func(t *testing.T) { assetsSuite(t, st, suffix) })
 	t.Run("projects", func(t *testing.T) { projectsSuite(t, st, suffix) })
 	t.Run("renders", func(t *testing.T) { rendersSuite(t, st, suffix) })
+	t.Run("annotations", func(t *testing.T) { annotationsSuite(t, st, suffix) })
 	t.Run("usage ledger", func(t *testing.T) { usageSuite(t, st, suffix) })
 	t.Run("agent runs", func(t *testing.T) { agentRunsSuite(t, st, suffix) })
 }

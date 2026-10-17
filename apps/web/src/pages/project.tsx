@@ -1,7 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import { FormatBadge, StatusBadge } from "@/components/project/badges";
-import { type CommentsStore, sessionCommentsStore } from "@/components/project/comments-store";
 import { EditAgain } from "@/components/project/edit-again";
 import { chooseRun, isRunId, useRememberedRun } from "@/components/project/last-run";
 import { ProjectReview } from "@/components/project/project-review";
@@ -20,13 +19,11 @@ export function ProjectPage({
   projectId,
   runId: urlRunId,
   onRunStarted,
-  comments = sessionCommentsStore,
 }: {
   projectId: string;
   runId?: string;
   /** Called with the run an "Edit again" started, so that the URL can name it. */
   onRunStarted: (runId: string) => void;
-  comments?: CommentsStore;
 }) {
   const project = useProject(projectId);
   const versions = useTimelineVersions(projectId);
@@ -90,7 +87,7 @@ export function ProjectPage({
           <Skeleton className="h-96 w-full rounded-xl" />
         </div>
       ) : (
-        <ProjectReview project={data} versions={versionList} comments={comments} runActive={runActive} />
+        <ProjectReview project={data} versions={versionList} runActive={runActive} />
       )}
 
       <EditAgain projectId={projectId} busy={runActive} firstCut={versionList.length === 0} onStarted={onRunStarted} />

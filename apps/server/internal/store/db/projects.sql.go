@@ -425,7 +425,7 @@ func (q *Queries) ListProjectAssets(ctx context.Context, arg ListProjectAssetsPa
 }
 
 const listProjectCatalogAssets = `-- name: ListProjectCatalogAssets :many
-SELECT a.id AS asset_id, a.kind, a.duration_ms
+SELECT a.id AS asset_id, a.kind, a.title, a.duration_ms
 FROM project_assets pa
 JOIN assets a ON a.workspace_id = pa.workspace_id AND a.id = pa.asset_id
 WHERE pa.workspace_id = $1 AND pa.project_id = $2
@@ -440,6 +440,7 @@ type ListProjectCatalogAssetsParams struct {
 type ListProjectCatalogAssetsRow struct {
 	AssetID    ids.AssetID
 	Kind       string
+	Title      string
 	DurationMs *int64
 }
 
@@ -453,7 +454,12 @@ func (q *Queries) ListProjectCatalogAssets(ctx context.Context, arg ListProjectC
 	var items []ListProjectCatalogAssetsRow
 	for rows.Next() {
 		var i ListProjectCatalogAssetsRow
-		if err := rows.Scan(&i.AssetID, &i.Kind, &i.DurationMs); err != nil {
+		if err := rows.Scan(
+			&i.AssetID,
+			&i.Kind,
+			&i.Title,
+			&i.DurationMs,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

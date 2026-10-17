@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { buildTimeMap } from "./lib/time-map";
 import { ReviewScreen } from "./review-screen";
@@ -452,4 +452,108 @@ test("zooming keeps the middle of the view, and the playhead follow does not und
     Reflect.deleteProperty(HTMLElement.prototype, "scrollLeft");
     Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
   }
+});
+
+// ── Comments kept by a parent (P1-08) ───────────────────────────────────────
+
+const saved = (id: string, over: Partial<ReviewAnnotation> = {}): ReviewAnnotation => ({
+  id,
+  version: 1,
+  start_ms: 1000,
+  end_ms: 2000,
+  kind: "comment",
+  body: `Body of ${id}`,
+  status: "open",
+  author: { kind: "creator", name: "You", own: true },
+  created_at: "2026-10-14T09:30:00Z",
+  ...over,
+});
+const item = (id: string) => within(panel()).getByText(`Body of ${id}`).closest("li") as HTMLElement;
+
+test("a comment gets Resolve, Edit and Delete only when the parent handles them, and Edit and Delete only for the author's", () => {
+  const { unmount } = renderScreen({ comments: [saved("ann_1"), saved("ann_2", { author: { kind: "creator", name: "Teammate" } })] });
+  expect(within(panel()).queryByRole("button", { name: "Resolve" })).toBeNull();
+  unmount();
+
+  renderScreen({ comments: [saved("ann_1"), saved("ann_2", { author: { kind: "creator", name: "Teammate" } })], onCommentUpdate: vi.fn(), onCommentDelete: vi.fn() });
+  expect(within(item("ann_1")).getByRole("button", { name: "Resolve" })).toBeTruthy();
+  expect(within(item("ann_1")).getByRole("button", { name: "Edit" })).toBeTruthy();
+  expect(within(item("ann_1")).getByRole("button", { name: "Delete" })).toBeTruthy();
+  expect(within(item("ann_2")).getByRole("button", { name: "Resolve" })).toBeTruthy();
+  expect(within(item("ann_2")).queryByRole("button", { name: "Edit" })).toBeNull();
+  expect(within(item("ann_2")).queryByRole("button", { name: "Delete" })).toBeNull();
+});
+
+test("resolve, reopen, edit and delete change the list at once and are reported to the parent", () => {
+  const onCommentUpdate = vi.fn();
+  const onCommentDelete = vi.fn();
+  const onCommentsChange = vi.fn();
+  renderScreen({
+    comments: [saved("ann_1"), saved("ann_1r", { reply_to: "ann_1", author: { kind: "agent", name: "Editor" } }), saved("ann_2", { status: "applied", applied_in_version: 2 })],
+    onCommentUpdate,
+    onCommentDelete,
+    onCommentsChange,
+  });
+
+  fireEvent.click(within(item("ann_1")).getByRole("button", { name: "Resolve" }));
+  expect(onCommentUpdate).toHaveBeenLastCalledWith("ann_1", { status: "resolved" });
+  expect(item("ann_1").getAttribute("data-status")).toBe("resolved");
+  fireEvent.click(within(item("ann_1")).getByRole("button", { name: "Reopen" }));
+  expect(onCommentUpdate).toHaveBeenLastCalledWith("ann_1", { status: "open" });
+  expect(item("ann_1").getAttribute("data-status")).toBe("open");
+
+  // Editing what the editor applied reopens it.
+  fireEvent.click(within(item("ann_2")).getByRole("button", { name: "Edit" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Edit comment text" }), { target: { value: "  Actually the other way " } });
+  fireEvent.click(within(screen.getByRole("form", { name: "Edit comment" })).getByRole("button", { name: "Save" }));
+  expect(onCommentUpdate).toHaveBeenLastCalledWith("ann_2", { body: "Actually the other way" });
+  expect(within(panel()).getByText("Actually the other way").closest("li")?.getAttribute("data-status")).toBe("open");
+  // Cancelling changes nothing.
+  fireEvent.click(within(item("ann_1")).getByRole("button", { name: "Edit" }));
+  fireEvent.click(within(screen.getByRole("form", { name: "Edit comment" })).getByRole("button", { name: "Cancel" }));
+  expect(onCommentUpdate).toHaveBeenCalledTimes(3);
+
+  // Delete asks twice, and takes the reply with it.
+  fireEvent.click(within(item("ann_1")).getByRole("button", { name: "Delete" }));
+  expect(onCommentDelete).not.toHaveBeenCalled();
+  fireEvent.click(within(item("ann_1")).getByRole("button", { name: "Keep" }));
+  fireEvent.click(within(item("ann_1")).getByRole("button", { name: "Delete" }));
+  fireEvent.click(within(item("ann_1")).getByRole("button", { name: "Delete for good" }));
+  expect(onCommentDelete).toHaveBeenCalledExactlyOnceWith("ann_1");
+  expect(within(panel()).queryByText("Body of ann_1")).toBeNull();
+  expect(within(panel()).queryByText("Body of ann_1r")).toBeNull();
+  expect(onCommentsChange.mock.lastCall?.[0]).toHaveLength(1);
+});
+
+test("a comment that is still being saved has no actions; a new list from the parent replaces the screen's, and the error shows", () => {
+  const onDismissCommentsError = vi.fn();
+  const handlers = { onCommentUpdate: vi.fn(), onCommentDelete: vi.fn(), onDismissCommentsError };
+  const { rerender } = render(<ReviewScreen versions={[VERSION]} comments={[saved("ann_local_1"), saved("ann_1")]} src="blob:test-video" {...handlers} />);
+  expect(within(item("ann_local_1")).queryByRole("button", { name: "Resolve" })).toBeNull();
+  expect(within(item("ann_1")).getByRole("button", { name: "Resolve" })).toBeTruthy();
+
+  // The parent took the first one back (the API refused it) and says why.
+  rerender(<ReviewScreen versions={[VERSION]} comments={[saved("ann_1")]} src="blob:test-video" commentsError="Your role can't comment." {...handlers} />);
+  expect(within(panel()).queryByText("Body of ann_local_1")).toBeNull();
+  expect(within(panel()).getByRole("alert").textContent).toContain("Your role can't comment.");
+  fireEvent.click(within(panel()).getByRole("button", { name: "Dismiss" }));
+  expect(onDismissCommentsError).toHaveBeenCalledTimes(1);
+});
+
+test("a saved comment keeps the selection when the API's id replaces the screen's", async () => {
+  let resolve: (value: { id: string }) => void = () => {};
+  const onCommentCreate = vi.fn((_comment: ReviewAnnotation) => new Promise<{ id: string }>((r) => (resolve = r)));
+  const { rerender } = renderScreen({ onCommentCreate });
+  scrubTo(4000);
+  key("c");
+  saveComment("Make this text bigger");
+  expect(within(panel()).getByText("Make this text bigger").closest("li")?.getAttribute("data-selected")).toBe("true");
+  const temp = onCommentCreate.mock.calls[0]?.[0] as ReviewAnnotation;
+
+  await act(async () => {
+    resolve({ id: "ann_real" });
+  });
+  rerender(<ReviewScreen versions={[VERSION]} comments={[{ ...temp, id: "ann_real" }]} src="blob:test-video" onCommentCreate={onCommentCreate} />);
+  expect(within(panel()).getByText("Make this text bigger").closest("li")?.getAttribute("data-comment-id")).toBe("ann_real");
+  expect(within(panel()).getByText("Make this text bigger").closest("li")?.getAttribute("data-selected")).toBe("true");
 });

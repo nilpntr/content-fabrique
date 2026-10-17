@@ -20,6 +20,12 @@ type FrameSpec struct {
 // FramesArgs cuts one JPEG per spec from the proxy, each scaled to fit a longSide x longSide box (so longSide pixels on the
 // long side, the aspect ratio kept, both sides even). The file is opened once per frame, each time at its own time with a
 // fast seek (the proxy has a keyframe every second), and all frames come from one process. The pictures carry no metadata.
+//
+// Every decoder and encoder runs on one thread (-threads 1). The sandbox caps the processes and threads of a job (PIDs), and
+// ffmpeg starts one decoding thread and one encoding thread per CPU core of the machine for each of the up to MaxFrameBatch
+// inputs and outputs: on a 14 core machine, 8 frames needed far more than the cap, mjpeg's encoder failed to start
+// ("ff_frame_thread_encoder_init failed", EAGAIN) and only some of the pictures were written. A still needs one frame
+// decoded from the last keyframe, so single threads cost nothing noticeable.
 func FramesArgs(input string, frames []FrameSpec, longSide int) ([]string, error) {
 	if len(frames) < 1 || len(frames) > MaxFrameBatch {
 		return nil, fmt.Errorf("media: frames takes 1 to %d frames, got %d", MaxFrameBatch, len(frames))
@@ -33,13 +39,13 @@ func FramesArgs(input string, frames []FrameSpec, longSide int) ([]string, error
 			return nil, fmt.Errorf("media: invalid frame %+v", f)
 		}
 		a = append(a, inputOptions()...)
-		a = append(a, "-ss", seconds(f.AtMs), "-i", input)
+		a = append(a, "-threads", "1", "-ss", seconds(f.AtMs), "-i", input)
 	}
 	side := strconv.Itoa(longSide)
 	vf := "scale=" + side + ":" + side + ":force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos"
 	for i, f := range frames {
 		a = append(a, "-map", strconv.Itoa(i)+":v:0", "-an", "-sn", "-dn", "-map_metadata", "-1",
-			"-vf", vf, "-frames:v", "1", "-update", "1", "-q:v", "4", f.Output)
+			"-vf", vf, "-threads", "1", "-frames:v", "1", "-update", "1", "-q:v", "4", f.Output)
 	}
 	return a, nil
 }
