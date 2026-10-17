@@ -181,6 +181,12 @@ var validators = map[string]validator{
 		}
 		return ""
 	},
+	"RENDER_CONCURRENCY": func(_ *run, val string) string {
+		if n, err := strconv.Atoi(val); err != nil || n < 1 || n > 32 {
+			return "bad format (expected a whole number from 1 to 32)"
+		}
+		return ""
+	},
 
 	"APP_BASE_URL":                urlOf("http", "https"),
 	"API_BASE_URL":                urlOf("http", "https"),

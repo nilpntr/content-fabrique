@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/media"
@@ -600,7 +602,7 @@ func TestRenderPreview(t *testing.T) {
 	if _, ok := d.preview().(UnavailablePreviews); !ok {
 		t.Errorf("default renderer = %T", d.preview())
 	}
-	if _, _, err := (UnavailablePreviews{}).RenderAndWait(context.Background(), e.wsA.ID, prj, 1); !errors.Is(err, ErrPreviewUnavailable) {
+	if _, _, err := (UnavailablePreviews{}).RenderAndWait(context.Background(), e.wsA.ID, prj, 1, uuid.Nil); !errors.Is(err, ErrPreviewUnavailable) {
 		t.Errorf("UnavailablePreviews: %v", err)
 	}
 
@@ -618,6 +620,9 @@ func TestRenderPreview(t *testing.T) {
 	}
 	if last := e.preview.calls[len(e.preview.calls)-1]; last != fmt.Sprintf("%s %s v1", e.wsA.ID, prj) {
 		t.Errorf("renderer asked for %q", last)
+	}
+	if run := e.preview.runs[len(e.preview.runs)-1]; run == uuid.Nil {
+		t.Error("the renderer was not told which run asks")
 	}
 
 	// A sheet outside the workspace is never passed on.

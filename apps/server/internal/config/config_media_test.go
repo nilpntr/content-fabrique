@@ -20,7 +20,7 @@ func TestMediaDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.MediaSandboxProvider != SandboxDocker || c.MediaToolsImage != "media-tools:dev" || c.MediaConcurrency != 2 ||
+	if c.MediaSandboxProvider != SandboxDocker || c.MediaToolsImage != "media-tools:dev" || c.MediaConcurrency != 2 || c.RenderConcurrency != 2 ||
 		c.MediaTempDir != filepath.Join(os.TempDir(), "cf-media") {
 		t.Fatalf("%+v", c)
 	}
@@ -35,9 +35,9 @@ func TestMediaDefaults(t *testing.T) {
 
 func TestMediaSettings(t *testing.T) {
 	c, err := Load(mediaEnv(map[string]string{
-		"MEDIA_SANDBOX_PROVIDER": " Hardened ", "MEDIA_TOOLS_IMAGE": "registry.example.com/media-tools:1", "MEDIA_TEMP_DIR": "/var/lib/cf/media", "MEDIA_CONCURRENCY": "4",
+		"MEDIA_SANDBOX_PROVIDER": " Hardened ", "MEDIA_TOOLS_IMAGE": "registry.example.com/media-tools:1", "MEDIA_TEMP_DIR": "/var/lib/cf/media", "MEDIA_CONCURRENCY": "4", "RENDER_CONCURRENCY": "3",
 	}))
-	if err != nil || c.MediaSandboxProvider != "hardened" || c.MediaToolsImage != "registry.example.com/media-tools:1" || c.MediaTempDir != "/var/lib/cf/media" || c.MediaConcurrency != 4 {
+	if err != nil || c.RenderConcurrency != 3 || c.MediaSandboxProvider != "hardened" || c.MediaToolsImage != "registry.example.com/media-tools:1" || c.MediaTempDir != "/var/lib/cf/media" || c.MediaConcurrency != 4 {
 		t.Fatalf("%+v %v", c, err)
 	}
 }
@@ -61,6 +61,7 @@ func TestMediaInvalidSettings(t *testing.T) {
 		"MEDIA_SANDBOX_PROVIDER": {"MEDIA_SANDBOX_PROVIDER": "firecracker"},
 		"MEDIA_TEMP_DIR":         {"MEDIA_TEMP_DIR": "relative/dir"},
 		"MEDIA_CONCURRENCY":      {"MEDIA_CONCURRENCY": "0"},
+		"RENDER_CONCURRENCY":     {"RENDER_CONCURRENCY": "0"},
 	} {
 		if _, err := Load(mediaEnv(env)); err == nil || !strings.Contains(err.Error(), name) {
 			t.Errorf("%s: %v", name, err)
@@ -69,6 +70,9 @@ func TestMediaInvalidSettings(t *testing.T) {
 	for _, v := range []string{"many", "-1", "33", "1.5"} {
 		if _, err := Load(mediaEnv(map[string]string{"MEDIA_CONCURRENCY": v})); err == nil {
 			t.Errorf("MEDIA_CONCURRENCY=%q was accepted", v)
+		}
+		if _, err := Load(mediaEnv(map[string]string{"RENDER_CONCURRENCY": v})); err == nil {
+			t.Errorf("RENDER_CONCURRENCY=%q was accepted", v)
 		}
 	}
 }

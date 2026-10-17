@@ -8,6 +8,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/agents/agentset"
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/config"
+	"github.com/nilpntr/content-fabrique/internal/renderjobs"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
@@ -26,7 +27,15 @@ func newAgentRunner(cfg config.Config, st *store.Store, objects *storage.Client,
 			return nil
 		}
 	}
-	// TODO(director): set opts.Preview to the render jobs' RenderAndWait (P3-06, renderjobs) once it has merged.
+	if objects != nil {
+		// render_preview: the render service over the same storage; the render jobs run on this or another worker.
+		preview, err := renderjobs.NewPreviewRendererFor(st, objects, logger)
+		if err != nil {
+			logger.Warn("agent runs are off: the preview renderer cannot be set up", "error", err)
+			return nil
+		}
+		opts.Preview = preview
+	}
 	rt, err := agentset.Open(opts)
 	if err != nil {
 		if errors.Is(err, agentset.ErrNoStorage) {
