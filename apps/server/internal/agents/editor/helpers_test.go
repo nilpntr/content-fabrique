@@ -166,9 +166,11 @@ type fakePreview struct {
 	err   error
 	block bool
 	calls []string
+	runs  []uuid.UUID
 }
 
-func (p *fakePreview) RenderAndWait(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, version int) (ContactSheetRef, DurationMs, error) {
+func (p *fakePreview) RenderAndWait(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, version int, run uuid.UUID) (ContactSheetRef, DurationMs, error) {
+	p.runs = append(p.runs, run)
 	p.calls = append(p.calls, fmt.Sprintf("%s %s v%d", ws, project, version))
 	if p.block {
 		<-ctx.Done()

@@ -474,7 +474,7 @@ func (d Deps) renderPreview(ctx context.Context, rc runtime.RunContext, _ noArgs
 
 	waitCtx, cancel := context.WithTimeout(ctx, previewWait)
 	defer cancel()
-	sheet, dur, err := d.preview().RenderAndWait(waitCtx, ws, pid, v)
+	sheet, dur, err := d.preview().RenderAndWait(waitCtx, ws, pid, v, rc.RunID)
 	switch {
 	case errors.Is(err, ErrPreviewUnavailable):
 		return runtime.Result{}, runtime.UserErrorf("previews are not available yet, so there is no contact sheet to look at. Check your work with get_timeline instead (its issues and its length), and carry on")

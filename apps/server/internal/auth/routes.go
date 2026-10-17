@@ -12,6 +12,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/assets"
 	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/projects"
+	"github.com/nilpntr/content-fabrique/internal/renderjobs"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
@@ -27,6 +28,9 @@ type Deps struct {
 	// Assets is the assets service (object storage and the job enqueuer behind it). Nil means object storage is not
 	// configured: the assets operations answer 503 storage_not_configured.
 	Assets *assets.Service
+	// Renders is the renders service (object storage and the job enqueuer behind it). Nil means object storage is not
+	// configured: the renders operations answer 503 storage_not_configured.
+	Renders *renderjobs.Service
 	// Runs starts, reads, cancels and answers agent runs (agentset builds it, definition only: the worker executes them). Nil
 	// means agent runs are not configured: the runs operations answer 503 model_not_configured.
 	Runs *runtime.Service
@@ -114,6 +118,7 @@ func Mount(mux *http.ServeMux, d Deps) (*V1, error) {
 	}
 	srv.API = projects.NewAPI(projectsSvc, callerOf, logger)
 	srv.Runs = runapi.New(d.Runs, callerOf, d.RunOptions, logger)
+	srv.RenderAPI = renderjobs.NewAPI(d.Renders, callerOf, logger)
 	for pattern, h := range apiRoutes(srv, logger) {
 		if open[pattern] {
 			mux.Handle(pattern, mw(h))

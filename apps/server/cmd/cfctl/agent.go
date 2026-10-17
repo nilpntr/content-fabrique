@@ -26,6 +26,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/doctor"
 	"github.com/nilpntr/content-fabrique/internal/envfile"
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/renderjobs"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
@@ -265,6 +266,11 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 			return 1
 		}
 		opts.Objects = objects
+		// render_preview queues a render job: a worker with the render pipeline must be running to work it.
+		if opts.Preview, err = renderjobs.NewPreviewRendererFor(st, objects, nil); err != nil {
+			_, _ = fmt.Fprintf(errOut, "cfctl agent run: preview renderer: %v\n", err)
+			return 1
+		}
 		provider := cmp.Or(env.get("MEDIA_SANDBOX_PROVIDER"), config.SandboxDocker)
 		tempDir := cmp.Or(env.get("MEDIA_TEMP_DIR"), filepath.Join(os.TempDir(), "cf-media"))
 		if opts.Frames, opts.TempDir, err = agentset.NewFrameRunner(provider, env.get("MEDIA_TOOLS_IMAGE"), tempDir, env.get("CF_ENV")); err != nil {

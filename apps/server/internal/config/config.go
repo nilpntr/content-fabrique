@@ -89,6 +89,8 @@ type Config struct {
 	MediaTempDir string
 	// MediaConcurrency is MEDIA_CONCURRENCY: ingests that run at once on one worker.
 	MediaConcurrency int
+	// RenderConcurrency is RENDER_CONCURRENCY: renders that run at once on one worker (they have a queue of their own).
+	RenderConcurrency int
 }
 
 // The sandbox providers MEDIA_SANDBOX_PROVIDER accepts.
@@ -102,7 +104,9 @@ const (
 const (
 	DefaultMediaToolsImage  = "media-tools:dev"
 	DefaultMediaConcurrency = 2
-	maxMediaConcurrency     = 32
+	// DefaultRenderConcurrency is the default of RENDER_CONCURRENCY.
+	DefaultRenderConcurrency = 2
+	maxMediaConcurrency      = 32
 )
 
 // Storage is the connection to the bucket, from the R2_* settings.
@@ -254,6 +258,15 @@ func (c *Config) loadMedia(getenv Getenv) []error {
 			errs = append(errs, fmt.Errorf("MEDIA_CONCURRENCY: must be a whole number from 1 to %d", maxMediaConcurrency))
 		} else {
 			c.MediaConcurrency = n
+		}
+	}
+	c.RenderConcurrency = DefaultRenderConcurrency
+	if raw := strings.TrimSpace(getenv("RENDER_CONCURRENCY")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > maxMediaConcurrency {
+			errs = append(errs, fmt.Errorf("RENDER_CONCURRENCY: must be a whole number from 1 to %d", maxMediaConcurrency))
+		} else {
+			c.RenderConcurrency = n
 		}
 	}
 	return errs
