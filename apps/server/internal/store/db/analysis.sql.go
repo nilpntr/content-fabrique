@@ -268,6 +268,51 @@ func (q *Queries) ListAssetAnalysisSummaries(ctx context.Context, arg ListAssetA
 	return items, nil
 }
 
+const listAssetExposureSeries = `-- name: ListAssetExposureSeries :many
+SELECT asset_id, step_ms, luma, high FROM asset_signals
+WHERE workspace_id = $1 AND asset_id = ANY($2::uuid[])
+ORDER BY asset_id
+`
+
+type ListAssetExposureSeriesParams struct {
+	WorkspaceID ids.WorkspaceID
+	AssetIds    []uuid.UUID
+}
+
+type ListAssetExposureSeriesRow struct {
+	AssetID ids.AssetID
+	StepMs  int32
+	Luma    []byte
+	High    []byte
+}
+
+// The mean and the 90th percentile luma of each sample of the assets' analyses, for the percentile exposure (the exposure note of the
+// editor's footage list and the brightness check of check_edit). Two of the six series, not the whole row.
+func (q *Queries) ListAssetExposureSeries(ctx context.Context, arg ListAssetExposureSeriesParams) ([]ListAssetExposureSeriesRow, error) {
+	rows, err := q.db.Query(ctx, listAssetExposureSeries, arg.WorkspaceID, arg.AssetIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAssetExposureSeriesRow
+	for rows.Next() {
+		var i ListAssetExposureSeriesRow
+		if err := rows.Scan(
+			&i.AssetID,
+			&i.StepMs,
+			&i.Luma,
+			&i.High,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAssetMoments = `-- name: ListAssetMoments :many
 SELECT id, workspace_id, asset_id, kind, source, start_ms, end_ms, score, labels, attrs, description, created_at FROM moments WHERE workspace_id = $1 AND asset_id = $2 ORDER BY start_ms, kind
 `
@@ -338,6 +383,50 @@ func (q *Queries) ListAssetShots(ctx context.Context, arg ListAssetShotsParams) 
 			&i.EndMs,
 			&i.Signals,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAssetSpans = `-- name: ListAssetSpans :many
+SELECT asset_id, kind, start_ms, end_ms FROM moments
+WHERE workspace_id = $1 AND asset_id = ANY($2::uuid[]) AND kind IN ('rep', 'hold', 'dead')
+ORDER BY asset_id, start_ms
+`
+
+type ListAssetSpansParams struct {
+	WorkspaceID ids.WorkspaceID
+	AssetIds    []uuid.UUID
+}
+
+type ListAssetSpansRow struct {
+	AssetID ids.AssetID
+	Kind    string
+	StartMs int32
+	EndMs   int32
+}
+
+// The reps, holds and dead time of several assets in one read, for the editor's check_edit.
+func (q *Queries) ListAssetSpans(ctx context.Context, arg ListAssetSpansParams) ([]ListAssetSpansRow, error) {
+	rows, err := q.db.Query(ctx, listAssetSpans, arg.WorkspaceID, arg.AssetIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAssetSpansRow
+	for rows.Next() {
+		var i ListAssetSpansRow
+		if err := rows.Scan(
+			&i.AssetID,
+			&i.Kind,
+			&i.StartMs,
+			&i.EndMs,
 		); err != nil {
 			return nil, err
 		}

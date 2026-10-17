@@ -470,6 +470,10 @@ func (l *loop) toolContext(toolUseID string, resumed bool) RunContext {
 		WorkspaceID: l.ws, RunID: l.run.ID, ProjectID: l.run.ProjectID.UUID, Agent: l.run.Agent,
 		ToolUseID: toolUseID, Resumed: resumed, Input: l.run.Input,
 		Logger: l.log.With("tool_use_id", toolUseID),
+		Left: BudgetLeft{
+			Known: true, ToolCalls: int(l.run.BudgetToolCalls) - l.toolCalls,
+			Wall: time.Until(l.wallDeadline()), Micros: l.budget.remaining(),
+		},
 	}
 	if toolUseID != "" {
 		rc.IdempotencyKey = l.run.ID.String() + ":" + toolUseID
@@ -990,6 +994,22 @@ func (l *loop) stopBudget(ctx context.Context, limit string) (Outcome, error) {
 }
 
 func (l *loop) stopBudgetWithUsage(ctx context.Context, limit string, usage llm.Usage, cost int64) (Outcome, error) {
+	// An agent whose work is in a usable state may end the run gracefully instead of failing it for the limit.
+	if l.agent.OnLimit != nil {
+		if output, ok := l.agent.OnLimit(ctx, l.toolContext("", false), limit); ok && len(output) > 0 {
+			if err := l.recordGraceful(ctx, limit, usage, cost); err != nil {
+				return "", err
+			}
+			_, err := l.end(ctx, store.RunEnd{
+				Status: store.AgentSucceeded, Output: output,
+				Event: mustJSON(statusPayload{State: stateSucceeded, Limit: limit}), ActiveMs: l.takeActive(),
+			})
+			if err != nil {
+				return "", err
+			}
+			return OutcomeFinished, nil
+		}
+	}
 	msg := fmt.Sprintf("The run reached its %s limit and was stopped.", strings.ReplaceAll(limit, "_", " "))
 	if err := l.recordSpend(ctx, FailBudget, msg, usage, cost); err != nil {
 		return "", err
@@ -1028,6 +1048,16 @@ func (l *loop) failWithUsage(ctx context.Context, reason, message string, usage 
 		return "", err
 	}
 	return OutcomeFinished, nil
+}
+
+// recordGraceful writes the status event that says a run is ending at a limit by the agent's choice, with whatever the call that hit
+// the limit cost added to the run's totals.
+func (l *loop) recordGraceful(ctx context.Context, limit string, usage llm.Usage, cost int64) error {
+	_, err := l.append(ctx, store.EventStatus, mustJSON(statusPayload{State: "limit_reached", Limit: limit}), store.EventDelta{
+		InputTokens: usage.InputTokens, CacheWriteTokens: usage.CacheWriteTokens, CacheReadTokens: usage.CacheReadTokens,
+		OutputTokens: usage.OutputTokens, CostMicros: cost,
+	})
+	return err
 }
 
 // recordSpend writes the error event that explains a failure, with whatever the failed call cost added to the run's totals.
