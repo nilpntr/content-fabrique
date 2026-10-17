@@ -117,6 +117,14 @@ jobs:
               - 'bun.lock'
               - '.github/workflows/ci.yml'
       # Pushes to main: only the media paths (the other jobs run on every push).
+      # On a push the filter diffs the pushed commits in a local clone (on a pull request it asks the API instead), so it
+      # needs the repository and enough history to reach the push's `before` commit. Without this checkout the job failed
+      # on every push to main ("git rev-parse --abbrev-ref HEAD" exit 128), so no post-merge run ever tested main.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'push'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter_push
         if: github.event_name == 'push'
