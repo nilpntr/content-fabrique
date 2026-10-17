@@ -41,6 +41,13 @@ The gateway itself needs P0-09, which is the founder's Cloudflare work. Until it
   - **`record`:** calls the API and writes `testdata/cassettes/<stage>/<key>.json`, holding the redacted request summary, the response and the usage. The key and headers are never written.
   - **`replay`:** serves from cassettes. A miss is an error that names the key and the stage, never a silent call to the API.
   - CI always runs `replay`.
+- **As built in P4-00a** (details the sections above leave open):
+  - **Layers**, outside in: `metered` (resolves image references, checks the caps, writes the ledger row), `cassette` (record or replay), `limited` (per-key semaphore, shared cool-down, retries), `anthropic` (the SDK, `MaxRetries` 0). The runtime calls only `llm.Client`.
+  - **Caps** use a worst-case estimate: `CountTokens` input tokens at the dearest rate they could be billed (a cache write when the request has breakpoints), plus `max_tokens` at the output price. Every call therefore does one free `count_tokens` first. A call is refused when the estimate is over `LLM_MAX_REQUEST_MICROS`, over the run's `Budget.Remaining()`, or over what is left of `DAILY_SPEND_CAP_MICROS` today (UTC). A cap that cannot be checked (the ledger is unreadable) refuses the call.
+  - **Ledger** has one extra column, `cache_write_1h_tokens` (the part of `cache_write_tokens` written with the one-hour lifetime), because the two lifetimes are priced differently. `request_id` is unique when present. A call that returns usage and then fails is still written. If the row cannot be written after retries, the paid response is returned together with `llm.ErrLedger`, and the row is logged for reconciliation.
+  - **Prices** are integers (micro-dollars per MTok) and costs round up. A model with a `null` price is refused unless `LLM_ALLOW_UNPRICED=1`. Haiku 5.5 has a long-prompt tier (over 100,000 prompt tokens), modelled in the table.
+  - **Replay** writes no ledger row and skips the daily cap, because nothing was spent, but it charges the run's `Budget` with the cost the recorded usage would have had, so budget behaviour matches live. `CountTokens` in replay is a local estimate. Replay needs no API key.
+  - **Seams for P4-00b:** `llm.KeyResolver` (which key and who pays: the BYOK vault plugs in here), `llm.ImageResolver` (the runtime's R2 reader) and `llm.Ledger`.
 
 ## 3. Agent runtime (P4-01)
 

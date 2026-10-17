@@ -1,0 +1,41 @@
+# The price table (P4-00a, docs/design/agent-runtime-v1.md section 2). List prices in US dollars per million tokens (MTok).
+# Every ledger row names the `version` of the table that priced it, so a price change is a new file, never an edit of an
+# old one: add 2026-11.yaml and point the code at it, and old rows still explain themselves.
+#
+# A price that is `null` (or missing) is UNPRICED: the client refuses live calls for that model, because it could not
+# meter them (set LLM_ALLOW_UNPRICED=1 to run anyway; the ledger then records cost 0 and price_table_version "unpriced").
+# Never guess a price. Look it up, put the page in `source` and the day in `retrieved`.
+version: "2026-10"
+source: https://platform.claude.com/docs/en/about-claude/pricing
+retrieved: 2026-10-17
+notes:
+  - Standard (non-batch, non-fast-mode, global inference) prices only. The Batch API is 50 % off, fast mode and US-only inference (inference_geo) are priced differently; none of those is metered here yet.
+  - Cache hits on Opus 5.5 and Sonnet 5.5 cost 0.05x the base input price (the page's footnote 2), not the usual 0.1x.
+  - Haiku 5.5 is priced by prompt length. A request whose prompt (input + cache writes + cache reads) is over 100,000 tokens pays the long_context prices.
+
+models:
+  claude-opus-5-5:
+    input: 4
+    cache_write_5m: 5
+    cache_write_1h: 8
+    cache_read: 0.20
+    output: 20
+  claude-sonnet-5-5:
+    input: 2
+    cache_write_5m: 2.50
+    cache_write_1h: 4
+    cache_read: 0.10
+    output: 10
+  claude-haiku-5-5:
+    input: 0.10
+    cache_write_5m: 0.125
+    cache_write_1h: 0.20
+    cache_read: 0.01
+    output: 0.50
+    long_context:
+      over_prompt_tokens: 100000
+      input: 0.50
+      cache_write_5m: 0.625
+      cache_write_1h: 1
+      cache_read: 0.05
+      output: 2.50

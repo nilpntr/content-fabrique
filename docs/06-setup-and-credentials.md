@@ -45,6 +45,17 @@ Create four workspaces in the Console, one key each. Each has a monthly spend li
 - `ROUTING_PROFILE` starts at `dev-cheap` and `LLM_MODE` at `live` ([D-22](05-decisions.md#d-22-cheap-first-testing-ladder)).
 - **Model names.** The native Anthropic API, called directly or through the gateway's `/anthropic` endpoint, takes `claude-opus-5-5`. Cloudflare's REST endpoints use `provider/model` names, so the same model is `anthropic/claude-opus-5.5` there. That dotted spelling is the founder's: Cloudflare's docs show `anthropic/claude-sonnet-5` and `anthropic/claude-sonnet-4` but no 5.5 model ◐, so it is △ until `cfctl doctor` resolves it. The routing profiles use the native ID and `apps/server/config/routing/models.yaml` maps each one to its Cloudflare name ([architecture §7.5](03-architecture.md#75-model-routing-sub-agents-and-benchmarking)). The REST path also needs its own token, `CF_AI_API_TOKEN` ([§3.9](#39-scopes-and-permissions-per-token)), and credits loaded in Cloudflare. Claude stays on the native path by default ([D-19](05-decisions.md#d-19-model-gateway-cloudflare-ai-gateway-in-byok-mode-openrouter-optional)).
 - `ANTHROPIC_BASE_URL` stays empty until the gateways exist (P0-09). After that every environment sets its gateway's URL, `cf-dev` for local, CI and benchmarks ([§3.3](#33-cloudflare-needed-from-p0-09)). Empty again means a direct call, the bypass for debugging.
+- **Spend caps and limits (P4-00a).** Every model call goes through `internal/agents/llm`, which refuses a call before sending it when it could break a cap, and writes one `usage_ledger` row per call (`billed_to` is `test` in local, ci and bench, and `platform` in staging and production). Money is in micro-dollars (1,000,000 = $1). The prices come from `apps/server/config/pricing/`, one dated file per version.
+
+  | Variable | Default | What it does |
+  |---|---|---|
+  | `LLM_MAX_REQUEST_MICROS` | 2000000 ($2) | Refuses any single call whose worst case is above it. The worst case is the counted input tokens at list price (a cache write if the request has cache breakpoints) plus `max_tokens` of output |
+  | `DAILY_SPEND_CAP_MICROS` | 20000000 ($20) | Per workspace and UTC day, summed from `usage_ledger`. A call is refused when today's spend plus its worst case is over the cap. A per-run budget is passed in by the agent runtime |
+  | `LLM_KEY_CONCURRENCY` | 4 | Requests in flight per API key. More callers wait in a queue. On 429 and 529 the client backs off with jitter and honours `retry-after`; nothing else retries |
+  | `LLM_ALLOW_UNPRICED` | empty | `1` lets a model with no price in the table run (ledger cost 0, caps cannot be checked). Empty refuses it |
+  | `LLM_CASSETTE_DIR` | `testdata/cassettes` | Where `LLM_MODE=record` writes and `replay` reads cassettes (`<dir>/<stage>/<key>.json`) |
+
+  `cfctl llm ping --stage editor [--profile v1-start]` checks all of this without cost (it only counts tokens); add `--live --workspace wks_…` to send one tiny message and show its ledger row.
 
 ### 3.2 Clerk
 
@@ -349,8 +360,8 @@ Rules
 The same tags as in [`.env.example`](../.env.example), which holds the defaults and a comment per line. What each token may do is in [§3.9](#39-scopes-and-permissions-per-token).
 
 - **You provide before the agent starts, `[YOU-now]` (3):** `ANTHROPIC_API_KEY`, `VITE_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`.
-- **Local defaults or generated, `[AUTO]` (23):** `CF_ENV`, `APP_BASE_URL`, `API_BASE_URL`, `VITE_API_BASE_URL`, `ROUTING_PROFILE`, `LLM_MODE`, `ANTHROPIC_BASE_URL`, `DATABASE_URL`, `DATABASE_DIRECT_URL`, `DATABASE_MIGRATE_URL`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_JURISDICTION`, `SECRETS_MASTER_KEY`, `SECRETS_MASTER_KEY_VERSION`, `SANDBOX_GATEWAY_URL`, `SANDBOX_GATEWAY_TOKEN`, `RIVER_UI_PASSWORD`.
+- **Local defaults or generated, `[AUTO]` (26):** `CF_ENV`, `APP_BASE_URL`, `API_BASE_URL`, `VITE_API_BASE_URL`, `ROUTING_PROFILE`, `LLM_MODE`, `ANTHROPIC_BASE_URL`, `LLM_MAX_REQUEST_MICROS`, `DAILY_SPEND_CAP_MICROS`, `LLM_KEY_CONCURRENCY`, `DATABASE_URL`, `DATABASE_DIRECT_URL`, `DATABASE_MIGRATE_URL`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_JURISDICTION`, `SECRETS_MASTER_KEY`, `SECRETS_MASTER_KEY_VERSION`, `SANDBOX_GATEWAY_URL`, `SANDBOX_GATEWAY_TOKEN`, `RIVER_UI_PASSWORD`.
 - **You provide when staging is set up, `[YOU-staging]` (14):** `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_TUNNEL_TOKEN`, `CF_AIG_GATEWAY_ID`, `CF_AIG_TOKEN`, `CLERK_WEBHOOK_SECRET`, `DEPLOY_HOST`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_PRIVATE_KEY`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`, `SENTRY_DSN`, `VITE_SENTRY_DSN`.
 - **TikTok, `[YOU-P6]` (3):** `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, `TIKTOK_REDIRECT_URI`.
 - **Billing, `[YOU-P7]` (8):** `BILLING_PROVIDER`, `PADDLE_API_KEY`, `PADDLE_WEBHOOK_SECRET`, `PADDLE_CLIENT_TOKEN`, `PADDLE_ENVIRONMENT`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PUBLISHABLE_KEY`. Fill in one provider's set.
-- **Optional, `[optional]` (5):** `CF_AI_API_TOKEN`, `GEMINI_API_KEY`, `TWELVELABS_API_KEY`, `ELEVENLABS_API_KEY`, `CHARTMETRIC_REFRESH_TOKEN`.
+- **Optional, `[optional]` (7):** `CF_AI_API_TOKEN`, `LLM_ALLOW_UNPRICED`, `LLM_CASSETTE_DIR`, `GEMINI_API_KEY`, `TWELVELABS_API_KEY`, `ELEVENLABS_API_KEY`, `CHARTMETRIC_REFRESH_TOKEN`.
