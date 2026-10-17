@@ -1040,6 +1040,12 @@ func (s *Store) WorkspacesNeedingAllowance(ctx context.Context, now time.Time, a
 
 // ---- The end of a run -------------------------------------------------------------------------------------------
 
+// runAuthoredVersion says the run made a timeline version (the author id of the editor's versions is the run's TypeID).
+func (s *Store) runAuthoredVersion(ctx context.Context, ws ids.WorkspaceID, run uuid.UUID) (bool, error) {
+	v, err := s.q.AgentRunTimelineVersion(ctx, db.AgentRunTimelineVersionParams{WorkspaceID: ws, AuthorID: ids.Encode(ids.PrefixRun, run)})
+	return v > 0, err
+}
+
 // settleRunCredits settles the credit hold of a run that has just reached a final status, in the transaction that put it there: success
 // charges, failure releases, and a cancel charges when the run authored a timeline version or rendered a preview and releases when it did
 // neither. A run with no hold (the
@@ -1055,11 +1061,11 @@ func (s *Store) settleRunCredits(ctx context.Context, ws ids.WorkspaceID, run Ag
 			NoEditNeeded bool `json:"no_edit_needed"`
 		}
 		if len(run.Output) > 0 && json.Unmarshal(run.Output, &out) == nil && out.NoEditNeeded {
-			v, err := s.q.AgentRunTimelineVersion(ctx, db.AgentRunTimelineVersionParams{WorkspaceID: ws, AuthorID: ids.Encode(ids.PrefixRun, run.ID)})
+			made, err := s.runAuthoredVersion(ctx, ws, run.ID)
 			if err != nil {
 				return err
 			}
-			charge = v > 0
+			charge = made
 		}
 	case AgentFailed:
 		charge = false
@@ -1072,11 +1078,9 @@ func (s *Store) settleRunCredits(ctx context.Context, ws ids.WorkspaceID, run Ag
 		}
 		charge = previewed
 		if !charge {
-			v, err := s.q.AgentRunTimelineVersion(ctx, db.AgentRunTimelineVersionParams{WorkspaceID: ws, AuthorID: ids.Encode(ids.PrefixRun, run.ID)})
-			if err != nil {
+			if charge, err = s.runAuthoredVersion(ctx, ws, run.ID); err != nil {
 				return err
 			}
-			charge = v > 0
 		}
 	case AgentWaitingInput:
 		return s.ExtendCreditHold(ctx, ws, run.ID, now.Add(CreditHoldWaitingTTL))

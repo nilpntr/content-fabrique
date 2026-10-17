@@ -224,8 +224,9 @@ func budgetNote(l runtime.BudgetLeft, worst int64) string {
 	if budgetLow(l, worst) {
 		s += " That is not much: finish soon, and do not start work you cannot complete."
 	}
-	if worst > 0 && l.Micros < worst {
-		// The metered client cuts the next call's max_tokens to what the budget can pay for, and the answer may stop short.
+	if worst > 0 && l.Micros < worst+worst/4 {
+		// The metered client cuts the next call's max_tokens to what the budget can pay for (the input counts too, hence the margin over
+		// the output's worst case), and the answer may stop short.
 		s += " " + budgetShortNote
 	}
 	return s

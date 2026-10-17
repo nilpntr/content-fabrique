@@ -30,7 +30,7 @@ type Route struct {
 
 // Apply sets the model, effort and max_tokens of the request from the route and returns the request.
 func (r Route) Apply(req Request) Request {
-	req.Model, req.Effort, req.MaxTokens = r.Model, r.Effort, r.MaxTokens
+	req.Model, req.Effort, req.MaxTokens, req.MinOutputTokens = r.Model, r.Effort, r.MaxTokens, r.MinOutputTokens
 	return req
 }
 

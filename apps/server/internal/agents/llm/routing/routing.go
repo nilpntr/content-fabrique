@@ -162,6 +162,13 @@ type Entry struct {
 	MinOutputTokens int
 }
 
+// NoStageError is returned by Entry for a stage the profile does not have (as opposed to one it has and cannot use).
+type NoStageError struct{ Profile, Stage string }
+
+func (e *NoStageError) Error() string {
+	return fmt.Sprintf("routing: profile %q has no stage %q", e.Profile, e.Stage)
+}
+
 // Efforts are the values the Messages API accepts for output_config.effort.
 var Efforts = []string{"low", "medium", "high", "xhigh", "max"}
 
@@ -182,7 +189,7 @@ func (p Profile) Entry(stage string) (Entry, error) {
 			}
 		}
 		if next == nil {
-			return Entry{}, fmt.Errorf("routing: profile %q has no stage %q", p.Name, stage)
+			return Entry{}, &NoStageError{Profile: p.Name, Stage: stage}
 		}
 		if next.Kind == yaml.MappingNode && scalar(next, "enabled") == "false" {
 			return Entry{}, &DisabledError{Profile: p.Name, Stage: stage}

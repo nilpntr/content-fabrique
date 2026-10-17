@@ -1,6 +1,7 @@
 # The starting profile (docs/03-architecture.md §7.5, decision D-07). Opus 5.5 where judgement matters.
 profile: v1-start
-# The editor and the revision get 24000 tokens of output room per call (max_tokens covers the thinking and the answer together). The
+# The editor gets 24000 tokens of output room per call (max_tokens covers the thinking and the answer together; the revision gets 12000,
+# see its entry below). The
 # default of 16000 was not enough for Opus: its plan_edit turn thought, wrote the plan and was cut off, and the run failed. Why not
 # more: the metered client reserves the worst case of every call before it sends it, max_tokens at the output price (24000 x $20/MTok
 # = $0.48 on Opus 5.5), and the spend plan gives a creator's first edit a budget of about $0.96, so a larger room would leave the run

@@ -482,7 +482,7 @@ func (l *loop) toolContext(toolUseID string, resumed bool) RunContext {
 		Logger: l.log.With("tool_use_id", toolUseID),
 		Left: BudgetLeft{
 			Known: true, ToolCalls: int(l.run.BudgetToolCalls) - l.toolCalls,
-			Wall: time.Until(l.wallDeadline()), Micros: l.budget.remaining(),
+			Wall: time.Until(l.wallDeadline()), Micros: l.budget.Remaining(),
 		},
 	}
 	if toolUseID != "" {
@@ -500,7 +500,7 @@ func (l *loop) toolContext(toolUseID string, resumed bool) RunContext {
 func (l *loop) overBudget() string {
 	run := l.run
 	switch {
-	case l.budget.remaining() <= 0:
+	case l.budget.Remaining() <= 0:
 		return LimitDollars
 	case l.tokens >= run.BudgetTokens:
 		return LimitTokens
@@ -1198,9 +1198,7 @@ func (b *budgetTracker) takeHookErr() error {
 	return err
 }
 
-func (b *budgetTracker) remaining() int64 { return b.inner.Remaining() }
-
-// Remaining implements llm.RemainingBudget: the client shortens a call's max_tokens to what the run can still pay for.
+// Remaining is what the run can still spend (llm.RemainingBudget: the client shortens a call's max_tokens to what it can pay for).
 func (b *budgetTracker) Remaining() int64 { return b.inner.Remaining() }
 
 // takeSettled returns what calls have settled at since the last time, and resets it.

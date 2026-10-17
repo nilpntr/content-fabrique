@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
+	"github.com/nilpntr/content-fabrique/internal/agents/llm/routing"
 	"github.com/nilpntr/content-fabrique/internal/credits"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
@@ -113,8 +114,15 @@ func (s *Service) Create(ctx context.Context, tx *store.Store, p StartParams) (s
 	// a first edit's). The run keeps the agent's stage for the ledger and the cassettes; only the model, effort and limits come from the
 	// revision entry. A profile without one keeps the editor's.
 	if quote != nil && quote.Action == credits.EditRevision {
-		if rev, err := s.Router.Resolve(p.Profile, RevisionStage); err == nil {
+		rev, err := s.Router.Resolve(p.Profile, RevisionStage)
+		var noStage *routing.NoStageError
+		switch {
+		case err == nil:
 			route = rev
+		case errors.As(err, &noStage):
+			// the profile has no revision entry: the editor's stands
+		default:
+			return store.AgentRun{}, err // a revision entry that is there and cannot be used (a typo'd model, a disabled stage) is loud
 		}
 	}
 	// Asking the factory now fails fast when there is no key for the workspace (a missing key would otherwise show up

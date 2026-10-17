@@ -426,10 +426,12 @@ func thinkingFits(th *Thinking, maxTokens int64) bool {
 	return th == nil || th.Mode != ThinkingEnabled || maxTokens > minThinkingBudget
 }
 
-// fitThinking returns the thinking setting to send with maxTokens: a manual budget is cut to half of it (at least the minimum, always
-// below maxTokens) so that the answer keeps room after the thinking. The caller's setting is not changed.
+// fitThinking returns the thinking setting to send with a shortened maxTokens: a manual budget is cut to at most half of it (at least the
+// minimum, always below maxTokens), so that the answer keeps room after the thinking and a tool call is not cut off. The caller's
+// setting is not changed. (A changed thinking budget costs the cached message prefix; only a shortened call, which is short of money
+// anyway, pays that.)
 func fitThinking(th *Thinking, maxTokens int64) *Thinking {
-	if th == nil || th.Mode != ThinkingEnabled || th.BudgetTokens < maxTokens {
+	if th == nil || th.Mode != ThinkingEnabled {
 		return th
 	}
 	cut := *th
