@@ -36,4 +36,6 @@ export interface Asset {
   /** A short muted loop. Not requested until the pointer rests on the card. */
   hoverPreviewUrl?: string;
   sprite?: Sprite;
+  /** Whether a failed clip can be retried from here. Default true. */
+  retryable?: boolean;
 }

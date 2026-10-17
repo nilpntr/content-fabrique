@@ -248,7 +248,7 @@ export function ClipCard({ asset, onOpen, onDelete, onRetry, className }: ClipCa
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {ready ? (
+          {ready && asset.durationMs > 0 ? (
             <span className="pointer-events-none absolute right-1.5 bottom-2 rounded bg-black/70 px-1.5 font-mono text-[11px] leading-5 text-white tabular-nums">
               <span className="sr-only">Duration </span>
               {formatDuration(asset.durationMs)}
@@ -271,8 +271,8 @@ export function ClipCard({ asset, onOpen, onDelete, onRetry, className }: ClipCa
               : null}
             {ready && moreTags > 0 ? <span className="shrink-0 text-[11.5px] leading-5 text-subtle-foreground tabular-nums" title={asset.tags.join(", ")}>+{moreTags}</span> : null}
           </div>
-          {asset.status === "failed" ? (
-            <Button variant="secondary" size="sm" onClick={() => onRetry?.(asset)} aria-label={`Retry ${title}`}>
+          {asset.status === "failed" && onRetry && asset.retryable !== false ? (
+            <Button variant="secondary" size="sm" onClick={() => onRetry(asset)} aria-label={`Retry ${title}`}>
               <RotateCw aria-hidden="true" />
               Retry
             </Button>
