@@ -15,6 +15,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 // ProfileVersion is the version of the Profile shape. A reader checks it before it reads the rest.
@@ -311,10 +312,14 @@ type TextProfile struct {
 	// OneLineShare is the share of the titled references whose title is one line; HeightPct the median cap height as a percentage of the
 	// frame height (0: not read); Shadow the majority shadow (none, soft or strong).
 	OneLineShare float64 `json:"one_line_share,omitempty"`
-	HeightPct    float64 `json:"height_pct,omitempty"`
-	Shadow       string  `json:"shadow,omitempty"`
-	LabelShare   float64 `json:"label_share"`
-	CaptionShare float64 `json:"caption_share"`
+	// OneLineChars is how long a title may be and still be one line for this creator: between the longest of their one-line titles and the
+	// shortest of their wrapped ones (0: no preference known). Patterns are the forms their titles take, most common first.
+	OneLineChars int            `json:"one_line_chars,omitempty"`
+	Patterns     []TitlePattern `json:"patterns,omitempty"`
+	HeightPct    float64        `json:"height_pct,omitempty"`
+	Shadow       string         `json:"shadow,omitempty"`
+	LabelShare   float64        `json:"label_share"`
+	CaptionShare float64        `json:"caption_share"`
 	// Examples are up to three titles as read: the creator's own words, untrusted.
 	Examples []string `json:"examples,omitempty"`
 }
@@ -564,7 +569,17 @@ func aggregateText(refs []Measures) *TextProfile {
 	var cases, colours, positions, aligns, weights, shadows []string
 	var condensed, oneLine float64
 	var lines, heights []float64
+	var titleTexts []string
+	oneMax, twoMin := 0, 0
 	for _, r := range titled {
+		if n := utf8.RuneCountInString(strings.Join(strings.Fields(r.Text), " ")); r.Text != "" && n > 0 {
+			titleTexts = append(titleTexts, r.Text)
+			if r.Lines == 1 {
+				oneMax = max(oneMax, n)
+			} else if r.Lines >= 2 && (twoMin == 0 || n < twoMin) {
+				twoMin = n
+			}
+		}
 		cases, colours, positions = append(cases, r.Case), append(colours, strings.ToUpper(r.Colour)), append(positions, r.Position)
 		aligns, weights = append(aligns, r.Alignment), append(weights, r.Weight)
 		shadows = append(shadows, r.Shadow)
@@ -586,6 +601,15 @@ func aggregateText(refs []Measures) *TextProfile {
 	}
 	t.Case, t.Colour, t.Position, t.Alignment, t.Weight = majority(cases), medianColour(colours), majority(positions), majority(aligns), majority(weights)
 	t.Shadow, t.OneLineShare = majority(shadows), round2(oneLine/float64(len(titled)))
+	t.Patterns = patternsOf(titleTexts)
+	switch {
+	case oneMax > 0 && twoMin > oneMax:
+		t.OneLineChars = (oneMax + twoMin) / 2 // between the longest title that fitted one line and the shortest that wrapped
+	case oneMax > 0 && twoMin > 0:
+		t.OneLineChars = twoMin - 1 // a title that wrapped is no longer than one that did not: stay under the shortest that wrapped
+	case oneMax > 0:
+		t.OneLineChars = oneMax + 4 // no title of theirs wrapped: a little longer than the longest is still one line
+	}
 	if len(heights) > 0 {
 		t.HeightPct = RangeOf(heights).Median
 	}
@@ -729,7 +753,9 @@ func (p *Profile) Describe() string {
 			if t.Shadow != "" {
 				fmt.Fprintf(&b, ", %s shadow", t.Shadow)
 			}
-			if t.OneLineShare >= 0.5 {
+			if t.OneLineChars > 0 {
+				fmt.Fprintf(&b, ", titles up to %d characters on one line", t.OneLineChars)
+			} else if t.OneLineShare >= 0.5 {
 				b.WriteString(", one line")
 			}
 			if t.LabelShare == 0 {
@@ -829,6 +855,9 @@ func (p *Profile) CompactBlock() string {
 			fmt.Fprintf(&b, ", shadow %s", t.Shadow)
 		}
 		b.WriteString("\n")
+		if pl := patternLine(t.Patterns); pl != "" {
+			b.WriteString(pl + "\n")
+		}
 		if r := p.TitleRecipe(); r != nil {
 			b.WriteString(r.Describe() + "\n")
 		}

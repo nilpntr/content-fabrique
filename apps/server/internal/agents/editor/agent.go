@@ -15,6 +15,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/analysis"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
+	"github.com/nilpntr/content-fabrique/internal/subject"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
@@ -81,6 +82,8 @@ type contextCaps struct {
 	// comments is how many open comments are written out in full, and commentChars how much of each one's text is kept; the
 	// count and the guidance are always there, and get_comments has all of them.
 	comments, commentChars int
+	// subjects is where the person is in each clip, for the footage lines (the same in every step).
+	subjects subject.Index
 }
 
 var contextSteps = []contextCaps{
@@ -131,7 +134,9 @@ func (d Deps) runContext(ctx context.Context, rc runtime.RunContext) ([]llm.Bloc
 	}
 	hint := contentTypeHint(det.Project.Brief, rows, sums)
 	styleBlk := styleBlocks(d.style(ctx, ws))
+	subjects := d.subjects(ctx, ws, rows)
 	for _, caps := range contextSteps {
+		caps.subjects = subjects
 		blocks := contextBlocks(det.Project.Format, det.Project.Brief, rows, sums, status, caps)
 		if hint != "" {
 			blocks = append(blocks, llm.TextBlock(hint))
@@ -165,7 +170,7 @@ func contextBlocks(format, brief string, rows []store.ProjectFootageRow, sums ma
 		}
 		blocks = append(blocks, llm.TextBlock(intro), runtime.UntrustedBlock("brief", excerpt))
 	}
-	blocks = append(blocks, llm.TextBlock(footageText(rows, footageOpts{Detailed: caps.detailed, TitleChars: caps.titleChars, DescChars: caps.descChars, Analysis: sums})))
+	blocks = append(blocks, llm.TextBlock(footageText(rows, footageOpts{Detailed: caps.detailed, TitleChars: caps.titleChars, DescChars: caps.descChars, Analysis: sums, Subjects: caps.subjects})))
 	return append(blocks, llm.TextBlock(status))
 }
 

@@ -17,6 +17,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/styleprofile"
+	"github.com/nilpntr/content-fabrique/internal/subject"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 	"github.com/nilpntr/content-fabrique/internal/timeline/ops"
 )
@@ -122,6 +123,14 @@ func CheckVersion(ctx context.Context, projects Projects, src AnalysisSource, ws
 		return Report{}, err
 	}
 	in := CheckInput{Version: version, Spec: spec, Plan: plan, Assets: assets, Issues: vd.Issues, Style: style}
+	// Where the person is in the clips, for the title checks: read from the quick look when the source can (a source that cannot has none).
+	if rd, ok := src.(subject.Reader); ok {
+		if ix, err := subject.LoadForSpec(ctx, rd, ws, spec); err == nil {
+			in.Subjects = ix
+		} else {
+			slog.WarnContext(ctx, "editor: the subject boxes could not be read; the title is not checked against the head", "error", err)
+		}
+	}
 	if sampler != nil {
 		switch series, err := sampler.Rendered(ctx, ws, pid, version); {
 		case err == nil:

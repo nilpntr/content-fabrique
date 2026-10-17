@@ -2,10 +2,11 @@ package styleprofile
 
 import (
 	"fmt"
-	"github.com/nilpntr/content-fabrique/internal/timeline/style"
 	"math"
 	"slices"
 	"strings"
+
+	"github.com/nilpntr/content-fabrique/internal/timeline/style"
 )
 
 // The style distance: how far an edit is from the creator's profile, per dimension, with a one-line fix for each dimension that is out
@@ -31,6 +32,13 @@ type EditStats struct {
 	TitleShadow    string
 	// TitleScale is the scale override of the title (1 when it has none).
 	TitleScale float64
+	// TitleChars is the length of the title in characters (line breaks count as spaces), TitleBreak says the text has a line break of its
+	// own, TitleFitScale is the largest scale at which the title fits one line when it wraps (0 when none from 0.6 up does), and TitleKind
+	// is its shape (KindSeries, ...).
+	TitleChars    int
+	TitleBreak    bool
+	TitleFitScale float64
+	TitleKind     string
 	// TitleCase is "upper", "lower" or "mixed" for the first title ("" when there is none); TitleAtS is when it starts.
 	TitleCase string
 	TitleAtS  float64
@@ -68,6 +76,8 @@ type Dimension struct {
 	OK       bool   `json:"ok"`
 	// Fix is a one-line instruction for a dimension that is out of range.
 	Fix string `json:"fix,omitempty"`
+	// Soft marks a dimension that only advises: out of range it is borderline, and does not make the edit fail.
+	Soft bool `json:"soft,omitempty"`
 }
 
 // Distance is the result of comparing an edit with a profile.
@@ -81,7 +91,18 @@ type Distance struct {
 func (d Distance) Failed() []Dimension {
 	var out []Dimension
 	for _, x := range d.Dimensions {
-		if !x.OK {
+		if !x.OK && !x.Soft {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+// Borderline lists the soft dimensions that are out of range: advice, not a failure.
+func (d Distance) Borderline() []Dimension {
+	var out []Dimension
+	for _, x := range d.Dimensions {
+		if !x.OK && x.Soft {
 			out = append(out, x)
 		}
 	}
@@ -98,6 +119,10 @@ func (p *Profile) Compare(e EditStats) Distance {
 			fix = ""
 		}
 		dims = append(dims, Dimension{ID: id, Value: value, Expected: expected, OK: ok, Fix: fix})
+	}
+	addSoft := func(id, value, expected string, ok bool, fix string) {
+		add(id, value, expected, ok, fix)
+		dims[len(dims)-1].Soft = true
 	}
 	n := len(e.ShotsS)
 	cuts := max(n-1, 0)
@@ -160,7 +185,7 @@ func (p *Profile) Compare(e EditStats) Distance {
 		add("title", fmt.Sprintf("%d titles", e.Titles), map[bool]string{true: "one title", false: "no title"}[titles],
 			(titles && e.Titles == 1) || (!titles && e.Titles == 0), map[bool]string{true: "use exactly one title", false: "leave the title out"}[titles])
 		if titles && e.Titles >= 1 {
-			p.compareTitleLook(e, add)
+			p.compareTitleLook(e, add, addSoft)
 		}
 		if p.Text.LabelShare == 0 {
 			add("labels", fmt.Sprintf("%d labels", e.Labels), "none (the creator uses no exercise labels)", e.Labels == 0, "take the exercise labels out: the creator has one title only")
@@ -187,15 +212,19 @@ func (p *Profile) Compare(e EditStats) Distance {
 		add("duration", fmt.Sprintf("%.1f s", e.DurationS), fmt.Sprintf("%.0f to %.0f s", dlo, dhi), inRange(e.DurationS, dlo, dhi), "bring the length into the creator's range")
 	}
 
-	ok := 0
+	ok, hard := 0, 0
 	for _, d := range dims {
+		if d.Soft {
+			continue // advice does not count in the share
+		}
+		hard++
 		if d.OK {
 			ok++
 		}
 	}
 	score := 1.0
-	if len(dims) > 0 {
-		score = round2(float64(ok) / float64(len(dims)))
+	if hard > 0 {
+		score = round2(float64(ok) / float64(hard))
 	}
 	return Distance{Dimensions: dims, Score: score}
 }
@@ -222,16 +251,22 @@ func shadowRank(s string) int {
 
 // compareTitleLook adds the dimensions of the title's look: its colour (the colour difference), its lines, the size of its letters and
 // its shadow, each only when the profile and the edit both have the number.
-func (p *Profile) compareTitleLook(e EditStats, add func(id, value, expected string, ok bool, fix string)) {
+func (p *Profile) compareTitleLook(e EditStats, add, addSoft func(id, value, expected string, ok bool, fix string)) {
 	t := p.Text
 	if hexColour6.MatchString(t.Colour) && hexColour6.MatchString(e.TitleFill) {
 		de, _ := DeltaE(t.Colour, e.TitleFill)
 		add("title_colour", fmt.Sprintf("%s (colour difference %.0f)", strings.ToUpper(e.TitleFill), de), fmt.Sprintf("%s within %.0f", t.Colour, DeltaEMax), de <= DeltaEMax,
 			fmt.Sprintf("set the title's fill to %s", t.Colour))
 	}
-	if t.OneLineShare >= 0.5 && e.TitleLines > 0 {
-		add("title_lines", fmt.Sprintf("%d lines", e.TitleLines), "one line (the creator's titles are one line)", e.TitleLines == 1,
-			"make the title one line: shorten the text or lower its scale")
+	// One line: when the creator's titles of about this length are one line (or most of their titles are), so is this one.
+	wantOne := (t.OneLineChars > 0 && e.TitleChars > 0 && e.TitleChars <= t.OneLineChars) || (t.OneLineChars == 0 && t.OneLineShare >= 0.5)
+	if wantOne && e.TitleLines > 0 {
+		add("title_lines", fmt.Sprintf("%d lines (%d characters)", e.TitleLines, e.TitleChars), "one line (the creator's titles of this length are one line)", e.TitleLines == 1,
+			titleLinesFix(e))
+	}
+	if patternKinds(t) != "" && e.TitleKind != "" {
+		addSoft("title_pattern", e.TitleKind, "one of the creator's forms: "+patternKinds(t), t.Follows(e.TitleKind),
+			titlePatternFix(t))
 	}
 	if t.HeightPct > 0 && e.TitleHeightPct > 0 {
 		ratio := e.TitleHeightPct / t.HeightPct
@@ -242,6 +277,41 @@ func (p *Profile) compareTitleLook(e EditStats, add func(id, value, expected str
 		add("title_shadow", e.TitleShadow, "at most "+t.Shadow, shadowRank(e.TitleShadow) <= shadowRank(t.Shadow),
 			fmt.Sprintf("set the title's shadow to %s", t.Shadow))
 	}
+}
+
+// titleLinesFix says how to make the title one line: take the line break out, lower the scale to the one that fits, or shorten the text.
+func titleLinesFix(e EditStats) string {
+	switch {
+	case e.TitleBreak:
+		return "take the line break out of the title's text so it is one line"
+	case e.TitleFitScale > 0:
+		return fmt.Sprintf("set the title's scale to %g to fit it on one line, or shorten the text", e.TitleFitScale)
+	}
+	return "shorten the title's text to fit one line"
+}
+
+// patternKinds lists the kinds the creator uses, for the expected column.
+func patternKinds(t *TextProfile) string {
+	var ks []string
+	for _, p := range t.Patterns {
+		if p.Share >= PatternMinShare {
+			ks = append(ks, p.Kind)
+		}
+	}
+	return strings.Join(ks, ", ")
+}
+
+// titlePatternFix names the creator's most common form without quoting their words.
+func titlePatternFix(t *TextProfile) string {
+	if len(t.Patterns) == 0 {
+		return ""
+	}
+	p := t.Patterns[0]
+	s := "write the title as " + kindWords(p.Kind)
+	if p.Number != "" {
+		s += " ending in " + p.Number
+	}
+	return s + ", with a topic from the footage"
 }
 
 // titleSizeFix says what scale to set, as a number in the range the ops take (0.6 to 1.4, from the title's own scale and how far off it is).
@@ -274,7 +344,10 @@ func (d Distance) Text() string {
 	fmt.Fprintf(&b, "style distance: %.0f %% of %d dimensions in the creator's range\n", d.Score*100, len(d.Dimensions))
 	for _, x := range d.Dimensions {
 		mark := "ok  "
-		if !x.OK {
+		switch {
+		case !x.OK && x.Soft:
+			mark = "adv " // advice: borderline, not a failure
+		case !x.OK:
 			mark = "OUT "
 		}
 		fmt.Fprintf(&b, "%s %s: %s (expected %s)", mark, x.ID, x.Value, x.Expected)

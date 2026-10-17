@@ -1,6 +1,6 @@
 # Editor system prompt: changelog
 
-The editor agent's system prompt is `editor.v2.3.md`, embedded in the Go binary, and the genre playbooks are the files in
+The editor agent's system prompt is `editor.v2.4.md`, embedded in the Go binary, and the genre playbooks are the files in
 `playbooks/`, embedded too. The text the model receives is the runtime's preamble (`runtime.SystemPreamble`, the untrusted-data
 rule) followed by this file. The prompt version (`PromptVersion` in `prompt.go`) is stored in every run's input, so a run can
 always be tied to the text it was given; a playbook has its own version (`workout.v2`, in `playbooks.go`) that the run's plan
@@ -21,6 +21,24 @@ Rules for changing it:
 - The cache hit rate of a run is visible: `cfctl agent show <run>` prints the cache write and read tokens of every model call and
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
+
+## editor.v2.4 (2026-10-18)
+
+Title placement and wording (P6-05 follow-up). The live run of v2.3 matched the creator's title in colour, size, shadow and case and
+missed two things: the title was two lines ("BACK DAY" and "BLUEPRINT") and sat on the top of the person's head, and its words were
+invented ("BLUEPRINT") where the creator's titles follow a template ("BUILDING LATS 101"). The file is `editor.v2.4.md`; it changes what
+the editor writes for a creator who has a profile and for clips that have subject boxes, and nothing for the others, so it is a minor
+version.
+
+- **The title bullet of "Following the creator's style" has three parts.** *The words*: use the creator's most common title template
+  (a series such as "<MUSCLE OR EXERCISE> 101", a lowercase witty line) with a topic from the footage, never an invented name or a copied
+  example. *One line*: a title of up to the number of characters the recipe names stays on one line, with no line break in the text, a
+  shorter text or a lower scale when it would wrap. *Off the head*: the footage list has a `subject:` line (where the head is, in
+  numbers), the anchor `upper_third` is above it, and `text_over_subject` says when a title covers the head.
+- **Tools.** `add_text` and `update_text` take `avoid_subject` (default true): the renderer moves a title that would cover the head of
+  the person above the head, below it or to a smaller scale, inside the safe zone. `check_edit` has `text_over_subject` (a pass says
+  what the renderer does; a failure says one line, a lower scale or a shorter text) and `style_match` has `title_pattern` (advice, listed
+  as borderline) and a `title_lines` that follows the creator's one-line length.
 
 ## editor.v2.3 (2026-10-17)
 

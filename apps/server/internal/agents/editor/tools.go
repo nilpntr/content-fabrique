@@ -286,7 +286,7 @@ func (d Deps) listFootage(ctx context.Context, rc runtime.RunContext, _ noArgs) 
 	if err != nil {
 		return runtime.Result{}, err
 	}
-	return runtime.Text(footageText(rows, footageOpts{Full: true, Analysis: sums})), nil
+	return runtime.Text(footageText(rows, footageOpts{Full: true, Analysis: sums, Subjects: d.subjects(ctx, ws, rows)})), nil
 }
 
 // ---- view_clip --------------------------------------------------------------------------------------------------

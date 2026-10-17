@@ -11,9 +11,9 @@ import (
 
 // PromptVersion names the system prompt below. It is stored in every run's input (Input.PromptVersion), so a run can be tied to
 // the text it was given. prompts/CHANGELOG.md says what each version changed.
-const PromptVersion = "editor.v2.3"
+const PromptVersion = "editor.v2.4"
 
-//go:embed prompts/editor.v2.3.md
+//go:embed prompts/editor.v2.4.md
 var systemPromptTemplate string
 
 // systemPrompt is the prompt for the features of this build, rendered once: the sections about an effect or a look that the build

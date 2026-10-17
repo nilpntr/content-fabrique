@@ -89,7 +89,7 @@ func TestBuildingLatsPassesWithTheProfileAndFailsWithout(t *testing.T) {
 		t.Fatalf("with the profile the edit fails %v:\n%s", f, with.Text())
 	}
 	c := wantStatus(t, with, CheckStyleMatch, CheckPass)
-	if !strings.Contains(c.Detail, "all 14 style dimensions") || with.Style == nil || with.Style.Score != 1 || with.Metrics.StyleScore != 1 {
+	if !strings.Contains(c.Detail, "all 16 style dimensions") || with.Style == nil || with.Style.Score != 1 || with.Metrics.StyleScore != 1 {
 		t.Errorf("style match: %s / %+v", c.Detail, with.Style)
 	}
 
@@ -332,7 +332,7 @@ func TestStyleMatchHoldsTheTitleLook(t *testing.T) {
 		if tt, ok := tr.(*timeline.TextTrack); ok {
 			s := 1.4
 			tt.Items[0].Scale = &s
-			tt.Items[0].Text = "BUILDING LATS 101 AND SOME MORE WORDS HERE"
+			tt.Items[0].Text = "BUILDING LATS 101 ROW"
 		}
 	}
 	r2 := RunChecks(CheckInput{Spec: big, Plan: workoutPlan(), Style: p})

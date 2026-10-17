@@ -6,10 +6,13 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/nilpntr/content-fabrique/internal/analysis"
 	"github.com/nilpntr/content-fabrique/internal/styleprofile"
+	"github.com/nilpntr/content-fabrique/internal/subject"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
+	"github.com/nilpntr/content-fabrique/internal/timeline/style"
 )
 
 // check_edit: the objective checks of an edit (docs/design/edit-style-v1.md, step 5). Everything here is computed in Go from the
@@ -46,6 +49,8 @@ const (
 	CheckCrushed       = "crushed"
 	CheckBeatSync      = "beat_sync"
 	CheckStyleMatch    = "style_match"
+	// CheckTextOverSubject is the check for a title that covers the head of the person in the footage (the quick look's subject boxes).
+	CheckTextOverSubject = "text_over_subject"
 )
 
 // The thresholds that do not depend on the kind of video.
@@ -118,6 +123,9 @@ type CheckInput struct {
 	Assets map[string]AssetAnalysis
 	// Issues are the validation issues of the version (the safe zone of the texts is the validator's).
 	Issues []timeline.Issue
+	// Subjects is where the person is in the clips (the quick look's subject boxes), by asset id; nil or without an asset's entry, the
+	// subject check does not apply to the clip.
+	Subjects subject.Index
 	// Style is the creator's style profile (P6-05), nil for a workspace that has none: the thresholds then are the defaults of the
 	// content type, and style_match does not apply.
 	Style *styleprofile.Profile
@@ -307,7 +315,7 @@ func RunChecks(in CheckInput) Report {
 	r.Metrics.DurationMs, r.Metrics.Shots = c.total, len(items)
 	r.Checks = []Check{
 		c.hookLength(), c.hookTitle(), c.shotPacing(), c.shotVariety(), c.paceBuilds(), c.repBoundaries(), c.deadTime(),
-		c.effectDensity(), c.textSafe(), c.duration(targetS), c.brightness(), c.crushed(), c.beatSync(), c.styleMatch(),
+		c.effectDensity(), c.textSafe(), c.textOverSubject(), c.duration(targetS), c.brightness(), c.crushed(), c.beatSync(), c.styleMatch(),
 	}
 	if a := in.Audio; a != nil {
 		r.Checks = append(r.Checks, audioChecks(*a)...)
@@ -648,6 +656,69 @@ func (c *checker) textSafe() Check {
 	return c.pass(CheckTextSafe, "%d texts, all inside the safe zones", texts)
 }
 
+// textOverSubject checks the texts against the head of the person in the clips they are on top of. A text that covers the head is
+// cleared by the renderer when it can be (above the head, below it or smaller: PlaceTextAvoiding, the same function), which the line says;
+// one that cannot be cleared, or that asks not to avoid the subject, fails with what to change.
+func (c *checker) textOverSubject() Check {
+	if len(c.in.Subjects) == 0 {
+		return c.skip(CheckTextOverSubject, "the clips have no subject boxes (the quick look reads them: run cfctl assets quicklook --subjects for older clips)")
+	}
+	out := c.in.Spec.Output
+	var texts, moved int
+	var bad, notes []string
+	for _, tr := range c.in.Spec.Tracks {
+		tt, ok := tr.(*timeline.TextTrack)
+		if !ok {
+			continue
+		}
+		for _, it := range tt.Items {
+			obstacles := subject.HeadRects(c.in.Spec, c.in.Subjects.Lookup, it.AtMs, it.AtMs+it.DurationMs)
+			if len(obstacles) == 0 {
+				continue
+			}
+			texts++
+			// The text as placed, then as the renderer places it.
+			if over, err := timeline.TextOverlaps(out, it, obstacles); err != nil || !over {
+				continue
+			}
+			_, avoided, _ := timeline.PlaceTextAvoiding(out, it, obstacles)
+			head := obstacles[0]
+			for _, o := range obstacles[1:] {
+				head.Top = min(head.Top, o.Top)
+			}
+			band := head.Top - c.zoneTop()
+			where := fmt.Sprintf("the head starts at y %d (%.0f %% from the top) and the clear band above it is %d px tall", head.Top, float64(head.Top)/float64(max(out.Height, 1))*100, max(band, 0))
+			switch {
+			case it.AvoidsSubject() && avoided.Cleared:
+				moved++
+				notes = append(notes, fmt.Sprintf("%s covers the head, so the renderer moves it %s it (%s); one line and a smaller scale keep it above the head", it.ID, avoided.Where, where))
+			case it.AvoidsSubject():
+				bad = append(bad, fmt.Sprintf("%s covers the head and cannot be moved off it inside the safe zone (%s): use one line, a lower scale (0.6 at the least) or a shorter text", it.ID, where))
+			default:
+				bad = append(bad, fmt.Sprintf("%s covers the head and is set not to avoid it (%s): remove avoid_subject false, or use one line at the top of the safe zone", it.ID, where))
+			}
+		}
+	}
+	switch {
+	case len(bad) > 0:
+		return c.fail(CheckTextOverSubject, "%s", strings.Join(bad[:min(3, len(bad))], "; "))
+	case texts == 0:
+		return c.skip(CheckTextOverSubject, "no text is on top of a clip with a subject box")
+	case moved > 0:
+		return c.pass(CheckTextOverSubject, "%s", strings.Join(notes[:min(3, len(notes))], "; "))
+	}
+	return c.pass(CheckTextOverSubject, "%d texts, none on the head of the person", texts)
+}
+
+// zoneTop is the top of the safe zone of the output, in pixels (0 for an unknown format).
+func (c *checker) zoneTop() int {
+	z, ok := c.in.Spec.Output.Zone()
+	if !ok {
+		return 0
+	}
+	return z.Inner.Top
+}
+
 func (c *checker) duration(targetS int) Check {
 	lo, hi := int64(defaultMinDurationMs), int64(defaultMaxDurationMs)
 	what := "the default range"
@@ -869,6 +940,25 @@ func (c *checker) titleLook(e *styleprofile.EditStats, it timeline.TextItem) {
 		return
 	}
 	e.TitleFill, e.TitleLines = pl.Style.Fill.Hex(), len(pl.Layout.Lines)
+	e.TitleChars = utf8.RuneCountInString(strings.Join(strings.Fields(it.Text), " "))
+	e.TitleBreak = strings.Contains(it.Text, "\n")
+	e.TitleKind, _ = styleprofile.TitleKind(it.Text)
+	if e.TitleLines > 1 && !e.TitleBreak {
+		// The largest scale (in steps of 0.05, down to the lowest allowed) at which the text fits one line.
+		cur := 1.0
+		if it.Scale != nil {
+			cur = *it.Scale
+		}
+		for s := math.Floor(cur*20) / 20; s >= style.MinScale-1e-9; s -= 0.05 {
+			try := it
+			sc := math.Round(s*100) / 100
+			try.Scale = &sc
+			if tp, err := timeline.PlaceText(out, try); err == nil && len(tp.Layout.Lines) == 1 {
+				e.TitleFitScale = sc
+				break
+			}
+		}
+	}
 	// The size is a share of a 9:16 frame's height (1920 px for a 1080 px short side), as the profile has it, whatever the format of the
 	// output: text sizes scale with the short side, so the same scale is the same share on every format.
 	e.TitleHeightPct = math.Round(pl.Style.CapHeightPct(out.ShortSide(), out.ShortSide()*1920/1080)*10) / 10
@@ -890,12 +980,23 @@ func (c *checker) styleMatch() Check {
 	d := c.in.Style.Compare(c.editStats())
 	c.m.StyleScore = d.Score
 	*c.dist = &d
+	soft := ""
+	if b := d.Borderline(); len(b) > 0 {
+		var ps []string
+		for _, x := range b {
+			ps = append(ps, fmt.Sprintf("%s: %s, expected %s (%s)", x.ID, x.Value, x.Expected, x.Fix))
+		}
+		soft = "; borderline, not a failure: " + strings.Join(ps, "; ")
+	}
 	if bad := d.Failed(); len(bad) > 0 {
 		var parts []string
 		for _, b := range bad[:min(4, len(bad))] {
 			parts = append(parts, fmt.Sprintf("%s: %s, expected %s (%s)", b.ID, b.Value, b.Expected, b.Fix))
 		}
-		return c.fail(CheckStyleMatch, "%d of %d style dimensions are out of the creator's range: %s", len(bad), len(d.Dimensions), strings.Join(parts, "; "))
+		return c.fail(CheckStyleMatch, "%d of %d style dimensions are out of the creator's range: %s%s", len(bad), len(d.Dimensions), strings.Join(parts, "; "), soft)
+	}
+	if soft != "" {
+		return c.pass(CheckStyleMatch, "every style dimension that has to match is in the creator's range%s", soft)
 	}
 	return c.pass(CheckStyleMatch, "all %d style dimensions are in the creator's range", len(d.Dimensions))
 }
