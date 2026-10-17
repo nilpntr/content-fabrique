@@ -3,6 +3,7 @@ package diff
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 
@@ -203,7 +204,7 @@ func (d *differ) arrayByID(path []string, a, b []any, aIDs, bIDs []string) error
 	}
 
 	// 1. Removals, last first.
-	cur := append([]string(nil), aIDs...)
+	cur := slices.Clone(aIDs)
 	for i := len(cur) - 1; i >= 0; i-- {
 		if _, kept := inB[cur[i]]; !kept {
 			if err := d.emit(OpRemove, Pointer(at(path, i)...), "", nil); err != nil {
@@ -234,7 +235,7 @@ func (d *differ) arrayByID(path []string, a, b []any, aIDs, bIDs []string) error
 			continue
 		}
 		from := indexOf(cur, id)
-		rest := append(append([]string(nil), cur[:from]...), cur[from+1:]...)
+		rest := slices.Delete(slices.Clone(cur), from, from+1)
 		dest := 0
 		if k > 0 {
 			dest = indexOf(rest, kept[k-1]) + 1
@@ -245,7 +246,7 @@ func (d *differ) arrayByID(path []string, a, b []any, aIDs, bIDs []string) error
 		if err := d.emit(OpMove, Pointer(at(path, dest)...), Pointer(at(path, from)...), nil); err != nil {
 			return err
 		}
-		cur = append(rest[:dest], append([]string{id}, rest[dest:]...)...)
+		cur = slices.Insert(rest, dest, id)
 	}
 
 	// 3. Adds, at their final index.

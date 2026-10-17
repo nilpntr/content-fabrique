@@ -33,6 +33,7 @@ func cloneVideoAudio(v *timeline.VideoAudio) *timeline.VideoAudio {
 // ---- add_clip, remove_item, move_item ---------------------------------------------------------------------------
 
 func (a *applier) addClip(o *AddClip) bool {
+	a.ensureSorted()
 	items := a.main.Items
 	if o.Index != nil && o.AfterID != "" {
 		return a.errf(CodeBadArgument, "give index or after_id, not both")
@@ -69,12 +70,14 @@ func (a *applier) addClip(o *AddClip) bool {
 }
 
 func (a *applier) removeItem(o *RemoveItem) bool {
+	a.ensureSorted()
 	i, ok := a.clip(o.ID)
 	if !ok {
 		return false
 	}
 	prevFirst := a.firstClipID()
 	a.main.Items = slices.Delete(a.main.Items, i, i+1)
+	a.forget(o.ID)
 	a.firstClipLosesTransition(prevFirst)
 	a.ripple()
 	return true
@@ -123,6 +126,7 @@ func (a *applier) moveClip(o *MoveItem) bool {
 	if o.AtMs != nil {
 		return a.errf(CodeBadArgument, "a clip's start is worked out from its place on the main track; move %q with index or after_id", o.ID)
 	}
+	a.ensureSorted()
 	from, _ := a.clip(o.ID)
 	it := a.main.Items[from]
 	rest := slices.Delete(slices.Clone(a.main.Items), from, from+1)
@@ -140,7 +144,7 @@ func (a *applier) moveClip(o *MoveItem) bool {
 		}
 		k := slices.IndexFunc(rest, func(v timeline.VideoItem) bool { return v.ID == o.AfterID })
 		if k < 0 {
-			return a.wrongKind(o.AfterID, "clip")
+			return a.wrongKind(o.AfterID, kindClip)
 		}
 		dest = k + 1
 	}
@@ -163,6 +167,7 @@ func (a *applier) trimItem(o *TrimItem) bool {
 		if o.InMs == nil && o.OutMs == nil {
 			return a.errf(CodeBadArgument, "give in_ms and/or out_ms to trim the clip %q", o.ID)
 		}
+		a.ensureSorted()
 		i, _ := a.clip(o.ID)
 		it := &a.main.Items[i]
 		if o.InMs != nil {
@@ -194,6 +199,7 @@ func (a *applier) trimItem(o *TrimItem) bool {
 }
 
 func (a *applier) replaceSource(o *ReplaceSource) bool {
+	a.ensureSorted()
 	i, ok := a.clip(o.ID)
 	if !ok {
 		return false
@@ -206,6 +212,7 @@ func (a *applier) replaceSource(o *ReplaceSource) bool {
 }
 
 func (a *applier) setSpeed(o *SetSpeed) bool {
+	a.ensureSorted()
 	i, ok := a.clip(o.ID)
 	if !ok {
 		return false
@@ -228,6 +235,7 @@ func (a *applier) setReframe(o *SetReframe) bool {
 }
 
 func (a *applier) setTransition(o *SetTransition) bool {
+	a.ensureSorted()
 	i, ok := a.clip(o.ID)
 	if !ok {
 		return false
@@ -296,6 +304,7 @@ func (a *applier) addText(o *AddText) bool {
 	tt := a.textTrack()
 	if tt == nil {
 		tt = &timeline.TextTrack{ID: a.freeTrackID("text", id)}
+		a.register(tt.ID, kindTrack)
 		a.spec.Tracks = append(a.spec.Tracks, tt)
 		a.touch(tt.ID)
 	}
@@ -350,6 +359,7 @@ func (a *applier) removeText(o *RemoveText) bool {
 	}
 	tt := a.textTrack()
 	tt.Items = slices.DeleteFunc(tt.Items, func(t timeline.TextItem) bool { return t.ID == o.ID })
+	a.forget(o.ID)
 	a.touch(o.ID)
 	return true
 }
@@ -403,6 +413,7 @@ func (a *applier) setSound(o *SetSound) bool {
 	}
 	if at == nil {
 		at = &timeline.AudioTrack{ID: a.freeTrackID("sound", id)}
+		a.register(at.ID, kindTrack)
 		a.spec.Tracks = append(a.spec.Tracks, at)
 		a.touch(at.ID)
 	}
@@ -419,6 +430,7 @@ func (a *applier) removeSound(o *RemoveSound) bool {
 	}
 	at := a.audioTrack()
 	at.Items = slices.Delete(at.Items, i, i+1)
+	a.forget(o.ID)
 	a.touch(o.ID)
 	return true
 }
@@ -430,6 +442,7 @@ func (a *applier) setCaptions(o *SetCaptions) bool {
 	ct := a.captionsTrack()
 	if ct == nil {
 		ct = &timeline.CaptionsTrack{ID: a.freeTrackID("captions", ""), From: "transcript", Style: "word_highlight", Enabled: true}
+		a.register(ct.ID, kindTrack)
 		a.spec.Tracks = append(a.spec.Tracks, ct)
 	}
 	if o.Enabled != nil {

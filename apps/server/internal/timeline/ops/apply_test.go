@@ -667,21 +667,6 @@ func TestBatchSemantics(t *testing.T) {
 			t.Fatal("a typed nil op must fail, not panic")
 		}
 	})
-	t.Run("a main track given out of order is put in order", func(t *testing.T) {
-		spec := base
-		main, _, _ := timeline.MainTrack(&spec)
-		cp := *main
-		cp.Items = []timeline.VideoItem{main.Items[1], main.Items[0], main.Items[2]}
-		// c2 first in the array but still at 3000: contiguous by time, so valid.
-		spec.Tracks = []timeline.Track{&cp, spec.Tracks[1], spec.Tracks[2]}
-		if res := timeline.Validate(mustJSON(t, spec), cat); !res.OK() {
-			t.Fatalf("setup: %+v", res.Issues)
-		}
-		out := mustApply(t, spec, `[{"op":"update_text","id":"t1","text":"x"}]`)
-		if got := clipTimes(t, out); got != "c1:0-3000 c2:3000-7000 c3:7000-10000" {
-			t.Fatalf("clips: %s", got)
-		}
-	})
 	t.Run("marks warnings of the result but still applies", func(t *testing.T) {
 		out, res := apply(t, base, `[{"op":"update_text","id":"t1","style":"mystery"}]`)
 		if !res.OK() || len(res.Issues) != 1 || res.Issues[0].Severity != timeline.SeverityWarning {

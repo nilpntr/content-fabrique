@@ -503,11 +503,27 @@ func equalNumbers(a, b json.Number) bool {
 	if a == b {
 		return true
 	}
-	// The length guard keeps an absurd exponent (1e999999) from making big.Rat build a huge number.
-	if len(a) > 64 || len(b) > 64 {
+	// Numbers whose text is long or whose exponent is huge are only equal when they are written the same way: big.Rat
+	// would build a number with that many digits (1e999999) and take that long, and no spec has such numbers.
+	if len(a) > 64 || len(b) > 64 || hugeExponent(a) || hugeExponent(b) {
 		return false
 	}
 	x, ok1 := new(big.Rat).SetString(a.String())
 	y, ok2 := new(big.Rat).SetString(b.String())
 	return ok1 && ok2 && x.Cmp(y) == 0
+}
+
+// maxExponent is the largest exponent (either sign) for which numbers are compared by value.
+const maxExponent = 400
+
+// hugeExponent reports whether the number is written with an exponent beyond maxExponent (or one that does not fit an
+// int64).
+func hugeExponent(n json.Number) bool {
+	s := string(n)
+	i := strings.IndexAny(s, "eE")
+	if i < 0 {
+		return false
+	}
+	e, err := strconv.ParseInt(strings.TrimPrefix(s[i+1:], "+"), 10, 64)
+	return err != nil || e > maxExponent || e < -maxExponent
 }

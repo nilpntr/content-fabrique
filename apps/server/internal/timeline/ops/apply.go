@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -50,7 +51,6 @@ func Apply(spec timeline.Spec, batch []Op, catalog timeline.AssetCatalog) (timel
 		return fail(opIssue(NoOp, "", CodeInvalidOp, "", "the timeline has no main track"))
 	}
 	a.main = main
-	a.sortMain()
 	a.scanIDs()
 	for i, op := range batch {
 		a.idx = i
@@ -73,12 +73,27 @@ func Apply(spec timeline.Spec, batch []Op, catalog timeline.AssetCatalog) (timel
 		a.issues = append(a.issues, Issue{OpIndex: idx, Op: op, Code: is.Code, Path: is.Path, Message: is.Message, Severity: is.Severity})
 	}
 	// Created lists what is in the result: an item the batch added and then removed again is not there.
-	created := slices.DeleteFunc(a.created, func(c Created) bool { return !a.idInUse(c.ID) })
-	out := Result{Issues: a.issues, Created: created}
+	out := Result{Issues: a.issues, Created: a.finalCreated()}
 	if !out.OK() {
 		return spec, Result{Issues: a.issues}
 	}
 	return *work, out
+}
+
+// finalCreated is what Apply reports as created: the ids that exist in the result, each once, with the last op that
+// created it (an id can be created, removed and created again by a later op).
+func (a *applier) finalCreated() []Created {
+	last := map[string]int{}
+	for i, c := range a.created {
+		last[c.ID] = i
+	}
+	var out []Created
+	for i, c := range a.created {
+		if last[c.ID] == i && a.idInUse(c.ID) {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // applier is the state of one Apply.
@@ -88,8 +103,13 @@ type applier struct {
 	catalog   timeline.AssetCatalog
 	idx       int // the op being applied
 	currentOp string
-	issues    []Issue
-	created   []Created
+	// kinds maps every id in use (items and tracks) to what it names: "clip", "text", "sound" or "track". It is built once
+	// and kept up to date as items are added and removed, so looking an id up never walks the spec.
+	kinds map[string]string
+	// sorted says that the main track has been put in timeline order (see ensureSorted).
+	sorted  bool
+	issues  []Issue
+	created []Created
 	// hw holds, per id prefix ("c", "t", "s"), the highest number seen so far, so an id is never handed out twice in a
 	// batch, even after its item was removed.
 	hw map[string]int
@@ -101,14 +121,40 @@ type applier struct {
 
 var idNumber = regexp.MustCompile(`^([cts])([0-9]{1,9})$`)
 
-// scanIDs finds the highest number in use per prefix.
+// scanIDs indexes the ids in use and finds the highest number per prefix.
 func (a *applier) scanIDs() {
 	a.hw = map[string]int{}
-	a.eachID(func(id string) { a.noteID(id) })
+	a.kinds = map[string]string{}
+	for _, t := range a.spec.Tracks {
+		a.register(t.TrackID(), kindTrack)
+		switch t := t.(type) {
+		case *timeline.VideoTrack:
+			for i := range t.Items {
+				a.register(t.Items[i].ID, kindClip)
+			}
+		case *timeline.TextTrack:
+			for i := range t.Items {
+				a.register(t.Items[i].ID, kindText)
+			}
+		case *timeline.AudioTrack:
+			for _, it := range t.Items {
+				a.register(it.Common().ID, kindSound)
+			}
+		}
+	}
 }
 
-// noteID records an id that is in use.
-func (a *applier) noteID(id string) {
+// What an id can name.
+const (
+	kindClip  = "clip"
+	kindText  = "text"
+	kindSound = "sound"
+	kindTrack = "track"
+)
+
+// register records that id is in use for something of the kind.
+func (a *applier) register(id, kind string) {
+	a.kinds[id] = kind
 	if m := idNumber.FindStringSubmatch(id); m != nil {
 		if n, err := strconv.Atoi(m[2]); err == nil {
 			a.hw[m[1]] = max(a.hw[m[1]], n)
@@ -116,34 +162,12 @@ func (a *applier) noteID(id string) {
 	}
 }
 
-func (a *applier) eachID(f func(id string)) {
-	for _, t := range a.spec.Tracks {
-		f(t.TrackID())
-		switch t := t.(type) {
-		case *timeline.VideoTrack:
-			for i := range t.Items {
-				f(t.Items[i].ID)
-			}
-		case *timeline.TextTrack:
-			for i := range t.Items {
-				f(t.Items[i].ID)
-			}
-		case *timeline.AudioTrack:
-			for _, it := range t.Items {
-				f(it.Common().ID)
-			}
-		}
-	}
-}
+// forget records that an item is gone. The high-water mark stays, so its number is not handed out again in this batch.
+func (a *applier) forget(id string) { delete(a.kinds, id) }
 
 func (a *applier) idInUse(id string) bool {
-	found := false
-	a.eachID(func(other string) {
-		if other == id {
-			found = true
-		}
-	})
-	return found
+	_, ok := a.kinds[id]
+	return ok
 }
 
 // newID hands out the next free id with the prefix: one more than the highest number seen, skipping any id that is
@@ -158,17 +182,19 @@ func (a *applier) newID(prefix string) string {
 	}
 }
 
-// claimID checks an id the op gave for a new item (or hands out a fresh one when it gave none) and notes it.
+// claimID checks an id the op gave for a new item (or hands out a fresh one when it gave none) and registers it. The
+// prefix says the kind: "c" for a clip, "t" for text, "s" for a sound.
 func (a *applier) claimID(given, prefix string) (string, bool) {
-	if given == "" {
-		return a.newID(prefix), true
-	}
-	if a.idInUse(given) {
+	kind := map[string]string{"c": kindClip, "t": kindText, "s": kindSound}[prefix]
+	id := given
+	if id == "" {
+		id = a.newID(prefix)
+	} else if a.idInUse(id) {
 		a.errf(CodeIDTaken, "the id %q is already in use (items and tracks share one set of ids); choose another or leave id out to get the next free one", given)
 		return "", false
 	}
-	a.noteID(given)
-	return given, true
+	a.register(id, kind)
+	return id, true
 }
 
 func isNil(op Op) bool {
@@ -248,18 +274,19 @@ func (a *applier) dispatch(op Op) bool {
 
 // ---- the main track ---------------------------------------------------------------------------------------------
 
-// sortMain puts the main track in timeline order. A valid spec may hold its clips out of order as long as they are
-// contiguous by time; the ops work on positions, so they need the order of the timeline.
-func (a *applier) sortMain() {
-	slices.SortStableFunc(a.main.Items, func(x, y timeline.VideoItem) int {
-		switch {
-		case x.AtMs < y.AtMs:
-			return -1
-		case x.AtMs > y.AtMs:
-			return 1
-		}
-		return 0
-	})
+// ensureSorted puts the main track in timeline order, once, before the first op that works on the positions of clips
+// or on their timing. A valid spec may hold its clips out of order as long as they are contiguous by time; an op that
+// does not look at the order of clips leaves the array as it is, so it does not produce moves in the diff.
+func (a *applier) ensureSorted() {
+	if !a.sorted {
+		a.sorted = true
+		sortMainItems(a.main)
+	}
+}
+
+// sortMainItems puts a main track in timeline order (by at_ms; equal times keep their order).
+func sortMainItems(main *timeline.VideoTrack) {
+	slices.SortStableFunc(main.Items, func(x, y timeline.VideoItem) int { return cmp.Compare(x.AtMs, y.AtMs) })
 }
 
 // ripple recomputes the at_ms of the main track from the durations: the first clip is at 0 and each next one starts
@@ -303,35 +330,7 @@ func (a *applier) firstClipID() string {
 // ---- finding things ---------------------------------------------------------------------------------------------
 
 // kindOf says what an id names: "clip", "text", "sound", "track", or "" if nothing.
-func (a *applier) kindOf(id string) string {
-	kind := ""
-	for _, t := range a.spec.Tracks {
-		if t.TrackID() == id {
-			return "track"
-		}
-		switch t := t.(type) {
-		case *timeline.VideoTrack:
-			for i := range t.Items {
-				if t.Items[i].ID == id {
-					kind = "clip"
-				}
-			}
-		case *timeline.TextTrack:
-			for i := range t.Items {
-				if t.Items[i].ID == id {
-					kind = "text"
-				}
-			}
-		case *timeline.AudioTrack:
-			for _, it := range t.Items {
-				if it.Common().ID == id {
-					kind = "sound"
-				}
-			}
-		}
-	}
-	return kind
-}
+func (a *applier) kindOf(id string) string { return a.kinds[id] }
 
 func (a *applier) textTrack() *timeline.TextTrack {
 	for _, t := range a.spec.Tracks {
@@ -389,13 +388,18 @@ func (a *applier) ids(kind string) string {
 	return "there are " + strings.Join(ids, ", ")
 }
 
-// wrongKind reports an id that names nothing, or something of another kind than want.
+// wrongKind reports an id that names nothing, or something of another kind than want (kindClip, kindText or
+// kindSound).
 func (a *applier) wrongKind(id, want string) bool {
+	noun := want
+	if want == kindText {
+		noun = "text item"
+	}
 	switch got := a.kindOf(id); got {
 	case "":
-		return a.errf(CodeUnknownItem, "there is no %s with id %q; %s", want, id, a.ids(want))
+		return a.errf(CodeUnknownItem, "there is no %s with id %q; %s", noun, id, a.ids(want))
 	default:
-		return a.errf(CodeWrongItemKind, "%q is a %s, not a %s; %s", id, got, want, a.hintFor(got, want))
+		return a.errf(CodeWrongItemKind, "%q is a %s, not a %s; %s", id, got, noun, a.hintFor(got, noun))
 	}
 }
 
@@ -420,7 +424,7 @@ func (a *applier) clip(id string) (int, bool) {
 			}
 		}
 	}
-	return 0, a.wrongKind(id, "clip")
+	return 0, a.wrongKind(id, kindClip)
 }
 
 func (a *applier) textItem(id string) (*timeline.TextItem, bool) {
@@ -431,7 +435,7 @@ func (a *applier) textItem(id string) (*timeline.TextItem, bool) {
 			}
 		}
 	}
-	return nil, a.wrongKind(id, "text item")
+	return nil, a.wrongKind(id, kindText)
 }
 
 // soundIndex finds a sound by id and returns its index on the audio track.
@@ -443,7 +447,7 @@ func (a *applier) soundIndex(id string) (int, bool) {
 			}
 		}
 	}
-	return 0, a.wrongKind(id, "sound")
+	return 0, a.wrongKind(id, kindSound)
 }
 
 // commonOf gives write access to the shared fields of an audio item.

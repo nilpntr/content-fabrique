@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"math"
@@ -37,6 +38,7 @@ func (g BeatGrid) build() (beats.Grid, error) {
 }
 
 func (a *applier) snapCuts(o *SnapCutsToBeats) bool {
+	a.ensureSorted()
 	items := a.main.Items
 	n := len(items)
 	grid, err := o.Grid.build()
@@ -253,15 +255,7 @@ func (a *applier) writeMarkers(grid beats.Grid, fps int) error {
 		s := m.Strength
 		kept = append(kept, timeline.Marker{AtMs: m.AtMs, Kind: m.Kind, Strength: &s})
 	}
-	slices.SortStableFunc(kept, func(x, y timeline.Marker) int {
-		switch {
-		case x.AtMs < y.AtMs:
-			return -1
-		case x.AtMs > y.AtMs:
-			return 1
-		}
-		return 0
-	})
+	slices.SortStableFunc(kept, func(x, y timeline.Marker) int { return cmp.Compare(x.AtMs, y.AtMs) })
 	a.spec.Markers = kept
 	a.touched["markers"] = a.idx
 	return nil

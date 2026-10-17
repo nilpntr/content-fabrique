@@ -38,7 +38,8 @@ func Summarize(parent timeline.Spec, patch Patch) ([]string, error) {
 	s := &summarizer{work: root, after: after, done: map[string]bool{}, moved: map[string]bool{}}
 	for i, op := range patch {
 		if err := s.describe(op); err != nil {
-			return nil, fmt.Errorf("diff: operation %d (%s %q): %w", i, op.Op, op.Path, err)
+			// The patch applies (it did above), so this is only a sentence that could not be made.
+			s.fallback(op)
 		}
 		if s.work, err = applyOp(s.work, op); err != nil {
 			return nil, fmt.Errorf("diff: operation %d (%s %q): %w", i, op.Op, op.Path, err)
@@ -114,6 +115,9 @@ func (s *summarizer) describe(op Operation) error {
 	if len(path) == 0 {
 		s.say("%s the whole timeline", op.Op)
 		return nil
+	}
+	if op.Op == OpMove {
+		return s.move(op, path)
 	}
 	switch path[0] {
 	case "tracks":
@@ -291,29 +295,56 @@ func (s *summarizer) itemWhole(op Operation, path []string, items []any, typ str
 		}
 		m, _ := items[i].(map[string]any)
 		s.say("removed %s %s", itemNoun(typ), str(m["id"]))
-	case OpMove:
-		from, err := parsePointer(op.From)
-		if err != nil {
-			return err
-		}
-		if len(from) != 4 {
-			s.fallback(op)
-			return nil
-		}
-		i, err := arrayIndex(from[3], len(items), false)
-		if err != nil {
-			return err
-		}
-		m, _ := items[i].(map[string]any)
-		dest, err := strconv.Atoi(path[3])
-		if err != nil {
-			return err
-		}
-		s.moved[str(m["id"])] = true
-		s.say("moved %s to position %d", str(m["id"]), dest+1)
 	default:
 		s.fallback(op)
 	}
+	return nil
+}
+
+// move describes a move operation. The value that moves is read from the document before the operation, at from, which
+// can be anywhere: another place in the same items array (a reorder), another track, or not an item at all.
+func (s *summarizer) move(op Operation, path []string) error {
+	from, err := parsePointer(op.From)
+	if err != nil {
+		return err
+	}
+	val := get(s.work, from...)
+	if len(from) == 2 && from[0] == "markers" && path[0] == "markers" {
+		return nil // markers are in time order; moving one in the array changes nothing worth a line
+	}
+	if len(from) == 2 && from[0] == "tracks" && path[0] == "tracks" && len(path) == 2 {
+		s.say("reordered tracks")
+		return nil
+	}
+	if len(from) == 4 && from[0] == "tracks" && from[2] == "items" {
+		if m, ok := val.(map[string]any); ok {
+			track, _ := s.trackAt(from[1])
+			id, noun := str(m["id"]), itemNoun(str(track["type"]))
+			destTrack := ""
+			if len(path) == 4 && path[0] == "tracks" && path[2] == "items" {
+				destTrack = path[1]
+				if path[1] == from[1] {
+					s.moved[id] = true
+					if path[3] == "-" {
+						s.say("moved %s to the end", id)
+						return nil
+					}
+					if dest, err := strconv.Atoi(path[3]); err == nil {
+						s.say("moved %s to position %d", id, dest+1)
+						return nil
+					}
+				}
+			}
+			if t, ok := s.trackAt(destTrack); ok && destTrack != "" {
+				s.moved[id] = true
+				s.say("moved %s %s to the %s track %s", noun, id, str(t["type"]), str(t["id"]))
+				return nil
+			}
+			s.say("moved %s %s to %s", noun, id, op.Path)
+			return nil
+		}
+	}
+	s.say("moved %s to %s", op.From, op.Path)
 	return nil
 }
 
