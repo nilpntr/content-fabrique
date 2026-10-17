@@ -272,7 +272,11 @@ func (l *loop) end(ctx context.Context, end store.RunEnd) (store.AgentRun, error
 	l.hook("ending")
 	wctx, stop := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer stop()
-	return l.st.EndAgentRun(wctx, l.ws, l.run.ID, l.run.Epoch, end)
+	run, err := l.st.EndAgentRun(wctx, l.ws, l.run.ID, l.run.Epoch, end)
+	if err == nil && l.agent != nil && l.agent.OnEnd != nil {
+		l.agent.OnEnd(l.run.ID)
+	}
+	return run, err
 }
 
 // heartbeat touches the run until ctx ends. If the run is no longer this worker's, it cancels the loop.
@@ -415,6 +419,12 @@ func (l *loop) work(ctx context.Context) (Outcome, error) {
 		}
 		if t := l.cv.last(); t != nil && !t.complete() {
 			if out, done, err := l.callTool(ctx, t, t.pending()[0]); done || err != nil {
+				return out, err
+			}
+			continue
+		}
+		if t := l.cv.last(); t != nil && t.endedWithText() {
+			if out, done, err := l.endTurn(ctx, t.stopReason, t.text()); done || err != nil {
 				return out, err
 			}
 			continue
@@ -613,12 +623,53 @@ func (l *loop) modelStep(ctx context.Context) (Outcome, bool, error) {
 	case reason == "pause_turn", reason == "tool_use" && len(resp.ToolUses()) > 0, reason == "end_turn" && len(resp.ToolUses()) > 0:
 		return "", false, nil
 	case reason == "end_turn" || reason == "stop_sequence":
-		out, ferr := l.succeed(ctx, mustJSON(map[string]any{"summary": resp.Text(), "stop_reason": reason}))
-		return out, true, ferr
+		return l.endTurn(ctx, reason, resp.Text())
 	default:
 		out, ferr := l.fail(ctx, FailStopReason, fmt.Sprintf("the model stopped with %q, which the runtime does not handle", reason), nil)
 		return out, true, ferr
 	}
+}
+
+// endTurn handles a turn that ended with text and no tool call: the run succeeds with the text, or with the output the agent's
+// EndTurn hook gives, or the hook's nudge is stored and the run goes on (done false). It is also what a resumed run does when the
+// last turn is such an answer that was stored but not acted on (the worker died, or the hook failed, before the run ended or the
+// nudge was stored): the conversation must never go to the model ending on an assistant message.
+func (l *loop) endTurn(ctx context.Context, reason, text string) (Outcome, bool, error) {
+	output := mustJSON(map[string]any{"summary": text, "stop_reason": reason})
+	if reason == "end_turn" && l.agent.EndTurn != nil {
+		d, herr := l.agent.EndTurn(ctx, l.toolContext("", false), text, l.cv.nudges)
+		switch {
+		case herr != nil && ctx.Err() != nil:
+			return "", true, context.Cause(ctx)
+		case herr != nil:
+			return "", true, fmt.Errorf("end of turn: %w", herr) // retried; the next attempt asks the hook again
+		case d.Nudge != "":
+			return l.nudge(ctx, d.Nudge)
+		case len(d.Output) > 0:
+			output = d.Output
+		}
+	}
+	out, ferr := l.succeed(ctx, output)
+	return out, true, ferr
+}
+
+// nudge stores the agent's message after a turn that ended without a tool call; the next model call sends it. done is false:
+// the run goes on.
+func (l *loop) nudge(ctx context.Context, text string) (Outcome, bool, error) {
+	wire, err := toWire([]llm.Block{llm.TextBlock(text)})
+	if err != nil {
+		out, ferr := l.fail(ctx, FailBadInput, "the agent's nudge is invalid: "+err.Error(), nil)
+		return out, true, ferr
+	}
+	e, err := l.append(ctx, store.EventStatus, mustJSON(statusPayload{State: stateNudge, Blocks: wire}), store.EventDelta{})
+	if err != nil {
+		return "", true, err
+	}
+	if err := l.cv.apply(e); err != nil {
+		out, ferr := l.fail(ctx, FailCorruptLog, err.Error(), nil)
+		return out, true, ferr
+	}
+	return "", false, nil
 }
 
 func cmpOr(a, b string) string {

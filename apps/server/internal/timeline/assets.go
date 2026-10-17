@@ -30,6 +30,9 @@ type Asset struct {
 	DurationMs int64     `json:"duration_ms"`
 	Kind       AssetKind `json:"kind"`
 	Rights     Rights    `json:"rights"`
+	// Title is the asset's name in the creator's library. It is only used to word summaries of a version; Validate does not
+	// read it, and the fixtures leave it out.
+	Title string `json:"title,omitempty"`
 }
 
 // AssetCatalog is what Validate needs to know about the platform's assets. The server implements it over the assets

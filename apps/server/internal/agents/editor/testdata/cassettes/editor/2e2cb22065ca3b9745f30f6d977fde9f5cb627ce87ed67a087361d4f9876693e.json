@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "0af6bff72af068b88da6f54f566daf4a0308d229dd7652959a384a242f007f9a",
-  "recorded_at": "2026-10-17T13:48:36Z",
+  "key": "2e2cb22065ca3b9745f30f6d977fde9f5cb627ce87ed67a087361d4f9876693e",
+  "recorded_at": "2026-10-17T14:26:42Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 16000,
@@ -20,6 +20,30 @@
           "text",
           "text",
           "text"
+        ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
+        ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
         ]
       },
       {
@@ -97,57 +121,17 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_3",
-        "name": "edit_timeline",
-        "input": {
-          "base_version": 0,
-          "ops": [
-            {
-              "op": "add_clip",
-              "asset_id": "ast_01jc000000e00800000000000a",
-              "source": {
-                "in_ms": 2000,
-                "out_ms": 8000
-              },
-              "why": "The heaviest set of the lat pulldown, so it opens the video."
-            },
-            {
-              "op": "add_clip",
-              "asset_id": "ast_01jc000000e00800000000000b",
-              "source": {
-                "in_ms": 1000,
-                "out_ms": 6000
-              }
-            },
-            {
-              "op": "add_clip",
-              "asset_id": "ast_01jc000000e00800000000000c",
-              "source": {
-                "in_ms": 3000,
-                "out_ms": 9000
-              },
-              "reframe": {
-                "mode": "blur_fill"
-              }
-            },
-            {
-              "op": "add_text",
-              "text": "HEAVY LAT DAY",
-              "style": "title_bold",
-              "at_ms": 0,
-              "duration_ms": 2000,
-              "anchor": "upper_third"
-            }
-          ]
-        }
+        "id": "toolu_ed_5",
+        "name": "render_preview",
+        "input": {}
       }
     ],
     "usage": {
-      "input_tokens": 450,
-      "cache_write_tokens": 2100,
+      "input_tokens": 410,
+      "cache_write_tokens": 600,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 10100,
-      "output_tokens": 301
+      "cache_read_tokens": 13500,
+      "output_tokens": 40
     }
   },
   "count_tokens": 9000

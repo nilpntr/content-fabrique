@@ -14,10 +14,24 @@ tasks:
     cmds:
       - task: install
       - task: env:sync
+      - task: media:image
       - task: up
       - task: migrate:dev
       # Loads .env, builds the api and worker, runs the three processes and stops them together (see the script).
       - ./scripts/dev.sh
+
+  media:build:
+    desc: Build the local media-tools image (media-tools:dev, ffmpeg + fonts) that the worker runs ingests, previews and renders in
+    cmds:
+      - ./scripts/media-image.sh build
+
+  # Runs on every `task dev`: rebuilds media-tools:dev when it is missing, was built from other sources than packages/media-tools
+  # as it is now (a tree-hash label, see scripts/media-image.sh), or was built before the fonts were added. Without Docker it only warns. MEDIA_IMAGE_SKIP_BUILD=1 only warns.
+  media:image:
+    internal: true
+    silent: true
+    cmds:
+      - ./scripts/media-image.sh ensure
 
   # Runs on every `task dev`: creates .env if it is missing, fills the empty generated secrets and adds the [AUTO] defaults
   # an older .env lacks (DATABASE_MIGRATE_URL, say). Silent when nothing changes; it lists variable names when it does.

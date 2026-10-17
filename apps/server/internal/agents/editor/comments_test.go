@@ -141,7 +141,7 @@ func TestCommentsReachTheRunResolvedThroughTheTimeMap(t *testing.T) {
 
 	// The tool has the same, whole.
 	got := textOf(e.ok(e.nextCall(rc), ToolGetComments, `{}`))
-	if !strings.Contains(got, "2 open comments, oldest first") || !strings.Contains(got, "The current timeline is version 1") || !strings.Contains(got, across.ID.String()) {
+	if !strings.Contains(got, "Open comments 1 to 2 of 2, oldest first") || !strings.Contains(got, "The current timeline is version 1") || !strings.Contains(got, across.ID.String()) {
 		t.Errorf("get_comments:\n%s", got)
 	}
 
@@ -282,6 +282,7 @@ func TestTheCommentsARunWasHandedAreAppliedWhenItEndsWell(t *testing.T) {
 
 	// The run works and finishes; its own finish marks nothing (the run is not over until its result is stored).
 	e.ok(rc, ToolEditTimeline, e.opsArgs(prj, `{"op":"set_look","preset":"bw"}`))
+	e.previewed(prj, rc)
 	e.ok(e.nextCall(rc), ToolFinish, `{"summary":"Tightened the cut."}`)
 	for _, c := range []annotations.Annotation{req, instr} {
 		if got := e.commentStatus(e.wsA, c.ID); got.Status != "open" {
@@ -486,5 +487,14 @@ func TestWithoutACommentSourceARunHasNoComments(t *testing.T) {
 	// And finishing marks nothing (and does not fail).
 	rc := e.runCtx(e.wsA, prj, "")
 	e.ok(rc, ToolEditTimeline, e.opsArgs(prj, addClipOp(a, 0, 8000)))
+	e.previewed(prj, rc)
 	e.ok(e.nextCall(rc), ToolFinish, `{"summary":"Done."}`)
+}
+
+// previewed makes the run look at a preview of the newest version, which finish asks for.
+func (e *env) previewed(prj ids.ProjectID, rc runtime.RunContext) {
+	e.t.Helper()
+	sheet := fmt.Sprintf("ws/%s/previews/%s/v%d/contact.jpg", rc.WorkspaceID, prj, e.currentVersion(prj))
+	e.preview.err, e.preview.ref, e.preview.dur = nil, ContactSheetRef(sheet), 16000
+	e.ok(e.nextCall(rc), ToolRenderPreview, `{}`)
 }

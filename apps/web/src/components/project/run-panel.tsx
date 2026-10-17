@@ -131,7 +131,8 @@ export function RunView({ run, assetTitles, onCancel, cancelling = false, cancel
       {steps.length > 0 ? (
         <details className="group text-[13px]">
           <summary className="cursor-pointer text-muted-foreground outline-none select-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand">
-            {steps.length} {steps.length === 1 ? "step" : "steps"} so far
+            {steps.length} {steps.length === 1 ? "step" : "steps"}
+            {active ? " so far" : ""}
           </summary>
           <ol className="mt-2 max-h-56 space-y-1 overflow-y-auto border-l border-hairline pl-3">
             {steps.map((step) => (
