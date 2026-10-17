@@ -9,6 +9,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
+	"github.com/nilpntr/content-fabrique/internal/timeline/style"
 )
 
 func good() Sample { return Sample{AtMs: 1000, X: 0.2, Y: 0.2, W: 0.6, H: 0.7, HeadTopY: 0.22} }
@@ -186,6 +187,85 @@ func TestHeadRectsFollowTheClipsOnScreen(t *testing.T) {
 	fastTrack.Items[0].Speed = ptrF(2)
 	if rs := HeadRects(fast, ix.Lookup, 0, 5000); len(rs) != 2 {
 		t.Errorf("at speed 2: %+v", rs)
+	}
+}
+
+// The camera moves the head: a punch-in (or a push-in, a pull-back, a shake, a zoom_through) magnifies the picture about its middle, so
+// the head rises toward the title. The head region is the union of where it is still and where it is at the strongest zoom, and a title
+// cleared above the head with no motion is cleared again when there is some.
+func TestAPunchInBringsTheHeadBackUnderTheTitle(t *testing.T) {
+	// A head whose top is at 25 % of the frame (480 px): a one-line title at the top of the zone (240 to 401) clears it.
+	ix := Index{"a": {Aspect: 0.5625, Samples: []Sample{{AtMs: 1000, X: 0.2, Y: 0.23, W: 0.6, H: 0.7, HeadTopY: 0.25}}}}
+	title := timeline.TextItem{ID: "t1", AtMs: 0, DurationMs: 2000, Text: "BUILDING BACK 101", Style: "title_series", Anchor: timeline.AnchorUpperThird}
+	still := specWithClip("a", 0, 5000, nil)
+	rs := HeadRects(still, ix.Lookup, 0, 2000)
+	if len(rs) != 1 || rs[0].Top != 480 {
+		t.Fatalf("still: %+v", rs)
+	}
+	out := still.Output
+	if _, av, _ := timeline.PlaceTextAvoiding(out, title, rs); av.Overlapped {
+		t.Fatalf("the title should clear a still head: %+v", av)
+	}
+	// With a punch-in of 0.3 the head reaches (480 - 960) * 1.3 + 960 = 336 px: the union's top.
+	punch := specWithClip("a", 0, 5000, nil)
+	vt, _ := punch.Tracks[0].(*timeline.VideoTrack)
+	strength := 0.3
+	vt.Items[0].Motion = &timeline.Motion{Preset: timeline.MotionPunchIn, Strength: &strength}
+	rs = HeadRects(punch, ix.Lookup, 0, 2000)
+	if len(rs) != 1 || rs[0].Top != 336 || rs[0].Bottom < 718 {
+		t.Fatalf("punch-in: %+v", rs)
+	}
+	pl, av, err := timeline.PlaceTextAvoiding(out, title, rs)
+	if err != nil || !av.Overlapped || !av.Cleared {
+		t.Fatalf("under the punch-in: %+v %v", av, err)
+	}
+	if pl.Box.Overlaps(rs[0]) || !pl.Zone.Safe(pl.Box) {
+		t.Errorf("the title %+v is on the zoomed head %+v", pl.Box, rs[0])
+	}
+	// The head at the end of the zoom is inside the region too.
+	zoomedTop := int((float64(480)-960)*1.3 + 960)
+	if rs[0].Top > zoomedTop {
+		t.Errorf("the region %+v misses the head at full zoom (top %d)", rs[0], zoomedTop)
+	}
+}
+
+func TestCameraZoomOfEachPreset(t *testing.T) {
+	s := 0.2
+	for preset, want := range map[string]float64{timeline.MotionPunchIn: 1.2, timeline.MotionPushIn: 1.2, timeline.MotionPullBack: 1.2, timeline.MotionShake: 1.2} {
+		items := []timeline.VideoItem{{ID: "c1", Motion: &timeline.Motion{Preset: preset, Strength: &s}}}
+		if z, shake := cameraZoom(items, 0); z != want || shake != (preset == timeline.MotionShake) {
+			t.Errorf("%s: %v %v", preset, z, shake)
+		}
+	}
+	// No motion, no zoom; the default strength of a preset is its own; zoom_through counts for the clip it leaves and the one it enters.
+	if z, _ := cameraZoom([]timeline.VideoItem{{ID: "c1"}}, 0); z != 1 {
+		t.Errorf("no motion: %v", z)
+	}
+	if z, _ := cameraZoom([]timeline.VideoItem{{ID: "c1", Motion: &timeline.Motion{Preset: timeline.MotionPunchIn}}}, 0); z <= 1 {
+		t.Errorf("default strength: %v", z)
+	}
+	zt := &timeline.Transition{Type: timeline.TransitionZoomThrough, DurationMs: 300}
+	two := []timeline.VideoItem{{ID: "c1"}, {ID: "c2", TransitionIn: zt}}
+	if z, _ := cameraZoom(two, 0); z != 1.45 {
+		t.Errorf("the outgoing clip: %v", z)
+	}
+	if z, _ := cameraZoom(two, 1); z != 1.45 {
+		t.Errorf("the incoming clip: %v", z)
+	}
+	// The renderer multiplies the factors: a punch-in of 0.2 on a clip that a zoom_through enters peaks at 1.2 * 1.45.
+	strength := 0.2
+	both := []timeline.VideoItem{{ID: "c1"}, {ID: "c2", TransitionIn: zt, Motion: &timeline.Motion{Preset: timeline.MotionPunchIn, Strength: &strength}}}
+	if z, _ := cameraZoom(both, 1); math.Abs(z-1.2*1.45) > 1e-9 {
+		t.Errorf("motion and zoom_through: %v, want %v", z, 1.2*1.45)
+	}
+	// A shake widens the region by what it can add; no zoom leaves the box as it is.
+	r := style.Rect{Left: 300, Top: 500, Right: 700, Bottom: 800}
+	if got := withCamera(r, 1, false, out9x16()); got != r {
+		t.Errorf("no zoom: %+v", got)
+	}
+	still, shaky := withCamera(r, 1.2, false, out9x16()), withCamera(r, 1.2, true, out9x16())
+	if shaky.Left >= still.Left || shaky.Top >= still.Top || shaky.Right <= still.Right || shaky.Bottom <= still.Bottom {
+		t.Errorf("shake %+v against %+v", shaky, still)
 	}
 }
 

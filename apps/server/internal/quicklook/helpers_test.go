@@ -237,6 +237,13 @@ func (f *fakeStore) FailQuickLook(_ context.Context, ws ids.WorkspaceID, id ids.
 	return f.asset, nil
 }
 
+// edit changes the asset as a person would, between two steps of a run.
+func (f *fakeStore) edit(fn func(*store.Asset)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	fn(&f.asset)
+}
+
 func (f *fakeStore) snapshot() store.Asset {
 	f.mu.Lock()
 	defer f.mu.Unlock()

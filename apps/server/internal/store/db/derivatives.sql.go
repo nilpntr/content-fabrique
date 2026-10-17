@@ -429,7 +429,7 @@ func (q *Queries) ListAssetDerivatives(ctx context.Context, arg ListAssetDerivat
 const listAssetSubjects = `-- name: ListAssetSubjects :many
 SELECT id AS asset_id, (quick_look -> 'subjects')::jsonb AS subjects FROM assets
 WHERE workspace_id = $1 AND id = ANY($2::uuid[]) AND status = 'ready' AND deleted_at IS NULL
-  AND quick_look_status = 'succeeded' AND (quick_look -> 'subjects') IS NOT NULL
+  AND quick_look_status = 'succeeded' AND jsonb_typeof(quick_look -> 'subjects') = 'object'
 `
 
 type ListAssetSubjectsParams struct {

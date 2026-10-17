@@ -26,6 +26,9 @@ type TitleRecipe struct {
 	// many characters a title may have and still be one line for the creator (0 when only the share is known).
 	OneLine      bool
 	OneLineChars int
+	// OneLineAlways says at least half of the creator's titles are one line: then every title is, and a longer one than OneLineChars is
+	// shortened (style_match fails it); otherwise only a title of up to OneLineChars is held to one line.
+	OneLineAlways bool
 	// CapHeightPct is the creator's capital height as a percentage of the frame height (0: not read).
 	CapHeightPct float64
 }
@@ -39,7 +42,7 @@ func (p *Profile) TitleRecipe() *TitleRecipe {
 	if t == nil || t.TitleShare <= 0 {
 		return nil
 	}
-	r := &TitleRecipe{Anchor: style.AnchorUpperThird, Align: style.AlignCenter, CapHeightPct: t.HeightPct, OneLine: t.OneLineShare >= 0.5 || t.OneLineChars > 0, OneLineChars: t.OneLineChars}
+	r := &TitleRecipe{Anchor: style.AnchorUpperThird, Align: style.AlignCenter, CapHeightPct: t.HeightPct, OneLine: t.OneLineShare >= 0.5 || t.OneLineChars > 0, OneLineChars: t.OneLineChars, OneLineAlways: t.OneLineShare >= 0.5}
 	switch t.Case {
 	case "lower":
 		r.Style = "title_lowercase"
@@ -97,9 +100,12 @@ func (r *TitleRecipe) Args() string {
 // Describe is the recipe in one line for the editor.
 func (r *TitleRecipe) Describe() string {
 	one := ""
-	if r.OneLineChars > 0 {
+	switch {
+	case r.OneLineAlways && r.OneLineChars > 0:
+		one = fmt.Sprintf(" Keep the title on one line: shorten the text to %d characters or fewer (no line break in it); a longer title does not match the creator.", r.OneLineChars)
+	case r.OneLineChars > 0:
 		one = fmt.Sprintf(" Keep a title of up to %d characters on one line (no line break in the text): a short text, or a smaller scale if it would wrap.", r.OneLineChars)
-	} else if r.OneLine {
+	case r.OneLine:
 		one = " Keep the title to one line: a short text, or a smaller scale if it would wrap."
 	}
 	return fmt.Sprintf("title recipe: add_text with %s.%s", r.Args(), one)

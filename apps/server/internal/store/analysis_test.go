@@ -182,6 +182,16 @@ func analysisSuite(t *testing.T, st *store.Store, suffix string) {
 		if _, err := st.MergeQuickLookDetail(ctx, wb.ID, without.ID, []byte(`{"x":1}`)); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("workspace B merged into A's detail: %v", err)
 		}
+		// A null "subjects" (a later answer with nobody in it) is not a box: the asset is not in the result.
+		if rows, _ := st.ListAssetSubjects(ctx, wa.ID, []ids.AssetID{without.ID}); len(rows) != 1 {
+			t.Fatalf("after the merge the asset has boxes: %+v", rows)
+		}
+		if _, err := st.MergeQuickLookDetail(ctx, wa.ID, without.ID, []byte(`{"subjects":null}`)); err != nil {
+			t.Fatal(err)
+		}
+		if rows, _ := st.ListAssetSubjects(ctx, wa.ID, []ids.AssetID{without.ID}); len(rows) != 0 {
+			t.Fatalf("a null subjects was read: %+v", rows)
+		}
 		// A quick look that failed has no boxes to give, even if an earlier one had.
 		if _, err := st.FailQuickLook(ctx, wa.ID, with.ID, []byte(`{"error":"spend_cap"}`)); err != nil {
 			t.Fatal(err)

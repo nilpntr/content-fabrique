@@ -269,11 +269,15 @@ func (p *Profile) compareTitleLook(e EditStats, add, addSoft func(id, value, exp
 		add("title_colour", fmt.Sprintf("%s (colour difference %.0f)", strings.ToUpper(e.TitleFill), de), fmt.Sprintf("%s within %.0f", t.Colour, DeltaEMax), de <= DeltaEMax,
 			fmt.Sprintf("set the title's fill to %s", t.Colour))
 	}
-	// One line: when the creator's titles of about this length are one line (or most of their titles are), so is this one.
-	wantOne := (t.OneLineChars > 0 && e.TitleChars > 0 && e.TitleChars <= t.OneLineChars) || (t.OneLineChars == 0 && t.OneLineShare >= 0.5)
+	// One line: when most of the creator's titles are one line, so is this one, however long (a title over the limit is shortened); when only
+	// some are, a title of the length of theirs that were one line is.
+	wantOne := t.OneLineShare >= 0.5 || (t.OneLineChars > 0 && e.TitleChars > 0 && e.TitleChars <= t.OneLineChars)
 	if wantOne && e.TitleLines > 0 {
-		add("title_lines", fmt.Sprintf("%d lines (%d characters)", e.TitleLines, e.TitleChars), "one line (the creator's titles of this length are one line)", e.TitleLines == 1,
-			titleLinesFix(e, t))
+		expect := "one line (the creator's titles of this length are one line)"
+		if t.OneLineShare >= 0.5 {
+			expect = "one line (the creator's titles are one line)"
+		}
+		add("title_lines", fmt.Sprintf("%d lines (%d characters)", e.TitleLines, e.TitleChars), expect, e.TitleLines == 1, titleLinesFix(e, t))
 	}
 	if patternKinds(t) != "" && e.TitleKind != "" {
 		addSoft("title_pattern", e.TitleKind, "one of the creator's forms: "+patternKinds(t), t.Follows(e.TitleKind),
@@ -293,6 +297,12 @@ func (p *Profile) compareTitleLook(e EditStats, add, addSoft func(id, value, exp
 // titleLinesFix says how to make the title one line: take the line break out, lower the scale to the one that fits, or shorten the text.
 func titleLinesFix(e EditStats, t *TextProfile) string {
 	switch {
+	case t.OneLineChars > 0 && e.TitleChars > t.OneLineChars:
+		fix := fmt.Sprintf("shorten to %d characters or fewer so it fits on one line", t.OneLineChars)
+		if e.TitleBreak {
+			fix += ", and take the line break out of the text"
+		}
+		return fix
 	case e.TitleBreak:
 		return "take the line break out of the title's text so it is one line"
 	case e.TitleFitScale > 0 && fitsTheCreatorsSize(e, t):

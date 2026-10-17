@@ -332,12 +332,12 @@ func TestStyleMatchHoldsTheTitleLook(t *testing.T) {
 		if tt, ok := tr.(*timeline.TextTrack); ok {
 			s := 1.4
 			tt.Items[0].Scale = &s
-			tt.Items[0].Text = "BUILDING LATS 101 ROW"
+			tt.Items[0].Text = "BUILDING LATS 101 AND SOME MORE WORDS HERE"
 		}
 	}
 	r2 := RunChecks(CheckInput{Spec: big, Plan: workoutPlan(), Style: p})
 	c2 := wantStatus(t, r2, CheckStyleMatch, CheckFail)
-	for _, want := range []string{"title_size", "title_lines"} {
+	for _, want := range []string{"title_size", "title_lines", "shorten to 22 characters or fewer so it fits on one line"} {
 		if !strings.Contains(c2.Detail, want) {
 			t.Errorf("style_match lacks %q: %s", want, c2.Detail)
 		}

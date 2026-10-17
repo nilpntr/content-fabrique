@@ -159,3 +159,71 @@ func TestAClipWithNobodyInItIsMarkedAsRead(t *testing.T) {
 		t.Error("SubjectsRead")
 	}
 }
+
+// A subjects-only run changes the frames, the boxes and the marker and nothing else: the prompt version, the model, the labels and a
+// person's edit made after the quick look all stay. An answer with no boxes clears the earlier ones.
+func TestAMergePatchTouchesOnlyItsOwnKeys(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	// A quick look from before the boxes: v1 detail, a model, labels.
+	if _, err := r.store.ApplyQuickLook(context.Background(), r.asset.WorkspaceID, r.asset.ID, store.QuickLookResult{
+		Title: "Barbell row", Description: "A row.", Tags: []string{"row"}, Detail: json.RawMessage(`{"prompt_version":"quicklook.v1","model":"claude-haiku-5-5","profile":"dev-cheap"}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r.store.edit(func(a *store.Asset) { a.Description, a.Tags = "Edited by a person.", []string{"mine"} })
+	res, err := r.svc.Run(context.Background(), r.asset.WorkspaceID, r.asset.ID, Options{Force: true, KeepLabels: true})
+	if err != nil || res.Outcome != OutcomeDone {
+		t.Fatalf("%+v %v", res, err)
+	}
+	a := r.store.snapshot()
+	var d map[string]json.RawMessage
+	if err := json.Unmarshal(a.QuickLook, &d); err != nil {
+		t.Fatal(err)
+	}
+	if string(d["prompt_version"]) != `"quicklook.v1"` || string(d["model"]) != `"claude-haiku-5-5"` || string(d["profile"]) != `"dev-cheap"` {
+		t.Errorf("the detail's own keys changed: %s", a.QuickLook)
+	}
+	for _, k := range []string{"frames", "subjects", "subjects_read"} {
+		if _, ok := d[k]; !ok {
+			t.Errorf("the patch lacks %s: %s", k, a.QuickLook)
+		}
+	}
+	if a.Description != "Edited by a person." || strings.Join(a.Tags, ",") != "mine" || a.Title != "Barbell row" {
+		t.Errorf("the labels changed: %q %v %q", a.Description, a.Tags, a.Title)
+	}
+	// A later answer with nobody in it clears the boxes (null) and keeps the rest.
+	r.api.reply = func(int) (int, string) {
+		return toolReply(`{"title":"x","description":"x","tags":[],"subjects":[{"frame":1,"present":false,"x":0,"y":0,"w":0,"h":0,"head_top_y":0}]}`, 1750, 110)
+	}
+	if _, err := r.svc.Run(context.Background(), r.asset.WorkspaceID, r.asset.ID, Options{Force: true, KeepLabels: true}); err != nil {
+		t.Fatal(err)
+	}
+	b := r.store.snapshot()
+	if _, ok := subject.FromDetail(b.QuickLook); ok || !SubjectsRead(b.QuickLook) || !strings.Contains(string(b.QuickLook), `"quicklook.v1"`) {
+		t.Errorf("after an answer with nobody: %s", b.QuickLook)
+	}
+}
+
+// A subjects-only run whose answer has no usable boxes (none at all, or only ones that do not hold up) writes nothing: the boxes an
+// earlier run found, and the marker that they were read, are not cleared by it.
+func TestAnUnusableAnswerLeavesTheEarlierBoxesAlone(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	mustRun(t, r, Options{})
+	before := r.store.snapshot()
+	if _, ok := subject.FromDetail(before.QuickLook); !ok {
+		t.Fatalf("no boxes to begin with: %s", before.QuickLook)
+	}
+	for name, answer := range map[string]string{
+		"no subjects member": `{"title":"x","description":"x","tags":[]}`,
+		"a box too small":    `{"title":"x","description":"x","tags":[],"subjects":[{"frame":1,"present":true,"x":0.9,"y":0.9,"w":0.001,"h":0.001,"head_top_y":0.9}]}`,
+	} {
+		r.api.reply = func(int) (int, string) { return toolReply(answer, 1750, 110) }
+		res, err := r.svc.Run(context.Background(), r.asset.WorkspaceID, r.asset.ID, Options{Force: true, KeepLabels: true})
+		if err != nil || res.Outcome != OutcomeFailed || res.Reason != FailNoSubjects {
+			t.Fatalf("%s: %+v %v", name, res, err)
+		}
+		if after := r.store.snapshot(); string(after.QuickLook) != string(before.QuickLook) {
+			t.Errorf("%s: the detail changed: %s", name, after.QuickLook)
+		}
+	}
+}

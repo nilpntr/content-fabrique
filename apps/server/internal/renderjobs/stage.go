@@ -39,17 +39,19 @@ type stager struct {
 	// subjects are the subject boxes of the project's footage, read once (subjectsRead says it was tried).
 	subjects     subject.Index
 	subjectsRead bool
+	// wantSubjects says the timeline has a text item that keeps off the subject, the only thing that reads the boxes.
+	wantSubjects bool
 
 	fatal *fileError
 	infra error
 }
 
-func newStager(ctx context.Context, r *run, in []store.RenderInput, captions bool) *stager {
+func newStager(ctx context.Context, r *run, in []store.RenderInput, captions, subjects bool) *stager {
 	m := make(map[ids.AssetID]store.RenderInput, len(in))
 	for _, i := range in {
 		m[i.AssetID] = i
 	}
-	return &stager{r: r, ctx: ctx, inputs: m, cache: map[string]render.ResolvedAsset{}, captions: captions}
+	return &stager{r: r, ctx: ctx, inputs: m, cache: map[string]render.ResolvedAsset{}, captions: captions, wantSubjects: subjects}
 }
 
 // Resolve implements render.AssetResolver.
@@ -72,6 +74,22 @@ func (s *stager) stage(assetID string, variant render.Variant) (render.ResolvedA
 	id, err := ids.ParseAssetID(assetID)
 	if err != nil {
 		return s.refuse(ReasonInvalidTimeline, errors.New("the timeline names an asset id that is not valid"))
+	}
+	// Where the person is, so a title is kept off the head: one read for all the project's footage, the first time. A database error is
+	// ours, like a transcript's: the job fails and is retried, so a render is never made without boxes the preview had (the final would
+	// differ from it). Only a timeline with a title that avoids the subject needs them. Read before the first download, so a retry does
+	// not fetch a file first. Assets that have no boxes are simply not in the index.
+	if s.wantSubjects && !s.subjectsRead {
+		all := make([]ids.AssetID, 0, len(s.inputs))
+		for aid := range s.inputs {
+			all = append(all, aid)
+		}
+		ix, err := s.r.p.loadSubjects(s.ctx, ws, all)
+		if err != nil {
+			s.infra = fmt.Errorf("subject boxes of the project's footage: %w", err)
+			return render.ResolvedAsset{}, s.infra
+		}
+		s.subjects, s.subjectsRead = ix, true
 	}
 	in, ok := s.inputs[id]
 	if !ok {
@@ -117,20 +135,6 @@ func (s *stager) stage(assetID string, variant render.Variant) (render.ResolvedA
 		return render.ResolvedAsset{}, perr
 	}
 	ra := render.ResolvedAsset{Location: dest, HasAudio: in.HasAudio != nil && *in.HasAudio}
-	// Where the person is, so a title is kept off the head: one read for all the project's footage, the first time. A failed read is not a
-	// failed render: the titles stay where they are placed.
-	if !s.subjectsRead {
-		s.subjectsRead = true
-		all := make([]ids.AssetID, 0, len(s.inputs))
-		for aid := range s.inputs {
-			all = append(all, aid)
-		}
-		ix, err := subject.Load(s.ctx, s.r.p.cfg.Store, ws, all)
-		if err != nil {
-			s.r.log.WarnContext(s.ctx, "render: the subject boxes could not be read; titles are placed without them", "error", err)
-		}
-		s.subjects = ix
-	}
 	if t, ok := s.subjects[assetID]; ok {
 		ra.Subject = &t
 	}

@@ -9,7 +9,7 @@ func TestTitleKind(t *testing.T) {
 	for text, want := range map[string]string{
 		"BUILDING LATS 101":                KindSeries,
 		"BRACHIORADIALIS BUILDER 101":      KindSeries,
-		"  CHEST   DAY 201 ": KindSeries,
+		"  CHEST   DAY 201 ":               KindSeries,
 		"how to bake a croissant tricep":   KindLowercase,
 		"is this the best row?":            KindQuestion,
 		"BACK DAY":                         KindCaps,
@@ -121,17 +121,45 @@ func TestTheLinesAndPatternDimensions(t *testing.T) {
 	if x, _ := dim(p.Compare(two), "title_lines"); !strings.Contains(x.Fix, "scale to 0.85") {
 		t.Errorf("a scale that fits: %q", x.Fix)
 	}
+	// For a creator whose titles are mostly one line (a share of one half or more) a long title that wraps is held to one line too, with the
+	// number of characters to shorten to; for one whose titles are not, a long title may wrap.
 	long := base
-	long.TitleLines, long.TitleChars = 2, 27
+	long.TitleLines, long.TitleChars = 2, 30
 	if x, ok := dim(p.Compare(long), "title_lines"); ok {
-		t.Errorf("a long title was held to one line: %+v", x)
+		t.Errorf("a long title was held to one line for a creator whose titles often wrap: %+v", x)
+	}
+	one := *p.Text
+	one.OneLineShare = 0.8
+	prof := *p
+	prof.Text = &one
+	x, ok := dim(prof.Compare(long), "title_lines")
+	if !ok || x.OK || !strings.Contains(x.Fix, "shorten to 22 characters or fewer so it fits on one line") {
+		t.Errorf("a 30-character title wrapped for a one-line creator: %+v", x)
+	}
+	// A long title with a line break of its own is told both.
+	broken := long
+	broken.TitleBreak = true
+	if x, _ := dim(prof.Compare(broken), "title_lines"); !strings.Contains(x.Fix, "shorten to 22 characters") || !strings.Contains(x.Fix, "take the line break out") {
+		t.Errorf("a long title with a break: %q", x.Fix)
+	}
+	// With no character limit in the profile (only the share) it still fails, with the fixes that need none.
+	noLimit := one
+	noLimit.OneLineChars = 0
+	prof2 := *p
+	prof2.Text = &noLimit
+	if x, ok := dim(prof2.Compare(long), "title_lines"); !ok || x.OK || strings.Contains(x.Fix, "0 characters") {
+		t.Errorf("no limit: %+v", x)
+	}
+	long.TitleLines = 1
+	if x, ok := dim(prof.Compare(long), "title_lines"); !ok || !x.OK {
+		t.Errorf("a long title that fits one line: %+v", x)
 	}
 
 	// The pattern is soft: a label in capitals is borderline, and does not fail the edit.
 	label := base
 	label.TitleKind = KindCaps
 	d = p.Compare(label)
-	x, ok := dim(d, "title_pattern")
+	x, ok = dim(d, "title_pattern")
 	if !ok || x.OK || !x.Soft || !strings.Contains(x.Fix, "ending in 101") {
 		t.Fatalf("pattern %+v", x)
 	}

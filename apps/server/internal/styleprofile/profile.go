@@ -753,7 +753,9 @@ func (p *Profile) Describe() string {
 			if t.Shadow != "" {
 				fmt.Fprintf(&b, ", %s shadow", t.Shadow)
 			}
-			if t.OneLineChars > 0 {
+			if t.OneLineChars > 0 && t.OneLineShare >= 0.5 {
+				fmt.Fprintf(&b, ", every title one line (at most %d characters)", t.OneLineChars)
+			} else if t.OneLineChars > 0 {
 				fmt.Fprintf(&b, ", titles up to %d characters on one line", t.OneLineChars)
 			} else if t.OneLineShare >= 0.5 {
 				b.WriteString(", one line")

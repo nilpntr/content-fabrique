@@ -54,6 +54,7 @@ const (
 	FailSpendCap      = "spend_cap"        // a spend cap or the $0.003 budget refused the call
 	FailModelRejected = "model_rejected"   // the API refused the request (a 4xx that is ours to fix)
 	FailReplayMiss    = "replay_miss"      // LLM_MODE=replay and no cassette holds the request
+	FailNoSubjects    = "no_subjects"      // a subjects-only run whose answer had no usable boxes: the earlier ones stay
 )
 
 // ErrModelUnavailable is returned when the model client cannot be built because no key is configured: not a failure of the
@@ -251,8 +252,16 @@ func (s *Service) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, o
 	if keep {
 		// Only the new keys of the detail are written: what a person edited while the model call ran stays, and so do the labels.
 		res.Title, res.Description, res.Tags = a.Title, a.Description, a.Tags
-		patch := detail{Frames: d.Frames, Subjects: d.Subjects, SubjectsRead: d.SubjectsRead}
-		if _, err := s.cfg.Store.MergeQuickLookDetail(ctx, ws, id, patch.json()); err != nil {
+		if !d.SubjectsRead {
+			// An answer with no usable boxes writes nothing: it must not clear boxes an earlier run found, or the marker that they were read.
+			res.Outcome, res.Reason = OutcomeFailed, FailNoSubjects
+			return res, nil
+		}
+		patch, err := subjectsPatch(d)
+		if err != nil {
+			return Result{}, err
+		}
+		if _, err := s.cfg.Store.MergeQuickLookDetail(ctx, ws, id, patch); err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				return Result{Outcome: OutcomeGone}, nil
 			}
@@ -391,6 +400,24 @@ func (s *Service) ask(ctx context.Context, a store.Asset, fr frameSet, d *detail
 		res.Subjects = len(d.Subjects.Samples)
 	}
 	return res, "", nil
+}
+
+// subjectsPatch is what a subjects-only run writes into the detail of a good quick look: the frames it saw, the subject boxes (null when
+// the answer said nobody is there, which replaces earlier ones) and the marker that they were asked for. It is built key by key so that nothing
+// else is written: the prompt version, the model and the rest of the detail stay as the quick look that made the labels left them.
+func subjectsPatch(d detail) (json.RawMessage, error) {
+	patch := map[string]any{"subjects_read": d.SubjectsRead, "subjects": nil}
+	if d.Frames != nil {
+		patch["frames"] = d.Frames
+	}
+	if d.Subjects != nil {
+		patch["subjects"] = d.Subjects
+	}
+	b, err := json.Marshal(patch)
+	if err != nil {
+		return nil, fmt.Errorf("the subject patch: %w", err)
+	}
+	return b, nil
 }
 
 // nobodyThere says the answer had subject entries and none of them put a person in a frame.
