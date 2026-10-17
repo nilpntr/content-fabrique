@@ -39,3 +39,6 @@ packages/*/node_modules
 /apps/server/cfctl
 /apps/server/api
 /apps/server/worker
+
+# Media the render golden tests generate (apps/server/internal/render)
+apps/server/internal/render/testdata/.cache/
