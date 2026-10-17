@@ -25,8 +25,10 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
   const navigate = useNavigate();
   const theme = useTheme();
 
+  // Closing leaves the query alone (clearing it would re-render the full list mid-fade; see onOpenChangeComplete).
+  // Opening clears it, which covers a reopen during the exit animation, when that never completes.
   useEffect(() => {
-    if (!open) setQuery("");
+    if (open) setQuery("");
   }, [open]);
 
   const close = () => onOpenChange(false);
@@ -57,7 +59,14 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
     .filter((group) => group.items.length > 0);
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+    // The query is cleared once the exit animation has finished: clearing it on close would re-render the full list mid-fade.
+    <DialogPrimitive.Root
+      open={open}
+      onOpenChange={onOpenChange}
+      onOpenChangeComplete={(isOpen) => {
+        if (!isOpen) setQuery("");
+      }}
+    >
       <DialogPrimitive.Portal>
         <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-[oklch(0.25_0.01_80/0.18)] backdrop-blur-[2px] transition-opacity duration-(--dur-base) data-ending-style:opacity-0 data-starting-style:opacity-0 dark:bg-black/55" />
         <DialogPrimitive.Popup

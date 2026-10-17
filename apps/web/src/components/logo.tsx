@@ -1,7 +1,7 @@
 import { useId } from "react";
 import { cn } from "@/lib/utils";
 
-export const APP_NAME = "Dashboard";
+export const APP_NAME = "Content Fabrique";
 
 export function LogoMark({ className }: { className?: string }) {
   const id = useId();

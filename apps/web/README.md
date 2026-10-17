@@ -19,7 +19,7 @@ The Worker is `cf-web` in `wrangler.jsonc` (`main: @tanstack/react-start/server-
 
 1. Create `src/pages/my-page.tsx` exporting a component.
 2. Create `src/routes/my-page.tsx` with `createFileRoute("/my-page")({ component: MyPage })`. Start regenerates `src/routeTree.gen.ts`.
-3. Add the path to the `to` union and an entry in `src/nav.ts`; the sidebar item, active state and header title follow.
+3. Add an entry in `src/nav.ts`. Its `to` is typed from the generated route tree, so a path that is not a route fails typecheck; the sidebar item, active state (by the router's match, so child routes count) and header title follow.
 
 ## Server rendering
 
@@ -37,7 +37,7 @@ Theme tokens live in `src/index.css`. The brand colour is `--brand`; `--accent` 
 
 ## Look and motion
 
-Tokens live in `src/index.css`: surfaces and shadows (`--shadow-raised`, `--shadow-pop`, `--shadow-well`), the sidebar lens (`--lens-*`), and motion (`--motion-spring`, `--motion-out`, `--dur-*`). Tailwind exposes them as `ease-spring`, `ease-out` and `shadow-*`; scripts read them with `motion()` from `src/lib/glide.ts`.
+Tokens live in `src/index.css`: surfaces and shadows (`--shadow-raised`, `--shadow-pop`, `--shadow-well`), the sidebar lens (`--lens-*`), and motion (`--motion-spring`, `--motion-out`, `--dur-*`). Tailwind exposes them as `ease-spring`, `ease-out` and `shadow-*`; `src/lib/glide.ts` reads them for the scripted animations.
 
 - The current page is a lens that springs from item to item. Every `SidebarMenuButton` inside `SidebarContent` takes part: pass `isActive` and put the text in a `SidebarMenuLabel`. Hover and keyboard focus glide on their own.
 - Menus and lists get the same travelling highlight from `HighlightGlider`, placed first inside a `relative isolate` container.

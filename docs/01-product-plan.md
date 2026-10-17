@@ -141,6 +141,8 @@ flowchart LR
 
 **Why Opus 5.5 for editing sets the price floor.** It puts COGS at about **$1.25 per exported video** all-in, of which about $1.15 is the LLM ([architecture §13](03-architecture.md#13-cost-model)). That can't be sold as "unlimited".
 
+**Before checkout exists** (P7-01), plans are granted by hand with `cfctl plan grant` (P0-16), so the founder and beta creators can be marked as paying while everyone else sees the paywall.
+
 **Plan hypotheses.** Validate them in the beta. The margin assumptions are in [architecture §13](03-architecture.md#13-cost-model), and competitor prices still need benchmarking ([research §6](02-research.md#6-limits-of-this-research-and-open-questions)).
 
 | Plan | Price | AI billed by | Includes | Gross margin at full use |
