@@ -98,7 +98,7 @@ func (f *fakeAnthropic) turn(n int) string {
 	case 2:
 		return message(use("toolu_ed_2", "view_clip", `{"asset_id":`+asset(clipA)+`}`), 380, 900, 9200, 74)
 	case 3:
-		ops := `{"ops":[` +
+		ops := `{"base_version":0,"ops":[` +
 			`{"op":"add_clip","asset_id":` + asset(clipA) + `,"source":{"in_ms":2000,"out_ms":8000},"why":"The heaviest set of the lat pulldown, so it opens the video."},` +
 			`{"op":"add_clip","asset_id":` + asset(clipB) + `,"source":{"in_ms":1000,"out_ms":6000}},` +
 			`{"op":"add_clip","asset_id":` + asset(clipC) + `,"source":{"in_ms":3000,"out_ms":9000},"reframe":{"mode":"blur_fill"}},` +
@@ -417,7 +417,7 @@ func TestEditorRunInReplayMode(t *testing.T) {
 	if d := timeline.TotalDuration(parsed); d != 17000 {
 		t.Errorf("duration %d ms", d)
 	}
-	if vd.Version.AuthorKind != "agent" || !strings.HasPrefix(vd.Version.AuthorID, x.run.ID.String()+":toolu_") {
+	if vd.Version.AuthorKind != "agent" || vd.Version.AuthorID != ids.Encode(ids.PrefixRun, x.run.ID) {
 		t.Errorf("author: %s %s", vd.Version.AuthorKind, vd.Version.AuthorID)
 	}
 

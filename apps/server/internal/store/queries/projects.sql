@@ -82,8 +82,8 @@ WHERE pa.workspace_id = @workspace_id AND pa.project_id = @project_id
   AND a.status = 'ready' AND a.deleted_at IS NULL AND a.duration_ms IS NOT NULL;
 
 -- name: InsertTimelineVersion :one
-INSERT INTO timeline_versions (workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id)
-VALUES (@workspace_id, @project_id, @version, @parent_version, @spec, @ops, @diff, @summary, @author_kind, @author_id)
+INSERT INTO timeline_versions (workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id, idempotency_key, result)
+VALUES (@workspace_id, @project_id, @version, @parent_version, @spec, @ops, @diff, @summary, @author_kind, @author_id, sqlc.narg('idempotency_key')::text, sqlc.narg('result')::jsonb)
 RETURNING *;
 
 -- name: GetTimelineVersion :one
@@ -110,10 +110,15 @@ WHERE pa.workspace_id = @workspace_id AND pa.project_id = @project_id
   AND a.status = 'ready' AND a.deleted_at IS NULL AND a.duration_ms IS NOT NULL
 ORDER BY pa.position;
 
--- The version a given author made, if there is one: how an agent's edit finds out that it was applied already (the author id
--- of an agent version is the idempotency key of the tool call that made it).
+-- The latest version a given author made, if there is one: for the editor agent the author id is the run's TypeID, so this says
+-- whether the run has made a version.
 -- name: GetTimelineVersionByAuthor :one
 SELECT * FROM timeline_versions
 WHERE workspace_id = @workspace_id AND project_id = @project_id AND author_kind = @author_kind AND author_id = @author_id
-ORDER BY version
+ORDER BY version DESC
 LIMIT 1;
+
+-- The version a tool call made, by the call's idempotency key: how a repeated call finds what the first one did.
+-- name: GetTimelineVersionByIdempotencyKey :one
+SELECT * FROM timeline_versions
+WHERE workspace_id = @workspace_id AND project_id = @project_id AND idempotency_key = @idempotency_key;

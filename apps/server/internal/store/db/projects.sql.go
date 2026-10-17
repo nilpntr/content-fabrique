@@ -137,7 +137,7 @@ func (q *Queries) GetProjectForUpdate(ctx context.Context, arg GetProjectForUpda
 }
 
 const getTimelineVersion = `-- name: GetTimelineVersion :one
-SELECT id, workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id, created_at FROM timeline_versions
+SELECT id, workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id, created_at, idempotency_key, result FROM timeline_versions
 WHERE workspace_id = $1 AND project_id = $2 AND version = $3
 `
 
@@ -163,14 +163,16 @@ func (q *Queries) GetTimelineVersion(ctx context.Context, arg GetTimelineVersion
 		&i.AuthorKind,
 		&i.AuthorID,
 		&i.CreatedAt,
+		&i.IdempotencyKey,
+		&i.Result,
 	)
 	return i, err
 }
 
 const getTimelineVersionByAuthor = `-- name: GetTimelineVersionByAuthor :one
-SELECT id, workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id, created_at FROM timeline_versions
+SELECT id, workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id, created_at, idempotency_key, result FROM timeline_versions
 WHERE workspace_id = $1 AND project_id = $2 AND author_kind = $3 AND author_id = $4
-ORDER BY version
+ORDER BY version DESC
 LIMIT 1
 `
 
@@ -181,8 +183,8 @@ type GetTimelineVersionByAuthorParams struct {
 	AuthorID    string
 }
 
-// The version a given author made, if there is one: how an agent's edit finds out that it was applied already (the author id
-// of an agent version is the idempotency key of the tool call that made it).
+// The latest version a given author made, if there is one: for the editor agent the author id is the run's TypeID, so this says
+// whether the run has made a version.
 func (q *Queries) GetTimelineVersionByAuthor(ctx context.Context, arg GetTimelineVersionByAuthorParams) (TimelineVersion, error) {
 	row := q.db.QueryRow(ctx, getTimelineVersionByAuthor,
 		arg.WorkspaceID,
@@ -204,27 +206,65 @@ func (q *Queries) GetTimelineVersionByAuthor(ctx context.Context, arg GetTimelin
 		&i.AuthorKind,
 		&i.AuthorID,
 		&i.CreatedAt,
+		&i.IdempotencyKey,
+		&i.Result,
+	)
+	return i, err
+}
+
+const getTimelineVersionByIdempotencyKey = `-- name: GetTimelineVersionByIdempotencyKey :one
+SELECT id, workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id, created_at, idempotency_key, result FROM timeline_versions
+WHERE workspace_id = $1 AND project_id = $2 AND idempotency_key = $3
+`
+
+type GetTimelineVersionByIdempotencyKeyParams struct {
+	WorkspaceID    ids.WorkspaceID
+	ProjectID      ids.ProjectID
+	IdempotencyKey *string
+}
+
+// The version a tool call made, by the call's idempotency key: how a repeated call finds what the first one did.
+func (q *Queries) GetTimelineVersionByIdempotencyKey(ctx context.Context, arg GetTimelineVersionByIdempotencyKeyParams) (TimelineVersion, error) {
+	row := q.db.QueryRow(ctx, getTimelineVersionByIdempotencyKey, arg.WorkspaceID, arg.ProjectID, arg.IdempotencyKey)
+	var i TimelineVersion
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.Version,
+		&i.ParentVersion,
+		&i.Spec,
+		&i.Ops,
+		&i.Diff,
+		&i.Summary,
+		&i.AuthorKind,
+		&i.AuthorID,
+		&i.CreatedAt,
+		&i.IdempotencyKey,
+		&i.Result,
 	)
 	return i, err
 }
 
 const insertTimelineVersion = `-- name: InsertTimelineVersion :one
-INSERT INTO timeline_versions (workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id, created_at
+INSERT INTO timeline_versions (workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id, idempotency_key, result)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::text, $12::jsonb)
+RETURNING id, workspace_id, project_id, version, parent_version, spec, ops, diff, summary, author_kind, author_id, created_at, idempotency_key, result
 `
 
 type InsertTimelineVersionParams struct {
-	WorkspaceID   ids.WorkspaceID
-	ProjectID     ids.ProjectID
-	Version       int32
-	ParentVersion *int32
-	Spec          json.RawMessage
-	Ops           json.RawMessage
-	Diff          json.RawMessage
-	Summary       []string
-	AuthorKind    string
-	AuthorID      string
+	WorkspaceID    ids.WorkspaceID
+	ProjectID      ids.ProjectID
+	Version        int32
+	ParentVersion  *int32
+	Spec           json.RawMessage
+	Ops            json.RawMessage
+	Diff           json.RawMessage
+	Summary        []string
+	AuthorKind     string
+	AuthorID       string
+	IdempotencyKey *string
+	Result         []byte
 }
 
 func (q *Queries) InsertTimelineVersion(ctx context.Context, arg InsertTimelineVersionParams) (TimelineVersion, error) {
@@ -239,6 +279,8 @@ func (q *Queries) InsertTimelineVersion(ctx context.Context, arg InsertTimelineV
 		arg.Summary,
 		arg.AuthorKind,
 		arg.AuthorID,
+		arg.IdempotencyKey,
+		arg.Result,
 	)
 	var i TimelineVersion
 	err := row.Scan(
@@ -254,6 +296,8 @@ func (q *Queries) InsertTimelineVersion(ctx context.Context, arg InsertTimelineV
 		&i.AuthorKind,
 		&i.AuthorID,
 		&i.CreatedAt,
+		&i.IdempotencyKey,
+		&i.Result,
 	)
 	return i, err
 }

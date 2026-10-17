@@ -64,7 +64,7 @@ func TestRunsStartEdit(t *testing.T) {
 	if err := e.pool.QueryRow(context.Background(), `SELECT input::text, workspace_id, project_id FROM agent_runs WHERE id = $1`, runID).Scan(&input, &ws, &project); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(input, "Open on the heaviest set.") || !strings.Contains(input, `"editor.v1"`) || ws != e.ws["ada"].UUID || project.String() == "" {
+	if !strings.Contains(input, "Open on the heaviest set.") || !strings.Contains(input, `"editor.v1.1"`) || ws != e.ws["ada"].UUID || project.String() == "" {
 		t.Errorf("input %s, workspace %s", input, ws)
 	}
 
@@ -137,6 +137,24 @@ func TestRunsStartEditRefusals(t *testing.T) {
 		t.Fatalf("delete asset: %d %s", rec.Code, rec.Body)
 	}
 	e.fail(http.MethodPost, editPath(p), "ada", nil, http.StatusUnprocessableEntity, api.ErrorCodeAssetsNotUsable)
+}
+
+// A project of only an audio file has footage, but no clip to cut: there is nothing for the editor to do.
+func TestRunsNeedAVideoClip(t *testing.T) {
+	e := newAssetsEnv(t, func(o *assetsEnvOptions) { o.runs = true })
+	var c api.CreateAssetResponse
+	e.call(http.MethodPost, "/v1/assets", "ada", api.CreateAssetRequest{Filename: "song.mp3", SizeBytes: 4096, ContentType: "audio/mpeg"}, http.StatusCreated, &c)
+	parts := e.uploadAll("ada", c)
+	var song api.Asset
+	e.call(http.MethodPost, "/v1/assets/"+c.Asset.Id+"/complete", "ada", api.CompleteAssetRequest{Parts: parts}, http.StatusOK, &song)
+	e.ingested("ada", song)
+	p := e.newProject("ada", "9:16", song.Id)
+	e.fail(http.MethodPost, editPath(p), "ada", nil, http.StatusUnprocessableEntity, api.ErrorCodeAssetsNotUsable)
+
+	// With a video next to it, the project can be edited.
+	video := e.readyAsset("ada", "lat.mp4")
+	p2 := e.newProject("ada", "9:16", song.Id, video)
+	e.startEdit("ada", p2, nil)
 }
 
 func randomProjectID() string { return ids.Encode(ids.PrefixProject, uuid.Must(uuid.NewV7())) }

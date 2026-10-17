@@ -151,6 +151,10 @@ type NewTimelineVersion struct {
 	Summary    []string
 	AuthorKind string
 	AuthorID   string
+	// IdempotencyKey and Result are set for a version an agent's tool call made: the call's key (unique per project), and the
+	// JSON object the repeat of the call answers with. Empty for a person's edit.
+	IdempotencyKey string
+	Result         json.RawMessage
 }
 
 // ErrVersionConflict is returned by AddTimelineVersion when the project is no longer at the version the new one was made
@@ -182,7 +186,7 @@ func (s *Store) AddTimelineVersion(ctx context.Context, ws ids.WorkspaceID, proj
 		v, err = tx.q.InsertTimelineVersion(ctx, db.InsertTimelineVersionParams{
 			WorkspaceID: ws, ProjectID: project, Version: int32(in.Version), //nolint:gosec // range checked above
 			ParentVersion: parent, Spec: in.Spec, Ops: orEmptyArray(in.Ops), Diff: orEmptyArray(in.Diff), Summary: summary,
-			AuthorKind: in.AuthorKind, AuthorID: in.AuthorID,
+			AuthorKind: in.AuthorKind, AuthorID: in.AuthorID, IdempotencyKey: nilIfEmpty(in.IdempotencyKey), Result: nilIfEmptyJSON(in.Result),
 		})
 		if err != nil {
 			if errors.Is(mapErr(err), ErrConflict) {
@@ -245,9 +249,23 @@ func (s *Store) ListProjectFootage(ctx context.Context, ws ids.WorkspaceID, proj
 	return rows, mapErr(err)
 }
 
-// GetTimelineVersionByAuthor returns the first version of the project that the author made, or ErrNotFound. The editor
-// agent's author id is the idempotency key of the tool call, so this is how a retried call finds the version it made.
+// GetTimelineVersionByIdempotencyKey returns the version a tool call made, or ErrNotFound. This is how a retried call finds
+// the version it made the first time.
+func (s *Store) GetTimelineVersionByIdempotencyKey(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, key string) (TimelineVersion, error) {
+	v, err := s.q.GetTimelineVersionByIdempotencyKey(ctx, db.GetTimelineVersionByIdempotencyKeyParams{WorkspaceID: ws, ProjectID: project, IdempotencyKey: &key})
+	return v, mapErr(err)
+}
+
+// GetTimelineVersionByAuthor returns the latest version of the project that the author made, or ErrNotFound. The editor
+// agent's author id is its run's TypeID, so this says whether a run has made a version.
 func (s *Store) GetTimelineVersionByAuthor(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, authorKind, authorID string) (TimelineVersion, error) {
 	v, err := s.q.GetTimelineVersionByAuthor(ctx, db.GetTimelineVersionByAuthorParams{WorkspaceID: ws, ProjectID: project, AuthorKind: authorKind, AuthorID: authorID})
 	return v, mapErr(err)
+}
+
+func nilIfEmptyJSON(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	return raw
 }

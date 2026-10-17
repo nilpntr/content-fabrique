@@ -197,7 +197,8 @@ func (h *Runs) startEdit(ctx context.Context, req api.StartEditRequestObject) (s
 		if err != nil {
 			return err
 		}
-		if len(footage) == 0 {
+		// A usable clip is a ready video (an audio file is footage of the project, but there is nothing to cut).
+		if !slices.ContainsFunc(footage, func(r store.ProjectFootageRow) bool { return r.Kind == store.AssetKindVideo }) {
 			return errNoFootage
 		}
 		_, err = tx.ActiveAgentRunForProject(ctx, who.Workspace, project, editor.Name)
@@ -219,7 +220,7 @@ func (h *Runs) startEdit(ctx context.Context, req api.StartEditRequestObject) (s
 	case errors.Is(err, store.ErrNotFound):
 		return store.AgentRun{}, errProjectNotFound
 	case errors.Is(err, errNoFootage):
-		return store.AgentRun{}, &failure{http.StatusUnprocessableEntity, api.ErrorCodeAssetsNotUsable, "the project has no ready clip to edit"}
+		return store.AgentRun{}, &failure{http.StatusUnprocessableEntity, api.ErrorCodeAssetsNotUsable, "the project has no ready video clip to edit"}
 	case errors.Is(err, errActive):
 		return store.AgentRun{}, &failure{http.StatusConflict, api.ErrorCodeRunInProgress, "the project already has an editor run that has not finished"}
 	case errors.Is(err, runtime.ErrInvalidInput):

@@ -100,7 +100,7 @@ func Open(o Options) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	deps := editor.Deps{Projects: projectsSvc, Footage: o.Store, Preview: o.Preview}
+	deps := editor.Deps{Projects: projectsSvc, Store: o.Store, Preview: o.Preview}
 	var images llm.ImageResolver
 	switch {
 	case o.Objects != nil && o.Frames != nil && o.TempDir != "":

@@ -45,20 +45,23 @@ func orientation(w, h int32) string {
 	return "square"
 }
 
-// Caps on the creator's text in the run context, so that it stays far below the size of an event.
-const (
-	contextTitleChars       = 100
-	contextDescriptionChars = 300
-)
+// footageOpts say how much of the creator's text footageText prints.
+type footageOpts struct {
+	// Full prints every title and description whole, for every clip (list_footage).
+	Full bool
+	// Otherwise the first Detailed clips get their title (cut to TitleChars runes, none if 0) and description (cut to DescChars,
+	// none if 0); the others get their facts only.
+	Detailed, TitleChars, DescChars int
+}
 
-// footageText lists the clips. titleCap and descCap cut the creator's text (0: no cut).
-func footageText(rows []store.ProjectFootageRow, titleCap, descCap int) string {
+// footageText lists the clips.
+func footageText(rows []store.ProjectFootageRow, o footageOpts) string {
 	if len(rows) == 0 {
 		return "Footage: this project has no usable clips."
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "Footage: %d clips, in the creator's order. Only these can go on the timeline.\n", len(rows))
-	for _, r := range rows {
+	for n, r := range rows {
 		var dur int64
 		if r.DurationMs != nil {
 			dur = *r.DurationMs
@@ -79,17 +82,24 @@ func footageText(rows []store.ProjectFootageRow, titleCap, descCap int) string {
 			sound = "yes"
 		}
 		fmt.Fprintf(&b, "\n- id %s | %d ms (%s) | %s%s | sound: %s | kind: %s\n", r.AssetID, dur, secs(dur), orientation(w, h), size, sound, r.Kind)
-		title := r.Title
-		if titleCap > 0 {
-			title = cutRunes(title, titleCap)
+		if !o.Full && n >= o.Detailed {
+			continue
 		}
-		fmt.Fprintf(&b, "  title: %s\n", runtime.Untrusted("clip_title", title))
-		if d := strings.TrimSpace(r.Description); d != "" {
-			if descCap > 0 {
-				d = cutRunes(d, descCap)
+		if title := r.Title; o.Full || o.TitleChars > 0 {
+			if !o.Full {
+				title = cutRunes(title, o.TitleChars)
+			}
+			fmt.Fprintf(&b, "  title: %s\n", runtime.Untrusted("clip_title", title))
+		}
+		if d := strings.TrimSpace(r.Description); d != "" && (o.Full || o.DescChars > 0) {
+			if !o.Full {
+				d = cutRunes(d, o.DescChars)
 			}
 			fmt.Fprintf(&b, "  description: %s\n", runtime.Untrusted("clip_description", d))
 		}
+	}
+	if !o.Full && len(rows) > o.Detailed {
+		b.WriteString("\nTitles and descriptions are shortened or left out here to keep this overview small; list_footage has them whole.")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

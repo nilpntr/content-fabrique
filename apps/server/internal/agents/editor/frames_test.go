@@ -150,6 +150,65 @@ func TestFrameServiceMakesAndCachesFrames(t *testing.T) {
 	}
 }
 
+// A time past the end of the proxy is moved to its last frame (the proxy can be shorter than the original), a negative one to the
+// start; frames that cannot be decoded are reported while the others come back; only when none works is it an error.
+func TestFrameServiceClampsAndKeepsWhatWorked(t *testing.T) {
+	e := newEnv(t)
+	a := e.asset(e.wsA, clip{durMs: 10000})
+	if _, err := e.pool.Exec(context.Background(), `UPDATE asset_derivatives SET meta = '{"duration_ms": 9500}' WHERE asset_id = $1`, a); err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeRunner{}
+	fs := newFrameService(e, runner)
+	ctx := context.Background()
+
+	frames, err := fs.Frames(ctx, e.wsA.ID, a, []int64{9990, 60000, -5, 3000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAt := []int64{9400, 9400, 0, 3000}
+	wantReq := []int64{9990, 60000, -5, 3000}
+	for i, f := range frames {
+		if f.AtMs != wantAt[i] || f.RequestedMs != wantReq[i] || f.Err != "" || f.Ref == "" {
+			t.Errorf("frame %d = %+v", i, f)
+		}
+	}
+	if frames[0].Ref != frames[1].Ref {
+		t.Error("two requests for the end made two pictures")
+	}
+	// One ffmpeg output per distinct moment.
+	if got := strings.Count(strings.Join(runner.runs[0].Args, " "), "-frames:v 1"); got != 3 {
+		t.Errorf("%d pictures asked of ffmpeg, want 3", got)
+	}
+	if ClampMs(5, 0) != 5 || ClampMs(-5, 0) != 0 || ClampMs(50, 80) != 0 || ClampMs(1000, 1000) != 900 {
+		t.Error("ClampMs")
+	}
+
+	// One moment does not decode: the others are made and kept.
+	bad := newFrameService(e, &fakeRunner{mutate: func(name string, data []byte) []byte {
+		if name == "f1.jpg" {
+			return nil
+		}
+		return data
+	}})
+	frames, err = bad.Frames(ctx, e.wsA.ID, a, []int64{100, 200, 300})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frames[0].Err != "" || frames[2].Err != "" || frames[1].Err == "" || frames[1].Ref != "" || !strings.Contains(frames[1].Err, "200 ms") {
+		t.Errorf("frames: %+v", frames)
+	}
+	if _, ok := e.objs.m[frames[0].Ref]; !ok {
+		t.Error("the frame that worked was not stored")
+	}
+	// ffmpeg exits with an error for the output it could not make, and still writes the others: they are kept too.
+	partial := newFrameService(e, &fakeRunner{exit: 1, mutate: nil})
+	_, err = partial.Frames(ctx, e.wsA.ID, a, []int64{400})
+	if !errors.Is(err, ErrNoFrames) {
+		t.Errorf("all failed: %v", err)
+	}
+}
+
 func TestFrameServiceRefusals(t *testing.T) {
 	e := newEnv(t)
 	a := e.asset(e.wsA, clip{})
@@ -173,7 +232,7 @@ func TestFrameServiceRefusals(t *testing.T) {
 	if runner.runCount() != 0 {
 		t.Errorf("ffmpeg ran %d times for assets that cannot be viewed", runner.runCount())
 	}
-	for _, bad := range [][]int64{nil, {}, make([]int64, media.MaxFrameBatch+1), {-1}} {
+	for _, bad := range [][]int64{nil, {}, make([]int64, media.MaxFrameBatch+1)} {
 		if _, err := fs.Frames(ctx, e.wsA.ID, a, bad); err == nil {
 			t.Errorf("times %v accepted", bad)
 		}

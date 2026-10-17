@@ -388,8 +388,8 @@ type Edit struct {
 	Created []ops.Created
 	// Warnings are the non-blocking issues of the batch.
 	Warnings []ops.Issue
-	// Replayed is set by ApplyOpsOnce when the author had made this version already: nothing was applied now, Created and
-	// Warnings are empty, and Version is the one stored earlier.
+	// Replayed is set by ApplyOpsOnce when the call had made this version already: nothing was applied now, Version, Created and
+	// Warnings are what the first call stored and answered.
 	Replayed bool
 }
 
@@ -404,20 +404,30 @@ type Edit struct {
 //
 // The HTTP handler calls it with the user as author; the editor agent's edit_timeline tool calls it with the run as author.
 func (s *Service) ApplyOps(ctx context.Context, ws ids.WorkspaceID, id ids.ProjectID, baseVersion int, rawOps json.RawMessage, author ops.Author) (Edit, *Error) {
-	return s.applyOps(ctx, ws, id, baseVersion, rawOps, author, false)
+	return s.applyOps(ctx, ws, id, baseVersion, rawOps, author, "")
 }
 
 // ApplyOpsOnce is ApplyOps for a caller that may repeat a call it cannot tell was made: the editor agent's tool call, which a
-// resumed run runs again when its worker died after the version was stored and before the result was. author.ID is the
-// idempotency key (run id and tool-use id, at most 128 characters) and must be unique to the call. Under the project's lock,
-// before anything else, it looks for a version that this author made: when there is one it is returned with Replayed set and
-// nothing is applied, whatever base_version the repeat names (the project has moved on since). The key lives in the version
-// itself (author_id), so the two cannot disagree.
-func (s *Service) ApplyOpsOnce(ctx context.Context, ws ids.WorkspaceID, id ids.ProjectID, baseVersion int, rawOps json.RawMessage, author ops.Author) (Edit, *Error) {
-	return s.applyOps(ctx, ws, id, baseVersion, rawOps, author, true)
+// resumed run runs again when its worker died after the version was stored and before the result was. key (at most 128
+// characters) identifies the call (the run's id and the tool-use id) and is stored with the version, together with the call's
+// answer (the ids the ops created, the warnings). Under the project's lock, before anything else, it looks for the version that
+// key made: when there is one it is returned with Replayed set and that stored answer, and nothing is applied, whatever
+// base_version the repeat names (the project has moved on since). author is stored as it is; for the agent it is the run's
+// TypeID.
+func (s *Service) ApplyOpsOnce(ctx context.Context, ws ids.WorkspaceID, id ids.ProjectID, baseVersion int, rawOps json.RawMessage, author ops.Author, key string) (Edit, *Error) {
+	if key == "" || len(key) > 128 {
+		return Edit{}, invalid("the idempotency key must be 1 to 128 characters")
+	}
+	return s.applyOps(ctx, ws, id, baseVersion, rawOps, author, key)
 }
 
-func (s *Service) applyOps(ctx context.Context, ws ids.WorkspaceID, id ids.ProjectID, baseVersion int, rawOps json.RawMessage, author ops.Author, once bool) (Edit, *Error) {
+// callResult is what a call's version stores for its repeat.
+type callResult struct {
+	Created  []ops.Created `json:"created"`
+	Warnings []ops.Issue   `json:"warnings"`
+}
+
+func (s *Service) applyOps(ctx context.Context, ws ids.WorkspaceID, id ids.ProjectID, baseVersion int, rawOps json.RawMessage, author ops.Author, key string) (Edit, *Error) {
 	if baseVersion < 0 || baseVersion > 1<<30 {
 		return Edit{}, invalid("base_version must be 0 or a version number")
 	}
@@ -432,11 +442,18 @@ func (s *Service) applyOps(ctx context.Context, ws ids.WorkspaceID, id ids.Proje
 		if err != nil {
 			return err
 		}
-		if once {
-			earlier, err := tx.GetTimelineVersionByAuthor(ctx, ws, id, string(author.Kind), author.ID)
+		if key != "" {
+			earlier, err := tx.GetTimelineVersionByIdempotencyKey(ctx, ws, id, key)
 			switch {
 			case err == nil:
 				out.Version, out.Replayed = earlier, true
+				var stored callResult
+				if len(earlier.Result) > 0 {
+					if err := json.Unmarshal(earlier.Result, &stored); err != nil {
+						return fmt.Errorf("stored result of version %d: %w", earlier.Version, err)
+					}
+				}
+				out.Created, out.Warnings = stored.Created, stored.Warnings
 				return nil
 			case !errors.Is(err, store.ErrNotFound):
 				return err
@@ -475,6 +492,19 @@ func (s *Service) applyOps(ctx context.Context, ws ids.WorkspaceID, id ids.Proje
 		if len(in.Spec) > MaxSpecBytes {
 			return rejected(api.ErrorCodeInvalidOps, "the timeline would be too large; nothing was stored",
 				[]ops.Issue{limitIssue(fmt.Sprintf("the timeline is %d bytes, at most %d are allowed", len(in.Spec), MaxSpecBytes))})
+		}
+		if key != "" {
+			in.IdempotencyKey = key
+			stored := callResult{Created: res.Created, Warnings: res.Issues}
+			if stored.Created == nil {
+				stored.Created = []ops.Created{}
+			}
+			if stored.Warnings == nil {
+				stored.Warnings = []ops.Issue{}
+			}
+			if in.Result, err = json.Marshal(stored); err != nil {
+				return fmt.Errorf("encode result: %w", err)
+			}
 		}
 		if out.Version, err = tx.AddTimelineVersion(ctx, ws, id, in); err != nil {
 			return err

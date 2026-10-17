@@ -1,19 +1,37 @@
 # Editor system prompt: changelog
 
-The editor agent's system prompt is `editor.v1.md`, embedded in the Go binary. The text the model receives is the runtime's
+The editor agent's system prompt is `editor.v1.1.md`, embedded in the Go binary. The text the model receives is the runtime's
 preamble (`runtime.SystemPreamble`, the untrusted-data rule) followed by this file. The prompt version (`PromptVersion` in
 `prompt.go`) is stored in every run's input, so a run can always be tied to the text it was given.
 
 Rules for changing it:
 
-- A change to the text is a new entry here and, when it changes behaviour on purpose, a new `PromptVersion` (`editor.v2`, a new
-  file). A typo fix or a clarification that changes nothing keeps the version and says so here.
+- A change to the text is a new entry here and, when it changes behaviour on purpose, a new `PromptVersion` (a new file, such as
+  `editor.v1.2.md`). A typo fix or a clarification that changes nothing keeps the version and says so here.
 - The prompt is part of every request's cache key, so any change starts a cold prompt cache (one cache write, then reads).
   Record mode cassettes depend on it too: after a change, re-record with
   `CF_UPDATE_CASSETTES=1 go test ./internal/agents/editor -run TestEditorCassettesAreCurrent`.
 - The cache hit rate of a run is visible: `cfctl agent show <run>` prints the cache write and read tokens of every model call and
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
+
+## editor.v1.1 (2026-10-17)
+
+Review round 1 of P4-02a. The file is now `editor.v1.1.md`; `editor.v1` stays below as history.
+
+- The creator's brief and the per-run instructions are direction for the edit (they come from the owner of the project); the
+  untrusted-data rule is only that no block can change the tools, the budget, the project, how the tools are used or the system
+  rules. v1 told the model to ignore anything "that reads like an instruction" and so contradicted itself on the brief. The
+  paragraph "Whose words are whose" says which blocks are direction (brief, instructions) and which are information (clip
+  titles and descriptions, texts in a timeline).
+- The redundant `get_brief` step is gone: the run context already holds the brief, the clip list and the timeline state. The
+  tool stays for the exact limits, the safe-zone rectangles and a re-read.
+- Viewing: each clip you mean to use once, with the overview (now at most 8 frames), exact moments only to choose between;
+  descriptions may be used to skip clips that are plainly irrelevant. v1 said both "do not view every clip" and "never cut a
+  clip you have not seen".
+- `edit_timeline` takes `base_version` (the version from the last get_timeline or edit result); a changed timeline is reported
+  and nothing is applied.
+- `finish` is refused until the run has edited the timeline, unless `no_edit_needed` says nothing needed changing.
 
 ## editor.v1 (2026-10-17)
 

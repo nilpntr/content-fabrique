@@ -361,6 +361,36 @@ func projectsSuite(t *testing.T, st *store.Store, suffix string) {
 			}
 		}
 
+		// The idempotency key and the result of an agent's tool call: unique per project, found by the key.
+		keyed := version(2, 1)
+		keyed.AuthorKind, keyed.AuthorID = store.AuthorAgent, "run_x"
+		keyed.IdempotencyKey, keyed.Result = "run-1:toolu_01", json.RawMessage(`{"created":[{"op_index":0,"kind":"clip","id":"c1"}],"warnings":[]}`)
+		stored, err := st.AddTimelineVersion(ctx, wa.ID, p.ID, keyed)
+		if err != nil || stored.IdempotencyKey == nil || *stored.IdempotencyKey != "run-1:toolu_01" || !strings.Contains(string(stored.Result), `"c1"`) {
+			t.Fatalf("keyed version: %+v, %v", stored, err)
+		}
+		byKey, err := st.GetTimelineVersionByIdempotencyKey(ctx, wa.ID, p.ID, "run-1:toolu_01")
+		if err != nil || byKey.Version != 2 {
+			t.Fatalf("by key: %+v, %v", byKey, err)
+		}
+		if _, err := st.GetTimelineVersionByIdempotencyKey(ctx, wb.ID, p.ID, "run-1:toolu_01"); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("another workspace finds the key: %v", err)
+		}
+		if _, err := st.GetTimelineVersionByIdempotencyKey(ctx, wa.ID, p.ID, "run-1:toolu_02"); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("another key: %v", err)
+		}
+		if latest, err := st.GetTimelineVersionByAuthor(ctx, wa.ID, p.ID, store.AuthorAgent, "run_x"); err != nil || latest.Version != 2 {
+			t.Errorf("latest by author: %+v, %v", latest, err)
+		}
+		twice := version(3, 2)
+		twice.AuthorKind, twice.AuthorID, twice.IdempotencyKey = store.AuthorAgent, "run_x", "run-1:toolu_01"
+		if _, err := st.AddTimelineVersion(ctx, wa.ID, p.ID, twice); !errors.Is(err, store.ErrVersionConflict) && !errors.Is(err, store.ErrConflict) {
+			t.Errorf("the same key twice: %v", err)
+		}
+		if _, err := st.GetTimelineVersion(ctx, wa.ID, p.ID, 3); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("a version was stored for a key that exists: %v", err)
+		}
+
 		// The one unfinished editor run of a project.
 		if _, err := st.ActiveAgentRunForProject(ctx, wa.ID, p.ID, "editor"); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("before a run: err = %v", err)

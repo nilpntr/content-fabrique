@@ -117,6 +117,8 @@ describe("tool arguments", () => {
 
   it("finish takes a summary", () => {
     expect(check("finish", { summary: "Done." })).toBe(true);
+    expect(check("finish", { summary: "Done.", no_edit_needed: true })).toBe(true);
+    expect(check("finish", { summary: "Done.", no_edit_needed: "yes" })).toBe(false);
     expect(check("finish", {})).toBe(false);
     expect(check("finish", { summary: "x", open_questions: [] })).toBe(false);
   });
@@ -136,21 +138,23 @@ describe("edit_timeline", () => {
 
   it.each(validOps)("takes the valid op %s", (f) => {
     const op = readJson(join(timelineDir, "fixtures", "ops", "valid", f));
-    expect(check("edit_timeline", { ops: [op] })).toBe(true);
+    expect(check("edit_timeline", { base_version: 0, ops: [op] })).toBe(true);
   });
 
   it.each(invalidOps)("refuses the invalid op %s", (f) => {
     const op = readJson(join(timelineDir, "fixtures", "ops", "invalid", f));
-    expect(check("edit_timeline", { ops: [op] })).toBe(false);
+    expect(check("edit_timeline", { base_version: 0, ops: [op] })).toBe(false);
   });
 
-  it("wants 1 to 100 ops and nothing besides them", () => {
+  it("wants a base version, 1 to 100 ops and nothing besides them", () => {
     const op = { op: "set_look", preset: "bw" };
-    expect(check("edit_timeline", {})).toBe(false);
-    expect(check("edit_timeline", { ops: [] })).toBe(false);
-    expect(check("edit_timeline", { ops: Array(100).fill(op) })).toBe(true);
-    expect(check("edit_timeline", { ops: Array(101).fill(op) })).toBe(false);
-    expect(check("edit_timeline", { ops: [op], base_version: 3 })).toBe(false);
-    expect(check("edit_timeline", { ops: op })).toBe(false);
+    expect(check("edit_timeline", { base_version: 0 })).toBe(false);
+    expect(check("edit_timeline", { ops: [op] })).toBe(false);
+    expect(check("edit_timeline", { base_version: 1.5, ops: [op] })).toBe(false);
+    expect(check("edit_timeline", { base_version: 3, ops: [] })).toBe(false);
+    expect(check("edit_timeline", { base_version: 3, ops: Array(100).fill(op) })).toBe(true);
+    expect(check("edit_timeline", { base_version: 3, ops: Array(101).fill(op) })).toBe(false);
+    expect(check("edit_timeline", { base_version: 3, ops: [op], project_id: "x" })).toBe(false);
+    expect(check("edit_timeline", { base_version: 3, ops: op })).toBe(false);
   });
 });

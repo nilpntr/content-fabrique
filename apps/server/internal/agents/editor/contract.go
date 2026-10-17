@@ -130,6 +130,11 @@ func bundle(schema, opsSchema json.RawMessage) (json.RawMessage, error) {
 		}
 		opDefs, _ := opsObj["$defs"].(map[string]any)
 		for k, v := range opDefs {
+			if k == "opBatch" {
+				// A batch of ops: its items refer to the root of the op schema ("#"), which in this document is the tool. The tool
+				// has its own array of ops, so the definition is not carried over.
+				continue
+			}
 			if _, clash := defs[k]; clash {
 				return nil, fmt.Errorf("$defs/%s is defined by the tool and by the op schema", k)
 			}
@@ -146,8 +151,34 @@ func bundle(schema, opsSchema json.RawMessage) (json.RawMessage, error) {
 		}
 		defs[opDef] = edit
 		obj["$defs"] = defs
+		if selfReference(root) {
+			return nil, errors.New(`a reference to the document root ("#") is left in the bundled schema`)
+		}
 	}
 	return json.Marshal(root) // map keys are sorted: deterministic
+}
+
+// selfReference reports a {"$ref": "#"} anywhere in the schema: a reference to the root, which would mean the wrong thing once
+// the op schema is a part of a bigger document.
+func selfReference(n any) bool {
+	switch v := n.(type) {
+	case map[string]any:
+		if ref, ok := v["$ref"].(string); ok && ref == "#" {
+			return true
+		}
+		for _, child := range v {
+			if selfReference(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range v {
+			if selfReference(child) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func decode(raw json.RawMessage) (any, error) {

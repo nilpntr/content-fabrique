@@ -29,7 +29,6 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/ids"
-	"github.com/nilpntr/content-fabrique/internal/media"
 	"github.com/nilpntr/content-fabrique/internal/projects"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
@@ -40,26 +39,29 @@ import (
 type Projects interface {
 	Get(ctx context.Context, who projects.Actor, id ids.ProjectID) (projects.Detail, *projects.Error)
 	Version(ctx context.Context, who projects.Actor, id ids.ProjectID, version int) (projects.VersionDetail, *projects.Error)
-	ApplyOpsOnce(ctx context.Context, ws ids.WorkspaceID, id ids.ProjectID, baseVersion int, rawOps json.RawMessage, author ops.Author) (projects.Edit, *projects.Error)
+	ApplyOpsOnce(ctx context.Context, ws ids.WorkspaceID, id ids.ProjectID, baseVersion int, rawOps json.RawMessage, author ops.Author, key string) (projects.Edit, *projects.Error)
 }
 
-// Footage lists a project's usable clips. *store.Store is the real one.
-type Footage interface {
+// Store is what the tools read from the database. *store.Store is the real one.
+type Store interface {
+	// ListProjectFootage lists a project's usable clips.
 	ListProjectFootage(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID) ([]store.ProjectFootageRow, error)
+	// GetTimelineVersionByAuthor returns the latest version an author made (for the agent, its run's TypeID).
+	GetTimelineVersionByAuthor(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, authorKind, authorID string) (store.TimelineVersion, error)
 }
 
 // Deps are what the editor's tools need.
 type Deps struct {
 	Projects Projects
-	Footage  Footage
+	Store    Store
 	Frames   FrameSource
 	// Preview renders previews; nil means UnavailablePreviews.
 	Preview PreviewRenderer
 }
 
 func (d Deps) check() error {
-	if d.Projects == nil || d.Footage == nil || d.Frames == nil {
-		return errors.New("editor: the projects service, the footage list and the frame source are required")
+	if d.Projects == nil || d.Store == nil || d.Frames == nil {
+		return errors.New("editor: the projects service, the store and the frame source are required")
 	}
 	return nil
 }
@@ -230,11 +232,11 @@ func (d Deps) listFootage(ctx context.Context, rc runtime.RunContext, _ noArgs) 
 	if err != nil {
 		return runtime.Result{}, err
 	}
-	rows, err := d.Footage.ListProjectFootage(ctx, ws, pid)
+	rows, err := d.Store.ListProjectFootage(ctx, ws, pid)
 	if err != nil {
 		return runtime.Result{}, fmt.Errorf("list footage: %w", err)
 	}
-	return runtime.Text(footageText(rows, 0, 0)), nil
+	return runtime.Text(footageText(rows, footageOpts{Full: true})), nil
 }
 
 // ---- view_clip --------------------------------------------------------------------------------------------------
@@ -253,7 +255,7 @@ func (d Deps) viewClip(ctx context.Context, rc runtime.RunContext, in viewClipAr
 	if perr != nil {
 		return runtime.Result{}, runtime.UserErrorf("asset_id is not an asset id; use an id from list_footage")
 	}
-	rows, err := d.Footage.ListProjectFootage(ctx, ws, pid)
+	rows, err := d.Store.ListProjectFootage(ctx, ws, pid)
 	if err != nil {
 		return runtime.Result{}, fmt.Errorf("list footage: %w", err)
 	}
@@ -278,9 +280,6 @@ func (d Deps) viewClip(ctx context.Context, rc runtime.RunContext, in viewClipAr
 		seen := map[int64]bool{}
 		uniq := times[:0:0]
 		for _, t := range times {
-			if t < 0 || t >= dur {
-				return runtime.Result{}, runtime.UserErrorf("the time %d ms is outside the clip, which is %d ms long; use times from 0 to %d", t, dur, dur-1)
-			}
 			if !seen[t] {
 				seen[t] = true
 				uniq = append(uniq, t)
@@ -293,12 +292,10 @@ func (d Deps) viewClip(ctx context.Context, rc runtime.RunContext, in viewClipAr
 	switch {
 	case errors.Is(err, ErrNoVideo):
 		return runtime.Result{}, runtime.UserErrorf("%s has no video to look at", in.AssetID)
+	case errors.Is(err, ErrNoFrames):
+		logOf(rc).WarnContext(ctx, "view_clip: no frame could be made", "asset_id", aid.String(), "error", err)
+		return runtime.Result{}, runtime.UserErrorf("none of the moments you asked for in %s could be decoded; try other times or another clip", in.AssetID)
 	case err != nil:
-		var te *media.ToolError
-		if errors.As(err, &te) {
-			logOf(rc).WarnContext(ctx, "view_clip: ffmpeg could not make the frames", "asset_id", aid.String(), "error", err)
-			return runtime.Result{}, runtime.UserErrorf("the frames of %s could not be made; try other times or another clip", in.AssetID)
-		}
 		return runtime.Result{}, fmt.Errorf("view_clip: %w", err)
 	}
 
@@ -306,15 +303,36 @@ func (d Deps) viewClip(ctx context.Context, rc runtime.RunContext, in viewClipAr
 	if overview {
 		what = "Overview"
 	}
-	content := []llm.Block{llm.TextBlock(fmt.Sprintf("%s of %s (%d ms, %s long): %d frames, %d px on the long side, each labelled with its time in the clip.",
-		what, in.AssetID, dur, secs(dur), len(frames), FrameLongSide))}
+	var pictures []llm.Block
+	var notes []string
+	shown := map[int64]bool{}
+	made := 0
 	for _, f := range frames {
+		switch {
+		case f.Err != "":
+			notes = append(notes, fmt.Sprintf("No frame at %d ms: %s.", f.RequestedMs, f.Err))
+			continue
+		case shown[f.AtMs]:
+			notes = append(notes, fmt.Sprintf("%d ms is past the end of the picture, where %d ms is already shown.", f.RequestedMs, f.AtMs))
+			continue
+		}
 		if _, err := CheckImageRef(ws, f.Ref); err != nil {
 			return runtime.Result{}, fmt.Errorf("view_clip: frame reference: %w", err)
 		}
-		content = append(content,
-			llm.TextBlock(fmt.Sprintf("Frame at %d ms (%s):", f.AtMs, secs2(f.AtMs))),
-			llm.Block{Type: llm.BlockImage, Image: &llm.Image{MediaType: "image/jpeg", Ref: f.Ref}})
+		shown[f.AtMs] = true
+		made++
+		label := fmt.Sprintf("Frame at %d ms (%s):", f.AtMs, secs2(f.AtMs))
+		if f.AtMs != f.RequestedMs {
+			label = fmt.Sprintf("Frame at %d ms (%s), the nearest to the %d ms you asked for:", f.AtMs, secs2(f.AtMs), f.RequestedMs)
+		}
+		pictures = append(pictures, llm.TextBlock(label), llm.Block{Type: llm.BlockImage, Image: &llm.Image{MediaType: "image/jpeg", Ref: f.Ref}})
+	}
+	head := fmt.Sprintf("%s of %s (%d ms, %s long): %d frames, %d px on the long side, each labelled with its time in the clip.",
+		what, in.AssetID, dur, secs(dur), made, FrameLongSide)
+	content := []llm.Block{llm.TextBlock(head)}
+	content = append(content, pictures...)
+	if len(notes) > 0 {
+		content = append(content, llm.TextBlock(strings.Join(notes, "\n")))
 	}
 	return runtime.Result{Content: content}, nil
 }
@@ -360,7 +378,8 @@ func (d Deps) getTimeline(ctx context.Context, rc runtime.RunContext, _ noArgs) 
 // ---- edit_timeline ----------------------------------------------------------------------------------------------
 
 type editArgs struct {
-	Ops json.RawMessage `json:"ops"`
+	BaseVersion int             `json:"base_version"`
+	Ops         json.RawMessage `json:"ops"`
 }
 
 func (d Deps) editTimeline(ctx context.Context, rc runtime.RunContext, in editArgs) (runtime.Result, error) {
@@ -371,19 +390,16 @@ func (d Deps) editTimeline(ctx context.Context, rc runtime.RunContext, in editAr
 	if rc.IdempotencyKey == "" {
 		return runtime.Result{}, errors.New("edit_timeline: no idempotency key")
 	}
-	det, perr := d.Projects.Get(ctx, actor(ws), pid)
+	// The edit is applied to the version the model says it was looking at, and to no other: if the timeline moved on (a person
+	// edited it, say) nothing is applied and the model is told what changed. The call's key is stored with the version, so a call
+	// that is run again (a worker died after the version was stored and before the result was) finds its version and answers as
+	// the first call did; the author of the version is the run.
+	author := ops.Author{Kind: ops.AuthorAgent, ID: ids.Encode(ids.PrefixRun, rc.RunID)}
+	edit, perr := d.Projects.ApplyOpsOnce(ctx, ws, pid, in.BaseVersion, in.Ops, author, rc.IdempotencyKey)
 	if perr != nil {
-		return runtime.Result{}, projectErr(perr)
-	}
-	base := 0
-	if det.Project.CurrentTimelineVersion != nil {
-		base = int(*det.Project.CurrentTimelineVersion)
-	}
-	// The key is the author of the version, stored with it, so a call that is run again (a worker died after the version was
-	// stored and before the result was) finds the version it made instead of making a second one.
-	author := ops.Author{Kind: ops.AuthorAgent, ID: rc.IdempotencyKey}
-	edit, perr := d.Projects.ApplyOpsOnce(ctx, ws, pid, base, in.Ops, author)
-	if perr != nil {
+		if perr.Status == http.StatusConflict {
+			return runtime.Result{}, d.conflict(ctx, ws, pid, in.BaseVersion, perr)
+		}
 		return runtime.Result{}, projectErr(perr)
 	}
 	v := edit.Version
@@ -391,12 +407,12 @@ func (d Deps) editTimeline(ctx context.Context, rc runtime.RunContext, in editAr
 	if err != nil {
 		return runtime.Result{}, fmt.Errorf("parse stored spec: %w", err)
 	}
-	var b strings.Builder
-	if edit.Replayed {
-		fmt.Fprintf(&b, "This edit had been applied already (the call was repeated after an interruption). The timeline holds it as %s.\n", timelineLine(int(v.Version), spec))
-	} else {
-		fmt.Fprintf(&b, "Applied. The timeline is now %s (it was version %d).\n", timelineLine(int(v.Version), spec), base)
+	parent := 0
+	if v.ParentVersion != nil {
+		parent = int(*v.ParentVersion)
 	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Applied. The timeline is now %s (it was version %d).\n", timelineLine(int(v.Version), spec), parent)
 	if len(v.Summary) > 0 {
 		b.WriteString("Changes:\n")
 		for _, s := range v.Summary {
@@ -413,10 +429,30 @@ func (d Deps) editTimeline(ctx context.Context, rc runtime.RunContext, in editAr
 	if len(edit.Warnings) > 0 {
 		b.WriteString("Warnings (they do not block, but look at them):\n" + opIssuesText(edit.Warnings, maxIssueLines) + "\n")
 	}
-	if err := rc.Artifact(ctx, "timeline_version", map[string]any{"version": v.Version, "id": v.ID.String(), "summary": v.Summary, "duration_ms": timeline.TotalDuration(spec)}); err != nil {
-		return runtime.Result{}, fmt.Errorf("record the version: %w", err)
+	// A repeated call answers exactly as the first one did, and does not announce its version a second time. (If the worker died
+	// between storing the version and writing this event, the event is missing; the version itself is in the project's history.)
+	if !edit.Replayed {
+		if err := rc.Artifact(ctx, "timeline_version", map[string]any{"version": v.Version, "id": v.ID.String(), "summary": v.Summary, "duration_ms": timeline.TotalDuration(spec)}); err != nil {
+			return runtime.Result{}, fmt.Errorf("record the version: %w", err)
+		}
 	}
 	return runtime.Text(strings.TrimRight(b.String(), "\n")), nil
+}
+
+// conflict is the message for an edit based on a version that is no longer the current one: what the timeline is now and what
+// the last edit changed (it may quote a person's text, so it goes in a data block).
+func (d Deps) conflict(ctx context.Context, ws ids.WorkspaceID, pid ids.ProjectID, base int, perr *projects.Error) error {
+	det, gerr := d.Projects.Get(ctx, actor(ws), pid)
+	if gerr != nil || det.Project.CurrentTimelineVersion == nil {
+		return projectErr(perr)
+	}
+	cur := int(*det.Project.CurrentTimelineVersion)
+	msg := fmt.Sprintf("Nothing was applied: your edit was based on version %d, but the timeline is at version %d now; it changed since you last read it.", base, cur)
+	if vd, verr := d.Projects.Version(ctx, actor(ws), pid, cur); verr == nil {
+		msg += fmt.Sprintf(" Version %d was made by the %s. What it changed:\n%s", cur, vd.Version.AuthorKind, runtime.Untrusted("timeline_summary", strings.Join(vd.Version.Summary, "\n")))
+	}
+	msg += "\nCall get_timeline to read the current timeline, then make your edit again from it, with base_version " + fmt.Sprint(cur) + "."
+	return runtime.UserErrorf("%s", msg)
 }
 
 // ---- render_preview ---------------------------------------------------------------------------------------------
@@ -467,7 +503,8 @@ func (d Deps) renderPreview(ctx context.Context, rc runtime.RunContext, _ noArgs
 // ---- finish -----------------------------------------------------------------------------------------------------
 
 type finishArgs struct {
-	Summary string `json:"summary"`
+	Summary      string `json:"summary"`
+	NoEditNeeded bool   `json:"no_edit_needed"`
 }
 
 // maxSummaryChars is the longest message for the creator.
@@ -486,11 +523,22 @@ func (d Deps) finish(ctx context.Context, rc runtime.RunContext, in finishArgs) 
 	if perr != nil {
 		return runtime.Result{}, projectErr(perr)
 	}
-	if det.Project.CurrentTimelineVersion == nil {
+	// A run ends by having edited the timeline, or by saying that there was nothing to edit. The versions this run made have its
+	// TypeID as their author.
+	var version any // the version number the run finished on, null when it made none
+	made, err := d.Store.GetTimelineVersionByAuthor(ctx, ws, pid, string(ops.AuthorAgent), ids.Encode(ids.PrefixRun, rc.RunID))
+	switch {
+	case err == nil:
+		version = made.Version
+	case !errors.Is(err, store.ErrNotFound):
+		return runtime.Result{}, fmt.Errorf("look for the run's versions: %w", err)
+	case det.Project.CurrentTimelineVersion == nil:
 		return runtime.Errorf("you cannot finish yet: there is no timeline. Build one with edit_timeline first"), nil
+	case !in.NoEditNeeded:
+		return runtime.Errorf("you cannot finish yet: this run has not changed the timeline. Make your edit with edit_timeline first. If the timeline already does what the creator asked and nothing needs to change, call finish again with no_edit_needed set to true"), nil
 	}
 	summary = cutRunes(summary, maxSummaryChars)
-	out, _ := json.Marshal(map[string]any{"summary": summary, "timeline_version": *det.Project.CurrentTimelineVersion})
+	out, _ := json.Marshal(map[string]any{"summary": summary, "timeline_version": version})
 	res := runtime.Text(summary)
 	res.Final, res.Output = true, out
 	return res, nil

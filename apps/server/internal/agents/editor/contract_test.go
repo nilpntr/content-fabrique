@@ -159,6 +159,12 @@ func TestEditTimelineSchemaCarriesTheOps(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name := range opsDoc.Defs {
+		if name == "opBatch" { // dropped on purpose: its items refer to the root of the op schema
+			if _, ok := doc.Defs[name]; ok {
+				t.Error("opBatch is still in the bundled schema")
+			}
+			continue
+		}
 		if _, ok := doc.Defs[name]; !ok {
 			t.Errorf("the bundled schema lacks the definition %q of the op schema", name)
 		}
@@ -171,8 +177,8 @@ func TestEditTimelineSchemaCarriesTheOps(t *testing.T) {
 
 	sch := compile(t, d.Schema)
 	valid := []string{
-		`{"ops":[{"op":"add_clip","asset_id":"ast_01j9z3x7m8c4v6n2q5r0t1y8ab","source":{"in_ms":0,"out_ms":3000}}]}`,
-		`{"ops":[{"op":"set_look","preset":"punchy"},{"op":"add_text","text":"GO","style":"title_bold","at_ms":0,"duration_ms":1500,"anchor":"upper_third"}]}`,
+		`{"base_version":0,"ops":[{"op":"add_clip","asset_id":"ast_01j9z3x7m8c4v6n2q5r0t1y8ab","source":{"in_ms":0,"out_ms":3000}}]}`,
+		`{"base_version":4,"ops":[{"op":"set_look","preset":"punchy"},{"op":"add_text","text":"GO","style":"title_bold","at_ms":0,"duration_ms":1500,"anchor":"upper_third"}]}`,
 	}
 	for _, v := range valid {
 		if err := sch.Validate(parseDoc(t, v)); err != nil {
@@ -180,14 +186,16 @@ func TestEditTimelineSchemaCarriesTheOps(t *testing.T) {
 		}
 	}
 	invalid := map[string]string{
-		"no ops":         `{}`,
-		"empty batch":    `{"ops":[]}`,
-		"unknown op":     `{"ops":[{"op":"explode"}]}`,
-		"extra property": `{"ops":[{"op":"set_look","preset":"bw"}],"base_version":1}`,
-		"bad asset id":   `{"ops":[{"op":"add_clip","asset_id":"nope","source":{"in_ms":0,"out_ms":3000}}]}`,
-		"out of range":   `{"ops":[{"op":"set_speed","id":"c1","speed":99}]}`,
-		"not an array":   `{"ops":{"op":"set_look","preset":"bw"}}`,
-		"too many ops":   `{"ops":[` + strings.TrimSuffix(strings.Repeat(`{"op":"set_look","preset":"bw"},`, ops.MaxBatchOps+1), ",") + `]}`,
+		"no ops":            `{"base_version":0}`,
+		"no base":           `{"ops":[{"op":"set_look","preset":"bw"}]}`,
+		"a fractional base": `{"base_version":1.5,"ops":[{"op":"set_look","preset":"bw"}]}`,
+		"empty batch":       `{"base_version":0,"ops":[]}`,
+		"unknown op":        `{"base_version":0,"ops":[{"op":"explode"}]}`,
+		"extra property":    `{"base_version":0,"ops":[{"op":"set_look","preset":"bw"}],"project_id":"x"}`,
+		"bad asset id":      `{"base_version":0,"ops":[{"op":"add_clip","asset_id":"nope","source":{"in_ms":0,"out_ms":3000}}]}`,
+		"out of range":      `{"base_version":0,"ops":[{"op":"set_speed","id":"c1","speed":99}]}`,
+		"not an array":      `{"base_version":0,"ops":{"op":"set_look","preset":"bw"}}`,
+		"too many ops":      `{"base_version":0,"ops":[` + strings.TrimSuffix(strings.Repeat(`{"op":"set_look","preset":"bw"},`, ops.MaxBatchOps+1), ",") + `]}`,
 	}
 	for name, v := range invalid {
 		if err := sch.Validate(parseDoc(t, v)); err == nil {
@@ -237,7 +245,7 @@ func TestToolSchemasAcceptAndRefuse(t *testing.T) {
 		{ToolViewClip,
 			[]string{`{"asset_id":"` + asset + `"}`, `{"asset_id":"` + asset + `","at_ms":[0,1500]}`},
 			[]string{`{}`, `{"asset_id":1}`, `{"asset_id":"` + asset + `","at_ms":["1"]}`, `{"asset_id":"` + asset + `","at_ms":[1.5]}`, `{"asset_id":"` + asset + `","extra":1}`}},
-		{ToolFinish, []string{`{"summary":"Done."}`}, []string{`{}`, `{"summary":3}`, `{"summary":"x","open_questions":[]}`}},
+		{ToolFinish, []string{`{"summary":"Done."}`, `{"summary":"Done.","no_edit_needed":true}`}, []string{`{}`, `{"summary":3}`, `{"summary":"x","open_questions":[]}`, `{"summary":"x","no_edit_needed":"yes"}`}},
 	}
 	for _, c := range cases {
 		d, err := contractTool(c.tool)
@@ -254,6 +262,26 @@ func TestToolSchemasAcceptAndRefuse(t *testing.T) {
 			if err := sch.Validate(parseDoc(t, v)); err == nil {
 				t.Errorf("%s: %s accepted", c.tool, v)
 			}
+		}
+	}
+}
+
+// No bundled schema keeps a reference to the root of its document: in the op schema that reference means "an op", and the
+// root of a tool schema is the tool's arguments.
+func TestBundledSchemasHaveNoSelfReference(t *testing.T) {
+	defs, err := Contract()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range defs {
+		for _, bad := range []string{`"$ref":"#"`, `"opBatch"`} {
+			if bytes.Contains(d.Schema, []byte(bad)) {
+				t.Errorf("%s: the bundled schema contains %s", d.Name, bad)
+			}
+		}
+		var doc any
+		if err := json.Unmarshal(d.Schema, &doc); err != nil || selfReference(doc) {
+			t.Errorf("%s: self reference %v", d.Name, err)
 		}
 	}
 }
@@ -280,6 +308,17 @@ func TestBundle(t *testing.T) {
 		_, err := bundle([]byte(`{"type":"object","$defs":{"a":{}},"properties":{"o":{"$ref":"`+opsSchemaID+`"}}}`), opsDoc)
 		if err == nil {
 			t.Fatal("clash accepted")
+		}
+	})
+	t.Run("opBatch is dropped and a stray root reference is refused", func(t *testing.T) {
+		withBatch := []byte(`{"$id":"https://contentfabrique.app/schemas/timeline/ops.v1.json","oneOf":[{"$ref":"#/$defs/a"}],"$defs":{"a":{"type":"object"},"opBatch":{"type":"array","items":{"$ref":"#"}}}}`)
+		out, err := bundle([]byte(`{"type":"object","properties":{"o":{"$ref":"`+opsSchemaID+`"}}}`), withBatch)
+		if err != nil || strings.Contains(string(out), "opBatch") || strings.Contains(string(out), `"$ref":"#"`) {
+			t.Fatalf("%s %v", out, err)
+		}
+		stray := []byte(`{"$id":"https://contentfabrique.app/schemas/timeline/ops.v1.json","oneOf":[{"$ref":"#"}],"$defs":{}}`)
+		if _, err := bundle([]byte(`{"type":"object","properties":{"o":{"$ref":"`+opsSchemaID+`"}}}`), stray); err == nil {
+			t.Fatal("a reference to the root was left in")
 		}
 	})
 	t.Run("the same input gives the same output", func(t *testing.T) {

@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
@@ -117,6 +118,9 @@ type fakeFrames struct {
 	// calls records (asset, times).
 	calls []string
 	err   error
+	// durationMs is the proxy's duration for the clamp (0: none), and failAt the shown times that cannot be decoded.
+	durationMs int64
+	failAt     map[int64]bool
 }
 
 func (f *fakeFrames) Frames(_ context.Context, ws ids.WorkspaceID, asset ids.AssetID, atMs []int64) ([]Frame, error) {
@@ -128,13 +132,24 @@ func (f *fakeFrames) Frames(_ context.Context, ws ids.WorkspaceID, asset ids.Ass
 		return nil, err
 	}
 	out := make([]Frame, len(atMs))
-	for i, at := range atMs {
+	made := 0
+	for i, req := range atMs {
+		at := ClampMs(req, f.durationMs)
 		key, kerr := storage.FrameKey(ws, asset, at, FrameLongSide)
 		if kerr != nil {
 			return nil, kerr
 		}
+		out[i] = Frame{AtMs: at, RequestedMs: req}
+		if f.failAt[at] {
+			out[i].Err = fmt.Sprintf("the picture at %d ms could not be decoded", at)
+			continue
+		}
 		f.objs.set(key, testJPEG(key, 216, 384))
-		out[i] = Frame{AtMs: at, Ref: key}
+		out[i].Ref = key
+		made++
+	}
+	if made == 0 {
+		return nil, fmt.Errorf("%w: nothing decoded", ErrNoFrames)
 	}
 	return out, nil
 }
@@ -197,7 +212,7 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	e.frames = &fakeFrames{objs: e.objs}
-	e.deps = Deps{Projects: e.svc, Footage: st, Frames: e.frames, Preview: e.preview}
+	e.deps = Deps{Projects: e.svc, Store: st, Frames: e.frames, Preview: e.preview}
 	e.rebuild()
 	return e
 }
@@ -390,4 +405,42 @@ func addClipOp(asset ids.AssetID, in, out int) string {
 	return fmt.Sprintf(`{"op":"add_clip","asset_id":%q,"source":{"in_ms":%d,"out_ms":%d}}`, asset.String(), in, out)
 }
 
-func opsArgs(ops ...string) string { return `{"ops":[` + strings.Join(ops, ",") + `]}` }
+// opsArgs are the arguments of an edit_timeline call based on the project's current version, as a model that has just read it
+// would send them.
+func (e *env) opsArgs(prj ids.ProjectID, ops ...string) string {
+	e.t.Helper()
+	return e.opsArgsAt(e.currentVersion(prj), ops...)
+}
+
+func (e *env) opsArgsAt(base int, ops ...string) string {
+	return fmt.Sprintf(`{"base_version":%d,"ops":[%s]}`, base, strings.Join(ops, ","))
+}
+
+func (e *env) currentVersion(prj ids.ProjectID) int {
+	e.t.Helper()
+	var v int
+	err := e.pool.QueryRow(context.Background(), `SELECT coalesce(current_timeline_version, 0) FROM projects WHERE id = $1`, prj).Scan(&v)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		e.t.Fatal(err)
+	}
+	return v
+}
+
+// nextCall is another tool call of the same run: a new tool-use id and so a new idempotency key.
+func (e *env) nextCall(rc runtime.RunContext) runtime.RunContext {
+	e.seq++
+	rc.ToolUseID = fmt.Sprintf("toolu_%03d", e.seq)
+	rc.IdempotencyKey = rc.RunID.String() + ":" + rc.ToolUseID
+	rc.Resumed = false
+	return rc
+}
+
+// runUUIDOf is the UUID of a run's TypeID.
+func (e *env) runUUIDOf(typeID string) string {
+	e.t.Helper()
+	u, err := ids.Decode(ids.PrefixRun, typeID)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return u.String()
+}

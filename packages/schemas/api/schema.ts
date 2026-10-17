@@ -378,8 +378,8 @@ export interface paths {
          * @description Starts the editor agent on the project: it looks at the project's footage, builds the timeline with edit ops (each one a
          *     new timeline version, authored by the run) and ends with a message for the creator. The call only creates the run and
          *     returns it (`202`, status `queued`); follow it with `GET /v1/runs/{id}`. Only owners and editors may start a run.
-         *     A project has at most one unfinished editor run (`409 run_in_progress`), and needs at least one ready clip
-         *     (`422 assets_not_usable`).
+         *     A project has at most one unfinished editor run (`409 run_in_progress`), and needs at least one ready video clip
+         *     (`422 assets_not_usable`; an audio file is not a clip to cut).
          *     `instructions` is the creator's extra instruction for this run (text, at most 2,000 characters; the model treats it as data
          *     that steers the content of the video, nothing else). `profile` picks the model profile of the run; the default is the
          *     server's. `budget_usd` is the run's spend cap in dollars: the default is $5, and a larger value is cut to the server's maximum
@@ -801,7 +801,10 @@ export interface components {
             /** @description The version this one was made from. Null for version 1. */
             parent_version: number | null;
             author_kind: components["schemas"]["AuthorKind"];
-            /** @description The user's TypeID, or the editor run's id. */
+            /**
+             * @description For `user`, the TypeID of the user (`usr_...`). For `agent`, the TypeID of the editor run (`run_...`) that made the
+             *     version; `GET /v1/runs/{id}` shows the run. (The key that makes a repeated tool call idempotent is stored apart from it.)
+             */
             author_id: string;
             /** @description One line per change, for the version list and the run feed. */
             summary: string[];
@@ -1803,7 +1806,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description `assets_not_usable`: the project has no ready clip to edit. */
+            /** @description `assets_not_usable`: the project has no ready video clip to edit. */
             422: {
                 headers: {
                     [name: string]: unknown;

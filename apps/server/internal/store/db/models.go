@@ -143,18 +143,20 @@ type ProjectAsset struct {
 }
 
 type TimelineVersion struct {
-	ID            ids.TimelineID
-	WorkspaceID   ids.WorkspaceID
-	ProjectID     ids.ProjectID
-	Version       int32
-	ParentVersion *int32
-	Spec          json.RawMessage
-	Ops           json.RawMessage
-	Diff          json.RawMessage
-	Summary       []string
-	AuthorKind    string
-	AuthorID      string
-	CreatedAt     time.Time
+	ID             ids.TimelineID
+	WorkspaceID    ids.WorkspaceID
+	ProjectID      ids.ProjectID
+	Version        int32
+	ParentVersion  *int32
+	Spec           json.RawMessage
+	Ops            json.RawMessage
+	Diff           json.RawMessage
+	Summary        []string
+	AuthorKind     string
+	AuthorID       string
+	CreatedAt      time.Time
+	IdempotencyKey *string
+	Result         []byte
 }
 
 type Upload struct {
