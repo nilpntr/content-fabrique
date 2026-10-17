@@ -35,5 +35,10 @@ packages/*/node_modules
 # Local dev binaries built by `task dev`
 /.dev/
 
+# Built binaries
+/apps/server/cfctl
+/apps/server/api
+/apps/server/worker
+
 # Media the render golden tests generate (apps/server/internal/render)
 apps/server/internal/render/testdata/.cache/

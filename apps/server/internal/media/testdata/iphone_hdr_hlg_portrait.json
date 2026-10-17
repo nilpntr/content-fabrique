@@ -1,0 +1,68 @@
+{
+  "streams": [
+    {
+      "index": 0,
+      "codec_name": "hevc",
+      "codec_type": "video",
+      "codec_tag_string": "avc1",
+      "width": 3840,
+      "height": 2160,
+      "pix_fmt": "yuv420p10le",
+      "color_space": "bt2020nc",
+      "color_transfer": "arib-std-b67",
+      "color_primaries": "bt2020",
+      "r_frame_rate": "30000/1001",
+      "avg_frame_rate": "30000/1001",
+      "duration": "87.135000",
+      "disposition": {
+        "default": 1,
+        "attached_pic": 0
+      },
+      "side_data_list": [
+        {
+          "side_data_type": "Display Matrix",
+          "displaymatrix": "\n00000000:            0       65536           0\n",
+          "rotation": -90
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "codec_name": "aac",
+      "codec_type": "audio",
+      "codec_tag_string": "mp4a",
+      "sample_rate": "48000",
+      "channels": 2,
+      "channel_layout": "stereo",
+      "duration": "87.135000",
+      "disposition": {
+        "default": 1,
+        "attached_pic": 0
+      }
+    },
+    {
+      "index": 2,
+      "codec_type": "audio",
+      "codec_tag_string": "apac",
+      "sample_rate": "48000",
+      "channels": 4,
+      "duration": "87.135000",
+      "disposition": {
+        "default": 0,
+        "attached_pic": 0
+      }
+    }
+  ],
+  "format": {
+    "filename": "/in/0",
+    "nb_streams": 8,
+    "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+    "format_long_name": "QuickTime / MOV",
+    "duration": "87.135000",
+    "size": "120000000",
+    "bit_rate": "44624000",
+    "tags": {
+      "major_brand": "qt  "
+    }
+  }
+}

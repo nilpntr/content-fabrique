@@ -501,6 +501,7 @@ type Sandbox interface {
   - `hardened`: gVisor (`runsc`) containers on our worker hosts, for **all deterministic media jobs**.
   - `cloudflare`: the Cloudflare Sandbox SDK via the `sandbox-gateway` Worker, the **default for the agent escape hatch**. Internet is disabled, and the job's R2 prefix is mounted with the Worker signing requests, so **no credentials inside**.
   - Alternatives behind the same interface: E2B (Firecracker), and **Claude Managed Agents** for free-form sessions where Anthropic runs the loop. Tools then run in Anthropic's cloud container or on our `hardened` hosts via the Go environment worker.
+- **As built in P1-03** (`apps/server/internal/sandbox`): the interface above is the target; v0 ships the smaller one-shot form every media job needs, `Provider.Run(ctx, Job{Image, Args, Mounts, Limits, Network: none}) (Result{ExitCode, Stdout, Stderr, Duration})`, with the `local` (development only, no isolation), `docker` and `hardened` providers. Inputs are read-only mounts under `/in`, the one writable mount is `/work`, and a job without limits is refused. `Create`/`Exec`/`Download`/`Upload` arrive with the `cloudflare` provider.
 - **Security**: one sandbox per job (never shared across workspaces); non-root; read-only root filesystem except `/work`; CPU/memory/disk/time limits; egress deny-by-default; no long-lived credentials inside (only presigned URLs scoped to the job's own keys); audit log of every `Exec`.
 
 ## 9. API
