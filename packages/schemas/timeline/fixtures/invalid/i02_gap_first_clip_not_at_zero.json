@@ -1,0 +1,38 @@
+{
+  "$comment": "expect: gap",
+  "schema": "contentfabrique.timeline/v1",
+  "output": {
+    "format": "9:16",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000"
+  },
+  "tracks": [
+    {
+      "id": "main",
+      "type": "video",
+      "items": [
+        {
+          "id": "c1",
+          "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+          "source": {
+            "in_ms": 0,
+            "out_ms": 3000
+          },
+          "at_ms": 500
+        },
+        {
+          "id": "c2",
+          "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+          "source": {
+            "in_ms": 5000,
+            "out_ms": 8000
+          },
+          "at_ms": 3500
+        }
+      ]
+    }
+  ],
+  "markers": []
+}

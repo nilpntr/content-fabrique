@@ -1,0 +1,147 @@
+{
+  "schema": "contentfabrique.timeline/v1",
+  "output": {
+    "format": "9:16",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000"
+  },
+  "tracks": [
+    {
+      "id": "main",
+      "type": "video",
+      "items": [
+        {
+          "id": "c1",
+          "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+          "moment_id": "mom_01js9afva5j9pt8dqesz1r8s0p",
+          "source": {
+            "in_ms": 3200,
+            "out_ms": 5400
+          },
+          "at_ms": 0,
+          "reframe": {
+            "mode": "cover",
+            "focus": {
+              "x": 0.52,
+              "y": 0.4
+            },
+            "zoom": 1.08
+          },
+          "look": {
+            "preset": "punchy"
+          },
+          "transition_in": {
+            "type": "cut"
+          },
+          "audio": {
+            "use_source": false
+          },
+          "why": "Best back double-biceps pose; the brief asks to open on it"
+        },
+        {
+          "id": "c2",
+          "asset_id": "ast_01jex6xx15ayjx8epfhfjj9s11",
+          "moment_id": "mom_01jykr7ag5kv7qjvz7f4q8agmp",
+          "source": {
+            "in_ms": 12000,
+            "out_ms": 15000
+          },
+          "at_ms": 1900,
+          "speed": 1.25,
+          "reframe": {
+            "mode": "blur_fill"
+          },
+          "look": {
+            "preset": "warm"
+          },
+          "transition_in": {
+            "type": "crossfade",
+            "duration_ms": 300
+          },
+          "audio": {
+            "use_source": true,
+            "gain_db": -2
+          },
+          "why": "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"
+        },
+        {
+          "id": "c3",
+          "asset_id": "ast_01jfbemsc6way7dnfebdf8tf3g",
+          "moment_id": "mom_01jvnqsdxfa2jjy7r5dt68hq02",
+          "source": {
+            "in_ms": 1000,
+            "out_ms": 4000
+          },
+          "at_ms": 4100,
+          "speed": 0.5,
+          "look": {
+            "preset": "matte"
+          },
+          "transition_in": {
+            "type": "whip",
+            "duration_ms": 200
+          }
+        }
+      ]
+    },
+    {
+      "id": "text",
+      "type": "text",
+      "items": [
+        {
+          "id": "t1",
+          "at_ms": 0,
+          "duration_ms": 2200,
+          "text": "How to grow a back 101",
+          "style": "title_bold",
+          "anchor": "upper_third",
+          "animation": "pop_in"
+        },
+        {
+          "id": "t2",
+          "at_ms": 3000,
+          "duration_ms": 1500,
+          "text": "Rows. Then rows.",
+          "style": "title_bold",
+          "anchor": "lower_third",
+          "animation": "slide_up"
+        }
+      ]
+    },
+    {
+      "id": "captions",
+      "type": "captions",
+      "from": "transcript",
+      "style": "word_highlight",
+      "enabled": false
+    },
+    {
+      "id": "sound",
+      "type": "audio",
+      "items": [
+        {
+          "id": "s1",
+          "kind": "trend_sound",
+          "trend_id": "trd_01jcmevy4tr3fffvjc82eh7rjm",
+          "at_ms": 0,
+          "source_offset_ms": 12000,
+          "export": "cue_only",
+          "gain_db": -3
+        }
+      ]
+    }
+  ],
+  "markers": [
+    {
+      "at_ms": 2200,
+      "kind": "beat",
+      "strength": 1
+    }
+  ],
+  "meta": {
+    "idea_id": "ide_01jgd709ebmwe67n38b7yw5gt8",
+    "concept_id": "con_01jvv56y7pdpdwexmgcjc21r19"
+  }
+}

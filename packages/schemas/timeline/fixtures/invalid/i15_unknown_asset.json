@@ -1,0 +1,29 @@
+{
+  "$comment": "expect: unknown_asset",
+  "schema": "contentfabrique.timeline/v1",
+  "output": {
+    "format": "9:16",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000"
+  },
+  "tracks": [
+    {
+      "id": "main",
+      "type": "video",
+      "items": [
+        {
+          "id": "c1",
+          "asset_id": "ast_01jz6b8v83t2vr2qa03wpcnhnd",
+          "source": {
+            "in_ms": 0,
+            "out_ms": 3000
+          },
+          "at_ms": 0
+        }
+      ]
+    }
+  ],
+  "markers": []
+}
