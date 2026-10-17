@@ -189,16 +189,17 @@ type limits struct {
 	medianShotMs int64   // the median shot may not be longer
 	minEffects   float64 // effects per cut, at least (0: no lower bound)
 	beatGrid     bool    // the video follows a beat grid
+	gridRequired bool    // a plan for this type may not have tempo 0
 	paceBuilds   bool    // the cuts speed up toward the end
 }
 
 var typeLimits = map[string]limits{
-	TypeWorkout:  {3000, 0.15, true, true},
-	TypeUnboxing: {3500, 0.15, true, true},
-	TypeVlog:     {4000, 0.15, true, true},
-	TypeGeneral:  {3500, 0.15, true, true},
-	TypeTutorial: {5000, 0, false, false},
-	TypeTalking:  {6000, 0, false, false},
+	TypeWorkout:  {medianShotMs: 3000, minEffects: 0.15, beatGrid: true, gridRequired: true, paceBuilds: true},
+	TypeUnboxing: {medianShotMs: 3500, minEffects: 0.15, beatGrid: true, paceBuilds: true},
+	TypeVlog:     {medianShotMs: 4000, minEffects: 0.15, beatGrid: true, paceBuilds: true},
+	TypeGeneral:  {medianShotMs: 3500, minEffects: 0.15, beatGrid: true, paceBuilds: true},
+	TypeTutorial: {medianShotMs: 5000},
+	TypeTalking:  {medianShotMs: 6000},
 }
 
 // RunChecks runs the checks.
@@ -218,7 +219,7 @@ func RunChecks(in CheckInput) Report {
 	slices.SortStableFunc(items, func(a, b timeline.VideoItem) int { return cmp.Compare(a.AtMs, b.AtMs) })
 	lim := typeLimits[typ]
 	if in.Plan != nil && in.Plan.TempoBPM == 0 {
-		lim.beatGrid = false // the plan has no beat grid (a video that follows speech or a mood): the cuts are not judged against one
+		lim.beatGrid = false // the plan has no beat grid (a vlog or a general video that follows speech, say): the cuts are not judged against one
 	}
 	c := &checker{in: in, items: items, lim: lim, typ: typ, m: &r.Metrics}
 	c.total = timeline.TotalDuration(in.Spec)

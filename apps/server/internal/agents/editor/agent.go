@@ -174,7 +174,8 @@ func contentTypeHint(brief string, rows []store.ProjectFootageRow, sums map[ids.
 	var b strings.Builder
 	b.WriteString(brief)
 	for _, r := range rows {
-		b.WriteString(" " + r.Title + " " + r.Description)
+		// a new line between the fields: a phrase does not run from one clip's title into the next one's
+		b.WriteString("\n" + r.Title + "\n" + r.Description)
 	}
 	reps := 0
 	for _, s := range sums {

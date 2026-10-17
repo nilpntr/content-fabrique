@@ -73,7 +73,7 @@ func TestBuildPlanRefusesWhatIsNotValid(t *testing.T) {
 		{"beats", func(p *planArgs) { p.Shots[1].Beats = 0 }, "shot 2: beats is 0"},
 		{"too many beats", func(p *planArgs) { p.Shots[1].Beats = 65 }, "shot 2: beats is 65"},
 		{"effect", func(p *planArgs) { p.Shots[2].Effect = "glitch" }, "shot 3: effect"},
-		{"no grid for a workout", func(p *planArgs) { p.TempoBPM = 0 }, "tempo_bpm 0 means no beat grid"},
+		{"no grid for a workout", func(p *planArgs) { p.TempoBPM = 0 }, "tempo_bpm 0 means no beat grid, which a workout video needs"},
 		{"foreign asset", func(p *planArgs) { p.Shots[0].AssetID = assetB }, "not one of this project's clips"},
 	}
 	for _, c := range cases {

@@ -412,7 +412,7 @@ type ListAssetSpansRow struct {
 	EndMs   int32
 }
 
-// The reps, holds and dead time of several assets in one read, for the editor's check_edit.
+// The reps, holds and dead moments of several assets in one read (every source), for the editor's check_edit.
 func (q *Queries) ListAssetSpans(ctx context.Context, arg ListAssetSpansParams) ([]ListAssetSpansRow, error) {
 	rows, err := q.db.Query(ctx, listAssetSpans, arg.WorkspaceID, arg.AssetIds)
 	if err != nil {

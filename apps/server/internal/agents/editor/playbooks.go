@@ -99,7 +99,9 @@ func LikelyContentType(text string) string {
 	// Whole words only ("day in" is not in "today in"), and a phrase does not run across a clause: the text is cut at punctuation and
 	// line ends first.
 	var clauses []string
-	for _, clause := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return strings.ContainsRune(".,;:!?()\n\r\"", r) }) {
+	for _, clause := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return strings.ContainsRune(".,;:!?()/\n\r\"\u2014\u2013\u2026\u201c\u201d\u2018\u2019", r)
+	}) {
 		words := strings.FieldsFunc(clause, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '-' })
 		clauses = append(clauses, " "+strings.Join(words, " ")+" ")
 	}

@@ -46,7 +46,7 @@ SELECT asset_id, step_ms, luma, high FROM asset_signals
 WHERE workspace_id = @workspace_id AND asset_id = ANY(@asset_ids::uuid[])
 ORDER BY asset_id;
 
--- The reps, holds and dead time of several assets in one read, for the editor's check_edit.
+-- The reps, holds and dead moments of several assets in one read (every source), for the editor's check_edit.
 -- name: ListAssetSpans :many
 SELECT asset_id, kind, start_ms, end_ms FROM moments
 WHERE workspace_id = @workspace_id AND asset_id = ANY(@asset_ids::uuid[]) AND kind IN ('rep', 'hold', 'dead')

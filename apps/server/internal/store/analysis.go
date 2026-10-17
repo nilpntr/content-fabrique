@@ -207,7 +207,7 @@ func (s *Store) ListAssetExposureSeries(ctx context.Context, ws ids.WorkspaceID,
 	return rows, mapErr(err)
 }
 
-// ListAssetSpans returns the reps, holds and dead time of the assets' analyses in time order (kind MomentRep, MomentHold or
+// ListAssetSpans returns the reps, holds and dead moments of the assets (whatever made them) in time order (kind MomentRep, MomentHold or
 // MomentDead), for all of them in one read.
 func (s *Store) ListAssetSpans(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]AssetSpanRow, error) {
 	if len(assets) == 0 {
