@@ -295,7 +295,9 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 		// loudnorm resamples to 192 kHz internally, so the rate and layout are set again after it.
 		stmts = append(stmts, mix+","+ln+","+stereo48+"["+progOut+"]")
 		prog = progOut
-		res.loudnorm = &LoudnormPlan{Filter: ln, TwoPass: c.profile.LoudnormPasses >= 2}
+		// A preview with a beat guide writes an audio stem, which the audio check measures as the export: the stem must have the
+		// export's loudness stage (two linear passes), not the preview's dynamic single pass, which levels a different mix.
+		res.loudnorm = &LoudnormPlan{Filter: ln, TwoPass: c.profile.LoudnormPasses >= 2 || len(guide) > 0}
 		if res.loudnorm.TwoPass {
 			measure := append(slices.Clone(stmts[:len(stmts)-1]), mix+","+ln+":print_format=json[aout]")
 			res.pass1Graph = strings.Join(measure, ";")

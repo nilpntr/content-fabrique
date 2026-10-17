@@ -51,7 +51,7 @@ func programmeChecklist(r Report) []CheckItem {
 			ID: "loudness", Title: "Integrated loudness", Status: StatusFail, Value: "digital silence",
 			Target: fmt.Sprintf("%.0f to %.0f LUFS (about %.0f)", lufsWindowLo, lufsWindowHi, targetLUFS),
 			Source: srcEarshot + "; " + srcPractice,
-			Fix:    "The sound track is silent: mix in the clips' own sound (audio.use_source), a licensed track or sound effects. A speed ramp mutes a clip's own sound.",
+			Fix:    "The sound track is silent: give the clips a sound mode (audio.mode bed for ambience, full for speech; a clip left in mute, or an asset with no sound track, is silent), or add a licensed track or sound effects. A speed ramp mutes the speech of a full clip, not the bed of a bed clip.",
 		})
 		return cs
 	}

@@ -207,3 +207,18 @@ func TestRampedBedClipKeepsItsBed(t *testing.T) {
 		t.Errorf("a speech clip with a ramp has sound: %d bed clips", len(plan.Bed.Clips))
 	}
 }
+
+// A preview that writes an audio stem (it has a beat guide) normalises the programme in two passes like the final, so the stem has the
+// export's loudness stage; a preview without a guide keeps its single dynamic pass.
+func TestPreviewWithAStemNormalisesInTwoPasses(t *testing.T) {
+	full := clipAt("c1", assetA, 0, 3000, 0, withMode(timeline.AudioModeFull))
+	spec := specOf(30, []timeline.VideoItem{full})
+	if plan := mustCompile(t, spec, Preview); plan.Loudnorm == nil || plan.Loudnorm.TwoPass || plan.StemLabel != "" {
+		t.Errorf("a preview with no guide: %+v stem %q", plan.Loudnorm, plan.StemLabel)
+	}
+	spec.Markers = []timeline.Marker{{AtMs: 1000, Kind: timeline.MarkerBeat}}
+	plan := mustCompile(t, spec, Preview)
+	if plan.StemLabel == "" || plan.Loudnorm == nil || !plan.Loudnorm.TwoPass || len(plan.Loudnorm.Pass1Args) == 0 {
+		t.Errorf("a preview with a guide: stem %q loudnorm %+v", plan.StemLabel, plan.Loudnorm)
+	}
+}

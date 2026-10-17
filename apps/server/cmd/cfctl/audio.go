@@ -355,11 +355,12 @@ func loadProjectRender(ctx context.Context, name, projectArg, workspaceArg, rend
 	}
 	// A preview with a beat guide has the mix without the guide next to it (the audio stem): that is the export's sound, so it is what is
 	// measured. Without one the video's own sound is.
+	usedStem := false
 	if stemKey, kerr := storage.RenderKey(ws.ID, pid, row.ID, storage.RenderAudioStemName); kerr == nil {
 		stem := filepath.Join(work, storage.RenderAudioStemName)
 		switch derr := download(ctx, objects, stemKey, stem, 256<<20); {
 		case derr == nil:
-			mp4 = stem
+			mp4, usedStem = stem, true
 			_, _ = fmt.Fprintf(stdout, "cfctl %s: measuring the audio stem (the mix without the beat guide)\n", name)
 		case !errors.Is(derr, storage.ErrNotFound):
 			_, _ = fmt.Fprintf(env.err, "cfctl %s: warning: the audio stem could not be downloaded, so the video's sound (with its beat guide) is measured: %v\n", name, derr)
@@ -388,6 +389,9 @@ func loadProjectRender(ctx context.Context, name, projectArg, workspaceArg, rend
 		var spec *timeline.Spec
 		if spec, err = timeline.Parse(tv.Spec); err == nil {
 			planned, specOut = audiocheck.PlannedSFXFromSpec(spec), spec
+			if !usedStem && row.Profile == store.ProfilePreview && hasGuideMarkers(spec) {
+				_, _ = fmt.Fprintf(env.err, "cfctl %s: WARNING: this preview has no audio stem and its timeline has beat markers, so the video's sound includes the generated beat guide (a click on every beat, -12 dB under full scale): the loudness, onsets, sync and bed checks below measure the guide as well. Render the preview again (it writes the stem) or check a final render.\n", name)
+			}
 			if fps == 0 {
 				fps = spec.Output.FPS
 			}
@@ -423,4 +427,20 @@ func download(ctx context.Context, objects *storage.Client, key, path string, li
 		return err
 	}
 	return f.Close()
+}
+
+// hasGuideMarkers says the preview of this timeline carries the generated beat guide: it has beat, downbeat or drop markers inside the
+// video (the renderer puts no click at or past the end).
+func hasGuideMarkers(spec *timeline.Spec) bool {
+	total := timeline.TotalDuration(spec)
+	for _, m := range spec.Markers {
+		if m.AtMs >= total {
+			continue
+		}
+		switch m.Kind {
+		case timeline.MarkerBeat, timeline.MarkerDownbeat, timeline.MarkerDrop:
+			return true
+		}
+	}
+	return false
 }

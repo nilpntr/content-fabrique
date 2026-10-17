@@ -40,6 +40,7 @@ editor puts on the timeline (a bed under every shot), so it is a new version, a 
   click, glitch, shimmer, sting) with their variants and what each is for, `variant` (omit it for the first, `"auto"` to vary by the
   effect's id), the rule of one effect sound per visual effect and none on a plain cut, and that `gain_db` is left alone unless
   `check_edit` says an effect is lost in the bed. A test checks that every category and variant name of the build is in the prompt.
+- **Loudness numbers are scoped.** The levels (bed about -24, export about -21, effects -12 to -10) are for an edit with no `full` clip; an edit with speech is the programme at -14 LUFS with the bed 10 LU under it. The prompt tells the editor to trust the target in each check's detail and never to switch speech to bed (or bed to full) because of a loudness number.
 - **Rhythm.** "You have no sound tools" is gone: the beat grid is still written, now so that the cuts and effects match the sound the
   creator adds.
 - **check_edit listens.** Step 5 and "Checking and finishing" describe the three new checks (`audio_level`, `audio_bed`,
