@@ -45,14 +45,14 @@ func newTranscriber(cfg config.Config, st *store.Store, objects *storage.Client,
 	if err != nil {
 		return nil, err
 	}
-	// The daily spend cap is the model client's (DAILY_SPEND_CAP_MICROS): one budget for editing and transcription.
-	dailyCap := llm.DefaultDailySpendCapMicros
-	if settings, err := llm.LoadSettings(os.Getenv); err == nil {
-		dailyCap = settings.DailySpendCapMicros
-	} else {
-		logger.Warn("DAILY_SPEND_CAP_MICROS could not be read; transcription uses the default cap", "default_micros", dailyCap)
+	// The daily spend cap is the model client's (DAILY_SPEND_CAP_MICROS): one budget for editing and transcription, read the same way.
+	// Settings that cannot be read leave transcription off (the jobs wait) rather than running on a cap nobody chose.
+	settings, err := llm.LoadSettings(os.Getenv)
+	if err != nil {
+		logger.Error("transcription is off: the model settings (DAILY_SPEND_CAP_MICROS and the rest) cannot be read, so its spend cap is unknown", "error", err)
+		return nil, nil
 	}
-	p, err := setup.Pipeline(cfg, parts, st, objects, dailyCap, logger)
+	p, err := setup.Pipeline(cfg, parts, st, objects, settings.DailySpendCapMicros, logger)
 	if err != nil {
 		return nil, err
 	}

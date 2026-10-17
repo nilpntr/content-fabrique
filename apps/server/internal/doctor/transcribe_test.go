@@ -21,6 +21,7 @@ func TestWorkersAIPriceMustBeVerifiedInHostedEnvironments(t *testing.T) {
 		{"local", "abc", Invalid},
 	} {
 		vars := goodVars(t)
+		vars["TRANSCRIBE_PROVIDER"] = "workersai"
 		vars["WORKERS_AI_PRICE_MICROS_PER_MINUTE"] = tc.price
 		rep := runDoctor(t, tc.env, 0, vars, ep)
 		r := find(t, rep, "WORKERS_AI_PRICE_MICROS_PER_MINUTE")
@@ -28,8 +29,15 @@ func TestWorkersAIPriceMustBeVerifiedInHostedEnvironments(t *testing.T) {
 			t.Errorf("%s with price %q: %s (%s), want %s", tc.env, tc.price, r.Status, r.Reason, tc.want)
 		}
 	}
-	// Staging with no price at all is flagged as missing (it is a [YOU-staging] value).
+	// Staging that runs whisper.cpp instead has no use for a Workers AI price.
 	vars := goodVars(t)
+	vars["TRANSCRIBE_PROVIDER"] = "whispercpp"
+	vars["WORKERS_AI_PRICE_MICROS_PER_MINUTE"] = "0"
+	if r := find(t, runDoctor(t, "staging", 0, vars, ep), "WORKERS_AI_PRICE_MICROS_PER_MINUTE"); r.Status != OK {
+		t.Errorf("staging on whisper.cpp with no price: %s (%s)", r.Status, r.Reason)
+	}
+	// Staging with no price at all is flagged as missing (it is a [YOU-staging] value).
+	vars = goodVars(t)
 	vars["WORKERS_AI_PRICE_MICROS_PER_MINUTE"] = ""
 	if r := find(t, runDoctor(t, "staging", 0, vars, ep), "WORKERS_AI_PRICE_MICROS_PER_MINUTE"); r.Status != Missing {
 		t.Errorf("staging without a price: %s (%s)", r.Status, r.Reason)

@@ -6,12 +6,14 @@ UPDATE assets SET transcript_status = @status::text, transcript_failure_reason =
 WHERE workspace_id = @workspace_id AND id = @id AND deleted_at IS NULL
 RETURNING id;
 
--- The transcript failed, with a reason code, but only for the ingest the job was made for: a late failure of an old job must not
--- mark the transcript of a newer ingest. No row: the asset is gone or has been ingested again since.
+-- The transcript failed, with a reason code, but only for the ingest the job was made for and only while it is pending: a late
+-- failure of an old job must not mark the transcript of a newer ingest, nor overwrite a transcript another job has finished meanwhile.
+-- No row: the asset is gone, has been ingested again since, or its transcript is not pending.
 -- name: FailTranscript :one
 UPDATE assets SET transcript_status = 'failed', transcript_failure_reason = @reason::text
 WHERE workspace_id = @workspace_id AND id = @id AND deleted_at IS NULL
   AND ingested_at IS NOT DISTINCT FROM sqlc.narg('source_ingested_at')::timestamptz
+  AND transcript_status = 'pending'
 RETURNING id;
 
 -- SaveTranscript locks the asset row first: two transcriptions of one asset (an old ingest's and a new one's) save one after the

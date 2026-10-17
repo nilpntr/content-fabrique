@@ -117,28 +117,10 @@ type Result struct {
 // StatusStale is Result.Status of a run that did nothing because its ingest is no longer the asset's.
 const StatusStale = "stale"
 
-// GenerationOf is the ingest generation of an asset: the time its ingest finished, in microseconds (0 when it has none). A
-// transcribe job carries the generation it was enqueued for; it is part of the job's unique key, so an asset that is ingested
-// again gets a new transcription instead of being deduplicated against the old job.
-func GenerationOf(a store.Asset) int64 {
-	if a.IngestedAt == nil {
-		return 0
-	}
-	return a.IngestedAt.UnixMicro()
-}
-
-func instantOf(generation int64) *time.Time {
-	if generation == 0 {
-		return nil
-	}
-	t := time.UnixMicro(generation).UTC()
-	return &t
-}
-
 // Fail marks the transcript failed (gave_up), for a job that has used its last attempt, but only if the asset is still at the
 // ingest the job was for. A deleted or re-ingested asset is not an error.
 func (p *Pipeline) Fail(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, generation int64) error {
-	err := p.cfg.Store.FailTranscript(ctx, ws, id, store.TranscriptGaveUp, instantOf(generation))
+	err := p.cfg.Store.FailTranscript(ctx, ws, id, store.TranscriptGaveUp, store.GenerationTime(generation))
 	if errors.Is(err, store.ErrNotFound) {
 		return nil
 	}
@@ -162,11 +144,16 @@ func (p *Pipeline) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, 
 		return Result{}, fmt.Errorf("get asset: %w", err)
 	}
 	log := p.cfg.Logger.With("workspace_id", ws.String(), "asset_id", id.String(), "provider", p.cfg.Provider.Name())
-	if asset.Status != store.AssetReady || GenerationOf(asset) != generation {
+	if asset.Status != store.AssetReady || store.IngestGeneration(asset) != generation {
 		log.InfoContext(ctx, "transcription skipped: the asset was ingested again", "status", asset.Status)
 		return Result{Status: StatusStale}, nil
 	}
 	source := asset.IngestedAt
+	// A provider that is switched off (no account, or no verified price) makes the job wait, before the audio is fetched and before
+	// any daily limit can fail the transcript for good.
+	if c, ok := p.cfg.Provider.(interface{ Configured() bool }); ok && !c.Configured() {
+		return Result{}, ErrNotConfigured
+	}
 
 	rows, err := p.cfg.Store.ListAssetDerivatives(ctx, ws, []ids.AssetID{id})
 	if err != nil {
@@ -252,9 +239,7 @@ func (p *Pipeline) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, 
 	if terr == nil && len(calls) == 0 {
 		calls = []Call{{AudioMs: audio.DurationMs}}
 	}
-	if err := p.meter(ctx, ws, calls); err != nil {
-		return Result{}, err // the rows are what the caps read: a call that cannot be recorded is retried, not forgotten
-	}
+	p.meter(ctx, ws, calls)
 	switch {
 	case errors.Is(terr, ErrUnusableAudio):
 		return p.unusable(ctx, ws, id, source, terr, log)
@@ -339,8 +324,10 @@ func (p *Pipeline) reserveMinutes(ctx context.Context, ws ids.WorkspaceID, ms in
 }
 
 // meter writes the ledger row of every billed call, in the order they were made, with a fresh context: the calls are already paid
-// for. A row failing is retried a few times and then reported.
-func (p *Pipeline) meter(ctx context.Context, ws ids.WorkspaceID, calls []Call) error {
+// for. A row that cannot be written is retried a few times and then logged in full for reconciliation (the llm client does the
+// same): failing the run would only send the audio to the provider, and bill it, a second time. The transcript the call produced is
+// kept and saved.
+func (p *Pipeline) meter(ctx context.Context, ws ids.WorkspaceID, calls []Call) {
 	mctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	for _, c := range calls {
@@ -354,15 +341,17 @@ func (p *Pipeline) meter(ctx context.Context, ws ids.WorkspaceID, calls []Call) 
 			if err = p.cfg.Store.InsertUsage(mctx, e); err == nil {
 				break
 			}
-			time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
+			select {
+			case <-time.After(time.Duration(attempt) * 200 * time.Millisecond):
+			case <-mctx.Done():
+			}
 		}
 		if err != nil {
-			p.cfg.Logger.Error("transcribe: usage ledger write failed", "error", err, "workspace_id", ws.String(), "provider", e.Provider,
-				"audio_ms", e.AudioMs, "list_cost_micros", e.ListCostMicros)
-			return fmt.Errorf("write usage ledger: %w", err)
+			p.cfg.Logger.Error("transcribe: usage ledger write failed; reconcile this row by hand", "error", err, "workspace_id", ws.String(),
+				"provider", e.Provider, "model", e.Model, "audio_ms", e.AudioMs, "list_cost_micros", e.ListCostMicros,
+				"price_table_version", e.PriceTableVersion, "billed_to", e.BilledTo, "created_at", e.CreatedAt)
 		}
 	}
-	return nil
 }
 
 // save writes the transcript with a fresh context: the work is done and paid for. A transcript made from an ingest that is no

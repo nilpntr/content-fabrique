@@ -864,7 +864,14 @@ func assetsSuite(t *testing.T, st *store.Store, suffix string) {
 			t.Fatalf("a bogus status: %v", err)
 		}
 
-		// A failure carries its reason, and the next status clears it.
+		// A failure carries its reason, and the next status clears it. It lands only on a pending transcript: a ready one, finished by
+		// another job, is left alone.
+		if err := st.FailTranscript(ctx, wa.ID, voiced.ID, store.TranscriptGaveUp, voiced.IngestedAt); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("a late failure overwrote a transcript that is not pending: %v", err)
+		}
+		if err := st.SetTranscriptStatus(ctx, wa.ID, voiced.ID, store.TranscriptPending); err != nil {
+			t.Fatal(err)
+		}
 		if err := st.FailTranscript(ctx, wa.ID, voiced.ID, store.TranscriptSpendCap, voiced.IngestedAt); err != nil {
 			t.Fatal(err)
 		}
@@ -958,6 +965,9 @@ func assetsSuite(t *testing.T, st *store.Store, suffix string) {
 		with := finish(store.DerivativePoster, store.DerivativeAudio16k)
 		if _, err := st.SaveTranscript(ctx, wa.ID, a.ID, store.NewTranscript{SourceIngestedAt: with.IngestedAt, Speech: true, Language: "en",
 			Words: []byte(`[{"text":"Hi","start_ms":0,"end_ms":100,"confidence":1}]`), Provider: "p", Model: "m", AudioMs: 5000}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetTranscriptStatus(ctx, wa.ID, a.ID, store.TranscriptPending); err != nil {
 			t.Fatal(err)
 		}
 		if err := st.FailTranscript(ctx, wa.ID, a.ID, store.TranscriptSpendCap, with.IngestedAt); err != nil {

@@ -32,6 +32,7 @@ const failTranscript = `-- name: FailTranscript :one
 UPDATE assets SET transcript_status = 'failed', transcript_failure_reason = $1::text
 WHERE workspace_id = $2 AND id = $3 AND deleted_at IS NULL
   AND ingested_at IS NOT DISTINCT FROM $4::timestamptz
+  AND transcript_status = 'pending'
 RETURNING id
 `
 
@@ -42,8 +43,9 @@ type FailTranscriptParams struct {
 	SourceIngestedAt *time.Time
 }
 
-// The transcript failed, with a reason code, but only for the ingest the job was made for: a late failure of an old job must not
-// mark the transcript of a newer ingest. No row: the asset is gone or has been ingested again since.
+// The transcript failed, with a reason code, but only for the ingest the job was made for and only while it is pending: a late
+// failure of an old job must not mark the transcript of a newer ingest, nor overwrite a transcript another job has finished meanwhile.
+// No row: the asset is gone, has been ingested again since, or its transcript is not pending.
 func (q *Queries) FailTranscript(ctx context.Context, arg FailTranscriptParams) (ids.AssetID, error) {
 	row := q.db.QueryRow(ctx, failTranscript,
 		arg.Reason,

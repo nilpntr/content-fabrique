@@ -15,7 +15,7 @@
 -- assets.transcript_status: none (not checked: no audio, or the ingest has not finished), pending (the job is queued or running),
 --               no_speech (checked; the clip has no speech), ready (words are available), failed (the job gave up or was blocked).
 -- assets.transcript_failure_reason: why it failed, a code that is safe to show: spend_cap and minutes_cap (the workspace's daily
---               limits, D-27), price_unset (a hosted provider without a verified price), unusable_audio, gave_up. Null otherwise.
+--               limits, D-27), unusable_audio, gave_up. Null otherwise.
 --
 -- usage_ledger: kind 'transcription' joins 'llm' (D-27). A row holds the audio it metered (audio_ms) and the provider; the token
 --               columns are 0. Local transcription costs 0 (list_cost_micros 0, price_table_version 'local').

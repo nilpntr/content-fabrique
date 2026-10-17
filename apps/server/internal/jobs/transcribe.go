@@ -141,12 +141,7 @@ func (w *TranscribeWorker) giveUp(ctx context.Context, ws ids.WorkspaceID, id id
 		}
 		return
 	}
-	var source *time.Time
-	if generation != 0 {
-		t := time.UnixMicro(generation).UTC()
-		source = &t
-	}
-	if err := w.deps.Store.FailTranscript(fctx, ws, id, store.TranscriptGaveUp, source); err != nil && !errors.Is(err, store.ErrNotFound) {
+	if err := w.deps.Store.FailTranscript(fctx, ws, id, store.TranscriptGaveUp, store.GenerationTime(generation)); err != nil && !errors.Is(err, store.ErrNotFound) {
 		w.deps.logger().ErrorContext(ctx, "could not mark a transcript whose job gave up as failed", "asset_id", id.String(), "error", err)
 	}
 }

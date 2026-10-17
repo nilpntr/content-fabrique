@@ -178,13 +178,15 @@ var validators = map[string]validator{
 		return ""
 	},
 	// Hosted transcription is capped by price (D-27): an unpriced Workers AI call would be recorded at 0 and the daily spend cap
-	// could never trip, so a price of 0 is refused in staging and production, where Workers AI is the provider.
+	// could never trip, so a price of 0 is refused in staging and production, where Workers AI is the provider unless
+	// TRANSCRIBE_PROVIDER says otherwise.
 	"WORKERS_AI_PRICE_MICROS_PER_MINUTE": func(r *run, val string) string {
 		n, err := strconv.Atoi(val)
 		if err != nil || n < 0 || n > 1000000 {
 			return "bad format (expected millionths of a dollar per minute, 1 to 1000000)"
 		}
-		if n == 0 && (r.opts.Env == "staging" || r.opts.Env == "production") {
+		hosted := (r.opts.Env == "staging" || r.opts.Env == "production") && r.getenv("TRANSCRIBE_PROVIDER") != "whispercpp"
+		if n == 0 && hosted {
 			return "must be a verified price above 0 in " + r.opts.Env + ": the daily spend cap cannot count unpriced transcription (D-27)"
 		}
 		return ""

@@ -46,12 +46,7 @@ func (AnalyzeArgs) InsertOpts() river.InsertOpts {
 }
 
 // generationOf is the ingest generation of an asset: the time its ingest finished, in microseconds (0 when it has none).
-func generationOf(a store.Asset) int64 {
-	if a.IngestedAt == nil {
-		return 0
-	}
-	return a.IngestedAt.UnixMicro()
-}
+func generationOf(a store.Asset) int64 { return store.IngestGeneration(a) }
 
 // EnqueueAnalysis is the store's analysis hook (Store.SetAnalysisHook): it inserts the job in the transaction that marks the
 // video ready, so the job exists exactly when the ready asset does.

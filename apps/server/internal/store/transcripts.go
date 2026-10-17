@@ -30,8 +30,6 @@ const (
 	TranscriptSpendCap = "spend_cap"
 	// TranscriptMinutesCap: the workspace had its daily minutes of transcription already (TRANSCRIBE_DAILY_MINUTES).
 	TranscriptMinutesCap = "minutes_cap"
-	// TranscriptPriceUnset: the hosted provider has no verified price, so its spend cannot be capped and it is not called.
-	TranscriptPriceUnset = "price_unset"
 	// TranscriptUnusableAudio: the audio cannot be transcribed by any provider.
 	TranscriptUnusableAudio = "unusable_audio"
 	// TranscriptGaveUp: every attempt of the job failed.
@@ -40,6 +38,25 @@ const (
 
 // KindTranscription is the usage_ledger kind of a transcription call (D-27).
 const KindTranscription = "transcription"
+
+// IngestGeneration is the ingest generation of an asset: the time its ingest finished, in microseconds (0 when it has none). Jobs
+// that must run once per ingest (analysis, transcription) carry it in their arguments, and are unique by it.
+func IngestGeneration(a Asset) int64 {
+	if a.IngestedAt == nil {
+		return 0
+	}
+	return a.IngestedAt.UnixMicro()
+}
+
+// GenerationTime is the instant an ingest generation stands for (nil for 0): the value SaveTranscript and FailTranscript compare
+// with assets.ingested_at.
+func GenerationTime(generation int64) *time.Time {
+	if generation == 0 {
+		return nil
+	}
+	t := time.UnixMicro(generation).UTC()
+	return &t
+}
 
 // ErrStaleTranscript is returned by SaveTranscript when the transcript was made from an ingest that is no longer the asset's (it
 // was ingested again meanwhile) or the asset is not ready: nothing is written, and the job treats it as a clean no-op (the newer
@@ -59,7 +76,9 @@ func (s *Store) SetTranscriptStatus(ctx context.Context, ws ids.WorkspaceID, id 
 }
 
 // FailTranscript marks the transcript failed with a reason code, for the ingest the job was made for (source is its
-// assets.ingested_at): ErrNotFound when the asset is gone or has been ingested again since, which is not an error for the caller.
+// assets.ingested_at) and only while the transcript is pending: a job that gives up late must not overwrite the ready transcript
+// of a sibling job (`cfctl transcribe run --force`). ErrNotFound when the asset is gone, has been ingested again since, or is not
+// pending, which is not an error for the caller.
 func (s *Store) FailTranscript(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, reason string, source *time.Time) error {
 	_, err := s.q.FailTranscript(ctx, db.FailTranscriptParams{WorkspaceID: ws, ID: id, Reason: reason, SourceIngestedAt: source})
 	return mapErr(err)

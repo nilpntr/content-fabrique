@@ -14,7 +14,6 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
 	"github.com/nilpntr/content-fabrique/internal/store"
-	"github.com/nilpntr/content-fabrique/internal/transcribe"
 )
 
 const transcribeRunUsage = `Usage:
@@ -180,7 +179,7 @@ func enqueueTranscription(ctx context.Context, st *store.Store, ws ids.Workspace
 		return transcriptionEnqueued{}, err
 	}
 	enq := jobs.NewEnqueuer(client, nil)
-	args := jobs.TranscribeArgs{WorkspaceID: ws, AssetID: id, Generation: transcribe.GenerationOf(a)}
+	args := jobs.TranscribeArgs{WorkspaceID: ws, AssetID: id, Generation: store.IngestGeneration(a)}
 	if force {
 		args.Force = time.Now().UnixNano()
 	}

@@ -107,6 +107,11 @@ func (p *fakeProvider) Transcribe(context.Context, Audio, Options) (Transcript, 
 	return Transcript{Language: "en", Words: p.words, Calls: p.calls}, p.err
 }
 
+// offProvider is a provider that reports it is not configured (Workers AI without an account or a price).
+type offProvider struct{ *fakeProvider }
+
+func (*offProvider) Configured() bool { return false }
+
 type fakeDetector struct {
 	segs []Segment
 	err  error
@@ -157,7 +162,7 @@ func newRig(t *testing.T) *rig {
 		asset:  store.Asset{Status: store.AssetReady, Kind: store.AssetKindVideo, IngestedAt: &ingested},
 		derivs: []store.Derivative{{Kind: store.DerivativeAudio16k, R2Key: key}},
 	}
-	r.gen = GenerationOf(r.st.asset)
+	r.gen = store.IngestGeneration(r.st.asset)
 	// 4 s of audio: speech-like bursts at 0.5-1.0 s and 2.0-2.6 s.
 	r.obj = &fakeObjects{body: EncodeWAV(speechLike(4000, [][2]int64{{500, 1000}, {2000, 2600}}))}
 	r.det = fakeDetector{segs: []Segment{{StartMs: 500, EndMs: 1000}, {StartMs: 2000, EndMs: 2600}}}
@@ -443,10 +448,29 @@ func TestRunErrors(t *testing.T) {
 		t.Errorf("deleted while working: %v", err)
 	}
 
+	// A ledger that cannot be written does not throw away a paid result (a retry would pay for the audio again): the row is
+	// logged for reconciliation and the transcript is saved.
 	r = newRig(t)
+	r.prov.words = []Word{{Text: "hi", AnchorMs: 900}}
 	r.st.usageErr = errors.New("db down")
-	if _, err := r.run(t); err == nil || r.st.saved != nil {
-		t.Errorf("a ledger that cannot be written must fail the run: %v", err)
+	if res, err := r.run(t); err != nil || res.Status != store.TranscriptReady || r.st.saved == nil {
+		t.Errorf("a ledger outage lost the transcript: %+v %v", res, err)
+	}
+
+	// A provider that is switched off waits before anything is fetched or limited, even for a workspace over its minutes.
+	r = newRig(t)
+	r.mins = 1
+	r.st.transcribe = 59_000
+	off := &offProvider{fakeProvider: r.prov}
+	p, err := New(Config{Store: r.st, Objects: r.obj, Provider: off, Detector: r.det, Spend: r.guard, DailyMinutes: 1, TempDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Run(context.Background(), r.ws, r.id, r.gen); !errors.Is(err, ErrNotConfigured) {
+		t.Errorf("a switched-off provider: %v", err)
+	}
+	if len(r.obj.keys) != 0 || len(r.st.failures) != 0 || r.prov.runs != 0 {
+		t.Errorf("a switched-off provider fetched audio or failed the transcript: keys %v, failures %+v", r.obj.keys, r.st.failures)
 	}
 }
 
@@ -456,7 +480,7 @@ func TestFailMarksFailedForThatIngestOnly(t *testing.T) {
 	if err := p.Fail(context.Background(), r.ws, r.id, r.gen); err != nil || len(r.st.failures) != 1 || r.st.failures[0].reason != store.TranscriptGaveUp {
 		t.Fatalf("%v %+v", err, r.st.failures)
 	}
-	if s := r.st.failures[0].source; s == nil || GenerationOf(store.Asset{IngestedAt: s}) != r.gen {
+	if s := r.st.failures[0].source; s == nil || store.IngestGeneration(store.Asset{IngestedAt: s}) != r.gen {
 		t.Errorf("the failure names ingest %v, want generation %d", s, r.gen)
 	}
 	r.st.statusErr = store.ErrNotFound // deleted or ingested again since

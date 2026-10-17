@@ -807,9 +807,8 @@ export interface components {
             transcript_status: components["schemas"]["TranscriptStatus"];
             /**
              * @description Why the transcript is `failed`, as a code that is safe to show: `spend_cap` (the workspace's daily spend cap could not
-             *     cover the transcription), `minutes_cap` (the workspace had its daily minutes of transcription already), `price_unset`
-             *     (the hosted provider has no verified price), `unusable_audio`, `gave_up` (every attempt failed). Null otherwise. Absent
-             *     on older responses.
+             *     cover the transcription), `minutes_cap` (the workspace had its daily minutes of transcription already),
+             *     `unusable_audio`, `gave_up` (every attempt failed). Null otherwise. Absent on older responses.
              */
             transcript_failure_reason?: string | null;
             media?: components["schemas"]["MediaInfo"];
