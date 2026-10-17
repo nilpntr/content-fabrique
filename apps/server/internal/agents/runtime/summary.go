@@ -18,6 +18,11 @@ type EventSummary struct {
 	// Tool names the tool of a tool_call or tool_result.
 	Tool    string
 	IsError bool
+	// CallID is the model's tool_use id of a tool_call, of its tool_result, and of the artifact that call made: the key that pairs them.
+	// Empty for the other events.
+	CallID string
+	// Kind is the kind of an artifact event (creative_plan, edit_check, preview, timeline_version), empty for the other events.
+	Kind string
 }
 
 // SummaryChars is the longest Text of an EventSummary, in bytes.
@@ -58,14 +63,14 @@ func SummarizeEvent(e store.AgentEvent) EventSummary {
 		if json.Unmarshal(e.Payload, &p) != nil {
 			break
 		}
-		s.Tool = p.Name
+		s.Tool, s.CallID = p.Name, p.ToolUseID
 		s.Text = p.Name + " " + string(p.Input)
 	case store.EventToolResult:
 		var p toolResultPayload
 		if json.Unmarshal(e.Payload, &p) != nil {
 			break
 		}
-		s.Tool, s.IsError = p.Name, p.IsError
+		s.Tool, s.IsError, s.CallID = p.Name, p.IsError, p.ToolUseID
 		images := 0
 		var parts []string
 		for _, b := range p.Content {
@@ -88,16 +93,46 @@ func SummarizeEvent(e store.AgentEvent) EventSummary {
 		s.IsError = true
 		s.Text = p.Code + ": " + p.Message
 	case store.EventArtifact:
+		// Only the head: the data (up to 64 KB) is not needed for a one-line summary.
 		var p struct {
-			Kind string `json:"kind"`
+			Kind      string `json:"kind"`
+			ToolUseID string `json:"tool_use_id"`
 		}
 		if json.Unmarshal(e.Payload, &p) != nil {
 			break
 		}
-		s.Text = p.Kind
+		s.Text, s.Kind, s.CallID = p.Kind, p.Kind, p.ToolUseID
 	}
 	s.Text = oneLine(s.Text, SummaryChars)
 	return s
+}
+
+// Artifact is an artifact event read back: what a tool recorded for the creator to see. Data was written by a model or a tool (the plan's
+// story, a check's reason) and may quote the creator's own text, so it is untrusted text for whoever shows it.
+type Artifact struct {
+	Kind   string
+	CallID string
+	Data   json.RawMessage
+}
+
+// ArtifactOf reads an artifact event ({kind, tool_use_id, data}, see RunContext.Artifact). ok is false for another type of event or a
+// payload that is not that.
+func ArtifactOf(e store.AgentEvent) (Artifact, bool) {
+	if e.Type != store.EventArtifact {
+		return Artifact{}, false
+	}
+	var p struct {
+		Kind      string          `json:"kind"`
+		ToolUseID string          `json:"tool_use_id"`
+		Data      json.RawMessage `json:"data"`
+	}
+	if json.Unmarshal(e.Payload, &p) != nil || p.Kind == "" {
+		return Artifact{}, false
+	}
+	if len(p.Data) == 0 {
+		p.Data = json.RawMessage("null")
+	}
+	return Artifact{Kind: p.Kind, CallID: p.ToolUseID, Data: p.Data}, true
 }
 
 // QuestionOf returns the question of the status event that parked a run (waiting_input), or "".

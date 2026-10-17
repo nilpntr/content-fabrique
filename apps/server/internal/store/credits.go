@@ -352,6 +352,70 @@ func (s *Store) HoldCredits(ctx context.Context, p HoldCreditsParams) (CreditHol
 	return hold, nil
 }
 
+// The credits of one run, as the run resource shows them.
+const (
+	RunCreditsHeld     = "held"     // the run is in progress (or its hold has not been settled): these credits are set aside
+	RunCreditsCharged  = "charged"  // the run was charged
+	RunCreditsRefunded = "refunded" // the run was charged and the charge was given back
+)
+
+// RunCredits is what a run cost in credits: its state, the action (edit.first or edit.revision) and the credits.
+type RunCredits struct {
+	State   string
+	Action  string
+	Credits int
+}
+
+// RunCreditsOf reads the credits of a run from the ledger and the holds: charged (the charge rows), refunded (a refund of them; Credits
+// is then what was given back, which is less than the charge when a source had expired), or held (the hold). ok is false when the run
+// has neither: it was released (a failed or empty run is not charged and leaves no row), or it never took credits. Only the actions of an
+// edit are reported.
+func (s *Store) RunCreditsOf(ctx context.Context, ws ids.WorkspaceID, run uuid.UUID) (rc RunCredits, ok bool, err error) {
+	// The settle writes the charge and deletes the hold in one transaction, but these reads are separate: charges first, then the hold,
+	// then the charges again when the hold is gone, so a settle in between is seen as a charge and never as nothing.
+	for attempt := 0; attempt < 2; attempt++ {
+		charges, err := s.q.ListCreditChargesOfAction(ctx, db.ListCreditChargesOfActionParams{WorkspaceID: ws, ActionID: pgUUID(run)})
+		if err != nil {
+			return RunCredits{}, false, mapErr(err)
+		}
+		if len(charges) > 0 {
+			return s.chargedRunCredits(ctx, ws, run, charges)
+		}
+		hold, err := s.GetCreditHold(ctx, ws, run)
+		switch {
+		case err == nil:
+			rc = RunCredits{State: RunCreditsHeld, Action: hold.Action, Credits: hold.Credits}
+			return rc, isEditAction(rc.Action), nil
+		case !errors.Is(err, ErrNotFound):
+			return RunCredits{}, false, err
+		}
+	}
+	return RunCredits{}, false, nil
+}
+
+func isEditAction(a string) bool { return a == ActionEditFirst || a == ActionEditRevision }
+
+func (s *Store) chargedRunCredits(ctx context.Context, ws ids.WorkspaceID, run uuid.UUID, charges []db.CreditLedger) (RunCredits, bool, error) {
+	rc := RunCredits{State: RunCreditsCharged}
+	for _, c := range charges {
+		rc.Credits -= int(c.Credits)
+		if c.Action != nil {
+			rc.Action = *c.Action
+		}
+	}
+	refunds, err := s.q.ListCreditRefundsOfAction(ctx, db.ListCreditRefundsOfActionParams{WorkspaceID: ws, ActionID: pgUUID(run)})
+	if err != nil {
+		return RunCredits{}, false, mapErr(err)
+	}
+	if len(refunds) > 0 {
+		rc.State, rc.Credits = RunCreditsRefunded, 0
+		for _, r := range refunds {
+			rc.Credits += int(r.Credits)
+		}
+	}
+	return rc, isEditAction(rc.Action), nil
+}
+
 // GetCreditHold returns the hold of an action, or ErrNotFound.
 func (s *Store) GetCreditHold(ctx context.Context, ws ids.WorkspaceID, actionID uuid.UUID) (CreditHold, error) {
 	h, err := s.q.GetCreditHoldByAction(ctx, db.GetCreditHoldByActionParams{WorkspaceID: ws, ActionID: actionID})
