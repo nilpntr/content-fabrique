@@ -11,6 +11,7 @@ import (
 	"github.com/riverqueue/river/rivertype"
 
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/ingest"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
@@ -47,23 +48,64 @@ type AssetIngestArgs struct {
 // Kind implements river.JobArgs.
 func (AssetIngestArgs) Kind() string { return "asset_ingest" }
 
-// InsertOpts makes the job unique by asset, so a repeated completion enqueues one ingest.
+// InsertOpts makes the job unique by asset, so a repeated completion enqueues one ingest, and puts it on the media queue,
+// which has its own (small) concurrency: an ingest is minutes of CPU, and must not delay the short jobs.
 func (AssetIngestArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: QueueDefault, MaxAttempts: 5, UniqueOpts: river.UniqueOpts{ByArgs: true}}
+	return river.InsertOpts{Queue: QueueMedia, MaxAttempts: 5, UniqueOpts: river.UniqueOpts{ByArgs: true}}
 }
 
-// AssetIngestWorker works AssetIngestArgs. Until P1-04 implements the media pipeline it only logs and records that the
-// asset is waiting: the asset stays `uploaded`, and P1-04 replaces this worker (same kind) to move it on.
+// AssetIngester is the media pipeline (package ingest) as the worker sees it.
+type AssetIngester interface {
+	// Run ingests the asset. ingest.ErrAssetGone means there is nothing to do; other errors are retried.
+	Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (ingest.Result, error)
+	// Fail marks the asset failed with a reason code, for a job that has used its last attempt.
+	Fail(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, reason string) error
+}
+
+// IngestTimeout is how long one attempt of an ingest may run. River's default is a minute; a long clip takes much longer.
+// The sandbox limits each tool run on top of this.
+const IngestTimeout = 2 * time.Hour
+
+// noIngestSnooze is how long an ingest waits when the worker has no media pipeline (no object storage or no sandbox set up).
+const noIngestSnooze = 5 * time.Minute
+
+// AssetIngestWorker works AssetIngestArgs: it runs the pipeline of package ingest, which downloads the original, probes and
+// validates it in the sandbox, makes the derivatives (proxy, poster, sprite, waveform, 16 kHz audio, hover preview),
+// uploads them and moves the asset to `ready`, or to `failed` with a reason when the file cannot be processed.
 type AssetIngestWorker struct {
 	river.WorkerDefaults[AssetIngestArgs]
 	deps Deps
 }
 
-// Work logs the job and records it as pending.
+// Timeout implements river.Worker.
+func (w *AssetIngestWorker) Timeout(*river.Job[AssetIngestArgs]) time.Duration { return IngestTimeout }
+
+// Work runs one attempt. A worker without the pipeline snoozes the job (no attempt is used), like the jobs that need
+// object storage do, so nothing is lost for a missing setting. An asset that was deleted, failed or never existed in the
+// workspace of the job ends it (cancelled, not retried). Any other error is retried by River; the last attempt marks the
+// asset failed, so it does not stay `processing` for ever.
 func (w *AssetIngestWorker) Work(ctx context.Context, job *river.Job[AssetIngestArgs]) error {
-	w.deps.logger().InfoContext(ctx, "asset ingest is pending (the media pipeline arrives with P1-04)",
-		"workspace_id", job.Args.WorkspaceID.String(), "asset_id", job.Args.AssetID.String(), "job_id", job.ID)
-	return river.RecordOutput(ctx, map[string]string{"state": "pending", "reason": "ingest is implemented by P1-04"})
+	if w.deps.Ingest == nil {
+		return river.JobSnooze(noIngestSnooze)
+	}
+	ws, id := job.Args.WorkspaceID, job.Args.AssetID
+	res, err := w.deps.Ingest.Run(ctx, ws, id)
+	switch {
+	case errors.Is(err, ingest.ErrAssetGone):
+		w.deps.logger().InfoContext(ctx, "asset ingest skipped", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "reason", err.Error())
+		return river.JobCancel(err)
+	case err != nil:
+		w.deps.logger().WarnContext(ctx, "asset ingest attempt failed", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "attempt", job.Attempt, "error", err)
+		if job.Attempt >= job.MaxAttempts && ctx.Err() == nil {
+			fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+			defer cancel()
+			if ferr := w.deps.Ingest.Fail(fctx, ws, id, store.FailureProcessing); ferr != nil {
+				w.deps.logger().ErrorContext(ctx, "could not mark an asset whose ingest gave up as failed", "asset_id", id.String(), "error", ferr)
+			}
+		}
+		return err
+	}
+	return river.RecordOutput(ctx, res)
 }
 
 // AssetObjectDeleteArgs is enqueued, in the transaction that deletes an asset (or fails its upload while an object may

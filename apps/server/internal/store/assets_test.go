@@ -439,4 +439,124 @@ func assetsSuite(t *testing.T, st *store.Store, suffix string) {
 		other, ou := newWorkspace("cap-other")
 		newAsset(other, ou, "free", future)
 	})
+	t.Run("ingest: claim, progress, finish, fail", func(t *testing.T) {
+		a, _ := newAsset(wa, ua, "ingest", future)
+		derivative := func(kind, name string) store.NewDerivative {
+			return store.NewDerivative{Kind: kind, Key: "ws/" + wa.ID.String() + "/assets/" + a.ID.String() + "/" + name + "-" + suffix, ContentType: "image/jpeg", SizeBytes: 10, Meta: []byte(`{"width":720}`)}
+		}
+		// Not uploaded yet: nothing to claim.
+		if _, err := st.ClaimAssetForIngest(ctx, wa.ID, a.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("claim of an asset that is still uploading = %v", err)
+		}
+		if err := st.InTx(ctx, func(tx *store.Store) error { _, err := tx.CompleteUpload(ctx, wa.ID, a.ID); return err }); err != nil {
+			t.Fatal(err)
+		}
+		// Workspace B cannot claim, move, finish or fail A's asset.
+		if _, err := st.ClaimAssetForIngest(ctx, wb.ID, a.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("workspace B claimed A's asset: %v", err)
+		}
+		got, err := st.ClaimAssetForIngest(ctx, wa.ID, a.ID)
+		if err != nil || got.Status != store.AssetProcessing || got.IngestProgress != 0 || got.IngestStage == nil || *got.IngestStage != store.StageStarting {
+			t.Fatalf("claim = %+v %v", got, err)
+		}
+		if _, err := st.ClaimAssetForIngest(ctx, wa.ID, a.ID); err != nil {
+			t.Fatalf("a retry must be able to claim again: %v", err)
+		}
+		if err := st.SetIngestProgress(ctx, wa.ID, a.ID, 55, store.StageProxy); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetIngestProgress(ctx, wb.ID, a.ID, 99, store.StageProxy); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("workspace B set A's progress: %v", err)
+		}
+		if _, err := st.FailAssetIngest(ctx, wb.ID, a.ID, store.FailureCorruptMedia); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("workspace B failed A's asset: %v", err)
+		}
+		res := store.IngestResult{
+			DurationMs: 87135, Width: 2160, Height: 3840, FPS: 30, Rotation: 90, VideoCodec: "h264", AudioCodec: "aac", HasAudio: true, HDR: true,
+			Probe:       []byte(`{"container":"mov"}`),
+			Derivatives: []store.NewDerivative{derivative(store.DerivativePoster, "poster"), derivative(store.DerivativeAudio16k, "audio"), derivative(store.DerivativeProxy720, "proxy")},
+		}
+		if _, err := st.FinishAssetIngest(ctx, wb.ID, a.ID, res); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("workspace B finished A's asset: %v", err)
+		}
+		if rows, _ := st.ListAssetDerivatives(ctx, wa.ID, []ids.AssetID{a.ID}); len(rows) != 0 {
+			t.Fatalf("a refused finish left derivatives: %v", rows)
+		}
+		done, err := st.FinishAssetIngest(ctx, wa.ID, a.ID, res)
+		if err != nil || done.Status != store.AssetReady || done.IngestProgress != 100 || done.IngestStage != nil || done.FailureReason != nil ||
+			*done.DurationMs != 87135 || *done.Width != 2160 || *done.Height != 3840 || *done.Rotation != 90 || !*done.HasAudio || !*done.Hdr || *done.VideoCodec != "h264" || string(done.Probe) != `{"container": "mov"}` {
+			t.Fatalf("finish = %+v %v", done, err)
+		}
+		rows, err := st.ListAssetDerivatives(ctx, wa.ID, []ids.AssetID{a.ID})
+		if err != nil || len(rows) != 3 || rows[0].Kind != store.DerivativeAudio16k || rows[2].Kind != store.DerivativeProxy720 || rows[1].WorkspaceID != wa.ID {
+			t.Fatalf("derivatives = %+v %v", rows, err)
+		}
+		if rows, _ := st.ListAssetDerivatives(ctx, wb.ID, []ids.AssetID{a.ID}); len(rows) != 0 {
+			t.Fatalf("workspace B lists A's derivatives: %v", rows)
+		}
+
+		// A re-run replaces the rows of its kinds and drops the kinds it no longer makes (the clip lost its audio).
+		if _, err := st.ClaimAssetForIngest(ctx, wa.ID, a.ID); err != nil {
+			t.Fatalf("a ready asset can be ingested again: %v", err)
+		}
+		res.Derivatives = []store.NewDerivative{derivative(store.DerivativePoster, "poster2"), derivative(store.DerivativeProxy720, "proxy")}
+		res.HasAudio, res.AudioCodec = false, ""
+		if _, err := st.FinishAssetIngest(ctx, wa.ID, a.ID, res); err != nil {
+			t.Fatal(err)
+		}
+		rows, _ = st.ListAssetDerivatives(ctx, wa.ID, []ids.AssetID{a.ID})
+		if len(rows) != 2 || rows[0].Kind != store.DerivativePoster || !strings.Contains(rows[0].R2Key, "poster2") {
+			t.Fatalf("after the re-run: %+v", rows)
+		}
+
+		// A finish that fails half way (here: an unknown kind) writes nothing.
+		if _, err := st.ClaimAssetForIngest(ctx, wa.ID, a.ID); err != nil {
+			t.Fatal(err)
+		}
+		bad := res
+		bad.Derivatives = []store.NewDerivative{{Kind: "nonsense", Key: "k-" + suffix, ContentType: "x", SizeBytes: 1}}
+		if _, err := st.FinishAssetIngest(ctx, wa.ID, a.ID, bad); err == nil {
+			t.Fatal("an unknown derivative kind was accepted")
+		}
+		if got, _ := st.GetAsset(ctx, wa.ID, a.ID); got.Status != store.AssetProcessing {
+			t.Fatalf("a failed finish must roll back; status = %s", got.Status)
+		}
+
+		// Failing: only from uploaded or processing, with the reason kept.
+		failed, err := st.FailAssetIngest(ctx, wa.ID, a.ID, store.FailureCorruptMedia)
+		if err != nil || failed.Status != store.AssetFailed || failed.FailureReason == nil || *failed.FailureReason != store.FailureCorruptMedia || failed.DeletedAt != nil {
+			t.Fatalf("fail = %+v %v", failed, err)
+		}
+		if _, err := st.FailAssetIngest(ctx, wa.ID, a.ID, store.FailureProcessing); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("failing a failed asset = %v", err)
+		}
+		if _, err := st.ClaimAssetForIngest(ctx, wa.ID, a.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("claiming a failed asset = %v", err)
+		}
+	})
+
+	t.Run("ingest: a deleted asset is not claimed, finished or failed", func(t *testing.T) {
+		a, _ := newAsset(wa, ua, "ingest-deleted", future)
+		if err := st.InTx(ctx, func(tx *store.Store) error { _, err := tx.CompleteUpload(ctx, wa.ID, a.ID); return err }); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.ClaimAssetForIngest(ctx, wa.ID, a.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.SoftDeleteAsset(ctx, wa.ID, a.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetIngestProgress(ctx, wa.ID, a.ID, 70, store.StageProxy); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("progress of a deleted asset = %v", err)
+		}
+		if _, err := st.FinishAssetIngest(ctx, wa.ID, a.ID, store.IngestResult{DurationMs: 1, Width: 2, Height: 2}); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("finish of a deleted asset = %v", err)
+		}
+		if _, err := st.FailAssetIngest(ctx, wa.ID, a.ID, store.FailureProcessing); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("fail of a deleted asset = %v", err)
+		}
+		if _, err := st.ClaimAssetForIngest(ctx, wa.ID, a.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("claim of a deleted asset = %v", err)
+		}
+	})
 }

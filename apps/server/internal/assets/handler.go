@@ -81,11 +81,65 @@ func assetOf(a store.Asset) api.Asset {
 	if tags == nil {
 		tags = []string{}
 	}
-	return api.Asset{
+	out := api.Asset{
 		Id: a.ID.String(), Kind: api.AssetKind(a.Kind), Status: api.AssetStatus(a.Status), Filename: a.Filename,
 		ContentType: a.ContentType, SizeBytes: a.SizeBytes, Sha256: a.Sha256, Title: a.Title, Description: a.Description,
-		Tags: tags, FailureReason: a.FailureReason, CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt,
+		Tags: tags, FailureReason: a.FailureReason, IngestProgress: int(a.IngestProgress), IngestStage: a.IngestStage,
+		CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt,
 	}
+	if a.Status == store.AssetReady && a.DurationMs != nil {
+		out.Media = &api.MediaInfo{
+			DurationMs: *a.DurationMs, Width: intOf(a.Width), Height: intOf(a.Height), Fps: a.Fps,
+			Rotation: api.MediaInfoRotation(deref(a.Rotation)), VideoCodec: a.VideoCodec, AudioCodec: a.AudioCodec,
+			HasAudio: deref(a.HasAudio), Hdr: deref(a.Hdr),
+		}
+	}
+	return out
+}
+
+// viewOf is assetOf plus the derivative URLs of a ready asset.
+func viewOf(v View) api.Asset {
+	out := assetOf(v.Asset)
+	if len(v.Files) == 0 {
+		return out
+	}
+	d := &api.AssetDerivatives{}
+	for _, f := range v.Files {
+		switch f.Kind {
+		case store.DerivativeProxy720:
+			d.Proxy720 = f.file()
+		case store.DerivativePoster:
+			d.Poster = f.file()
+		case store.DerivativeHoverPreview:
+			d.HoverPreview = f.file()
+		case store.DerivativeSprite:
+			d.Sprite = f.file()
+		case store.DerivativeSpriteVTT:
+			d.SpriteVtt = f.file()
+		case store.DerivativeWaveform:
+			d.Waveform = f.file()
+		}
+	}
+	out.Derivatives = d
+	exp := v.URLsExpires
+	out.DerivativeUrlsExpireAt = &exp
+	return out
+}
+
+func intOf(n *int32) *int {
+	if n == nil {
+		return nil
+	}
+	v := int(*n)
+	return &v
+}
+
+func deref[T any](p *T) T {
+	var zero T
+	if p == nil {
+		return zero
+	}
+	return *p
 }
 
 func (h *Handler) uploadOf(u store.Upload) api.UploadInfo {
@@ -135,7 +189,7 @@ func (h *Handler) CreateAsset(ctx context.Context, req api.CreateAssetRequestObj
 func (h *Handler) ListAssets(ctx context.Context, req api.ListAssetsRequestObject) (api.ListAssetsResponseObject, error) {
 	who, e := h.begin(ctx, false)
 	var (
-		rows []store.Asset
+		rows []View
 		next string
 	)
 	if e == nil {
@@ -167,8 +221,8 @@ func (h *Handler) ListAssets(ctx context.Context, req api.ListAssetsRequestObjec
 		return nil, undocumented("listAssets", e)
 	}
 	items := make([]api.Asset, len(rows))
-	for i, a := range rows {
-		items[i] = assetOf(a)
+	for i, v := range rows {
+		items[i] = viewOf(v)
 	}
 	res := api.ListAssets200JSONResponse{Items: items}
 	if next != "" {
@@ -180,11 +234,11 @@ func (h *Handler) ListAssets(ctx context.Context, req api.ListAssetsRequestObjec
 // GetAsset is GET /v1/assets/{id}.
 func (h *Handler) GetAsset(ctx context.Context, req api.GetAssetRequestObject) (api.GetAssetResponseObject, error) {
 	who, e := h.begin(ctx, false)
-	var a store.Asset
+	var v View
 	if e == nil {
 		var id ids.AssetID
 		if id, e = parseID(req.Id); e == nil {
-			a, e = h.svc.Get(ctx, who, id)
+			v, e = h.svc.Get(ctx, who, id)
 		}
 	}
 	if e != nil {
@@ -204,7 +258,7 @@ func (h *Handler) GetAsset(ctx context.Context, req api.GetAssetRequestObject) (
 		}
 		return nil, undocumented("getAsset", e)
 	}
-	return api.GetAsset200JSONResponse(assetOf(a)), nil
+	return api.GetAsset200JSONResponse(viewOf(v)), nil
 }
 
 // DeleteAsset is DELETE /v1/assets/{id}.

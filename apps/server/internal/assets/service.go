@@ -69,6 +69,7 @@ type Objects interface {
 	Abort(ctx context.Context, key, uploadID string) error
 	Head(ctx context.Context, key string) (storage.ObjectInfo, error)
 	DeletePrefix(ctx context.Context, prefix string) (int, error)
+	PresignGet(ctx context.Context, key string, expires time.Duration) (string, error)
 }
 
 // Enqueuer inserts a job in the transaction behind tx. *jobs.Enqueuer is the real one.
@@ -560,16 +561,20 @@ func (s *Service) Delete(ctx context.Context, who Actor, id ids.AssetID) *Error 
 
 // ---- Read ------------------------------------------------------------------------------------------------------
 
-// Get returns one asset of the workspace.
-func (s *Service) Get(ctx context.Context, who Actor, id ids.AssetID) (store.Asset, *Error) {
+// Get returns one asset of the workspace, with its derivative URLs once it is ready.
+func (s *Service) Get(ctx context.Context, who Actor, id ids.AssetID) (View, *Error) {
 	a, err := s.store.GetAsset(ctx, who.Workspace, id)
 	if errors.Is(err, store.ErrNotFound) {
-		return store.Asset{}, errNotFound
+		return View{}, errNotFound
 	}
 	if err != nil {
-		return store.Asset{}, s.internal(ctx, "get asset", err)
+		return View{}, s.internal(ctx, "get asset", err)
 	}
-	return a, nil
+	vs, e := s.views(ctx, who.Workspace, []store.Asset{a})
+	if e != nil {
+		return View{}, e
+	}
+	return vs[0], nil
 }
 
 // DefaultPageSize and MaxPageSize bound a list page.
@@ -580,7 +585,7 @@ const (
 
 // List returns a page of the workspace's assets, newest first, and the cursor of the next page ("" on the last one). The
 // cursor is the id of the last asset of the page.
-func (s *Service) List(ctx context.Context, who Actor, limit int, cursor string) ([]store.Asset, string, *Error) {
+func (s *Service) List(ctx context.Context, who Actor, limit int, cursor string) ([]View, string, *Error) {
 	if limit == 0 {
 		limit = DefaultPageSize
 	}
@@ -604,7 +609,11 @@ func (s *Service) List(ctx context.Context, who Actor, limit int, cursor string)
 		rows = rows[:limit]
 		next = rows[limit-1].ID.String()
 	}
-	return rows, next, nil
+	views, e := s.views(ctx, who.Workspace, rows)
+	if e != nil {
+		return nil, "", e
+	}
+	return views, next, nil
 }
 
 // ---- Failures --------------------------------------------------------------------------------------------------

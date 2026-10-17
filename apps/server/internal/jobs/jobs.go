@@ -29,6 +29,8 @@ import (
 const (
 	// QueueDefault holds short, cheap jobs such as the welcome job.
 	QueueDefault = "default"
+	// QueueMedia holds the asset ingest: minutes of CPU per job in a sandbox, so few at a time.
+	QueueMedia = "media"
 	// QueueMaintenance holds housekeeping, so a flood of other work never delays it and it never uses much.
 	QueueMaintenance = "maintenance"
 )
@@ -62,11 +64,15 @@ type Config struct {
 	Queues []Queue
 }
 
+// DefaultMediaConcurrency is how many ingests run at once on one worker unless MEDIA_CONCURRENCY says otherwise.
+const DefaultMediaConcurrency = 2
+
 // DefaultConfig is the queue layout of the worker.
 func DefaultConfig() Config {
 	return Config{Queues: []Queue{
 		{Name: QueueDefault, MaxWorkers: 10},
 		{Name: QueueMaintenance, MaxWorkers: 2},
+		{Name: QueueMedia, MaxWorkers: DefaultMediaConcurrency},
 	}}
 }
 

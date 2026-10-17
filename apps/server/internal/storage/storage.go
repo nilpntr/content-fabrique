@@ -136,6 +136,31 @@ func OriginalKey(ws ids.WorkspaceID, asset ids.AssetID) string {
 	return AssetPrefix(ws, asset) + "original"
 }
 
+// DerivativeKey is the key of a generated file of an asset: ws/{workspace}/assets/{asset}/{name}. name is a plain file
+// name (ValidDerivativeName), so it cannot reach outside the asset's prefix.
+func DerivativeKey(ws ids.WorkspaceID, asset ids.AssetID, name string) (string, error) {
+	if !ValidDerivativeName(name) {
+		return "", fmt.Errorf("storage: %q is not a valid derivative name", name)
+	}
+	return AssetPrefix(ws, asset) + name, nil
+}
+
+// ValidDerivativeName reports whether name is a short plain file name: letters, digits, '_', '-' and '.', not starting with
+// a dot, and not "original" (the uploaded file is never overwritten by a derivative).
+func ValidDerivativeName(name string) bool {
+	if name == "" || len(name) > 64 || name[0] == '.' || name == "original" {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-', r == '.':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // Part is one uploaded part of a multipart upload.
 type Part struct {
 	Number int
@@ -249,6 +274,53 @@ func (c *Client) Head(ctx context.Context, key string) (ObjectInfo, error) {
 		return ObjectInfo{}, fmt.Errorf("head object: %w", mapError(err))
 	}
 	return ObjectInfo{Size: aws.ToInt64(out.ContentLength), ETag: aws.ToString(out.ETag), ContentType: aws.ToString(out.ContentType)}, nil
+}
+
+// Object is a stream from an object, with the size storage reports. The caller closes Body.
+type Object struct {
+	Body        io.ReadCloser
+	Size        int64
+	ContentType string
+}
+
+// Get opens an object for reading, or ErrNotFound. The size is what storage says the body holds.
+func (c *Client) Get(ctx context.Context, key string) (Object, error) {
+	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(c.bucket), Key: aws.String(key)})
+	if err != nil {
+		return Object{}, fmt.Errorf("get object: %w", mapError(err))
+	}
+	return Object{Body: out.Body, Size: aws.ToInt64(out.ContentLength), ContentType: aws.ToString(out.ContentType)}, nil
+}
+
+// MaxPutSize is the largest object Put writes: one request, and R2 and S3 allow 5 GB for it. A derivative is far smaller.
+const MaxPutSize = 4 << 30
+
+// Put writes an object of exactly size bytes from body, replacing any object at key. body must be seekable (a file): the
+// request is signed over its content and may be retried.
+func (c *Client) Put(ctx context.Context, key string, body io.ReadSeeker, size int64, contentType string) error {
+	if size < 0 || size > MaxPutSize {
+		return fmt.Errorf("put object: size %d is outside 0..%d", size, int64(MaxPutSize))
+	}
+	_, err := c.s3.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(c.bucket), Key: aws.String(key), Body: body, ContentLength: aws.Int64(size), ContentType: aws.String(contentType),
+	})
+	if err != nil {
+		return fmt.Errorf("put object: %w", mapError(err))
+	}
+	return nil
+}
+
+// PresignGet returns a URL that reads the object for the given time. The key is built by the server from ids, never by a
+// client.
+func (c *Client) PresignGet(ctx context.Context, key string, expires time.Duration) (string, error) {
+	if expires <= 0 || expires > 7*24*time.Hour {
+		return "", fmt.Errorf("presign get: expiry %v is outside (0, 7 days]", expires)
+	}
+	req, err := c.presign.PresignGetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(c.bucket), Key: aws.String(key)}, s3.WithPresignExpires(expires))
+	if err != nil {
+		return "", fmt.Errorf("presign get: %w", mapError(err))
+	}
+	return req.URL, nil
 }
 
 // DeletePrefix deletes every object of one asset and returns how many it deleted. The prefix must be exactly

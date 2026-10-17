@@ -7,8 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 
+	"github.com/nilpntr/content-fabrique/internal/sandbox"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 )
 
@@ -71,7 +75,35 @@ type Config struct {
 	R2SecretAccessKey string
 	// R2Jurisdiction is "eu" for real R2 and empty for MinIO.
 	R2Jurisdiction string
+
+	// The media pipeline of the worker (P1-04): which sandbox runs ffmpeg and ffprobe on uploaded files, with which image,
+	// where the job directories live and how many ingests run at once.
+	//
+	// MediaSandboxProvider is MEDIA_SANDBOX_PROVIDER: "docker" (the default on a developer machine and in CI), "hardened"
+	// (docker under gVisor; the default in staging and production) or "local" (no isolation at all; refused in staging and
+	// production).
+	MediaSandboxProvider string
+	// MediaToolsImage is MEDIA_TOOLS_IMAGE, the media-tools image (packages/media-tools). It is never pulled at job time.
+	MediaToolsImage string
+	// MediaTempDir is MEDIA_TEMP_DIR: an absolute directory the worker may write to and the sandbox may mount from.
+	MediaTempDir string
+	// MediaConcurrency is MEDIA_CONCURRENCY: ingests that run at once on one worker.
+	MediaConcurrency int
 }
+
+// The sandbox providers MEDIA_SANDBOX_PROVIDER accepts.
+const (
+	SandboxDocker   = "docker"
+	SandboxHardened = "hardened"
+	SandboxLocal    = "local"
+)
+
+// Defaults of the media settings.
+const (
+	DefaultMediaToolsImage  = "media-tools:dev"
+	DefaultMediaConcurrency = 2
+	maxMediaConcurrency     = 32
+)
 
 // Storage is the connection to the bucket, from the R2_* settings.
 func (c Config) Storage() storage.Config {
@@ -106,6 +138,10 @@ func Load(getenv Getenv) (Config, error) {
 		R2AccessKeyID:     strings.TrimSpace(getenv("R2_ACCESS_KEY_ID")),
 		R2SecretAccessKey: strings.TrimSpace(getenv("R2_SECRET_ACCESS_KEY")),
 		R2Jurisdiction:    strings.ToLower(strings.TrimSpace(getenv("R2_JURISDICTION"))),
+
+		MediaSandboxProvider: strings.ToLower(strings.TrimSpace(getenv("MEDIA_SANDBOX_PROVIDER"))),
+		MediaToolsImage:      strings.TrimSpace(getenv("MEDIA_TOOLS_IMAGE")),
+		MediaTempDir:         strings.TrimSpace(getenv("MEDIA_TEMP_DIR")),
 	}
 
 	if c.Env == "" {
@@ -158,6 +194,8 @@ func Load(getenv Getenv) (Config, error) {
 		errs = append(errs, errors.New(`R2_JURISDICTION: must be empty (MinIO) or "eu"`))
 	}
 
+	errs = append(errs, c.loadMedia(getenv)...)
+
 	if c.OTLPEndpoint != "" {
 		if u, err := url.Parse(c.OTLPEndpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			errs = append(errs, errors.New("OTEL_EXPORTER_OTLP_ENDPOINT: must be an absolute http(s) URL"))
@@ -181,6 +219,44 @@ func Load(getenv Getenv) (Config, error) {
 		return Config{}, errors.Join(errs...)
 	}
 	return c, nil
+}
+
+// loadMedia fills in and checks the media settings (the three strings are already read).
+func (c *Config) loadMedia(getenv Getenv) []error {
+	var errs []error
+	if c.MediaSandboxProvider == "" {
+		c.MediaSandboxProvider = SandboxDocker
+		if c.Env == EnvStaging || c.Env == EnvProduction {
+			c.MediaSandboxProvider = SandboxHardened
+		}
+	}
+	switch c.MediaSandboxProvider {
+	case SandboxDocker, SandboxHardened:
+	case SandboxLocal:
+		if err := sandbox.CheckLocalAllowed(c.Env); err != nil {
+			errs = append(errs, fmt.Errorf("MEDIA_SANDBOX_PROVIDER: %w", err))
+		}
+	default:
+		errs = append(errs, fmt.Errorf("MEDIA_SANDBOX_PROVIDER: %q is not one of docker, hardened, local", c.MediaSandboxProvider))
+	}
+	if c.MediaToolsImage == "" {
+		c.MediaToolsImage = DefaultMediaToolsImage
+	}
+	if c.MediaTempDir == "" {
+		c.MediaTempDir = filepath.Join(os.TempDir(), "cf-media")
+	} else if !filepath.IsAbs(c.MediaTempDir) {
+		errs = append(errs, errors.New("MEDIA_TEMP_DIR: must be an absolute path"))
+	}
+	c.MediaConcurrency = DefaultMediaConcurrency
+	if raw := strings.TrimSpace(getenv("MEDIA_CONCURRENCY")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > maxMediaConcurrency {
+			errs = append(errs, fmt.Errorf("MEDIA_CONCURRENCY: must be a whole number from 1 to %d", maxMediaConcurrency))
+		} else {
+			c.MediaConcurrency = n
+		}
+	}
+	return errs
 }
 
 func countSet(values ...string) int {

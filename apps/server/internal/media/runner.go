@@ -44,6 +44,13 @@ type SandboxRunner struct {
 	Labels         map[string]string
 }
 
+// WithLabels returns a copy of the runner whose jobs carry the labels (workspace, asset and job kind, for audit and billing).
+func (r *SandboxRunner) WithLabels(labels map[string]string) Runner {
+	c := *r
+	c.Labels = labels
+	return &c
+}
+
 // Run implements Runner.
 func (r *SandboxRunner) Run(ctx context.Context, inv Invocation) (sandbox.Result, error) {
 	if r.Provider == nil {

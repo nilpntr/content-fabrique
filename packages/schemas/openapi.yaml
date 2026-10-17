@@ -181,7 +181,9 @@ paths:
       operationId: listAssets
       tags: [assets]
       summary: List the workspace's assets, newest first
-      description: Cursor pagination. Deleted assets are not listed.
+      description: |
+        Cursor pagination. Deleted assets are not listed. A `ready` asset carries its `media` facts and short-lived
+        `derivatives` URLs, as in `getAsset`.
       parameters:
         - name: limit
           in: query
@@ -226,7 +228,11 @@ paths:
       operationId: getAsset
       tags: [assets]
       summary: One asset
-      description: An asset of another workspace, or one that does not exist, is `404 not_found`.
+      description: |
+        An asset of another workspace, or one that does not exist, is `404 not_found`. While the asset is `processing`,
+        `ingest_progress` and `ingest_stage` say how far the ingest is. Once it is `ready`, `media` holds what the probe
+        found and `derivatives` holds a presigned GET URL per generated file (see `AssetDerivatives`); the URLs stop working
+        at `derivative_urls_expire_at`, so fetch the asset again for fresh ones.
       responses:
         "200":
           description: The asset.
@@ -811,12 +817,13 @@ components:
       type: string
       description: |
         `uploading` (the multipart upload is in progress), `uploaded` (the object is complete; ingest is queued),
-        `processing`, `ready`, or `failed` (see `failure_reason`).
+        `processing` (the ingest is running: see `ingest_progress`), `ready` (probed, with its derivatives), or `failed`
+        (see `failure_reason`).
       enum: [uploading, uploaded, processing, ready, failed]
 
     Asset:
       type: object
-      required: [id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, failure_reason, created_at, updated_at]
+      required: [id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, failure_reason, ingest_progress, ingest_stage, created_at, updated_at]
       properties:
         id:
           $ref: "#/components/schemas/AssetId"
@@ -846,13 +853,120 @@ components:
             type: string
         failure_reason:
           type: [string, "null"]
-          description: Why the asset is `failed` (`upload_expired`, `size_mismatch`, `upload_aborted`). Null otherwise.
+          description: |
+            Why the asset is `failed`, as a code that is safe to show. The upload failed: `upload_expired`, `size_mismatch`,
+            `upload_aborted`. The ingest could not process the file: `unsupported_format` (not a container we accept),
+            `corrupt_media` (damaged or cut off), `no_video_stream`, `no_audio_stream`, `undecodable_video`,
+            `invalid_duration`, `too_long` (over 4 hours), `unsupported_resolution`, `kind_mismatch`; or `processing_failed`
+            (our fault: it failed on every retry). Null otherwise.
+        ingest_progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: How far the ingest is while `status` is `processing`; 100 when `ready`, 0 before it starts.
+        ingest_stage:
+          type: [string, "null"]
+          description: What the ingest is doing while `status` is `processing` (`starting`, `downloading`, `probing`, `proxy`, `derivatives`, `uploading`). Null otherwise.
+        media:
+          $ref: "#/components/schemas/MediaInfo"
+        derivatives:
+          $ref: "#/components/schemas/AssetDerivatives"
+        derivative_urls_expire_at:
+          type: string
+          format: date-time
+          description: When the URLs in `derivatives` stop working. Present with `derivatives`.
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+
+    MediaInfo:
+      type: object
+      description: What the ingest probe found in the original. Present once the asset is `ready`.
+      required: [duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr]
+      properties:
+        duration_ms:
+          type: integer
+          format: int64
+          description: 0 for an image.
+        width:
+          type: [integer, "null"]
+          description: The upright (display) width of the original in pixels, rotation applied. Null for audio.
+        height:
+          type: [integer, "null"]
+          description: The upright (display) height. A phone clip held upright is portrait here although it is stored sideways.
+        fps:
+          type: [number, "null"]
+          format: double
+        rotation:
+          type: integer
+          enum: [0, 90, 180, 270]
+          description: Degrees clockwise the stored picture of the original must turn to be upright. The derivatives have it applied already and carry no rotation flag.
+        video_codec:
+          type: [string, "null"]
+        audio_codec:
+          type: [string, "null"]
+          description: The codec of the audio stream that was used. A file's other audio tracks that cannot be decoded (the APAC spatial-audio track of an iPhone clip) are ignored.
+        has_audio:
+          type: boolean
+          description: True when a decodable audio stream was found and is in the proxy.
+        hdr:
+          type: boolean
+          description: True when the original is HDR (PQ or HLG). The proxy is always SDR BT.709.
+
+    DerivativeFile:
+      type: object
+      required: [url, content_type, size_bytes]
+      properties:
+        url:
+          type: string
+          description: A presigned GET URL. It supports HTTP range requests. Treat it as a secret until it expires.
+        content_type:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+        width:
+          type: integer
+          description: Pixels, for pictures and videos.
+        height:
+          type: integer
+        duration_ms:
+          type: integer
+          format: int64
+
+    AssetDerivatives:
+      type: object
+      description: |
+        The files the ingest made, each as a short-lived presigned GET URL. Only the files that exist are present: an
+        audio file has no picture files, and a clip without a decodable audio track has no `waveform`.
+      properties:
+        proxy_720:
+          allOf:
+            - $ref: "#/components/schemas/DerivativeFile"
+          description: "`proxy_720.mp4`: H.264, 720 px on the short side (a portrait clip is 720x1280), upright with no rotation flag, SDR BT.709, a keyframe every second, the index first, AAC audio. Plays and seeks in a plain `<video>`."
+        poster:
+          allOf:
+            - $ref: "#/components/schemas/DerivativeFile"
+          description: "`poster.jpg`: a representative frame."
+        hover_preview:
+          allOf:
+            - $ref: "#/components/schemas/DerivativeFile"
+          description: "`hover_preview.mp4`: about 8 s made of four 2 s segments spread over the clip (the whole clip when it is shorter), muted, 360 px on the short side, under 1 MB."
+        sprite:
+          allOf:
+            - $ref: "#/components/schemas/DerivativeFile"
+          description: "`sprite.jpg`: a grid of 160 px wide tiles, one per `interval_sec` seconds (at most 100), for hover scrubbing. `sprite_vtt` says where each tile is."
+        sprite_vtt:
+          allOf:
+            - $ref: "#/components/schemas/DerivativeFile"
+          description: "`sprite.vtt`: a WebVTT thumbnails track. Each cue is `sprite.jpg#xywh=x,y,w,h`; resolve `sprite.jpg` to the `sprite` URL."
+        waveform:
+          allOf:
+            - $ref: "#/components/schemas/DerivativeFile"
+          description: "`waveform.json`: `{version, sample_rate, duration_ms, samples_per_peak, peaks}`, up to 1000 peaks from 0 to 1."
 
     CreateAssetRequest:
       type: object
