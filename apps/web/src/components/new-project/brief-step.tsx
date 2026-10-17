@@ -2,6 +2,7 @@ import { Lightbulb, Music } from "lucide-react";
 import * as React from "react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
 export const BRIEF_MAX_LENGTH = 2000;
 
@@ -23,11 +24,19 @@ export function BriefStep({ value, onChange }: { value: string; onChange: (brief
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const textareaId = React.useId();
   const hintId = React.useId();
+  const counterId = React.useId();
 
   function applyExample(example: string) {
-    onChange(withExample(value, example).slice(0, BRIEF_MAX_LENGTH));
+    const next = withExample(value, example);
+    if (next.length > BRIEF_MAX_LENGTH) return;
+    onChange(next);
     textareaRef.current?.focus();
   }
+
+  const remaining = BRIEF_MAX_LENGTH - value.length;
+  // Said aloud only when it changes bucket, so it does not talk on every keystroke.
+  const limitNote =
+    remaining <= 0 ? "Character limit reached" : remaining <= 50 ? "Fewer than 50 characters left" : remaining <= 200 ? "Fewer than 200 characters left" : "";
 
   return (
     <div className="space-y-6">
@@ -36,14 +45,18 @@ export function BriefStep({ value, onChange }: { value: string; onChange: (brief
           <label htmlFor={textareaId} className="font-medium">
             Instructions <span className="font-normal text-subtle-foreground">(optional)</span>
           </label>
-          <span className="text-[12.5px] text-subtle-foreground tabular-nums">
+          <span id={counterId} className={cn("text-[12.5px] tabular-nums", remaining <= 200 ? "text-foreground" : "text-subtle-foreground")}>
             {value.length} / {BRIEF_MAX_LENGTH}
+            <span className="sr-only"> characters</span>
+          </span>
+          <span role="status" className="sr-only">
+            {limitNote}
           </span>
         </div>
         <Textarea
           ref={textareaRef}
           id={textareaId}
-          aria-describedby={hintId}
+          aria-describedby={`${hintId} ${counterId}`}
           value={value}
           maxLength={BRIEF_MAX_LENGTH}
           rows={6}
@@ -58,17 +71,22 @@ export function BriefStep({ value, onChange }: { value: string; onChange: (brief
       <div className="space-y-2">
         <h3 className="font-medium">Examples</h3>
         <ul aria-label="Example instructions" className="grid gap-2 sm:grid-cols-2">
-          {EXAMPLE_PROMPTS.map((example) => (
-            <li key={example} className="flex">
-              <button
-                type="button"
-                onClick={() => applyExample(example)}
-                className="w-full cursor-pointer rounded-xl bg-surface-raised px-3 py-2 text-left text-[13px] leading-5 text-muted-foreground shadow-raised transition-[color,box-shadow,translate] duration-(--dur-fast) ease-out hover:text-foreground hover:shadow-pop motion-safe:hover:-translate-y-px"
-              >
-                <span className="line-clamp-2">{example}</span>
-              </button>
-            </li>
-          ))}
+          {EXAMPLE_PROMPTS.map((example) => {
+            const fits = withExample(value, example).length <= BRIEF_MAX_LENGTH;
+            return (
+              <li key={example} className="flex">
+                <button
+                  type="button"
+                  disabled={!fits}
+                  onClick={() => applyExample(example)}
+                  className="w-full cursor-pointer rounded-xl bg-surface-raised px-3 py-2 text-left text-[13px] leading-5 text-muted-foreground shadow-raised transition-[color,box-shadow,translate] duration-(--dur-fast) ease-out hover:text-foreground hover:shadow-pop disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:text-muted-foreground disabled:hover:shadow-raised motion-safe:hover:-translate-y-px motion-safe:disabled:hover:translate-y-0"
+                >
+                  {example}
+                  {fits ? null : <span className="mt-0.5 block text-[12px] text-subtle-foreground">Not enough room left in the instructions</span>}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       </div>
 

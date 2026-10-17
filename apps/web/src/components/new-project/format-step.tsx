@@ -6,45 +6,21 @@ import { FORMATS } from "./formats";
 import type { Format } from "./types";
 
 /**
- * One card per output format, as a radio group: the selected card is the tab stop, the arrow keys move
- * the selection (and the focus) and wrap around, Home and End jump to the ends, Space and Enter select.
+ * One card per output format, as native radios sharing one name: the browser does the arrow keys (they move the
+ * selection and the focus, and wrap), Space and the tab stop. Only Home and End are added here, and only when no
+ * modifier key is held.
  */
 export function FormatStep({ value, onChange }: { value: Format; onChange: (format: Format) => void }) {
+  const id = React.useId();
   const refs = React.useRef(new Map<Format, HTMLInputElement>());
 
-  function select(format: Format) {
-    onChange(format);
-    refs.current.get(format)?.focus();
-  }
-
-  function onKeyDown(event: React.KeyboardEvent, index: number) {
-    const last = FORMATS.length - 1;
-    let next: number;
-    switch (event.key) {
-      case "ArrowRight":
-      case "ArrowDown":
-        next = index === last ? 0 : index + 1;
-        break;
-      case "ArrowLeft":
-      case "ArrowUp":
-        next = index === 0 ? last : index - 1;
-        break;
-      case "Home":
-        next = 0;
-        break;
-      case "End":
-        next = last;
-        break;
-      case " ":
-      case "Enter":
-        event.preventDefault();
-        select(FORMATS[index]?.id ?? value);
-        return;
-      default:
-        return;
-    }
+  function onKeyDown(event: React.KeyboardEvent) {
+    if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+    const target = event.key === "Home" ? FORMATS[0] : event.key === "End" ? FORMATS.at(-1) : undefined;
+    if (!target) return;
     event.preventDefault();
-    select(FORMATS[next]?.id ?? value);
+    onChange(target.id);
+    refs.current.get(target.id)?.focus();
   }
 
   return (
@@ -52,8 +28,8 @@ export function FormatStep({ value, onChange }: { value: Format; onChange: (form
       <legend className="sr-only">Output format</legend>
       {FORMATS.map((format, index) => {
         const checked = format.id === value;
-        const labelId = `format-${format.id}-label`.replace(":", "-");
-        const detailId = `format-${format.id}-detail`.replace(":", "-");
+        const labelId = `${id}-${index}-label`;
+        const detailId = `${id}-${index}-detail`;
         return (
           <label
             key={format.id}
@@ -70,13 +46,13 @@ export function FormatStep({ value, onChange }: { value: Format; onChange: (form
                 else refs.current.delete(format.id);
               }}
               type="radio"
-              name="format"
+              name={id}
               value={format.id}
               checked={checked}
               aria-labelledby={labelId}
               aria-describedby={detailId}
               onChange={() => onChange(format.id)}
-              onKeyDown={(event) => onKeyDown(event, index)}
+              onKeyDown={onKeyDown}
               className="sr-only"
             />
             <span
@@ -92,12 +68,7 @@ export function FormatStep({ value, onChange }: { value: Format; onChange: (form
 
             <span className="flex h-40 items-end justify-center">
               <span className="flex origin-bottom transition-transform duration-(--dur-base) ease-out motion-safe:group-hover/card:-translate-y-1 motion-safe:group-hover/card:scale-[1.04] motion-safe:group-has-checked/card:-translate-y-1.5 motion-safe:group-has-checked/card:scale-[1.07] motion-safe:group-has-checked/card:duration-(--dur-spring) motion-safe:group-has-checked/card:ease-spring">
-                <DeviceFrame
-                  kind={format.device}
-                  postRatio={format.id === "4:5" ? "4:5" : "1:1"}
-                  active={checked}
-                  className="drop-shadow-sm"
-                />
+                <DeviceFrame kind={format.device} postRatio={format.postRatio} active={checked} className="drop-shadow-sm" />
               </span>
             </span>
 

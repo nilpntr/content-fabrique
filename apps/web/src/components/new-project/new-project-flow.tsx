@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { BriefStep } from "./brief-step";
 import { formatDuration } from "./duration";
-import { FootageStep, totalDurationMs } from "./footage-step";
+import { FootageStep, totalDurationMs, validPicks } from "./footage-step";
 import { FormatStep } from "./format-step";
 import { ReviewStep, type StepId } from "./review-step";
 import type { Asset, AssetId, Format, NewProjectInput } from "./types";
@@ -39,12 +39,20 @@ export interface NewProjectFlowProps {
 export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:16" }: NewProjectFlowProps) {
   const [stepIndex, setStepIndex] = React.useState(0);
   const [format, setFormat] = React.useState<Format>(initialFormat);
-  const [assetIds, setAssetIds] = React.useState<AssetId[]>([]);
+  const [pickedIds, setAssetIds] = React.useState<AssetId[]>([]);
   const [brief, setBrief] = React.useState("");
   const [creating, setCreating] = React.useState(false);
   const [failed, setFailed] = React.useState(false);
   const headingRef = React.useRef<HTMLHeadingElement>(null);
+  const createRef = React.useRef<HTMLButtonElement>(null);
   const shownStep = React.useRef(0);
+
+  // One source for every count, the review and the payload: the picks that still exist in the library.
+  const assetIds = React.useMemo(() => validPicks(assets, pickedIds), [assets, pickedIds]);
+  // Forget the picks that left the library, for good.
+  React.useEffect(() => {
+    setAssetIds((current) => (current.length === validPicks(assets, current).length ? current : validPicks(assets, current)));
+  }, [assets]);
 
   const step = STEPS[stepIndex] ?? STEPS[0];
   const isLast = stepIndex === STEPS.length - 1;
@@ -61,7 +69,7 @@ export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:
   }, [stepIndex]);
 
   function go(index: number) {
-    if (index < 0 || index >= STEPS.length || !reachable(index)) return;
+    if (creating || index < 0 || index >= STEPS.length || !reachable(index)) return;
     setFailed(false);
     setStepIndex(index);
   }
@@ -74,6 +82,8 @@ export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:
       await onCreate({ format, assetIds: [...assetIds], brief: brief.trim() });
     } catch {
       setFailed(true);
+      // The button stayed focusable while pending; make sure the focus is on it for the retry.
+      createRef.current?.focus();
     } finally {
       setCreating(false);
     }
@@ -97,7 +107,7 @@ export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:
               <li key={item.id} className="flex items-center gap-1">
                 <button
                   type="button"
-                  disabled={!reachable(index)}
+                  disabled={creating || !reachable(index)}
                   aria-current={current ? "step" : undefined}
                   onClick={() => go(index)}
                   className={cn(
@@ -132,44 +142,54 @@ export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:
           <p className="max-w-prose text-muted-foreground">{step.description}</p>
         </div>
 
-        {step.id === "format" ? <FormatStep value={format} onChange={setFormat} /> : null}
-        {step.id === "footage" ? <FootageStep assets={assets} selectedIds={assetIds} onChange={setAssetIds} /> : null}
-        {step.id === "brief" ? <BriefStep value={brief} onChange={setBrief} /> : null}
-        {step.id === "review" ? (
-          <ReviewStep assets={assets} format={format} assetIds={assetIds} brief={brief} onEdit={(target) => go(STEPS.findIndex((s) => s.id === target))} />
-        ) : null}
+        <fieldset disabled={creating} className="m-0 min-w-0 border-0 p-0">
+          {step.id === "format" ? <FormatStep value={format} onChange={setFormat} /> : null}
+          {step.id === "footage" ? <FootageStep assets={assets} selectedIds={assetIds} onChange={setAssetIds} /> : null}
+          {step.id === "brief" ? <BriefStep value={brief} onChange={setBrief} /> : null}
+          {step.id === "review" ? (
+            <ReviewStep assets={assets} format={format} assetIds={assetIds} brief={brief} onEdit={(target) => go(STEPS.findIndex((s) => s.id === target))} disabled={creating} />
+          ) : null}
+        </fieldset>
       </section>
 
+      <p role="status" className="sr-only">
+        {creating ? "Creating the project" : ""}
+      </p>
       {failed ? (
         <p role="alert" className="rounded-xl bg-del-wash px-3 py-2 text-destructive">
           The project could not be created. Try again.
         </p>
       ) : null}
 
-      <div className="flex items-center justify-between gap-3 border-t border-hairline pt-4">
+      <div className="sticky bottom-0 z-20 -mx-2 flex items-center justify-between gap-3 border-t border-hairline bg-background/90 px-2 py-3 backdrop-blur-md">
         <div className="flex items-center gap-2">
           {stepIndex === 0 ? (
             onCancel ? (
-              <Button variant="ghost" onClick={onCancel}>
+              <Button variant="ghost" onClick={onCancel} disabled={creating}>
                 Cancel
               </Button>
             ) : null
           ) : (
-            <Button variant="ghost" onClick={() => go(stepIndex - 1)}>
+            <Button variant="ghost" onClick={() => go(stepIndex - 1)} disabled={creating}>
               <ArrowLeft aria-hidden="true" />
               Back
             </Button>
           )}
         </div>
         <div className="flex items-center gap-3">
-          {hasClips && step.id !== "footage" ? (
-            <p className="hidden text-[13px] text-muted-foreground tabular-nums sm:block">
-              {assetIds.length} {assetIds.length === 1 ? "clip" : "clips"} · {formatDuration(totalMs)}
+          {step.id !== "format" ? (
+            // The footage step has its own live count; this one would only repeat it for screen readers.
+            <p aria-hidden={step.id === "footage" ? true : undefined} className="text-[13px] text-muted-foreground tabular-nums">
+              <span className="font-medium text-foreground">
+                {assetIds.length} {assetIds.length === 1 ? "clip" : "clips"}
+              </span>{" "}
+              · {formatDuration(totalMs)}
             </p>
           ) : null}
           {!canAdvance ? <p className="text-[13px] text-muted-foreground">Select at least one clip</p> : null}
           {isLast ? (
-            <Button size="lg" onClick={create} disabled={creating || !hasClips}>
+            // Stays focusable while pending (aria-disabled), so the focus is not lost on press.
+            <Button ref={createRef} size="lg" onClick={create} disabled={creating || !hasClips} focusableWhenDisabled>
               {creating ? "Creating…" : "Create project"}
             </Button>
           ) : (

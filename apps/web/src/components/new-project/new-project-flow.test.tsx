@@ -37,39 +37,37 @@ test("the format cards are one radio group with the selected card checked", () =
   expect(description?.textContent).toContain("TikTok, Reels, Shorts");
 });
 
-test("arrow keys move the selection and wrap, Home and End jump", () => {
-  const { spy, rerenderWith } = Format_({});
-  fireEvent.keyDown(radio(/^9:16/), { key: "ArrowRight" });
-  expect(spy).toHaveBeenLastCalledWith("1:1");
-  rerenderWith();
-  expect(document.activeElement).toBe(radio(/^1:1/));
-  fireEvent.keyDown(radio(/^1:1/), { key: "ArrowDown" });
-  expect(spy).toHaveBeenLastCalledWith("4:5");
-  rerenderWith();
-  fireEvent.keyDown(radio(/^4:5/), { key: "End" });
-  expect(spy).toHaveBeenLastCalledWith("16:9");
-  rerenderWith();
-  fireEvent.keyDown(radio(/^16:9/), { key: "ArrowRight" });
-  expect(spy).toHaveBeenLastCalledWith("9:16");
-  rerenderWith();
-  fireEvent.keyDown(radio(/^9:16/), { key: "ArrowLeft" });
-  expect(spy).toHaveBeenLastCalledWith("16:9");
-  rerenderWith();
-  fireEvent.keyDown(radio(/^16:9/), { key: "ArrowUp" });
-  expect(spy).toHaveBeenLastCalledWith("4:5");
-  rerenderWith();
-  fireEvent.keyDown(radio(/^4:5/), { key: "Home" });
-  expect(spy).toHaveBeenLastCalledWith("9:16");
+test("the radios share one name and have unique ids, so the browser handles the arrow keys", () => {
+  Format_({});
+  const radios = screen.getAllByRole("radio") as HTMLInputElement[];
+  expect(new Set(radios.map((r) => r.name)).size).toBe(1);
+  expect(radios[0]?.name).not.toBe("");
+  const ids = radios.flatMap((r) => [r.getAttribute("aria-labelledby"), r.getAttribute("aria-describedby")]);
+  expect(new Set(ids).size).toBe(8);
 });
 
-test("Space and Enter select a card, and a click does too", () => {
-  const { spy } = Format_({});
-  fireEvent.keyDown(radio(/^4:5/), { key: " " });
-  expect(spy).toHaveBeenLastCalledWith("4:5");
-  fireEvent.keyDown(radio(/^16:9/), { key: "Enter" });
+test("Home and End select the first and last card; arrows, Enter and modified keys are left alone", () => {
+  const { spy, rerenderWith } = Format_({ initial: "1:1" });
+  fireEvent.keyDown(radio(/^1:1/), { key: "End" });
   expect(spy).toHaveBeenLastCalledWith("16:9");
-  fireEvent.click(radio(/^1:1/));
-  expect(spy).toHaveBeenLastCalledWith("1:1");
+  rerenderWith();
+  expect(document.activeElement).toBe(radio(/^16:9/));
+  fireEvent.keyDown(radio(/^16:9/), { key: "Home" });
+  expect(spy).toHaveBeenLastCalledWith("9:16");
+  spy.mockClear();
+  for (const init of [{ key: "End", ctrlKey: true }, { key: "Home", metaKey: true }, { key: "End", altKey: true }, { key: "Home", shiftKey: true }]) {
+    expect(fireEvent.keyDown(radio(/^9:16/), init)).toBe(true);
+  }
+  for (const key of ["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp", "Enter"]) {
+    expect(fireEvent.keyDown(radio(/^9:16/), { key })).toBe(true); // not prevented: the browser's own behaviour runs
+  }
+  expect(spy).not.toHaveBeenCalled();
+});
+
+test("choosing a radio (what the browser does on an arrow key or Space) selects that format", () => {
+  const { spy } = Format_({});
+  fireEvent.click(radio(/^4:5/));
+  expect(spy).toHaveBeenLastCalledWith("4:5");
 });
 
 test("a device frame is decorative and reflects the active state", () => {
@@ -257,4 +255,108 @@ test("Edit on the review goes back to that step with the choices kept", () => {
   expect(checkedFormats()).toEqual(["1:1"]);
   next();
   expect(checkbox(/Back double biceps/).checked).toBe(true);
+});
+
+test("footage: a stale pick is dropped from every count, and hidden picks only count clips that exist", () => {
+  const onChange = vi.fn();
+  const gone = "ast_01jh6m99999999999999999999" as AssetId;
+  const { rerender } = render(<FootageStep assets={SAMPLE_ASSETS} selectedIds={[SAMPLE_ASSETS[0]?.id as AssetId, gone]} onChange={onChange} />);
+  expect(screen.getByText(/1 clip selected/)).toBeTruthy();
+  expect(screen.queryByText(/hidden by the filter/)).toBeNull();
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search clips" }), { target: { value: "zzz" } });
+  expect(screen.getByText(/1 hidden by the filter/)).toBeTruthy();
+  rerender(<FootageStep assets={SAMPLE_ASSETS.slice(1)} selectedIds={[SAMPLE_ASSETS[0]?.id as AssetId]} onChange={onChange} />);
+  expect(screen.getByText(/0 clips selected/)).toBeTruthy();
+  expect(screen.queryByText(/hidden by the filter/)).toBeNull();
+});
+
+test("footage: the shift-click anchor is reset by Clear, Select all and by a selection that came from outside", () => {
+  const ids = SAMPLE_ASSETS.map((a) => a.id);
+  const onChange = vi.fn();
+  const view = (selectedIds: AssetId[]) => <FootageStep assets={SAMPLE_ASSETS} selectedIds={selectedIds} onChange={onChange} />;
+  const { rerender } = render(view([]));
+
+  fireEvent.click(checkbox(/Lat pulldown/)); // anchor: clip 2
+  fireEvent.click(screen.getByRole("button", { name: /^Select all/ }));
+  rerender(view(ids));
+  fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+  rerender(view([]));
+  onChange.mockClear();
+  fireEvent.click(checkbox(/Squat, rear view/), { shiftKey: true }); // no anchor: just this clip
+  expect(onChange).toHaveBeenLastCalledWith([ids[7]]);
+
+  rerender(view([ids[7] as AssetId]));
+  fireEvent.click(checkbox(/Gym walk-in/)); // anchor: clip 5
+  rerender(view([ids[7] as AssetId, ids[4] as AssetId]));
+  rerender(view([ids[0] as AssetId])); // the parent replaced the selection
+  fireEvent.click(checkbox(/Deadlift lockout/), { shiftKey: true });
+  expect(onChange).toHaveBeenLastCalledWith([ids[0], ids[6]]);
+});
+
+test("create locks the flow while pending, keeps focus on the button, and keeps the error until the user acts", async () => {
+  let fail: () => void = () => {};
+  let finish: () => void = () => {};
+  const onCreate = vi
+    .fn()
+    .mockImplementationOnce(() => new Promise<void>((_, reject) => { fail = () => reject(new Error("boom")); }))
+    .mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+  render(<NewProjectFlow assets={SAMPLE_ASSETS} onCreate={onCreate} />);
+  next();
+  fireEvent.click(checkbox(/Back double biceps/));
+  next();
+  fireEvent.click(screen.getAllByRole("button", { name: /^Review/ }).at(-1) as HTMLElement);
+
+  const create = screen.getByRole("button", { name: "Create project" }) as HTMLButtonElement;
+  create.focus();
+  fireEvent.click(create);
+  expect(onCreate).toHaveBeenCalledTimes(1);
+  const pending = screen.getByRole("button", { name: "Creating…" }) as HTMLButtonElement;
+  expect(pending).toBe(create);
+  expect(pending.getAttribute("aria-disabled")).toBe("true");
+  expect(document.activeElement).toBe(pending);
+  expect(screen.getByRole("status").textContent).toContain("Creating");
+  for (const name of ["Back", "Edit format", "Edit footage", "Edit instructions"]) {
+    expect((screen.getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(true);
+  }
+  const steps = within(screen.getByRole("navigation", { name: "Progress" })).getAllByRole("button");
+  expect(steps).toHaveLength(4);
+  for (const step of steps) {
+    expect((step as HTMLButtonElement).disabled).toBe(true);
+  }
+  fireEvent.click(pending); // pressing again while pending does nothing
+  expect(onCreate).toHaveBeenCalledTimes(1);
+
+  fail();
+  await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+  const again = screen.getByRole("button", { name: "Create project" });
+  expect(document.activeElement).toBe(again);
+  expect((screen.getByRole("button", { name: "Back" }) as HTMLButtonElement).disabled).toBe(false);
+  // The error stays while the user does nothing, and goes once they act.
+  expect(screen.getByRole("alert")).toBeTruthy();
+  fireEvent.click(again);
+  await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(2));
+  await act(async () => finish());
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+});
+
+test("brief: an example that would not fit is disabled with a hint and never truncated; the counter describes the textarea", () => {
+  render(<NewProjectFlow assets={SAMPLE_ASSETS} onCreate={vi.fn()} />);
+  next();
+  fireEvent.click(checkbox(/Back double biceps/));
+  next();
+  const textarea = screen.getByRole("textbox", { name: /Instructions/ }) as HTMLTextAreaElement;
+  const describedBy = (textarea.getAttribute("aria-describedby") ?? "").split(" ");
+  expect(describedBy).toHaveLength(2);
+  expect(describedBy.some((id) => document.getElementById(id)?.textContent?.includes("/ 2000"))).toBe(true);
+  expect(screen.getAllByRole("status")[0]?.textContent).toBe("");
+
+  const first = EXAMPLE_PROMPTS[0];
+  fireEvent.change(textarea, { target: { value: "x".repeat(2000 - first.length - 1) } }); // one short of fitting after the blank line
+  const chip = screen.getByRole("button", { name: new RegExp(`^${first.slice(0, 20)}`) }) as HTMLButtonElement;
+  expect(chip.disabled).toBe(true);
+  expect(chip.textContent).toContain("Not enough room");
+  fireEvent.click(chip);
+  expect(textarea.value).toHaveLength(2000 - first.length - 1);
+  expect(screen.getAllByRole("status")[0]?.textContent).toBe("Fewer than 200 characters left");
+  expect((screen.getByRole("button", { name: new RegExp(`^${EXAMPLE_PROMPTS[1].slice(0, 20)}`) }) as HTMLButtonElement).disabled).toBe(false);
 });
