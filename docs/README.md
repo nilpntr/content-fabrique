@@ -40,7 +40,7 @@
 | 02 | [Research report](02-research.md) | TikTok APIs and trend data, music licensing, video understanding, editing and rendering stack, competitors, agent runtime and sandboxes, Cloudflare/Clerk/Go platform, costs. Sourced and confidence-marked |
 | 03 | [Architecture](03-architecture.md) | Components, data model, media pipeline, timeline spec and renderer, agents and evals, model routing and sub-agents, benchmark harness, sandbox interface, API, realtime, auth/billing, managed vs BYOK model access, deployment, cost model, security |
 | 04 | [Implementation plan](04-implementation-plan.md) | Phases P0–P7 with PR-sized tasks and acceptance criteria, cross-cutting practices, definition of done, open questions |
-| 05 | [Decision log](05-decisions.md) | Lightweight ADRs (D-01 … D-24) with context, alternatives and when to revisit |
+| 05 | [Decision log](05-decisions.md) | Lightweight ADRs (D-01 … D-25) with context, alternatives and when to revisit |
 | 06 | [Setup and credentials](06-setup-and-credentials.md) | Every account, key and `.env` variable, who creates it and when; the scopes to grant each token; the hostnames on `contentfabrique.app`; `cfctl doctor` and bootstrap tooling; a prompt for the implementing agent |
 | — | [Design notes](design/) | Short notes written before a hard part is built: [timeline v1, edit ops and renderer](design/timeline-v1.md) |
 

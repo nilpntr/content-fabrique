@@ -1,6 +1,6 @@
 # 01 — Product Plan
 
-> Status: **draft v0.1** · 2026-10-16 · Scope decided with the founder: **multi-tenant SaaS, fitness creators first, TikTok only for v1.**
+> Status: **draft v0.1** · 2026-10-16 · Scope decided with the founder: **multi-tenant SaaS, fitness creators first, TikTok only for v1** (publishing; renders come in four formats, [D-25](05-decisions.md#d-25-output-formats-916-11-45-and-169-per-project)).
 > Companion docs: [research](02-research.md) · [architecture](03-architecture.md) · [implementation plan](04-implementation-plan.md) · [decision log](05-decisions.md)
 
 ## 1. One-liner
@@ -54,7 +54,7 @@ Most AI video tools solve a neighbouring problem: **long → short clipping** (c
 | **Idea** | A concept instantiated for one creator: hook text, slot→moment mapping, suggested sound, rationale. |
 | **Project** | One video being produced. It owns timeline versions and renders. |
 | **Timeline** | A declarative JSON edit spec (an EDL). Versioned and immutable per version, it renders deterministically. |
-| **Render** | An output video, either a fast low-res preview or the final 1080×1920. |
+| **Render** | An output video in the project's format, either a fast low-res preview or the final (1080×1920 for 9:16). |
 | **Agent run** | One execution of an agent, with a persisted event log for transparency, debugging and billing. |
 
 ## 6. Core user journeys (v1)
@@ -79,9 +79,10 @@ flowchart LR
 4. **Annotate.** Open a clip to get a player with a filmstrip and waveform timeline. Select a range and add a comment or tag. Annotations become hard constraints ("never use") or preferences ("best pose") for the agents.
 5. **Trend board.** Trending sounds and formats for fitness TikTok, each with growth, BPM and length of the popular snippet, a "why it works" note and source links. Items can be saved as inspiration.
 6. **Ideas.** "Give me ideas", optionally scoped to selected clips, a trend or a sound, returns idea cards: concept, hook, structure, clips to use, sound, and why. Pick one, tweak it, then "Make it".
-7. **Brief (optional).** Free text, for example: *"Start with my best back pose with the title 'How to grow a back 101', then the clip of me doing the exercise, cut to a viral song that matches."* The agent turns it into explicit constraints.
-8. **Edit & revise.** The agent builds a timeline and a preview renders. Under the player sits a visible timeline: the creator drags across it to select a range and comments on it, and a side panel keeps the history of every comment with its time range and whether a later version addressed it. The creator comments on time ranges of the preview, or pins a comment to a spot on the frame ("make *this* text bigger"), or uses quick actions (shorter, more energetic, swap clip, change text, change sound). The agent produces a new version, and versions can be compared side by side. This "point at the frame and say what to change" loop is what [FrameJam](https://github.com/moritzkremb/framejam), linked in the README, does for coding agents; here it is built into the product.
-9. **Export.** The final render (1080×1920, H.264), caption text and hashtags, plus a **sound cue** when a trending sound must be added inside TikTok (see §9). Later, the export goes to the creator's TikTok inbox as a draft.
+7. **New project.** Start a job in three steps: pick the **format** from cards that each show a device in that shape (9:16 phone, 1:1 and 4:5 feed posts, 16:9 laptop), **select the footage** to use from the library, and optionally add **instructions**. Ideas from step 6 open this screen pre-filled.
+8. **Brief (optional).** Free text, for example: *"Start with my best back pose with the title 'How to grow a back 101', then the clip of me doing the exercise, cut to a viral song that matches."* The agent turns it into explicit constraints.
+9. **Edit & revise.** The agent builds a timeline and a preview renders. Under the player sits a visible timeline: the creator drags across it to select a range and comments on it, and a side panel keeps the history of every comment with its time range and whether a later version addressed it. The creator comments on time ranges of the preview, or pins a comment to a spot on the frame ("make *this* text bigger"), or uses quick actions (shorter, more energetic, swap clip, change text, change sound). The agent produces a new version, and versions can be compared side by side. This "point at the frame and say what to change" loop is what [FrameJam](https://github.com/moritzkremb/framejam), linked in the README, does for coding agents; here it is built into the product.
+10. **Export.** The final render in the project's format (1080×1920 for 9:16, H.264), caption text and hashtags, plus a **sound cue** when a trending sound must be added inside TikTok (see §9). Later, the export goes to the creator's TikTok inbox as a draft.
 
 ## 7. Feature scope
 

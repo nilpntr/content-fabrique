@@ -300,12 +300,12 @@ Agents (and the UI) change timelines through **high-level ops**, never by rewrit
 ### Renderer
 
 `internal/render` compiles a spec into one ffmpeg invocation per render (`-filter_complex`):
-- Per item: `trim/atrim` → `setpts` (speed) → scale/crop to 9:16 around the focus point → fps conversion → look (`eq`/`curves`/`lut3d`) → transitions (`xfade`).
+- Per item: `trim/atrim` → `setpts` (speed) → scale/crop to the project's format ([D-25](05-decisions.md#d-25-output-formats-916-11-45-and-169-per-project)) around the focus point → fps conversion → look (`eq`/`curves`/`lut3d`) → transitions (`xfade`).
 - Text: `drawtext` for simple text; **ASS subtitles via libass** for styled and animated text and word-highlight captions.
 - Audio: source audio and licensed tracks mixed (`amix`/`adelay`/`volume`) and normalised (`loudnorm`).
 - **Profiles**:
   - `preview`: 540×960, rendered from proxies, very fast encoder preset, with a watermark. Target: seconds for a 30 s edit.
-  - `final`: 1080×1920 from originals, high-quality CRF H.264 + AAC, `+faststart`.
+  - `final`: full size (1080×1920 for 9:16) from originals, high-quality CRF H.264 + AAC, `+faststart`.
   - CPU x264 is enough at our volumes: rendering costs fractions of a cent per short ([research §3.3](02-research.md#33-rendering)).
 - Output includes `time_map` (output ms → item id) for comment mapping, and a **contact sheet** (frames at every cut) that the Editor agent uses to check its own work cheaply.
 - **Golden tests**: a fixture set of specs rendered in CI, compared by frame hashes or SSIM.
