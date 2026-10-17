@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -312,6 +313,24 @@ func (s *Store) AgentEvents(ctx context.Context, ws ids.WorkspaceID, run uuid.UU
 func (s *Store) AgentArtifactEvents(ctx context.Context, ws ids.WorkspaceID, run uuid.UUID, kind string) ([]AgentEvent, error) {
 	rows, err := s.q.ListAgentArtifactEvents(ctx, db.ListAgentArtifactEventsParams{WorkspaceID: ws, RunID: run, Kind: kind})
 	return rows, mapErr(err)
+}
+
+// AgentArtifactPage returns up to limit artifact events of a run after afterSeq, oldest first, of one kind (the payload's "kind") or of
+// any kind when kind is empty; more says there are events after the last one returned.
+func (s *Store) AgentArtifactPage(ctx context.Context, ws ids.WorkspaceID, run uuid.UUID, afterSeq int32, kind string, limit int) (events []AgentEvent, more bool, err error) {
+	if limit < 1 {
+		return nil, false, fmt.Errorf("%w: a page needs a limit", ErrInvalid)
+	}
+	rows, err := s.q.ListAgentArtifactEventsPage(ctx, db.ListAgentArtifactEventsPageParams{
+		WorkspaceID: ws, RunID: run, AfterSeq: afterSeq, Kind: kind, RowLimit: int32(min(limit+1, math.MaxInt32)), //nolint:gosec // bounded by min
+	})
+	if err != nil {
+		return nil, false, mapErr(err)
+	}
+	if len(rows) > limit {
+		return rows[:limit], true, nil
+	}
+	return rows, false, nil
 }
 
 // AgentRunLedgerCostMicros is what the usage ledger holds for the run, at list price.

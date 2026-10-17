@@ -123,11 +123,11 @@ func TestSummarizeEvent(t *testing.T) {
 		{"context is not shown", ev("status", `{"state":"context","blocks":[{"type":"text","text":"SECRET BRIEF"}]}`), EventSummary{Seq: 3, Type: "status", Text: "context"}},
 		{"assistant", ev("assistant_message", `{"content":[{"type":"thinking","thinking":"hidden"},{"type":"text","text":"Looking."},{"type":"tool_use","id":"t","name":"view_clip","input":{}}]}`),
 			EventSummary{Seq: 3, Type: "assistant_message", Text: "Looking. [calls view_clip]"}},
-		{"tool call", ev("tool_call", `{"tool_use_id":"t","name":"view_clip","input":{"asset_id":"ast_x"}}`), EventSummary{Seq: 3, Type: "tool_call", Tool: "view_clip", Text: `view_clip {"asset_id":"ast_x"}`}},
+		{"tool call", ev("tool_call", `{"tool_use_id":"t","name":"view_clip","input":{"asset_id":"ast_x"}}`), EventSummary{Seq: 3, Type: "tool_call", Tool: "view_clip", CallID: "t", Text: `view_clip {"asset_id":"ast_x"}`}},
 		{"tool result", ev("tool_result", `{"tool_use_id":"t","name":"view_clip","is_error":true,"content":[{"type":"text","text":"no"},{"type":"image","ref":"ws/a/b.jpg"}]}`),
-			EventSummary{Seq: 3, Type: "tool_result", Tool: "view_clip", IsError: true, Text: "no [1 images]"}},
+			EventSummary{Seq: 3, Type: "tool_result", Tool: "view_clip", CallID: "t", IsError: true, Text: "no [1 images]"}},
 		{"error", ev("error", `{"code":"model_error","message":"boom"}`), EventSummary{Seq: 3, Type: "error", IsError: true, Text: "model_error: boom"}},
-		{"artifact", ev("artifact", `{"kind":"timeline_version","data":{"version":2}}`), EventSummary{Seq: 3, Type: "artifact", Text: "timeline_version"}},
+		{"artifact", ev("artifact", `{"kind":"timeline_version","data":{"version":2}}`), EventSummary{Seq: 3, Type: "artifact", Text: "timeline_version", Kind: "timeline_version"}},
 		{"not json", ev("tool_call", `x`), EventSummary{Seq: 3, Type: "tool_call"}},
 	}
 	for _, c := range cases {

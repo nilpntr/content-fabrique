@@ -293,6 +293,103 @@ func (h *Runs) getRun(ctx context.Context, req api.GetRunRequestObject) (api.Run
 	if run.Status == store.AgentWaitingInput {
 		out.Question = h.question(ctx, who.Workspace, id)
 	}
+	if run.Agent == credits.EditorAgent {
+		rc, ok, err := h.svc.Store.RunCreditsOf(ctx, who.Workspace, id)
+		if err != nil {
+			return api.Run{}, h.internal(ctx, "run credits", err)
+		}
+		// A run that is over and has neither a charge nor a hold was released: no credits object.
+		if ok {
+			out.Credits = &api.RunCredits{State: api.RunCreditsState(rc.State), Action: api.RunCreditsAction(rc.Action), Credits: rc.Credits}
+		}
+	}
+	return out, nil
+}
+
+// ---- GetRunArtifacts --------------------------------------------------------------------------------------------
+
+// Paging of GET /v1/runs/{id}/artifacts: an artifact is up to 64 KB, so a page is at most 50 of them.
+const (
+	defaultArtifacts = 20
+	maxArtifacts     = 50
+	maxKindLen       = 64
+)
+
+// GetRunArtifacts is GET /v1/runs/{id}/artifacts.
+func (h *Runs) GetRunArtifacts(ctx context.Context, req api.GetRunArtifactsRequestObject) (api.GetRunArtifactsResponseObject, error) {
+	out, f := h.getRunArtifacts(ctx, req)
+	if f != nil {
+		switch f.status {
+		case 400:
+			return api.GetRunArtifacts400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body(f))}, nil
+		case 401:
+			return api.GetRunArtifacts401JSONResponse{UnauthenticatedJSONResponse: api.UnauthenticatedJSONResponse(body(f))}, nil
+		case 403:
+			return api.GetRunArtifacts403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(body(f))}, nil
+		case 404:
+			return api.GetRunArtifacts404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(body(f))}, nil
+		case 500:
+			return api.GetRunArtifacts500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(body(f))}, nil
+		case 503:
+			return api.GetRunArtifacts503JSONResponse{UnavailableJSONResponse: api.UnavailableJSONResponse(body(f))}, nil
+		}
+		return nil, undocumented("getRunArtifacts", f)
+	}
+	return api.GetRunArtifacts200JSONResponse(out), nil
+}
+
+func (h *Runs) getRunArtifacts(ctx context.Context, req api.GetRunArtifactsRequestObject) (api.RunArtifacts, *failure) {
+	who, f := h.begin(ctx, false)
+	if f != nil {
+		return api.RunArtifacts{}, f
+	}
+	id, f := parseRunID(req.Id)
+	if f != nil {
+		return api.RunArtifacts{}, f
+	}
+	after, limit, kind := 0, defaultArtifacts, ""
+	if req.Params.AfterSeq != nil {
+		if after = *req.Params.AfterSeq; after < 0 || after > math.MaxInt32 {
+			return api.RunArtifacts{}, bad("after_seq must be 0 or a sequence number")
+		}
+	}
+	if req.Params.Limit != nil {
+		if limit = *req.Params.Limit; limit < 1 || limit > maxArtifacts {
+			return api.RunArtifacts{}, bad("limit must be between 1 and 50")
+		}
+	}
+	if req.Params.Kind != nil {
+		if kind = *req.Params.Kind; len(kind) > maxKindLen {
+			return api.RunArtifacts{}, bad("kind is too long")
+		}
+	}
+	// The run first, so that a run of another workspace is 404 and not an empty list.
+	if _, err := h.svc.Store.GetAgentRun(ctx, who.Workspace, id); errors.Is(err, store.ErrNotFound) {
+		return api.RunArtifacts{}, errRunNotFound
+	} else if err != nil {
+		return api.RunArtifacts{}, h.internal(ctx, "get run", err)
+	}
+	events, more, err := h.svc.Store.AgentArtifactPage(ctx, who.Workspace, id, int32(after), kind, limit) //nolint:gosec // range checked above
+	if err != nil {
+		return api.RunArtifacts{}, h.internal(ctx, "run artifacts", err)
+	}
+	out := api.RunArtifacts{Artifacts: make([]api.RunArtifact, 0, len(events))}
+	for _, e := range events {
+		a, ok := runtime.ArtifactOf(e)
+		if !ok {
+			continue
+		}
+		item := api.RunArtifact{Seq: int(e.Seq), Kind: a.Kind, Data: a.Data, CreatedAt: e.CreatedAt}
+		if a.CallID != "" {
+			call := a.CallID
+			item.CallId = &call
+		}
+		out.Artifacts = append(out.Artifacts, item)
+	}
+	if more && len(events) > 0 {
+		next := int(events[len(events)-1].Seq)
+		out.NextAfterSeq = &next
+	}
 	return out, nil
 }
 
@@ -447,6 +544,14 @@ func runOf(r store.AgentRun, events []store.AgentEvent) api.Run {
 		if s.IsError {
 			yes := true
 			ev.IsError = &yes
+		}
+		if s.CallID != "" {
+			c := s.CallID
+			ev.CallId = &c
+		}
+		if s.Kind != "" {
+			k := s.Kind
+			ev.Kind = &k
 		}
 		out.Events = append(out.Events, ev)
 	}
