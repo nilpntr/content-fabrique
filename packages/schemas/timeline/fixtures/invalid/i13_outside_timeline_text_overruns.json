@@ -1,10 +1,9 @@
 {
-  "$comment": "expect: schema",
   "schema": "contentfabrique.timeline/v1",
   "output": {
     "format": "9:16",
     "width": 1080,
-    "height": 1080,
+    "height": 1920,
     "fps": 30,
     "background": "#000000"
   },
@@ -21,6 +20,20 @@
             "out_ms": 3000
           },
           "at_ms": 0
+        }
+      ]
+    },
+    {
+      "id": "text",
+      "type": "text",
+      "items": [
+        {
+          "id": "t1",
+          "at_ms": 2500,
+          "duration_ms": 1000,
+          "text": "Runs past the end",
+          "style": "title_bold",
+          "anchor": "upper_third"
         }
       ]
     }

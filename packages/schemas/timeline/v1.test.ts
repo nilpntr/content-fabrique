@@ -1,8 +1,8 @@
 // Schema tests for the timeline spec v1 (P3-01, design note docs/design/timeline-v1.md section 7).
 //
-// Valid fixtures pass the JSON Schema. Invalid fixtures name the issue code they must raise in "$comment": the ones
-// that expect `schema` must fail the JSON Schema, and the ones that expect a semantic code must pass it, because the
-// Go layer (apps/server/internal/timeline) is what catches them.
+// Valid fixtures pass the JSON Schema. fixtures/expect.json maps every invalid fixture to the issue code it must
+// raise: the ones that expect `schema` must fail the JSON Schema, at the given instance path (and keyword), and the
+// ones that expect a semantic code must pass it, because the Go layer (apps/server/internal/timeline) catches them.
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,7 +23,15 @@ const SEMANTIC_CODES = [
   "unsafe_text",
   "unknown_asset",
   "transition_too_long",
+  "unlicensed_audio",
+  "fade_too_long",
 ];
+
+interface Expect {
+  code: string;
+  path?: string;
+  keyword?: string;
+}
 
 type Json = Record<string, any>;
 const readJson = (path: string): Json => JSON.parse(readFileSync(path, "utf8"));
@@ -41,25 +49,32 @@ const validate = ajv.compile(schema);
 const validFiles = list("valid");
 const invalidFiles = list("invalid");
 
+const expectations = readJson(join(fixtures, "expect.json")) as Record<string, Expect>;
+
 describe("fixture sets", () => {
-  it("has 30 valid and 30 invalid fixtures", () => {
-    expect(validFiles).toHaveLength(30);
-    expect(invalidFiles).toHaveLength(30);
+  it("has at least 30 valid and 30 invalid fixtures", () => {
+    expect(validFiles.length).toBeGreaterThanOrEqual(30);
+    expect(invalidFiles.length).toBeGreaterThanOrEqual(30);
   });
 
-  it("names the expected issue code in every invalid fixture, and covers every code", () => {
-    const codes = new Set<string>();
-    for (const f of invalidFiles) {
-      const m = /^expect: (\w+)$/.exec(readJson(join(fixtures, "invalid", f)).$comment ?? "");
-      expect(m, f).not.toBeNull();
-      codes.add(m?.[1] ?? "");
-    }
+  it("has an expectation for every invalid fixture and no others, and covers every issue code", () => {
+    expect(Object.keys(expectations).sort()).toEqual(invalidFiles);
+    const codes = new Set(Object.values(expectations).map((e) => e.code));
     for (const code of ["schema", ...SEMANTIC_CODES]) expect(codes, code).toContain(code);
     expect([...codes].filter((c) => c !== "schema" && !SEMANTIC_CODES.includes(c))).toEqual([]);
   });
 
-  it("has file names that are unique and carry no $comment on valid fixtures", () => {
+  it("gives every schema expectation an instance path, and no other expectation one", () => {
+    for (const [f, e] of Object.entries(expectations)) {
+      if (e.code === "schema") expect(e.path, f).toMatch(/^(\/[^/]+)*$/);
+      else expect(e.path ?? e.keyword, f).toBeUndefined();
+    }
+  });
+
+  it("keeps the production schema closed and the fixtures free of $comment", () => {
+    expect(schema.properties).not.toHaveProperty("$comment");
     for (const f of validFiles) expect(readJson(join(fixtures, "valid", f)).$comment, f).toBeUndefined();
+    for (const f of invalidFiles) expect(readJson(join(fixtures, "invalid", f)).$comment, f).toBeUndefined();
   });
 });
 
@@ -73,11 +88,13 @@ describe("valid fixtures", () => {
 
 describe("invalid fixtures", () => {
   it.each(invalidFiles)("%s", (f) => {
-    const spec = readJson(join(fixtures, "invalid", f));
-    const code = /^expect: (\w+)$/.exec(spec.$comment)?.[1];
-    const ok = validate(spec);
-    if (code === "schema") {
+    const want = expectations[f];
+    const ok = validate(readJson(join(fixtures, "invalid", f)));
+    if (want.code === "schema") {
       expect(ok, "expected a schema error").toBe(false);
+      const errors = validate.errors ?? [];
+      const hit = errors.some((e) => e.instancePath === want.path && (want.keyword === undefined || e.keyword === want.keyword));
+      expect(hit, `want ${want.keyword ?? "any error"} at ${want.path}, got ${errors.map((e) => `${e.instancePath} ${e.keyword}`).join(", ")}`).toBe(true);
     } else {
       // A semantic issue: structurally valid, the Go layer raises the code.
       expect(validate.errors ?? []).toEqual([]);
@@ -85,10 +102,13 @@ describe("invalid fixtures", () => {
     }
   });
 
-  it("rejects $comment below the top level", () => {
-    const spec = readJson(join(fixtures, "valid", validFiles[0]));
-    spec.output.$comment = "nope";
-    expect(validate(spec)).toBe(false);
+  it("rejects $comment at every level", () => {
+    const top = readJson(join(fixtures, "valid", validFiles[0]));
+    top.$comment = "nope";
+    expect(validate(top)).toBe(false);
+    const nested = readJson(join(fixtures, "valid", validFiles[0]));
+    nested.output.$comment = "nope";
+    expect(validate(nested)).toBe(false);
   });
 });
 
@@ -158,6 +178,33 @@ describe("the schema", () => {
     expect(validate(s)).toBe(false);
     t.items[0].text = "";
     expect(validate(s)).toBe(false);
+  });
+
+  it("allows no control characters in text except the newline, and any other character", () => {
+    const s = base();
+    const t = s.tracks.find((x: Json) => x.type === "text");
+    for (const bad of ["a\rb", "a\tb", "a\u0000b", "a\u0085b", "a\u2028b", "a\u2029b", "a\u001bb", "a\u007fb"]) {
+      t.items[0].text = bad;
+      expect(validate(s), JSON.stringify(bad)).toBe(false);
+    }
+    for (const good of ["Ça va? 💪 日本語", "{\\an8}tags are text here", "a\n\nc"]) {
+      t.items[0].text = good;
+      expect(validate(s), JSON.stringify(good)).toBe(true);
+    }
+  });
+
+  it("caps every time at 24 hours", () => {
+    for (const [d, ok] of [[86400000, true], [86400001, false]] as const) {
+      const s = base();
+      main(s).items[0].source.out_ms = d;
+      expect(validate(s), String(d)).toBe(ok);
+      const t = base();
+      t.tracks.find((x: Json) => x.type === "text").items[0].duration_ms = d;
+      expect(validate(t), `text ${d}`).toBe(ok);
+      const a = base();
+      a.tracks.find((x: Json) => x.type === "audio").items[0].source_offset_ms = d;
+      expect(validate(a), `audio ${d}`).toBe(ok);
+    }
   });
 
   it("allows at most one track per type", () => {

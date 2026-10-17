@@ -1,5 +1,4 @@
 {
-  "$comment": "expect: duration_out_of_range",
   "schema": "contentfabrique.timeline/v1",
   "output": {
     "format": "9:16",
@@ -15,21 +14,29 @@
       "items": [
         {
           "id": "c1",
-          "asset_id": "ast_01jdsx72atvnb7ssgbc57zbxj9",
+          "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
           "source": {
             "in_ms": 0,
-            "out_ms": 100000
+            "out_ms": 3000
           },
           "at_ms": 0
-        },
+        }
+      ]
+    },
+    {
+      "id": "text",
+      "type": "text",
+      "items": [
         {
-          "id": "c2",
-          "asset_id": "ast_01jdsx72atvnb7ssgbc57zbxj9",
-          "source": {
-            "in_ms": 0,
-            "out_ms": 100000
-          },
-          "at_ms": 100000
+          "id": "t1",
+          "at_ms": 0,
+          "duration_ms": 1000,
+          "text": "Under the status bar",
+          "style": "title_bold",
+          "position": {
+            "x": 0.5,
+            "y": 0.03
+          }
         }
       ]
     }

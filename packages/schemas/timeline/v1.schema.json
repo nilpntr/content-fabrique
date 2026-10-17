@@ -3,16 +3,11 @@
   "$id": "https://contentfabrique.app/schemas/timeline/v1.json",
   "title": "Timeline",
   "description": "A Content Fabrique edit: the declarative timeline (an EDL in JSON) that agents and users change through edit ops and that the Go compiler turns into one ffmpeg invocation. Every time is an integer number of milliseconds.",
-  "$comment": "Structure only. The Go layer (apps/server/internal/timeline, docs/design/timeline-v1.md section 3) checks what a schema cannot: unique ids across the spec (duplicate_id), contiguity of the main track (gap, overlap), source in < out <= the asset's duration (source_out_of_range), output duration of an item >= 300 ms (shot_too_short), total duration 1 s to 180 s (duration_out_of_range), every text item, audio item and marker inside the total duration (outside_timeline), text inside the format's safe zone (unsafe_text), asset ids that exist in the catalog (unknown_asset), transitions shorter than both items they join (transition_too_long), text styles that exist in the style registry, and the at_ms of the first main item being 0. The top-level \"$comment\" property exists so test fixtures can state the issue code they must raise.",
+  "$comment": "Structure only. The Go layer (apps/server/internal/timeline, docs/design/timeline-v1.md section 3) checks what a schema cannot: unique ids across the spec (duplicate_id), contiguity of the main track including the first item starting at 0 (gap, overlap), source ranges inside the asset, for video and audio, with in < out (source_out_of_range), output duration of an item >= 300 ms (shot_too_short), total duration 1 s to 180 s (duration_out_of_range), every text item, audio item and marker inside the total duration (outside_timeline), text inside the format safe zone (unsafe_text), asset ids that exist in the catalog (unknown_asset), transitions shorter than both items they join (transition_too_long), audio assets that are licensed or attested (unlicensed_audio), fades that fit the sound (fade_too_long) and text styles that exist in the style registry (unknown_style). The schema is closed: no property is allowed outside the ones listed, at any level.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "output", "tracks", "markers"],
   "properties": {
-    "$comment": {
-      "type": "string",
-      "title": "Comment",
-      "description": "Free text for humans. Allowed at the top level only. The invalid fixtures use it to name the issue code they must raise."
-    },
     "schema": {
       "const": "contentfabrique.timeline/v1",
       "title": "Schema version",
@@ -60,9 +55,9 @@
     "ms": {
       "type": "integer",
       "minimum": 0,
-      "maximum": 2147483647,
+      "maximum": 86400000,
       "title": "Milliseconds",
-      "description": "A time or duration as a whole number of milliseconds, 0 or more. No floats."
+      "description": "A time or duration as a whole number of milliseconds, from 0 to 86 400 000 (24 hours). No floats."
     },
     "unit": {
       "type": "number",
@@ -220,7 +215,7 @@
     "videoItem": {
       "type": "object",
       "title": "Video clip",
-      "description": "A cut from a source asset placed on the main track. Its output duration is round((source.out_ms - source.in_ms) / speed).",
+      "description": "A cut from a source asset placed on the main track. Its output duration is floor((source.out_ms - source.in_ms) / speed + 0.5) ms.",
       "additionalProperties": false,
       "required": ["id", "asset_id", "source", "at_ms"],
       "properties": {
@@ -398,7 +393,7 @@
         "duration_ms": {
           "type": "integer",
           "minimum": 300,
-          "maximum": 2147483647,
+          "maximum": 86400000,
           "title": "Duration",
           "description": "How long the text stays, in ms. At least 300. It must end inside the total duration (checked by the Go layer)."
         },
@@ -406,9 +401,9 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 120,
-          "pattern": "^[^\\n]*(\\n[^\\n]*){0,2}$",
+          "pattern": "^[^\\p{Cc}\\p{Zl}\\p{Zp}]*(\\n[^\\p{Cc}\\p{Zl}\\p{Zp}]*){0,2}$",
           "title": "Text",
-          "description": "The words to show: 1 to 120 characters and at most 3 lines (lines are separated by a newline)."
+          "description": "The words to show: 1 to 120 characters and at most 3 lines. Lines are separated by a newline (\\n). No other control character is allowed, and neither are the line and paragraph separators U+2028 and U+2029."
         },
         "style": { "$ref": "#/$defs/styleId" },
         "anchor": {
@@ -562,19 +557,19 @@
     "audioDuration": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 2147483647,
+      "maximum": 86400000,
       "title": "Duration",
-      "description": "How long the sound plays, in ms, 1 or more. Without it, it plays to the end of the timeline."
+      "description": "How long the sound plays, in ms, 1 or more. Without it, it plays to the end of the timeline. The sound must end inside the total duration, and source_offset_ms + this duration must fit inside the asset (both checked by the Go layer)."
     },
     "fadeIn": {
       "$ref": "#/$defs/ms",
       "title": "Fade in",
-      "description": "Length of the fade in at the start, in ms. Without it, there is no fade."
+      "description": "Length of the fade in at the start, in ms. Without it, there is no fade. fade_in_ms + fade_out_ms must not exceed the sound's duration (checked by the Go layer)."
     },
     "fadeOut": {
       "$ref": "#/$defs/ms",
       "title": "Fade out",
-      "description": "Length of the fade out at the end, in ms. Without it, there is no fade."
+      "description": "Length of the fade out at the end, in ms. Without it, there is no fade. fade_in_ms + fade_out_ms must not exceed the sound's duration (checked by the Go layer)."
     },
 
     "marker": {

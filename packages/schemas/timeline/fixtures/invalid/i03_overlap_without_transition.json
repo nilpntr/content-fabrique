@@ -1,5 +1,4 @@
 {
-  "$comment": "expect: overlap",
   "schema": "contentfabrique.timeline/v1",
   "output": {
     "format": "9:16",

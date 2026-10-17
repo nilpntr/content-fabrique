@@ -12,8 +12,9 @@ timeline/
   v1.ts                 generated TypeScript types (committed, do not edit)
   v1.test.ts            Ajv tests: every fixture, the render-fixture coverage and the edge rules
   fixtures/
-    valid/*.json        30 specs that pass the schema (and the Go semantic checks, given assets.json)
-    invalid/*.json      30 specs; "$comment": "expect: <code>" names the issue code each must raise
+    valid/*.json        31 specs that pass the schema (and the Go semantic checks, given assets.json)
+    invalid/*.json      43 specs, each of which must raise exactly one issue code (named in expect.json)
+    expect.json         invalid fixture file -> { code, path?, keyword? }
     render.txt          the 20 valid fixtures that are also render fixtures (P3-03)
     assets.json         the asset catalog the semantic fixtures assume (asset_id -> duration_ms)
 scripts/
@@ -38,12 +39,13 @@ After you change `v1.schema.json`, run `gen` and commit `v1.ts` with it.
 
 The JSON Schema checks structure only: types, ranges, enums, unknown fields, TypeID prefixes, the format/size pairing, track counts, the anchor-or-position rule, the first clip being a cut and the `trend_sound` => `cue_only` rule.
 
-Everything that needs to compare values lives in Go (`apps/server/internal/timeline`, P3-01 part 2): unique ids, contiguity on `main`, source ranges against the asset catalog, shot length, total duration, items inside the timeline, text in the safe zone, unknown assets and transitions longer than their clips. Do not try to express those in the schema. The list is in the schema's top-level `$comment` and in [design note section 3](../../docs/design/timeline-v1.md#3-validation).
+Everything that needs to compare values or look something up lives in Go (`apps/server/internal/timeline`, P3-01 part 2): unique ids, contiguity on `main`, source ranges against the asset catalog, shot length, total duration, items inside the timeline, text in the safe zone, unknown assets, audio that is not licensed or attested, fades longer than their sound and transitions longer than their clips. Do not try to express those in the schema. The list is in the schema's top-level `$comment` and in [design note section 3](../../docs/design/timeline-v1.md#3-validation).
 
 ## Fixtures
 
-- A valid fixture has no `$comment`. The schema allows `$comment` at the top level only, for the invalid fixtures.
-- An invalid fixture that expects `schema` must fail the JSON Schema. One that expects any other code (`gap`, `overlap`, `duplicate_id`, `source_out_of_range`, `shot_too_short`, `duration_out_of_range`, `outside_timeline`, `unsafe_text`, `unknown_asset`, `transition_too_long`) must pass it: the Go layer catches it.
+- Fixtures are plain specs. The schema is closed (no `$comment` property anywhere), so expectations live in `fixtures/expect.json`, which the TS test and the Go tests both read.
+- An invalid fixture that expects `schema` must fail the JSON Schema, and Ajv must report an error at the `path` (and `keyword`, where given) in `expect.json`. One that expects any other code (`gap`, `overlap`, `duplicate_id`, `source_out_of_range`, `shot_too_short`, `duration_out_of_range`, `outside_timeline`, `unsafe_text`, `unknown_asset`, `transition_too_long`, `unlicensed_audio`, `fade_too_long`) must pass it: the Go layer catches it and raises that code only.
+- `assets.json` is the catalog the semantic fixtures assume: duration, `kind` (`video`, `audio`) and `rights` (`licensed`, `attested`, `none`) per asset.
 - Ids in the fixtures are real TypeIDs (lowercase prefix, then 26 characters of Crockford base32 whose first character is 0 to 7).
 - Adding a fixture: add the file, keep the counts the test expects (or change them on purpose), and add it to `render.txt` only if it should be rendered.
 

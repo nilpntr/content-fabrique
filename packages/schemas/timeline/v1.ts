@@ -5,10 +5,6 @@
  */
 
 /**
- * Free text for humans. Allowed at the top level only. The invalid fixtures use it to name the issue code they must raise.
- */
-export type Comment = string;
-/**
  * The constant "contentfabrique.timeline/v1". It names the spec version the document follows.
  */
 export type SchemaVersion = "contentfabrique.timeline/v1";
@@ -209,7 +205,7 @@ export type Start = number;
  */
 export type Duration1 = number;
 /**
- * The words to show: 1 to 120 characters and at most 3 lines (lines are separated by a newline).
+ * The words to show: 1 to 120 characters and at most 3 lines. Lines are separated by a newline (\n). No other control character is allowed, and neither are the line and paragraph separators U+2028 and U+2029.
  */
 export type Text = string;
 /**
@@ -306,7 +302,7 @@ export type SourceOffset = number;
  */
 export type ExportPolicy = "cue_only";
 /**
- * How long the sound plays, in ms, 1 or more. Without it, it plays to the end of the timeline.
+ * How long the sound plays, in ms, 1 or more. Without it, it plays to the end of the timeline. The sound must end inside the total duration, and source_offset_ms + this duration must fit inside the asset (both checked by the Go layer).
  *
  * This interface was referenced by `Timeline`'s JSON-Schema
  * via the `definition` "audioDuration".
@@ -320,11 +316,11 @@ export type Duration2 = number;
  */
 export type GainInDB = number;
 /**
- * Length of the fade in at the start, in ms. Without it, there is no fade.
+ * Length of the fade in at the start, in ms. Without it, there is no fade. fade_in_ms + fade_out_ms must not exceed the sound's duration (checked by the Go layer).
  */
 export type FadeIn = number;
 /**
- * Length of the fade out at the end, in ms. Without it, there is no fade.
+ * Length of the fade out at the end, in ms. Without it, there is no fade. fade_in_ms + fade_out_ms must not exceed the sound's duration (checked by the Go layer).
  */
 export type FadeOut = number;
 /**
@@ -401,7 +397,7 @@ export type IdeaId = string;
  */
 export type ConceptId = string;
 /**
- * A time or duration as a whole number of milliseconds, 0 or more. No floats.
+ * A time or duration as a whole number of milliseconds, from 0 to 86 400 000 (24 hours). No floats.
  *
  * This interface was referenced by `Timeline`'s JSON-Schema
  * via the `definition` "ms".
@@ -415,14 +411,14 @@ export type Milliseconds = number;
  */
 export type UnitInterval = number;
 /**
- * Length of the fade in at the start, in ms. Without it, there is no fade.
+ * Length of the fade in at the start, in ms. Without it, there is no fade. fade_in_ms + fade_out_ms must not exceed the sound's duration (checked by the Go layer).
  *
  * This interface was referenced by `Timeline`'s JSON-Schema
  * via the `definition` "fadeIn".
  */
 export type FadeIn1 = number;
 /**
- * Length of the fade out at the end, in ms. Without it, there is no fade.
+ * Length of the fade out at the end, in ms. Without it, there is no fade. fade_in_ms + fade_out_ms must not exceed the sound's duration (checked by the Go layer).
  *
  * This interface was referenced by `Timeline`'s JSON-Schema
  * via the `definition` "fadeOut".
@@ -433,7 +429,6 @@ export type FadeOut1 = number;
  * A Content Fabrique edit: the declarative timeline (an EDL in JSON) that agents and users change through edit ops and that the Go compiler turns into one ffmpeg invocation. Every time is an integer number of milliseconds.
  */
 export interface Timeline {
-  $comment?: Comment;
   schema: SchemaVersion;
   output: Output;
   tracks: Tracks;
@@ -459,7 +454,7 @@ export interface VideoTrack {
   items: Clips;
 }
 /**
- * A cut from a source asset placed on the main track. Its output duration is round((source.out_ms - source.in_ms) / speed).
+ * A cut from a source asset placed on the main track. Its output duration is floor((source.out_ms - source.in_ms) / speed + 0.5) ms.
  *
  * This interface was referenced by `Timeline`'s JSON-Schema
  * via the `definition` "videoItem".

@@ -1,5 +1,4 @@
 {
-  "$comment": "expect: schema",
   "schema": "contentfabrique.timeline/v1",
   "output": {
     "format": "9:16",
@@ -30,11 +29,12 @@
       "items": [
         {
           "id": "s1",
-          "kind": "licensed_track",
-          "asset_id": "ast_01j0h9rew727hk2pt0v5b31h44",
-          "at_ms": 0,
+          "kind": "creator_audio",
+          "asset_id": "ast_01jwbx4exrs98bh4pyzkx8020y",
+          "at_ms": 1000,
           "source_offset_ms": 0,
-          "export": "licensed"
+          "export": "licensed",
+          "duration_ms": 4000
         }
       ]
     }

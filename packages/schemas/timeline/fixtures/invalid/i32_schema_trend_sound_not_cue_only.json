@@ -1,5 +1,4 @@
 {
-  "$comment": "expect: schema",
   "schema": "contentfabrique.timeline/v1",
   "output": {
     "format": "9:16",
@@ -20,8 +19,21 @@
             "in_ms": 0,
             "out_ms": 3000
           },
+          "at_ms": 0
+        }
+      ]
+    },
+    {
+      "id": "sound",
+      "type": "audio",
+      "items": [
+        {
+          "id": "s1",
+          "kind": "trend_sound",
+          "trend_id": "trd_01jcmevy4tr3fffvjc82eh7rjm",
           "at_ms": 0,
-          "colour": "red"
+          "source_offset_ms": 0,
+          "export": "licensed"
         }
       ]
     }

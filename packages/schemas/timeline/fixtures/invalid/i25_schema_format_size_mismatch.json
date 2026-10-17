@@ -1,10 +1,9 @@
 {
-  "$comment": "expect: schema",
   "schema": "contentfabrique.timeline/v1",
   "output": {
     "format": "9:16",
     "width": 1080,
-    "height": 1920,
+    "height": 1080,
     "fps": 30,
     "background": "#000000"
   },
@@ -21,19 +20,6 @@
             "out_ms": 3000
           },
           "at_ms": 0
-        },
-        {
-          "id": "c2",
-          "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
-          "source": {
-            "in_ms": 4000,
-            "out_ms": 7000
-          },
-          "at_ms": 2700,
-          "transition_in": {
-            "type": "wipe",
-            "duration_ms": 300
-          }
         }
       ]
     }

@@ -1,5 +1,4 @@
 {
-  "$comment": "expect: outside_timeline",
   "schema": "contentfabrique.timeline/v1",
   "output": {
     "format": "9:16",
@@ -21,15 +20,18 @@
             "out_ms": 3000
           },
           "at_ms": 0
+        },
+        {
+          "id": "c2",
+          "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+          "source": {
+            "in_ms": 4000,
+            "out_ms": 4200
+          },
+          "at_ms": 3000
         }
       ]
     }
   ],
-  "markers": [
-    {
-      "at_ms": 3500,
-      "kind": "beat",
-      "strength": 1
-    }
-  ]
+  "markers": []
 }

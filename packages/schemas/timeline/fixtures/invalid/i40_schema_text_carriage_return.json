@@ -1,5 +1,4 @@
 {
-  "$comment": "expect: outside_timeline",
   "schema": "contentfabrique.timeline/v1",
   "output": {
     "format": "9:16",
@@ -30,9 +29,9 @@
       "items": [
         {
           "id": "t1",
-          "at_ms": 2500,
+          "at_ms": 0,
           "duration_ms": 1000,
-          "text": "Runs past the end",
+          "text": "one\rtwo",
           "style": "title_bold",
           "anchor": "upper_third"
         }
