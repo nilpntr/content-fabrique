@@ -85,7 +85,7 @@ func TestMediaJobsMeterTheirCompute(t *testing.T) {
 	r := rows[0]
 	if r.Kind != store.KindMedia || r.Stage != "ingest" || r.Unit != store.UnitVCPUMs || r.Quantity < 300 || r.Quantity > 5_000 || r.ListCostMicros != (r.Quantity*20+999)/1000 ||
 		r.PriceTableVersion != "test-prices" || r.MemberUserID != e.user || r.ActionID != a.ID.UUID || r.WorkspaceID != w.ID ||
-		!strings.HasPrefix(r.IdempotencyKey, "media:ingest:") || !strings.HasSuffix(r.IdempotencyKey, ":1") {
+		!strings.HasPrefix(r.IdempotencyKey, "media:ingest:") || strings.Count(r.IdempotencyKey, ":") != 4 {
 		t.Errorf("row = %+v", r)
 	}
 }
