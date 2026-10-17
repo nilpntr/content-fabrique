@@ -20,7 +20,7 @@
 | D-13 | Billing: merchant of record for EU VAT; Clerk for identity only; own usage ledger | Proposed (decide before P7-01) |
 | D-14 | OpenAPI 3.1 contract-first API with generated clients | Accepted |
 | D-15 | EU data residency where the vendor allows | Accepted |
-| D-16 | Only permissively licensed ML components in the product | Accepted |
+| D-16 | Only permissively licensed ML components in the product; GPL/LGPL CLI tools (ffmpeg, x264) allowed as separate processes, AGPL and non-commercial banned | Accepted; amended 2026-10-17 (founder to confirm) |
 | D-17 | Model routing is data, tuned by benchmark: effort first, then escalation, then delegation, then cheaper models | Accepted (protocol); results come from P4-10 |
 | D-18 | Who pays for tokens: managed credits or bring-your-own Anthropic key, per workspace | Proposed (founder confirms the beta default) |
 | D-19 | Model gateway: Cloudflare AI Gateway in BYOK mode in front of every model call; other providers through the same gateway, OpenRouter not needed | Accepted (the founder chose it for customer traffic); gated by the conformance test in P4-00 |
@@ -251,6 +251,16 @@ Daytona is not considered: its open-source repo was reported unmaintained or arc
 - **Shot detection**: PySceneDetect / ffmpeg `scdet`.
 
 `media-tools` keeps a licence inventory, and CI fails on new copyleft or non-commercial dependencies.
+
+**Amendment, 2026-10-17** (director, while the founder was away; **founder to confirm**). The rule above was written for ML components. Read literally, it also bans ffmpeg (LGPL, and GPL once x264 is enabled), which the media pipeline and the renderer need ([architecture §6](03-architecture.md#6-timeline-spec-and-renderer)). Clarified:
+- **Allowed: GPL or LGPL command-line tools** that run as separate processes inside our own containers. These are ffmpeg and ffprobe built with `--enable-gpl`, x264, and libass.
+  - We never link them into our Go or web code.
+  - We never ship them to customers. A SaaS doesn't distribute them, so the GPL's copyleft obligations aren't triggered.
+  - The image keeps their licence texts and the exact source versions in its inventory.
+- **Still banned: AGPL**, because it reaches network use, and **non-commercial** licences on code or model weights. Copyleft libraries linked into our own binaries are also still banned.
+- **CI** checks the `media-tools` image against an explicit allowlist. The allowlist names the GPL/LGPL tools above as exceptions. Anything new that is copyleft or non-commercial fails the check.
+- **Patents are a separate question.** H.264/AAC patent licensing for encoding at scale is added to the P0-12 legal questions. If the answer requires it, we move to licensed encoders or another codec.
+- **Revisit** if we ever distribute an image or binary (on-premise or desktop), or if the P0-12 answer says otherwise.
 
 ## D-17 Model routing is data, tuned by benchmark
 
