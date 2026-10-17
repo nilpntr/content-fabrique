@@ -1083,7 +1083,7 @@ func (s *Store) expireSourceKeepingHolds(ctx context.Context, ws ids.WorkspaceID
 		if err != nil {
 			return 0, err
 		}
-		rem, earlier = int(src.Remaining), 0
+		rem = int(src.Remaining)
 		if err := s.expireSource(ctx, ws, source, rem, at, reason); err != nil {
 			return 0, err
 		}
