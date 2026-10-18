@@ -45,7 +45,8 @@ suite run an experiment. Nothing is spent beyond --max-usd (improver calls, judg
 
   --max-usd         the hard total (required, more than 0)
   --iterations      changes to try, each on top of the last kept one; default 1
-  --improver-usd    the budget of one improver call; default 0.50
+  --improver-usd    the budget of the improver in one iteration, every attempt included (a refused proposal is sent back with the
+                    exact error and asked again, up to 3 proposals); default 0.50
   --min-gain        the least rise of the mean that keeps a change, in points of 100, whatever the noise; default 0.5
   --max-regression  the most one case may drop beyond its noise; default 5
   --held-out-slack  the most the held-out mean may drop beyond its noise; default 1
@@ -137,6 +138,12 @@ func cmdEvalImprove(args []string, stdout, stderr io.Writer, lookup lookupEnv, d
 	if !guardCost(out, errOut, name, total, f.maxUSD, lines) {
 		return 2
 	}
+	if f.live {
+		if err := se.room(ctx, total); err != nil {
+			_, _ = fmt.Fprintf(errOut, "cfctl %s: not started: %v\n", name, err)
+			return exitStopped
+		}
+	}
 
 	d := evals.ImproveDeps{
 		Repo: evals.GitRepo{Root: se.env.root},
@@ -148,7 +155,7 @@ func cmdEvalImprove(args []string, stdout, stderr io.Writer, lookup lookupEnv, d
 			o := baseOpts
 			o.MaxMicros = maxMicros - int64(*iterations)*(improverMicros+run.Micros) // the candidates keep their share
 			r, err := evals.Run(ctx, se.suite, se.deps, o)
-			if err == nil && complete(r) {
+			if err == nil && r != nil && complete(r) {
 				_ = evals.RecordBaseline(outDir, r, time.Now())
 			}
 			return r, false, err
@@ -156,11 +163,21 @@ func cmdEvalImprove(args []string, stdout, stderr io.Writer, lookup lookupEnv, d
 		Evaluate: func(ctx context.Context, dir, label string, live bool, left int64) (*evals.RunResult, error) {
 			return evaluateIn(ctx, se, f, dir, label, live, left, outDir)
 		},
-		Propose: func(ctx context.Context, in evals.ImproverInput, budget int64) (evals.Proposal, int64, error) {
+		Propose: func(ctx context.Context, in evals.ImproverInput, budget int64, validate func(evals.Proposal) (evals.Proposal, error)) (evals.Proposal, int64, []evals.Attempt, error) {
 			if *proposalFile != "" {
-				return readProposal(*proposalFile)
+				// Your own change: checked once, nobody to ask again.
+				p, _, err := readProposal(*proposalFile)
+				if err == nil {
+					p, err = validate(p)
+				}
+				a := evals.Attempt{N: 1, Title: p.Title, File: p.File()}
+				if err != nil {
+					a.Error = err.Error()
+					return p, 0, []evals.Attempt{a}, fmt.Errorf("--proposal: %w", err)
+				}
+				return p, 0, []evals.Attempt{a}, nil
 			}
-			return improver.Propose(ctx, ws, in, budget)
+			return improver.Propose(ctx, ws, in, budget, validate, evals.MaxImproverAttempts)
 		},
 		TraceURL: func(id string) string {
 			if se.deps.Phoenix == nil {
@@ -222,7 +239,7 @@ func evaluateIn(ctx context.Context, se *suiteEnv, f suiteFlags, dir, label stri
 			before[e.Name()] = true
 		}
 	}
-	args := []string{"run", "./cmd/cfctl", "eval", "suite", "--suite", se.suite.Path, "--out", outDir, "--label", label,
+	args := []string{"eval", "suite", "--suite", se.suite.Path, "--out", outDir, "--label", label,
 		"--max-usd", strconv.FormatFloat(float64(max(left, 0))/1e6, 'f', 6, 64), "--repeat", strconv.Itoa(se.opts.Repeat)}
 	if _, err := os.Stat(se.env.path); err == nil {
 		args = append(args, "--env-file", se.env.path)
@@ -244,22 +261,48 @@ func evaluateIn(ctx context.Context, se *suiteEnv, f suiteFlags, dir, label stri
 	} else {
 		args = append(args, "--no-phoenix")
 	}
-	cmd := exec.CommandContext(ctx, "go", args...) // #nosec G204 -- our own command, fixed arguments
-	cmd.Dir = filepath.Join(dir, "apps", "server")
-	cmd.Stdout, cmd.Stderr = se.env.out, se.env.err
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("the suite on the change: %w", err)
-	}
-	entries, err := os.ReadDir(resultsDir)
+	// Built, then run: go run would turn the suite's exit code (exitStopped) into 1.
+	server := filepath.Join(dir, "apps", "server")
+	tmp, err := os.MkdirTemp("", "cfctl-candidate-")
 	if err != nil {
 		return nil, err
 	}
-	for _, e := range entries {
-		if !before[e.Name()] && strings.HasSuffix(e.Name(), ".jsonl") {
-			return evals.LoadResults(filepath.Join(resultsDir, e.Name()))
+	defer func() { _ = os.RemoveAll(tmp) }()
+	bin := filepath.Join(tmp, "cfctl")
+	build := exec.CommandContext(ctx, "go", "build", "-o", bin, "./cmd/cfctl") // #nosec G204 -- our own command, fixed arguments
+	build.Dir = server
+	build.Stdout, build.Stderr = se.env.out, se.env.err
+	if err := build.Run(); err != nil {
+		return nil, fmt.Errorf("the suite on the change: building cfctl: %w", err)
+	}
+	cmd := exec.CommandContext(ctx, bin, args...) // #nosec G204 -- our own command, fixed arguments
+	cmd.Dir = server
+	cmd.Stdout, cmd.Stderr = se.env.out, se.env.err
+	runErr := cmd.Run()
+	var res *evals.RunResult
+	if entries, err := os.ReadDir(resultsDir); err == nil {
+		for _, e := range entries {
+			if !before[e.Name()] && strings.HasSuffix(e.Name(), ".jsonl") {
+				res, _ = evals.LoadResults(filepath.Join(resultsDir, e.Name()))
+				break
+			}
 		}
 	}
-	return nil, errors.New("the suite on the change wrote no results file")
+	var exit *exec.ExitError
+	switch {
+	case errors.As(runErr, &exit) && exit.ExitCode() == exitStopped, res != nil && res.Aborted != "":
+		// The infrastructure stopped the candidate's run (or refused to start it): nothing to decide.
+		msg := "the suite on the change was stopped by the infrastructure"
+		if res != nil && res.Aborted != "" {
+			msg = res.Aborted
+		}
+		return res, &evals.InfraError{Reason: "candidate", Msg: msg}
+	case runErr != nil:
+		return res, fmt.Errorf("the suite on the change: %w", runErr)
+	case res == nil:
+		return nil, errors.New("the suite on the change wrote no results file")
+	}
+	return res, nil
 }
 
 // readProposal reads a proposal written by hand (--proposal): no model call, no cost.

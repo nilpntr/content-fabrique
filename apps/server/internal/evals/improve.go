@@ -2,6 +2,7 @@ package evals
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -46,8 +47,8 @@ type ImproveDeps struct {
 	Baseline func(ctx context.Context) (res *RunResult, cached bool, err error)
 	// Evaluate runs the suite on the code in the scratch worktree dir, with a label and a spending limit.
 	Evaluate func(ctx context.Context, dir, label string, live bool, maxMicros int64) (*RunResult, error)
-	// Propose asks the improver.
-	Propose func(ctx context.Context, in ImproverInput, budget int64) (Proposal, int64, error)
+	// Propose asks the improver for a change that passes validate (asking again after a refusal); it returns every attempt.
+	Propose func(ctx context.Context, in ImproverInput, budget int64, validate func(Proposal) (Proposal, error)) (Proposal, int64, []Attempt, error)
 	// TraceURL makes a case's trace link ("" when there is none).
 	TraceURL func(traceID string) string
 	Log      func(format string, a ...any)
@@ -77,14 +78,16 @@ type ImproveOptions struct {
 
 // Iteration is one tried change.
 type Iteration struct {
-	N          int
-	Proposal   Proposal
-	Invalid    string // why the proposal was refused before it was tried
-	NotRun     string // why it was not evaluated
-	Before     *RunResult
-	After      *RunResult
-	Accepted   bool
-	Reasons    []string
+	N        int
+	Proposal Proposal
+	Invalid  string // why the proposal was refused before it was tried
+	NotRun   string // why it was not evaluated
+	Before   *RunResult
+	After    *RunResult
+	Accepted bool
+	Reasons  []string
+	// Attempts are the improver's proposals in this iteration, with why each refused one was refused.
+	Attempts   []Attempt
 	Decision   *Decision
 	Diff       string
 	CostMicros int64
@@ -94,11 +97,13 @@ type Iteration struct {
 type ImproveResult struct {
 	// BaselineCached says the baseline was a recent run of the same code, reused.
 	BaselineCached bool
-	Branch         string
-	Kept           bool
-	Iterations     []Iteration
-	Report         string
-	Spent          int64
+	// Aborted says the infrastructure stopped the loop (a spend cap, the model API, ...): nothing was decided.
+	Aborted    string
+	Branch     string
+	Kept       bool
+	Iterations []Iteration
+	Report     string
+	Spent      int64
 }
 
 // lowest are the n lowest-scoring cases that the improver may see (scored, not held out, not calibration).
@@ -140,6 +145,17 @@ func Improve(ctx context.Context, d ImproveDeps, o ImproveOptions) (*ImproveResu
 	defer span.End()
 
 	before, cached, err := d.Baseline(ctx)
+	if errors.Is(err, ErrInfrastructure) {
+		if before != nil {
+			res.Spent += before.SpentMicro
+		}
+		res.Aborted = "the baseline " + err.Error()
+		span.SetStatus(codes.Error, "stopped by the infrastructure")
+		if path, rerr := writeReport(res, o, d); rerr == nil {
+			res.Report = path
+		}
+		return res, fmt.Errorf("baseline: %w", err)
+	}
 	if err != nil {
 		span.SetStatus(codes.Error, "baseline")
 		return res, fmt.Errorf("baseline: %w", err)
@@ -183,18 +199,29 @@ func Improve(ctx context.Context, d ImproveDeps, o ImproveOptions) (*ImproveResu
 		}
 		low := lowest(before, o.LowCases)
 		logf("iteration %d: asking the improver about %d low cases", n, len(low))
-		p, cost, err := d.Propose(ctx, ImproverInput{Suite: o.Suite.Name, Cases: low, Files: files, Tried: tried, Feedback: o.Suite.Feedback}, budget)
+		validate := func(p Proposal) (Proposal, error) {
+			if err := CheckProposalText(p); err != nil {
+				return p, err
+			}
+			return ValidateProposal(p, dir)
+		}
+		p, cost, attempts, err := d.Propose(ctx, ImproverInput{Suite: o.Suite.Name, Cases: low, Files: files, Tried: tried, Feedback: o.Suite.Feedback}, budget, validate)
 		it.CostMicros += cost
 		res.Spent += cost
-		if err != nil {
-			it.Invalid = err.Error()
+		it.Attempts = attempts
+		for _, a := range attempts {
+			if a.Error != "" {
+				logf("iteration %d: proposal %d refused: %s", n, a.N, a.Error)
+			}
+		}
+		if errors.Is(err, ErrNoChange) {
+			it.NotRun = err.Error()
 			res.Iterations = append(res.Iterations, it)
 			traceIteration(ctx, it)
 			continue
 		}
-		if p, err = ValidateProposal(p, dir); err != nil {
-			it.Proposal, it.Invalid = p, err.Error()
-			tried = append(tried, p.Title+" (refused: "+err.Error()+")")
+		if err != nil {
+			it.Invalid = err.Error()
 			res.Iterations = append(res.Iterations, it)
 			traceIteration(ctx, it)
 			continue
@@ -227,6 +254,20 @@ func Improve(ctx context.Context, d ImproveDeps, o ImproveOptions) (*ImproveResu
 			return res, fmt.Errorf("commit the change: %w", err)
 		}
 		after, err := d.Evaluate(ctx, dir, fmt.Sprintf("candidate %d: %s", n, p.Title), o.Live, o.MaxMicros-res.Spent) // live when the baseline was: like against like
+		if errors.Is(err, ErrInfrastructure) {
+			// Not the candidate's doing: the round stops, nothing is decided, and what was spent is reported.
+			if after != nil {
+				it.CostMicros += after.SpentMicro
+				res.Spent += after.SpentMicro
+			}
+			it.NotRun = "stopped: " + err.Error()
+			res.Aborted = "candidate " + fmt.Sprint(n) + ": " + err.Error()
+			_ = d.Repo.DropLast(ctx, dir)
+			res.Iterations = append(res.Iterations, it)
+			traceIteration(ctx, it)
+			logf("iteration %d: stopped by the infrastructure: %v", n, err)
+			break
+		}
 		if err != nil {
 			it.NotRun = "the suite did not run on the change: " + err.Error()
 			_ = d.Repo.DropLast(ctx, dir)
@@ -253,6 +294,9 @@ func Improve(ctx context.Context, d ImproveDeps, o ImproveOptions) (*ImproveResu
 		}
 		res.Iterations = append(res.Iterations, it)
 		traceIteration(ctx, it)
+	}
+	if res.Aborted != "" {
+		span.SetAttributes(attribute.String("cf.aborted", res.Aborted))
 	}
 	span.SetAttributes(attribute.Bool("cf.kept", res.Kept), attribute.Int64("cf.spent_micros", res.Spent), attribute.Int("cf.iterations", len(res.Iterations)))
 	report, err := writeReport(res, o, d)
@@ -283,7 +327,12 @@ func traceIteration(ctx context.Context, it Iteration) {
 	_, s := tracer().Start(ctx, fmt.Sprintf("eval.improve.iteration %d", it.N), trace.WithAttributes(
 		telemetry.Kind(telemetry.KindChain), attribute.String("cf.change.kind", it.Proposal.Kind), attribute.String("cf.change.file", it.Proposal.File()),
 		attribute.String("cf.change.title", it.Proposal.Title), attribute.Bool("cf.accepted", it.Accepted), attribute.Int64("cf.cost_micros", it.CostMicros),
-		attribute.String("cf.invalid", it.Invalid), attribute.String("cf.not_run", it.NotRun), attribute.StringSlice("cf.reasons", it.Reasons)))
+		attribute.String("cf.invalid", it.Invalid), attribute.String("cf.not_run", it.NotRun), attribute.StringSlice("cf.reasons", it.Reasons),
+		attribute.Int("cf.attempts", len(it.Attempts))))
+	for _, a := range it.Attempts {
+		s.AddEvent("proposal", trace.WithAttributes(attribute.Int("cf.attempt", a.N), attribute.String("cf.change.title", a.Title),
+			attribute.String("cf.change.file", a.File), attribute.String("cf.refused", a.Error)))
+	}
 	if it.Before != nil && it.Before.Mean != nil {
 		s.SetAttributes(attribute.Float64("cf.before.mean", *it.Before.Mean))
 	}
@@ -302,6 +351,9 @@ func writeReport(res *ImproveResult, o ImproveOptions, d ImproveDeps) (string, e
 	fmt.Fprintf(&b, "# Eval improve: %s\n\n", o.Suite.Name)
 	fmt.Fprintf(&b, "- Branch: `%s` (%s)\n", res.Branch, map[bool]string{true: "kept: review it and open a PR; it was never pushed", false: "nothing was kept; the branch was deleted"}[res.Kept])
 	fmt.Fprintf(&b, "- Spent: $%.3f of $%.2f\n", float64(res.Spent)/1e6, float64(o.MaxMicros)/1e6)
+	if res.Aborted != "" {
+		fmt.Fprintf(&b, "- **Stopped by the infrastructure, nothing was decided:** %s\n", res.Aborted)
+	}
 	fmt.Fprintf(&b, "- Rule (paired by case, noise-aware, docs/design/observability-v1.md section 9): the mean gain is at least %.1f and more than twice its standard error; no case drops by more than max(%.1f, twice its noise); the held-out mean drops by at most max(%.1f, twice its noise); the failure rate does not rise. A live case scored once is given a noise sd of %.1f\n", o.Rule.MinGain, o.Rule.MaxRegression, o.Rule.HeldOutSlack, cmpF(o.Rule.NoiseSD, DefaultNoiseSD))
 	if res.BaselineCached {
 		b.WriteString("- The baseline is a recent run of the same code, reused (no new runs)\n")
@@ -309,6 +361,14 @@ func writeReport(res *ImproveResult, o ImproveOptions, d ImproveDeps) (string, e
 	b.WriteString("\n")
 	for _, it := range res.Iterations {
 		fmt.Fprintf(&b, "## Iteration %d: %s\n\n", it.N, cmpOr(it.Proposal.Title, "(no proposal)"))
+		for _, a := range it.Attempts {
+			if a.Error != "" {
+				fmt.Fprintf(&b, "- Proposal %d (%q, `%s`) refused: %s\n", a.N, a.Title, a.File, a.Error)
+			}
+		}
+		if len(it.Attempts) > 0 {
+			b.WriteString("\n")
+		}
 		switch {
 		case it.Invalid != "":
 			fmt.Fprintf(&b, "**Refused before it was tried:** %s\n\n", it.Invalid)

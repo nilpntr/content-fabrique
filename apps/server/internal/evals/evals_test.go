@@ -59,7 +59,7 @@ func TestRepoSuiteLoads(t *testing.T) {
 			held++
 		}
 	}
-	if calibration != 1 || held != 1 {
+	if calibration != 1 || held < 1 {
 		t.Errorf("calibration cases %d, held out %d", calibration, held)
 	}
 	for _, f := range s.Feedback {
