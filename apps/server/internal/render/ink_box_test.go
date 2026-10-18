@@ -13,7 +13,12 @@ import (
 // must never be outside it (a title would be on a head the check calls clear), and it must be tight enough to be worth using.
 func TestTheInkBoxHoldsTheInk(t *testing.T) {
 	ffmpeg, _ := ffmpegTools(t)
-	texts := []string{"BACK DAY 101", "BACK DAY\nBLUEPRINT", "Never skip leg day", "Drive through\nyour heels", "Ünïcödé ÀÉÎÕÜ", "5x5 gjpqy"}
+	texts := []string{
+		"BACK DAY 101", "BACK DAY\nBLUEPRINT", "Never skip leg day", "Drive through\nyour heels", "Ünïcödé ÀÉÎÕÜ", "5x5 gjpqy",
+		// the glyphs that draw highest above the capitals: brackets, a dollar sign, a slash, a bar, an at sign, a caret, a tilde and an
+		// asterisk, and letters with a ring, a stacked accent or a tall mark
+		"(BACK) [DAY] {101}", "$5 / 10 | @home ^~*", "(row) [pull] {push} |", "ÅNGSTRÖM Åå Ůů", "Ǻ Ế Ǘ Ǻ", "Éclair Ñandú Öl",
+	}
 	var checked atomic.Int32
 	t.Run("cases", func(t *testing.T) {
 		for _, sty := range style.IDs() {
@@ -49,7 +54,7 @@ func TestTheInkBoxHoldsTheInk(t *testing.T) {
 		}
 	})
 	// The skip above must not hide the test: most of the cases are ones the validator accepts.
-	if n := checked.Load(); n < 70 {
+	if n := checked.Load(); n < 100 {
 		t.Errorf("only %d cases were checked", n)
 	}
 }

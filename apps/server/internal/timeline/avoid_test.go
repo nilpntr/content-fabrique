@@ -198,6 +198,38 @@ func TestAvoidingPlacesAboveWhenTheBandFits(t *testing.T) {
 	off(t, "above", pl, high, false)
 }
 
+// A title moved above the person keeps its ink inside the documented top margin even when a glyph rises above the capitals (a bracket, a
+// bar, a ring accent) or above the line box itself (a stacked accent in Inter): the ink box says how far each can rise.
+func TestTheInkOfATallGlyphStaysOutOfTheTopMargin(t *testing.T) {
+	out := baseSpec().Output
+	subs := []Subject{person(380)}
+	above := 0
+	for _, c := range []struct{ style, text string }{
+		{"title_series", "(BACK) DAY 101"}, {"title_series", "|BACK DAY|"}, {"title_series", "ÅNGSTRÖM"}, {"title_series", "Ǻ DAY"},
+		{"title_lowercase", "back day |"}, {"title_lowercase", "Ǻ Ế day"}, {"subtitle_clean", "(row) | pull"},
+	} {
+		it := titleItem(c.text)
+		it.Style = c.style
+		pl, av, err := PlaceTextAvoiding(out, it, subs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ink := pl.Layout.InkBox(pl.Box)
+		if av.Where == WhereAbove {
+			above++
+		}
+		if av.Where == WhereAbove && ink.Top < 240 {
+			t.Errorf("%s %q: the ink box %+v starts above the margin (240)", c.style, c.text, ink)
+		}
+		if av.Where == WhereAbove && ink.Bottom >= 380 {
+			t.Errorf("%s %q: the ink box %+v reaches the head (380)", c.style, c.text, ink)
+		}
+	}
+	if above < 2 {
+		t.Errorf("only %d of the cases were put above the head: the test does not test the margin", above)
+	}
+}
+
 // An item that cannot be put inside the safe zone at all is not "over the subject": the renderer leaves it out (unsafe_text), and the two
 // functions agree.
 func TestAnItemThatDoesNotFitTheZoneIsNotOverTheSubject(t *testing.T) {

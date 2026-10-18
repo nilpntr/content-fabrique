@@ -144,8 +144,8 @@ func PlaceTextAvoiding(out Output, it TextItem, subs []Subject) (TextPlacement, 
 	inkZone := func(cpl TextPlacement, nb style.Rect) style.Zone {
 		ink := cpl.Layout.InkBox(nb)
 		z := cpl.Zone
-		z.Inner.Top -= max(ink.Top-nb.Top, 0)
-		z.Inner.Bottom += max(nb.Bottom-ink.Bottom, 0)
+		z.Inner.Top -= ink.Top - nb.Top // the empty space over the letters, or (negative) the glyphs that rise above the line box
+		z.Inner.Bottom += nb.Bottom - ink.Bottom
 		return z
 	}
 	withInkBottom := func(cpl TextPlacement, y int) style.Rect {
