@@ -30,6 +30,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/renderjobs"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
+	"github.com/nilpntr/content-fabrique/internal/telemetry"
 )
 
 const agentUsage = `Usage:
@@ -254,6 +255,9 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 
 	ctx, stop := signalContext()
 	defer stop()
+	// With OTEL_EXPORTER_OTLP_ENDPOINT set (task dev:obs's Phoenix, say) every step of the run is a span (docs/design/observability-v1.md).
+	flushSpans := setupCfctlTracing(env)
+	defer flushSpans()
 	st, code := env.openDB(ctx, "agent run", deps)
 	if code != 0 {
 		return code
@@ -364,6 +368,14 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 	code = printRun(ctx, out, errOut, st, ws, run.ID, *showEvents)
 	if code != 0 {
 		return code
+	}
+	if ep := env.get("OTEL_EXPORTER_OTLP_ENDPOINT"); ep != "" {
+		tid := telemetry.RunTraceID(run.ID)
+		if link := phoenixTraceURL(ctx, ep, tid); link != "" {
+			_, _ = fmt.Fprintf(out, "\ntrace: %s\n", link)
+		} else {
+			_, _ = fmt.Fprintf(out, "\ntrace id: %s\n", tid)
+		}
 	}
 	if final, err := st.GetAgentRun(ctx, ws, run.ID); err == nil && final.Status != store.AgentSucceeded {
 		return 1

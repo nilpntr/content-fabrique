@@ -13,11 +13,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
 	"github.com/nilpntr/content-fabrique/internal/store"
+	"github.com/nilpntr/content-fabrique/internal/telemetry"
 )
 
 // Why a run failed (agent_runs.failure_reason).
@@ -123,7 +126,7 @@ func NewRunner(deps Deps) (*Runner, error) {
 // live worker holds does nothing), rebuilds the conversation from the events, and repeats the steps of the design note:
 // check cancel and budgets, run the tool calls that have no result, call the model. A non-nil error means "retry the job":
 // the run is put back to queued and resumes from its events on the next attempt.
-func (r *Runner) Execute(ctx context.Context, ws ids.WorkspaceID, id uuid.UUID) (Outcome, error) {
+func (r *Runner) Execute(ctx context.Context, ws ids.WorkspaceID, id uuid.UUID) (outcome Outcome, retErr error) {
 	st := r.deps.Store
 	run, err := st.ClaimAgentRun(ctx, ws, id, r.deps.StaleAfter)
 	if errors.Is(err, store.ErrNotFound) {
@@ -143,7 +146,15 @@ func (r *Runner) Execute(ctx context.Context, ws ids.WorkspaceID, id uuid.UUID) 
 	}
 
 	l := r.newLoop(ws, run)
-	loopCtx, cancel := context.WithCancelCause(ctx)
+	spanCtx, span := startRunSpan(ctx, ws, run, r.deps.Agents)
+	defer func() {
+		if p := recover(); p != nil {
+			span.End() // a test's simulated kill: the span ends, nothing else is read or written
+			panic(p)
+		}
+		endRunSpan(spanCtx, st, ws, run, span, outcome, retErr)
+	}()
+	loopCtx, cancel := context.WithCancelCause(spanCtx)
 	l.cancel = cancel
 	out, err := func() (out Outcome, err error) {
 		// The heartbeat stops however the loop ends, a panic included: a worker that dies must not keep its run fresh.
@@ -389,6 +400,7 @@ func (l *loop) work(ctx context.Context) (Outcome, error) {
 	}
 	spent := l.costMicro
 	if want := max(ledger, spent+l.cv.inflight); want > spent {
+		TraceRunEvent(ctx, "cost_reconciled", attribute.Int64("cf.added_cost_micros", want-spent))
 		if _, err := l.append(ctx, store.EventStatus, mustJSON(statusPayload{State: stateCostFixed, AddedCostMicros: want - spent}), store.EventDelta{CostMicros: want - spent}); err != nil {
 			return "", err
 		}
@@ -447,7 +459,21 @@ func (l *loop) work(ctx context.Context) (Outcome, error) {
 
 // storeContext builds the run context and stores it as an event. done says the run ended.
 func (l *loop) storeContext(ctx context.Context) (Outcome, bool, error) {
+	ctx, span := tracer().Start(ctx, "agent.context", trace.WithAttributes(telemetry.Kind(telemetry.KindChain)))
+	defer span.End()
 	blocks, err := l.agent.Context(ctx, l.toolContext("", false))
+	if err == nil && telemetry.Content() {
+		var parts []string
+		for _, b := range blocks {
+			if b.Type == llm.BlockText {
+				parts = append(parts, b.Text)
+			}
+		}
+		span.SetAttributes(telemetry.Text(telemetry.OutputValue, strings.Join(parts, "\n\n"))...)
+	}
+	if err != nil {
+		llm.RecordError(span, err)
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			return "", true, context.Cause(ctx)
@@ -490,6 +516,9 @@ func (l *loop) toolContext(toolUseID string, resumed bool) RunContext {
 	}
 	rc.artifact = func(ctx context.Context, payload json.RawMessage) error {
 		_, err := l.append(ctx, store.EventArtifact, payload, store.EventDelta{})
+		if err == nil {
+			traceArtifact(ctx, payload)
+		}
 		return err
 	}
 	return rc
@@ -700,6 +729,7 @@ func (l *loop) recoverCutOff(ctx context.Context, t *turn) (Outcome, bool, error
 		return out, true, ferr
 	}
 	msg := []wireBlock{{Type: "text", Text: CutOffMessage}}
+	TraceRunEvent(ctx, "cut_off", attribute.Int("cf.cut_offs", l.cv.cutOffs), attribute.Int("cf.pending_tool_calls", len(t.pending())))
 	if len(t.uses) == 0 {
 		e, err := l.append(ctx, store.EventStatus, mustJSON(statusPayload{State: stateCutOff, Blocks: msg}), store.EventDelta{})
 		if err != nil {
@@ -728,6 +758,11 @@ func (l *loop) recoverCutOff(ctx context.Context, t *turn) (Outcome, bool, error
 // nudge stores the agent's message after a turn that ended without a tool call; the next model call sends it. done is false:
 // the run goes on.
 func (l *loop) nudge(ctx context.Context, text string) (Outcome, bool, error) {
+	nudgeAttrs := []attribute.KeyValue{attribute.Int("cf.nudges", l.cv.nudges+1)}
+	if telemetry.Content() {
+		nudgeAttrs = append(nudgeAttrs, attribute.String("cf.nudge", telemetry.Clean(text, telemetry.MaxTextBytes)))
+	}
+	TraceRunEvent(ctx, "nudge", nudgeAttrs...)
 	wire, err := toWire([]llm.Block{llm.TextBlock(text)})
 	if err != nil {
 		out, ferr := l.fail(ctx, FailBadInput, "the agent's nudge is invalid: "+err.Error(), nil)
@@ -807,6 +842,15 @@ const maxResultTextBytes = 48 * 1024
 func (l *loop) callTool(ctx context.Context, t *turn, use llm.Block) (Outcome, bool, error) {
 	resumed := t.called[use.ID]
 	tool, known := l.agent.registry.Get(use.Name)
+	ctx, span := startToolSpan(ctx, use, known && tool.Mutates(), resumed)
+	var traced *toolResultPayload
+	defer func() {
+		if traced != nil {
+			endToolSpan(span, *traced)
+			return
+		}
+		span.End()
+	}()
 	if !resumed {
 		call := toolCallPayload{ToolUseID: use.ID, Name: use.Name, Input: use.Input, Mutates: known && tool.Mutates()}
 		if len(call.Input) == 0 {
@@ -845,6 +889,7 @@ func (l *loop) callTool(ctx context.Context, t *turn, use llm.Block) (Outcome, b
 	l.hook("tool_run_done")
 
 	if res.Ask && !res.IsError {
+		TraceRunEvent(ctx, "waiting_input", telemetry.ToolName.String(use.Name))
 		return l.park(ctx, use, res)
 	}
 	payload, perr := l.resultPayload(use, res)
@@ -855,6 +900,7 @@ func (l *loop) callTool(ctx context.Context, t *turn, use llm.Block) (Outcome, b
 	}
 	final := res.Final && !res.IsError
 	payload.Final = final
+	traced = &payload
 	e, err := l.append(ctx, store.EventToolResult, mustJSON(payload), store.EventDelta{})
 	switch {
 	case errors.Is(err, store.ErrPayloadTooLarge):
@@ -1069,6 +1115,7 @@ func (l *loop) stopBudgetWithUsage(ctx context.Context, limit string, usage llm.
 	// An agent whose work is in a usable state may end the run gracefully instead of failing it for the limit.
 	if l.agent.OnLimit != nil {
 		if output, ok := l.agent.OnLimit(ctx, l.toolContext("", false), limit); ok && len(output) > 0 {
+			traceLimit(ctx, limit, true)
 			if err := l.recordGraceful(ctx, limit, usage, cost); err != nil {
 				return "", err
 			}
@@ -1082,6 +1129,7 @@ func (l *loop) stopBudgetWithUsage(ctx context.Context, limit string, usage llm.
 			return OutcomeFinished, nil
 		}
 	}
+	traceLimit(ctx, limit, false)
 	msg := fmt.Sprintf("The run reached its %s limit and was stopped.", strings.ReplaceAll(limit, "_", " "))
 	if err := l.recordSpend(ctx, FailBudget, msg, usage, cost); err != nil {
 		return "", err

@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
@@ -503,6 +504,7 @@ func (d Deps) editTimeline(ctx context.Context, rc runtime.RunContext, in editAr
 	for _, n := range recipeNotes {
 		b.WriteString("Title look: " + n + ".\n")
 	}
+	traceTitleRecipe(ctx, recipeNotes)
 	if len(edit.Warnings) > 0 {
 		b.WriteString("Warnings (they do not block, but look at them):\n" + opIssuesText(edit.Warnings, maxIssueLines) + "\n")
 	}
@@ -590,9 +592,12 @@ func (d Deps) renderPreview(ctx context.Context, rc runtime.RunContext, _ noArgs
 	if err := rc.Artifact(ctx, PreviewArtifact, map[string]any{"version": v, "duration_ms": int64(dur)}); err != nil {
 		return runtime.Result{}, fmt.Errorf("record the preview: %w", err)
 	}
+	perCall := d.callCostMicros(ctx, rc)
+	traceBudgetLow(ctx, rc.Left, perCall)
+	runtime.TraceEvent(ctx, "preview", attribute.String("cf.contact_sheet", string(sheet)), attribute.Int("cf.version", v))
 	return runtime.Result{Content: []llm.Block{
 		llm.TextBlock(fmt.Sprintf("Preview of version %d: the video is %d ms (%s) long. The contact sheet below shows frames from the whole video, each labelled with its time. Where the clips play:\n%s%s",
-			v, int64(dur), secs2(int64(dur)), timeMap(spec, maxTimeMapLines), budgetNote(rc.Left, d.callCostMicros(ctx, rc)))),
+			v, int64(dur), secs2(int64(dur)), timeMap(spec, maxTimeMapLines), budgetNote(rc.Left, perCall))),
 		{Type: llm.BlockImage, Image: &llm.Image{MediaType: "image/jpeg", Ref: string(sheet)}},
 	}}, nil
 }

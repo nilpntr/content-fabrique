@@ -410,6 +410,7 @@ func (d Deps) planEdit(ctx context.Context, rc runtime.RunContext, in planArgs) 
 		return runtime.Result{}, fmt.Errorf("record the plan: %w", err)
 	}
 	d.previews.setPlan(rc.RunID, plan)
+	tracePlan(ctx, plan)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Plan saved (it is shown to the creator). Content type %s, playbook %s.\n", plan.ContentType, plan.PlaybookVersion)

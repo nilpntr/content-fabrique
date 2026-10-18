@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,46 +48,118 @@ type Options struct {
 	LogLevel slog.Level
 	// LogText selects the human-readable text format instead of JSON (used locally).
 	LogText bool
+	// TraceContent turns content capture on (SetContent): the agent spans then carry prompts, answers, tool arguments and results and
+	// thumbnails. config.Load sets it from OTEL_TRACE_CONTENT, only in the local environment (ContentAllowed).
+	TraceContent bool
+	// ExplicitEndpoint, for a process whose settings do not come from its own environment (cfctl reads them from the env file), passes
+	// OTLPEndpoint and Headers to the exporter instead of letting the SDK read OTEL_EXPORTER_OTLP_ENDPOINT and _HEADERS itself. The
+	// api and the worker leave it false.
+	ExplicitEndpoint bool
+	// Headers are the OTLP headers when ExplicitEndpoint is set (OTEL_EXPORTER_OTLP_HEADERS, parsed by ParseHeaders).
+	Headers map[string]string
 }
+
+// PhoenixProject is the project Phoenix files the spans of the local stack under (the openinference.project.name resource attribute,
+// set only in the local environment).
+const PhoenixProject = "content-fabrique"
 
 // Setup installs the global logger and tracer provider. The returned shutdown function flushes pending spans
 // and must be called before the process exits.
 func Setup(ctx context.Context, opts Options) (*slog.Logger, func(context.Context) error, error) {
 	logger := NewLogger(opts)
 	slog.SetDefault(logger)
+	shutdown, err := SetupTracing(ctx, opts, logger)
+	if err != nil {
+		return nil, nil, err
+	}
+	return logger, shutdown, nil
+}
 
+// SetupTracing installs the global tracer provider (and content capture) without touching the logger: cfctl, which prints to the
+// terminal, uses it. logger receives exporter errors.
+func SetupTracing(ctx context.Context, opts Options, logger *slog.Logger) (func(context.Context) error, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	SetContent(opts.TraceContent)
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{}, propagation.Baggage{},
 	))
 	// Exporter problems (an unreachable collector, say) go to the logger, at most once a minute.
 	otel.SetErrorHandler(newThrottledErrorHandler(logger, time.Minute))
 
-	res, err := resource.New(ctx,
-		resource.WithAttributes(
-			attribute.String("service.name", opts.Service),
-			attribute.String("service.version", opts.Version),
-			attribute.String("deployment.environment.name", opts.Env),
-		),
-		resource.WithTelemetrySDK(),
-	)
+	attrs := []attribute.KeyValue{
+		attribute.String("service.name", opts.Service),
+		attribute.String("service.version", opts.Version),
+		attribute.String("deployment.environment.name", opts.Env),
+	}
+	if opts.Env == "local" {
+		attrs = append(attrs, attribute.String("openinference.project.name", PhoenixProject))
+	}
+	res, err := resource.New(ctx, resource.WithAttributes(attrs...), resource.WithTelemetrySDK())
 	if err != nil {
-		return nil, nil, fmt.Errorf("telemetry resource: %w", err)
+		return nil, fmt.Errorf("telemetry resource: %w", err)
 	}
 
-	tpOpts := []sdktrace.TracerProviderOption{sdktrace.WithResource(res)}
+	// The id generator lets an agent run's spans use the run's id as their trace id (ids.go).
+	tpOpts := []sdktrace.TracerProviderOption{sdktrace.WithResource(res), sdktrace.WithIDGenerator(IDGenerator{}), sdktrace.WithRawSpanLimits(SpanLimits())}
 	if opts.OTLPEndpoint != "" {
-		exp, err := otlptracehttp.New(ctx)
-		if err != nil {
-			return nil, nil, fmt.Errorf("otlp trace exporter: %w", err)
+		var expOpts []otlptracehttp.Option
+		if opts.ExplicitEndpoint {
+			expOpts = append(expOpts, otlptracehttp.WithEndpointURL(TracesURL(opts.OTLPEndpoint)))
+			if len(opts.Headers) > 0 {
+				expOpts = append(expOpts, otlptracehttp.WithHeaders(opts.Headers))
+			}
 		}
-		tpOpts = append(tpOpts, sdktrace.WithBatcher(exp))
-		logger.Info("trace export enabled", "endpoint", opts.OTLPEndpoint)
+		exp, err := otlptracehttp.New(ctx, expOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("otlp trace exporter: %w", err)
+		}
+		var batch []sdktrace.BatchSpanProcessorOption
+		if opts.TraceContent {
+			// Spans with content are large (an LLM span can hold a few hundred KB of messages): smaller batches keep each request small.
+			batch = append(batch, sdktrace.WithMaxExportBatchSize(16))
+		}
+		tpOpts = append(tpOpts, sdktrace.WithBatcher(exp, batch...))
+		logger.Info("trace export enabled", "endpoint", opts.OTLPEndpoint, "content", opts.TraceContent)
 	}
 	tp := sdktrace.NewTracerProvider(tpOpts...)
 	otel.SetTracerProvider(tp)
 
-	shutdown := func(ctx context.Context) error { return tp.Shutdown(ctx) }
-	return logger, shutdown, nil
+	return tp.Shutdown, nil
+}
+
+// SpanLimits are the tracer provider's limits. The SDK's default of 128 attributes a span would cut an LLM span's messages (each part is
+// two attributes, flattened as OpenInference has them); the sizes are bounded by the caps of content.go instead (MaxSpanContentBytes).
+func SpanLimits() sdktrace.SpanLimits {
+	l := sdktrace.NewSpanLimits()
+	l.AttributeCountLimit = 4096
+	l.EventCountLimit = 512
+	l.AttributePerEventCountLimit = 64
+	return l
+}
+
+// TracesURL is the OTLP/HTTP traces URL of a base endpoint, as the SDK builds it from OTEL_EXPORTER_OTLP_ENDPOINT: the base with
+// /v1/traces appended.
+func TracesURL(endpoint string) string {
+	return strings.TrimRight(endpoint, "/") + "/v1/traces"
+}
+
+// ParseHeaders reads OTEL_EXPORTER_OTLP_HEADERS: comma-separated key=value pairs, values percent-encoded. A malformed pair is skipped.
+func ParseHeaders(s string) map[string]string {
+	out := map[string]string{}
+	for _, kv := range strings.Split(s, ",") {
+		k, v, ok := strings.Cut(kv, "=")
+		k = strings.TrimSpace(k)
+		if !ok || k == "" {
+			continue
+		}
+		if dec, err := url.QueryUnescape(strings.TrimSpace(v)); err == nil {
+			v = dec
+		}
+		out[k] = strings.TrimSpace(v)
+	}
+	return out
 }
 
 // NewLogger builds a slog logger that adds trace_id and span_id to records logged with a context that has an

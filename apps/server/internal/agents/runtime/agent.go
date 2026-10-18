@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 )
@@ -117,6 +118,9 @@ type Agent struct {
 	Thinking *llm.Thinking
 	// Budgets are this agent's defaults for the fields a caller leaves unset.
 	Budgets Budgets
+	// TraceAttrs, when set, adds attributes of the run's input to the run's span (the prompt version, the vibe). They are metadata:
+	// never the user's text (that is content, see trace.go).
+	TraceAttrs func(input json.RawMessage) []attribute.KeyValue
 
 	registry *Registry
 }

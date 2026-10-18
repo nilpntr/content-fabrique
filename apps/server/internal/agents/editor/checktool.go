@@ -257,12 +257,14 @@ func (d Deps) checkEdit(ctx context.Context, rc runtime.RunContext, _ noArgs) (r
 	}
 	d.previews.checkRun(rc.RunID, v, nth, rc.ToolUseID)
 	d.previews.checkOutcome(rc.RunID, v, report.Failed())
+	traceChecks(ctx, report, nth)
 
 	var b strings.Builder
 	b.WriteString(report.Text())
 	b.WriteString("\n\n")
 	perCall := d.callCostMicros(ctx, rc)
 	low := budgetLow(rc.Left, perCall)
+	traceBudgetLow(ctx, rc.Left, perCall)
 	switch {
 	case fail == 0:
 		b.WriteString("All the checks that apply pass. Call finish.")
