@@ -1,0 +1,43 @@
+# A format card of the format library (docs/design/formats-v1.md). Our words only. A device: it is mixed into a format (plan_edit's
+# format_mix), never the whole idea of a video.
+id: loop_ending
+version: 1
+kind: device
+name: Seamless loop
+plural: seamless loops
+pitch: The last frame flows back into the first, so the video replays without a seam and the watch time climbs.
+fits:
+  content_types: [workout, vlog, general, tutorial, unboxing_product, talking]
+  needs: []
+  helps: [pose, long_clip]
+  when:
+    - The opening shot can come back at the end (the same pose, the same angle, the same movement at the same phase).
+not_when:
+  - The ending is a punchline that should land once (a dialogue twist, a myth busted).
+beats:
+  - name: hook
+    roles: [hook]
+    timing: the first frame
+    what: Open on a frame that the end can return to.
+  - name: middle
+    roles: [build, step, broll, detail, peak]
+    timing: as the format says
+    what: The format's own middle.
+  - name: payoff
+    roles: [ending]
+    timing: the last second
+    what: End on the same clip as the opening, at the same phase of the movement, cut on a beat so the replay lands on the first beat.
+text:
+  pattern: any
+  title_forms: []
+  notes: Keep the last frame free of text that the first frame does not have.
+music: The last cut on a phrase boundary so the restart sounds like the next bar.
+length_s: {min: 6, max: 45}
+pace: steady
+pace_hint: No hold at the end longer than the pace allows.
+vibes: {calm: great, lively: great, hype: great}
+how_it_plays:
+  - Opens on the pose, ends on the same pose from the same angle a moment earlier in the clip, so the replay looks like one take.
+check:
+  loop: true
+  min_shots: 2

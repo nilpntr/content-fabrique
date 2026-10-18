@@ -1,0 +1,49 @@
+# A format card of the format library (docs/design/formats-v1.md). Our words only.
+id: myth_fact
+version: 1
+kind: format
+name: Myth vs fact
+plural: myth busters
+pitch: A common belief on screen, then the fact, shown with the creator's own footage.
+fits:
+  content_types: [workout, tutorial, talking]
+  needs: [reps]
+  helps: [talking, two_exercises]
+  when:
+    - The footage shows a movement or a habit that people get wrong, and the right way to do it.
+not_when:
+  - The brief gives no claim and the footage shows nothing debatable.
+  - Never make up a health or science claim; keep to what the footage shows and the brief says.
+beats:
+  - name: hook
+    roles: [hook]
+    timing: from 0 to the drop
+    what: '"Myth: ..." on screen over the movement done the common way, or over a still frame.'
+  - name: middle
+    roles: [reveal, step]
+    timing: on the drop
+    what: '"Fact: ..." with the right way shown, cut on the drop.'
+  - name: payoff
+    roles: [payoff, peak, ending]
+    timing: to the end
+    what: The right way in clean reps, held, a short closing line or none.
+text:
+  pattern: single_title
+  title_forms: ["MYTH: <CLAIM>", "FACT: <CLAIM>"]
+  notes: Two short lines (myth, then fact), each a few words; claims only from the brief or what the footage plainly shows.
+music: The myth on the intro, the fact on the drop.
+length_s: {min: 10, max: 30}
+pace: steady
+pace_hint: Two halves; the fact half a little longer.
+vibes: {calm: good, lively: great, hype: good}
+how_it_plays:
+  - '"Myth: you need to go heavy to grow" over a sloppy heavy rep; on the drop "Fact: control grows it" over slow clean reps.'
+detect:
+  keywords: [myth, fact, truth, lie, nobody tells you, stop doing]
+  rules:
+    - all: [keyword]
+      none: [pattern_dialogue]
+      score: 0.75
+check:
+  payoff: drop
+  min_shots: 2

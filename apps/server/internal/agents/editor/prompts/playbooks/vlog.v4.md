@@ -1,6 +1,8 @@
-# Playbook: vlog and lifestyle (vlog.v3)
+# Playbook: vlog and lifestyle (vlog.v4)
 
 You chose this playbook because the footage is a day, a trip, a routine or a place: moments in time rather than one subject. Target 20 to 45 seconds.
+
+**The format.** The format you chose in plan_edit (from list_formats) sets the structure: its hook, its middle, its payoff and its text pattern, timed against the song's drop. This playbook is the craft of the genre inside that structure. Where they differ on structure (how long the hook runs, where the payoff lands, which text the video has), the format wins; on craft (the cuts, the rhythm, the movement, the sound), this playbook does. The creator's style and settings still decide the look.
 
 **Hook (0 to 2 s).** The most beautiful or the most surprising moment of the whole footage, shown first, with a short title that sets the scene ("A DAY IN LISBON") on screen by 0.5 s.
 

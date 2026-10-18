@@ -1,0 +1,53 @@
+# A format card of the format library (docs/design/formats-v1.md). Our words only.
+id: one_take
+version: 1
+kind: format
+name: One take, one title
+plural: one-take sets
+pitch: One set or one pose, held almost unbroken under one title, the song doing the work.
+fits:
+  content_types: [workout, vlog, general]
+  needs: [long_clip]
+  helps: [song, pose]
+  when:
+    - There is one long, good-looking clip (a full set, a posing routine) that holds attention on its own.
+not_when:
+  - The long clips are dead (resting, setting up) or there are many short clips worth showing.
+beats:
+  - name: hook
+    roles: [hook]
+    timing: from 0 to the drop
+    what: The set or the pose starts at once with the title above the head.
+  - name: middle
+    roles: [build, peak]
+    timing: from the drop
+    what: The take keeps running with the living camera, a punch-in on the drop and on a strong beat, at most an angle switch or two.
+  - name: payoff
+    roles: [payoff, ending]
+    timing: the last phrase
+    what: The last rep or the held pose, ending where it can loop.
+text:
+  pattern: single_title
+  title_forms: ["<TOPIC>"]
+  notes: One title in the creator's form; no other text.
+music: The song's drop is the one big moment, with a punch-in on it.
+length_s: {min: 10, max: 40}
+pace: steady
+pace_hint: Very few cuts; the camera moves instead.
+vibes: {calm: great, lively: good, hype: weak}
+how_it_plays:
+  - A whole set of pulldowns from behind, one take, a punch-in on the drop and on the last rep, the title gone by the drop.
+detect:
+  rules:
+    - all: [long_take, pattern_single_title]
+      none: [title_series, title_numbered, chapters, hook_quote]
+      score: 0.6
+    - all: [long_take, pattern_none]
+      score: 0.6
+    # The text was not read: the take alone, less sure.
+    - all: [long_take]
+      none: [pattern_single_title, pattern_story_captions, pattern_dialogue, pattern_none]
+      score: 0.5
+check:
+  payoff: end
+  min_shots: 1

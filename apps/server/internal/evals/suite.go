@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -23,7 +24,10 @@ type Suite struct {
 	// FeedbackFile is the recorded human feedback, relative to the suite file.
 	FeedbackFile string   `yaml:"feedback"`
 	Defaults     Defaults `yaml:"defaults"`
-	Cases        []Case   `yaml:"cases"`
+	// Rubric are rubric items of every case but the calibration ones (a case's own item of the same id wins): what every edit is
+	// judged on besides the dimensions, such as a clear concept.
+	Rubric []Expectation `yaml:"rubric"`
+	Cases  []Case        `yaml:"cases"`
 
 	// Feedback is FeedbackFile, loaded.
 	Feedback []FeedbackItem `yaml:"-"`
@@ -64,6 +68,9 @@ type Case struct {
 	// Calibration marks a case whose human verdict is known: the judge's scores are compared with Expect, and the case does not count
 	// in the suite's mean.
 	Calibration *Calibration `yaml:"calibration"`
+	// NewIdea makes the live edit a "Try another idea" run on the stored project (a new version in a format none of its versions
+	// used) instead of a first edit of new footage; judged without --live, it is the stored version as it is.
+	NewIdea bool `yaml:"new_idea"`
 }
 
 // Stored names a project's timeline version.
@@ -165,6 +172,9 @@ func (s *Suite) merge(o *Suite) {
 	if o.FeedbackFile != "" {
 		s.FeedbackFile = o.FeedbackFile
 	}
+	if len(o.Rubric) > 0 {
+		s.Rubric = o.Rubric
+	}
 	for _, oc := range o.Cases {
 		i := s.caseIndex(oc.ID)
 		if i < 0 {
@@ -197,6 +207,9 @@ func (s *Suite) merge(o *Suite) {
 		if oc.Calibration != nil {
 			c.Calibration = oc.Calibration
 		}
+		if oc.NewIdea {
+			c.NewIdea = true
+		}
 	}
 }
 
@@ -216,6 +229,11 @@ func (s *Suite) validate() error {
 	}
 	if len(s.Cases) == 0 {
 		errs = append(errs, errors.New("suite: no cases"))
+	}
+	for _, e := range s.Rubric {
+		if !idRE.MatchString(e.ID) || strings.TrimSpace(e.Text) == "" || e.Weight < 0 {
+			errs = append(errs, fmt.Errorf("suite rubric: item %q needs an id, a text and a weight of 0 or more", e.ID))
+		}
 	}
 	seen := map[string]bool{}
 	for _, c := range s.Cases {
@@ -254,6 +272,16 @@ func (s *Suite) Resolved(c Case) Case {
 	if c.BudgetUSD <= 0 {
 		c.BudgetUSD = s.Defaults.BudgetUSD
 	}
+	// The suite's rubric, under the case's own items (an item of the same id is the case's); a calibration case keeps its own.
+	if c.Calibration == nil && len(s.Rubric) > 0 {
+		items := slices.Clone(c.Expectations)
+		for _, e := range s.Rubric {
+			if !slices.ContainsFunc(items, func(x Expectation) bool { return x.ID == e.ID }) {
+				items = append(items, e)
+			}
+		}
+		c.Expectations = items
+	}
 	return c
 }
 
@@ -267,6 +295,13 @@ func (c Case) Missing(live bool) []string {
 		}
 	}
 	ph("workspace", c.Workspace)
+	if live && c.NewIdea { // a new idea is made on the stored project
+		if c.Stored == nil {
+			return append(out, "stored")
+		}
+		ph("stored.project", c.Stored.Project)
+		return out
+	}
 	if live {
 		if len(c.Footage) == 0 {
 			out = append(out, "footage")

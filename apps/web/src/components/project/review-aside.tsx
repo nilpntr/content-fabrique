@@ -1,4 +1,4 @@
-import { Check, CircleAlert, Download, Loader2, Sparkles, Wand2, Wrench } from "lucide-react";
+import { Check, CircleAlert, Download, Lightbulb, Loader2, Sparkles, Wand2, Wrench } from "lucide-react";
 import * as React from "react";
 import { ExtraCarefulOption, extraCarefulCosts } from "@/components/extra-careful";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -6,7 +6,7 @@ import { Disclosure } from "@/components/ui/disclosure";
 import { Textarea } from "@/components/ui/textarea";
 import { useMe } from "@/lib/api/hooks";
 import { useFinalRender, useStartEdit } from "@/lib/api/project-hooks";
-import { creditsOf } from "@/lib/credits";
+import { creditsLabel, creditsOf } from "@/lib/credits";
 import { cn } from "@/lib/utils";
 import { renderFailureMessage, renderMessage, startEditMessage } from "./errors";
 import type { ReviewSummary } from "./plain-words";
@@ -45,6 +45,16 @@ export function WhatIMade({ text, className }: { text: string; className?: strin
         )}
       </div>
     </section>
+  );
+}
+
+/** The name of a version a new idea made: "Version 3 · new idea: transformation reveal". */
+export function VersionIdea({ label, className }: { label: string; className?: string }) {
+  return (
+    <p data-testid="version-idea" className={cn("flex items-center gap-2 text-[13.5px] font-medium text-pretty", className)}>
+      <Lightbulb aria-hidden className="size-4 shrink-0 text-brand" />
+      {label}
+    </p>
   );
 }
 
@@ -144,18 +154,29 @@ export function FeedbackBox({
 }) {
   const [text, setText] = React.useState("");
   const [careful, setCareful] = React.useState(false);
+  // Which button started the edit that is on its way: "Make the changes" or "Try another idea".
+  const [asked, setAsked] = React.useState<"changes" | "idea">("changes");
   const start = useStartEdit();
   const me = useMe();
-  const extraCareful = extraCarefulCosts(creditsOf(me.data)?.edit_costs, firstCut ? "first_edit" : "revision");
+  const costs = creditsOf(me.data)?.edit_costs;
+  const extraCareful = extraCarefulCosts(costs, firstCut ? "first_edit" : "revision");
   const id = React.useId();
   const hintId = React.useId();
+  const ideaHintId = React.useId();
 
-  function submit(event: React.FormEvent) {
-    event.preventDefault();
+  function begin(newIdea: boolean) {
     if (start.isPending || busy) return;
     const instructions = text.trim();
+    setAsked(newIdea ? "idea" : "changes");
     start.mutate(
-      { projectId, body: { ...(instructions === "" ? {} : { instructions }), ...(extraCareful && careful ? { quality: "max" as const } : {}) } },
+      {
+        projectId,
+        body: {
+          ...(instructions === "" ? {} : { instructions }),
+          ...(extraCareful && careful ? { quality: "max" as const } : {}),
+          ...(newIdea ? { new_idea: true } : {}),
+        },
+      },
       {
         onSuccess: (run) => {
           setText("");
@@ -166,7 +187,13 @@ export function FeedbackBox({
     );
   }
 
+  function submit(event: React.FormEvent) {
+    event.preventDefault();
+    begin(false);
+  }
+
   const label = firstCut ? "Make my video" : "Make the changes";
+  const pending = (which: "changes" | "idea") => start.isPending && asked === which;
   return (
     <form onSubmit={submit} aria-label={firstCut ? "Make my video" : "Tell me what to change"} className={cn(SECTION, className)}>
       <label htmlFor={id} className={HEADING}>
@@ -197,9 +224,36 @@ export function FeedbackBox({
           {startEditMessage(start.error)}
         </p>
       ) : null}
-      <Button type="submit" variant={firstCut ? "default" : "secondary"} className="w-full sm:w-auto" disabled={start.isPending || busy} focusableWhenDisabled>
-        {start.isPending ? "Starting…" : label}
-      </Button>
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+        <Button type="submit" variant={firstCut ? "default" : "secondary"} className="w-full sm:w-auto" disabled={start.isPending || busy} focusableWhenDisabled>
+          {pending("changes") ? "Starting…" : label}
+        </Button>
+        {firstCut ? null : (
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full sm:w-auto"
+            disabled={start.isPending || busy}
+            focusableWhenDisabled
+            aria-describedby={ideaHintId}
+            onClick={() => begin(true)}
+          >
+            <Lightbulb aria-hidden />
+            {pending("idea") ? "Starting…" : "Try another idea"}
+          </Button>
+        )}
+      </div>
+      {firstCut ? null : (
+        <p id={ideaHintId} className="text-[12.5px] text-muted-foreground text-pretty">
+          {ideaHint(costs?.standard.revision)}
+        </p>
+      )}
     </form>
   );
+}
+
+/** What "Try another idea" does, in a line, with what it costs when the API said. */
+export function ideaHint(revisionCredits: number | undefined): string {
+  const cost = typeof revisionCredits === "number" && revisionCredits > 0 ? ` Costs the same as a change (${creditsLabel(revisionCredits)}).` : "";
+  return `Another idea makes a new version with a different concept, in your style. This one stays.${cost}`;
 }

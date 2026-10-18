@@ -934,3 +934,22 @@ up to fifteen frames, still under its $0.01 budget.
 - Phoenix's licence forbids offering it as a service: it stays a development tool.
 
 **Revisit** when traces are wanted in staging with content (that needs a store we control and the creators' consent), or when a hosted eval platform is chosen.
+
+## D-40 A format library: the editor picks the idea first
+
+> Status: **Proposed** by engineering (2026-10-18), on the founder's request to "teach the model to be creative, so it also comes up with new ideas". Reversible: the cards are data, the check is one id, the API field is optional.
+
+**Context.** The style profile teaches the editor how a creator edits (D-36, D-38); nothing gave it ideas. Every edit was the creator's usual video, and a creator who wanted something else could only describe it.
+
+**Decision.**
+- **A versioned library of short-form formats** (`config/formats`, one card each, our words only, validated by package `formats`): 12 formats and a loop-ending device, each with when it fits and when not, its beats against the song's drop, its text pattern and title forms, music, length, pace, vibes and how it plays. Details in [formats v1](design/formats-v1.md).
+- **Detected on the creator's references with no model call**, from the measures and the text the style read already reads; the profile keeps the share of each format ("Your go-to formats" in Your style).
+- **The editor picks a format first**: `list_formats` ranks the formats that fit the footage by fit and the creator's use, marks one or two new to the creator; `plan_edit` records the format and why; at most one new format per edit unless asked (prompt `editor.v2.11`, playbooks bumped); `check_edit`'s `format_followed` holds the edit to the format's beats. The creator's own settings still win (their text pattern over the format's).
+- **"Try another idea"**: `POST /v1/projects/{id}/edit` with `new_idea` makes a new version in a format none of the project's versions used, priced as a revision (`409 no_video_yet` without a version); the app has the button next to "Make the changes" and names the version "Version 3 · new idea: ...".
+- **Evals**: `judge_edit.v4` sees the format; suites have a suite-wide `clear-concept` item and a new-idea case with `novelty`.
+
+**Alternatives.** A model call to propose ideas (the `ideation` stage): more cost per edit and nothing the editor cannot do with a good list in front of it. A format setting the creator picks: possible later; the editor choosing from fit and the creator's own use needs no new decision from them. Formats as playbooks: a playbook is the craft of a genre (how to cut lifts), a format the structure of one video (a reveal on the drop); a workout can be any of them.
+
+**Consequences.** Every plan names a format (the strict schema requires it), and a cassette re-recording follows any change to the enum. The editor's context does not grow: the cards come in list_formats' answer, once per run. A creator's go-to formats are only as good as their text read: references read without it show only one-take and montage tags.
+
+**Revisit** when the `viral_*` examples arrive (new cards), when creators ask to choose the format themselves, or when the judge's novelty and concept scores do not follow the founder's verdicts.

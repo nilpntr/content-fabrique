@@ -1,8 +1,8 @@
 import { expect, test } from "vitest";
 import { mainItems } from "@/components/project/review-data";
-import { assetId, PLAN_PAYLOAD, v2Spec } from "@/test-fixtures";
+import { assetId, PLAN_FORMAT, PLAN_PAYLOAD, v2Spec } from "@/test-fixtures";
 import { planFromArtifact, planFromSummaries } from "./run-artifacts";
-import { describeShot, lengthWords, storyboard, storyboardFromItems, storyboardFromPlan, subjectOf } from "./storyboard";
+import { describeShot, lengthWords, storyboard, storyboardFromItems, storyboardFromPlan, storyIdea, subjectOf, versionLabel } from "./storyboard";
 
 const TITLES = new Map([
   [assetId(1), "Heaviest lat pulldown"],
@@ -80,4 +80,22 @@ test("the small words: whose clip it is, and how long the video is", () => {
   expect(lengthWords(500)).toBeUndefined();
   expect(lengthWords(24_200)).toBe("About 24 seconds");
   expect(lengthWords(65_000)).toBe("About 1 minute");
+});
+
+test("the plan's format is the storyboard's idea, and names a new idea's version", () => {
+  const plan = planFromArtifact({ ...PLAN_PAYLOAD, format: PLAN_FORMAT });
+  expect(plan?.idea).toEqual({ id: "transformation", name: "Transformation reveal", why: PLAN_FORMAT.why, mixName: "Seamless loop", newToCreator: true, newIdea: true });
+  expect(storyIdea(plan)).toEqual({ name: "Transformation reveal", why: PLAN_FORMAT.why, mix: "with a seamless loop", isNew: true });
+  expect(plan ? storyboardFromPlan(plan, TITLES)?.idea?.name : undefined).toBe("Transformation reveal");
+  expect(versionLabel("Version 3", plan, true)).toBe("Version 3 · new idea: transformation reveal");
+  expect(versionLabel("Version 3", plan, false)).toBe("Version 3");
+  // A plan from before formats, or a format that cannot be read, has no idea.
+  const old = planFromArtifact(PLAN_PAYLOAD);
+  expect(old?.idea).toBeUndefined();
+  expect(storyIdea(old)).toBeUndefined();
+  expect(versionLabel("Version 2", old, true)).toBe("Version 2");
+  expect(planFromArtifact({ ...PLAN_PAYLOAD, format: { id: "pov" } })?.idea).toBeUndefined();
+  expect(planFromArtifact({ ...PLAN_PAYLOAD, format: "pov" })?.idea).toBeUndefined();
+  // An acronym in a name keeps its capitals.
+  expect(versionLabel("Version 4", planFromArtifact({ ...PLAN_PAYLOAD, format: { id: "pov", name: "POV video" } }), true)).toBe("Version 4 · new idea: POV video");
 });

@@ -1,6 +1,8 @@
-# Playbook: unboxing and product (unboxing_product.v3)
+# Playbook: unboxing and product (unboxing_product.v4)
 
 You chose this playbook because the footage shows a product: an unboxing, a review, a demo, a haul. Target 20 to 40 seconds.
+
+**The format.** The format you chose in plan_edit (from list_formats) sets the structure: its hook, its middle, its payoff and its text pattern, timed against the song's drop. This playbook is the craft of the genre inside that structure. Where they differ on structure (how long the hook runs, where the payoff lands, which text the video has), the format wins; on craft (the cuts, the rhythm, the movement, the sound), this playbook does. The creator's style and settings still decide the look.
 
 **Hook (0 to 2 s).** The reveal moment, or the product at its best, shown first: the first look at the product out of the box, a close-up with the logo or the best detail. 1 to 2 seconds with a punch_in and a short title that names the product, on screen by 0.5 s.
 

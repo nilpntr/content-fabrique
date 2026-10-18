@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { rememberRun } from "@/components/project/last-run";
 import { apiError, type FakeApi, installApi, json, renderApp } from "@/test-api";
 import { ME } from "@/test-clerk";
-import { annotation, annotationId, clip, event, project, projectId, readyRender, render, renderId, run, runId, timelineVersion, v2Artifacts, v2Run, versionSummary } from "@/test-fixtures";
+import { annotation, annotationId, clip, event, PLAN_FORMAT, project, projectId, readyRender, render, renderId, run, runId, timelineVersion, v2Artifacts, v2Run, versionSummary } from "@/test-fixtures";
 import { ProjectPage } from "./project";
 
 vi.mock("@tanstack/react-router", async (original) => ({
@@ -692,6 +692,52 @@ test("a finished edit says what it made, the self-review in one line with the ch
   expect(within(board).getByText("Opens on your heaviest lat pulldown lockout, with a quick zoom")).toBeTruthy();
   expect(within(board).getByText("Ends on your back pose, held, with a flash")).toBeTruthy();
   expect(board.textContent).not.toMatch(/BPM|beats|hook|punch_in/);
+});
+
+test("a new idea's version is named after its idea, and the storyboard says the idea in plain words", async () => {
+  v2Api({ "GET /v1/runs/{id}": v2Run({ timeline_version: 3, new_idea: true }), "GET /v1/runs/{id}/artifacts": v2Artifacts({ format: PLAN_FORMAT }) });
+  page();
+  expect((await screen.findByTestId("version-idea")).textContent).toBe("Version 3 · new idea: transformation reveal");
+  const idea = within(await screen.findByTestId("storyboard-idea"));
+  expect(idea.getByText("Transformation reveal")).toBeTruthy();
+  expect(idea.getByText("with a seamless loop")).toBeTruthy();
+  expect(idea.getByText("New for you")).toBeTruthy();
+  expect(idea.getByText(PLAN_FORMAT.why)).toBeTruthy();
+  // No ids of the library on the page.
+  expect(screen.queryByText(/transformation\b(?! reveal)|loop_ending|formats@/)).toBeNull();
+});
+
+test("a plain edit with a format shows the idea in the storyboard but does not rename the version", async () => {
+  v2Api({ "GET /v1/runs/{id}/artifacts": v2Artifacts({ format: { ...PLAN_FORMAT, new_idea: false, new_to_creator: false, mix: "", mix_name: "" } }) });
+  page();
+  const idea = await screen.findByTestId("storyboard-idea");
+  expect(idea.textContent).toContain("The idea:Transformation reveal");
+  expect(idea.textContent).not.toContain("New for you");
+  expect(screen.queryByTestId("version-idea")).toBeNull();
+});
+
+test("'Try another idea' starts a new idea with the creator's words, priced as a change", async () => {
+  const fake = api({ ...noRenders, "POST /v1/projects/{id}/edit": json(202, run({ id: runId(9), status: "queued", new_idea: true })) });
+  const onRunStarted = vi.fn();
+  page({ onRunStarted });
+  await reviewUp();
+  const form = within(screen.getByRole("form", { name: "Tell me what to change" }));
+  const button = form.getByRole("button", { name: "Try another idea" });
+  expect(form.getByText(/Another idea makes a new version with a different concept, in your style. This one stays./)).toBeTruthy();
+  fireEvent.change(form.getByRole("textbox"), { target: { value: " something with a counter " } });
+  fireEvent.click(button);
+  await waitFor(() => expect(onRunStarted).toHaveBeenCalledWith(runId(9)));
+  expect(fake.callsTo("POST /v1/projects/{id}/edit")[0]?.body).toEqual({ instructions: "something with a counter", new_idea: true });
+});
+
+test("a new idea refused because there is no video yet says so in plain words", async () => {
+  api({ ...noRenders, "POST /v1/projects/{id}/edit": apiError(409, "no_video_yet") });
+  page();
+  await reviewUp();
+  fireEvent.click(within(screen.getByRole("form", { name: "Tell me what to change" })).getByRole("button", { name: "Try another idea" }));
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toMatch(/no video to rethink yet/);
+  expect(alert.textContent).not.toContain("no_video_yet");
 });
 
 test("a failed edit says why in a sentence, that nothing was charged, and offers one thing to do; the code is only in Details", async () => {

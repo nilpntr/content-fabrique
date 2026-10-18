@@ -31,7 +31,7 @@ const JudgeStage = "judge_edit"
 
 // JudgePromptVersion names the judge's prompt and tool. A change to either is a new version: cached verdicts of the old one are not
 // reused.
-const JudgePromptVersion = "judge_edit.v3"
+const JudgePromptVersion = "judge_edit.v4"
 
 // MaxJudgeMicros is the hard budget of one judge call: $0.10. It is a llm.Budget, so a call whose worst case does not fit is cut (its
 // max_tokens) or refused before it is sent.
@@ -107,6 +107,8 @@ type JudgeInput struct {
 	Music string
 	// StyleEvidence is the creator's style profile, in words.
 	StyleEvidence string
+	// Format is the format the editor chose, from the library (its name, pitch and beats: our words), "" when the plan names none.
+	Format string
 }
 
 // Router resolves the route of a stage. *llm.Router is the real one.
@@ -162,6 +164,7 @@ func (in JudgeInput) Key(model string) string {
 	w(in.Timeline)
 	w(in.Music)
 	w(in.StyleEvidence)
+	w(in.Format)
 	for _, e := range in.Expectations {
 		w(e.ID + "|" + e.Text)
 	}
@@ -289,6 +292,8 @@ Score each dimension from 1 to 5 and write the rationale first, two to four sent
 
 Then score each rubric item of the case the same way (5 = fully met).
 
+The editor picks a format (the concept of the video: a 101 tutorial, a numbered list, a quote then the reveal on the drop, a transformation, a dialogue then the twist, a story in captions, ...) before it edits. When the case data names it (format, below the plan), judge the concept items against it: a clear concept means a viewer could say in a few words what the video is, its hook sets the format up, its middle delivers it and its payoff lands (on the drop for a reveal). Novelty compares the format with the creator's usual formats in the style profile: a format they do not use, done well, is novel; their usual format is not, however well it is done; a new format that falls flat is not good novelty.
+
 Answer only by calling score_edit, once; do not write the scores as text.
 
 The recorded feedback of the creator's team is listed under human_feedback: it describes what they dislike and it outweighs your own taste; take it into account in ai_look, energy_pace, text and style_match.
@@ -352,6 +357,11 @@ func BuildJudgeRequest(in JudgeInput) llm.Request {
 	}
 	if in.Plan != "" {
 		c = append(c, llm.TextBlock("The editor's plan:"), untrusted("plan", in.Plan))
+	}
+	if in.Format != "" {
+		c = append(c, llm.TextBlock("format: the format the editor chose, from the format library:\n"+in.Format))
+	} else {
+		c = append(c, llm.TextBlock("format: the plan names no format; judge the concept from what you see."))
 	}
 	if in.Timeline != "" {
 		c = append(c, llm.TextBlock("The timeline, as data:"), untrusted("timeline", in.Timeline))

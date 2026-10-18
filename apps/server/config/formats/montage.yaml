@@ -1,0 +1,55 @@
+# A format card of the format library (docs/design/formats-v1.md). Our words only.
+id: montage
+version: 1
+kind: format
+name: Beat montage
+plural: beat montages
+pitch: A day in the life, a product or a routine in quick jump cuts, every cut on the beat.
+fits:
+  content_types: [vlog, unboxing_product, general, workout]
+  needs: [many_clips]
+  helps: [lifestyle, product, song]
+  when:
+    - There are five or more different moments (the gym, the kitchen, the street, a product in the hand) that each work for a second or two.
+not_when:
+  - There are only a couple of clips, or one long set is the point.
+beats:
+  - name: hook
+    roles: [hook]
+    timing: the first beat
+    what: The most striking moment first, a short title or none, the first cut on the first strong beat.
+  - name: middle
+    roles: [broll, build, detail]
+    timing: a cut on every beat or every other beat
+    what: Jump cuts of one to two beats each, varying the size and the angle, the camera moving.
+  - name: payoff
+    roles: [payoff, peak, ending]
+    timing: the drop or the last phrase
+    what: The moment the montage leads to (the set, the product in use, the pose) held a little longer.
+text:
+  pattern: any
+  title_forms: ["<TOPIC>", "A DAY OF <TOPIC>"]
+  notes: One short title or a few labels at most; the cuts carry it.
+music: The song's beats decide every cut; the payoff lands on the drop or the last phrase.
+length_s: {min: 8, max: 30}
+pace: fast
+pace_hint: Shots of one or two beats; never three of the same length in a row.
+vibes: {calm: weak, lively: great, hype: great}
+how_it_plays:
+  - Coffee, shoes, the walk, the door, chalk, the first rep, each a beat; the full set on the drop.
+  - A new pair of lifting shoes in hand, on the floor, laced, on the platform, the lift on the drop.
+detect:
+  keywords: [day in the life, routine, what i eat, haul, morning, setup]
+  rules:
+    - all: [montage]
+      none: [pattern_story_captions, pattern_dialogue, chapters]
+      score: 0.8
+    - all: [handheld, many_cuts]
+      none: [pattern_story_captions, pattern_dialogue, chapters]
+      score: 0.7
+    - all: [keyword_hook]
+      none: [pattern_dialogue]
+      score: 0.6
+check:
+  payoff: end
+  min_shots: 5

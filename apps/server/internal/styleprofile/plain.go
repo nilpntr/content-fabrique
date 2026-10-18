@@ -110,6 +110,9 @@ func (p *Profile) PlainLines() []PlainLine {
 			add("title", "Title", strings.Join(parts, ", "))
 		}
 	}
+	if f := p.formatsWords(); f != "" {
+		add("formats", "Your go-to formats", f)
+	}
 	a := p.Audio
 	var sound []string
 	switch {

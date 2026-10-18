@@ -1,0 +1,48 @@
+# A format card of the format library (docs/design/formats-v1.md). Our words only.
+id: meme_dialogue
+version: 1
+kind: format
+name: Dialogue, then the twist
+plural: dialogue twists
+pitch: Two or three quoted lines, two voices answering each other, then a cut to the twist that answers them (a reveal, a set, an old self).
+fits:
+  content_types: [workout, general, vlog]
+  needs_any: [pose, then_clip, big_set]
+  helps: [song]
+  when:
+    - There is a shot that can be the punchline (a pose, an old clip, a heavy set).
+    - The clips before it are calm (walking, setting up, a stare at the camera) so the lines can be read.
+not_when:
+  - Nothing in the footage can answer the lines.
+beats:
+  - name: hook
+    roles: [hook, build]
+    timing: from 0 to the drop, a line per shot
+    what: Two to four short quoted lines on calm shots, one per shot, a second or more each, building a small question.
+  - name: middle
+    roles: [reveal]
+    timing: on the drop
+    what: "The twist, with no text: the answer to the lines."
+  - name: payoff
+    roles: [payoff, ending]
+    timing: after the drop
+    what: The twist shot held with the living camera to the end.
+text:
+  pattern: dialogue
+  title_forms: []
+  notes: Lines of our own in the creator's language, two speakers answering each other, each in quotes; never a line from a film or a creator word for word.
+music: The lines sit in the intro; the twist lands on the drop.
+length_s: {min: 7, max: 20}
+pace: steady
+pace_hint: A line per shot before the drop, then one held shot.
+vibes: {calm: good, lively: great, hype: good}
+how_it_plays:
+  - '"You look different." / "What happened to you?" over two slow shots, then on the drop a cut to an old clip of a much smaller self.'
+  - Two lines of banter over the walk to the rack, the answer is a heavy set on the drop.
+detect:
+  rules:
+    - all: [pattern_dialogue]
+      score: 0.9
+check:
+  payoff: drop
+  min_shots: 3

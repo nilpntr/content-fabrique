@@ -1,6 +1,8 @@
-# Playbook: general (general.v3)
+# Playbook: general (general.v4)
 
 You chose this playbook because the footage fits no other genre well, or it is a mix. Target 15 to 35 seconds.
+
+**The format.** The format you chose in plan_edit (from list_formats) sets the structure: its hook, its middle, its payoff and its text pattern, timed against the song's drop. This playbook is the craft of the genre inside that structure. Where they differ on structure (how long the hook runs, where the payoff lands, which text the video has), the format wins; on craft (the cuts, the rhythm, the movement, the sound), this playbook does. The creator's style and settings still decide the look.
 
 **Hook (0 to 2 s).** The single best moment of the footage first: the most striking, the funniest, the most beautiful. 1 to 2 seconds, a punch_in, and a short title that says what the video is, on screen by 0.5 s.
 

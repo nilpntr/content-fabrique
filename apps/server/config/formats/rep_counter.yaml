@@ -1,0 +1,52 @@
+# A format card of the format library (docs/design/formats-v1.md). Our words only.
+id: rep_counter
+version: 1
+kind: format
+name: Rep counter to a PR
+plural: rep counters
+pitch: A counter climbs rep by rep (or plate by plate) and lands the last, hardest rep or the PR on the drop.
+fits:
+  content_types: [workout]
+  needs: [big_set]
+  helps: [song]
+  when:
+    - There is one long, clean set (six reps or more) or a sequence of heavier and heavier attempts.
+not_when:
+  - The reps are short fragments of many different exercises.
+  - Nothing in the set is a real effort (a warm-up with no last hard rep).
+beats:
+  - name: hook
+    roles: [hook]
+    timing: from 0, the first rep
+    what: The set starts at once with the counter at 1 (or the weight) and the goal in a few words.
+  - name: middle
+    roles: [build]
+    timing: each rep on a beat
+    what: Rep by rep, the counter ticking on each rep's turning point, cuts or punch-ins on the strong beats.
+  - name: payoff
+    roles: [peak, payoff, ending]
+    timing: the drop
+    what: The last rep or the PR lands on the drop, held with a punch-in, the final number big.
+text:
+  pattern: single_title
+  title_forms: ["<GOAL>", "<N> REPS", "NEW PR"]
+  notes: The counter is a counter graphic or a big number text that changes per rep; the numbers come from the measured reps, never invented.
+music: Build-up under the reps, the drop on the last rep. A song with a long build fits best.
+length_s: {min: 10, max: 30}
+pace: building
+pace_hint: Each rep on a beat, faster toward the end; the last rep held.
+vibes: {calm: weak, lively: good, hype: great}
+how_it_plays:
+  - A set of eight squats, the counter ticking at the bottom of each rep, the eighth on the drop with a punch-in and the number large.
+  - Three attempts with the plates added between them, the last attempt's lockout on the drop with "NEW PR".
+detect:
+  keywords: [pr, personal record, personal best, new pr, 1rm, one rep max, reps]
+  rules:
+    - all: [numbers_rise]
+      score: 0.8
+    - all: [keyword_hook]
+      none: [pattern_dialogue, pattern_story_captions]
+      score: 0.65
+check:
+  payoff: drop
+  min_shots: 1

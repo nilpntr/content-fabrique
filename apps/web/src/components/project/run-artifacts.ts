@@ -26,8 +26,25 @@ export interface PlanShot {
   effect?: string;
 }
 
+/** The format (the idea) a plan chose from the format library, in plain words. */
+export interface PlanIdea {
+  id: string;
+  /** "Transformation reveal". */
+  name: string;
+  /** Why it fits, in the editor's words (a model wrote it; React escapes it). */
+  why?: string;
+  /** The device mixed in ("Seamless loop"). */
+  mixName?: string;
+  /** The creator's own videos never use it. */
+  newToCreator: boolean;
+  /** The creator asked for another idea ("Try another idea"). */
+  newIdea: boolean;
+}
+
 export interface CreativePlan {
   contentType: string;
+  /** The format of the video, for plans made since the format library. */
+  idea?: PlanIdea;
   playbook?: string;
   story?: string;
   hook?: string;
@@ -104,8 +121,10 @@ export function planFromArtifact(data: unknown): CreativePlan | undefined {
     shots.push({ role, beats, what: str(raw.what), assetId: str(raw.asset_id), lengthMs: int(raw.length_ms), ...(effect && effect !== "none" ? { effect } : {}) });
   }
   const tempo = int(data.tempo_bpm);
+  const idea = ideaFrom(data.format);
   return {
     contentType,
+    ...(idea ? { idea } : {}),
     playbook: str(data.playbook),
     story: str(data.story),
     hook: str(data.hook),
@@ -118,6 +137,17 @@ export function planFromArtifact(data: unknown): CreativePlan | undefined {
     shotCount: shots.length,
     shots,
   };
+}
+
+/** A plan's `format` (formats-v1): an id and a name at least; anything else is left out. */
+function ideaFrom(raw: unknown): PlanIdea | undefined {
+  if (!isRecord(raw)) return undefined;
+  const id = str(raw.id);
+  const name = str(raw.name);
+  if (!id || !name) return undefined;
+  const why = str(raw.why);
+  const mixName = str(raw.mix_name);
+  return { id, name, ...(why ? { why } : {}), ...(mixName ? { mixName } : {}), newToCreator: raw.new_to_creator === true, newIdea: raw.new_idea === true };
 }
 
 const STATUSES: ReadonlySet<string> = new Set(["pass", "fail", "skip"]);

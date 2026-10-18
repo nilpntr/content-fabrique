@@ -120,7 +120,7 @@ var turnUsage = [][4]int{
 // planInput is the creative plan of the scripted run: a workout of 14 seconds at 124 BPM.
 func planInput() string {
 	a, b, c := `"`+clipA.String()+`"`, `"`+clipB.String()+`"`, `"`+clipC.String()+`"`
-	return `{"content_type":"workout","story":"A heavy lat day in six quick cuts, ending on the wide gym.","hook":"The lat pulldown at full stretch, with the words HEAVY LAT DAY.",` +
+	return `{"content_type":"workout","format":"tutorial_101","format_why":"One exercise from two angles, the gym as the closing shot.","story":"A heavy lat day in six quick cuts, ending on the wide gym.","hook":"The lat pulldown at full stretch, with the words HEAVY LAT DAY.",` +
 		`"arc":"Hook on the heaviest rep, the cable row, a second look at the pulldown, the wide gym and a last pulldown rep.","ending":"Back to the cable row, held a little longer.",` +
 		`"playbook":"workout","target_length_s":14,"tempo_bpm":124,"pace":"building","shots":[` +
 		`{"role":"hook","what":"Heaviest pulldown rep, first half","asset_id":` + a + `,"beats":3,"effect":"punch_in"},` +
@@ -423,7 +423,7 @@ func TestEditorRecordedRequests(t *testing.T) {
 		}
 	}
 	first := api.requests[0]
-	if tools, _ := first["tools"].([]any); len(tools) != 14 {
+	if tools, _ := first["tools"].([]any); len(tools) != 15 {
 		t.Errorf("%d tools sent", len(tools))
 	} else {
 		var names []string
@@ -432,10 +432,10 @@ func TestEditorRecordedRequests(t *testing.T) {
 			name, _ := m["name"].(string)
 			names = append(names, name)
 		}
-		if strings.Join(names, ",") != "get_brief,list_footage,view_clip,find_moments,get_music,plan_edit,list_motion_templates,get_timeline,get_comments,edit_timeline,match_exposure,render_preview,check_edit,finish" {
+		if strings.Join(names, ",") != "get_brief,list_footage,view_clip,find_moments,get_music,list_formats,plan_edit,list_motion_templates,get_timeline,get_comments,edit_timeline,match_exposure,render_preview,check_edit,finish" {
 			t.Errorf("tools: %v", names)
 		}
-		editTool, _ := tools[9].(map[string]any)
+		editTool, _ := tools[10].(map[string]any)
 		viewTool, _ := tools[2].(map[string]any)
 		if editTool["strict"] == true || viewTool["strict"] != true {
 			t.Errorf("strict flags: edit_timeline %v, view_clip %v", editTool["strict"], viewTool["strict"])

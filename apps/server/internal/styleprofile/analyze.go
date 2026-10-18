@@ -127,6 +127,14 @@ func loadRow(ctx context.Context, st StyleReader, ws ids.WorkspaceID) (*Profile,
 	if errors.Is(err, ErrUnsupportedVersion) {
 		return nil, row, nil
 	}
+	// The formats are tagged with the library of this build: a profile made before them, or with an older library, is tagged again from
+	// its stored measures (no model call); measures that cannot be read leave the profile as it is.
+	if p != nil && err == nil && !p.formatsCurrent() {
+		var ms []Measures
+		if json.Unmarshal(row.Measures, &ms) == nil && len(ms) > 0 {
+			p.Formats = AggregateFormats(ms)
+		}
+	}
 	return p, row, err
 }
 

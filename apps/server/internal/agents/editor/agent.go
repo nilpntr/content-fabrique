@@ -68,6 +68,9 @@ func opening(raw json.RawMessage) ([]llm.Block, error) {
 	if in.Vibe != "" {
 		blocks = append(blocks, llm.TextBlock(vibeNote(in.Vibe)))
 	}
+	if in.NewIdea {
+		blocks = append(blocks, llm.TextBlock(newIdeaNote(in.AvoidFormats)))
+	}
 	if in.Instructions != "" {
 		blocks = append(blocks,
 			llm.TextBlock("The creator added these instructions for this run:"),

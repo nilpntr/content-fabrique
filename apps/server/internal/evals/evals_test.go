@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -338,6 +339,69 @@ func TestJudgeScoresCachesAndStaysInBudget(t *testing.T) {
 	in2.Render = &Picture{Label: "sheet", JPEG: testJPEG(t, 99)}
 	if in2.Key("m") == in.Key("m") || in.Key("m") == in.Key("other-model") {
 		t.Error("the cache key ignores the picture or the model")
+	}
+	// The format: without one the judge is told so; with one it reads the card, and the key changes.
+	if !strings.Contains(all, "the plan names no format") || !strings.Contains(judgeSystem, "Novelty compares the format") {
+		t.Errorf("the judge is not told about formats:\n%s", all)
+	}
+	in3 := in
+	in3.Format = formatWords(&editor.PlanFormat{ID: "transformation", Mix: "loop_ending", NewToCreator: true, NewIdea: true})
+	if in3.Key("m") == in.Key("m") {
+		t.Error("the cache key ignores the format")
+	}
+	var parts []string
+	for _, b := range BuildJudgeRequest(in3).Messages[0].Content {
+		parts = append(parts, b.Text)
+	}
+	got := strings.Join(parts, "\n")
+	for _, want := range []string{"format: the format the editor chose", "Transformation reveal (transformation)", "- payoff (", "mixed in: Seamless loop", "new to this creator", "asked for a new idea"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the request lacks %q:\n%s", want, got)
+		}
+	}
+}
+
+// The suite's rubric reaches every case but the calibration ones, under the case's own items.
+func TestSuiteRubricAndNewIdeaCases(t *testing.T) {
+	s, err := LoadSuite("../../../../suites/back-day.yaml", os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Rubric) == 0 || s.Rubric[0].ID != "clear-concept" {
+		t.Fatalf("suite rubric %+v", s.Rubric)
+	}
+	var idea *Case
+	for _, raw := range s.Cases {
+		c := s.Resolved(raw)
+		has := slices.ContainsFunc(c.Expectations, func(e Expectation) bool { return e.ID == "clear-concept" })
+		if has == (c.Calibration != nil) {
+			t.Errorf("case %s: clear-concept %v, calibration %v", c.ID, has, c.Calibration != nil)
+		}
+		if c.NewIdea {
+			idea = &c
+		}
+	}
+	if idea == nil || !slices.ContainsFunc(idea.Expectations, func(e Expectation) bool { return e.ID == "novelty" }) {
+		t.Fatalf("no new-idea case with a novelty item: %+v", idea)
+	}
+	// A new idea runs live on its stored project, so it needs that, not footage.
+	if m := idea.Missing(true); strings.Join(m, ",") != "workspace,stored.project" {
+		t.Errorf("a new idea's live needs: %v", m)
+	}
+	c := *idea
+	c.Stored = nil
+	if m := c.Missing(true); strings.Join(m, ",") != "workspace,stored" {
+		t.Errorf("a new idea without stored: %v", m)
+	}
+	// A case's own item of the same id wins over the suite's.
+	c = Case{ID: "x", Expectations: []Expectation{{ID: "clear-concept", Text: "mine", Weight: 2}}}
+	if got := s.Resolved(c).Expectations; len(got) != 1 || got[0].Text != "mine" {
+		t.Errorf("expectations %+v", got)
+	}
+	dir := t.TempDir()
+	bad := write(t, dir, "bad.yaml", "suite: bad\nrubric:\n  - id: Not An Id\n    text: x\ncases:\n  - id: a\n")
+	if _, err := LoadSuite(bad, os.DevNull); err == nil || !strings.Contains(err.Error(), "suite rubric") {
+		t.Errorf("a bad rubric item: %v", err)
 	}
 }
 

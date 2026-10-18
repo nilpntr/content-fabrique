@@ -20,6 +20,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/nilpntr/content-fabrique/internal/agents/editor"
+	"github.com/nilpntr/content-fabrique/internal/formats"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/telemetry"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
@@ -433,8 +434,13 @@ func judgeInput(ctx context.Context, c Case, t Target, m Measurement, s *Suite, 
 	in := JudgeInput{CaseID: c.ID, Render: render, Strips: strips, Brief: m.Brief, Expectations: c.Expectations, Feedback: s.Feedback,
 		StyleEvidence: m.StyleEvidence, Timeline: describeTimeline(m.Spec)}
 	if m.Plan != nil {
-		if raw, err := json.Marshal(map[string]any{"content_type": m.Plan.ContentType, "story": m.Plan.Story, "hook": m.Plan.Hook, "arc": m.Plan.Arc,
-			"ending": m.Plan.Ending, "playbook": m.Plan.PlaybookVersion, "target_length_s": m.Plan.TargetLengthS, "tempo_bpm": m.Plan.TempoBPM, "pace": m.Plan.Pace}); err == nil {
+		plan := map[string]any{"content_type": m.Plan.ContentType, "story": m.Plan.Story, "hook": m.Plan.Hook, "arc": m.Plan.Arc,
+			"ending": m.Plan.Ending, "playbook": m.Plan.PlaybookVersion, "target_length_s": m.Plan.TargetLengthS, "tempo_bpm": m.Plan.TempoBPM, "pace": m.Plan.Pace}
+		if f := m.Plan.Format; f != nil {
+			plan["format"] = map[string]any{"id": f.ID, "why": f.Why, "mix": f.Mix, "new_to_creator": f.NewToCreator, "new_idea": f.NewIdea}
+			in.Format = formatWords(f)
+		}
+		if raw, err := json.Marshal(plan); err == nil {
 			in.Plan = string(raw)
 		}
 	}
@@ -458,6 +464,29 @@ func judgeInput(ctx context.Context, c Case, t Target, m Measurement, s *Suite, 
 
 // describeTimeline is a few lines of where the clips, transitions and texts are, for the judge: every text item and every graphics item
 // (titles, story captions, chapter cards and the other motion-graphics templates), with its words, time, place and placement rule.
+// formatWords is the plan's format for the judge: the card's name, pitch and beats from the library (our words), and the device mixed in.
+func formatWords(f *editor.PlanFormat) string {
+	card, ok := formats.Default().Card(f.ID)
+	if !ok {
+		return f.ID + " (not in this build's library)"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s (%s): %s\n", card.Name, card.ID, card.Pitch)
+	for _, beat := range card.Beats {
+		fmt.Fprintf(&b, "- %s (%s): %s\n", beat.Name, beat.Timing, beat.What)
+	}
+	if mix, ok := formats.Default().Card(f.Mix); ok {
+		fmt.Fprintf(&b, "mixed in: %s: %s\n", mix.Name, mix.Pitch)
+	}
+	if f.NewToCreator {
+		b.WriteString("The editor marked it as new to this creator.\n")
+	}
+	if f.NewIdea {
+		b.WriteString("The creator asked for a new idea: this version had to use another format than the project's earlier versions.\n")
+	}
+	return b.String()
+}
+
 func describeTimeline(spec *timeline.Spec) string {
 	if spec == nil {
 		return ""
