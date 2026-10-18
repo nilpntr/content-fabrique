@@ -3,13 +3,13 @@ import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { useNavigate } from "@tanstack/react-router";
 import { CornerDownLeft, FilmIcon, FolderOpenIcon, type LucideIcon, MoonIcon, SearchIcon, SunIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import { statusLabel } from "@/components/project/badges";
 import { HighlightGlider } from "@/components/ui/highlight-glider";
 import { Kbd } from "@/components/ui/kbd";
 import { toggleTheme, useTheme } from "@/hooks/use-theme";
 import { useAssets } from "@/lib/api/hooks";
 import { useProjects } from "@/lib/api/project-hooks";
 import { searchClips, searchProjects } from "@/lib/search";
+import { projectStatusWords } from "@/lib/words";
 import { NAV_ITEMS } from "@/nav";
 
 interface PaletteItem {
@@ -81,7 +81,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
     id: `project:${project.id}`,
     label: project.title,
     icon: FolderOpenIcon,
-    hint: `${project.format} · ${statusLabel(project.status)}`,
+    hint: projectStatusWords(project).label,
     run: () => {
       close();
       void navigate({ to: "/projects/$projectId", params: { projectId: project.id } });
@@ -141,7 +141,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
             <div className="flex h-14 shrink-0 items-center gap-3 border-b border-hairline px-4 dark:border-border">
               <SearchIcon className="size-4.5 shrink-0 text-subtle-foreground" />
               <Autocomplete.Input
-                placeholder="Search projects, clips and pages…"
+                placeholder="Search your videos, clips and pages…"
                 onKeyDown={(event) => {
                   if (event.key === "Escape") close();
                 }}
