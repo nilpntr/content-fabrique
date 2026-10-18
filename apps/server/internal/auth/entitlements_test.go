@@ -218,7 +218,7 @@ func TestMountedPaywall(t *testing.T) {
 		t.Fatalf("/v1/me with a plan: %s", rec.Body)
 	}
 	rec = call("/v1/workspace/plan", ada)
-	if !strings.Contains(rec.Body.String(), `"limits":{"ai_billing":"managed","exports":15,"storage_gb":50}`) || !strings.Contains(rec.Body.String(), `"source":"manual"`) {
+	if !strings.Contains(rec.Body.String(), `"limits":{"ai_billing":"managed","exports":3,"storage_gb":50}`) || !strings.Contains(rec.Body.String(), `"source":"manual"`) {
 		t.Fatalf("/v1/workspace/plan with a plan: %s", rec.Body)
 	}
 	wantError(t, call("/v1/library/summary", bob), http.StatusPaymentRequired, "plan_required")

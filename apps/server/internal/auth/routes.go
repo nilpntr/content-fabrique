@@ -12,6 +12,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/annotations"
 	"github.com/nilpntr/content-fabrique/internal/assets"
 	"github.com/nilpntr/content-fabrique/internal/config"
+	"github.com/nilpntr/content-fabrique/internal/credits"
 	"github.com/nilpntr/content-fabrique/internal/projects"
 	"github.com/nilpntr/content-fabrique/internal/renderjobs"
 	"github.com/nilpntr/content-fabrique/internal/store"
@@ -35,6 +36,9 @@ type Deps struct {
 	// Runs starts, reads, cancels and answers agent runs (agentset builds it, definition only: the worker executes them). Nil
 	// means agent runs are not configured: the runs operations answer 503 model_not_configured.
 	Runs *runtime.Service
+	// PriceList is the price list the API shows credits and videos from (what a video costs in credits, how many videos a plan pays for
+	// per period). Nil means the embedded one (credits.LoadDefault).
+	PriceList *credits.PriceList
 }
 
 // V1 is the router of the paid-only API. Every route added with Handle sits behind the authentication middleware and
@@ -110,6 +114,9 @@ func Mount(mux *http.ServeMux, d Deps) (*V1, error) {
 	}
 	v1 := &V1{mux: http.NewServeMux()}
 	srv := newAPIServer(d.Store, logger)
+	if d.PriceList != nil {
+		srv.list = d.PriceList
+	}
 	srv.Handler = assets.NewHandler(d.Assets, callerOf, logger)
 	projectsSvc, err := projects.NewService(d.Store, logger)
 	if err != nil {

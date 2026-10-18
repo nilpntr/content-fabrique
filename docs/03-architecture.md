@@ -423,13 +423,14 @@ Agent quality is the product, so every prompt, model or tool change runs the eva
 profile: v1-start
 editor:
   model: claude-opus-5-5
-  effort: medium                 # Opus 5.5's default, set explicitly; tuned by D-17
-  escalate: { when: hard_constraints_failed, effort: high, max_attempts: 1 }
+  effort: max                    # the founder's choice (D-31, pending confirmation); was medium (D-17). Nothing above max, so no escalate
+  max_tokens: 64000
   subagents:
     inspector: { enabled: false, model: claude-haiku-5-5 }   # benchmark variant only
 revision:
   model: claude-opus-5-5
-  effort: medium
+  effort: max
+  max_tokens: 32000
 research:
   lead:    { model: claude-opus-5-5, effort: medium }
   workers: { model: claude-haiku-5-5, max_parallel: 6, budget_micros: 150000 }
@@ -447,7 +448,7 @@ Development climbs a **cheap-first ladder** ([D-22](05-decisions.md#d-22-cheap-f
 ```mermaid
 flowchart LR
   subgraph EDIT["Editor run: one Opus 5.5 loop, no orchestrator"]
-    E["Editor · Opus 5.5<br/>effort medium, high on failure"]
+    E["Editor · Opus 5.5<br/>effort max (D-31)"]
     T["Tools: search_moments · view_moment ·<br/>edit_timeline · render_preview"]
     I["Inspector · Haiku 5.5<br/>(benchmark variant only)"]
     E --> T

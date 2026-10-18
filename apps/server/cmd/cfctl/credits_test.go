@@ -62,31 +62,31 @@ func TestCreditsGrantAdjustShow(t *testing.T) {
 		t.Fatalf("refused commands changed the balance: %+v", b)
 	}
 
-	code, out, errOut = r.credits("grant", "--workspace", ws, "--credits", "30", "--reason", "founder testing", "--yes")
-	if code != 0 || !strings.Contains(out, "granted     30 credits, expiring ") || !strings.Contains(out, "available   30 credits (3.0 videos)") ||
+	code, out, errOut = r.credits("grant", "--workspace", ws, "--credits", "80", "--reason", "founder testing", "--yes")
+	if code != 0 || !strings.Contains(out, "granted     80 credits, expiring ") || !strings.Contains(out, "available   80 credits (2.0 videos)") ||
 		!strings.Contains(out, "grant_topup") || !strings.Contains(out, `by "cfctl:sam"`) || !strings.Contains(out, `"founder testing"`) {
 		t.Fatalf("grant = %d\n%s%s", code, out, errOut)
 	}
 	b := r.balance("Fit Studio")
-	if b.Available != 30 || len(b.TopUps) != 1 || b.TopUps[0].ExpiresAt.Before(time.Now().AddDate(0, 11, 0)) {
+	if b.Available != 80 || len(b.TopUps) != 1 || b.TopUps[0].ExpiresAt.Before(time.Now().AddDate(0, 11, 0)) {
 		t.Fatalf("balance = %+v; a top-up lasts 12 months", b)
 	}
 
 	// adjust, by the Clerk org id as well.
 	code, out, errOut = r.credits("adjust", "--workspace", "org_Fit Studio", "--credits", "-10", "--reason", "refund of a broken render", "--yes")
-	if code != 0 || !strings.Contains(out, "adjusted    -10 credits") || !strings.Contains(out, "available   20 credits") || !strings.Contains(out, "adjust") {
+	if code != 0 || !strings.Contains(out, "adjusted    -10 credits") || !strings.Contains(out, "available   70 credits") || !strings.Contains(out, "adjust") {
 		t.Fatalf("adjust = %d\n%s%s", code, out, errOut)
 	}
 	code, out, errOut = r.credits("adjust", "--workspace", ws, "--credits", "+5", "--reason", "goodwill", "--expires", "2999-01-01", "--yes")
-	if code != 0 || !strings.Contains(out, "available   25 credits") {
+	if code != 0 || !strings.Contains(out, "available   75 credits") {
 		t.Fatalf("adjust + = %d\n%s%s", code, out, errOut)
 	}
 	// Taking away more than there is fails and changes nothing.
-	code, out, errOut = r.credits("adjust", "--workspace", ws, "--credits", "-26", "--reason", "too much", "--yes")
+	code, out, errOut = r.credits("adjust", "--workspace", ws, "--credits", "-76", "--reason", "too much", "--yes")
 	if code != 1 || !strings.Contains(errOut, "Nothing was changed") {
 		t.Fatalf("adjust too much = %d\n%s%s", code, out, errOut)
 	}
-	if b := r.balance("Fit Studio"); b.Available != 25 {
+	if b := r.balance("Fit Studio"); b.Available != 75 {
 		t.Fatalf("balance = %+v", b)
 	}
 	// Every ledger row says who and why.
@@ -105,7 +105,7 @@ func TestCreditsGrantAdjustShow(t *testing.T) {
 		t.Fatalf("plan grant = %d\n%s%s", code, out, errOut)
 	}
 	code, out, errOut = r.credits("show", "--workspace", ws)
-	if code != 0 || !strings.Contains(out, "available   175 credits") || !strings.Contains(out, "allowance   150 of 150 left, expires ") || !strings.Contains(out, "top-up      ") ||
+	if code != 0 || !strings.Contains(out, "available   225 credits") || !strings.Contains(out, "allowance   150 of 150 left, expires ") || !strings.Contains(out, "top-up      ") ||
 		!strings.Contains(out, "plan        creator (active)") {
 		t.Fatalf("show = %d\n%s%s", code, out, errOut)
 	}

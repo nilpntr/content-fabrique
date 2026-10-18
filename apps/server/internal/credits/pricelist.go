@@ -20,9 +20,11 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
-// ListFile is the price list the code loads from config/plans. A change is a new file and a new version: ledger rows name the version
-// that priced them.
-const ListFile = "2026-10.yaml"
+// ListFile is the price list the code loads from config/plans: the NEWEST file, which prices every new charge. A change is a new file and a
+// new version, never an edit: ledger rows (and holds) name the version that priced them, and older files stay in the directory so that
+// they still load and still pass the profit invariant. TestTheDefaultPriceListIsTheNewestFile fails when a newer file is added without
+// this constant moving to it.
+const ListFile = "2026-10c.yaml"
 
 // Action is something the customer pays credits for.
 type Action string
@@ -272,6 +274,27 @@ func ListFiles(fsys fs.FS) ([]string, error) {
 func (l *PriceList) Price(a Action) (credits int, ok bool) {
 	c, ok := l.Credits[a]
 	return c, ok
+}
+
+// VideoRevisions is how many revisions make up a video next to its first edit: "1 video = a first edit plus two revisions" (product plan
+// section 10). It is the only place that says so.
+const VideoRevisions = 2
+
+// CreditsPerVideo is what a video costs in credits on this list: one first edit and VideoRevisions revisions. Everything that shows credits
+// as videos (the API, the CLI, a plan's videos per period) derives from it, so no code hardcodes "1 video = 10 credits".
+func (l *PriceList) CreditsPerVideo() int {
+	return l.Credits[EditFirst] + VideoRevisions*l.Credits[EditRevision]
+}
+
+// VideosPerPeriod is how many whole videos the plan's allowance pays for in a period (a trial's allowance is once, in total). 0 for a plan
+// the list does not have, and for a list that makes videos free.
+func (l *PriceList) VideosPerPeriod(p plans.Plan) int {
+	pl, ok := l.Plans[p]
+	per := l.CreditsPerVideo()
+	if !ok || per <= 0 {
+		return 0
+	}
+	return pl.AllowanceCredits / per
 }
 
 // Plan returns what the plan includes. ok is false for none and for a plan the list does not have.

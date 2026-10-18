@@ -124,11 +124,11 @@ func TestQuoteDecidesFirstOrRevisionFromTheProject(t *testing.T) {
 	project, other := r.project(ws), r.project(ws)
 
 	first, q, err := r.run(ws, project, false)
-	if err != nil || q.Action != credits.EditFirst || q.Credits != 6 || q.BudgetMicros != 960_000 || q.Plan != plans.Creator || q.ListVersion != "2026-10" {
+	if err != nil || q.Action != credits.EditFirst || q.Credits != 24 || q.BudgetMicros != 3_000_000 || q.Plan != plans.Creator || q.ListVersion != "2026-10c" {
 		t.Fatalf("first run: %+v, %v", q, err)
 	}
-	if first.BudgetMicros != 960_000 {
-		t.Fatalf("the run's budget is %d, want the plan's 960,000", first.BudgetMicros)
+	if first.BudgetMicros != 3_000_000 {
+		t.Fatalf("the run's budget is %d, want the plan's 3,000,000", first.BudgetMicros)
 	}
 	// While it works, and after it failed: still the first edit (a run that did not succeed is not a charged edit).
 	r.finish(ws, first, store.AgentFailed)
@@ -139,7 +139,7 @@ func TestQuoteDecidesFirstOrRevisionFromTheProject(t *testing.T) {
 	// It succeeds: the next one on this project is a revision, on another project the first edit still.
 	r.finish(ws, failedThenFirst, store.AgentSucceeded)
 	rev, q, err := r.run(ws, project, false)
-	if err != nil || q.Action != credits.EditRevision || q.Credits != 2 || q.BudgetMicros != 320_000 || rev.BudgetMicros != 320_000 {
+	if err != nil || q.Action != credits.EditRevision || q.Credits != 8 || q.BudgetMicros != 1_000_000 || rev.BudgetMicros != 1_000_000 {
 		t.Fatalf("revision: %+v, %v", q, err)
 	}
 	r.finish(ws, rev, store.AgentFailed) // the revision failed: released
@@ -151,9 +151,9 @@ func TestQuoteDecidesFirstOrRevisionFromTheProject(t *testing.T) {
 	if _, q, err := r.run(ws, other, false); err != nil || q.Action != credits.EditFirst {
 		t.Fatalf("another project: %+v, %v", q, err)
 	}
-	// 100 credits: 6 charged for the first edit, 2 for the revision, and 6 held for the other project's first run.
+	// 100 credits: 24 charged for the first edit, 8 for the revision, and 24 held for the other project's first run.
 	b, _ := r.st.CreditBalance(context.Background(), ws.ID, time.Now())
-	if b.Available != 100-6-2-6 || b.Held != 6 {
+	if b.Available != 100-24-8-24 || b.Held != 24 {
 		t.Fatalf("balance %+v", b)
 	}
 }
@@ -164,11 +164,11 @@ func TestQuoteUsesThePlansPriceAndBudget(t *testing.T) {
 	for _, tc := range []struct {
 		plan   plans.Plan
 		budget int64
-	}{{plans.Trial, 750_000}, {plans.Studio, 2_000_000}, {plans.Creator, 960_000}, {plans.Pro, 790_000}} {
+	}{{plans.Trial, 3_000_000}, {plans.Studio, 3_000_000}, {plans.Creator, 3_000_000}, {plans.Pro, 3_000_000}} {
 		ws := r.workspace(string(tc.plan))
 		creditstest.Fund(t, r.st, ws.ID, tc.plan, 50)
 		run, q, err := r.run(ws, r.project(ws), false)
-		if err != nil || q.Credits != 6 || q.BudgetMicros != tc.budget || run.BudgetMicros != tc.budget || q.Plan != tc.plan {
+		if err != nil || q.Credits != 24 || q.BudgetMicros != tc.budget || run.BudgetMicros != tc.budget || q.Plan != tc.plan {
 			t.Errorf("%s: %+v, %v", tc.plan, q, err)
 		}
 	}
@@ -181,9 +181,9 @@ func TestQuoteRefusesWithoutCreditsOrPlan(t *testing.T) {
 	if _, _, err := r.run(ws, project, false); !errors.Is(err, credits.ErrNoPlan) {
 		t.Fatalf("no plan: %v", err)
 	}
-	creditstest.Fund(t, r.st, ws.ID, plans.Creator, 5) // a first edit costs 6
+	creditstest.Fund(t, r.st, ws.ID, plans.Creator, 23) // a first edit costs 24
 	if _, _, err := r.run(ws, project, false); !errors.Is(err, store.ErrInsufficientCredits) {
-		t.Fatalf("5 credits for a first edit: %v", err)
+		t.Fatalf("23 credits for a first edit: %v", err)
 	}
 	// Nothing was created by the refused run, and no hold is left.
 	var n int
@@ -193,7 +193,7 @@ func TestQuoteRefusesWithoutCreditsOrPlan(t *testing.T) {
 	}
 	creditstest.Fund(t, r.st, ws.ID, plans.Creator, 1)
 	if _, _, err := r.run(ws, project, false); err != nil {
-		t.Fatalf("6 credits for a first edit: %v", err)
+		t.Fatalf("24 credits for a first edit: %v", err)
 	}
 }
 
@@ -273,7 +273,7 @@ func TestRecordFinalExport(t *testing.T) {
 		t.Fatalf("%d export rows for one render, want 1", exports)
 	}
 	b, _ := r.st.CreditBalance(ctx, ws.ID, time.Now())
-	if b.Available != 50-6 {
+	if b.Available != 50-24 {
 		t.Fatalf("an export changed the balance: %+v", b)
 	}
 }
@@ -411,21 +411,21 @@ func TestCancelIsChargedAfterAVersionAndReleasedBeforeOne(t *testing.T) {
 	}
 	r.addVersion(ws, project, 1, &made)
 	r.finish(ws, made, store.AgentCancelled)
-	if avail() != 94 {
-		t.Fatalf("a cancel after a version left %d credits, want 94", avail())
+	if avail() != 76 {
+		t.Fatalf("a cancel after a version left %d credits, want 76", avail())
 	}
 	if err := r.exportable(ws, project, 1); err != nil {
 		t.Fatalf("the version of a charged cancel: %v", err)
 	}
-	// The next revision, cancelled after its version and before its preview, costs its 2 credits and cannot be had for free.
+	// The next revision, cancelled after its version and before its preview, costs its 8 credits and cannot be had for free.
 	rev, q, err := r.run(ws, project, false)
 	if err != nil || q.Action != credits.EditRevision {
 		t.Fatalf("revision: %+v %v", q, err)
 	}
 	r.addVersion(ws, project, 2, &rev)
 	r.finish(ws, rev, store.AgentCancelled)
-	if avail() != 92 {
-		t.Fatalf("a cancelled revision left %d credits, want 92", avail())
+	if avail() != 68 {
+		t.Fatalf("a cancelled revision left %d credits, want 68", avail())
 	}
 	if err := r.exportable(ws, project, 2); err != nil {
 		t.Fatalf("the version of a charged revision: %v", err)

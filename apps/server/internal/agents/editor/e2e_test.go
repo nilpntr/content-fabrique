@@ -62,8 +62,10 @@ type fakeAnthropic struct {
 	messages int
 	requests []map[string]any
 	bodies   []string
-	// scale multiplies the cache and output tokens of every turn (0 and 1: as scripted), to make a scripted run cost what a real Opus run
-	// does; an answer never has more output tokens than the max_tokens the request allowed.
+	// scale multiplies the output tokens of every turn (0 and 1: as scripted), to make a scripted run cost what a real max-effort Opus run
+	// does (long thinking); an answer never has more output tokens than the max_tokens the request allowed, which is what keeps a run's
+	// cost inside the reservation of its calls, as it is with the real API. The cache numbers stay as scripted: the count_tokens answer is
+	// fixed, so a bigger cache would be input that no reservation counted.
 	scale int
 	// lastMax is the max_tokens of the newest request.
 	lastMax int
@@ -157,7 +159,7 @@ func (f *fakeAnthropic) turn(n int) string {
 	asset := func(a ids.AssetID) string { return `"` + a.String() + `"` }
 	u := turnUsage[min(n, len(turnUsage))-1]
 	if f.scale > 1 {
-		u[1], u[2], u[3] = u[1]*f.scale, u[2]*f.scale, u[3]*f.scale
+		u[3] *= f.scale
 	}
 	if f.lastMax > 0 {
 		u[3] = min(u[3], f.lastMax)
@@ -511,13 +513,13 @@ func TestEditorRunInReplayMode(t *testing.T) {
 	if r.CostMicros <= 0 || r.CostMicros >= r.BudgetMicros {
 		t.Fatalf("cost %d of budget %d", r.CostMicros, r.BudgetMicros)
 	}
-	// The run was a first edit on a creator plan: its budget is the plan's, and its 6 credits were charged when it succeeded.
+	// The run was a first edit on a creator plan: its budget is the plan's, and its 24 credits were charged when it succeeded.
 	if r.BudgetMicros != cassetteRunBudget {
 		t.Fatalf("the run's budget is %d, want the creator plan's budget for a first edit, %d", r.BudgetMicros, cassetteRunBudget)
 	}
 	bal, err := x.st.CreditBalance(context.Background(), x.wsA.ID, time.Now())
-	if err != nil || bal.Available != 44 || bal.Held != 0 {
-		t.Fatalf("credits after the run = %+v, %v; want 44 left of 50 and nothing held", bal, err)
+	if err != nil || bal.Available != 26 || bal.Held != 0 {
+		t.Fatalf("credits after the run = %+v, %v; want 26 left of 50 and nothing held", bal, err)
 	}
 	if charged, err := x.st.ProjectHasChargedEdit(context.Background(), x.wsA.ID, x.prj); err != nil || !charged {
 		t.Fatalf("the project's edit was not charged: %v %v", charged, err)

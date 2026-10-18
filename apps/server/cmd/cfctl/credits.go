@@ -229,12 +229,12 @@ func cmdCreditsWith(args []string, stdout, stderr io.Writer, lookup lookupEnv, d
 		}
 		_, _ = fmt.Fprintf(out, "  adjusted    %+d credits\n", moved)
 	}
-	return printCredits(ctx, out, errOut, st, ws, now, *limit)
+	return printCredits(ctx, out, errOut, st, list, ws, now, *limit)
 }
 
 // printCredits prints the plan, the balance and the newest ledger rows of a workspace. Free text from the ledger (a reason) is quoted
 // with %q, so it cannot forge lines or move the cursor.
-func printCredits(ctx context.Context, out, errOut io.Writer, st *store.Store, ws store.Workspace, now time.Time, limit int) int {
+func printCredits(ctx context.Context, out, errOut io.Writer, st *store.Store, list *credits.PriceList, ws store.Workspace, now time.Time, limit int) int {
 	ent, err := st.GetEntitlements(ctx, ws.ID)
 	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "cfctl credits: reading the plan failed: %v\n", err)
@@ -246,7 +246,7 @@ func printCredits(ctx context.Context, out, errOut io.Writer, st *store.Store, w
 		return 1
 	}
 	_, _ = fmt.Fprintf(out, "  workspace   %q (%s)\n  plan        %s (%s)\n", ws.Name, ws.ID, ent.Plan, ent.Status)
-	_, _ = fmt.Fprintf(out, "  available   %d credits (%.1f videos), %d held by runs in progress\n", bal.Available, float64(bal.Available)/10, bal.Held)
+	_, _ = fmt.Fprintf(out, "  available   %d credits (%.1f videos), %d held by runs in progress\n", bal.Available, float64(bal.Available)/float64(list.CreditsPerVideo()), bal.Held)
 	if bal.Allowance > 0 {
 		end := "does not expire"
 		if bal.PeriodEnd != nil {

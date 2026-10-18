@@ -38,9 +38,9 @@ The two are joined by `action_id`: every charged action has one `credit_ledger` 
 
 ## 3. Credits and the price list
 
-Credits are the customer's currency. The UI shows them as **videos**: 1 video = 10 credits = a first edit plus two revisions, as in [product plan §10](../01-product-plan.md#10-pricing-and-business-model).
+Credits are the customer's currency. The UI shows them as **videos**: a video is a first edit plus two revisions (10 credits on the original list 2026-10, 40 on 2026-10c, see §3a; always derived from the list), as in [product plan §10](../01-product-plan.md#10-pricing-and-business-model).
 
-**Price list** (versioned data in `apps/server/config/plans/2026-10.yaml`, the same way as `config/pricing`; a change is a new file):
+**Price list** (versioned data in `apps/server/config/plans/`, the same way as `config/pricing`; a change is a new file; the tables of §3 to §5 are the original list `2026-10.yaml`, the current one is `2026-10c.yaml`, §3a):
 
 | Action | Credits | What it covers |
 |---|---|---|
@@ -64,6 +64,40 @@ Credits are the customer's currency. The UI shows them as **videos**: 1 video = 
 - **Top-ups** (later, through the MoR; locally `cfctl credits grant`) last 12 months.
 - Allowance is used first, then top-ups, oldest expiry first.
 - BYOK workspaces use the same price list. Their credits pay the platform fee, while tokens go to their own key.
+
+## 3a. Update 2026-10c: the editor thinks at max effort (D-31, pending founder confirmation)
+
+> **Pending founder confirmation.** The numbers below are the engineering answer to "Opus 5.5 at max effort, $2 for an edit is not a problem and maybe needed". Sections 3 and 4 above describe the original list (`2026-10.yaml`, kept as it was); where they differ, this section is the list that prices new charges.
+
+**What changed.**
+- **Routing** (`config/routing/v1-start.yaml`): the `editor` and `revision` entries run `claude-opus-5-5` at effort `max` (they were `medium`). `max_tokens` went from 24,000 to **64,000** (editor) and from 12,000 to **32,000** (revision), because max-effort thinking is long and counts toward `max_tokens`. There is no `escalate` entry any more: nothing is above `max`, and `routing.Entry` refuses an `escalate` whose effort is not above the stage's own. `dev-cheap` and `dev-mid` stay at effort `medium` and 24,000 tokens (they exist for cheap smoke tests; their limits are not production's).
+- **Run budgets** (`config/plans/2026-10c.yaml`, a new file; `2026-10.yaml` is untouched because ledger rows name the version that priced them): a first edit gets a hard run budget of **$3.00** (was $0.96 on creator), a revision **$1.00** (was $0.32), on every managed plan. A real edit costs a fraction of that (about $0.38 at `medium`); the budget is the backstop. A call's worst case is `max_tokens` at the output price ($1.28 for 64,000 tokens on Opus 5.5), reserved before it is sent and settled at its real cost, so budget fitting (section 5) shortens late calls instead of refusing early ones.
+- **Not loosened:** plan prices, the merchant fee, the exchange rate and `max_cogs_share` (0.40) are those of 2026-10. The profit invariant holds for every plan (`TestEveryPriceListFileHoldsTheProfitInvariant`), and `TestMaxEffortBudgetsFitWithoutLoosenTheInvariant` pins that nothing above moved.
+
+**Credits per action went up, not the budgets' share.** An action's credits are one number for all plans, so they must cover the plan that earns least per credit of its allowance (pro: 400 credits for €129, $0.3296 net per credit, so 40 % is $0.1318): $3.00 / $0.1318 = 22.8 credits and $1.00 / $0.1318 = 7.6 credits.
+
+| Action | 2026-10 | 2026-10c |
+|---|---|---|
+| `edit.first` | 6 | **24** |
+| `edit.revision` | 2 | **8** |
+| `export.final` | 0 | 0 |
+| `ideation.run` | 1 | 1 |
+| **1 video** (first edit + 2 revisions) | 10 credits | **40 credits** |
+
+A video's cost in credits is **derived** from the list (`credits.PriceList.CreditsPerVideo`: first edit plus two revisions), never written down elsewhere. The API exposes it as `credits.credits_per_video` in `GET /v1/me` and the videos a plan pays for per period as `limits.exports` in `GET /v1/workspace/plan` (`PriceList.VideosPerPeriod`, whole videos); `cfctl credits show` uses it for "N videos". The paywall cards state no video counts (they cannot ask the API before there is a plan).
+
+**Plans** (allowance in credits; videos = allowance / 40, whole videos in the API):
+
+| Plan | Allowance (2026-10 -> 2026-10c) | Videos per period (was -> now) | Run budget first edit / revision | Note |
+|---|---|---|---|---|
+| `trial` | 20 -> **40** once | 2 -> **1** | $3.00 / $1.00 | The same per-edit budgets as a paying plan (the first impression should be the best result). Its fixed COGS allowance goes from $2.50 to **$5.00** (40 credits x $0.125): the one place this change costs us more per customer. Worst case is $5.00 per trial for one video instead of $2.50 for two. |
+| `studio` (BYOK) | 600 -> **2400** | 60 -> 60 | $3.00 / $2.00 on the creator's own key | The allowance scales with the credits per video so that studio keeps its 60 videos; our cost is only the non-LLM budgets, which are unchanged for edits ($0.100 / $0.033) and $0.004 for an idea run (was $0.016: 1 credit now earns a quarter as much on a 2400-credit allowance; an idea run has no compute of its own). The first-edit cap on the creator's key is $3.00 so that a max-effort edit can finish. |
+| `creator` | 150 (unchanged) | 15 -> **3.75** (3 whole) | $3.00 / $1.00 | The invariant would allow up to 192 credits (4.8 videos) at these budgets; the allowance was not raised because the task was to keep it. |
+| `pro` | 400 (unchanged) | 40 -> **10** | $3.00 / $1.00 | The plan that sets the credit prices: 24 credits allow $3.16, 8 credits $1.05. |
+
+**Why videos per month fall so far.** The invariant is about the worst case. A video can now cost up to $5.00 (three runs at their hard budgets) against $1.60 before, and the plan's net revenue pays for 40 % of itself: creator earns about $60 net a month, so $24 of COGS, so at most 4.8 worst-case videos. The real cost of a video is much lower than its budgets, so most creators will not use them. If the beta shows that, the lever is lower budgets for revisions or more allowance, both a new list version, not an edit.
+
+**Other limits to watch.** `DAILY_SPEND_CAP_MICROS` (default $20 per workspace per UTC day) now covers about six worst-case first edits. The cap on runs that end without a charge (5 per day) allows up to $15 of unbilled model spend per workspace per day in the worst case (it was $4.80); a trial workspace is the one to watch. A 64,000-token call is not streamed (the client uses a long timeout); a run on `v1-start` is the first proof that the API accepts it, and nothing here was measured live.
 
 ## 4. Profit invariant: COGS budgets are derived from price
 
@@ -109,7 +143,7 @@ The cost model puts an Opus first edit at about $0.61 (range $0.45–0.95) and a
 
 Built: the price list and plans as versioned data with the profit-invariant test; `credit_accounts`, `credit_ledger` and `credit_holds`; the balance and the order of use; the allowance periods and their expiry as periodic jobs; hold, settle and release on editor runs; the export rule; `GET /v1/me` credits and `402 credits_exhausted`; `cfctl credits`, `cfctl plan grant` and `cfctl agent run --no-credits`. Not built: the usage endpoints and screens (P7-01b); a hold for `ideation.run` (its price is in the list, but no ideation agent exists yet); checkout and top-up purchase (P7-01c, `cfctl credits grant` stands in); the BYOK key itself (P4-00b).
 
-**The price list** is `apps/server/config/plans/2026-10.yaml`, embedded like `config/pricing` (`configfiles.Plans()`, loaded by `credits.LoadPriceList`). A change is a new file named `<version>.yaml`; the loader refuses a file whose name and version differ, an unknown field, a missing action or plan, and a negative number. It holds the four actions, the MoR fee (5 % and 47 euro cents, which is the $0.50 at 1.08 rounded up), `usd_per_eur`, `max_cogs_share`, the top-up expiry (12 months), the trial's COGS allowance ($2.50) and the four plans. The decimals are parsed exactly (`big.Rat`).
+**The price list** (as built in P7-01a; the code now runs on the newer `2026-10c.yaml`, see §3a) is `apps/server/config/plans/2026-10.yaml`, embedded like `config/pricing` (`configfiles.Plans()`, loaded by `credits.LoadPriceList`). A change is a new file named `<version>.yaml`; the loader refuses a file whose name and version differ, an unknown field, a missing action or plan, and a negative number. It holds the four actions, the MoR fee (5 % and 47 euro cents, which is the $0.50 at 1.08 rounded up), `usd_per_eur`, `max_cogs_share`, the top-up expiry (12 months), the trial's COGS allowance ($2.50) and the four plans. The decimals are parsed exactly (`big.Rat`).
 
 | Plan | Mode | Price | Allowance | Refills | Run budget: first edit / revision / idea | Our non-LLM budget (BYOK only) |
 |---|---|---|---|---|---|---|

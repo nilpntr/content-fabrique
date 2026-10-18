@@ -73,7 +73,7 @@ func TestCreditsPeriodsJobGrantsAndExpires(t *testing.T) {
 	if b, err := e.api.CreditBalance(ctx, paid.ID, time.Now()); err != nil || b.Available != 150 || b.Allowance != 150 {
 		t.Fatalf("paid balance = %+v, %v", b, err)
 	}
-	if b, err := e.api.CreditBalance(ctx, trial.ID, time.Now()); err != nil || b.Available != 20 {
+	if b, err := e.api.CreditBalance(ctx, trial.ID, time.Now()); err != nil || b.Available != 40 {
 		t.Fatalf("trial balance = %+v, %v", b, err)
 	}
 

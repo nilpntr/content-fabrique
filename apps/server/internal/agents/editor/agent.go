@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
@@ -26,10 +25,12 @@ const (
 	Stage = "editor"
 )
 
-// DefaultBudgets are the editor's budgets for a run that does not name its own: $5, 60 tool calls and 15 minutes. The token
+// DefaultBudgets are the editor's budgets for a run that does not name its own: $5, 60 tool calls and 30 minutes. The token
 // budget counts cache reads too, which dominate a long run (the tool definitions and the conversation are read again on every
-// call), so it is generous; the dollar budget is what really limits a run.
-var DefaultBudgets = runtime.Budgets{Micros: 5_000_000, Tokens: 4_000_000, ToolCalls: 60, WallClock: 15 * time.Minute}
+// call), so it is generous; the dollar budget is what really limits a run (a plan's price list sets it, config/plans). The wall clock
+// is the longest a run may have (runtime.MaxWallClock): the editor thinks at max effort (D-31), and a single call of up to 64,000
+// tokens takes minutes to write, so 15 minutes would end a long edit on the clock before it could spend its dollars.
+var DefaultBudgets = runtime.Budgets{Micros: 5_000_000, Tokens: 4_000_000, ToolCalls: 60, WallClock: runtime.MaxWallClock}
 
 // NewAgent defines the editor agent: its prompt, its tools, and the context it starts every run with.
 func NewAgent(d Deps) (runtime.Agent, error) {

@@ -44,8 +44,8 @@ const (
 
 // Limits is what a plan includes. A zero number means "not included".
 type Limits struct {
-	// Exports is the number of exported videos per month (the trial's two are in total, not per month).
-	Exports   int       `json:"exports"`
+	// The number of videos a plan pays for is not here: it follows from the plan's credit allowance and what a video costs, which the
+	// price list (internal/credits, config/plans) says; the API derives it from there (credits.PriceList.VideosPerPeriod).
 	StorageGB int       `json:"storage_gb"`
 	AIBilling AIBilling `json:"ai_billing"`
 }
@@ -55,13 +55,13 @@ type Limits struct {
 func LimitsOf(p Plan) Limits {
 	switch p {
 	case Trial:
-		return Limits{Exports: 2, StorageGB: 2, AIBilling: BilledByUs}
+		return Limits{StorageGB: 2, AIBilling: BilledByUs}
 	case Studio:
-		return Limits{Exports: 60, StorageGB: 100, AIBilling: BilledByCreator}
+		return Limits{StorageGB: 100, AIBilling: BilledByCreator}
 	case Creator:
-		return Limits{Exports: 15, StorageGB: 50, AIBilling: BilledByUs}
+		return Limits{StorageGB: 50, AIBilling: BilledByUs}
 	case Pro:
-		return Limits{Exports: 40, StorageGB: 200, AIBilling: BilledByUs}
+		return Limits{StorageGB: 200, AIBilling: BilledByUs}
 	default:
 		return Limits{}
 	}

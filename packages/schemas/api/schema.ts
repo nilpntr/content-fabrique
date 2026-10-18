@@ -771,7 +771,10 @@ export interface components {
         };
         /** @description What the plan includes. A zero number means "not included"; all zero without an active plan. */
         PlanLimits: {
-            /** @description Exported videos per month (the trial's two are in total, not per month). */
+            /**
+             * @description Whole videos the plan's credit allowance pays for per period (a video is a first edit plus two revisions; what it costs in credits is
+             *     `credits_per_video` of `GET /v1/me`, from the price list). A trial's allowance is once, in total, not per period.
+             */
             exports: number;
             storage_gb: number;
             ai_billing: components["schemas"]["AiBilling"];
@@ -801,11 +804,16 @@ export interface components {
             expires_at: string;
         };
         /**
-         * @description The workspace's credits (1 video = 10 credits). Credits in use by a run that has not finished are already taken out of
+         * @description The workspace's credits (`credits_per_video` credits make a video). Credits in use by a run that has not finished are already taken out of
          *     `available`. Allowance that is not used by the end of its period expires; top-ups last 12 months. The allowance is used first,
          *     then the top-ups, earliest expiry first.
          */
         Credits: {
+            /**
+             * @description What a video costs in credits: a first edit plus two revisions, on the price list that prices new charges. Show credits as
+             *     videos by dividing by it; do not hardcode a number.
+             */
+            credits_per_video: number;
             /** @description What a new action can use now, allowance and top-ups together. */
             available: number;
             /** @description The size of the current period's allowance; 0 when the workspace has none. */

@@ -368,7 +368,7 @@ func TestNewAgentChecksItsTools(t *testing.T) {
 	if _, err := runtime.NewAgents(a); err != nil {
 		t.Fatal(err)
 	}
-	if a.Name != "editor" || a.Stage != "editor" || a.Budgets.Micros != 5_000_000 || a.Budgets.ToolCalls != 60 || a.Budgets.WallClock.Minutes() != 15 {
+	if a.Name != "editor" || a.Stage != "editor" || a.Budgets.Micros != 5_000_000 || a.Budgets.ToolCalls != 60 || a.Budgets.WallClock.Minutes() != 30 {
 		t.Fatalf("agent: %+v", a)
 	}
 	if _, err := NewAgent(Deps{}); err == nil {
