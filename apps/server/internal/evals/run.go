@@ -143,6 +143,8 @@ type CaseResult struct {
 	reason                  string
 	editMicros, judgeMicros int64
 	judgeWanted             bool
+	// infra is the infrastructure failure that stopped the sample (InfraError), "" for none.
+	infra error
 }
 
 // RunResult is a whole suite run.
@@ -163,9 +165,12 @@ type RunResult struct {
 	// CalibrationError is the mean distance of the judge's scores from the human ranges on the calibration cases (0: it agrees).
 	CalibrationError *float64 `json:"calibration_error,omitempty"`
 	CodeHash         string   `json:"code_hash,omitempty"`
-	SpentMicro       int64    `json:"spent_micros"`
-	JSONL            string   `json:"jsonl,omitempty"`
-	Experiment       string   `json:"experiment_url,omitempty"`
+	// Aborted says the run was stopped by the infrastructure (a spend cap, the model API, ...): nothing was decided, the cases are not
+	// scored, and the run is never a baseline.
+	Aborted    string `json:"aborted,omitempty"`
+	SpentMicro int64  `json:"spent_micros"`
+	JSONL      string `json:"jsonl,omitempty"`
+	Experiment string `json:"experiment_url,omitempty"`
 }
 
 // ByCase returns the result of a case.
@@ -234,6 +239,15 @@ func Run(ctx context.Context, s *Suite, d Deps, o Options) (*RunResult, error) {
 		c := s.Resolved(raw)
 		cr := runCase(ctx, s, c, d, o, rs, res.SpentMicro)
 		res.SpentMicro += cr.CostMicros
+		if cr.infra != nil {
+			// The infrastructure stopped it: nothing about the code can be concluded from this run. It is not scored.
+			res.Aborted = fmt.Sprintf("stopped at case %s: %s; nothing was decided", c.ID, cr.infra)
+			logf("  %-28s STOPPED: %s", c.ID, cr.infra)
+			if out != nil {
+				_ = writeLine(out, map[string]any{"summary": res})
+			}
+			return res, &InfraError{Reason: infraReason(cr.infra), Msg: res.Aborted + fmt.Sprintf(" (spent $%.3f)", float64(res.SpentMicro)/1e6)}
+		}
 		res.Cases = append(res.Cases, cr)
 		line := "skipped: " + cr.Skipped
 		switch {
@@ -337,6 +351,10 @@ func runCase(ctx context.Context, s *Suite, c Case, d Deps, o Options, rs *runSt
 			started = sr.Started
 		}
 		cost += sr.CostMicros
+		if sr.infra != nil {
+			sr.CostMicros = cost
+			return sr // the run stops; this case is not scored
+		}
 		if sr.Skipped != "" {
 			if k == 1 {
 				return sr // nothing ran
@@ -418,9 +436,13 @@ func runSample(ctx context.Context, s *Suite, c Case, d Deps, o Options, rs *run
 		if t.RunID != uuid.Nil {
 			cr.EditorRun = ids.Encode(ids.PrefixRun, t.RunID)
 		}
+		if errors.Is(err, ErrInfrastructure) {
+			cr.Mode, cr.Error, cr.infra = "live", err.Error(), err
+			return cr
+		}
 		if err != nil {
-			// A run that failed (its budget, an answer cut off at max_tokens, an error) is a bad outcome of this code, not a missing sample:
-			// it scores 0 and is listed.
+			// A run that failed for itself (its budget, an answer cut off at max_tokens, an editor error, no version) is a bad outcome of
+			// this code, not a missing sample: it scores 0 and is listed.
 			cr.Mode, cr.Error, cr.failed, cr.reason = "live", err.Error(), true, err.Error()
 			return cr
 		}
@@ -449,7 +471,8 @@ func runSample(ctx context.Context, s *Suite, c Case, d Deps, o Options, rs *run
 	if err != nil {
 		cr.Error = "measure: " + err.Error()
 		if live {
-			cr.failed, cr.reason = true, cr.Error
+			// Reading the analysis, the render or the database failed: the infrastructure's, not the edit's.
+			cr.infra = &InfraError{Reason: "measure", Msg: "measuring the edit failed: " + err.Error()}
 		}
 		return cr
 	}
@@ -766,4 +789,12 @@ func sampleLabel(s SampleResult) string {
 		return "-"
 	}
 	return fmt.Sprintf("%.1f", *s.Score)
+}
+
+func infraReason(err error) string {
+	var ie *InfraError
+	if errors.As(err, &ie) {
+		return ie.Reason
+	}
+	return "infrastructure"
 }

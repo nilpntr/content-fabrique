@@ -97,11 +97,13 @@ type Iteration struct {
 type ImproveResult struct {
 	// BaselineCached says the baseline was a recent run of the same code, reused.
 	BaselineCached bool
-	Branch         string
-	Kept           bool
-	Iterations     []Iteration
-	Report         string
-	Spent          int64
+	// Aborted says the infrastructure stopped the loop (a spend cap, the model API, ...): nothing was decided.
+	Aborted    string
+	Branch     string
+	Kept       bool
+	Iterations []Iteration
+	Report     string
+	Spent      int64
 }
 
 // lowest are the n lowest-scoring cases that the improver may see (scored, not held out, not calibration).
@@ -143,6 +145,17 @@ func Improve(ctx context.Context, d ImproveDeps, o ImproveOptions) (*ImproveResu
 	defer span.End()
 
 	before, cached, err := d.Baseline(ctx)
+	if errors.Is(err, ErrInfrastructure) {
+		if before != nil {
+			res.Spent += before.SpentMicro
+		}
+		res.Aborted = "the baseline " + err.Error()
+		span.SetStatus(codes.Error, "stopped by the infrastructure")
+		if path, rerr := writeReport(res, o, d); rerr == nil {
+			res.Report = path
+		}
+		return res, fmt.Errorf("baseline: %w", err)
+	}
 	if err != nil {
 		span.SetStatus(codes.Error, "baseline")
 		return res, fmt.Errorf("baseline: %w", err)
@@ -241,6 +254,20 @@ func Improve(ctx context.Context, d ImproveDeps, o ImproveOptions) (*ImproveResu
 			return res, fmt.Errorf("commit the change: %w", err)
 		}
 		after, err := d.Evaluate(ctx, dir, fmt.Sprintf("candidate %d: %s", n, p.Title), o.Live, o.MaxMicros-res.Spent) // live when the baseline was: like against like
+		if errors.Is(err, ErrInfrastructure) {
+			// Not the candidate's doing: the round stops, nothing is decided, and what was spent is reported.
+			if after != nil {
+				it.CostMicros += after.SpentMicro
+				res.Spent += after.SpentMicro
+			}
+			it.NotRun = "stopped: " + err.Error()
+			res.Aborted = "candidate " + fmt.Sprint(n) + ": " + err.Error()
+			_ = d.Repo.DropLast(ctx, dir)
+			res.Iterations = append(res.Iterations, it)
+			traceIteration(ctx, it)
+			logf("iteration %d: stopped by the infrastructure: %v", n, err)
+			break
+		}
 		if err != nil {
 			it.NotRun = "the suite did not run on the change: " + err.Error()
 			_ = d.Repo.DropLast(ctx, dir)
@@ -267,6 +294,9 @@ func Improve(ctx context.Context, d ImproveDeps, o ImproveOptions) (*ImproveResu
 		}
 		res.Iterations = append(res.Iterations, it)
 		traceIteration(ctx, it)
+	}
+	if res.Aborted != "" {
+		span.SetAttributes(attribute.String("cf.aborted", res.Aborted))
 	}
 	span.SetAttributes(attribute.Bool("cf.kept", res.Kept), attribute.Int64("cf.spent_micros", res.Spent), attribute.Int("cf.iterations", len(res.Iterations)))
 	report, err := writeReport(res, o, d)
@@ -321,6 +351,9 @@ func writeReport(res *ImproveResult, o ImproveOptions, d ImproveDeps) (string, e
 	fmt.Fprintf(&b, "# Eval improve: %s\n\n", o.Suite.Name)
 	fmt.Fprintf(&b, "- Branch: `%s` (%s)\n", res.Branch, map[bool]string{true: "kept: review it and open a PR; it was never pushed", false: "nothing was kept; the branch was deleted"}[res.Kept])
 	fmt.Fprintf(&b, "- Spent: $%.3f of $%.2f\n", float64(res.Spent)/1e6, float64(o.MaxMicros)/1e6)
+	if res.Aborted != "" {
+		fmt.Fprintf(&b, "- **Stopped by the infrastructure, nothing was decided:** %s\n", res.Aborted)
+	}
 	fmt.Fprintf(&b, "- Rule (paired by case, noise-aware, docs/design/observability-v1.md section 9): the mean gain is at least %.1f and more than twice its standard error; no case drops by more than max(%.1f, twice its noise); the held-out mean drops by at most max(%.1f, twice its noise); the failure rate does not rise. A live case scored once is given a noise sd of %.1f\n", o.Rule.MinGain, o.Rule.MaxRegression, o.Rule.HeldOutSlack, cmpF(o.Rule.NoiseSD, DefaultNoiseSD))
 	if res.BaselineCached {
 		b.WriteString("- The baseline is a recent run of the same code, reused (no new runs)\n")

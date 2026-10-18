@@ -15,6 +15,7 @@ import (
 
 	"github.com/nilpntr/content-fabrique/internal/agents/agentset"
 	"github.com/nilpntr/content-fabrique/internal/agents/editor"
+	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/api"
 	"github.com/nilpntr/content-fabrique/internal/config"
@@ -126,11 +127,8 @@ func cmdEvalSuite(args []string, stdout, stderr io.Writer, lookup lookupEnv, dep
 		_, _ = fmt.Fprintf(stderr, "cfctl %s: --live needs --max-usd, the hard total it may spend (editor runs and judge calls)\n", name)
 		return 2
 	}
-	res, _, code := runSuite(name, f, stdout, stderr, lookup, deps)
-	if code != 0 || res == nil {
-		return code
-	}
-	return 0
+	_, _, code := runSuite(name, f, stdout, stderr, lookup, deps)
+	return code
 }
 
 // suiteEnv is an opened suite run: its suite, the database and what Run needs.
@@ -141,7 +139,13 @@ type suiteEnv struct {
 	deps  evals.Deps
 	opts  evals.Options
 	close func()
+	// room checks the live cases' workspaces have room under today's spend caps for an estimate (live runs only).
+	room func(ctx context.Context, estimate int64) error
 }
+
+// exitStopped is cfctl eval suite's exit code when the infrastructure stopped the run (a spend cap, the model API, ...): eval improve
+// tells it from a failure of the command.
+const exitStopped = 3
 
 // runSuite loads, runs and prints a suite. It returns the result (nil when nothing ran) and an exit code.
 func runSuite(name string, f suiteFlags, stdout, stderr io.Writer, lookup lookupEnv, deps agentDeps) (*evals.RunResult, *evals.Suite, int) {
@@ -164,8 +168,22 @@ func runSuite(name string, f suiteFlags, stdout, stderr io.Writer, lookup lookup
 		if !guardCost(out, se.env.err, name, est.Micros, f.maxUSD, est.Lines) {
 			return nil, se.suite, 2
 		}
+		if f.live {
+			if err := se.room(ctx, est.Micros); err != nil {
+				_, _ = fmt.Fprintf(se.env.err, "cfctl %s: not started: %v\n", name, err)
+				return nil, se.suite, exitStopped
+			}
+		}
 	}
 	res, err := evals.Run(ctx, se.suite, se.deps, se.opts)
+	if errors.Is(err, evals.ErrInfrastructure) {
+		spent := 0.0
+		if res != nil {
+			spent = float64(res.SpentMicro) / 1e6
+		}
+		_, _ = fmt.Fprintf(se.env.err, "cfctl %s: %v. Spent $%.3f; the run is not scored and is never a baseline\n", name, err, spent)
+		return res, se.suite, exitStopped
+	}
 	if err == nil && res != nil && complete(res) {
 		if rerr := evals.RecordBaseline(se.opts.OutDir, res, time.Now()); rerr != nil {
 			_, _ = fmt.Fprintf(se.env.err, "cfctl %s: remembering the run: %v\n", name, rerr)
@@ -197,6 +215,9 @@ func guardCost(out, errOut io.Writer, name string, micros int64, maxUSD float64,
 // complete says a run scored every case it was asked to as fully as it could: none was cut short, and no judge call was left out, by the
 // budget. Only such a run can stand as a baseline (a baseline without the judge's parts is on another scale).
 func complete(r *evals.RunResult) bool {
+	if r.Aborted != "" {
+		return false
+	}
 	for _, c := range r.Cases {
 		if strings.Contains(c.Skipped, "--max-usd") || strings.Contains(c.Skipped, "samples ran") || strings.Contains(c.JudgeNote, "--max-usd") {
 			return false
@@ -399,6 +420,44 @@ func openSuite(name string, f suiteFlags, stdout, stderr io.Writer, lookup looku
 		workspaces[ref] = w
 		return w, nil
 	}
+	se.room = func(ctx context.Context, estimate int64) error {
+		billing, err := llm.BillingFor(rt.Settings.Env)
+		if err != nil {
+			return err
+		}
+		caps := rt.Settings.SpendCaps()
+		period := store.DayPeriod(time.Now())
+		seen := map[string]bool{}
+		for _, raw := range suite.Cases {
+			c := suite.Resolved(raw)
+			if seen[c.Workspace] || c.Calibration != nil || len(c.Missing(true)) > 0 {
+				continue
+			}
+			seen[c.Workspace] = true
+			w, err := workspace(ctx, c.Workspace)
+			if err != nil {
+				return err
+			}
+			wc, err := st.WorkspaceSpend(ctx, w.ID, period)
+			if err != nil {
+				return fmt.Errorf("reading today's spend: %w", err)
+			}
+			r := evals.SpendRoom{Workspace: caps.WorkspaceDailyMicros - wc.PlatformMicros - wc.TestMicros, WorkspaceCap: caps.WorkspaceDailyMicros,
+				PlatformBilled: billing == llm.BilledToPlatform}
+			if r.PlatformBilled {
+				pc, err := st.PlatformSpend(ctx, period)
+				if err != nil {
+					return fmt.Errorf("reading the platform's spend: %w", err)
+				}
+				r.Platform, r.PlatformTripped = caps.PlatformDailyMicros-pc.PlatformMicros, pc.TrippedAt != nil
+			}
+			// The whole estimate against each workspace: the cases usually share one, and an over-estimate only refuses early.
+			if err := evals.CheckRoom(estimate, r); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	se.deps = evals.Deps{
 		Log: env.out,
 		Stored: func(ctx context.Context, c evals.Case) (evals.Target, error) {
@@ -557,13 +616,13 @@ func editLive(ctx context.Context, st *store.Store, svc *projects.Service, rt *a
 	run, err := rt.Service.Start(ctx, runtime.StartParams{Agent: editor.Name, WorkspaceID: w.ID, ProjectID: pid.UUID, Input: input,
 		Profile: c.Profile, Budgets: runtime.Budgets{Micros: budget}, NoCredits: true})
 	if err != nil {
-		return evals.Target{}, fmt.Errorf("start the editor: %w", err)
+		return evals.Target{}, &evals.InfraError{Reason: "start", Msg: "the editor run could not be started: " + err.Error()}
 	}
 	t := evals.Target{Workspace: w.ID, Project: pid, RunID: run.ID}
 	for {
 		outcome, err := rt.Runner.Execute(ctx, w.ID, run.ID)
 		if err != nil {
-			return t, fmt.Errorf("the editor run: %w", err)
+			return t, &evals.InfraError{Reason: "worker", Msg: "the editor run could not be worked: " + err.Error()}
 		}
 		if outcome != runtime.OutcomeWaiting {
 			break
@@ -578,11 +637,13 @@ func editLive(ctx context.Context, st *store.Store, svc *projects.Service, rt *a
 	t.EditMicros = final.CostMicros
 	// A run that did not succeed is a failed sample, whatever versions it saved on the way (the creator would see a failed edit).
 	if final.Status != store.AgentSucceeded {
-		reason := final.Status
+		reason := ""
 		if final.FailureReason != nil {
-			reason += ": " + *final.FailureReason
+			reason = *final.FailureReason
 		}
-		return t, fmt.Errorf("the editor run %s %s", ids.Encode(ids.PrefixRun, run.ID), reason)
+		// A spend cap, the model API or the database is the infrastructure's (the run stops, unscored); a budget, max_tokens or an
+		// editor error is the edit's own (scored 0).
+		return t, evals.RunFailure(ids.Encode(ids.PrefixRun, run.ID), final.Status, reason)
 	}
 	v, err := st.GetTimelineVersionByAuthor(ctx, w.ID, pid, "agent", ids.Encode(ids.PrefixRun, run.ID))
 	if err != nil {
