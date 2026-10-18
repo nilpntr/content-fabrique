@@ -13,8 +13,10 @@ import type { ApiAsset } from "@/lib/api/client";
 import { useAssets, useMe } from "@/lib/api/hooks";
 import { useCreateProject, useStartEdit } from "@/lib/api/project-hooks";
 import { creditsOf } from "@/lib/credits";
+import { useStyle } from "@/lib/api/style-hooks";
 import { ASSETS_QUERY_KEY } from "@/lib/query-client";
 import { useRefreshThrottle } from "@/lib/refresh-throttle";
+import { sourceNote } from "@/lib/style-words";
 
 /** A clip the editor can use: a video that has finished processing. */
 export const isUsableClip = (asset: ApiAsset): boolean => asset.kind === "video" && asset.status === "ready";
@@ -43,6 +45,11 @@ export function NewProjectPage({ onOpenProject }: { onOpenProject: (projectId: s
   const me = useMe();
   const extraCareful = extraCarefulCosts(creditsOf(me.data)?.edit_costs, "first_edit");
   const queryClient = useQueryClient();
+  // The vibe picker starts on the creator's style's vibe (a style that cannot be loaded leaves it on lively).
+  const style = useStyle();
+  const styleVibe = style.data?.effective.vibe ?? "lively";
+  const vibeSource = style.data ? sourceNote(style.data.effective.sources.vibe) : null;
+  const vibeNote = style.data?.effective.sources.vibe === "you" ? "From your style." : vibeSource ? `${vibeSource}.` : undefined;
 
   // The picker needs the whole library to search it, so the remaining pages are fetched as they come. After a failure it stops,
   // and a button asks again: a loop of retries against a failing API helps nobody.
@@ -67,7 +74,11 @@ export function NewProjectPage({ onOpenProject }: { onOpenProject: (projectId: s
     try {
       const run = await startEdit.mutateAsync({
         projectId: project.id,
-        body: { ...(input.brief ? { instructions: input.brief } : {}), ...(input.quality ? { quality: input.quality } : {}) },
+        body: {
+          ...(input.brief ? { instructions: input.brief } : {}),
+          ...(input.vibe ? { vibe: input.vibe } : {}),
+          ...(input.quality ? { quality: input.quality } : {}),
+        },
       });
       onOpenProject(project.id, run.id);
     } catch (error) {
@@ -135,7 +146,16 @@ export function NewProjectPage({ onOpenProject }: { onOpenProject: (projectId: s
           </Button>
         </div>
       ) : null}
-      <NewProjectFlow assets={clips} onCreate={onCreate} onMediaError={refresh} costNote="About one video from your plan, with room for two rounds of changes." describeError={describeError} extraCareful={extraCareful} />
+      <NewProjectFlow
+        assets={clips}
+        onCreate={onCreate}
+        onMediaError={refresh}
+        costNote="About one video from your plan, with room for two rounds of changes."
+        describeError={describeError}
+        defaultVibe={styleVibe}
+        vibeNote={vibeNote}
+        extraCareful={extraCareful}
+      />
     </div>
   );
 }

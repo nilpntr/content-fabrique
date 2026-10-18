@@ -1,0 +1,20 @@
+# Local ids for suites/back-day.yaml (gitignored: never commit). The founder's workspace and Gino's back-day footage.
+suite: back-day
+defaults:
+  workspace: wks_01m54sbe3afkwrw0ay4qjj8vfv
+  references_dir: ~/Downloads/gino_tiktok
+cases:
+  - id: back-day-lively
+    footage: [ast_01m54sq73kednrv75h256899gs, ast_01m54sq7aker1tqn70vg8a6hxd, ast_01m54sq8j7em88y7kngmvb9qxs, ast_01m54sq9bqfw5vf2sda35wc0eg, ast_01m54sqagkfngtwan6072w7ajb]
+    song: ast_01m56pyxepf8psrf0kxwphbjr4
+    stored: {project: prj_01m56xnvyae13rpkn2jjxx6c78, version: 4}
+  - id: back-day-calm
+    footage: [ast_01m54sq73kednrv75h256899gs, ast_01m54sq8j7em88y7kngmvb9qxs, ast_01m54sq9bqfw5vf2sda35wc0eg]
+    song: ast_01m56pyxepf8psrf0kxwphbjr4
+    stored: {project: prj_01m56w64djfk4bb1y603194f9k, version: 3}
+  - id: back-day-held-out
+    footage: [ast_01m54sq73kednrv75h256899gs, ast_01m54sqagkfngtwan6072w7ajb, ast_01m54sq7aker1tqn70vg8a6hxd]
+    song: ast_01m56pyxepf8psrf0kxwphbjr4
+    stored: {project: prj_01m56tbhqxf0evfmzz21yrxbpk, version: 2}
+  - id: calibration-founder-v4
+    stored: {project: prj_01m56q05yne29805f3vgpw8cwp, version: 4}

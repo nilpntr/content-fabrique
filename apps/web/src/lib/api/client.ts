@@ -87,6 +87,16 @@ export type AnnotationTargetType = components["schemas"]["AnnotationTargetType"]
 export type CreateAnnotationRequest = components["schemas"]["CreateAnnotationRequest"];
 export type UpdateAnnotationRequest = components["schemas"]["UpdateAnnotationRequest"];
 
+/** The creator's style (GET /v1/style): the AI summary, the measures in plain words, the settings and the reference videos. */
+export type CreatorStyle = components["schemas"]["CreatorStyle"];
+/** The creator's own settings: a setting that is absent is not set. */
+export type StyleSettings = components["schemas"]["StyleSettings"];
+export type EffectiveStyleSettings = components["schemas"]["EffectiveStyleSettings"];
+export type StyleSettingSource = components["schemas"]["StyleSettingSource"];
+export type StyleReference = components["schemas"]["StyleReference"];
+export type StyleReferenceStatus = components["schemas"]["StyleReferenceStatus"];
+export type EditVibe = components["schemas"]["EditVibe"];
+
 export interface ApiClientOptions {
   getToken: GetToken;
   /** For tests. Defaults to `apiBaseUrl()`. */
@@ -259,4 +269,35 @@ export const updateAnnotation = async (client: ApiClient, id: string, body: Upda
 
 export const deleteAnnotation = async (client: ApiClient, id: string): Promise<void> => {
   unwrap(await client.DELETE("/v1/annotations/{id}", { params: { path: { id } } }));
+};
+
+// ── The creator's style ─────────────────────────────────────────────────────
+
+/** Whether an answer has the shape of a style (an older server, or a proxy, may answer something else: that is no style). */
+export function isCreatorStyle(value: unknown): value is CreatorStyle {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Partial<CreatorStyle>;
+  return typeof v.status === "string" && Array.isArray(v.references) && typeof v.effective === "object" && v.effective !== null && typeof v.settings === "object" && v.settings !== null;
+}
+
+export const fetchStyle = async (client: ApiClient, signal?: AbortSignal): Promise<CreatorStyle> => {
+  const data: unknown = unwrap(await client.GET("/v1/style", { signal }));
+  if (!isCreatorStyle(data)) throw new ApiError(200, "unknown_error", "The server's answer is not a style.");
+  return data;
+};
+
+/** PUT /v1/style: replaces the creator's settings (a setting left out follows the suggestion). */
+export const putStyleSettings = async (client: ApiClient, settings: StyleSettings): Promise<CreatorStyle> =>
+  unwrap(await client.PUT("/v1/style", { body: { settings } }));
+
+/** POST /v1/style/relearn: measures the reference videos again, in the background. */
+export const relearnStyle = async (client: ApiClient): Promise<CreatorStyle> => unwrap(await client.POST("/v1/style/relearn", {}));
+
+export const removeStyleReference = async (client: ApiClient, assetId: string): Promise<void> => {
+  unwrap(await client.DELETE("/v1/style/references/{id}", { params: { path: { id: assetId as ApiAsset["id"] } } }));
+};
+
+/** DELETE /v1/style: forgets the reference videos, the summary and the settings. */
+export const resetStyle = async (client: ApiClient): Promise<void> => {
+  unwrap(await client.DELETE("/v1/style", {}));
 };

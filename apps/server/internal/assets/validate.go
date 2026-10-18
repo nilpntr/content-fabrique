@@ -12,6 +12,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/api"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
+	"github.com/nilpntr/content-fabrique/internal/styleprofile"
 	"github.com/nilpntr/content-fabrique/internal/textclean"
 )
 
@@ -167,6 +168,8 @@ type spec struct {
 	Title       string
 	Size        int64
 	SHA256      string // lower case, or empty
+	// Purpose is store.PurposeFootage or store.PurposeStyleReference.
+	Purpose string
 }
 
 // validateCreate checks a create request and returns what the server will store, or the error to answer with.
@@ -185,7 +188,23 @@ func validateCreate(req api.CreateAssetRequest) (spec, *Error) {
 	if !ok {
 		return spec{}, invalid("filename is not usable")
 	}
-	s := spec{Kind: kind, ContentType: mt, Filename: name, Title: titleOf(name), Size: req.SizeBytes}
+	s := spec{Kind: kind, ContentType: mt, Filename: name, Title: titleOf(name), Size: req.SizeBytes, Purpose: store.PurposeFootage}
+	if req.Purpose != nil {
+		switch *req.Purpose {
+		case api.AssetPurposeFootage:
+		case api.AssetPurposeStyleReference:
+			// A style reference is one of the creator's finished videos (P6-05b): a video of at most 1 GiB.
+			if kind != store.AssetKindVideo {
+				return spec{}, &Error{Status: 415, Code: api.ErrorCodeUnsupportedContentType, Message: "a style reference must be a video (video/mp4, video/quicktime or video/webm)"}
+			}
+			if req.SizeBytes > styleprofile.MaxReferenceBytes {
+				return spec{}, &Error{Status: 413, Code: api.ErrorCodeFileTooLarge, Message: "a style reference can be at most 1 GB"}
+			}
+			s.Purpose = store.PurposeStyleReference
+		default:
+			return spec{}, invalid("purpose must be footage or style_reference")
+		}
+	}
 	if req.Sha256 != nil && *req.Sha256 != "" {
 		if !sha256Hex.MatchString(*req.Sha256) {
 			return spec{}, invalid("sha256 must be 64 hexadecimal characters")

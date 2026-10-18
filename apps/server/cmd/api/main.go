@@ -13,6 +13,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/assets"
 	"github.com/nilpntr/content-fabrique/internal/auth"
 	"github.com/nilpntr/content-fabrique/internal/config"
+	"github.com/nilpntr/content-fabrique/internal/creatorstyle"
 	"github.com/nilpntr/content-fabrique/internal/credits"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
@@ -46,6 +47,7 @@ func main() {
 			var (
 				assetsSvc  *assets.Service
 				rendersSvc *renderjobs.Service
+				posters    creatorstyle.Presigner // nil without object storage: the style has no poster URLs then
 			)
 			// The price list and the plans (config/plans): a final export needs a charged edit and is recorded on the credit ledger.
 			priceList, err := credits.LoadDefault()
@@ -58,6 +60,7 @@ func main() {
 					return err
 				}
 				health.AddCheck(httpapi.Check{Name: "object-storage", Fn: objects.Ready})
+				posters = objects
 				if assetsSvc, err = assets.NewService(st, objects, jobs.NewEnqueuer(river, logger), logger); err != nil {
 					return err
 				}
@@ -81,7 +84,13 @@ func main() {
 			}
 			// Mount registers every route of the OpenAPI contract (GET /v1/library/summary included); the V1 router it
 			// returns is for routes that are not in the contract yet.
-			_, err = auth.Mount(mux, auth.Deps{Config: cfg, Store: st, Logger: logger, Assets: assetsSvc, Runs: runs, Renders: rendersSvc, PriceList: priceList})
+			// The creator's style (P6-05b): the API reads and changes it and enqueues the jobs that learn it (the worker runs them).
+			styleSvc, err := creatorstyle.NewService(st, posters, jobs.NewEnqueuer(river, logger), logger)
+			if err != nil {
+				return err
+			}
+			styleSvc.Plans = priceList
+			_, err = auth.Mount(mux, auth.Deps{Config: cfg, Store: st, Logger: logger, Assets: assetsSvc, Runs: runs, Renders: rendersSvc, Style: styleSvc, PriceList: priceList})
 			return err
 		},
 		// The CORS allowlist is the web app's origin, APP_BASE_URL, and nothing else.

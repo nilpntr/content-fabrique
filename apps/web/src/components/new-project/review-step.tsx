@@ -18,6 +18,7 @@ export function ReviewStep({
   disabled = false,
   costNote,
   title = "",
+  vibe,
   onMediaError,
 }: {
   assets: readonly Asset[];
@@ -31,6 +32,8 @@ export function ReviewStep({
   costNote?: string;
   /** The project's name, when the creator gave one. */
   title?: string;
+  /** The vibe of the video in words ("Lively"). */
+  vibe?: string;
   /** A poster would not load: the caller can fetch the list again for fresh URLs. */
   onMediaError?: () => void;
 }) {
@@ -77,6 +80,12 @@ export function ReviewStep({
       </Row>
 
       <Row disabled={disabled} term="Instructions" onEdit={() => onEdit("brief")} editLabel="Edit instructions">
+        {vibe ? (
+          <p className="mb-1">
+            <span className="text-muted-foreground">Vibe: </span>
+            <span className="font-medium">{vibe}</span>
+          </p>
+        ) : null}
         {title.trim() === "" ? null : <p className="mb-1 font-medium">{title.trim()}</p>}
         {text === "" ? (
           <p className="text-muted-foreground">None. I'll decide from your clips.</p>

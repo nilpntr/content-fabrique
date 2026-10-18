@@ -1,5 +1,5 @@
 /** Canned API objects for tests, in the types of the contract. Each factory takes the fields a test cares about. */
-import type { Annotation, ApiAsset, Project, ProjectSummary, Render, Run, RunArtifact, RunArtifacts, RunEvent, TimelineVersion, TimelineVersionSummary } from "@/lib/api/client";
+import type { Annotation, ApiAsset, CreatorStyle, Project, ProjectSummary, Render, Run, RunArtifact, RunArtifacts, RunEvent, StyleReference, TimelineVersion, TimelineVersionSummary } from "@/lib/api/client";
 
 const ID = "01jh6m00000000000000000000";
 const typeId = (prefix: string, n: number) => `${prefix}_${ID.slice(0, 26 - String(n).length)}${n}`;
@@ -451,5 +451,124 @@ export function v2Spec(): unknown {
       },
     ],
     markers: beats,
+  };
+}
+
+// ── The creator's style ─────────────────────────────────────────────────────
+
+/** A style reference video. */
+export function styleReference(n: number, over: Partial<StyleReference> = {}): StyleReference {
+  return { asset_id: assetId(100 + n), name: `video-${n}.mp4`, status: "ready", failure_reason: null, progress: 100, duration_ms: 20_000, poster_url: null, created_at: NOW, ...over };
+}
+
+/** A style with nothing learnt: the defaults. */
+export function emptyStyle(over: Partial<CreatorStyle> = {}): CreatorStyle {
+  return {
+    status: "empty",
+    progress: { done: 0, total: 0 },
+    summary: null,
+    measures: null,
+    settings: {},
+    effective: {
+      vibe: "lively",
+      transitions: "off",
+      text_animation: "on",
+      camera_motion: "subtle",
+      title_colour: null,
+      title_position: "auto",
+      title_case: "as_typed",
+      music: "always",
+      pace: "like_mine",
+      chapter_titles: "on",
+      title_template: null,
+      ending_hold: "long",
+      cut_timing: "full_reps",
+      angle_switches: "on",
+      sources: {
+        vibe: "default",
+        transitions: "default",
+        text_animation: "vibe",
+        camera_motion: "vibe",
+        title_colour: "default",
+        title_position: "default",
+        title_case: "default",
+        music: "default",
+        pace: "default",
+        chapter_titles: "default",
+        title_template: "default",
+        ending_hold: "default",
+        cut_timing: "default",
+        angle_switches: "default",
+      },
+    },
+    references: [],
+    limits: { max_references: 10, max_size_bytes: 1_073_741_824, max_duration_ms: 180_000 },
+    learned_at: null,
+    ...over,
+  };
+}
+
+/** A learnt style: five videos, the AI's sentence, the measures, and one setting of the creator's own (transitions: lots). */
+export function learntStyle(over: Partial<CreatorStyle> = {}): CreatorStyle {
+  const base = emptyStyle();
+  return {
+    ...base,
+    status: "ready",
+    progress: { done: 5, total: 5 },
+    summary: {
+      text: "Handheld gym shots that follow you, music on every video with a lift around 3 s, cream all-caps titles above your head, mostly 2-second shots, cuts mid-rep, numbered chapter titles and a long hold at the end.",
+      suggested: { vibe: "lively", transitions: "off", text_animation: "on", camera_motion: "subtle", title_colour: "#FFF4D6", title_position: "top", title_case: "upper", music: "always", pace: "like_mine", chapter_titles: "on", ending_hold: "long", cut_timing: "mid_rep", angle_switches: "on" },
+      references: 5,
+      prompt_version: "stylesummary.v3",
+      written_at: NOW,
+    },
+    measures: {
+      references: 5,
+      confidence: 0.9,
+      firm: true,
+      lines: [
+        { id: "references", label: "Learnt from", value: "5 videos" },
+        { id: "shots", label: "Shots", value: "Long takes that let the set run: 0 to 5 cuts a video, the longest shot about 20 s" },
+        { id: "first_cut", label: "Opening shot", value: "The first cut comes about 2.3 s in" },
+        { id: "effects", label: "Effects", value: "None found: no zoom punches, flashes or speed changes" },
+        { id: "title", label: "Title", value: "On 60 % of the videos, all capitals, colour #FFF4D6, at the top, one line, no other text" },
+        { id: "ending", label: "Ending", value: "A long hold on the last shot, about 4.0 s" },
+        { id: "transitions", label: "Transitions", value: "Plain cuts only" },
+        { id: "camera", label: "Camera", value: "Handheld, it follows you" },
+        { id: "cuts", label: "Cuts and reps", value: "Cuts mid-rep; switches angles within an exercise" },
+        { id: "title_form", label: "Title form", value: "<topic> 7" },
+        { id: "chapters", label: "Chapters", value: "Numbered chapter titles in videos with several exercises" },
+        { id: "music", label: "Music", value: "Music on every video, quiet for about 2.9 s, then it lifts, builds to the end" },
+        { id: "length", label: "Length", value: "15 s to 44 s (usually about 26 s)" },
+      ],
+    },
+    settings: { transitions: "lots" },
+    effective: {
+      ...base.effective,
+      transitions: "lots",
+      title_colour: "#FFF4D6",
+      title_position: "top",
+      title_case: "upper",
+      title_template: "<TOPIC> 7",
+      cut_timing: "mid_rep",
+      sources: {
+        ...base.effective.sources,
+        vibe: "suggested",
+        transitions: "you",
+        title_colour: "suggested",
+        title_position: "suggested",
+        title_case: "suggested",
+        music: "suggested",
+        pace: "suggested",
+        chapter_titles: "measured",
+        title_template: "measured",
+        ending_hold: "measured",
+        cut_timing: "measured",
+        angle_switches: "measured",
+      },
+    },
+    references: [1, 2, 3, 4, 5].map((n) => styleReference(n)),
+    learned_at: NOW,
+    ...over,
   };
 }

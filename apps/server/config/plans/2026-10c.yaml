@@ -59,6 +59,10 @@ max_cogs_share: 0.40
 # model money. Each plan caps how many of those a workspace may have per UTC day (`uncharged_runs_per_day`); the next start is refused
 # with 429 too_many_uncharged_runs. Runs that cost nothing, and failures that are ours, do not count.
 
+# The creator style (P6-05b): "learn again" measures every reference video again (a sandbox pass and a metered title read of at most
+# $0.01 each, up to 10 videos) and writes one summary (at most $0.03), none of it charged in credits. Each plan caps the passes per
+# workspace per UTC day (`style_relearns_per_day`); the next is refused with 429 too_many_relearns.
+
 # Top-ups last this many months from the day they are granted.
 topup_expiry_months: 12
 
@@ -77,6 +81,7 @@ plans:
     concurrent_runs: 1
     uncharged_runs_per_day: 5 # editor runs per UTC day that ended with nothing to charge (released after they spent money); more are refused
     transcribed_minutes_per_day: 30
+    style_relearns_per_day: 2 # "learn again" passes of the creator style per UTC day (each measures every reference again and writes one summary)
     cogs_budget_micros: # 2.5 USD / 20 credits = 125,000 per credit
       edit.first: 750000
       edit.revision: 250000
@@ -95,6 +100,7 @@ plans:
     concurrent_runs: 3
     uncharged_runs_per_day: 5 # editor runs per UTC day that ended with nothing to charge (released after they spent money); more are refused
     transcribed_minutes_per_day: 240
+    style_relearns_per_day: 5 # "learn again" passes of the creator style per UTC day (each measures every reference again and writes one summary)
     # The run's cap on the creator's own key (their money, not ours): the $2 default of spend control section 4, enough for an extra careful edit.
     cogs_budget_micros:
       edit.first: 2000000
@@ -124,6 +130,7 @@ plans:
     concurrent_runs: 2
     uncharged_runs_per_day: 5 # editor runs per UTC day that ended with nothing to charge (released after they spent money); more are refused
     transcribed_minutes_per_day: 120
+    style_relearns_per_day: 3 # "learn again" passes of the creator style per UTC day (each measures every reference again and writes one summary)
     cogs_budget_micros: # 0.40 x $0.4002 net per credit = $0.1601 per credit: 16 credits allow $2.56, 7 allow $1.12
       edit.first: 960000
       edit.revision: 320000
@@ -142,6 +149,7 @@ plans:
     concurrent_runs: 4
     uncharged_runs_per_day: 5 # editor runs per UTC day that ended with nothing to charge (released after they spent money); more are refused
     transcribed_minutes_per_day: 360
+    style_relearns_per_day: 5 # "learn again" passes of the creator style per UTC day (each measures every reference again and writes one summary)
     cogs_budget_micros: # 0.40 x $0.3296 net per credit = $0.1318 per credit: 16 credits allow $2.11, 7 allow $0.92
       edit.first: 790000
       edit.revision: 260000

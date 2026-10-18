@@ -40,6 +40,8 @@
 | D-33 | Exports are sound-ready: no music and no trend sound, the clips' own sound as a low bed, effects on top, speech as the programme; amends D-03 | Proposed (director, 2026-10-17; the founder confirms); superseded by D-34 for an edit with a song |
 | D-34 | Music from the creator: a song the creator uploads (or the sound of one of their videos) is analysed once and is the export's only sound, -14 LUFS; the creator answers for its rights; supersedes D-33 for an edit with a song | Proposed (director, 2026-10-18; the founder confirms) |
 | D-35 | Motion graphics are versioned HTML templates (Web Animations API) the editor picks by name and params, rendered frame by frame by chrome-headless-shell on a virtual clock inside the media sandbox and composited by ffmpeg; ASS text stays as the fallback; amends D-26's render column for graphic templates | Proposed (engineering, 2026-10-18; security review by the director, licence question for P0-12) |
+| D-36 | The creator's style is three layers (measured, the AI's suggestion, the creator's settings), the creator always wins; reference videos are assets with purpose style_reference | Proposed (director, 2026-10-18; the founder confirms) |
+| D-37 | Plain cuts on the beat by default: no vibe asks for transitions; they come from the creator's setting or their own videos | Proposed (director, from a creator's verdict, 2026-10-18; the founder confirms) |
 
 ---
 
@@ -830,7 +832,69 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 
 **Revisit** when the security review asks for Chrome's own sandbox (user namespaces under gVisor), when the licence answer prefers a Debian-built Chromium, or when overlay time matters (parallel tabs would cut it about in four).
 
-## D-36 Local traces and evals in Arize Phoenix
+## D-36 The creator's style is three layers, and the creator always wins
+
+**Context.** The style profile (P6-05) existed only through `cfctl style analyze`, with no API and no UI, so no creator could set,
+see or change it. It also acted as a hidden rule: it measured "no effects" in the founder's reference videos and the editor obeyed,
+so the edits were static. The founder asked for three things: let AI set the style from the creator's example videos, let the creator
+tweak it, and keep uploading videos as references.
+
+**Decision.** The effective style the editor follows is made of three layers, the creator always winning: (1) what was measured from
+the creator's reference videos; (2) the defaults an AI summary proposes from those measures (one cheap call per (re)analysis,
+`stylesummary`, at most $0.03, one call a learning pass: the profile job waits until every reference of a pass is measured); (3) the creator's own settings (vibe, transitions, text animation, camera motion, title colour, place
+and case, music, pace), stored apart from the measures (`creator_style_settings`), so re-learning never overwrites them. The vibe of one
+edit (P6-06) sits on top of the vibe setting. A measured "no effects" is a fact about the creator's posted videos, never a rule: it
+does not turn transitions, text animation or camera motion off by itself; at a lively or hype vibe an AI suggestion of "off" does not
+hold either. Reference videos are uploaded through the normal upload path as assets with `purpose = style_reference`: never footage,
+never in the library, never in a project, with their own limits (10 a workspace, 1 GiB, 3 minutes).
+
+**Alternatives.** A per-dimension override inside the profile (the original design note): re-learning would have had to merge into it,
+and a creator's choice and a measure would have been one field. An `assets.kind` of `style_reference`: the kind is the media type,
+used everywhere (the ingest, the editor, the renderer), and a reference is a video; the purpose is a separate column. A summary on
+every request, or several per analysis: the summary is for the creator to read and changes only when the references do.
+
+**Consequences.** The checks take the settings: `effect_density` fails what the settings turn off and allows more at "lots",
+`style_match` has `transitions`, `camera_motion` and `text_animation` (hard when the creator chose them, advice otherwise) in place of
+the measured `effects`. Existing workspaces with a profile and no settings get the lively defaults: their edits now move. Prompt
+`editor.v2.9`; migration `00024_style_references`.
+
+**Revisit** when the founder has watched edits made with the settings, or when a creator asks for a setting that is not here.
+
+## Template for new decisions
+
+```
+## D-xx Title
+**Context.** Why we need to decide.
+**Decision.** What we do.
+**Alternatives.** What else we considered and why not.
+**Consequences.** What this makes easier or harder.
+**Revisit** when …
+```
+
+## D-37 Plain cuts on the beat by default: no vibe asks for transitions
+
+**Context.** P6-06 made the lively and hype vibes put effect transitions (punch, zoom_through, whip, flash) on the strong beats
+and the drop, and a check failed a lively edit with only hard cuts. On a live edit the creator said: "the transitions really look AI,
+nobody uses those transition effects, only someone who throws it into an automatic edit". The rest (the music, the cuts on the beat,
+the movement) was praised.
+
+**Decision.** Transitions are off at every vibe by default. They are used only when the creator's reference videos measurably use them
+(the P6-05c measure: then only the kinds they use, at about their rate, and the AI's suggestion follows that measure) or when the
+creator sets Transitions to subtle or lots in "Your style". The energy of lively and hype comes from the cuts on the beat, the pace,
+the living camera with its punch-ins and the text that enters and leaves. check_edit's `no_transitions_at_lively` is replaced by
+`transitions_match_style` (a transition fails where the effective style has them off; none fails where it asks for lots), and the
+prompt (`editor.v2.9`), the playbooks and the summary prompt (`stylesummary.v3`) say plain cuts on the beat are the default, and why.
+
+**Alternatives.** Keep transitions at hype only: the verdict was about the kind of effect, not the amount. A softer set of transitions
+(crossfades): a crossfade says time has passed, it is not energy, and it is still a choice the creator's own videos should make.
+
+**Consequences.** Existing workspaces whose settings came from the vibe now get plain cuts; a creator who set transitions keeps them.
+Text entrances and exits are unchanged. The onboarding's vibe cards no longer promise transitions.
+
+**Revisit** when creators ask for transitions in numbers, or when the measured transitions of their references are reliable enough
+to name the exact effect.
+
+## D-38 Local traces and evals in Arize Phoenix
 
 > Status: **Proposed** by engineering (2026-10-18), on the founder's request for "an MLflow-like tool in the local Docker stack to follow each step". Reversible: the spans are plain OpenTelemetry with the OpenInference conventions, so any other OTLP viewer reads them; Phoenix is a compose profile that nothing else depends on.
 
@@ -849,14 +913,3 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 - Phoenix's licence forbids offering it as a service: it stays a development tool.
 
 **Revisit** when traces are wanted in staging with content (that needs a store we control and the creators' consent), or when a hosted eval platform is chosen.
-
-## Template for new decisions
-
-```
-## D-xx Title
-**Context.** Why we need to decide.
-**Decision.** What we do.
-**Alternatives.** What else we considered and why not.
-**Consequences.** What this makes easier or harder.
-**Revisit** when …
-```

@@ -88,11 +88,11 @@ test("Settings shows what GET /v1/me returned, fetched with the session token", 
   expect(screen.getByText("usr_01test").closest("details")?.open).toBe(false);
 
   const calls = vi.mocked(fetch).mock.calls;
-  expect(calls.length).toBeGreaterThan(0);
+  expect(calls.map(([request]) => (request as Request).url)).toContain("http://api.test/v1/me");
   for (const [request] of calls) {
-    // The typed client calls fetch with one Request.
+    // The typed client calls fetch with one Request: the account, and the style card (GET /v1/style).
     expect(request).toBeInstanceOf(Request);
-    expect((request as Request).url).toBe("http://api.test/v1/me");
+    expect(["http://api.test/v1/me", "http://api.test/v1/style"]).toContain((request as Request).url);
     expect((request as Request).headers.get("Authorization")).toBe("Bearer test-token");
   }
 });
@@ -143,13 +143,23 @@ test("signing out in the browser sends the next navigation to sign-in", async ()
 });
 
 test("Settings keeps retrying while the API answers 503, and then shows the data", async () => {
-  const ok = new Response(JSON.stringify({ user: { id: "usr_1", email: "ada@example.com" }, workspace: { id: "wks_1", name: "Fit", role: "owner" } }), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
+  const ok = () =>
+    new Response(JSON.stringify({ user: { id: "usr_1", email: "ada@example.com" }, workspace: { id: "wks_1", name: "Fit", role: "owner" } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
   const unavailable = () =>
     new Response(JSON.stringify({ error: { code: "identity_unavailable", message: "try again" } }), { status: 503 });
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(unavailable()).mockResolvedValue(ok));
+  // GET /v1/me answers 503 once, then the data; the style card's GET /v1/style is not part of this test.
+  let meCalls = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (request: Request) => {
+      if (!request.url.endsWith("/v1/me")) return new Response(JSON.stringify({ error: { code: "not_found", message: "no" } }), { status: 404 });
+      meCalls++;
+      return meCalls === 1 ? unavailable() : ok();
+    }),
+  );
   renderAt("/settings");
   expect(await screen.findByText("ada@example.com", { selector: "dd" }, { timeout: 5000 })).toBeTruthy();
   expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThanOrEqual(2);

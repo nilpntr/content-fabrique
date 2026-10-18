@@ -10,7 +10,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { useHotkey, useModKey } from "@/hooks/use-hotkey";
 import { MAIN_SCROLL_ID } from "@/lib/scroll";
-import { useActiveNavItem } from "@/nav";
+import { pageTitle, useActiveNavItem } from "@/nav";
 import { cn } from "@/lib/utils";
 
 function useScrolled(threshold = 4) {
@@ -30,7 +30,7 @@ function useScrolled(threshold = 4) {
 export function AppShell({ defaultSidebarOpen = true }: { defaultSidebarOpen?: boolean }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const activeItem = useActiveNavItem();
-  const title = activeItem?.title ?? "Not found";
+  const title = activeItem?.title ?? pageTitle(pathname) ?? "Not found";
   const modKey = useModKey();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const { ref, scrolled } = useScrolled();

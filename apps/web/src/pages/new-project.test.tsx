@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { clerkMock } from "@/test-clerk";
 import { apiError, installApi, json, renderApp } from "@/test-api";
-import { apiAsset, assetId, project, projectId, run, runId } from "@/test-fixtures";
+import { apiAsset, assetId, learntStyle, project, projectId, run, runId } from "@/test-fixtures";
 import { NewProjectPage, toPickerAsset } from "./new-project";
 
 vi.mock("@tanstack/react-router", async (original) => ({
@@ -214,4 +214,29 @@ test("while the session is not ready the page is loading, not an empty library",
 test("toPickerAsset names a clip by its title, or its file when it has none, and carries the previews", () => {
   expect(toPickerAsset(apiAsset(1, { title: "" })).title).toBe("clip-1.mp4");
   expect(toPickerAsset(apiAsset(1))).toMatchObject({ id: assetId(1), posterUrl: "https://cdn.test/poster-1.jpg", hoverPreviewUrl: "https://cdn.test/hover-1.mp4", durationMs: 11_000 });
+});
+
+test("the vibe starts on the creator's style, and only a vibe picked for this video is sent", async () => {
+  const style = learntStyle();
+  const api = installApi({
+    "GET /v1/assets": LIBRARY,
+    "GET /v1/style": { ...style, effective: { ...style.effective, vibe: "calm", sources: { ...style.effective.sources, vibe: "you" } } },
+    "POST /v1/projects": json(201, project(1)),
+    "POST /v1/projects/{id}/edit": json(202, run({ id: runId(3) })),
+  });
+  const onOpen = vi.fn();
+  renderApp(<NewProjectPage onOpenProject={onOpen} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^Next/ }));
+  fireEvent.click(await screen.findByRole("checkbox", { name: /Back pose/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^Next/ }));
+  // The picker shows the style's vibe and says where it came from.
+  await waitFor(() => expect((screen.getByRole("radio", { name: /Calm/ }) as HTMLInputElement).checked).toBe(true));
+  expect(screen.getByText("From your style.")).toBeTruthy();
+  fireEvent.click(screen.getByRole("radio", { name: /Hype/ }));
+  expect(screen.getByText("Just for this video.")).toBeTruthy();
+  fireEvent.click(screen.getAllByRole("button", { name: /^Review/ }).at(-1) as HTMLElement);
+  expect(screen.getByText("Hype")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Make my video" }));
+  await waitFor(() => expect(onOpen).toHaveBeenCalled());
+  expect(api.callsTo("POST /v1/projects/{id}/edit")[0]?.body).toEqual({ vibe: "hype" });
 });

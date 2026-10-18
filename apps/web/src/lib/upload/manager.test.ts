@@ -53,6 +53,19 @@ const settled = (s: UploadSnapshot) => s.summary.active + s.summary.queued === 0
 const doneCount = (n: number) => (s: UploadSnapshot) => s.summary.done === n;
 
 describe("the queue", () => {
+  test("style videos are uploaded as style references, and the queue says which ones they are", async () => {
+    const { manager, server } = setup();
+    await manager.init();
+    await manager.add([fakeFile("my-video.mp4", 2 * MiB)], { purpose: "style_reference" });
+    await manager.add([fakeFile("clip.mp4", 2 * MiB)]);
+    await until(manager, doneCount(2));
+    const byName = new Map(server.createRequests.map((request) => [request.filename, request]));
+    expect(byName.get("my-video.mp4")?.purpose).toBe("style_reference");
+    expect(byName.get("clip.mp4")?.purpose).toBeUndefined();
+    expect(manager.getSnapshot().items.find((item) => item.name === "my-video.mp4")?.purpose).toBe("style_reference");
+    expect(manager.getSnapshot().items.find((item) => item.name === "clip.mp4")?.purpose).toBeUndefined();
+  });
+
   test("uploads every file, never more than maxFiles files and maxPartsPerFile parts at a time", async () => {
     const { manager, server, transport, store } = setup();
     await manager.init();

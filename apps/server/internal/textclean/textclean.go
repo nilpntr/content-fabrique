@@ -1,7 +1,7 @@
 // Package textclean cleans a short piece of text before it is stored and shown as a label: an asset's title, a model's
 // description or tag. There are two policies, and the difference is who wrote the text.
 //
-// User text (User) is what a person typed or a file name they chose: "Gino's $100 rows [take 2] | ^heavy~". It keeps every
+// User text (User) is what a person typed or a file name they chose: "Ada's $100 rows [take 2] | ^heavy~". It keeps every
 // ordinary typed character, markup characters included (the client renders a title as text, never as HTML). It removes only
 // what cannot be typed on purpose or is invisible: control and format characters (the right-to-left override that makes
 // "exe.mp4" read backwards, among them), private-use and surrogate code points, invalid UTF-8; and it turns every run of

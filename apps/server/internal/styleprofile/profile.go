@@ -20,8 +20,13 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/camshift"
 )
 
-// ProfileVersion is the version of the Profile shape. A reader checks it before it reads the rest.
-const ProfileVersion = 1
+// ProfileVersion is the version of the Profile shape. A reader checks it before it reads the rest. Version 2 (P6-05c) adds the title
+// templates, the chapter titles, the shot-length tail and the ending hold, the transitions and the text entrance, the camera level and
+// where the cuts sit against the movement; a version 1 profile is still read (those parts are then unknown).
+const ProfileVersion = 2
+
+// MinProfileVersion is the oldest Profile shape this code reads.
+const MinProfileVersion = 1
 
 // Range is a median with the smallest and the largest value seen, and the quartiles. The thresholds are made from the quartiles, not
 // from the extremes (thresholds.go): the minimum and the maximum are for the reader.
@@ -31,6 +36,8 @@ type Range struct {
 	Max    float64 `json:"max"`
 	P25    float64 `json:"p25"`
 	P75    float64 `json:"p75"`
+	// P90 is the 90th percentile (0 in a version 1 profile).
+	P90 float64 `json:"p90,omitempty"`
 }
 
 // Lower is the 25th percentile and Upper the 75th: what the thresholds are made from.
@@ -65,7 +72,7 @@ func RangeOf(values []float64) Range {
 	}
 	s := slices.Clone(values)
 	slices.Sort(s)
-	return Range{Median: round2(median(s)), Min: round2(s[0]), Max: round2(s[len(s)-1]), P25: round2(percentile(s, 0.25)), P75: round2(percentile(s, 0.75))}
+	return Range{Median: round2(median(s)), Min: round2(s[0]), Max: round2(s[len(s)-1]), P25: round2(percentile(s, 0.25)), P75: round2(percentile(s, 0.75)), P90: round2(percentile(s, 0.9))}
 }
 
 func median(sorted []float64) float64 {
@@ -100,6 +107,10 @@ type Measures struct {
 	Audio  AudioStats `json:"audio"`
 	// Text is what the vision call read from the hook, nil when it was not made or its answer was rejected.
 	Text *TextStyle `json:"text,omitempty"`
+	// Transitions is how the picture changes at the cuts and Movement where the cuts sit against the reps (P6-05c); nil in measures
+	// made before they existed, or when the movement pass could not run.
+	Transitions *TransitionStats `json:"transitions,omitempty"`
+	Movement    *MovementStats   `json:"movement,omitempty"`
 }
 
 // FirstCutS is the time of the first cut, -1 for a video with none.
@@ -155,6 +166,12 @@ type TextStyle struct {
 	ExerciseLabels bool `json:"exercise_labels,omitempty"`
 	// Captions says there are spoken-word captions.
 	Captions bool `json:"captions,omitempty"`
+	// Entrance is how the title comes on (none, pop, slide, fade, typewriter; "" when not read or unknown), and Chapters the numbered
+	// chapter titles read after the cuts (P6-05c, stylevision.v3): the creator's words, untrusted.
+	Entrance string   `json:"entrance,omitempty"`
+	Chapters []string `json:"chapters,omitempty"`
+	// ChaptersRead says the later frames were read (a read of stylevision.v2 did not look for chapters).
+	ChaptersRead bool `json:"chapters_read,omitempty"`
 }
 
 // AudioStats are the sound measures of a reference.
@@ -240,6 +257,9 @@ type Profile struct {
 	Audio   AudioProfile   `json:"audio"`
 	// Camera is how the creator's camera moves, apart from any effect (P6-06): a hand-held creator's "no effects" still moves.
 	Camera CameraProfile `json:"camera"`
+	// Transitions and Movement (P6-05c): what happens at the cuts, and where they sit against the movement.
+	Transitions TransitionsProfile `json:"transitions"`
+	Movement    MovementProfile    `json:"movement"`
 
 	// Evidence is one line per reference with its main numbers, for the creator to read and correct.
 	Evidence []string `json:"evidence,omitempty"`
@@ -278,13 +298,79 @@ type PacingProfile struct {
 	EndingS  Range   `json:"ending_s"`
 }
 
+// P90 is the 90th percentile shot length: ShotP90S, or the shot range's own (both are the same measure; 0 when neither was measured).
+func (pc PacingProfile) P90() float64 {
+	if pc.ShotP90S > 0 {
+		return pc.ShotP90S
+	}
+	return pc.ShotS.P90
+}
+
+// LongEndingHold says the creator holds the last shot clearly longer than their other shots: at least 2.5 s and 1.5 times the median
+// shot.
+func (pc PacingProfile) LongEndingHold() bool {
+	return pc.EndingS.Median >= 2.5 && (pc.ShotS.Median == 0 || pc.EndingS.Median >= 1.5*pc.ShotS.Median)
+}
+
 // CameraProfile is the camera motion of the references (P6-06): Verdict is static or handheld (the majority), ShiftPctPerS the drift of
 // the picture in percent of the frame a second, HandheldShare the share of the references that are hand-held.
 type CameraProfile struct {
 	Verdict       string  `json:"verdict,omitempty"`
 	ShiftPctPerS  Range   `json:"shift_pct_per_s"`
 	HandheldShare float64 `json:"handheld_share"`
+	// Level is static, subtle or handheld (P6-05c): a picture that drifts a little but is not hand-held is subtle.
+	Level string `json:"level,omitempty"`
 }
+
+// The camera levels.
+const (
+	CameraStatic   = "static"
+	CameraSubtle   = "subtle"
+	CameraHandheld = "handheld"
+	// CameraSubtlePctPerS is the median drift from which a camera is not static (camshift.HandheldPctPerS is the one for hand-held).
+	CameraSubtlePctPerS = 0.3
+)
+
+// TransitionsProfile is what happens at the creator's cuts (P6-05c). Used is none (the videos have no cuts), cut_only (every cut is a
+// plain cut) or some; Kinds are the kinds seen (blend, flash, zoom), most used first; Share the share of the cuts with a transition.
+type TransitionsProfile struct {
+	Measured int      `json:"measured"`
+	Cuts     int      `json:"cuts"`
+	Used     string   `json:"used,omitempty"`
+	Kinds    []string `json:"kinds,omitempty"`
+	Share    float64  `json:"share"`
+}
+
+// Level is the transitions setting the creator's videos stand for: "" when they do not measurably use transitions (plain cuts, no cuts,
+// or not measured), subtle when some of their cuts have one, lots when half of them or more do.
+func (tp TransitionsProfile) Level() string {
+	switch {
+	case tp.Used != TransitionsSome:
+		return ""
+	case tp.Share >= 0.5:
+		return LevelLots
+	}
+	return LevelSubtle
+}
+
+// The uses of transitions.
+const (
+	TransitionsNone    = "none"
+	TransitionsCutOnly = "cut_only"
+	TransitionsSome    = "some"
+)
+
+// MovementProfile is where the creator's cuts sit against the movement (P6-05c), over the cuts that could be measured (CutsMeasured;
+// fewer than MinCutsForBeat means unknown).
+type MovementProfile struct {
+	CutsMeasured    int     `json:"cuts_measured"`
+	OnBoundaryShare float64 `json:"on_boundary_share"`
+	MidRepShare     float64 `json:"mid_rep_share"`
+	InsideSetShare  float64 `json:"inside_set_share"`
+}
+
+// Known says enough cuts were measured to say anything.
+func (m MovementProfile) Known() bool { return m.CutsMeasured >= MinCutsForBeat }
 
 // HookProfile is how the videos open.
 type HookProfile struct {
@@ -349,6 +435,22 @@ type TextProfile struct {
 	// Titles are every title read from the references (untrusted). They are never shown to the editor: check_edit compares an edit's
 	// titles with them, so a reference's title is never reused word for word (title_copied).
 	Titles []string `json:"titles,omitempty"`
+	// Templates are the forms the titles take with the changing words as slots (P6-05c), most common first. Entrance is the most common
+	// way the title comes on (of EntranceRead reads). ChapterRead is how many multi-shot references were read for chapter titles,
+	// ChapterShare the share of those that have numbered chapter titles, ChapterTemplates their forms and ChapterExamples a couple of
+	// them (the creator's words, untrusted).
+	Templates        []TitleTemplate `json:"templates,omitempty"`
+	Entrance         string          `json:"entrance,omitempty"`
+	EntranceRead     int             `json:"entrance_read,omitempty"`
+	ChapterRead      int             `json:"chapter_read,omitempty"`
+	ChapterShare     float64         `json:"chapter_share,omitempty"`
+	ChapterTemplates []TitleTemplate `json:"chapter_templates,omitempty"`
+	ChapterExamples  []string        `json:"chapter_examples,omitempty"`
+}
+
+// NumberedChapters says the creator's multi-exercise videos have numbered chapter titles (half of the ones read or more).
+func (t *TextProfile) NumberedChapters() bool {
+	return t != nil && t.ChapterRead > 0 && t.ChapterShare >= 0.5
 }
 
 // Audio arcs.
@@ -462,6 +564,14 @@ func Aggregate(refs []Measures) *Profile {
 	}
 	if len(verdicts) > 0 {
 		p.Camera = CameraProfile{Verdict: majority(verdicts), ShiftPctPerS: RangeOf(shift), HandheldShare: round2(handheld / float64(len(verdicts)))}
+		switch {
+		case p.Camera.HandheldShare >= 0.5:
+			p.Camera.Level = CameraHandheld
+		case p.Camera.ShiftPctPerS.Median >= CameraSubtlePctPerS:
+			p.Camera.Level = CameraSubtle
+		default:
+			p.Camera.Level = CameraStatic
+		}
 	}
 	p.Format = FormatProfile{DurationS: RangeOf(dur), FPS: RangeOf(fps).Median}
 	pace := PacingProfile{
@@ -511,6 +621,8 @@ func Aggregate(refs []Measures) *Profile {
 		p.Hook.TitleShare = p.Text.TitleShare
 	}
 	p.Audio = aggregateAudio(refs)
+	p.Transitions = aggregateTransitions(refs)
+	p.Movement = aggregateMovement(refs)
 
 	// Confidence: 0.9 x 0.2 a reference (five give 0.9), 1 for ten or more, 0.2 for one.
 	conf := math.Min(1, 0.2*float64(n)) * 0.9
@@ -590,10 +702,12 @@ func portraitFactor(m Measures) float64 {
 
 func aggregateText(refs []Measures) *TextProfile {
 	var read []*TextStyle
+	var readCuts []int
 	portrait := map[*TextStyle]float64{} // each read's factor to a 9:16 frame's height
 	for _, m := range refs {
 		if m.Text != nil {
 			read = append(read, m.Text)
+			readCuts = append(readCuts, len(m.CutsS))
 			portrait[m.Text] = portraitFactor(m)
 		}
 	}
@@ -615,6 +729,32 @@ func aggregateText(refs []Measures) *TextProfile {
 		}
 	}
 	t.TitleShare = round2(float64(len(titled)) / float64(len(read)))
+	// The entrance and the chapters (P6-05c) are known only from reads that looked for them.
+	var entrances []string
+	var chapterShapes []titleShape
+	withChapters := 0
+	for i, r := range read {
+		if r.Entrance != "" && r.Entrance != "unknown" {
+			entrances = append(entrances, r.Entrance)
+		}
+		if r.ChaptersRead && readCuts[i] >= 2 {
+			t.ChapterRead++
+			if len(r.Chapters) > 0 {
+				withChapters++
+				for _, c := range r.Chapters {
+					chapterShapes = append(chapterShapes, titleShape{text: c})
+					if len(t.ChapterExamples) < 2 {
+						t.ChapterExamples = append(t.ChapterExamples, c)
+					}
+				}
+			}
+		}
+	}
+	t.Entrance, t.EntranceRead = majority(entrances), len(entrances)
+	if t.ChapterRead > 0 {
+		t.ChapterShare = round2(float64(withChapters) / float64(t.ChapterRead))
+		t.ChapterTemplates = templatesOf(chapterShapes)
+	}
 	t.LabelShare, t.CaptionShare = round2(labels/float64(len(read))), round2(captions/float64(len(read)))
 	if len(titled) == 0 {
 		return t
@@ -655,6 +795,13 @@ func aggregateText(refs []Measures) *TextProfile {
 	t.Case, t.Colour, t.Position, t.Alignment, t.Weight = majority(cases), medianColour(colours), majority(positions), majority(aligns), majority(weights)
 	t.Shadow, t.OneLineShare = majority(shadows), round2(oneLine/float64(len(titled)))
 	t.Patterns = patternsOf(titleTexts)
+	var shapes []titleShape
+	for _, r := range titled {
+		if r.Text != "" {
+			shapes = append(shapes, titleShape{text: r.Text, lines: r.Lines})
+		}
+	}
+	t.Templates = templatesOf(shapes)
 	t.Titles = titleTexts
 	switch {
 	case oneMax > 0 && twoMin > oneMax:
@@ -783,7 +930,10 @@ func countDistinct(v []string) int {
 // ---- reading it ------------------------------------------------------------------------------------------------------------
 
 // Describe is the profile in plain language, for the creator to read and for `cfctl style show`.
-func (p *Profile) Describe() string {
+func (p *Profile) Describe() string { return p.describe(true) }
+
+// describe is Describe; without words it leaves the title forms out (they hold the creator's fixed words).
+func (p *Profile) describe(withWords bool) string {
 	if p == nil {
 		return "No style profile yet."
 	}
@@ -833,6 +983,9 @@ func (p *Profile) Describe() string {
 		b.WriteString("Text: not read (the vision step was not run).\n")
 	}
 	b.WriteString("Sound: " + p.Audio.Describe() + "\n")
+	for _, l := range p.structureLines(withWords) {
+		b.WriteString(strings.ToUpper(l[:1]) + l[1:] + ".\n")
+	}
 	return strings.TrimRight(b.String(), "\n")
 }
 
@@ -917,18 +1070,12 @@ func (p *Profile) CompactBlock() string {
 		}
 		b.WriteString("\n")
 	}
-	if p.Pacing.ShotS.Median > 0 {
-		fmt.Fprintf(&b, "shot lengths (every shot of the videos with a cut): %s s", p.Pacing.ShotS)
-		if p.Pacing.ShotP90S > 0 {
-			fmt.Fprintf(&b, ", 90th percentile %.1f s", p.Pacing.ShotP90S)
-		}
-		if p.Pacing.EndingS.Median > 0 {
-			fmt.Fprintf(&b, "; the last shot is held %s s", p.Pacing.EndingS)
-		}
-		b.WriteString("\n")
-	}
+	// The shot lengths, their 90th percentile and the ending are in structureLines.
 	if p.Audio.DropS.Median > 0 {
 		fmt.Fprintf(&b, "drop: the music drops at %s s in %.0f %% of the videos; the hook ends on it\n", p.Audio.DropS, p.Audio.DropShare*100)
+	}
+	for _, l := range p.structureLines(true) {
+		b.WriteString(l + "\n")
 	}
 	fmt.Fprintf(&b, "look: grade %s; footage %s (p90 luma %s)\n", p.Look.Grade, map[bool]string{true: "low-key", false: "normally lit"}[p.Look.LowKey], p.Look.LumaP90)
 	if t := p.Text; t != nil && t.TitleShare > 0 {
@@ -964,4 +1111,59 @@ func labelsWord(t *TextProfile) string {
 		return "none (no exercise labels, one title only)"
 	}
 	return fmt.Sprintf("in %.0f %% of the videos", t.LabelShare*100)
+}
+
+
+func aggregateTransitions(refs []Measures) TransitionsProfile {
+	var tp TransitionsProfile
+	kinds := map[string]int{}
+	with := 0
+	for _, m := range refs {
+		if m.Transitions == nil {
+			continue
+		}
+		t := m.Transitions
+		tp.Measured++
+		tp.Cuts += t.Cuts
+		with += t.Blend + t.Flash + t.Zoom
+		kinds["blend"] += t.Blend
+		kinds["flash"] += t.Flash
+		kinds["zoom"] += t.Zoom
+	}
+	if tp.Measured == 0 {
+		return tp
+	}
+	switch {
+	case tp.Cuts == 0:
+		tp.Used = TransitionsNone
+	case with == 0:
+		tp.Used = TransitionsCutOnly
+	default:
+		tp.Used = TransitionsSome
+		tp.Share = round2(float64(with) / float64(tp.Cuts))
+		for _, k := range []string{"blend", "flash", "zoom"} {
+			if kinds[k] > 0 {
+				tp.Kinds = append(tp.Kinds, k)
+			}
+		}
+		slices.SortStableFunc(tp.Kinds, func(a, b string) int { return kinds[b] - kinds[a] })
+	}
+	return tp
+}
+
+func aggregateMovement(refs []Measures) MovementProfile {
+	var mp MovementProfile
+	var on, mid, inside int
+	for _, m := range refs {
+		if m.Movement == nil {
+			continue
+		}
+		mp.CutsMeasured += m.Movement.CutsMeasured
+		on, mid, inside = on+m.Movement.OnBoundary, mid+m.Movement.MidRep, inside+m.Movement.InsideSet
+	}
+	if mp.CutsMeasured > 0 {
+		c := float64(mp.CutsMeasured)
+		mp.OnBoundaryShare, mp.MidRepShare, mp.InsideSetShare = round2(float64(on)/c), round2(float64(mid)/c), round2(float64(inside)/c)
+	}
+	return mp
 }
