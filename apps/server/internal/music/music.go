@@ -235,7 +235,7 @@ func Analyse(rep audiocheck.Report, sp Spectrum) Analysis {
 		a.TempoBPM, a.Confidence = round1(bpm), conf
 	}
 	// The drop is found whether or not there is a grid: a jump of the energy is a moment to cut on in any sound.
-	a.DropMs, a.DropLU = findDrop(rep.Loudness.Momentary, a.OnsetsMs, float64(a.DurationMs)/1000)
+	a.DropMs, a.DropLU = FindDrop(rep.Loudness.Momentary, a.OnsetsMs, float64(a.DurationMs)/1000)
 	if !a.Music {
 		return a
 	}
@@ -343,10 +343,10 @@ func fluxAt(flux []float64, ms int64) float64 {
 	return m
 }
 
-// findDrop is the biggest jump of the momentary loudness between dropFromS and dropToS: the mean of the second after a time against the
+// FindDrop is the biggest jump of the momentary loudness between dropFromS and dropToS: the mean of the second after a time against the
 // second before it, at least dropMinLU. The jump's time is moved to the strong onset that starts it (within 250 ms; the momentary window
 // is 400 ms long, so the curve rises a little before and after the hit).
-func findDrop(c []audiocheck.LoudnessPoint, onsets []int64, durS float64) (int64, float64) {
+func FindDrop(c []audiocheck.LoudnessPoint, onsets []int64, durS float64) (int64, float64) {
 	if len(c) < 20 {
 		return 0, 0
 	}

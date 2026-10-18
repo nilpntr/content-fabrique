@@ -11,6 +11,7 @@ import (
 
 	"github.com/nilpntr/content-fabrique/internal/audiocheck"
 	"github.com/nilpntr/content-fabrique/internal/media"
+	"github.com/nilpntr/content-fabrique/internal/music"
 )
 
 // The sound of a reference, from internal/audiocheck's measurements (P3-11: ebur128 loudness with its momentary curve, the onsets from
@@ -112,6 +113,9 @@ func AnalyseAudio(rep audiocheck.Report, sp spectrum, cutsS []float64) AudioStat
 		if o.RiseDB >= 6 {
 			strong = append(strong, o.TimeMs)
 		}
+	}
+	if ms, lu := music.FindDrop(curve, strong, rep.DurationS); ms > 0 {
+		a.DropS, a.DropLU = round2(float64(ms)/1000), lu
 	}
 	// Where the cuts sit: the distance to the nearest onset and to the nearest beat of the fitted tempo.
 	var beatGrid func(ms int64) int64

@@ -16,6 +16,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/nilpntr/content-fabrique/internal/camshift"
 )
 
 // ProfileVersion is the version of the Profile shape. A reader checks it before it reads the rest.
@@ -127,6 +129,8 @@ type VideoStats struct {
 	SatMean       float64 `json:"sat_mean"`
 	SatP90        float64 `json:"sat_p90"`
 	VignetteRatio float64 `json:"vignette_ratio"`
+	// Camera is the global motion of the picture (package camshift): how much the camera itself moves, apart from the subject (P6-06).
+	Camera camshift.Motion `json:"camera"`
 }
 
 // TextStyle is what the vision call read of the title of a reference: strict fields, and a text that is the creator's own words.
@@ -162,6 +166,9 @@ type AudioStats struct {
 	// loudness never rises by LiftMinLU has none (IntroS 0, LiftLU 0).
 	IntroS float64 `json:"intro_s"`
 	LiftLU float64 `json:"lift_lu"`
+	// DropS is the drop of the music (package music: the biggest jump of the energy early on, P6-06), 0 when there is none; DropLU its size.
+	DropS  float64 `json:"drop_s,omitempty"`
+	DropLU float64 `json:"drop_lu,omitempty"`
 	// QuarterLUFS is the mean loudness of each quarter of the video, Arc the shape of it: builds, flat or falls, and EndingLU the level
 	// of the last three seconds against the integrated loudness (0: the music holds to the last frame).
 	QuarterLUFS [4]float64 `json:"quarter_lufs"`
@@ -231,6 +238,8 @@ type Profile struct {
 	Look    LookProfile    `json:"look"`
 	Text    *TextProfile   `json:"text,omitempty"`
 	Audio   AudioProfile   `json:"audio"`
+	// Camera is how the creator's camera moves, apart from any effect (P6-06): a hand-held creator's "no effects" still moves.
+	Camera CameraProfile `json:"camera"`
 
 	// Evidence is one line per reference with its main numbers, for the creator to read and correct.
 	Evidence []string `json:"evidence,omitempty"`
@@ -260,6 +269,16 @@ type PacingProfile struct {
 	ZeroCutShare  float64 `json:"zero_cut_share"`
 	LongTakeShare float64 `json:"long_take_share"` // the share of the screen time in shots of 6 s or more
 	HasLongTakes  bool    `json:"has_long_takes"`
+	// ShotS is the distribution of every shot length of the references that have a cut (P6-06): what a shot of this creator lasts.
+	ShotS Range `json:"shot_s"`
+}
+
+// CameraProfile is the camera motion of the references (P6-06): Verdict is static or handheld (the majority), ShiftPctPerS the drift of
+// the picture in percent of the frame a second, HandheldShare the share of the references that are hand-held.
+type CameraProfile struct {
+	Verdict       string  `json:"verdict,omitempty"`
+	ShiftPctPerS  Range   `json:"shift_pct_per_s"`
+	HandheldShare float64 `json:"handheld_share"`
 }
 
 // HookProfile is how the videos open.
@@ -342,6 +361,9 @@ const (
 // AudioProfile is how the creator's videos sound.
 type AudioProfile struct {
 	IntroS    Range   `json:"intro_s"`
+	// DropS is where the music drops in the references that have a drop, DropShare the share that do (P6-06).
+	DropS     Range   `json:"drop_s"`
+	DropShare float64 `json:"drop_share"`
 	LiftLU    Range   `json:"lift_lu"`
 	LiftShare float64 `json:"lift_share"` // the share of the references with a clear lift
 	Arc       string  `json:"arc"`
@@ -413,10 +435,29 @@ func Aggregate(refs []Measures) *Profile {
 		flashes += float64(m.Video.Flashes)
 		luma, lumaP, sat, vig = append(luma, m.Video.LumaMean), append(lumaP, m.Video.LumaP90), append(sat, m.Video.SatMean), append(vig, m.Video.VignetteRatio)
 	}
+	// The camera (P6-06): the drift of the picture, apart from effects; and every shot length of the references with a cut.
+	var shift, allShots []float64
+	var verdicts []string
+	handheld := 0.0
+	for _, m := range refs {
+		if v := m.Video.Camera.Verdict(); v != "" {
+			verdicts = append(verdicts, v)
+			shift = append(shift, m.Video.Camera.ShiftPctPerS)
+			if v == camshift.Handheld {
+				handheld++
+			}
+		}
+		if len(m.CutsS) > 0 {
+			allShots = append(allShots, m.ShotsS...)
+		}
+	}
+	if len(verdicts) > 0 {
+		p.Camera = CameraProfile{Verdict: majority(verdicts), ShiftPctPerS: RangeOf(shift), HandheldShare: round2(handheld / float64(len(verdicts)))}
+	}
 	p.Format = FormatProfile{DurationS: RangeOf(dur), FPS: RangeOf(fps).Median}
 	pace := PacingProfile{
 		CutsPerVideo: RangeOf(cutsPer), CutsPerMinute: RangeOf(cutsMin), ShotMedianS: RangeOf(shotMed), LongestShotS: RangeOf(longest),
-		ShortestShotS: RangeOf(shortest), ZeroCutShare: round2(zeroCuts / float64(n)),
+		ShortestShotS: RangeOf(shortest), ZeroCutShare: round2(zeroCuts / float64(n)), ShotS: RangeOf(allShots),
 	}
 	if allTime > 0 {
 		pace.LongTakeShare = round2(longTime / allTime)
@@ -674,6 +715,13 @@ func aggregateAudio(refs []Measures) AudioProfile {
 	}
 	out.IntroS, out.LiftLU, out.EndingLU = RangeOf(intro), RangeOf(lift), RangeOf(ending)
 	out.LiftShare = round2(liftN / float64(have))
+	var drops []float64
+	for _, m := range refs {
+		if m.Audio.HasAudio && m.Audio.DropS > 0 {
+			drops = append(drops, m.Audio.DropS)
+		}
+	}
+	out.DropS, out.DropShare = RangeOf(drops), round2(float64(len(drops))/float64(have))
 	out.TempoBPM, out.LUFS, out.RangeLU = RangeOf(tempo), RangeOf(lufs), RangeOf(lra)
 	out.TempoLongTakeBPM, out.TempoMontageBPM = RangeOf(longTempos).Median, RangeOf(montTempos).Median
 	out.CutOnsetMs = RangeOf(cutOnset)
@@ -738,6 +786,9 @@ func (p *Profile) Describe() string {
 		fmt.Fprintf(&b, "Hook: the first cut comes at %s s.\n", p.Hook.FirstCutS)
 	}
 	fmt.Fprintf(&b, "Effects: %s (an estimate of %.1f zoom or flash moments a minute). ", p.Effects.Verdict, p.Effects.PerMinute.Median)
+	if c := p.Camera; c.Verdict != "" {
+		fmt.Fprintf(&b, "Camera: %s (drifts %s %% of the frame a second). ", c.Verdict, c.ShiftPctPerS)
+	}
 	fmt.Fprintf(&b, "Look: %s grade, brightness (p90 luma) %s, %s.\n", p.Look.Grade, p.Look.LumaP90, map[bool]string{true: "low-key footage", false: "normally lit footage"}[p.Look.LowKey])
 	if t := p.Text; t != nil {
 		if t.TitleShare == 0 {
@@ -845,7 +896,20 @@ func (p *Profile) CompactBlock() string {
 	if p.Hook.FirstCutS.Median > 0 {
 		fmt.Fprintf(&b, "hook: first cut at %s s\n", p.Hook.FirstCutS)
 	}
-	fmt.Fprintf(&b, "effects: %s (motion presets, transitions and speed ramps: use them only when the verdict is not none); labels: %s\n", p.Effects.Verdict, labelsWord(p.Text))
+	fmt.Fprintf(&b, "effects: %s (applied punch-ins, flashes and speed ramps measured in the picture); labels: %s\n", p.Effects.Verdict, labelsWord(p.Text))
+	if c := p.Camera; c.Verdict != "" {
+		fmt.Fprintf(&b, "camera: %s (the picture drifts %s %% of the frame a second; %.0f %% of the videos are hand-held)", c.Verdict, c.ShiftPctPerS, c.HandheldShare*100)
+		if c.Verdict == camshift.Handheld {
+			b.WriteString(": the camera never sits still, so tripod footage gets the handheld living camera; that is camera motion, not an effect")
+		}
+		b.WriteString("\n")
+	}
+	if p.Pacing.ShotS.Median > 0 {
+		fmt.Fprintf(&b, "shot lengths (every shot of the videos with a cut): %s s\n", p.Pacing.ShotS)
+	}
+	if p.Audio.DropS.Median > 0 {
+		fmt.Fprintf(&b, "drop: the music drops at %s s in %.0f %% of the videos; the hook ends on it\n", p.Audio.DropS, p.Audio.DropShare*100)
+	}
 	fmt.Fprintf(&b, "look: grade %s; footage %s (p90 luma %s)\n", p.Look.Grade, map[bool]string{true: "low-key", false: "normally lit"}[p.Look.LowKey], p.Look.LumaP90)
 	if t := p.Text; t != nil && t.TitleShare > 0 {
 		fmt.Fprintf(&b, "title: case %s, colour %s, %s, %s, weight %s, condensed %v, lines %d (one line in %.0f %% of the videos)", orDash(t.Case), orDash(t.Colour),
