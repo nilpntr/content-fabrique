@@ -239,16 +239,28 @@ counted under the workspace's upload lock), 1 GiB (`413`), a video (`415`), 3 mi
 storage quota (`PlanLimits.storage_gb`) is not enforced anywhere yet, so the references do not count against it.
 
 **The jobs.** The transaction that marks a reference ready queues its row in `style_references` and enqueues `style_reference` (the
-analysis queue): the original is downloaded into the worker's media directory, measured in the sandbox (`Analyzer.TempDir`, so the
+analysis queue, unique by its reference while it waits or runs): the reference's 720 px proxy (the original when it has none; the
+frame rate is the original's) is downloaded into the worker's media directory, measured in the sandbox (`Analyzer.TempDir`, so the
 sandbox writes inside its allowed root) and its title read with the `stylevision` call ($0.01 at most). The row holds the measures; a
-reference that cannot be measured on its last attempt is `failed` with a code (`analysis_failed`, `no_video_stream`, `too_long`). Every
-reference that finishes, fails or is removed enqueues `style_profile` for the next 15 s slot (`jobs.StyleProfileWindow`; five uploads
-make one job): it aggregates the newest 10 measured references whose asset is live (and the files of cfctl), writes the summary and
-stores the profile with the ids it was made from. A profile already made from exactly those references is left alone (no model call);
-with none left it is removed. A failed summary call is retried; on the last attempt the profile is kept with its previous summary.
+reference that cannot be measured on its last attempt, whatever the step, is `failed` with a code (`analysis_failed`,
+`no_video_stream`, `too_long`). Every reference that finishes, fails or is removed enqueues `style_profile` for the next 15 s slot
+(`jobs.StyleProfileWindow`; five uploads make one job). While any live reference is queued or analysing the profile job snoozes
+(`jobs.ErrStyleLearning`) and changes nothing, so the editor keeps the profile and summary it has; when they are all measured it
+aggregates the newest 10 measured references whose asset is live (and the files of cfctl), writes **one** summary and stores the
+profile with the ids it was made from. A profile already made from exactly those references, none measured again since, is left alone
+(no model call); with no reference left it is removed, and when the ones left all failed it is kept. A row left queued by a job that
+gave up (older than `store.StyleInFlightMaxAge`, 26 hours) holds nothing back. A failed summary call is retried; on the last attempt
+the profile is kept with its previous summary.
+
+**Learning again, bounded.** `POST /v1/style/relearn` takes the workspace's style lock, refuses while a reference is being measured
+(`409 style_learning_in_progress`) and past the plan's passes for the UTC day (`style_relearns_per_day` in the price list, 2 on the
+trial, 3 on creator, 5 on studio and pro; `429 too_many_relearns`), records the pass in `style_learn_passes` and queues every ready
+reference. A pass therefore costs at most 10 title reads ($0.01 each) and one summary ($0.03), plus 10 sandbox passes over 720 px
+proxies; none of it is charged in credits, and the workspace's spend backstop still applies. `DELETE /v1/assets/{id}` refuses a
+style reference (`409 style_reference`): `DELETE /v1/style/references/{id}` removes it with its measures and makes the style again.
 
 **The summary** (`stylesummary`, prompt `stylesummary.v1`, Haiku 5.5 in dev-cheap and dev-mid, Sonnet 5.5 in v1-start, `max_tokens`
-800, a run budget of $0.03; from the price table about $0.0008 on Haiku and $0.015 on Sonnet, the worst case $0.021). It reads the
+800, a run budget of $0.03, one call a learning pass; from the price table about $0.0008 on Haiku and $0.015 on Sonnet, the worst case $0.021). It reads the
 measures in our words (`Profile.SummaryFacts`: `Describe` plus a note that "effects" counts only effects applied to the picture; no file
 names, no title texts) and up to three posters of the references, and calls a forced strict tool that returns one or two sentences
 in the second person ("Handheld gym shots that follow you, music on every video ...") and a value for each setting. The answer is
@@ -276,7 +288,8 @@ the beat grid. A workspace with neither a profile nor settings, and a run withou
 in plain words, the settings, the effective settings with their sources, the references with their state and a poster, the overall
 status `empty`, `learning` or `ready` and the progress), `PUT /v1/style` (replaces the settings), `DELETE /v1/style` (the references,
 their measures, the profile and the settings), `POST /v1/style/relearn` (every reference measured again, then the profile),
-`DELETE /v1/style/references/{id}`. `POST /v1/projects/{id}/edit` takes `vibe`. Tenancy: the workspace comes from the token; every
+`DELETE /v1/style/references/{id}`. `POST /v1/projects/{id}/edit` takes `vibe`. "Owners and editors" are the roles that change
+assets and projects too (a Clerk member is an editor); viewers only read. Tenancy: the workspace comes from the token; every
 query filters by it; an asset of another workspace is `404`.
 
 **cfctl** (`cfctl style analyze|show|set|clear`) goes through the same code: the files are stored as references without an asset

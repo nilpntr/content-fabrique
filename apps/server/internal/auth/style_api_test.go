@@ -162,10 +162,52 @@ func TestStyleReferencesQuotaLibraryAndTenancy(t *testing.T) {
 	// A place is free again.
 	e.call(http.MethodPost, "/v1/assets", "ada", referenceRequest("ref.mp4", 1000, "video/mp4"), http.StatusCreated, nil)
 
-	// Learning again is queued for the workspace alone.
+	// A reference is not deleted as an asset: its measures would stay in the style.
+	second := lib.Items[1].Id
+	e.fail(http.MethodDelete, "/v1/assets/"+second, "ada", nil, http.StatusConflict, api.ErrorCodeStyleReference)
+	if _, err := e.st.GetAsset(ctx, e.ws["ada"], mustAsset(t, second)); err != nil {
+		t.Errorf("the refused delete removed the reference: %v", err)
+	}
+
+	// Learning again is queued for the workspace alone, once at a time: while a reference is measured, another pass is refused.
+	if _, err := e.pool.Exec(ctx, `UPDATE assets SET status = 'ready', duration_ms = 20000 WHERE id = $1`, mustAsset(t, second).UUID); err != nil {
+		t.Fatal(err)
+	}
 	e.fail(http.MethodPost, "/v1/style/relearn", "viewer", nil, http.StatusForbidden, api.ErrorCodeInsufficientRole)
 	if rec := e.do(http.MethodPost, "/v1/style/relearn", "ada", nil); rec.Code != http.StatusAccepted {
 		t.Fatalf("relearn: %d %s", rec.Code, rec.Body)
+	}
+	countJobs := func(kind string) int {
+		var n int
+		if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM river_job WHERE kind = $1 AND args->>'workspace_id' = $2`, kind, e.ws["ada"].String()).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := countJobs("style_reference"); n != 1 {
+		t.Errorf("%d style_reference jobs after one pass", n)
+	}
+	e.fail(http.MethodPost, "/v1/style/relearn", "ada", nil, http.StatusConflict, api.ErrorCodeStyleLearningInProgress)
+	if n := countJobs("style_reference"); n != 1 {
+		t.Errorf("a refused pass queued work: %d style_reference jobs", n)
+	}
+	// When it is measured (here: failed) the next pass may start, up to the day's cap (3 without a price list); Bob's are his own.
+	finish := func() {
+		t.Helper()
+		if _, err := e.pool.Exec(ctx, `UPDATE style_references SET status = 'failed' WHERE workspace_id = $1`, e.ws["ada"].UUID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 2 {
+		finish()
+		if rec := e.do(http.MethodPost, "/v1/style/relearn", "ada", nil); rec.Code != http.StatusAccepted {
+			t.Fatalf("relearn: %d %s", rec.Code, rec.Body)
+		}
+	}
+	finish()
+	e.fail(http.MethodPost, "/v1/style/relearn", "ada", nil, http.StatusTooManyRequests, api.ErrorCodeTooManyRelearns)
+	if rec := e.do(http.MethodPost, "/v1/style/relearn", "bob", nil); rec.Code != http.StatusAccepted {
+		t.Fatalf("bob's relearn: %d %s", rec.Code, rec.Body)
 	}
 
 	// Resetting deletes every reference of the workspace and nothing of Bob's.

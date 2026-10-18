@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
@@ -69,6 +70,64 @@ func creatorStyleSuite(t *testing.T, st *store.Store, suffix string) {
 		}
 		if _, err := st.GetCreatorStyle(ctx, a.ID); err != nil {
 			t.Fatalf("b's delete removed a's profile: %v", err)
+		}
+	})
+
+	// A reference row belongs to its workspace: another workspace queueing the same asset id (the upsert's conflict on asset_id) changes
+	// nothing and gets no row; the in-flight count and the passes are per workspace.
+	t.Run("references and passes stay in their workspace", func(t *testing.T) {
+		a, b := newWorkspace("ref-a"), newWorkspace("ref-b")
+		u, err := st.UpsertUserByClerkID(ctx, "user_style_ref_"+suffix, "style-ref-"+suffix+"@example.com")
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, err := st.NewAssetID(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := st.CreateAssetWithUpload(ctx, a.ID, store.NewAsset{
+			ID: id, Kind: store.AssetKindVideo, Filename: "ref.mp4", ContentType: "video/mp4", SizeBytes: 1 << 20, Title: "ref",
+			R2Key: "ws/" + a.ID.String() + "/assets/" + id.String() + "/original", CreatedBy: u.ID, Purpose: store.PurposeStyleReference,
+			R2UploadID: "r2-" + id.String(), PartSize: 16 << 20, PartCount: 1, ExpiresAt: time.Now().Add(time.Hour),
+		}, 0); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.QueueStyleReference(ctx, a.ID, id, "mine.mp4"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.FailStyleReference(ctx, a.ID, id, "analysis_failed", nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.QueueStyleReference(ctx, b.ID, id, "theirs.mp4"); err == nil {
+			t.Fatal("workspace b queued workspace a's reference")
+		}
+		if r, err := st.GetStyleReferenceByAsset(ctx, a.ID, id); err != nil || r.Name != "mine.mp4" || r.Status != store.StyleRefFailed {
+			t.Fatalf("workspace a's row after b's upsert: %+v %v", r, err)
+		}
+		if _, err := st.GetStyleReferenceByAsset(ctx, b.ID, id); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("workspace b sees the row: %v", err)
+		}
+		// The asset is not ready: its queued row is not in flight (nothing measures it until its ingest is done).
+		if _, err := st.QueueStyleReference(ctx, a.ID, id, "mine.mp4"); err != nil {
+			t.Fatal(err)
+		}
+		if n, err := st.CountStyleReferencesInFlight(ctx, a.ID, time.Now()); err != nil || n != 0 {
+			t.Fatalf("in flight with an asset still uploading: %d %v", n, err)
+		}
+		for range 2 {
+			if err := st.InsertStyleLearnPass(ctx, a.ID, u.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		day := time.Now().Add(-time.Hour)
+		if n, err := st.CountStyleLearnPasses(ctx, a.ID, day); err != nil || n != 2 {
+			t.Errorf("a's passes: %d %v", n, err)
+		}
+		if n, err := st.CountStyleLearnPasses(ctx, b.ID, day); err != nil || n != 0 {
+			t.Errorf("b's passes: %d %v", n, err)
+		}
+		if n, err := st.CountStyleLearnPasses(ctx, a.ID, time.Now().Add(time.Hour)); err != nil || n != 0 {
+			t.Errorf("passes after now: %d %v", n, err)
 		}
 	})
 

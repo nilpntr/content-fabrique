@@ -809,7 +809,7 @@ tweak it, and keep uploading videos as references.
 
 **Decision.** The effective style the editor follows is made of three layers, the creator always winning: (1) what was measured from
 the creator's reference videos; (2) the defaults an AI summary proposes from those measures (one cheap call per (re)analysis,
-`stylesummary`, at most $0.03); (3) the creator's own settings (vibe, transitions, text animation, camera motion, title colour, place
+`stylesummary`, at most $0.03, one call a learning pass: the profile job waits until every reference of a pass is measured); (3) the creator's own settings (vibe, transitions, text animation, camera motion, title colour, place
 and case, music, pace), stored apart from the measures (`creator_style_settings`), so re-learning never overwrites them. The vibe of one
 edit (P6-06) sits on top of the vibe setting. A measured "no effects" is a fact about the creator's posted videos, never a rule: it
 does not turn transitions, text animation or camera motion off by itself; at a lively or hype vibe an AI suggestion of "off" does not

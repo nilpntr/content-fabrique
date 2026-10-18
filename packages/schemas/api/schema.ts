@@ -134,7 +134,8 @@ export interface paths {
         /**
          * Delete an asset
          * @description Soft-deletes the asset and enqueues the deletion of its objects. An asset whose upload is still in progress is
-         *     aborted as well. Only owners and editors may delete.
+         *     aborted as well. A style reference is not deleted here (`409 style_reference`): `DELETE /v1/style/references/{id}`
+         *     removes it with what was measured from it and makes the style again. Only owners and editors may delete.
          */
         delete: operations["deleteAsset"];
         options?: never;
@@ -687,8 +688,11 @@ export interface paths {
         /**
          * Learn the style again from the reference videos
          * @description Measures every reference video again and writes a new summary, in the background (`202`; follow `status` with
-         *     `GET /v1/style`). The creator's settings stay. Each reference costs at most $0.01 of model time and the summary at most $0.03,
-         *     metered like every model call. Only owners and editors may start it.
+         *     `GET /v1/style`). The creator's settings stay, and so do the profile and the summary the editor uses until every reference is
+         *     measured again; then the profile is made once and one summary is written. Each reference costs at most $0.01 of model time
+         *     and the pass's one summary at most $0.03, metered like every model call. While a pass (or a new reference) is being measured
+         *     another is refused (`409 style_learning_in_progress`), and a workspace may start as many passes per UTC day as its plan allows
+         *     (`style_relearns_per_day`, then `429 too_many_relearns`). Only owners and editors may start it.
          */
         post: operations["relearnStyle"];
         delete?: never;
@@ -799,7 +803,7 @@ export interface components {
          *     code as a generic failure of its HTTP status.
          * @enum {string}
          */
-        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "credits_exhausted" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured" | "assets_not_usable" | "version_conflict" | "invalid_ops" | "no_change" | "timeline_invalid" | "too_many_renders" | "run_in_progress" | "run_not_waiting" | "model_not_configured" | "edit_not_charged" | "too_many_uncharged_runs" | "byok_key_required" | "version_not_charged" | "too_many_references";
+        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "credits_exhausted" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured" | "assets_not_usable" | "version_conflict" | "invalid_ops" | "no_change" | "timeline_invalid" | "too_many_renders" | "run_in_progress" | "run_not_waiting" | "model_not_configured" | "edit_not_charged" | "too_many_uncharged_runs" | "byok_key_required" | "version_not_charged" | "too_many_references" | "style_learning_in_progress" | "too_many_relearns" | "style_reference";
         ErrorDetail: {
             code: components["schemas"]["ErrorCode"];
             /** @description For people. It may change; do not branch on it. */
@@ -2338,6 +2342,15 @@ export interface operations {
             402: components["responses"]["PlanRequired"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description `style_reference`: the asset is a style reference; remove it with `DELETE /v1/style/references/{id}`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             500: components["responses"]["InternalError"];
             503: components["responses"]["Unavailable"];
         };
@@ -3265,6 +3278,24 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             402: components["responses"]["PlanRequired"];
             403: components["responses"]["Forbidden"];
+            /** @description `style_learning_in_progress`: the reference videos are being measured; learn again when that is done. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `too_many_relearns`: the workspace has learnt its style again as often as its plan allows today (UTC). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             500: components["responses"]["InternalError"];
             503: components["responses"]["Unavailable"];
         };

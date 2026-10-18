@@ -338,7 +338,8 @@ paths:
       summary: Delete an asset
       description: |
         Soft-deletes the asset and enqueues the deletion of its objects. An asset whose upload is still in progress is
-        aborted as well. Only owners and editors may delete.
+        aborted as well. A style reference is not deleted here (`409 style_reference`): `DELETE /v1/style/references/{id}`
+        removes it with what was measured from it and makes the style again. Only owners and editors may delete.
       responses:
         "204":
           description: Deleted.
@@ -352,6 +353,12 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          description: "`style_reference`: the asset is a style reference; remove it with `DELETE /v1/style/references/{id}`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "500":
           $ref: "#/components/responses/InternalError"
         "503":
@@ -1400,8 +1407,11 @@ paths:
       summary: Learn the style again from the reference videos
       description: |
         Measures every reference video again and writes a new summary, in the background (`202`; follow `status` with
-        `GET /v1/style`). The creator's settings stay. Each reference costs at most $0.01 of model time and the summary at most $0.03,
-        metered like every model call. Only owners and editors may start it.
+        `GET /v1/style`). The creator's settings stay, and so do the profile and the summary the editor uses until every reference is
+        measured again; then the profile is made once and one summary is written. Each reference costs at most $0.01 of model time
+        and the pass's one summary at most $0.03, metered like every model call. While a pass (or a new reference) is being measured
+        another is refused (`409 style_learning_in_progress`), and a workspace may start as many passes per UTC day as its plan allows
+        (`style_relearns_per_day`, then `429 too_many_relearns`). Only owners and editors may start it.
       responses:
         "202":
           description: Learning; the style as it is now.
@@ -1415,6 +1425,18 @@ paths:
           $ref: "#/components/responses/PlanRequired"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          description: "`style_learning_in_progress`: the reference videos are being measured; learn again when that is done."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: "`too_many_relearns`: the workspace has learnt its style again as often as its plan allows today (UTC)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "500":
           $ref: "#/components/responses/InternalError"
         "503":
@@ -1849,6 +1871,9 @@ components:
         - byok_key_required # 402: the plan uses the workspace's own Anthropic key (BYOK) and none is set up, so no model run can start
         - version_not_charged # 422: a final render of a version that contains editor work that was not charged (a failed or released run)
         - too_many_references # 409: the workspace has its 10 style references already
+        - style_learning_in_progress # 409: the style is being learnt already (learn again when it is done)
+        - too_many_relearns # 429: the workspace has learnt its style again as often as its plan allows today
+        - style_reference # 409: the asset is a style reference; remove it with DELETE /v1/style/references/{id}
 
     ErrorDetail:
       type: object

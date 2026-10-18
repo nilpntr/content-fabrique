@@ -8,11 +8,49 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 )
+
+const countStyleLearnPasses = `-- name: CountStyleLearnPasses :one
+SELECT count(*) FROM style_learn_passes WHERE workspace_id = $1 AND created_at >= $2
+`
+
+type CountStyleLearnPassesParams struct {
+	WorkspaceID ids.WorkspaceID
+	Since       time.Time
+}
+
+func (q *Queries) CountStyleLearnPasses(ctx context.Context, arg CountStyleLearnPassesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countStyleLearnPasses, arg.WorkspaceID, arg.Since)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countStyleReferencesInFlight = `-- name: CountStyleReferencesInFlight :one
+SELECT count(*) FROM style_references r
+JOIN assets a ON a.workspace_id = r.workspace_id AND a.id = r.asset_id
+WHERE r.workspace_id = $1 AND r.status IN ('queued', 'analysing') AND r.updated_at > $2
+  AND a.deleted_at IS NULL AND a.status = 'ready'
+`
+
+type CountStyleReferencesInFlightParams struct {
+	WorkspaceID ids.WorkspaceID
+	Since       time.Time
+}
+
+// The references of a workspace that are being measured: queued or analysing, with an asset that is ready and not deleted, and a row
+// that changed after @since (a row older than that belongs to a job that gave up, and holds nothing back).
+func (q *Queries) CountStyleReferencesInFlight(ctx context.Context, arg CountStyleReferencesInFlightParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countStyleReferencesInFlight, arg.WorkspaceID, arg.Since)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
 
 const deleteCreatorStyle = `-- name: DeleteCreatorStyle :exec
 DELETE FROM creator_style_profiles WHERE workspace_id = $1
@@ -262,6 +300,20 @@ func (q *Queries) InsertFileStyleReference(ctx context.Context, arg InsertFileSt
 	return i, err
 }
 
+const insertStyleLearnPass = `-- name: InsertStyleLearnPass :exec
+INSERT INTO style_learn_passes (workspace_id, started_by) VALUES ($1, $2::uuid)
+`
+
+type InsertStyleLearnPassParams struct {
+	WorkspaceID ids.WorkspaceID
+	StartedBy   pgtype.UUID
+}
+
+func (q *Queries) InsertStyleLearnPass(ctx context.Context, arg InsertStyleLearnPassParams) error {
+	_, err := q.db.Exec(ctx, insertStyleLearnPass, arg.WorkspaceID, arg.StartedBy)
+	return err
+}
+
 const listStyleReferenceAssets = `-- name: ListStyleReferenceAssets :many
 
 SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose FROM assets
@@ -367,10 +419,23 @@ func (q *Queries) ListStyleReferences(ctx context.Context, workspaceID ids.Works
 	return items, nil
 }
 
+const lockWorkspaceStyle = `-- name: LockWorkspaceStyle :exec
+
+SELECT pg_advisory_xact_lock(hashtextextended('style:' || $1::text, 0))
+`
+
+// ---- learning again ------------------------------------------------------------------------------------------------------------
+// Serialises a workspace's "learn again" (the in-flight check and the day's count hold however many requests race).
+func (q *Queries) LockWorkspaceStyle(ctx context.Context, workspaceID string) error {
+	_, err := q.db.Exec(ctx, lockWorkspaceStyle, workspaceID)
+	return err
+}
+
 const queueStyleReference = `-- name: QueueStyleReference :one
 INSERT INTO style_references (workspace_id, asset_id, name, status)
 VALUES ($1, $2, $3, 'queued')
 ON CONFLICT (asset_id) DO UPDATE SET status = 'queued', failure_reason = NULL, name = EXCLUDED.name
+WHERE style_references.workspace_id = EXCLUDED.workspace_id
 RETURNING id, workspace_id, asset_id, name, status, failure_reason, measures, detail, analysed_at, created_at, updated_at
 `
 

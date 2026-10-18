@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/nilpntr/content-fabrique/internal/api"
+	"github.com/nilpntr/content-fabrique/internal/credits"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
 	"github.com/nilpntr/content-fabrique/internal/store"
@@ -41,6 +42,7 @@ func (e *Error) Error() string { return fmt.Sprintf("%d %s: %s", e.Status, e.Cod
 
 var (
 	errNotFound  = &Error{Status: 404, Code: api.ErrorCodeNotFound, Message: "no such style reference"}
+	errLearning  = &Error{Status: 409, Code: api.ErrorCodeStyleLearningInProgress, Message: "your videos are being learnt; learn again when that is done"}
 	errQueue     = &Error{Status: 503, Code: api.ErrorCodeQueueNotMigrated, Message: "the job queue is not ready; try again later"}
 	errInternal  = &Error{Status: 500, Code: api.ErrorCodeInternalError, Message: "something went wrong"}
 	errReadSetup = errors.New("creatorstyle: a store is required")
@@ -62,6 +64,8 @@ type Service struct {
 	objects Presigner
 	jobs    jobs.TxInserter
 	logger  *slog.Logger
+	// Plans is the price list whose plans cap the "learn again" passes per day; nil uses credits.DefaultStyleRelearnsPerDay.
+	Plans *credits.PriceList
 	// Now replaces time.Now (tests).
 	Now func() time.Time
 }
@@ -191,6 +195,15 @@ func (s *Service) view(ctx context.Context, ws ids.WorkspaceID) (View, *Error) {
 	stale := len(ready) > 0 && !slices.Equal(sortedIDs(profileRefs), ProfileSet(ready))
 	if len(ready) == 0 && len(profileRefs) > 0 && style.Profile != nil {
 		stale = true // every reference it was made from is gone: the profile job removes it
+	}
+	if learnedAt != nil && len(ready) > 0 {
+		var measured []store.StyleReference
+		for _, r := range rows {
+			if slices.Contains(ready, r.ID) {
+				measured = append(measured, r)
+			}
+		}
+		stale = stale || measuredSince(measured, *learnedAt) // learnt again: the profile job makes it from the new measures
 	}
 	switch {
 	case busy || stale:
@@ -369,10 +382,49 @@ func (s *Service) Remove(ctx context.Context, who Actor, id ids.AssetID) *Error 
 	return s.internal(ctx, "remove a reference", err)
 }
 
-// Relearn measures every reference again and makes the profile and its summary again, in the background.
+// relearnCap is the workspace's "learn again" passes per UTC day: its plan's, else the default.
+func (s *Service) relearnCap(ctx context.Context, tx *store.Store, ws ids.WorkspaceID) (int, error) {
+	if s.Plans == nil {
+		return credits.DefaultStyleRelearnsPerDay, nil
+	}
+	ent, err := tx.GetEntitlements(ctx, ws)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return 0, err
+	}
+	if pl, ok := s.Plans.Plan(ent.Plan); ok && err == nil {
+		return pl.RelearnsPerDay(), nil
+	}
+	return credits.DefaultStyleRelearnsPerDay, nil
+}
+
+// Relearn measures every reference again and makes the profile and its summary again, in the background. Under the workspace's style
+// lock it refuses while a reference is being measured (a pass, or a new upload: the profile job makes the profile once they are all
+// measured, so a second pass now would only measure them twice) and past the plan's passes for the UTC day; each pass is recorded.
 func (s *Service) Relearn(ctx context.Context, who Actor) (View, *Error) {
-	pass := s.now().UnixMicro()
+	now := s.now()
 	err := s.store.InTx(ctx, func(tx *store.Store) error {
+		if err := tx.LockWorkspaceStyle(ctx, who.Workspace); err != nil {
+			return err
+		}
+		if n, err := tx.CountStyleReferencesInFlight(ctx, who.Workspace, now); err != nil {
+			return err
+		} else if n > 0 {
+			return errLearning
+		}
+		limit, err := s.relearnCap(ctx, tx, who.Workspace)
+		if err != nil {
+			return err
+		}
+		utc := now.UTC()
+		day := time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
+		if n, err := tx.CountStyleLearnPasses(ctx, who.Workspace, day); err != nil {
+			return err
+		} else if n >= limit {
+			return &Error{Status: 429, Code: api.ErrorCodeTooManyRelearns, Message: fmt.Sprintf("you can learn your style again %d times a day; try again tomorrow", limit)}
+		}
+		if err := tx.InsertStyleLearnPass(ctx, who.Workspace, who.User); err != nil {
+			return err
+		}
 		assets, err := tx.ListStyleReferenceAssets(ctx, who.Workspace)
 		if err != nil {
 			return err
@@ -391,7 +443,7 @@ func (s *Service) Relearn(ctx context.Context, who Actor) (View, *Error) {
 		for _, r := range rows {
 			if id, ok := store.StyleReferenceAsset(r); ok && live[id] {
 				queued[id] = true
-				if _, err := s.jobs.InsertInStore(ctx, tx, jobs.StyleReferenceArgs{WorkspaceID: who.Workspace, AssetID: id, Pass: pass}, nil); err != nil {
+				if _, err := s.jobs.InsertInStore(ctx, tx, jobs.StyleReferenceArgs{WorkspaceID: who.Workspace, AssetID: id}, nil); err != nil {
 					return err
 				}
 			}
@@ -408,13 +460,16 @@ func (s *Service) Relearn(ctx context.Context, who Actor) (View, *Error) {
 			if _, err := tx.QueueStyleReference(ctx, who.Workspace, id, a.Filename); err != nil {
 				return err
 			}
-			if _, err := s.jobs.InsertInStore(ctx, tx, jobs.StyleReferenceArgs{WorkspaceID: who.Workspace, AssetID: id, Pass: pass}, nil); err != nil {
+			if _, err := s.jobs.InsertInStore(ctx, tx, jobs.StyleReferenceArgs{WorkspaceID: who.Workspace, AssetID: id}, nil); err != nil {
 				return err
 			}
 		}
 		// The profile job follows every reference's; with no asset reference (only files, or none) it is the only job.
-		return jobs.EnqueueStyleProfile(ctx, s.jobs, tx, who.Workspace, s.now())
+		return jobs.EnqueueStyleProfile(ctx, s.jobs, tx, who.Workspace, now)
 	})
+	if ae := (*Error)(nil); errors.As(err, &ae) {
+		return View{}, ae
+	}
 	if err != nil {
 		return View{}, s.internal(ctx, "learn again", err)
 	}

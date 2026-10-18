@@ -128,23 +128,23 @@ func (l *Learner) AnalyzeReference(ctx context.Context, ws ids.WorkspaceID, id i
 		return nil, false, err
 	}
 	local := filepath.Join(dir, "in", "reference")
-	if err := l.download(ctx, a, local); err != nil {
-		return nil, false, err
+	proxy, err := l.download(ctx, a, local)
+	if err != nil {
+		return l.giveUp(ctx, ws, id, lastAttempt, FailAnalysisFailed, "download", err)
 	}
 	an, err := l.cfg.Analyzer.AnalyzeFile(ctx, ws, local)
 	if err != nil {
-		if ctx.Err() != nil || !lastAttempt {
-			return nil, false, fmt.Errorf("analyse: %w", err)
-		}
 		reason := FailAnalysisFailed
 		if strings.Contains(err.Error(), "has no video") {
 			reason = FailNoVideo
 		}
-		log.WarnContext(ctx, "style reference could not be measured", "error", err)
-		return l.fail(ctx, ws, id, reason, map[string]string{"error": "measure"})
+		return l.giveUp(ctx, ws, id, lastAttempt, reason, "measure", err)
 	}
 	m := an.Measures
 	m.Name = a.Filename
+	if proxy && a.Fps != nil && *a.Fps > 0 {
+		m.FPS = *a.Fps // the proxy runs at 30 frames a second; the creator's frame rate is the original's
+	}
 	detail := map[string]any{"vision": "skipped"}
 	vision := "skipped"
 	if an.Vision != nil {
@@ -179,6 +179,18 @@ func (l *Learner) AnalyzeReference(ctx context.Context, ws ids.WorkspaceID, id i
 	return ReferenceResult{Outcome: "measured", Vision: vision}, false, nil
 }
 
+// giveUp is a failed attempt: retried by the job, and on the last attempt the reference is marked failed (with a context that outlives
+// a timeout), so that the profile job does not wait for it.
+func (l *Learner) giveUp(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, lastAttempt bool, reason, step string, err error) (any, bool, error) {
+	if !lastAttempt {
+		return nil, false, fmt.Errorf("%s: %w", step, err)
+	}
+	l.cfg.Logger.WarnContext(ctx, "style reference could not be measured", "workspace_id", ws.String(), "asset_id", id.String(), "step", step, "error", err)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	return l.fail(ctx, ws, id, reason, map[string]string{"error": step})
+}
+
 // fail marks the reference failed and makes the profile again without it.
 func (l *Learner) fail(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, reason string, detail map[string]string) (any, bool, error) {
 	dj, _ := json.Marshal(detail)
@@ -210,31 +222,55 @@ func (l *Learner) fail(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, 
 	return ReferenceResult{Outcome: "failed: " + reason}, false, nil
 }
 
-// download copies the reference's original to path, refusing an object that is not the size of the asset or over the limit.
-func (l *Learner) download(ctx context.Context, a store.Asset, path string) error {
-	obj, err := l.cfg.Objects.Get(ctx, a.R2Key)
+// download copies the reference's 720 px proxy to path (proxy true), or its original when it has none, refusing an object over the
+// limit or, for the original, not the size of the asset. The proxy is what the clip analysis measures too: a few MB a minute instead of
+// up to 1 GiB, and the same cuts, text, motion and sound.
+func (l *Learner) download(ctx context.Context, a store.Asset, path string) (proxy bool, err error) {
+	key, size := a.R2Key, a.SizeBytes
+	if k, ok := l.proxyKey(ctx, a); ok {
+		key, size, proxy = k, 0, true
+	}
+	obj, err := l.cfg.Objects.Get(ctx, key)
 	if err != nil {
-		return fmt.Errorf("download the reference: %w", err)
+		return proxy, fmt.Errorf("download the reference: %w", err)
 	}
 	defer func() { _ = obj.Body.Close() }()
-	if obj.Size <= 0 || obj.Size > styleprofile.MaxReferenceBytes || obj.Size != a.SizeBytes {
-		return fmt.Errorf("the reference object is %d bytes, which is not the asset's %d", obj.Size, a.SizeBytes)
+	if obj.Size <= 0 || obj.Size > styleprofile.MaxReferenceBytes || (size > 0 && obj.Size != size) {
+		return proxy, fmt.Errorf("the reference object is %d bytes, which is not the asset's %d", obj.Size, a.SizeBytes)
 	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) // #nosec G302,G304 -- a path in our job dir; the container user must read it
 	if err != nil {
-		return err
+		return proxy, err
 	}
 	n, err := io.Copy(f, io.LimitReader(obj.Body, styleprofile.MaxReferenceBytes+1))
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
 	if err != nil {
-		return fmt.Errorf("download the reference: %w", err)
+		return proxy, fmt.Errorf("download the reference: %w", err)
 	}
 	if n != obj.Size {
-		return fmt.Errorf("download the reference: %d of %d bytes", n, obj.Size)
+		return proxy, fmt.Errorf("download the reference: %d of %d bytes", n, obj.Size)
 	}
-	return nil
+	return proxy, nil
+}
+
+// proxyKey is the key of the asset's 720 px proxy, when it has one whose key is a derivative key of this very asset.
+func (l *Learner) proxyKey(ctx context.Context, a store.Asset) (string, bool) {
+	derivs, err := l.cfg.Store.ListAssetDerivatives(ctx, a.WorkspaceID, []ids.AssetID{a.ID})
+	if err != nil {
+		return "", false
+	}
+	for _, d := range derivs {
+		if d.Kind != store.DerivativeProxy720 || d.AssetID != a.ID || d.WorkspaceID != a.WorkspaceID {
+			continue
+		}
+		name, ok := strings.CutPrefix(d.R2Key, storage.AssetPrefix(a.WorkspaceID, a.ID))
+		if ok && storage.ValidDerivativeName(name) {
+			return d.R2Key, true
+		}
+	}
+	return "", false
 }
 
 // ProfileResult is what a style_profile job records.
@@ -247,7 +283,7 @@ type ProfileResult struct {
 
 // LearnProfile makes the workspace's profile from its measured references and writes the summary (jobs.StyleLearner).
 func (l *Learner) LearnProfile(ctx context.Context, ws ids.WorkspaceID, lastAttempt bool) (any, error) {
-	return Learn(ctx, LearnDeps{Store: l.cfg.Store, Objects: l.cfg.Objects, Writer: l.cfg.Writer, Logger: l.cfg.Logger}, ws, lastAttempt)
+	return Learn(ctx, LearnDeps{Store: l.cfg.Store, Objects: l.cfg.Objects, Writer: l.cfg.Writer, Logger: l.cfg.Logger, Now: l.cfg.Now}, ws, lastAttempt)
 }
 
 // LearnDeps are what making a profile needs. cfctl uses it too (without object storage: no frames for the summary).
@@ -258,19 +294,27 @@ type LearnDeps struct {
 	// Writer writes the summary; nil makes a profile without one.
 	Writer *styleprofile.Writer
 	Logger *slog.Logger
-	// Force writes a new summary even when the profile is up to date.
+	// Force writes a new summary even when the profile is up to date, and does not wait for references being measured.
 	Force bool
+	// Now replaces time.Now (tests).
+	Now func() time.Time
 }
 
 // Learn aggregates the workspace's measured references (the newest styleprofile.MaxReferences whose asset is not deleted, and the files
-// cfctl measured) into its profile and writes the summary, keeping the creator's settings. With none left it removes the profile. A
-// profile that is already made from exactly these references and has its summary is left alone (no model call). A failed summary call
-// is retried by the job; on the last attempt the profile is stored with the summary it had before (or none).
+// cfctl measured) into its profile and writes the summary, keeping the creator's settings. While a reference is still being measured it
+// returns jobs.ErrStyleLearning and changes nothing (the job snoozes), so a pass of "learn again" makes one profile and one summary and
+// the editor keeps the previous ones until then. With no reference left it removes the profile; when the ones left all failed it keeps
+// it. A profile that is already made from exactly these references, none measured since, and has its summary is left alone (no model
+// call). A failed summary call is retried by the job; on the last attempt the profile is stored with the summary it had before (or none).
 func Learn(ctx context.Context, d LearnDeps, ws ids.WorkspaceID, lastAttempt bool) (ProfileResult, error) {
 	st := d.Store
 	log := d.Logger
 	if log == nil {
 		log = slog.Default()
+	}
+	now := d.Now
+	if now == nil {
+		now = time.Now
 	}
 	rows, err := st.ListStyleReferences(ctx, ws)
 	if err != nil {
@@ -285,14 +329,26 @@ func Learn(ctx context.Context, d LearnDeps, ws ids.WorkspaceID, lastAttempt boo
 		live[a.ID] = a.Status == store.AssetReady
 	}
 	var measured []store.StyleReference
+	failed := 0 // references left that were not measured (failed, or left queued by a job that gave up)
 	for _, r := range rows {
-		if r.Status != store.StyleRefReady {
+		id, isAsset := store.StyleReferenceAsset(r)
+		if isAsset && !live[id] {
 			continue
 		}
-		if id, ok := store.StyleReferenceAsset(r); ok && !live[id] {
-			continue
+		switch r.Status {
+		case store.StyleRefReady:
+			measured = append(measured, r)
+		case store.StyleRefFailed:
+			failed++
+		default:
+			// Queued or analysing: the profile is made once, when every reference is measured (one summary a pass), and until then
+			// the editor keeps the profile and summary it has. A row older than store.StyleInFlightMaxAge belongs to a job that gave
+			// up and holds nothing back.
+			if !d.Force && r.UpdatedAt.After(now().Add(-store.StyleInFlightMaxAge)) {
+				return ProfileResult{}, fmt.Errorf("%w (%s)", jobs.ErrStyleLearning, r.Status)
+			}
+			failed++ // not measured, and nothing measures it any more
 		}
-		measured = append(measured, r)
 	}
 	slices.SortFunc(measured, func(a, b store.StyleReference) int { return bytes.Compare(a.ID[:], b.ID[:]) })
 	if len(measured) > styleprofile.MaxReferences {
@@ -301,6 +357,10 @@ func Learn(ctx context.Context, d LearnDeps, ws ids.WorkspaceID, lastAttempt boo
 	prev, perr := st.GetCreatorStyle(ctx, ws)
 	if perr != nil && !errors.Is(perr, store.ErrNotFound) {
 		return ProfileResult{}, fmt.Errorf("read the profile: %w", perr)
+	}
+	if len(measured) == 0 && failed > 0 && perr == nil {
+		// Every reference that is left failed to be measured (this pass): the profile the editor has stays until one is measured.
+		return ProfileResult{Outcome: "kept: no reference was measured"}, nil
 	}
 	if len(measured) == 0 {
 		if perr == nil && len(prev.ReferenceIds) > 0 {
@@ -318,7 +378,8 @@ func Learn(ctx context.Context, d LearnDeps, ws ids.WorkspaceID, lastAttempt boo
 	var prevSummary *styleprofile.Summary
 	if perr == nil {
 		prevSummary, _ = styleprofile.ParseSummary(prev.Summary)
-		if !d.Force && slices.Equal(sortedIDs(prev.ReferenceIds), sortedIDs(set)) && (prevSummary != nil || d.Writer == nil) {
+		if !d.Force && slices.Equal(sortedIDs(prev.ReferenceIds), sortedIDs(set)) && (prevSummary != nil || d.Writer == nil) &&
+			!measuredSince(measured, prev.UpdatedAt) {
 			return ProfileResult{Outcome: "up to date", References: len(set)}, nil
 		}
 	}
@@ -360,6 +421,16 @@ func Learn(ctx context.Context, d LearnDeps, ws ids.WorkspaceID, lastAttempt boo
 		return ProfileResult{}, fmt.Errorf("store the profile: %w", err)
 	}
 	return out, nil
+}
+
+// measuredSince says a reference was measured after t (learnt again after the profile was made).
+func measuredSince(refs []store.StyleReference, t time.Time) bool {
+	for _, r := range refs {
+		if r.AnalysedAt != nil && r.AnalysedAt.After(t) {
+			return true
+		}
+	}
+	return false
 }
 
 // posterFrames reads the posters of up to styleprofile.SummaryFrames of the references (JPEGs only), for the summary. A poster that
