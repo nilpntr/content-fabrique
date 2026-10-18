@@ -23,7 +23,9 @@ import (
 // Content (the run's input and output, tool arguments and results, the context text) is only put on spans when telemetry.Content().
 
 // tracer is the global provider's tracer, looked up on every use so a test can install its own provider.
-func tracer() trace.Tracer { return otel.Tracer("github.com/nilpntr/content-fabrique/internal/agents/runtime") }
+func tracer() trace.Tracer {
+	return otel.Tracer("github.com/nilpntr/content-fabrique/internal/agents/runtime")
+}
 
 // Span attributes of our own.
 const (
