@@ -172,6 +172,9 @@ func cmdRender(args []string, stdout, stderr io.Writer) int {
 		Motion: render.MotionOptions{Chrome: *motionChrome, Report: func(r motion.Report) {
 			_, _ = fmt.Fprintf(stderr, "motion graphics: %d frames in %.2f s (%s; chrome start %d ms, page %d ms, frames %d ms)\n",
 				r.Frames, r.Duration.Seconds(), r.Chrome, r.Timing.LaunchMs, r.Timing.LoadMs, r.Timing.FramesMs)
+			if r.Recovery.Retries > 0 {
+				_, _ = fmt.Fprintf(stderr, "motion graphics: %d frames drawn again after a hang, chrome restarted %d times\n", r.Recovery.Retries, r.Recovery.Restarts)
+			}
 		}},
 		Progress: func(p render.Progress) {
 			if tenth := int(p.Fraction * 10); tenth != lastTenth || p.Done {
