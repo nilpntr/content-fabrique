@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "34a4d070a15b6e38da3bea50afeeda3299fa79d91aaf1e7757ab3310644698d9",
-  "recorded_at": "2026-10-18T07:52:58Z",
+  "key": "0b0c7f8231bc4fff282583c0a7ec666e7abd22c311202478c0102952ede33755",
+  "recorded_at": "2026-10-18T09:37:19Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,
@@ -83,18 +83,6 @@
         "blocks": [
           "tool_result"
         ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
       }
     ],
     "tools": [
@@ -103,6 +91,7 @@
       "view_clip",
       "find_moments",
       "get_music",
+      "list_formats",
       "plan_edit",
       "list_motion_templates",
       "get_timeline",
@@ -158,38 +147,18 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_7",
-        "name": "edit_timeline",
-        "input": {
-          "base_version": 1,
-          "ops": [
-            {
-              "op": "trim_item",
-              "id": "c4",
-              "out_ms": 4500
-            },
-            {
-              "op": "snap_cuts_to_beats",
-              "grid": {
-                "bpm": 124,
-                "first_beat_ms": 0
-              },
-              "options": {
-                "write_markers": true,
-                "max_shift_ms": 60
-              }
-            }
-          ]
-        }
+        "id": "toolu_ed_6",
+        "name": "check_edit",
+        "input": {}
       }
     ],
     "usage": {
-      "input_tokens": 440,
-      "cache_write_tokens": 800,
+      "input_tokens": 420,
+      "cache_write_tokens": 700,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 14200,
-      "output_tokens": 120
+      "cache_read_tokens": 13500,
+      "output_tokens": 38
     }
   },
-  "count_tokens": 15440
+  "count_tokens": 14620
 }

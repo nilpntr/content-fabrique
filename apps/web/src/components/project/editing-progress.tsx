@@ -29,7 +29,7 @@ export function EditingProgress({
   retrying = false,
   className,
 }: {
-  run: Pick<Run, "status" | "events" | "question" | "failure_reason">;
+  run: Pick<Run, "status" | "events" | "question" | "failure_reason" | "new_idea">;
   onStop: () => void;
   stopping?: boolean;
   stopError?: boolean;
@@ -95,7 +95,7 @@ export function EditingProgress({
         )}
         <div className="min-w-0 flex-1">
           <h2 id={titleId} className="font-semibold tracking-[-0.01em]">
-            {asking ? "I have a question for you" : "I'm making your video"}
+            {asking ? "I have a question for you" : run.new_idea ? "I'm trying another idea" : "I'm making your video"}
           </h2>
           <p role="status" className="text-[13.5px] text-muted-foreground">
             {asking ? "Answer below and I'll carry on." : progress.headline}

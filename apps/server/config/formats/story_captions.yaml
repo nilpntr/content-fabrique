@@ -1,0 +1,49 @@
+# A format card of the format library (docs/design/formats-v1.md). Our words only.
+id: story_captions
+version: 1
+kind: format
+name: Story in captions
+plural: caption stories
+pitch: A first-person mini-story told one short line per shot ("this is how ..."), the result shown at the end.
+fits:
+  content_types: [workout, vlog, general]
+  needs: [clips_3]
+  helps: [reps, pose, lifestyle]
+  when:
+    - There are three or more shots that can carry a step of a story (what changed, what was done, the result).
+not_when:
+  - There are only one or two clips (a one-take or a quote reveal fits better).
+beats:
+  - name: hook
+    roles: [hook]
+    timing: the first shot
+    what: The first line is the hook, the promise of the story, on the most striking shot.
+  - name: middle
+    roles: [build, step, detail]
+    timing: a new line with each cut, on the beat
+    what: One line per shot that carries the story on, each on screen for its whole shot.
+  - name: payoff
+    roles: [payoff, peak, ending]
+    timing: the last shot
+    what: The result (the pose, the heavy set), with a closing line or bare.
+text:
+  pattern: story_captions
+  title_forms: []
+  notes: Short first-person lines in the creator's language and look, never their own lines; no separate title.
+music: Cuts on the beats, a new line with each; the result on the drop or the last phrase.
+length_s: {min: 10, max: 35}
+pace: building
+pace_hint: Shots long enough to read a line (1 s or more each), faster toward the result.
+vibes: {calm: great, lively: great, hype: good}
+how_it_plays:
+  - '"the one change that fixed my shoulders" on a side pose, then "I used to press every day", "now I start with raises" over the raises, ending on the pose.'
+  - A morning in five lines, one per shot, the last shot the set it was all for.
+detect:
+  rules:
+    - all: [pattern_story_captions, first_person]
+      score: 0.9
+    - all: [pattern_story_captions]
+      score: 0.75
+check:
+  payoff: end
+  min_shots: 3

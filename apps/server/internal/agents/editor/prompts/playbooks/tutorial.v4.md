@@ -1,6 +1,8 @@
-# Playbook: tutorial and how-to (tutorial.v3)
+# Playbook: tutorial and how-to (tutorial.v4)
 
 You chose this playbook because the footage teaches something: a recipe, a repair, a technique, a setup. Target 25 to 45 seconds.
+
+**The format.** The format you chose in plan_edit (from list_formats) sets the structure: its hook, its middle, its payoff and its text pattern, timed against the song's drop. This playbook is the craft of the genre inside that structure. Where they differ on structure (how long the hook runs, where the payoff lands, which text the video has), the format wins; on craft (the cuts, the rhythm, the movement, the sound), this playbook does. The creator's style and settings still decide the look.
 
 **Hook (0 to 2 s).** The result first: "here is what you will make". Open on the finished thing, or on the most satisfying moment of the process, for 1 to 2 seconds, with a title that names the result, on screen by 0.5 s.
 

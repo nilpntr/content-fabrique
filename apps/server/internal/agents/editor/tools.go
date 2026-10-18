@@ -145,6 +145,7 @@ func Tools(d Deps) ([]runtime.Tool, error) {
 		{ToolViewClip, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.viewClip) }},
 		{ToolFindMoments, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.findMoments) }},
 		{ToolGetMusic, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getMusic) }},
+		{ToolListFormats, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.listFormats) }},
 		{ToolPlanEdit, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.planEdit) }},
 		{ToolListMotionTemplates, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.listMotionTemplates) }},
 		{ToolGetTimeline, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getTimeline) }},

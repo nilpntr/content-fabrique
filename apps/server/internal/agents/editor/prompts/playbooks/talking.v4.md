@@ -1,6 +1,8 @@
-# Playbook: talking to camera and opinion (talking.v3)
+# Playbook: talking to camera and opinion (talking.v4)
 
 You chose this playbook because a person speaks to the camera: an opinion, a take, a story, advice. Target 20 to 45 seconds.
+
+**The format.** The format you chose in plan_edit (from list_formats) sets the structure: its hook, its middle, its payoff and its text pattern, timed against the song's drop. This playbook is the craft of the genre inside that structure. Where they differ on structure (how long the hook runs, where the payoff lands, which text the video has), the format wins; on craft (the cuts, the rhythm, the movement, the sound), this playbook does. The creator's style and settings still decide the look.
 
 **Hook (0 to 2 s).** The boldest line, often lifted from the middle of the take and placed first. Open on it with a punch_in and a short title that states the claim in 3 to 6 words, on screen by 0.5 s.
 

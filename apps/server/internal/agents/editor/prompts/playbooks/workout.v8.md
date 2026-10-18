@@ -1,6 +1,8 @@
-# Playbook: workout and fitness (workout.v7)
+# Playbook: workout and fitness (workout.v8)
 
 You chose this playbook because the footage is training: lifts, sets, a pose, a transformation. Target 15 to 35 seconds.
+
+**The format.** The format you chose in plan_edit (from list_formats) sets the structure: its hook, its middle, its payoff and its text pattern, timed against the song's drop. This playbook is the craft of the genre inside that structure. Where they differ on structure (how long the hook runs, where the payoff lands, which text the video has), the format wins; on craft (the cuts, the rhythm, the movement, the sound), this playbook does. The creator's style and settings still decide the look.
 
 **Hook (0 to the drop).** The most striking frame first: a peak flex, the heaviest lockout, the best rep, the back pose. With a song the hook runs until its drop (2 to 4.5 s in) and the first cut lands on the drop, a plain cut on the hit with a punch-in on it: the reveal. Without one the first shot is 1 to 2 seconds long. A big title (in the creator's style when there is one; else title_bold or title_outline, 2 to 4 words{{if .Has "op:add_graphic"}}; at lively or hype a title_pop whose words land on the first beats{{end}}) pops in by 0.5 s, in the top band above the head, and leaves before the drop. It stays in the hook: when the head is high, a short title stacks beside it, so keep its words few and short. Nothing sits still before the drop: the hook shot has the living camera or a punch_in on the first beat.
 

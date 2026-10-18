@@ -1,0 +1,51 @@
+# A format card of the format library (docs/design/formats-v1.md). Our words only.
+id: transformation
+version: 1
+kind: format
+name: Transformation reveal
+plural: transformation reveals
+pitch: Then, now. An old clip or photo with a weight or time label, then the current physique revealed on the drop.
+fits:
+  content_types: [workout, vlog, general]
+  needs: [then_clip]
+  helps: [pose, song]
+  when:
+    - There is an old clip or photo of the creator (a "before"), and a current pose or set (the "after").
+    - The creator can name the change with a weight, a time or a date.
+not_when:
+  - There is no old clip or photo (never fake a "before" from current footage).
+beats:
+  - name: hook
+    roles: [hook]
+    timing: from 0 to the drop
+    what: The "then" clip or photo with its label (a weight, a year, "day 1"), long enough to read.
+  - name: middle
+    roles: [reveal]
+    timing: on the drop
+    what: A hard cut on the drop to the "now" pose with its label.
+  - name: payoff
+    roles: [peak, payoff, ending]
+    timing: after the drop
+    what: The now shot held and moving, a punch-in on a strong beat; optionally a quick set to show it is real.
+text:
+  pattern: single_title
+  title_forms: ["<THEN> VS <NOW>", "<THEN> TO <NOW>", "<TIME> OF <GOAL>"]
+  notes: The labels carry the numbers the creator gave (in the brief or the clips' names); never invent a weight or a time. If none is known, use "then" and "now".
+music: The drop is the reveal. The "then" part sits in the quiet intro.
+length_s: {min: 7, max: 20}
+pace: steady
+pace_hint: Two to four shots; the reveal shot holds the longest.
+vibes: {calm: good, lively: great, hype: great}
+how_it_plays:
+  - A slim mirror selfie labelled with the old weight sits in the intro; on the drop a cut to the same pose today with the new weight.
+  - A grainy old gym clip with the year on it, a cut on the drop to today's set from the same angle.
+detect:
+  keywords: [transformation, progress, glow up, before and after, then vs now, journey]
+  rules:
+    - all: [versus]
+      score: 0.9
+    - all: [keyword]
+      score: 0.7
+check:
+  payoff: drop
+  min_shots: 2

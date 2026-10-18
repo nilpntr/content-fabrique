@@ -32,6 +32,7 @@ export function startEditMessage(error: unknown): string {
   if (code(error) === "byok_key_required") return "Your plan uses your own AI key, and none is set up yet. Add it in Settings.";
   if (code(error) === "quality_not_in_plan") return "Extra careful edits aren't part of your plan. Turn it off and try again, or see your plan in Settings.";
   if (code(error) === "too_many_uncharged_runs") return "You've started and stopped a lot of edits today. Try again tomorrow.";
+  if (code(error) === "no_video_yet") return "There's no video to rethink yet. Make the first one, then ask for another idea.";
   if (status(error) === 402) return "You need an active plan to edit videos. Choose one in Settings.";
   if (status(error) === 403) return "Your role in this workspace can't edit videos. Ask the owner to change it.";
   if (code(error) === "model_not_configured") return "Editing isn't switched on yet. Try again later.";

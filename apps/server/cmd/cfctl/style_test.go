@@ -102,6 +102,41 @@ func TestStyleAnalyzeRefusesWhatItCannotUse(t *testing.T) {
 	}
 }
 
+// style formats tags the references of a measures file with no model call and no database.
+func TestStyleFormatsTagsAMeasuresFile(t *testing.T) {
+	ms := []styleprofile.Measures{
+		{Name: "a.mp4", DurationS: 20, CutsS: []float64{2.5}, ShotsS: []float64{2.5, 17.5}, Text: &styleprofile.TextStyle{TitlePresent: true, Text: "UPPER CHEST 101"}},
+		{Name: "b.mp4", DurationS: 25, ShotsS: []float64{25}},
+	}
+	raw, err := json.Marshal(ms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "measures.json")
+	if err := os.WriteFile(file, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := cmdStyle([]string{"formats", "--measures", file}, &out, &errb, fakeProcessEnv(map[string]string{}), agentDeps{}); code != 0 {
+		t.Fatalf("code %d: %s", code, errb.String())
+	}
+	for _, want := range []string{"library formats@", "a.mp4: tutorial_101 (0.90)", "b.mp4: one_take (0.50)", "text not read", "Your go-to formats: one-take sets (1 of 2 videos), 101 tutorials (1 of 2)."} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the output lacks %q:\n%s", want, out.String())
+		}
+	}
+	errb.Reset()
+	if code := cmdStyle([]string{"formats"}, &out, &errb, fakeProcessEnv(map[string]string{}), agentDeps{}); code != 2 || !strings.Contains(errb.String(), "--measures") {
+		t.Errorf("no file: %d %q", code, errb.String())
+	}
+	if err := os.WriteFile(file, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := cmdStyle([]string{"formats", "--measures", file}, &out, &errb, fakeProcessEnv(map[string]string{}), agentDeps{}); code != 1 || !strings.Contains(errb.String(), "not a measures file") {
+		t.Errorf("a broken file: %d %q", code, errb.String())
+	}
+}
+
 // The whole path on a made-up video, through the local sandbox: analyse, store, show. It skips without ffmpeg.
 func TestStyleAnalyzeAStoredProfile(t *testing.T) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {

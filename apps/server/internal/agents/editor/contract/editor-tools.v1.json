@@ -96,8 +96,23 @@
       }
     },
     {
+      "name": "list_formats",
+      "description": "List the video formats (concepts) that fit this footage, best first: a 101 tutorial, a numbered list with chapter cards, a quote then the reveal on the drop, a transformation, a dialogue then the twist, a story in captions, a rep counter, a POV, myth vs fact, a beat montage, do this not that, one take, and the loop ending device. Each comes with why it fits (from the clips and their analysis), the creator's own use of it (from their reference videos), its beats (hook, middle, payoff, timed against the song's drop), its text pattern and title forms, its music, length, pace and vibes, and how it plays. One or two formats the creator has not used are marked NEW TO THE CREATOR: at most one of them per edit, unless the creator asked for something new. Formats an earlier version of this project used are marked when the creator asked for a new idea: do not pick them. Call it once before plan_edit, then put the format you choose in plan_edit. Give all true to also see the formats that do not fit and why.",
+      "strict": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "all": {
+            "type": "boolean",
+            "description": "Optional. True to list the formats that do not fit this footage too, with what they would need."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "plan_edit",
-      "description": "Write your creative plan before the first edit. It is the understand step: from the footage, the analysis and the brief, say what kind of video this is and what you will make of it. content_type is one of talking, unboxing_product, workout, vlog, tutorial or general (the genre of the footage); playbook is the playbook you will follow (usually the same, general when nothing fits well). story is the video in one line (at most 140 characters), hook what the first 1 to 2 seconds show (at most 140), arc how it builds (at most 240), ending how it ends (at most 140). target_length_s is the length you aim for in whole seconds, 5 to 120. tempo_bpm is the beat grid's tempo, 120 to 128 for a short video cut to music later, or 0 for a video that follows speech and has no beat grid (60 to 200 are allowed). pace is steady, building or fast. shots is the shot list, 1 to 16 shots in order: its role (hook, build, peak, detail, step, reveal, payoff, broll or ending), what it shows in a few words (at most 80 characters), optionally the clip it comes from (asset_id from list_footage), its length in beats (1 to 64; with tempo_bpm 0 a beat is half a second), optionally the effect it gets (none, punch_in, push_in, pull_back, shake, speed_ramp, whip, zoom_through, flash or punch; handheld is the living camera of a tripod shot, camera motion and not an effect) and optionally its chapter (the number of the exercise or step it belongs to in a listicle, 1 to 9, which gets a numbered chapter title). With a song, tempo_bpm is the song's tempo rounded. The plan is a short working note, not an essay: think briefly before you call it, and keep every field brief; a call that is too long is cut off at the output limit and you have to send it again. The creator sees the plan in the run feed. The answer gives you the playbook for the genre you chose, the length of a beat in milliseconds and what your shot list adds up to. You can call it again to change the plan; the last one counts. The first edit_timeline call is refused until you have a plan.",
+      "description": "Write your creative plan before the first edit. It is the understand step: from the footage, the analysis and the brief, say what kind of video this is and what you will make of it. format is the concept you chose with list_formats (format_why says why in a sentence, format_mix optionally a second card whose device you borrow). content_type is one of talking, unboxing_product, workout, vlog, tutorial or general (the genre of the footage); playbook is the playbook you will follow (usually the same, general when nothing fits well). story is the video in one line (at most 140 characters), hook what the first 1 to 2 seconds show (at most 140), arc how it builds (at most 240), ending how it ends (at most 140). target_length_s is the length you aim for in whole seconds, 5 to 120. tempo_bpm is the beat grid's tempo, 120 to 128 for a short video cut to music later, or 0 for a video that follows speech and has no beat grid (60 to 200 are allowed). pace is steady, building or fast. shots is the shot list, 1 to 16 shots in order: its role (hook, build, peak, detail, step, reveal, payoff, broll or ending), what it shows in a few words (at most 80 characters), optionally the clip it comes from (asset_id from list_footage), its length in beats (1 to 64; with tempo_bpm 0 a beat is half a second), optionally the effect it gets (none, punch_in, push_in, pull_back, shake, speed_ramp, whip, zoom_through, flash or punch; handheld is the living camera of a tripod shot, camera motion and not an effect) and optionally its chapter (the number of the exercise or step it belongs to in a listicle, 1 to 9, which gets a numbered chapter title). With a song, tempo_bpm is the song's tempo rounded. The plan is a short working note, not an essay: think briefly before you call it, and keep every field brief; a call that is too long is cut off at the output limit and you have to send it again. The creator sees the plan in the run feed. The answer gives you the beats of the format you chose, the playbook for the genre you chose, the length of a beat in milliseconds and what your shot list adds up to. You can call it again to change the plan; the last one counts. The first edit_timeline call is refused until you have a plan.",
       "strict": true,
       "input_schema": {
         "type": "object",
@@ -106,6 +121,20 @@
             "type": "string",
             "enum": ["talking", "unboxing_product", "workout", "vlog", "tutorial", "general"],
             "description": "The kind of video the footage is: talking, unboxing_product, workout, vlog, tutorial or general."
+          },
+          "format": {
+            "type": "string",
+            "enum": ["form_check", "meme_dialogue", "montage", "myth_fact", "numbered_listicle", "one_take", "pov", "quote_reveal", "rep_counter", "story_captions", "transformation", "tutorial_101"],
+            "description": "The format (the concept) of this video, from list_formats: pick it first, from the formats that fit this footage. Its beats set the structure; the playbook sets the craft."
+          },
+          "format_why": {
+            "type": "string",
+            "description": "Why this format fits this footage, in one sentence for the creator, at most 140 characters."
+          },
+          "format_mix": {
+            "type": "string",
+            "enum": ["none", "loop_ending", "form_check", "meme_dialogue", "montage", "myth_fact", "numbered_listicle", "one_take", "pov", "quote_reveal", "rep_counter", "story_captions", "transformation", "tutorial_101"],
+            "description": "Optional. A second card whose device the video borrows (loop_ending, say, or the counter of rep_counter), or none. At most one format new to the creator in the plan, unless the creator asked for something new."
           },
           "story": {
             "type": "string",
@@ -179,7 +208,7 @@
             }
           }
         },
-        "required": ["content_type", "story", "hook", "arc", "ending", "playbook", "target_length_s", "tempo_bpm", "pace", "shots"],
+        "required": ["content_type", "format", "format_why", "story", "hook", "arc", "ending", "playbook", "target_length_s", "tempo_bpm", "pace", "shots"],
         "additionalProperties": false
       }
     },

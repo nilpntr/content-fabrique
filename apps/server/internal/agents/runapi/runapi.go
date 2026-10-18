@@ -157,7 +157,16 @@ func (h *Runs) startEdit(ctx context.Context, req api.StartEditRequestObject) (s
 			return store.AgentRun{}, bad("vibe must be one of " + fmt.Sprint(editor.Vibes))
 		}
 	}
-	input, err := editor.NewEditInput(instructions, vibe)
+	newIdea := in.NewIdea != nil && *in.NewIdea
+	// A new idea avoids the formats of the project's earlier versions (their runs' plans). Read before the run is created, outside its
+	// lock: a version made meanwhile only adds a format the run may not know to avoid.
+	var avoid []string
+	if newIdea {
+		if avoid, err = editor.ProjectFormats(ctx, h.svc.Store, who.Workspace, project); err != nil {
+			return store.AgentRun{}, h.internal(ctx, "the formats of the project", err)
+		}
+	}
+	input, err := editor.NewEditInputWith(editor.EditOptions{Instructions: instructions, Vibe: vibe, NewIdea: newIdea, AvoidFormats: avoid})
 	if err != nil {
 		return store.AgentRun{}, bad("instructions must be text of at most 2,000 characters")
 	}
@@ -195,6 +204,15 @@ func (h *Runs) startEdit(ctx context.Context, req api.StartEditRequestObject) (s
 		if !slices.ContainsFunc(footage, func(r store.ProjectFootageRow) bool { return r.Kind == store.AssetKindVideo }) {
 			return errNoFootage
 		}
+		if newIdea {
+			versions, err := tx.ListTimelineVersions(ctx, who.Workspace, project, 0, 1)
+			if err != nil {
+				return err
+			}
+			if len(versions) == 0 {
+				return errNoVideo
+			}
+		}
 		_, err = tx.ActiveAgentRunForProject(ctx, who.Workspace, project, editor.Name)
 		switch {
 		case err == nil:
@@ -217,6 +235,8 @@ func (h *Runs) startEdit(ctx context.Context, req api.StartEditRequestObject) (s
 		return store.AgentRun{}, &failure{http.StatusUnprocessableEntity, api.ErrorCodeAssetsNotUsable, "the project has no ready video clip to edit"}
 	case errors.Is(err, errActive):
 		return store.AgentRun{}, &failure{http.StatusConflict, api.ErrorCodeRunInProgress, "the project already has an editor run that has not finished"}
+	case errors.Is(err, errNoVideo):
+		return store.AgentRun{}, &failure{http.StatusConflict, api.ErrorCodeNoVideoYet, "a new idea needs a video of the project to start from; make the first one"}
 	case errors.Is(err, store.ErrInsufficientCredits):
 		// The stable code the web app opens its upgrade dialog on. The message carries no numbers: the balance is in GET /v1/me.
 		return store.AgentRun{}, &failure{http.StatusPaymentRequired, api.ErrorCodeCreditsExhausted, "this workspace does not have enough credits for this edit"}
@@ -245,6 +265,7 @@ func (h *Runs) startEdit(ctx context.Context, req api.StartEditRequestObject) (s
 var (
 	errNoFootage = errors.New("runapi: the project has no ready clip")
 	errActive    = errors.New("runapi: the project has an unfinished editor run")
+	errNoVideo   = errors.New("runapi: the project has no version to start a new idea from")
 )
 
 // ---- GetRun -----------------------------------------------------------------------------------------------------
@@ -556,6 +577,10 @@ func runOf(r store.AgentRun, events []store.AgentEvent) api.Run {
 	if !r.ProjectID.IsZero() {
 		p := r.ProjectID.String()
 		out.ProjectId = &p
+	}
+	if r.Agent == editor.Name && editor.IsNewIdea(r.Input) {
+		yes := true
+		out.NewIdea = &yes
 	}
 	if summary, version := runtime.OutputSummary(r.Output); summary != "" || version != nil {
 		if summary != "" {

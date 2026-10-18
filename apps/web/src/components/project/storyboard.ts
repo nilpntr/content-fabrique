@@ -20,7 +20,19 @@ export interface StoryCard {
   place: "first" | "middle" | "last";
 }
 
+/** The idea of the video, in plain words: "Transformation reveal", and why it fits. */
+export interface StoryIdea {
+  name: string;
+  why?: string;
+  /** "with a seamless loop". */
+  mix?: string;
+  /** The creator's own videos never use this format. */
+  isNew: boolean;
+}
+
 export interface Storyboard {
+  /** The format the editor chose, when the plan names one. */
+  idea?: StoryIdea;
   /** The editor's story in a sentence, when the plan has one. */
   intro?: string;
   /** "About 25 seconds". */
@@ -146,7 +158,27 @@ export function storyboardFromPlan(plan: CreativePlan, assetTitles: ReadonlyMap<
     };
   });
   const length = lengthWords(plan.estimatedLengthMs ?? (plan.targetLengthS ? plan.targetLengthS * 1000 : undefined));
-  return { ...(plan.story ? { intro: plan.story } : {}), ...(length ? { length } : {}), ...fold(cards) };
+  const idea = storyIdea(plan);
+  return { ...(idea ? { idea } : {}), ...(plan.story ? { intro: plan.story } : {}), ...(length ? { length } : {}), ...fold(cards) };
+}
+
+/** The plan's format as the storyboard says it. */
+export function storyIdea(plan: CreativePlan | undefined): StoryIdea | undefined {
+  const idea = plan?.idea;
+  if (!idea) return undefined;
+  return {
+    name: idea.name,
+    ...(idea.why ? { why: idea.why } : {}),
+    ...(idea.mixName ? { mix: `with a ${lowerFirst(idea.mixName)}` } : {}),
+    isNew: idea.newToCreator,
+  };
+}
+
+/** "Version 3 · new idea: transformation reveal" for a version a new idea made; the version's name otherwise. */
+export function versionLabel(versionName: string, plan: CreativePlan | undefined, newIdea: boolean): string {
+  const idea = plan?.idea;
+  if (!newIdea || !idea) return versionName;
+  return `${versionName} · new idea: ${lowerFirst(idea.name)}`;
 }
 
 /** The effect of a clip on the timeline worth a word: its camera move, else a speed ramp, else how it comes in. */

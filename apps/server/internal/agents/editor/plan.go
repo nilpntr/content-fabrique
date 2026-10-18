@@ -112,12 +112,17 @@ type Plan struct {
 	Shots             []PlanShot `json:"shots"`
 	// Vibe is the energy of the edit the plan was written for (calm, lively or hype; P6-06).
 	Vibe string `json:"vibe,omitempty"`
+	// Format is the format (the concept) of the video and why (docs/design/formats-v1.md); nil for a plan from before formats.
+	Format *PlanFormat `json:"format,omitempty"`
 	// PromptVersion is the editor prompt the plan was written under.
 	PromptVersion string `json:"prompt_version"`
 }
 
 type planArgs struct {
 	ContentType   string         `json:"content_type"`
+	Format        string         `json:"format"`
+	FormatWhy     string         `json:"format_why"`
+	FormatMix     string         `json:"format_mix,omitempty"`
 	Story         string         `json:"story"`
 	Hook          string         `json:"hook"`
 	Arc           string         `json:"arc"`
@@ -395,6 +400,16 @@ func (d Deps) planEdit(ctx context.Context, rc runtime.RunContext, in planArgs) 
 	if err != nil {
 		return runtime.Result{}, err
 	}
+	// The format first (formats.go): one of the library's that fits this footage, and for a new idea not one of the earlier versions'.
+	fits, fc, err := d.formatFits(ctx, rc)
+	if err != nil {
+		return runtime.Result{}, err
+	}
+	format, formatNotes, err := planFormat(in, fc.input, fits, fc.creatorKnown)
+	if err != nil {
+		return runtime.Result{}, err
+	}
+	plan.Format = format
 	if st != nil {
 		plan.Vibe = st.Resolved.Vibe // this run's, else the creator's style's (P6-05b)
 	} else if ri, ierr := parseInput(rc.Input); ierr == nil {
@@ -413,8 +428,12 @@ func (d Deps) planEdit(ctx context.Context, rc runtime.RunContext, in planArgs) 
 	tracePlan(ctx, plan)
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "Plan saved (it is shown to the creator). Content type %s, playbook %s.\n", plan.ContentType, plan.PlaybookVersion)
+	fmt.Fprintf(&b, "Plan saved (it is shown to the creator). Content type %s, playbook %s, format %s.\n", plan.ContentType, plan.PlaybookVersion, plan.Format.ID)
 	b.WriteString(plan.describe())
+	b.WriteString(formatGuide(plan.Format, plan))
+	for _, n := range formatNotes {
+		b.WriteString("Note: " + n + "\n")
+	}
 	set := settingsOf(st)
 	if d := Pace(firmStyle(style), plan.ContentType, plan.Vibe, paceSetting(set)).Describe(); d != "" {
 		b.WriteString(d + "\n")

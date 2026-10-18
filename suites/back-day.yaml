@@ -23,6 +23,11 @@ defaults:
   vibe: lively
   budget_usd: 1.00
   references_dir: PLACEHOLDER_references_dir
+# Rubric items of every case but the calibration ones (judge_edit.v5 is shown the format the plan chose and the creator's usual formats).
+rubric:
+  - id: clear-concept
+    text: "A clear concept: a viewer could say in a few words what the video is (a 101 tutorial, a numbered list, a reveal on the drop, ...); its hook sets the format up, the middle delivers it and the payoff lands."
+    weight: 1
 cases:
   - id: back-day-lively
     title: "Back day, lively, the creator's song"
@@ -60,6 +65,19 @@ cases:
     vibe: hype
     held_out: true
     stored: {project: prj_PLACEHOLDER_hype, version: 1}
+  # "Try another idea" on a finished back-day project. Without --live the stored new-idea version is judged. With --live each sample
+  # makes a new version on the stored project (the project gains versions) in a format none of the versions up to idea_from used, so
+  # the --repeat samples avoid the same formats and stay comparable.
+  - id: back-day-new-idea
+    title: "Back day, try another idea"
+    vibe: lively
+    new_idea: true
+    idea_from: 1
+    stored: {project: prj_PLACEHOLDER_new_idea, version: 2}
+    expectations:
+      - id: novelty
+        text: "Novelty against the creator's usual formats: a different concept from their go-to formats and from the project's first version, still in their style, and done well."
+        weight: 1
   # The calibration set: the founder called v4 of this project "sick", except its transitions.
   - id: calibration-founder-v4
     title: "Founder's verdict: v4 'sick' except the transitions"

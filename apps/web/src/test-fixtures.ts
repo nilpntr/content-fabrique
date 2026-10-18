@@ -389,11 +389,23 @@ const stored = (seq: number, kind: string, callSeq: number | null, data: unknown
   created_at: NOW,
 });
 
-/** What `GET /v1/runs/{id}/artifacts` returns for the v2 run: the whole plan and both rounds of checks (the artifact events are the ones at seq 16, 23 and 30 of `v2RunEvents`). */
-export function v2Artifacts(): RunArtifacts {
+/** A plan's format (formats-v1): a transformation, new to the creator, with a loop mixed in. */
+export const PLAN_FORMAT = {
+  id: "transformation",
+  name: "Transformation reveal",
+  why: "The old mirror photo and today's pose make a then and now.",
+  mix: "loop_ending",
+  mix_name: "Seamless loop",
+  new_to_creator: true,
+  new_idea: true,
+  library: "formats@test",
+};
+
+/** What `GET /v1/runs/{id}/artifacts` returns for the v2 run: the whole plan and both rounds of checks (the artifact events are the ones at seq 16, 23 and 30 of `v2RunEvents`). `format` adds a format to the plan. */
+export function v2Artifacts({ format }: { format?: object } = {}): RunArtifacts {
   return {
     artifacts: [
-      stored(16, "creative_plan", 14, PLAN_PAYLOAD),
+      stored(16, "creative_plan", 14, format ? { ...PLAN_PAYLOAD, format } : PLAN_PAYLOAD),
       stored(23, "edit_check", 21, CHECKS_ROUND_1),
       stored(30, "edit_check", 28, CHECKS_ROUND_2),
     ],
