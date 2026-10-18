@@ -1,6 +1,6 @@
 import { annotation, apiAsset, assetId, event, project, projectId, projectSummary, readyRender, renderId, run, runId, callIdOf, timelineVersion, v2Artifacts, v2Run, v2Spec, versionSummary } from "@/test-fixtures";
 
-/** The scenario of a page, from its address: `?credits=ok|low|empty|none&run=done|working|failed|question&runcredits=charged|revision|refunded|none&artifacts=api|none&video=<url>&posters=<url with {n}>`. */
+/** The scenario of a page, from its address: `?credits=ok|low|empty|none&run=done|working|failed|question&runcredits=charged|revision|refunded|none&artifacts=api|none&video=<url>&posters=<url with {n}>&projects=some|none`. */
 export interface Scenario {
   credits: "none" | "ok" | "low" | "empty";
   run: "done" | "working" | "failed" | "question";
@@ -12,6 +12,8 @@ export interface Scenario {
   video?: string;
   /** Posters for the clips instead of gradients: an address with `{n}` for the clip's number. */
   posters?: string;
+  /** `none`: a brand-new workspace with no projects yet. */
+  projects: "some" | "none";
 }
 
 export function scenarioOf(search: URLSearchParams): Scenario {
@@ -26,6 +28,7 @@ export function scenarioOf(search: URLSearchParams): Scenario {
     artifacts: pick("artifacts", ["api", "none"], "api"),
     video: search.get("video") ?? undefined,
     posters: search.get("posters") ?? undefined,
+    projects: pick("projects", ["some", "none"], "some"),
   };
 }
 
@@ -122,6 +125,7 @@ export function installFakeApi(scenario: Scenario): void {
     if (method === "GET") {
       if (path === "/v1/me") return json(me);
       if (path === "/v1/assets") return json({ items: CLIPS.map((clip) => clipAsset(clip, scenario.posters)), next_cursor: null });
+      if (path === "/v1/projects" && scenario.projects === "none") return json({ items: [], next_cursor: null });
       if (path === "/v1/projects") {
         const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
         return json({
