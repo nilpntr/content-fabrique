@@ -155,5 +155,3 @@ func Schedule(it timeline.GraphicsItem, lines int) Timing {
 	return t
 }
 
-// StaggerMs is the stagger the templates use between elements that no accent places.
-func (f Feel) Stagger() int64 { return f.StaggerMs }

@@ -215,7 +215,6 @@ func trimFloat(f float64) string {
 }
 
 func round2(f float64) float64 { return math.Round(f*100) / 100 }
-func round3(f float64) float64 { return math.Round(f*1000) / 1000 }
 
 func ptr[T any](v T) *T { return &v }
 

@@ -69,7 +69,7 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl unzip dpkg-dev \
       libx11-6 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 libxcb1 libxkbcommon0 \
-      libasound2t64 libatk1.0-0t64 libatspi2.0-0t64 libdbus-1-3 libexpat1 libgbm1 libglib2.0-0t64 libnspr4 libnss3
+      libasound2t64 libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 libdbus-1-3 libexpat1 libgbm1 libglib2.0-0t64 libnspr4 libnss3
 # Chrome for Testing: the archive of this architecture, checked, unpacked and pruned to what a headless capture needs (no other
 # locales, no hyphenation dictionaries, no SwiftShader or Vulkan: the GPU is off and Skia rasterises in software).
 RUN set -eux; \
@@ -226,8 +226,9 @@ USER 10001:10001
 WORKDIR /work
 ARG SRC_HASH=unknown
 LABEL org.opencontainers.image.title="media-tools" \
-      org.opencontainers.image.description="ffmpeg 8, ffprobe and whisper.cpp for Content Fabrique sandboxes" \
+      org.opencontainers.image.description="ffmpeg 8, ffprobe, whisper.cpp and the motion-graphics renderer (chrome-headless-shell, cf-motion) for Content Fabrique sandboxes" \
       org.opencontainers.image.licenses="GPL-2.0-or-later" \
       org.opencontainers.image.source="https://github.com/nilpntr/content-fabrique" \
       org.contentfabrique.fonts="1" \
+      org.contentfabrique.motion="1" \
       org.contentfabrique.src-hash="${SRC_HASH}"

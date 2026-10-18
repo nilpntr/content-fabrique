@@ -91,6 +91,10 @@ type Config struct {
 	MediaConcurrency int
 	// RenderConcurrency is RENDER_CONCURRENCY: renders that run at once on one worker (they have a queue of their own).
 	RenderConcurrency int
+	// MotionGraphics is MOTION_GRAPHICS: "on" (the default) renders the graphics track's templates with headless Chrome in the media
+	// sandbox (D-35); "off" draws them as ASS text with each template's fallback animation, the operator's switch when the overlay
+	// renderer misbehaves.
+	MotionGraphics bool
 
 	// Transcription (P2-05, D-27); see loadTranscribe.
 	//
@@ -294,6 +298,14 @@ func (c *Config) loadMedia(getenv Getenv) []error {
 		} else {
 			c.RenderConcurrency = n
 		}
+	}
+	c.MotionGraphics = true
+	switch raw := strings.ToLower(strings.TrimSpace(getenv("MOTION_GRAPHICS"))); raw {
+	case "", "on":
+	case "off":
+		c.MotionGraphics = false
+	default:
+		errs = append(errs, fmt.Errorf("MOTION_GRAPHICS: %q is not on or off", raw))
 	}
 	return errs
 }

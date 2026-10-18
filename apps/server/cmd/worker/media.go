@@ -92,6 +92,8 @@ func newRenderPipeline(cfg config.Config, st *store.Store, objects *storage.Clie
 		CPUs:    limits.CPU,
 		Meter:   meter,
 		Logger:  logger,
+		// MOTION_GRAPHICS=off draws the graphics track as ASS text (D-35).
+		MotionFallback: !cfg.MotionGraphics,
 	})
 }
 
@@ -105,8 +107,18 @@ func imageHasFonts(inspectOutput string) bool {
 	return len(f) >= 2 && f[1] == "1"
 }
 
-// imageInspectFormat prints the image id and the fonts label ("<no value>" when the image has none).
-const imageInspectFormat = `{{.Id}} {{index .Config.Labels "` + fontsLabel + `"}}`
+// motionLabel is the label the media-tools Dockerfile sets when the image holds the motion-graphics renderer (chrome-headless-shell and
+// cf-motion, D-35). An image built before it lacks it, and every render with a graphics track would fail.
+const motionLabel = "org.contentfabrique.motion"
+
+// imageHasMotion reads the third field of imageInspectFormat's output, the motion label.
+func imageHasMotion(inspectOutput string) bool {
+	f := strings.Fields(inspectOutput)
+	return len(f) >= 3 && f[2] == "1"
+}
+
+// imageInspectFormat prints the image id, the fonts label and the motion label ("<no value>" when the image has none).
+const imageInspectFormat = `{{.Id}} {{index .Config.Labels "` + fontsLabel + `"}} {{index .Config.Labels "` + motionLabel + `"}}`
 
 // warnIfImageMissing logs when a container provider is selected and the media-tools image is not on this machine: the
 // sandbox never pulls at job time, so every ingest would fail until the image is built or loaded. It also logs when the image
@@ -126,5 +138,9 @@ func warnIfImageMissing(ctx context.Context, cfg config.Config, logger *slog.Log
 	if !imageHasFonts(string(out)) {
 		logger.Warn("the media-tools image has no title and caption fonts (it was built before they were added); renders with text will fail until it is rebuilt: task media:build",
 			"image", cfg.MediaToolsImage, "label", fontsLabel)
+	}
+	if cfg.MotionGraphics && !imageHasMotion(string(out)) {
+		logger.Warn("the media-tools image has no motion-graphics renderer (it was built before it was added); renders with a graphics track will fail until it is rebuilt (task media:build) or MOTION_GRAPHICS=off draws them as text",
+			"image", cfg.MediaToolsImage, "label", motionLabel)
 	}
 }

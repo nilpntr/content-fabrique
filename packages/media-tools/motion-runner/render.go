@@ -12,6 +12,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +35,7 @@ type Options struct {
 type Manifest struct {
 	Version  int             `json:"version"`
 	Chrome   string          `json:"chrome"`
+	Arch     string          `json:"arch"`
 	Segments []SegmentResult `json:"segments"`
 	Timing   Timing          `json:"timing"`
 }
@@ -152,7 +154,7 @@ func run(ctx context.Context, o Options) (err error) {
 	}
 	loaded := time.Now()
 
-	m := Manifest{Version: 1, Chrome: version.Product}
+	m := Manifest{Version: 1, Chrome: version.Product, Arch: runtime.GOARCH}
 	checks := inkChecks(job)
 	for k, seg := range job.Segments {
 		dir := fmt.Sprintf("s%d", k)

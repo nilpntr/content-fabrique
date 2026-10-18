@@ -67,8 +67,10 @@ func BundleHash() string {
 }
 
 // StageBundle writes the bundle into dir (which must exist), readable by any uid: the sandbox user may not be ours.
-func StageBundle(dir string) error {
-	return fs.WalkDir(Bundle(), ".", func(p string, d fs.DirEntry, err error) error {
+func StageBundle(dir string) error { return stage(Bundle(), dir) }
+
+func stage(bundle fs.FS, dir string) error {
+	return fs.WalkDir(bundle, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -76,7 +78,7 @@ func StageBundle(dir string) error {
 		if d.IsDir() {
 			return os.MkdirAll(dst, 0o755) //nolint:gosec // read by the sandbox user
 		}
-		data, err := fs.ReadFile(Bundle(), p)
+		data, err := fs.ReadFile(bundle, p)
 		if err != nil {
 			return err
 		}
@@ -98,7 +100,9 @@ type Options struct {
 
 // Report is what a run did, from the runner's manifest.
 type Report struct {
-	Chrome   string
+	Chrome string
+	// Arch is the architecture the runner ran on (Skia's software raster is deterministic per architecture).
+	Arch     string
 	Frames   int64
 	Timing   ManifestTiming
 	Duration time.Duration
@@ -108,6 +112,7 @@ type Report struct {
 type Manifest struct {
 	Version  int               `json:"version"`
 	Chrome   string            `json:"chrome"`
+	Arch     string            `json:"arch"`
 	Segments []ManifestSegment `json:"segments"`
 	Timing   ManifestTiming    `json:"timing"`
 }
@@ -138,11 +143,16 @@ var ErrRun = errors.New("motion: the overlay render failed")
 
 // Render runs job through runner with work as the job's work directory (its one writable mount), and checks what comes back. The
 // frames are left in work/motion for the render's ffmpeg. bundleDir is a directory the bundle is staged into (inside the provider's
-// allowed roots, and not inside work).
+// allowed roots; the render stages it inside work).
 func Render(ctx context.Context, runner media.Runner, job Job, work, bundleDir string, o Options) (Report, error) {
+	return render(ctx, runner, job, work, bundleDir, o, Bundle())
+}
+
+// render is Render with the bundle to stage: the sandbox tests run hostile pages through the same path.
+func render(ctx context.Context, runner media.Runner, job Job, work, bundleDir string, o Options, bundle fs.FS) (Report, error) {
 	start := time.Now()
 	_ = os.RemoveAll(filepath.Join(work, OutDir))
-	if err := StageBundle(bundleDir); err != nil {
+	if err := stage(bundle, bundleDir); err != nil {
 		return Report{}, fmt.Errorf("motion: stage the bundle: %w", err)
 	}
 	data, err := job.Encode()
@@ -178,7 +188,7 @@ func Render(ctx context.Context, runner media.Runner, job Job, work, bundleDir s
 	if err != nil {
 		return Report{}, err
 	}
-	return Report{Chrome: m.Chrome, Frames: job.TotalFrames(), Timing: m.Timing, Duration: time.Since(start)}, nil
+	return Report{Chrome: m.Chrome, Arch: m.Arch, Frames: job.TotalFrames(), Timing: m.Timing, Duration: time.Since(start)}, nil
 }
 
 // ReadManifest reads the runner's manifest from out and checks it against the job: one segment per job segment with the same

@@ -78,11 +78,14 @@ const SpillMargin = 0.02
 const MaxSegments = 64
 
 // BuildJob makes the job for items on an output rendered at w x h pixels (the profile's size) and fps.
-func BuildJob(out timeline.Output, w, h, fps int, totalFrames int64, items []Resolved) (Job, error) {
+//
+// The frames are always the output's own size (a device scale factor of 1): Chrome's software raster is deterministic at 1 and not at
+// a fractional factor, so a smaller render (the preview) scales the frames in ffmpeg (render.overlayGraph).
+func BuildJob(out timeline.Output, fps int, totalFrames int64, items []Resolved) (Job, error) {
 	if len(items) == 0 {
 		return Job{}, fmt.Errorf("motion: no items")
 	}
-	j := Job{Version: 1, Width: w, Height: h, CSSWidth: out.Width, CSSHeight: out.Height, FPS: fps}
+	j := Job{Version: 1, Width: out.Width, Height: out.Height, CSSWidth: out.Width, CSSHeight: out.Height, FPS: fps}
 	sorted := slices.Clone(items)
 	sort.SliceStable(sorted, func(a, b int) bool { return sorted[a].Item.AtMs < sorted[b].Item.AtMs })
 	hash := fnv.New32a()

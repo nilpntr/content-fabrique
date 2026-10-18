@@ -70,6 +70,12 @@
       "binaryLicence": "ISC",
       "copyrightSha256": "c3eb686a3786caa0e3033ee78908b6996a60fe9d163ecf7dc1c61871e19f88b7"
     },
+    "libatk-bridge2.0-0t64": {
+      "category": "copyleft-exception",
+      "binaryLicence": "LGPL-2.1-or-later",
+      "copyrightSha256": "72fbc9d2c44016dd061f3f63f75253e57089bcd23a4f9023039de4631e7cf918",
+      "reason": "A shared library chrome-headless-shell loads (directly or through GLib). Chrome and its libraries run as a separate process inside the media sandbox (the motion-graphics renderer, D-35); never linked into our code and never distributed."
+    },
     "libatk1.0-0t64": {
       "category": "copyleft-exception",
       "binaryLicence": "LGPL-2.1-or-later",

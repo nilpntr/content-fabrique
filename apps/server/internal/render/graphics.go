@@ -155,7 +155,7 @@ func (c *compiler) graphics() error {
 	if len(resolved) == 0 {
 		return nil
 	}
-	job, err := motion.BuildJob(c.spec.Output, c.w, c.h, c.fps, c.total, resolved)
+	job, err := motion.BuildJob(c.spec.Output, c.fps, c.total, resolved)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidSpec, err)
 	}
@@ -204,15 +204,21 @@ func (c *compiler) overlayGraph(cur, out string) []string {
 	}
 	var stmts []string
 	base := len(c.inputs)
+	d := c.profile.SizeDivisor
 	for k, s := range m.Job.Segments {
 		in := fmt.Sprintf("%d:v", base+k)
 		ov := "mo" + strconv.Itoa(k)
-		stmts = append(stmts, chain([]string{in}, []string{"setpts=PTS-STARTPTS+" + c.frameSecs(s.StartFrame) + "/TB"}, ov))
+		filters := []string{"setpts=PTS-STARTPTS+" + c.frameSecs(s.StartFrame) + "/TB"}
+		if d > 1 {
+			// The frames are the output's own size (motion.BuildJob); a smaller profile scales them, area-averaged.
+			filters = append(filters, fmt.Sprintf("scale=%d:%d:flags=area", max(1, s.Clip.W/d), max(1, s.Clip.H/d)))
+		}
+		stmts = append(stmts, chain([]string{in}, filters, ov))
 		next := "mv" + strconv.Itoa(k)
 		if k == len(m.Job.Segments)-1 {
 			next = out
 		}
-		stmts = append(stmts, chain([]string{cur, ov}, []string{fmt.Sprintf("overlay=x=%d:y=%d:eof_action=pass:repeatlast=0:format=auto", s.Clip.X, s.Clip.Y)}, next))
+		stmts = append(stmts, chain([]string{cur, ov}, []string{fmt.Sprintf("overlay=x=%d:y=%d:eof_action=pass:repeatlast=0:format=auto", s.Clip.X/d, s.Clip.Y/d)}, next))
 		cur = next
 	}
 	return stmts

@@ -131,7 +131,7 @@ func alphaOf(img image.Image) func(x, y int) uint8 {
 		// Formats without alpha (an opaque capture) are all ink.
 		return func(x, y int) uint8 {
 			_, _, _, a := img.At(x, y).RGBA()
-			return uint8(a >> 8)
+			return uint8(a >> 8) //nolint:gosec // a 16-bit alpha shifted to 8 bits
 		}
 	}
 }

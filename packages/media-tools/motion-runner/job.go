@@ -122,7 +122,9 @@ func (j *Job) Scale() float64 { return float64(j.Width) / float64(j.CSSWidth) }
 func (j *Job) FrameMs(n int64) float64 { return float64(n) * 1000 / float64(j.FPS) }
 
 // FrameAt is the frame on screen at time ms: the last frame that starts at or before it.
-func (j *Job) FrameAt(ms int64) int64 { return int64(math.Floor(float64(ms)*float64(j.FPS)/1000 + 1e-9)) }
+func (j *Job) FrameAt(ms int64) int64 {
+	return int64(math.Floor(float64(ms)*float64(j.FPS)/1000 + 1e-9))
+}
 
 // TotalFrames is the number of frames the job renders.
 func (j *Job) TotalFrames() int64 {
@@ -147,12 +149,11 @@ func (j *Job) check() error {
 			return fmt.Errorf("size %dx%d (layout %dx%d) is outside 16 to %d", j.Width, j.Height, j.CSSWidth, j.CSSHeight, maxSide)
 		}
 	}
-	if j.Width > j.CSSWidth || j.Height > j.CSSHeight {
-		return fmt.Errorf("frames of %dx%d are bigger than the %dx%d layout", j.Width, j.Height, j.CSSWidth, j.CSSHeight)
-	}
-	// The frame is the layout scaled by one factor; the height may be rounded up to an even number by the render profile.
-	if want := float64(j.CSSHeight) * j.Scale(); math.Abs(want-float64(j.Height)) > 1.01 {
-		return fmt.Errorf("frames of %dx%d are not the %dx%d layout scaled by one factor", j.Width, j.Height, j.CSSWidth, j.CSSHeight)
+	// Frames are rendered at the layout's own size (a device scale factor of 1): at a fractional factor Chrome's software raster
+	// is not deterministic from run to run (measured: frames of animated text differ between two renders at 0.5, never at 1). A
+	// smaller render (the preview) scales the frames in ffmpeg.
+	if j.Width != j.CSSWidth || j.Height != j.CSSHeight {
+		return fmt.Errorf("frames of %dx%d are not the %dx%d layout: render at the layout's size and scale in ffmpeg", j.Width, j.Height, j.CSSWidth, j.CSSHeight)
 	}
 	if len(j.Segments) == 0 || len(j.Segments) > maxSegments {
 		return fmt.Errorf("%d segments, want 1 to %d", len(j.Segments), maxSegments)

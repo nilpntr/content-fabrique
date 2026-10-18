@@ -82,6 +82,7 @@ To review a version bump, `--print-shas` prints each component's current copyrig
 | golang-runtime | 1.27.2 | BSD-3-clause | permissive | prose only |
 | libasound2t64 | 1.2.14-1+deb13u1 | LGPL-2.1-or-later | named exception | LGPL-2.1+ |
 | libass9 | 1:0.17.3-1+deb13u1 | ISC | permissive | BSD-2-clause, GPL-2+, ISC, NTP, Unlicense |
+| libatk-bridge2.0-0t64 | 2.56.2-1+deb13u2 | LGPL-2.1-or-later | named exception | AFL-2.1, GPL-2, GPL-2+, LGPL-2+, LGPL-2.1+, public-domain |
 | libatk1.0-0t64 | 2.56.2-1+deb13u2 | LGPL-2.1-or-later | named exception | AFL-2.1, GPL-2, GPL-2+, LGPL-2+, LGPL-2.1+, public-domain |
 | libatomic1 | 14.2.0-19 | GPL-3.0-or-later WITH GCC-exception-3.1 | named exception | prose only |
 | libatspi2.0-0t64 | 2.56.2-1+deb13u2 | LGPL-2.1-or-later | named exception | AFL-2.1, GPL-2, GPL-2+, LGPL-2+, LGPL-2.1+, public-domain |
@@ -135,6 +136,7 @@ To review a version bump, `--print-shas` prints each component's current copyrig
 - **chrome-headless-shell** (BSD-3-clause AND LGPL-2.1-or-later (bundled components)): chrome-headless-shell from Chrome for Testing: Chromium (BSD-3-Clause) with the third-party components built into it, some of them LGPL (its LICENSE file lists every one). Chrome and its libraries run as a separate process inside the media sandbox (the motion-graphics renderer, D-35); never linked into our code and never distributed. Pinned by version and by the SHA-256 of each architecture's archive.
 - **ffmpeg** (GPL-2.0-or-later): Built --enable-gpl because libx264 is GPL. Runs as a separate process in our containers; never linked into our code and never distributed (D-16 amendment). Source: ffmpeg.org release tarball checked against sourceSha256.
 - **libasound2t64** (LGPL-2.1-or-later): A shared library chrome-headless-shell loads (directly or through GLib). Chrome and its libraries run as a separate process inside the media sandbox (the motion-graphics renderer, D-35); never linked into our code and never distributed.
+- **libatk-bridge2.0-0t64** (LGPL-2.1-or-later): A shared library chrome-headless-shell loads (directly or through GLib). Chrome and its libraries run as a separate process inside the media sandbox (the motion-graphics renderer, D-35); never linked into our code and never distributed.
 - **libatk1.0-0t64** (LGPL-2.1-or-later): A shared library chrome-headless-shell loads (directly or through GLib). Chrome and its libraries run as a separate process inside the media sandbox (the motion-graphics renderer, D-35); never linked into our code and never distributed.
 - **libatomic1** (GPL-3.0-or-later WITH GCC-exception-3.1): GCC runtime library, linked by the allowed tools. The GCC Runtime Library Exception lets programs link it without becoming GPL. Part of the container's OS layer, not our code.
 - **libatspi2.0-0t64** (LGPL-2.1-or-later): A shared library chrome-headless-shell loads (directly or through GLib). Chrome and its libraries run as a separate process inside the media sandbox (the motion-graphics renderer, D-35); never linked into our code and never distributed.
