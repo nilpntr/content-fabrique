@@ -38,6 +38,7 @@
 | D-31 | Spend control: credits charged per action; every action's COGS budget is derived from its price (≤ 40 % of net credit value); caps hold across processes in the database; platform breaker | Accepted (director, 2026-10-17; founder asked) |
 | D-32 | Audio: effects are synthesised in ffmpeg and edits are checked with ffmpeg measurements; no audio models, nothing ported from earshot but its numbers and ideas | Accepted (founder decision, 2026-10-17) |
 | D-33 | Exports are sound-ready: no music and no trend sound, the clips' own sound as a low bed, effects on top, speech as the programme; amends D-03 | Proposed (director, 2026-10-17; the founder confirms) |
+| D-35 | Motion graphics are versioned HTML templates (Web Animations API) the editor picks by name and params, rendered frame by frame by chrome-headless-shell on a virtual clock inside the media sandbox and composited by ffmpeg; ASS text stays as the fallback; amends D-26's render column for graphic templates | Proposed (engineering, 2026-10-18; security review by the director, licence question for P0-12) |
 
 ---
 
@@ -582,6 +583,8 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 - Every preset gets golden tests in every format ([D-25](#d-25-output-formats-916-11-45-and-169-per-project)).
 - The style registry also covers templates.
 
+**Amended by [D-35](#d-35-motion-graphics-are-html-templates-rendered-by-headless-chrome-in-the-media-sandbox) (2026-10-18):** graphic templates render with chrome-headless-shell and our own runtime in the media sandbox (not HyperFrames), on a `graphics` track whose items name a template; the first templates are animated titles (title_pop, blur_in, chapter_card, highlight_word, counter, lower_label, outro_card), and the five above can follow on the same engine.
+
 **Revisit** when creators ask for presets we don't have, or when a template marketplace becomes worth integrating.
 
 ## D-27 Transcription: whisper.cpp locally, Workers AI Whisper when hosted
@@ -775,6 +778,29 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 - Measured on the founder's 26 s back-day edit with a bed on every clip: bed -24.2 LUFS (median short-term), effects at -11.1, -9.6 and -14.5 LUFS, integrated -21.0 LUFS, true peak -2.7 to -2.8 dBTP. (An earlier version of this decision normalised the bed and the effects together to -17 LUFS; that lifted the bed to -18, 4 LU under a trend sound, and was changed before merge.) The levers are `BedTargetLUFS`, `SoundReadyEffectGainDB` and `SoundReadyCeilingDB` in `internal/render/plan.go`.
 
 **Revisit** when the founder has listened to a few real exports, or when transcripts are available to the editor.
+
+## D-35 Motion graphics are HTML templates rendered by headless Chrome in the media sandbox
+
+> Status: **Proposed** by engineering (2026-10-18). The director reviews the security model ([motion graphics v1](design/motion-graphics-v1.md) section 5) before it ships; the licence of Chrome for Testing's headless shell joins the P0-12 legal questions. Reversible: `MOTION_GRAPHICS=off` draws every graphics item as ASS text in the same box.
+
+**Context.** The founder: the edits feel static, with no visual effect on the text entering the screen. Titles are ASS subtitles with a fade, a pop, a slide or a typewriter. The references (herk-edit-kit's motion philosophy, open-edit's HTML renderer) show what is wanted: type that moves as a character (word-by-word scale and blur, masked wipes, a marker, a counting number), landing on the beat. D-26 planned graphic templates as HTML rendered to frames (P4-11) but not how, and the render sandbox has no browser.
+
+**Decision.**
+- **Templates, not model-written code.** A versioned library of HTML/CSS/JS templates animated with the Web Animations API lives in the repo (`apps/server/internal/motion/bundle`): `title_pop`, `blur_in`, `chapter_card`, `highlight_word`, `counter`, `lower_label`, `outro_card`, each with an entrance and an exit. The timeline gets a `graphics` track whose items name a template and give it params (text, the creator's text style, colours, size, alignment, energy, beat-anchored accents), validated by the timeline schema. The editor picks templates; it never writes HTML.
+- **The box is a text item's box.** An item is laid out as its text in its style, so the text placement solver (safe zone, subject avoidance, caption band) and the validator place and check overlays exactly like text items.
+- **Rendered by chrome-headless-shell in the media sandbox.** Chrome for Testing 155, pinned by version and by the SHA-256 of each architecture's archive, and cf-motion, a standard-library Go runner, are added to the media-tools image. The runner drives Chrome over a DevTools pipe on a virtual clock (time, timers, animation frames and randomness only move when it seeks), renders only the frames where an overlay is on screen, clipped to the overlays' boxes, at the output's own size, as transparent PNGs; ffmpeg composites them before the ASS script (scaled down for the preview). Same spec, same bytes, tested by hashing per platform.
+- **Locked down.** No network (the sandbox, a dead proxy and resolver, and a request allowlist that admits only files of the read-only bundle), a CSP of `default-src 'self'` and nothing else, text only through `textContent`, fonts as bytes, all outputs read as untrusted, the job's resource limits. Chrome's own sandbox is off (it cannot start without capabilities); the container and gVisor confine it.
+- **Fail loudly, fall back by choice.** A page error, a refused request, a blank or spilling frame fails the render. The ASS text stays: text items and captions are unchanged and drawn on top, and `MOTION_GRAPHICS=off` compiles graphics items to text with each template's fallback animation.
+
+**Alternatives.** Model-written HTML per edit (unvalidated, untestable, the attack surface this avoids); more ASS (no animated masks or plates, no counting, limited easing; kept as the fallback); GSAP (custom licence with a competition clause, not needed over WAAPI); Remotion (company licence, Node in the image); HyperFrames' runtime (more than we need; we keep its template idea); Puppeteer or Playwright (Node and npm in the image); a DevTools port (addressable); ProRes 4444 or VP9 alpha intermediates (an extra encode, lossy, or a library our ffmpeg does not build); a preview at a device scale factor of 0.5 (measured not deterministic). Details in [motion graphics v1](design/motion-graphics-v1.md) section 11.
+
+**Consequences.**
+- The media-tools image grows from 75 MB to 310 MB and gains a browser to keep current: a Chrome bump is a PR with new golden hashes.
+- A 30 s edit with 20 s of overlays spends about 3 to 4 s rendering them; a preview grows from about 3 s to about 7 s on a developer Mac, inside the 10 s budget.
+- D-26's graphic templates (checklist, chart grow, cover story, ...) can be built on the same engine as more templates.
+- The editor gets a tool to list the templates and checks for overlay legibility, readable time and the torso rule (design note section 9).
+
+**Revisit** when the security review asks for Chrome's own sandbox (user namespaces under gVisor), when the licence answer prefers a Debian-built Chromium, or when overlay time matters (parallel tabs would cut it about in four).
 
 ## Template for new decisions
 

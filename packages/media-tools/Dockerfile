@@ -3,11 +3,13 @@
 # media-tools: ffmpeg 8 and ffprobe for the sandbox layer (architecture section 8, D-08, P1-03).
 #
 # What is in the image: ffmpeg, ffprobe, the exact shared libraries they load, fontconfig's config, the OFL-licensed title and
-# caption fonts of fonts/manifest.tsv (P3-04), and the licence texts and inventory of all of it. There is no shell, no coreutils and no package manager, and the user is
+# caption fonts of fonts/manifest.tsv (P3-04), chrome-headless-shell and cf-motion for the motion graphics (D-35, below), and the
+# licence texts and inventory of all of it. There is no shell, no coreutils and no package manager, and the user is
 # not root. The root filesystem is meant to run read-only: /work (the job's output mount) and /tmp (a tmpfs) are the only
 # places a job writes.
 #
-# Two labels (last lines): org.contentfabrique.fonts=1 says the image holds the fonts (the worker warns about one without it;
+# Three labels (last lines): org.contentfabrique.motion=1 says the image holds the motion-graphics renderer (the worker warns about one
+# without it); org.contentfabrique.fonts=1 says the image holds the fonts (the worker warns about one without it;
 # anything that removes the fonts must drop it), and org.contentfabrique.src-hash is the git tree hash of this directory at the
 # time of the build (scripts/media-image.sh passes it as SRC_HASH), which `task dev` compares with the tree it has now to decide
 # whether the local image is stale. The ARG sits right before the label, so a new hash changes the last layer only.
