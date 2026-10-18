@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/media"
 	"github.com/nilpntr/content-fabrique/internal/render"
 	"github.com/nilpntr/content-fabrique/internal/sandbox"
+	"github.com/nilpntr/content-fabrique/internal/subject"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
@@ -39,6 +41,9 @@ so run it through the validator first if it did not come from one.
                docker and hardened use the fonts in the image (default: found above the working directory)
   --ffmpeg     the ffmpeg binary used by --dry-run's printout, and ffprobe's directory (default: from PATH)
   --stem       also write the audio of a preview without its beat guide here (an M4A): what cfctl audio check should measure
+  --subjects   a JSON file of subject boxes per asset id ({"ast_...": {"aspect": 0.5625, "samples": [{"at_ms": 1000, "x": 0.2,
+               "y": 0.2, "w": 0.6, "h": 0.7, "head_top_y": 0.22}]}}): titles that would cover the head are moved off it, as in the
+               platform's renders, which read the boxes from the asset's quick look
   --dry-run    print the ffmpeg command line and the filter graph, and do not run it
 
 Prints the sound cues (cue_only sounds are never mixed in) and progress while it runs.
@@ -58,6 +63,7 @@ func cmdRender(args []string, stdout, stderr io.Writer) int {
 	dockerArg := flags.String("docker", "docker", "docker CLI")
 	fontsArg := flags.String("fonts-dir", "", "directory with the font files, for the local provider")
 	dryRun := flags.Bool("dry-run", false, "print the command and do not run it")
+	subjectsArg := flags.String("subjects", "", "a JSON file of subject boxes per asset id, for keeping titles off the head")
 
 	// The spec path may come before or after the flags.
 	var positional []string
@@ -99,7 +105,16 @@ func cmdRender(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "cfctl render: %s: %v\n", positional[0], err)
 		return 1
 	}
-	plan, err := render.Compile(spec, profile, &dirResolver{dir: *assetsArg, ffmpeg: *ffmpegArg})
+	res := &dirResolver{dir: *assetsArg, ffmpeg: *ffmpegArg}
+	if *subjectsArg != "" {
+		ix, err := loadSubjectsFile(*subjectsArg)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "cfctl render: %v\n", err)
+			return 1
+		}
+		res.subjects = ix
+	}
+	plan, err := render.Compile(spec, profile, res)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "cfctl render: %v\n", err)
 		return 1
@@ -219,6 +234,30 @@ func quoteAll(args []string) []string {
 type dirResolver struct {
 	dir    string
 	ffmpeg string
+	// subjects are the subject boxes of the assets (--subjects), by asset id.
+	subjects subject.Index
+}
+
+// loadSubjectsFile reads a JSON object of asset id to subject track ({"aspect": 0.5625, "samples": [...]}); a track that is not usable
+// is an error, so a typo in a hand-written file is seen.
+func loadSubjectsFile(path string) (subject.Index, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // a developer tool reading the file the developer named
+	if err != nil {
+		return nil, err
+	}
+	var raw map[string]subject.Track
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	ix := make(subject.Index, len(raw))
+	for id, t := range raw {
+		clean, ok := subject.Clean(t)
+		if !ok {
+			return nil, fmt.Errorf("%s: the subject track of %s is not usable (an aspect from %v to %v and boxes inside the frame)", path, id, subject.MinAspect, subject.MaxAspect)
+		}
+		ix[id] = clean
+	}
+	return ix, nil
 }
 
 func (r *dirResolver) Resolve(assetID string, _ render.Variant) (render.ResolvedAsset, error) {
@@ -246,7 +285,11 @@ func (r *dirResolver) Resolve(assetID string, _ render.Variant) (render.Resolved
 	if len(matches) == 0 {
 		return render.ResolvedAsset{}, fmt.Errorf("no file for asset %s in %s (want %s.<ext>)", assetID, r.dir, assetID)
 	}
-	return render.ResolvedAsset{Location: matches[0], HasAudio: r.hasAudio(matches[0])}, nil
+	ra := render.ResolvedAsset{Location: matches[0], HasAudio: r.hasAudio(matches[0])}
+	if t, ok := r.subjects[assetID]; ok {
+		ra.Subject = &t
+	}
+	return ra, nil
 }
 
 // hasAudio runs ffprobe; when it cannot, it assumes the file has audio and lets ffmpeg report the problem.

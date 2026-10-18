@@ -860,6 +860,10 @@ export type Shadow = "none" | "soft" | "strong";
  */
 export type Alignment = "left" | "center" | "right";
 /**
+ * Whether the renderer keeps this text off the head of the person in the footage: when it would cover the head it is moved above or below it inside the safe zone, or shrunk within the allowed scale. true by default; set false to place the text exactly where its anchor or position puts it.
+ */
+export type AvoidTheSubject = boolean;
+/**
  * The text items. They may overlap each other and may sit anywhere inside the total duration.
  */
 export type TextItems = TextItem[];
@@ -1228,6 +1232,7 @@ export interface TextItem2 {
   scale?: SizeScale;
   shadow?: Shadow;
   align?: Alignment;
+  avoid_subject?: AvoidTheSubject;
 }
 /**
  * A free place for the text's centre as fractions of the frame. The text must stay inside the format's safe zone (checked by the Go layer). Set this or anchor, not both.

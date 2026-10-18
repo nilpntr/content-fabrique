@@ -37,7 +37,31 @@ type Output struct {
 	Title       string
 	Description string
 	Tags        []string
+	// Subjects are the subject boxes the model gave, by frame number (1 based), as read: bounded numbers, not yet checked against the
+	// clip (package subject cleans them).
+	Subjects []SubjectRead
 }
+
+// SubjectRead is where the model says the person is in one frame.
+type SubjectRead struct {
+	Frame                int
+	Present              bool
+	X, Y, W, H, HeadTopY float64
+}
+
+// subjectIn is one subject entry of the answer, every member a pointer so that a missing one is told from a zero.
+type subjectIn struct {
+	Frame    *int     `json:"frame"`
+	Present  *bool    `json:"present"`
+	X        *float64 `json:"x"`
+	Y        *float64 `json:"y"`
+	W        *float64 `json:"w"`
+	H        *float64 `json:"h"`
+	HeadTopY *float64 `json:"head_top_y"`
+}
+
+// MaxSubjects is the most subject entries read: one per frame, with room.
+const MaxSubjects = 8
 
 // suspicious matches, on text that has been folded (foldForChecks), a link, an e-mail address, an @handle, a bare domain, or
 // a sentence that tries to steer whatever reads the text later. Footage can carry such words (a caption, a watermark, a sign)
@@ -72,9 +96,10 @@ var tagWord = regexp.MustCompile(`^[\p{L}\p{N}]+(?:['&-][\p{L}\p{N}]+)*$`)
 //     compatibility forms: that rejects the whole answer.
 func Validate(raw json.RawMessage) (Output, error) {
 	var in struct {
-		Title       *string   `json:"title"`
-		Description *string   `json:"description"`
-		Tags        *[]string `json:"tags"`
+		Title       *string      `json:"title"`
+		Description *string      `json:"description"`
+		Tags        *[]string    `json:"tags"`
+		Subjects    *[]subjectIn `json:"subjects"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
@@ -109,7 +134,23 @@ func Validate(raw json.RawMessage) (Output, error) {
 		seen[tag] = true
 		tags = append(tags, tag)
 	}
-	return Output{Title: title, Description: desc, Tags: tags}, nil
+	// The subject boxes are numbers: an entry that is not complete or not a plain number is left out (the labels are still good), never
+	// repaired. package subject holds the bounds a box must meet.
+	var subjects []SubjectRead
+	var entries []subjectIn
+	if in.Subjects != nil {
+		entries = *in.Subjects
+	}
+	for _, s := range entries {
+		if len(subjects) == MaxSubjects {
+			break
+		}
+		if s.Frame == nil || s.Present == nil || s.X == nil || s.Y == nil || s.W == nil || s.H == nil || s.HeadTopY == nil {
+			continue
+		}
+		subjects = append(subjects, SubjectRead{Frame: *s.Frame, Present: *s.Present, X: *s.X, Y: *s.Y, W: *s.W, H: *s.H, HeadTopY: *s.HeadTopY})
+	}
+	return Output{Title: title, Description: desc, Tags: tags, Subjects: subjects}, nil
 }
 
 func cleanLine(field, s string, limit int) (string, error) {

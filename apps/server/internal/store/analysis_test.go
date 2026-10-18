@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -149,6 +150,54 @@ func analysisSuite(t *testing.T, st *store.Store, suffix string) {
 		}
 		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, result(a, 1)); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("an analysis was saved on a deleted asset: %v", err)
+		}
+	})
+
+	t.Run("the subject boxes of the quick look are read, by workspace, for the assets that have them", func(t *testing.T) {
+		with, without := ready(wa, ua, "subjects-clip"), ready(wa, ua, "no-subjects-clip")
+		detail := []byte(`{"prompt_version":"quicklook.v2","subjects":{"aspect":0.5625,"samples":[{"at_ms":1500,"x":0.2,"y":0.2,"w":0.6,"h":0.7,"head_top_y":0.22}]}}`)
+		if _, err := st.ApplyQuickLook(ctx, wa.ID, with.ID, store.QuickLookResult{Title: "Row", Description: "A row.", Tags: []string{"row"}, Detail: detail}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.ApplyQuickLook(ctx, wa.ID, without.ID, store.QuickLookResult{Title: "Row 2", Description: "A row.", Tags: []string{"row"}, Detail: []byte(`{"prompt_version":"quicklook.v1"}`)}); err != nil {
+			t.Fatal(err)
+		}
+		rows, err := st.ListAssetSubjects(ctx, wa.ID, []ids.AssetID{with.ID, without.ID})
+		if err != nil || len(rows) != 1 || rows[0].AssetID != with.ID || !strings.Contains(string(rows[0].Subjects), `"head_top_y": 0.22`) && !strings.Contains(string(rows[0].Subjects), `"head_top_y":0.22`) {
+			t.Fatalf("subjects of workspace A: %+v %v", rows, err)
+		}
+		// Another workspace reads nothing of it; nothing asked is nothing read.
+		if rows, err := st.ListAssetSubjects(ctx, wb.ID, []ids.AssetID{with.ID}); err != nil || len(rows) != 0 {
+			t.Fatalf("workspace B read A's subjects: %+v %v", rows, err)
+		}
+		if rows, err := st.ListAssetSubjects(ctx, wa.ID, nil); err != nil || rows != nil {
+			t.Fatalf("no assets: %+v %v", rows, err)
+		}
+		// A subjects-only update writes only its own keys: the labels and the rest of the detail stay, and a quick look that has not
+		// succeeded, or is another workspace's, is not touched.
+		patched, err := st.MergeQuickLookDetail(ctx, wa.ID, without.ID, []byte(`{"subjects_read":true,"subjects":{"aspect":0.5625,"samples":[{"at_ms":0,"x":0.1,"y":0.1,"w":0.5,"h":0.5,"head_top_y":0.12}]}}`))
+		if err != nil || patched.Title != "Row 2" || !strings.Contains(string(patched.QuickLook), "quicklook.v1") || !strings.Contains(string(patched.QuickLook), "subjects_read") {
+			t.Fatalf("merge: %+v %v", patched, err)
+		}
+		if _, err := st.MergeQuickLookDetail(ctx, wb.ID, without.ID, []byte(`{"x":1}`)); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("workspace B merged into A's detail: %v", err)
+		}
+		// A null "subjects" (a later answer with nobody in it) is not a box: the asset is not in the result.
+		if rows, _ := st.ListAssetSubjects(ctx, wa.ID, []ids.AssetID{without.ID}); len(rows) != 1 {
+			t.Fatalf("after the merge the asset has boxes: %+v", rows)
+		}
+		if _, err := st.MergeQuickLookDetail(ctx, wa.ID, without.ID, []byte(`{"subjects":null}`)); err != nil {
+			t.Fatal(err)
+		}
+		if rows, _ := st.ListAssetSubjects(ctx, wa.ID, []ids.AssetID{without.ID}); len(rows) != 0 {
+			t.Fatalf("a null subjects was read: %+v", rows)
+		}
+		// A quick look that failed has no boxes to give, even if an earlier one had.
+		if _, err := st.FailQuickLook(ctx, wa.ID, with.ID, []byte(`{"error":"spend_cap"}`)); err != nil {
+			t.Fatal(err)
+		}
+		if rows, _ := st.ListAssetSubjects(ctx, wa.ID, []ids.AssetID{with.ID}); len(rows) != 0 {
+			t.Fatalf("a failed quick look's boxes were read: %+v", rows)
 		}
 	})
 

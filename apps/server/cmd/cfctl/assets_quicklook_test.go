@@ -16,6 +16,7 @@ import (
 
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
+	"github.com/nilpntr/content-fabrique/internal/subject"
 )
 
 // fakeAnthropic answers /v1/messages with a describe_clip call and /v1/messages/count_tokens with 1,750.
@@ -23,6 +24,9 @@ type fakeAnthropic struct {
 	mu       sync.Mutex
 	messages int
 	counts   int
+	// withSubjects makes the answer carry the subject boxes of the four frames (quicklook.v2); without it the answer has none, as a model
+	// that dropped them or a quick look from before them.
+	withSubjects bool
 }
 
 func (f *fakeAnthropic) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -38,8 +42,13 @@ func (f *fakeAnthropic) RoundTrip(r *http.Request) (*http.Response, error) {
 		status, body = 200, `{"input_tokens": 1750}`
 	case strings.HasSuffix(r.URL.Path, "/v1/messages"):
 		f.messages++
+		title, tags, subjects := "Barbell row", `["barbell row","back","gym"]`, ""
+		if f.withSubjects { // a later model pass that would label the clip differently
+			title, tags = "Another title", `["other","tags"]`
+			subjects = `,"subjects":[{"frame":1,"present":true,"x":0.2,"y":0.2,"w":0.6,"h":0.7,"head_top_y":0.22},{"frame":2,"present":true,"x":0.2,"y":0.2,"w":0.6,"h":0.7,"head_top_y":0.23}]`
+		}
 		status, body = 200, `{"id":"msg_fake","type":"message","role":"assistant","model":"claude-haiku-5-5","content":[{"type":"tool_use","id":"toolu_1","name":"describe_clip",`+
-			`"input":{"title":"Barbell row","description":"A lifter does bent-over barbell rows in a gym.","tags":["barbell row","back","gym"]}}],"stop_reason":"tool_use","stop_sequence":null,`+
+			`"input":{"title":"`+title+`","description":"A lifter does bent-over barbell rows in a gym.","tags":`+tags+subjects+`}}],"stop_reason":"tool_use","stop_sequence":null,`+
 			`"usage":{"input_tokens":1750,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":110}}`
 	}
 	h := http.Header{"Content-Type": {"application/json"}, "Request-Id": {fmt.Sprintf("req_cli_%d", f.messages+f.counts)}}
@@ -173,15 +182,34 @@ func TestAssetsQuickLook(t *testing.T) {
 		t.Errorf("%d ledger rows after two calls", len(rows))
 	}
 
+	// --subjects: the videos whose quick look has no subject boxes get them, and their labels stay as they are.
+	api.withSubjects = true
+	code, out, errOut = r.quickLook("--workspace", r.ws.ID.String(), "--subjects")
+	if code != 0 || !strings.Contains(out, "1 video(s)") || api.messages != 3 {
+		t.Fatalf("--subjects = %d, %d calls\n%s%s", code, api.messages, out, errOut)
+	}
+	after, err := r.st.GetAsset(ctx, r.ws.ID, a.ID)
+	if err != nil || after.Title != "Gino rows" || strings.Join(after.Tags, ",") != "barbell row,back,gym" {
+		t.Errorf("--subjects changed the labels: %q %v %v", after.Title, after.Tags, err)
+	}
+	if tr, ok := subject.FromDetail(after.QuickLook); !ok || len(tr.Samples) != 2 || tr.Samples[0].HeadTopY != 0.22 {
+		t.Errorf("the boxes were not stored: %s", after.QuickLook)
+	}
+	// And now there is nothing for it to do.
+	if code, out, errOut := r.quickLook("--workspace", r.ws.ID.String(), "--subjects"); code != 0 || !strings.Contains(out, "0 video(s)") || api.messages != 3 {
+		t.Errorf("a second --subjects = %d, %d calls\n%s%s", code, api.messages, out, errOut)
+	}
+	api.withSubjects = false
+
 	// --asset names one; another workspace's or a made-up asset is refused.
-	if code, out, errOut := r.quickLook("--workspace", r.ws.ID.String(), "--asset", a.ID.String()); code != 0 || api.messages != 3 {
+	if code, out, errOut := r.quickLook("--workspace", r.ws.ID.String(), "--asset", a.ID.String()); code != 0 || api.messages != 4 {
 		t.Fatalf("--asset = %d\n%s%s", code, out, errOut)
 	}
 	other, err := r.st.CreateWorkspace(ctx, store.NewWorkspace{ClerkOrgID: "org_other_ql", Name: "Other"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code, _, errOut := r.quickLook("--workspace", other.ID.String(), "--asset", a.ID.String()); code != 1 || !strings.Contains(errOut, "no such asset") || api.messages != 3 {
+	if code, _, errOut := r.quickLook("--workspace", other.ID.String(), "--asset", a.ID.String()); code != 1 || !strings.Contains(errOut, "no such asset") || api.messages != 4 {
 		t.Errorf("another workspace's asset: exit %d, %d calls: %s", code, api.messages, errOut)
 	}
 	if code, out, _ := r.quickLook("--workspace", other.ID.String(), "--all"); code != 0 || !strings.Contains(out, "0 video(s)") {

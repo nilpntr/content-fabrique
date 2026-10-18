@@ -12,6 +12,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/analysis"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
+	"github.com/nilpntr/content-fabrique/internal/subject"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 	"github.com/nilpntr/content-fabrique/internal/timeline/ops"
 )
@@ -57,6 +58,8 @@ type footageOpts struct {
 	// Analysis holds the one-line summary of each analysed clip (reps, dead time, exposure). It is computed from the picture, not
 	// written by a person, so it is printed as it is.
 	Analysis map[ids.AssetID]analysis.Summary
+	// Subjects is where the person is in each clip (the quick look's boxes): numbers only, printed as a line about where the head is.
+	Subjects subject.Index
 }
 
 // footageText lists the clips.
@@ -65,6 +68,7 @@ func footageText(rows []store.ProjectFootageRow, o footageOpts) string {
 		return "Footage: this project has no usable clips."
 	}
 	var b strings.Builder
+	anySubject := false
 	fmt.Fprintf(&b, "Footage: %d clips, in the creator's order. Only these can go on the timeline.\n", len(rows))
 	for n, r := range rows {
 		var dur int64
@@ -93,6 +97,10 @@ func footageText(rows []store.ProjectFootageRow, o footageOpts) string {
 		if !o.Full && n >= o.Detailed {
 			continue
 		}
+		if line := subjectLine(o.Subjects, r.AssetID.String()); line != "" {
+			fmt.Fprintf(&b, "  subject: %s\n", line)
+			anySubject = true
+		}
 		if title := r.Title; o.Full || o.TitleChars > 0 {
 			if !o.Full {
 				title = cutRunes(title, o.TitleChars)
@@ -106,6 +114,9 @@ func footageText(rows []store.ProjectFootageRow, o footageOpts) string {
 			fmt.Fprintf(&b, "  description: %s\n", runtime.Untrusted("clip_description", d))
 		}
 	}
+	if anySubject {
+		b.WriteString("\nA subject line says where the person's head is in the clip: its top as a percentage of the frame height at the sampled times. A title above the head needs the band between the top of the safe zone and that line; check_edit says when a title covers the head.\n")
+	}
 	if o.Analysis != nil {
 		if n := unanalysed(rows, o.Analysis); n > 0 {
 			fmt.Fprintf(&b, "\nThe analysis of %d video clip(s) is not ready yet, so find_moments knows nothing about them (it runs shortly after an upload).\n", n)
@@ -115,6 +126,21 @@ func footageText(rows []store.ProjectFootageRow, o footageOpts) string {
 		b.WriteString("\nTitles and descriptions are shortened or left out here to keep this overview small; list_footage has them whole.")
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// subjectLine says where the person is in a clip, in numbers: the top of the head as a percentage of the frame height at each sampled
+// time, and the clear band above the highest head ("subject top at about 22 % from the top"). "" for a clip with no subject box.
+func subjectLine(ix subject.Index, assetID string) string {
+	tr, ok := ix[assetID]
+	if !ok || len(tr.Samples) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, s := range tr.Samples[:min(len(tr.Samples), 4)] {
+		parts = append(parts, fmt.Sprintf("%.0f %% at %s", s.HeadTopY*100, secs(s.AtMs)))
+	}
+	top, _ := subject.TopPct(tr.Samples)
+	return fmt.Sprintf("head top at about %.0f %% from the top (%s)", top, strings.Join(parts, ", "))
 }
 
 // unanalysed counts the video clips that have no analysis yet.

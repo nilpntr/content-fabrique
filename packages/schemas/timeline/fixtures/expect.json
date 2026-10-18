@@ -299,5 +299,10 @@
     "code": "schema",
     "path": "/tracks/1/items/0/align",
     "keyword": "enum"
+  },
+  "i76_schema_text_avoid_subject_not_boolean.json": {
+    "code": "schema",
+    "path": "/tracks/1/items/0/avoid_subject",
+    "keyword": "type"
   }
 }

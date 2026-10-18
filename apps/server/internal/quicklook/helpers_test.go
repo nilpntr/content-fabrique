@@ -196,6 +196,25 @@ func (f *fakeStore) ApplyQuickLook(_ context.Context, ws ids.WorkspaceID, id ids
 	return f.asset, nil
 }
 
+func (f *fakeStore) MergeQuickLookDetail(_ context.Context, ws ids.WorkspaceID, id ids.AssetID, patch json.RawMessage) (store.Asset, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if ws != f.asset.WorkspaceID || id != f.asset.ID || f.asset.QuickLookStatus == nil || *f.asset.QuickLookStatus != store.QuickLookSucceeded {
+		return store.Asset{}, store.ErrNotFound
+	}
+	merged := map[string]json.RawMessage{}
+	_ = json.Unmarshal(f.asset.QuickLook, &merged)
+	var add map[string]json.RawMessage
+	if err := json.Unmarshal(patch, &add); err != nil {
+		return store.Asset{}, err
+	}
+	for k, v := range add {
+		merged[k] = v
+	}
+	f.asset.QuickLook, _ = json.Marshal(merged)
+	return f.asset, nil
+}
+
 func (f *fakeStore) SkipQuickLook(_ context.Context, ws ids.WorkspaceID, id ids.AssetID) (store.Asset, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -216,6 +235,13 @@ func (f *fakeStore) FailQuickLook(_ context.Context, ws ids.WorkspaceID, id ids.
 	st := store.QuickLookFailed
 	f.asset.QuickLookStatus, f.asset.QuickLook = &st, detail
 	return f.asset, nil
+}
+
+// edit changes the asset as a person would, between two steps of a run.
+func (f *fakeStore) edit(fn func(*store.Asset)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	fn(&f.asset)
 }
 
 func (f *fakeStore) snapshot() store.Asset {
@@ -314,7 +340,7 @@ func (f *fakeAPI) messageCalls() []apiCall {
 func (f *fakeAPI) total() int { f.mu.Lock(); defer f.mu.Unlock(); return len(f.calls) }
 
 // goodAnswer is a describe_clip call as the model would make it.
-const goodAnswer = `{"title":"Barbell row","description":"A lifter does bent-over barbell rows in a gym, filmed from the side.","tags":["barbell row","back","gym","side view","lats"]}`
+const goodAnswer = `{"title":"Barbell row","description":"A lifter does bent-over barbell rows in a gym, filmed from the side.","tags":["barbell row","back","gym","side view","lats"],"subjects":[{"frame":1,"present":true,"x":0.22,"y":0.2,"w":0.56,"h":0.7,"head_top_y":0.22},{"frame":2,"present":true,"x":0.2,"y":0.24,"w":0.6,"h":0.66,"head_top_y":0.26},{"frame":3,"present":true,"x":0.2,"y":0.22,"w":0.6,"h":0.68,"head_top_y":0.25},{"frame":4,"present":false,"x":0,"y":0,"w":0,"h":0,"head_top_y":0}]}`
 
 // toolReply is a Messages API answer in which the model calls describe_clip with input.
 func toolReply(input string, in, out int) (int, string) {

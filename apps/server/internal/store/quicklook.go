@@ -100,6 +100,13 @@ func (s *Store) ApplyQuickLook(ctx context.Context, ws ids.WorkspaceID, id ids.A
 	return a, err
 }
 
+// MergeQuickLookDetail adds the keys of patch (a JSON object) to the detail of a succeeded quick look and writes nothing else. ErrNotFound
+// when the asset is not ready in this workspace or its quick look has not succeeded.
+func (s *Store) MergeQuickLookDetail(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, patch json.RawMessage) (Asset, error) {
+	a, err := s.q.MergeQuickLookDetail(ctx, db.MergeQuickLookDetailParams{WorkspaceID: ws, ID: id, Patch: patch})
+	return a, mapErr(err)
+}
+
 // FailQuickLook marks the quick look failed and records the detail (an error code, the frames when they were cut). The
 // title, description and tags are left as they were. ErrNotFound when the asset is not ready in this workspace any more.
 func (s *Store) FailQuickLook(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, detail json.RawMessage) (Asset, error) {
@@ -158,4 +165,17 @@ func SearchWords(text string) []string {
 		}
 	}
 	return out
+}
+
+// AssetSubjectsRow is the subject boxes stored with the quick look of one asset (the JSON of the quick look's "subjects" member).
+type AssetSubjectsRow = db.ListAssetSubjectsRow
+
+// ListAssetSubjects reads the subject boxes of several assets in one query. Assets without any are not in the result; the caller
+// validates what it reads (package subject).
+func (s *Store) ListAssetSubjects(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]AssetSubjectsRow, error) {
+	if len(assets) == 0 {
+		return nil, nil
+	}
+	rows, err := s.q.ListAssetSubjects(ctx, db.ListAssetSubjectsParams{WorkspaceID: ws, AssetIds: assetUUIDs(assets)})
+	return rows, mapErr(err)
 }

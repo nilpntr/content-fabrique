@@ -451,7 +451,7 @@ func (a *applier) addText(o *AddText) bool {
 	tt.Items = append(tt.Items, timeline.TextItem{
 		ID: id, AtMs: o.AtMs, DurationMs: o.DurationMs, Text: o.Text, Style: o.Style,
 		Anchor: o.Anchor, Position: copyPtr(o.Position), Animation: o.Animation,
-		Fill: o.Fill, Scale: copyPtr(o.Scale), Shadow: o.Shadow, Align: o.Align,
+		Fill: o.Fill, Scale: copyPtr(o.Scale), Shadow: o.Shadow, Align: o.Align, AvoidSubject: copyPtr(o.AvoidSubject),
 	})
 	a.touch(id)
 	a.created = append(a.created, Created{OpIndex: a.idx, Kind: "text", ID: id})
@@ -460,7 +460,7 @@ func (a *applier) addText(o *AddText) bool {
 
 func (a *applier) updateText(o *UpdateText) bool {
 	if o.AtMs == nil && o.DurationMs == nil && o.Text == nil && o.Style == "" && o.Anchor == "" && o.Position == nil && o.Animation == "" &&
-		o.Fill == "" && o.Scale == nil && o.Shadow == "" && o.Align == "" {
+		o.Fill == "" && o.Scale == nil && o.Shadow == "" && o.Align == "" && o.AvoidSubject == nil {
 		return a.errf(CodeBadArgument, "give at least one field to change on the text item %q", o.ID)
 	}
 	if o.Anchor != "" && o.Position != nil {
@@ -507,6 +507,9 @@ func (a *applier) updateText(o *UpdateText) bool {
 	}
 	if o.Align != "" {
 		ti.Align = o.Align
+	}
+	if o.AvoidSubject != nil {
+		ti.AvoidSubject = copyPtr(o.AvoidSubject)
 	}
 	a.touch(o.ID)
 	return true

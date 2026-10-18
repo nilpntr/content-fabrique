@@ -1,5 +1,7 @@
 package render
 
+import "github.com/nilpntr/content-fabrique/internal/subject"
+
 // Word is one spoken word of an asset's transcript: its text and where it is in the asset, in milliseconds. Transcripts come
 // from the ingest pipeline (P2-05); the renderer only takes them through the resolver, so any source of words with times
 // (a fixture in a test, a stored transcript later) can drive the captions.
@@ -20,6 +22,9 @@ type ResolvedAsset struct {
 	// Transcript is the asset's words with their times in the asset, in order. The captions track draws the words of the
 	// part of the asset each clip plays; an asset without a transcript has no captions.
 	Transcript []Word
+	// Subject is where the person is in the asset's sampled frames (package subject), when the quick look read it: the titles that would
+	// cover the head are moved off it. Nil for an asset without one.
+	Subject *subject.Track
 }
 
 // AssetResolver maps an asset id to the file a profile reads: the proxy for the preview, the original for the final

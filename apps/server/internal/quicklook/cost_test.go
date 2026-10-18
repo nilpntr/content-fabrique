@@ -25,8 +25,8 @@ func TestACallCostsLessThanTheBudget(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", profile, err)
 		}
-		if route.Model != "claude-haiku-5-5" || route.MaxTokens != 400 || route.Effort != "" {
-			t.Errorf("%s: the quicklook stage routes to %+v, want claude-haiku-5-5 with max_tokens 400 in every profile", profile, route)
+		if route.Model != "claude-haiku-5-5" || route.MaxTokens != 700 || route.Effort != "" {
+			t.Errorf("%s: the quicklook stage routes to %+v, want claude-haiku-5-5 with max_tokens 700 in every profile", profile, route)
 		}
 
 		frames := make([][]byte, Frames)
@@ -80,8 +80,8 @@ func TestTheToolSchemaIsStrictAndPlain(t *testing.T) {
 		t.Errorf("schema = %v", schema)
 	}
 	required, _ := schema["required"].([]any)
-	if len(required) != 3 {
-		t.Errorf("required = %v, want title, description and tags", required)
+	if len(required) != 4 {
+		t.Errorf("required = %v, want title, description, tags and subjects", required)
 	}
 	var walk func(v any)
 	walk = func(v any) {

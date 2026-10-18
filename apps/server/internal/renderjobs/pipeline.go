@@ -23,6 +23,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/spend"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
+	"github.com/nilpntr/content-fabrique/internal/subject"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
@@ -51,6 +52,17 @@ type Config struct {
 	// Meter writes the ledger row of the render's CPU time (kind render, vCPU-milliseconds from cpu_ms). Nil records nothing.
 	Meter  *spend.ComputeMeter
 	Logger *slog.Logger
+
+	// subjects replaces the read of the subject boxes (a test makes it fail); nil reads them from the store.
+	subjects func(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) (subject.Index, error)
+}
+
+// loadSubjects reads the subject boxes of the project's footage.
+func (p *Pipeline) loadSubjects(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) (subject.Index, error) {
+	if p.cfg.subjects != nil {
+		return p.cfg.subjects(ctx, ws, assets)
+	}
+	return subject.Load(ctx, p.cfg.Store, ws, assets)
 }
 
 // Pipeline renders. It holds no per-job state, so one Pipeline serves all the workers. It implements jobs.Renderer.
@@ -395,7 +407,7 @@ func (r *run) execute(ctx context.Context) (finished, error) {
 			return finished{}, err
 		}
 	}
-	stager := newStager(ctx, r, inputs, hasCaptions(spec))
+	stager := newStager(ctx, r, inputs, hasCaptions(spec), hasAvoidingText(spec))
 	plan, cerr := render.Compile(spec, profile, stager)
 	switch {
 	case stager.infra != nil:
@@ -589,6 +601,21 @@ func hasCaptions(spec *timeline.Spec) bool {
 	for _, t := range spec.Tracks {
 		if c, ok := t.(*timeline.CaptionsTrack); ok && c.Enabled {
 			return true
+		}
+	}
+	return false
+}
+
+// hasAvoidingText reports whether the timeline has a text item that the renderer keeps off the subject's head, the one thing that reads
+// the subject boxes.
+func hasAvoidingText(spec *timeline.Spec) bool {
+	for _, t := range spec.Tracks {
+		if tt, ok := t.(*timeline.TextTrack); ok {
+			for _, it := range tt.Items {
+				if it.AvoidsSubject() {
+					return true
+				}
+			}
 		}
 	}
 	return false

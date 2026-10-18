@@ -555,6 +555,12 @@ func (s *summarizer) itemField(typ, id string, rest []string, op Operation, item
 			return
 		}
 		s.say("set the %s of %s to %s", names[field], id, str(newV))
+	case field == "avoid_subject":
+		if op.Op == OpRemove || scalar(newV) == "true" {
+			s.say("let %s move off the subject's head", id)
+			return
+		}
+		s.say("kept %s where it is placed, even on the subject's head", id)
 	case field == "gain_db":
 		if op.Op == OpRemove {
 			s.say("reset the gain of %s to 0 dB", id)

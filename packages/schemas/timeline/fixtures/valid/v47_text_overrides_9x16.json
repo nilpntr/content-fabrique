@@ -71,7 +71,8 @@
           "style": "label_box",
           "anchor": "lower_third",
           "fill": "#FFD60A",
-          "scale": 0.6
+          "scale": 0.6,
+          "avoid_subject": false
         }
       ]
     }

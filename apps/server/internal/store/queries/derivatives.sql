@@ -77,6 +77,13 @@ SET title = CASE WHEN title_source = 'user' THEN title ELSE @title::text END,
 WHERE workspace_id = @workspace_id AND id = @id AND status = 'ready' AND deleted_at IS NULL
 RETURNING *;
 
+-- A run that only adds to a good quick look (the subject boxes, the frames): only those keys of the detail are written, the title, the
+-- description, the tags and the rest of the detail stay as they are, whatever changed while the model call ran.
+-- name: MergeQuickLookDetail :one
+UPDATE assets SET quick_look = COALESCE(quick_look, '{}'::jsonb) || @patch::jsonb, quick_look_at = now()
+WHERE workspace_id = @workspace_id AND id = @id AND status = 'ready' AND deleted_at IS NULL AND quick_look_status = 'succeeded'
+RETURNING *;
+
 -- The quick look failed: nothing but the status and the detail (an error code, the frames if they were cut) is written. Any
 -- state of the asset: a job that gave up waiting for an asset that never became ready marks it too.
 -- name: FailQuickLook :one
@@ -104,3 +111,10 @@ WHERE workspace_id = @workspace_id AND kind = 'video' AND status = 'ready' AND d
   AND (@include_done::boolean OR quick_look_status IS DISTINCT FROM 'succeeded')
 ORDER BY id
 LIMIT @row_limit;
+
+-- Where the person is in the sampled frames of several videos (the quick look's "subjects" member), for the editor's checks and the
+-- compiler's title placement. A video with none is not in the result.
+-- name: ListAssetSubjects :many
+SELECT id AS asset_id, (quick_look -> 'subjects')::jsonb AS subjects FROM assets
+WHERE workspace_id = @workspace_id AND id = ANY(@asset_ids::uuid[]) AND status = 'ready' AND deleted_at IS NULL
+  AND quick_look_status = 'succeeded' AND jsonb_typeof(quick_look -> 'subjects') = 'object';

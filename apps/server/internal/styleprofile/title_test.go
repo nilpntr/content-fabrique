@@ -108,7 +108,7 @@ func TestCompareTheTitleLook(t *testing.T) {
 	p := Aggregate(referenceMeasures(t))
 	p.Text.OneLineShare = 1
 	good := buildingLats()
-	good.TitleFill, good.TitleLines, good.TitleHeightPct, good.TitleShadow = "#F2E9A0", 1, 4.0, "none"
+	good.TitleFill, good.TitleLines, good.TitleHeightPct, good.TitleShadow, good.TitleChars = "#F2E9A0", 1, 4.0, "none", 17
 	d := p.Compare(good)
 	for _, id := range []string{"title_colour", "title_lines", "title_size", "title_shadow"} {
 		found := false

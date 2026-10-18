@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/nilpntr/content-fabrique/internal/subject"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 	"github.com/nilpntr/content-fabrique/internal/timeline/style"
 )
@@ -25,7 +26,7 @@ type mappedWord struct {
 // Warning is something the renderer left out of the picture because it could not be drawn safely. Compile does not fail for it:
 // the rest of the render is fine, and the caller shows the warning (the editor agent reads it).
 type Warning struct {
-	// Code is text_dropped or caption_dropped.
+	// Code is text_dropped, caption_dropped, text_moved or text_over_subject.
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
@@ -36,20 +37,39 @@ type Warning struct {
 func (c *compiler) subtitles() (*Subtitles, error) {
 	b := newBuilder(c.spec.Output.Width, c.spec.Output.Height, c.fps, c.total)
 	out := c.spec.Output
+	// The subject of each asset the clips play, for keeping titles off the head.
+	subjects := subject.Index{}
+	for _, cl := range c.clips {
+		if cl.asset.Subject != nil {
+			subjects[cl.item.AssetID] = *cl.asset.Subject
+		}
+	}
 	for _, t := range c.spec.Tracks {
 		switch tr := t.(type) {
 		case *timeline.TextTrack:
 			for _, it := range tr.Items {
-				pl, err := timeline.PlaceText(out, it)
+				var obstacles []style.Rect
+				if it.AvoidsSubject() && len(subjects) > 0 {
+					obstacles = subject.HeadRects(c.spec, subjects.Lookup, it.AtMs, it.AtMs+it.DurationMs)
+				}
+				pl, av, err := timeline.PlaceTextAvoiding(out, it, obstacles)
 				if err != nil {
 					return nil, fmt.Errorf("%w: text item %s: %w", ErrInvalidSpec, it.ID, err)
 				}
 				// A character the font cannot draw is left out of the text, as the layout never measured it.
 				if bad := pl.Style.Unsupported(it.Text); len(bad) > 0 {
 					it.Text = dropUnsupported(pl.Style, it.Text)
-					if pl, err = timeline.PlaceText(out, it); err != nil {
+					if pl, av, err = timeline.PlaceTextAvoiding(out, it, obstacles); err != nil {
 						return nil, fmt.Errorf("%w: text item %s: %w", ErrInvalidSpec, it.ID, err)
 					}
+				}
+				switch {
+				case av.Overlapped && av.Cleared && av.Where == "smaller":
+					b.warn("text_moved", "text item %s was shrunk to scale %g to keep it clear of the subject's head", it.ID, av.Scale)
+				case av.Overlapped && av.Cleared:
+					b.warn("text_moved", "text item %s was moved %s the subject's head to keep it clear of it", it.ID, av.Where)
+				case av.Overlapped:
+					b.warn("text_over_subject", "text item %s covers the subject's head and could not be moved off it inside the safe zone", it.ID)
 				}
 				box, ok := pl.Zone.Fit(pl.Box)
 				if !ok {

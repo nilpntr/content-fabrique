@@ -9,7 +9,9 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/styleprofile"
+	"github.com/nilpntr/content-fabrique/internal/subject"
 )
 
 // The creator style profile in the editor (P6-05, docs/design/style-profile-v1.md). A creator's own finished videos say how they like to
@@ -20,6 +22,27 @@ import (
 
 // StyleBlockKind is the kind of the untrusted_data block that holds the profile.
 const StyleBlockKind = "creator_style"
+
+// subjects reads where the person is in the project's video clips (the quick look's boxes); a source that cannot, or a failed read, has
+// none, and the title checks then do not apply.
+func (d Deps) subjects(ctx context.Context, ws ids.WorkspaceID, rows []store.ProjectFootageRow) subject.Index {
+	rd, ok := d.Store.(subject.Reader)
+	if !ok {
+		return nil
+	}
+	var assets []ids.AssetID
+	for _, r := range rows {
+		if r.Kind == store.AssetKindVideo {
+			assets = append(assets, r.AssetID)
+		}
+	}
+	ix, err := subject.Load(ctx, rd, ws, assets)
+	if err != nil {
+		slog.WarnContext(ctx, "editor: the subject boxes could not be read; titles are not checked against the head", "error", err)
+		return nil
+	}
+	return ix
+}
 
 // style returns the workspace's profile, or nil (a workspace with none, or a profile this code cannot read: the editor then works
 // without a style, as before). A failed read is logged and also means no style.
@@ -94,6 +117,18 @@ func styleNote(p *styleprofile.Profile) string {
 	}
 	if r := p.TitleRecipe(); r != nil {
 		b.WriteString(r.Describe() + " ")
+		if p.Text != nil && len(p.Text.Patterns) > 0 && p.Text.Patterns[0].Share >= styleprofile.PatternMinShare {
+			switch top := p.Text.Patterns[0]; top.Kind {
+			case styleprofile.KindSeries:
+				b.WriteString("Their titles follow a series format, <TOPIC> <number> in capitals")
+				if top.Number != "" {
+					b.WriteString(" (always ending in " + top.Number + ")")
+				}
+				b.WriteString(": use it, with the muscle or the exercise of the footage as the topic, and do not invent a name. ")
+			case styleprofile.KindLowercase:
+				b.WriteString("Their titles are mostly a lowercase witty line about the footage: write one in that voice. ")
+			}
+		}
 	}
 	if p.Look.Grade == "none" {
 		b.WriteString("They post the natural picture: no look. ")
