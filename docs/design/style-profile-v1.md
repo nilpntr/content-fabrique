@@ -341,3 +341,45 @@ is about $0.002, under its $0.01 budget.
 **With P6-06b's pace targets.** The creator's `pace` setting scales the pace targets of `internal/agents/editor/pace.go` after the vibe
 (slower x1.25, like my videos x1, faster x0.8), in plan_edit and in check_edit; the title form the creator sets is the form those
 targets' title instruction fills. The two measures of the ending are one: `Pacing.EndingS`.
+
+## 13. All the text on screen, and two detector fixes (P6-05d)
+
+**Two bugs of the live re-learn.** (1) A creator of plain cuts read as "transitions: subtle (measured)" from zooms on 8 % of the cuts:
+a hand-held lifestyle reference and a camera push into a cut summed to a scale change near the cut. A cut is now a zoom only when the
+picture scales on **both** sides of it (`zoomSideS` 0.35 s each, every step the same way, at least ln 1.03 a side), the frames at the cut
+are blurred (sharpness at most 0.75 of the same shots further away) and the shots are quiet in the second before (a moving camera is
+hand-held or a push). Transitions are the style only when `Evident`: on a fifth of the cuts or more, in two videos or more
+(`TransitionsProfile.Videos`); fewer is plain cuts, and the summary prompt (`stylesummary.v4`) says so. Synthetic thumbnails test a
+zoom-through, a push into a plain cut, a hand-held camera and a plain cut (`zoom_test.go`). (2) The summary suggested `as_typed` for titles
+measured all in capitals, and the suggestion came before the measure. The measured case now comes before the suggestion in `Resolve`, and
+the summary's suggestion is set to the measured case (`MeasuredTitleCase`).
+
+**The text of every shot** (`stylevision.v4`). The one text read per reference now sees the five hook frames and one frame a little into
+each shot (`ShotTimes`: up to 10, spread over the shots; a video of one or two takes gets a frame every few seconds), cut in two ffmpeg
+passes (`media.MaxFrameBatch`). For each shot frame it reports the line, its place (top, upper_third, middle, lower_third), cap height,
+colour, shadow, whether it lies over the person's body and whether it is dialogue, and the language of the text. Fifteen frames are about
+4,000 input tokens: about $0.0005 a read on Haiku 5.5 (the live reads cost $0.001 each), so the $0.01 budget stays and `max_tokens` is
+1,500. Lines are the creator's words: kept as untrusted data like the title, never shown to the editor.
+
+**The pattern**, in code (`ClassifyText`): `dialogue` when two lines or more read as speech (quoted, or a question or an exclamation
+the read flagged as dialogue: the flag alone is not enough, it marked first-person captions too); `story_captions` when a new line comes
+on half of the shots or more (at least two, three when more than three shots were seen; numbered chapter titles do not count, the first
+line does); `single_title` when there is a title or a line; `none`. The profile keeps the majority (`TextProfile.Pattern`), the look of
+the pattern's lines (`LineLook`: place, size, case including sentence case, colour, shadow, the share over the body, words a line) and the
+language.
+
+**Settings** `text_pattern` (single_title, story_captions, dialogue, none) and `text_position` (top, upper_third, middle, lower_third,
+auto): the creator's, else measured, else one title and auto. **Placement modes**: a text item takes `avoid` body (the default: the head
+and the torso) or face (only the head and shoulders, `PlaceTextAvoiding` and `TextCovers` treat the head as the whole person).
+`Style.FaceOnly`: a style told in lines whose lines sit in the middle of the frame, or whose own lines lie over the body half the time or
+more, may put its lines on the chest; a title, and a title creator's text, keeps off the whole body (`text_over_subject` fails avoid face
+for them).
+
+**The editor** (`editor.v2.10`, `workout.v7`): the settings line names the pattern, the look, where the lines sit and the language;
+"The text of the video" says how to write story captions (a mini-story about the footage, one line per shot, in the creator's language,
+never a line of theirs) and dialogue. Checks for a style told in lines, and only for it: `story_captions`, `caption_readable` (1 s),
+`text_over_face`.
+
+**Verified** with `cfctl style analyze --no-store --workspace` (the reads metered to a local workspace; nothing stored), on a caption
+creator's five videos and the first creator's ten (local only, never committed): see the PR.
+
