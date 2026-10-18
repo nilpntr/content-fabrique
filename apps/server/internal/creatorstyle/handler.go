@@ -304,6 +304,10 @@ func (h *Handler) RelearnStyle(ctx context.Context, _ api.RelearnStyleRequestObj
 			return api.RelearnStyle401JSONResponse{UnauthenticatedJSONResponse: api.UnauthenticatedJSONResponse(body(e))}, nil
 		case 403:
 			return api.RelearnStyle403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(body(e))}, nil
+		case 409:
+			return api.RelearnStyle409JSONResponse(body(e)), nil
+		case 429:
+			return api.RelearnStyle429JSONResponse(body(e)), nil
 		case 500:
 			return api.RelearnStyle500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(body(e))}, nil
 		case 503:

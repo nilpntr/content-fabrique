@@ -141,11 +141,11 @@ func (p *Profile) PlainLines() []PlainLine {
 		add("length", "Length", rangeSecs(p.Format.DurationS))
 	}
 	// What P6-05c learnt.
-	if pc.EndShotS.Median > 0 {
+	if pc.EndingS.Median > 0 {
 		if pc.LongEndingHold() {
-			add("ending", "Ending", fmt.Sprintf("A long hold on the last shot, about %s", secs(pc.EndShotS.Median)))
+			add("ending", "Ending", fmt.Sprintf("A long hold on the last shot, about %s", secs(pc.EndingS.Median)))
 		} else {
-			add("ending", "Ending", fmt.Sprintf("The last shot is about as long as the others (%s)", secs(pc.EndShotS.Median)))
+			add("ending", "Ending", fmt.Sprintf("The last shot is about as long as the others (%s)", secs(pc.EndingS.Median)))
 		}
 	}
 	if pc.ShotS.P90 > 0 {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -205,6 +206,39 @@ func (s *Store) DeleteStyleReferences(ctx context.Context, ws ids.WorkspaceID) e
 func (s *Store) SoftDeleteStyleReferenceAssets(ctx context.Context, ws ids.WorkspaceID) ([]Asset, error) {
 	rows, err := s.q.SoftDeleteStyleReferenceAssets(ctx, ws)
 	return rows, mapErr(err)
+}
+
+// ---- learning again --------------------------------------------------------------------------------------------------------------
+
+// StyleInFlightMaxAge is how long a reference may stay queued or analysing and still count as being measured: longer than a job may
+// wait for a worker (jobs.StyleMaxAge, 24 hours) and run. A row older than that belongs to a job that gave up.
+const StyleInFlightMaxAge = 26 * time.Hour
+
+// LockWorkspaceStyle takes the workspace's style lock until the end of the transaction: one "learn again" at a time.
+func (s *Store) LockWorkspaceStyle(ctx context.Context, ws ids.WorkspaceID) error {
+	return mapErr(s.q.LockWorkspaceStyle(ctx, ws.UUID.String()))
+}
+
+// CountStyleReferencesInFlight counts the workspace's references that are being measured (queued or analysing, with a live asset and
+// a row younger than StyleInFlightMaxAge at now).
+func (s *Store) CountStyleReferencesInFlight(ctx context.Context, ws ids.WorkspaceID, now time.Time) (int, error) {
+	n, err := s.q.CountStyleReferencesInFlight(ctx, db.CountStyleReferencesInFlightParams{WorkspaceID: ws, Since: now.Add(-StyleInFlightMaxAge)})
+	return int(n), mapErr(err)
+}
+
+// CountStyleLearnPasses counts the workspace's "learn again" passes started at or after since.
+func (s *Store) CountStyleLearnPasses(ctx context.Context, ws ids.WorkspaceID, since time.Time) (int, error) {
+	n, err := s.q.CountStyleLearnPasses(ctx, db.CountStyleLearnPassesParams{WorkspaceID: ws, Since: since})
+	return int(n), mapErr(err)
+}
+
+// InsertStyleLearnPass records a "learn again" pass started by (a zero id for none).
+func (s *Store) InsertStyleLearnPass(ctx context.Context, ws ids.WorkspaceID, by ids.UserID) error {
+	var who pgtype.UUID
+	if by.UUID != uuid.Nil {
+		who = pgtype.UUID{Bytes: by.UUID, Valid: true}
+	}
+	return mapErr(s.q.InsertStyleLearnPass(ctx, db.InsertStyleLearnPassParams{WorkspaceID: ws, StartedBy: who}))
 }
 
 func objectOr(raw json.RawMessage) json.RawMessage {

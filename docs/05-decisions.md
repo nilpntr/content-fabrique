@@ -39,6 +39,8 @@
 | D-32 | Audio: effects are synthesised in ffmpeg and edits are checked with ffmpeg measurements; no audio models, nothing ported from earshot but its numbers and ideas | Accepted (founder decision, 2026-10-17) |
 | D-33 | Exports are sound-ready: no music and no trend sound, the clips' own sound as a low bed, effects on top, speech as the programme; amends D-03 | Proposed (director, 2026-10-17; the founder confirms); superseded by D-34 for an edit with a song |
 | D-34 | Music from the creator: a song the creator uploads (or the sound of one of their videos) is analysed once and is the export's only sound, -14 LUFS; the creator answers for its rights; supersedes D-33 for an edit with a song | Proposed (director, 2026-10-18; the founder confirms) |
+| D-35 | The creator's style is three layers (measured, the AI's suggestion, the creator's settings), the creator always wins; reference videos are assets with purpose style_reference | Proposed (director, 2026-10-18; the founder confirms) |
+| D-36 | Plain cuts on the beat by default: no vibe asks for transitions; they come from the creator's setting or their own videos | Proposed (director, from a creator's verdict, 2026-10-18; the founder confirms) |
 
 ---
 
@@ -809,7 +811,7 @@ tweak it, and keep uploading videos as references.
 
 **Decision.** The effective style the editor follows is made of three layers, the creator always winning: (1) what was measured from
 the creator's reference videos; (2) the defaults an AI summary proposes from those measures (one cheap call per (re)analysis,
-`stylesummary`, at most $0.03); (3) the creator's own settings (vibe, transitions, text animation, camera motion, title colour, place
+`stylesummary`, at most $0.03, one call a learning pass: the profile job waits until every reference of a pass is measured); (3) the creator's own settings (vibe, transitions, text animation, camera motion, title colour, place
 and case, music, pace), stored apart from the measures (`creator_style_settings`), so re-learning never overwrites them. The vibe of one
 edit (P6-06) sits on top of the vibe setting. A measured "no effects" is a fact about the creator's posted videos, never a rule: it
 does not turn transitions, text animation or camera motion off by itself; at a lively or hype vibe an AI suggestion of "off" does not
@@ -824,7 +826,7 @@ every request, or several per analysis: the summary is for the creator to read a
 **Consequences.** The checks take the settings: `effect_density` fails what the settings turn off and allows more at "lots",
 `style_match` has `transitions`, `camera_motion` and `text_animation` (hard when the creator chose them, advice otherwise) in place of
 the measured `effects`. Existing workspaces with a profile and no settings get the lively defaults: their edits now move. Prompt
-`editor.v2.7`; migration `00023_style_references`.
+`editor.v2.8`; migration `00023_style_references`.
 
 **Revisit** when the founder has watched edits made with the settings, or when a creator asks for a setting that is not here.
 
@@ -838,3 +840,26 @@ the measured `effects`. Existing workspaces with a profile and no settings get t
 **Consequences.** What this makes easier or harder.
 **Revisit** when …
 ```
+
+## D-36 Plain cuts on the beat by default: no vibe asks for transitions
+
+**Context.** P6-06 made the lively and hype vibes put effect transitions (punch, zoom_through, whip, flash) on the strong beats
+and the drop, and a check failed a lively edit with only hard cuts. On a live edit the creator said: "the transitions really look AI,
+nobody uses those transition effects, only someone who throws it into an automatic edit". The rest (the music, the cuts on the beat,
+the movement) was praised.
+
+**Decision.** Transitions are off at every vibe by default. They are used only when the creator's reference videos measurably use them
+(the P6-05c measure: then only the kinds they use, at about their rate, and the AI's suggestion follows that measure) or when the
+creator sets Transitions to subtle or lots in "Your style". The energy of lively and hype comes from the cuts on the beat, the pace,
+the living camera with its punch-ins and the text that enters and leaves. check_edit's `no_transitions_at_lively` is replaced by
+`transitions_match_style` (a transition fails where the effective style has them off; none fails where it asks for lots), and the
+prompt (`editor.v2.8`), the playbooks and the summary prompt (`stylesummary.v3`) say plain cuts on the beat are the default, and why.
+
+**Alternatives.** Keep transitions at hype only: the verdict was about the kind of effect, not the amount. A softer set of transitions
+(crossfades): a crossfade says time has passed, it is not energy, and it is still a choice the creator's own videos should make.
+
+**Consequences.** Existing workspaces whose settings came from the vibe now get plain cuts; a creator who set transitions keeps them.
+Text entrances and exits are unchanged. The onboarding's vibe cards no longer promise transitions.
+
+**Revisit** when creators ask for transitions in numbers, or when the measured transitions of their references are reliable enough
+to name the exact effect.

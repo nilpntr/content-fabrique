@@ -123,9 +123,9 @@ func patternsOf(titles []string) []TitlePattern {
 func kindWords(k string) string {
 	switch k {
 	case KindSeries:
-		return "a series title, <TOPIC> <number> in capitals"
+		return "a series title"
 	case KindLowercase:
-		return "a lowercase witty line"
+		return "a witty line"
 	case KindQuestion:
 		return "a question"
 	case KindCaps:
@@ -134,20 +134,100 @@ func kindWords(k string) string {
 	return "another form"
 }
 
-// patternLine is the patterns as one line for the creator_style block (the examples are the creator's words: the block is untrusted data).
+// Template is the form of the pattern as a template to fill, never a title to reuse: "<TOPIC> 101" with the length of the topic, "a
+// lowercase line of 4 to 7 words", and so on. The lengths come from the creator's titles (counted, not quoted).
+func (p TitlePattern) Template() string {
+	lo, hi := 0, 0
+	for _, e := range p.Examples {
+		n := len(strings.Fields(e))
+		if p.Kind == KindSeries {
+			n-- // the number is not part of the topic
+		}
+		if lo == 0 || n < lo {
+			lo = n
+		}
+		hi = max(hi, n)
+	}
+	words := func(what string) string {
+		switch {
+		case lo <= 0:
+			return what
+		case lo == hi:
+			return fmt.Sprintf("%s of %d %s", what, lo, map[bool]string{true: "word", false: "words"}[lo == 1])
+		}
+		return fmt.Sprintf("%s of %d to %d words", what, lo, hi)
+	}
+	switch p.Kind {
+	case KindSeries:
+		num := p.Number
+		if num == "" {
+			num = "<number>"
+		}
+		return fmt.Sprintf(`"<TOPIC> %s" in capitals (%s: the muscle, the exercise or the session of this video)`, num, words("a topic"))
+	case KindLowercase:
+		return words("a lowercase line") + " about this video"
+	case KindQuestion:
+		return words("a question") + " about this video"
+	case KindCaps:
+		return words(`"<LABEL>" in capitals, a label`) + " for this video"
+	}
+	return "another form"
+}
+
+// patternLine is the patterns as one line for the creator_style block: the forms as templates to fill, with their shares, and never the
+// creator's own titles (an editor shown a title copies it; check_edit's title_copied fails a copy).
 func patternLine(ps []TitlePattern) string {
 	if len(ps) == 0 {
 		return ""
 	}
 	parts := make([]string, 0, len(ps))
 	for _, p := range ps {
-		s := fmt.Sprintf("%s (%.0f %% of the titles; examples, never to reuse verbatim: %s", kindWords(p.Kind), p.Share*100, "'"+strings.Join(p.Examples, "', '")+"'")
-		if p.Number != "" {
-			s += "; always ends in " + p.Number
-		}
-		parts = append(parts, s+")")
+		parts = append(parts, fmt.Sprintf("%s, %s (%.0f %% of the titles)", kindWords(p.Kind), p.Template(), p.Share*100))
 	}
-	return "title templates: " + strings.Join(parts, "; ") + ". Prefer the most common template, with a topic taken from the footage (the muscle or the exercise)."
+	return "title templates: " + strings.Join(parts, "; ") + ". Write a new title for this video in the most common template: fill it with the topic of this footage, and never reuse a title of the creator's own videos."
+}
+
+// normTitle is a title compared without case or spaces.
+func normTitle(s string) string {
+	return strings.ToLower(strings.Join(strings.Fields(s), ""))
+}
+
+// ReferenceTitles are the titles read from the creator's references (untrusted text, for comparing only): every title of a profile made
+// since the field was added, and the examples of an older one.
+func (p *Profile) ReferenceTitles() []string {
+	if p == nil || p.Text == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	add := func(list []string) {
+		for _, t := range list {
+			if k := normTitle(t); k != "" && !seen[k] {
+				seen[k] = true
+				out = append(out, t)
+			}
+		}
+	}
+	add(p.Text.Titles)
+	add(p.Text.Examples)
+	for _, pt := range p.Text.Patterns {
+		add(pt.Examples)
+	}
+	return out
+}
+
+// CopiesReferenceTitle says the text is, without regard to case or spaces, the title of one of the creator's reference videos.
+func (p *Profile) CopiesReferenceTitle(text string) bool {
+	k := normTitle(text)
+	if k == "" {
+		return false
+	}
+	for _, t := range p.ReferenceTitles() {
+		if normTitle(t) == k {
+			return true
+		}
+	}
+	return false
 }
 
 // PatternMinShare is the share of the creator's titles a form needs to count as theirs.

@@ -79,11 +79,26 @@ type Plan struct {
 	UnchargedRunsPerDay int
 	// TranscribedMinutesPerDay caps hosted transcription per UTC day (P7-09b enforces it per plan; the env cap holds until then).
 	TranscribedMinutesPerDay int
+	// StyleRelearnsPerDay is how many times per UTC day a workspace may ask to learn its style again (P6-05b): each pass measures every
+	// reference video again (a sandbox pass and a metered title read each) and writes one summary. 0 in the file is
+	// DefaultStyleRelearnsPerDay.
+	StyleRelearnsPerDay int
 	// COGSBudgetMicros is the hard budget_micros of the run that performs an action. On a BYOK plan it protects the creator's own key.
 	COGSBudgetMicros map[Action]int64
 	// NonLLMCOGSBudgetMicros is, on a BYOK plan, what an action may cost US in compute, storage and transcription. The invariant
 	// checks it; the compute is metered, not refused. Empty on a managed plan, whose run budget covers everything.
 	NonLLMCOGSBudgetMicros map[Action]int64
+}
+
+// DefaultStyleRelearnsPerDay is a plan's "learn again" passes per UTC day when its file does not say.
+const DefaultStyleRelearnsPerDay = 3
+
+// RelearnsPerDay is the plan's StyleRelearnsPerDay, or the default.
+func (p Plan) RelearnsPerDay() int {
+	if p.StyleRelearnsPerDay > 0 {
+		return p.StyleRelearnsPerDay
+	}
+	return DefaultStyleRelearnsPerDay
 }
 
 // PriceList is one version of the price list and the plans.
@@ -129,6 +144,7 @@ type planFile struct {
 	ConcurrentRuns         int              `yaml:"concurrent_runs"`
 	UnchargedRunsPerDay    int              `yaml:"uncharged_runs_per_day"`
 	TranscribedMinutesDay  int              `yaml:"transcribed_minutes_per_day"`
+	StyleRelearnsPerDay    int              `yaml:"style_relearns_per_day"`
 	COGSBudgetMicros       map[string]int64 `yaml:"cogs_budget_micros"`
 	NonLLMCOGSBudgetMicros map[string]int64 `yaml:"non_llm_cogs_budget_micros"`
 }
@@ -213,12 +229,13 @@ func LoadPriceList(fsys fs.FS, name string) (*PriceList, error) {
 		pl := Plan{
 			Name: p, PriceEURCents: pf.PriceEURCents, BillingMode: BillingMode(pf.BillingMode), AllowanceCredits: pf.AllowanceCredits,
 			Refill: pf.Refill, StorageGB: pf.StorageGB, ConcurrentRuns: pf.ConcurrentRuns, UnchargedRunsPerDay: pf.UnchargedRunsPerDay, TranscribedMinutesPerDay: pf.TranscribedMinutesDay,
+			StyleRelearnsPerDay: pf.StyleRelearnsPerDay,
 			COGSBudgetMicros: map[Action]int64{}, NonLLMCOGSBudgetMicros: map[Action]int64{},
 		}
 		switch {
 		case pl.BillingMode != Managed && pl.BillingMode != BYOK:
 			return fail("plan %s: billing_mode must be managed or byok", k)
-		case pl.PriceEURCents < 0 || pl.AllowanceCredits <= 0 || pl.StorageGB < 0 || pl.ConcurrentRuns < 1 || pl.UnchargedRunsPerDay < 1 || pl.TranscribedMinutesPerDay < 0:
+		case pl.PriceEURCents < 0 || pl.AllowanceCredits <= 0 || pl.StorageGB < 0 || pl.ConcurrentRuns < 1 || pl.UnchargedRunsPerDay < 1 || pl.TranscribedMinutesPerDay < 0 || pl.StyleRelearnsPerDay < 0:
 			return fail("plan %s: a price, an allowance, a quota or a run limit is out of range", k)
 		case pl.PriceEURCents == 0 && pl.Refill:
 			return fail("plan %s: a free plan cannot refill its allowance", k)

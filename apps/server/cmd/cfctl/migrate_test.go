@@ -50,7 +50,7 @@ func TestMigrateCLI(t *testing.T) {
 	if code, out, _ := migrateCLI(t, url, "up"); code != 0 || !strings.Contains(out, "nothing to do") {
 		t.Fatalf("second up = %d %s", code, out)
 	}
-	if n := countTables(t, url); n != 31 {
+	if n := countTables(t, url); n != 32 {
 		t.Fatalf("tables after up = %d", n)
 	}
 	if n := countRiverTables(t, url); n == 0 {

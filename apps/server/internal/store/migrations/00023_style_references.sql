@@ -23,6 +23,11 @@
 --               the title's colour, position and case, music and pace). Kept apart from the measures on purpose: learning the style
 --               again never overwrites a choice of the creator's. A workspace may have settings and no profile (it picked a vibe and
 --               uploaded nothing).
+--
+-- style_learn_passes: one row per "learn again" the creator started. The API counts a workspace's rows of the UTC day, under the
+--               workspace's style lock, against the plan's style_relearns_per_day: every pass measures each reference again (a sandbox
+--               pass and a metered title read) and writes one summary, so the passes are capped like the editor runs that end
+--               without a charge.
 
 -- +goose Up
 
@@ -79,8 +84,20 @@ CREATE TRIGGER creator_style_settings_set_updated_at BEFORE UPDATE ON creator_st
 
 SELECT cf_grant_app_dml('creator_style_settings');
 
+CREATE TABLE style_learn_passes (
+    id           uuid        PRIMARY KEY DEFAULT uuidv7(),
+    workspace_id uuid        NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+    started_by   uuid        REFERENCES users (id) ON DELETE SET NULL,
+    created_at   timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX style_learn_passes_workspace_idx ON style_learn_passes (workspace_id, created_at);
+
+SELECT cf_grant_app_dml('style_learn_passes');
+
 -- +goose Down
 
+DROP TABLE style_learn_passes;
 DROP TABLE creator_style_settings;
 ALTER TABLE creator_style_profiles
     DROP CONSTRAINT creator_style_profiles_summary_check,

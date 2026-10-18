@@ -13,7 +13,7 @@ const Stage = "quicklook"
 
 // PromptVersion names the prompt and tool below. It is stored with the result, and a change to either needs a new cassette
 // (the test that checks the committed one says so).
-const PromptVersion = "quicklook.v2"
+const PromptVersion = "quicklook.v3"
 
 // ToolName is the one tool the model is made to call; its arguments are the answer.
 const ToolName = "describe_clip"
@@ -37,7 +37,7 @@ const systemPrompt = `You label video clips from a fitness creator's library: gy
 title: at most 60 characters. Say what the clip shows, as a coach would search for it: the exercise or activity first ("Barbell row", "Front double biceps pose"), then a short detail if it helps ("side view").
 description: one plain sentence of at most 160 characters: the exercise or activity, the setting and the camera angle.
 tags: at most 8, lowercase, one to three words each: exercise names, equipment, body parts, posing or competition terms, the setting ("gym", "stage", "outdoors") and the shot ("side view", "close up").
-subjects: one entry for each frame, in order, saying where the person who is the subject of the frame is. frame: the number of the frame (1 to 4). present: true when a person is the subject of the frame, false when nobody is. x, y, w, h: the box around the whole person, raised arms and hands included, as fractions of the frame: x and y are the left and top edges (0 to 1) and w and h the width and the height (each at most 1). head_top_y: the top of the head as a fraction of the frame's height, from the top (0 is the top edge, 1 the bottom), between y and y + h. When nobody is present, give 0 for every number.
+subjects: one entry for each frame, in order, saying where the person who is the subject of the frame is. frame: the number of the frame (1 to 4). present: true when a person is the subject of the frame, false when nobody is. x, y, w, h: the box around the whole person, raised arms and hands included, as fractions of the frame: x and y are the left and top edges (0 to 1) and w and h the width and the height (each at most 1). head_top_y: the top of the head as a fraction of the frame's height, from the top (0 is the top edge, 1 the bottom), between y and y + h. head_x and head_w: the left edge and the width of the head alone (hair and ears, not the shoulders or the arms), as fractions of the frame width, inside the box. shoulder_y: the top of the shoulders (where the neck meets the trapezius), as a fraction of the frame height, below head_top_y. Give 0 for head_x, head_w and shoulder_y when you cannot see them (the head is turned away and hidden, or cut off). When nobody is present, give 0 for every number.
 
 Rules:
 - Describe only what is visible. Never guess who anyone is, never name a person, and leave out ages, health information and anything else that identifies someone.
@@ -64,9 +64,12 @@ var inputSchema = json.RawMessage(`{
           "y": {"type": "number", "description": "Top edge of the box, 0 to 1 of the frame height."},
           "w": {"type": "number", "description": "Width of the box, as a fraction of the frame width."},
           "h": {"type": "number", "description": "Height of the box, as a fraction of the frame height."},
-          "head_top_y": {"type": "number", "description": "The top of the head, 0 to 1 of the frame height, between y and y + h."}
+          "head_top_y": {"type": "number", "description": "The top of the head, 0 to 1 of the frame height, between y and y + h."},
+          "head_x": {"type": "number", "description": "Left edge of the head alone (not the shoulders), 0 to 1 of the frame width; 0 when not visible."},
+          "head_w": {"type": "number", "description": "Width of the head alone, as a fraction of the frame width; 0 when not visible."},
+          "shoulder_y": {"type": "number", "description": "Top of the shoulders, 0 to 1 of the frame height, below head_top_y; 0 when not visible."}
         },
-        "required": ["frame", "present", "x", "y", "w", "h", "head_top_y"],
+        "required": ["frame", "present", "x", "y", "w", "h", "head_top_y", "head_x", "head_w", "shoulder_y"],
         "additionalProperties": false
       }
     }

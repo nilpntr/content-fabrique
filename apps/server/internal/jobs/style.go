@@ -33,17 +33,22 @@ const StyleProfileTimeout = 5 * time.Minute
 type StyleReferenceArgs struct {
 	WorkspaceID ids.WorkspaceID `json:"workspace_id"`
 	AssetID     ids.AssetID     `json:"asset_id"`
-	// Pass tells the measuring after the ingest (0) from a later "learn again" (its time in microseconds), so a new pass is never
-	// deduplicated against an old one.
-	Pass int64 `json:"pass"`
 }
 
 // Kind implements river.JobArgs.
 func (StyleReferenceArgs) Kind() string { return "style_reference" }
 
-// InsertOpts puts the job on the analysis queue (a sandbox pass, like the clip analysis) and makes it unique by its arguments.
+// styleReferenceUnique are the states in which a reference's job blocks another of the same reference: while one waits or runs, a
+// second is the same work (and the same model call). A finished job (completed, cancelled or discarded) does not block the next
+// "learn again", which the API caps per day and refuses while a pass is in flight.
+var styleReferenceUnique = []rivertype.JobState{
+	rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRetryable, rivertype.JobStateRunning, rivertype.JobStateScheduled,
+}
+
+// InsertOpts puts the job on the analysis queue (a sandbox pass, like the clip analysis) and makes it unique by its arguments while it
+// waits or runs.
 func (StyleReferenceArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: QueueAnalysis, MaxAttempts: 3, UniqueOpts: river.UniqueOpts{ByArgs: true}}
+	return river.InsertOpts{Queue: QueueAnalysis, MaxAttempts: 3, UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: styleReferenceUnique}}
 }
 
 // StyleProfileWindow is how long the profile job waits after the first reference that asks for it, so that a creator who uploads five
@@ -109,6 +114,13 @@ func (e *Enqueuer) EnqueueStyleReference(ctx context.Context, tx *store.Store, a
 // ErrStyleNotReady: the reference is still being ingested. The job looks again in a minute.
 var ErrStyleNotReady = errors.New("jobs: the style reference is not ready")
 
+// ErrStyleLearning: a reference of the workspace is still being measured. The profile job looks again in a minute; the profile and
+// summary the editor uses stay as they are until then.
+var ErrStyleLearning = errors.New("jobs: a style reference is still being measured")
+
+// learningSnooze is how long the profile job waits for the references that are being measured.
+const learningSnooze = time.Minute
+
 // StyleLearner is the style learning (package creatorstyle) as the worker sees it.
 type StyleLearner interface {
 	// AnalyzeReference measures one reference. lastAttempt says a failure now is final (the reference is marked failed). gone says the
@@ -116,7 +128,8 @@ type StyleLearner interface {
 	// ErrModelUnavailable snooze the job; other errors are retried.
 	AnalyzeReference(ctx context.Context, ws ids.WorkspaceID, asset ids.AssetID, lastAttempt bool) (output any, gone bool, err error)
 	// LearnProfile aggregates the workspace's measured references into its profile and writes the summary. lastAttempt says a failure of
-	// the summary call now is final (the profile is then stored without one).
+	// the summary call now is final (the profile is then stored without one). ErrStyleLearning snoozes the job: a reference is still
+	// being measured, and the profile is made once, when they all are.
 	LearnProfile(ctx context.Context, ws ids.WorkspaceID, lastAttempt bool) (output any, err error)
 }
 
@@ -181,6 +194,8 @@ func (w *StyleProfileWorker) Work(ctx context.Context, job *river.Job[StyleProfi
 	}
 	out, err := w.deps.Style.LearnProfile(ctx, ws, job.Attempt >= job.MaxAttempts)
 	switch {
+	case errors.Is(err, ErrStyleLearning):
+		return styleSnooze(ctx, w.deps, job.CreatedAt, learningSnooze, err.Error())
 	case errors.Is(err, ErrModelUnavailable):
 		return styleSnooze(ctx, w.deps, job.CreatedAt, noStyleSnooze, err.Error())
 	case err != nil:

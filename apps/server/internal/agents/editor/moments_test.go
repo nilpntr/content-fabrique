@@ -3,6 +3,7 @@ package editor
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -44,7 +45,7 @@ func (e *env) saveAnalysisSeries(ws store.Workspace, asset ids.AssetID, nReps in
 	for i := 0; i < nReps; i++ {
 		m := store.NewMoment{
 			Kind: store.MomentRep, StartMs: 6000 + i*3000, EndMs: 9000 + i*3000, Score: 0.4 + 0.5*float64(i)/float64(max(nReps-1, 1)),
-			Attrs: []byte(`{}`), Description: "rep " + string(rune('1'+i)) + " of " + string(rune('0'+nReps)) + ", clean, full range",
+			Attrs: []byte(fmt.Sprintf(`{"peak_ms": %d}`, 7400+i*3000)), Description: "rep " + string(rune('1'+i)) + " of " + string(rune('0'+nReps)) + ", clean, full range",
 		}
 		res.Moments = append(res.Moments, m)
 	}
@@ -84,7 +85,8 @@ func TestFindMomentsRanksAndFilters(t *testing.T) {
 	if len(ranked) != 6 {
 		t.Fatalf("%d ranked lines, want 5 reps and a hold:\n%s", len(ranked), text)
 	}
-	if !strings.Contains(ranked[0], "rep 5 of 5") || !strings.Contains(ranked[0], "score 0.90") || !strings.Contains(ranked[0], "18000 to 21000 ms") || !strings.Contains(ranked[0], a.String()) {
+	if !strings.Contains(ranked[0], "rep 5 of 5") || !strings.Contains(ranked[0], "score 0.90") || !strings.Contains(ranked[0], "18000 to 21000 ms") || !strings.Contains(ranked[0], a.String()) ||
+		!strings.Contains(ranked[0], "turn_ms 19400") {
 		t.Errorf("the best moment: %s", ranked[0])
 	}
 	for _, l := range ranked {

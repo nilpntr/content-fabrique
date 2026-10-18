@@ -89,6 +89,7 @@ func main() {
 			if err != nil {
 				return err
 			}
+			styleSvc.Plans = priceList
 			_, err = auth.Mount(mux, auth.Deps{Config: cfg, Store: st, Logger: logger, Assets: assetsSvc, Runs: runs, Renders: rendersSvc, Style: styleSvc})
 			return err
 		},

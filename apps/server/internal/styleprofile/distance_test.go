@@ -55,7 +55,7 @@ func TestAGenericEditIsOutOfRangeWithFixes(t *testing.T) {
 	if d.Score > 0.4 {
 		t.Errorf("score %.2f", d.Score)
 	}
-	if !strings.Contains(bad["transitions"].Fix, "hard cut") || !strings.Contains(bad["long_takes"].Fix, "keep one take running") {
+	if !strings.Contains(bad["transitions"].Fix, "plain cut on the beat") || !strings.Contains(bad["long_takes"].Fix, "keep one take running") {
 		t.Errorf("fixes: %q / %q", bad["transitions"].Fix, bad["long_takes"].Fix)
 	}
 	text := d.Text()

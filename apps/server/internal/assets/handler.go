@@ -383,6 +383,8 @@ func (h *Handler) DeleteAsset(ctx context.Context, req api.DeleteAssetRequestObj
 			return api.DeleteAsset403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(body(e))}, nil
 		case 404:
 			return api.DeleteAsset404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(body(e))}, nil
+		case 409:
+			return api.DeleteAsset409JSONResponse(body(e)), nil
 		case 500:
 			return api.DeleteAsset500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(body(e))}, nil
 		case 503:

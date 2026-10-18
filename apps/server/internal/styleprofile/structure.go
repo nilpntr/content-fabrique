@@ -15,9 +15,12 @@ func (p *Profile) structureLines(withWords bool) []string {
 	var out []string
 	pc := p.Pacing
 	if pc.ShotS.Median > 0 {
-		line := fmt.Sprintf("shot lengths: median %.1f s, 90 %% of the shots at most %.1f s", pc.ShotS.Median, pc.ShotS.P90)
-		if pc.EndShotS.Median > 0 {
-			line += fmt.Sprintf("; the last shot runs %s s", pc.EndShotS)
+		line := fmt.Sprintf("shot lengths (every shot of the videos with a cut): %s s", pc.ShotS)
+		if p90 := pc.P90(); p90 > 0 {
+			line += fmt.Sprintf(", 90 %% of the shots at most %.1f s", p90)
+		}
+		if pc.EndingS.Median > 0 {
+			line += fmt.Sprintf("; the last shot is held %s s", pc.EndingS)
 			if pc.LongEndingHold() {
 				line += " (a long hold at the end)"
 			}

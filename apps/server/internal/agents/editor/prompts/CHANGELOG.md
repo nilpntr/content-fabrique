@@ -1,6 +1,6 @@
 # Editor system prompt: changelog
 
-The editor agent's system prompt is `editor.v2.7.md`, embedded in the Go binary, and the genre playbooks are the files in
+The editor agent's system prompt is `editor.v2.8.md`, embedded in the Go binary, and the genre playbooks are the files in
 `playbooks/`, embedded too. The text the model receives is the runtime's preamble (`runtime.SystemPreamble`, the untrusted-data
 rule) followed by this file. The prompt version (`PromptVersion` in `prompt.go`) is stored in every run's input, so a run can
 always be tied to the text it was given; a playbook has its own version (`workout.v2`, in `playbooks.go`) that the run's plan
@@ -22,13 +22,13 @@ Rules for changing it:
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
 
-## editor.v2.7 (2026-10-18)
+## editor.v2.8 (2026-10-18)
 
 The creator's style as data and settings (P6-05b and P6-05c). The style is three layers, the creator always winning: what was measured
 from their reference videos, the defaults an AI summary suggests from those measures, and the creator's own settings (the vibe,
 transitions, text animation, camera motion, the title's colour, place, case and form, chapter titles, the ending hold, cuts against the
 movement, angles, music, pace), which the run context lists in our words after the creator_style block, with a title_form data block
-when a form is set. The file is `editor.v2.7.md`, a patch of v2.6:
+when a form is set. The file is `editor.v2.8.md`, a patch of v2.7:
 
 - **New section "Following the creator's settings"**: what each setting asks for; a setting the creator chose is a hard rule and the
   others are the plan; what the settings turn off stays off at every vibe.
@@ -38,6 +38,49 @@ when a form is set. The file is `editor.v2.7.md`, a patch of v2.6:
 - **Checks**: `style_match` has `transitions`, `camera_motion` and `text_animation` from the settings in place of the measured `effects`,
   and `ending_hold` and `title_form`; `effect_density` fails what the settings turn off; `rep_boundaries` does not apply when the cuts
   are mid-rep; `chapter_titles` does not apply when chapter titles are off.
+- **The pace setting.** The creator's pace (slower x1.25, like my videos x1, faster x0.8) scales v2.7's pace targets after the
+  vibe, in plan_edit and in check_edit (`PaceSettings`, `paceSetting`).
+- **The title form.** The words of v2.7's title templates and the creator's title_form setting are one instruction: the setting's
+  form wins, else the most common; the creator's titles stay out of every block (title_copied).
+- **Plain cuts on the beat (a creator's verdict).** On a live edit with punch and zoom_through transitions the creator said "the
+  transitions really look AI, nobody uses those transition effects, only someone who throws it into an automatic edit" (the music, the
+  beat cuts and the movement were praised). Transitions are now off at every vibe by default: no vibe asks for them; they come only
+  from the creator's setting (subtle or lots) or from their own videos when those measurably use them (then only those kinds, at
+  about their rate). The new section "Plain cuts on the beat" replaces "Transitions (lively and hype)" and says why; the vibe notes,
+  the settings lines and plan_edit's notes say the same. The playbooks are `workout.v5`, `general.v3`, `vlog.v3`,
+  `unboxing_product.v3`, `talking.v3` and `tutorial.v3` (energy from punch-ins, cuts on the beat and text, no effect transitions).
+  Text entrances and exits stay. check_edit's `no_transitions_at_lively` is replaced by `transitions_match_style`: it fails a
+  transition when the effective style has them off, none (fewer than one cut in four) at lots, too many at subtle, and a kind or a
+  rate the creator's videos do not have when the level was measured; `style_match`'s `transitions` off is a rule whatever its
+  source. The summary prompt (`stylesummary.v3`) proposes transitions only when the measures show them.
+
+## editor.v2.7 (2026-10-18)
+
+The pace, the hook title and the song, from the measured style and never from one creator (P6-06 follow-up). A live run of v2.6
+(lively, $0.60) passed 17 of 19 checks and still read slow and off: five shots in 20 s (a median of 3.97 s against the creator's
+measured median of about half that), a hook with no title (the renderer moved it to the next shot: no room above a high head), a title
+copied word for word from one of the creator's reference videos, and an ending pose held for 5 s. The file is `editor.v2.7.md`, the
+workout playbook is `workout.v4`; it changes behaviour on purpose, so it is a minor version.
+
+- **The pace targets.** plan_edit gives a median shot, the longest a shot may run (the hook and the ending aside) and the longest held
+  ending, from the creator's measured shot lengths (the median, the 90th percentile and the last shot of their videos with a cut),
+  scaled by the vibe (calm x1.3, lively x1.0, hype x0.7) and by the creator's own pace setting, or general defaults without a profile
+  (`pace.go`). check_edit holds the edit to them: `shot_pacing` (the median within ±40 % of the target), and the new `long_shot` and
+  `held_ending` (a longer ending passes only with a push and a punch-in on a beat). At lively and hype the style's pacing dimensions
+  (cuts, long takes, shot length) give way to the targets; at calm a long-take creator keeps their long takes.
+- **Slow lifts.** The prompt and the playbook name the tools for a rep longer than the pace allows: a cut at the rep's turning point
+  (`turn_ms` in find_moments, the analysis's measured turn), an angle switch at the turning point, a faster speed. They are tools for
+  when the pace needs them, not rules. `rep_boundaries` accepts the measured turn (the midpoint only when there is none) within a
+  tolerance from the measurement: 150 ms at speed 1, more at a higher speed, and 5 % of a slow rep's length (at most 250 ms).
+- **The title.** The style block gives the title templates as forms to fill ("<TOPIC> 101" with the length of the topic), never the
+  creator's titles; the prompt says to write a new title for this video. The new `title_copied` fails a title that is, without regard
+  to case or spaces, the title of one of the references.
+- **Never on the body, still in the hook.** The text says what the placement does now (smaller down to legible capitals of 2.2 % of the
+  frame, stacked beside the head in two or three lines, below the person) and that `text_over_subject` fails with the room in pixels
+  and the fix when a hook title still cannot stay.
+- **The song.** A footage clip's own sound is never the song, even when the gym's music is in it: only an audio file the creator gave,
+  or a video sound the creator chose for the edit (a creator_audio item already on the timeline). list_footage and the opening message
+  show song lines for those only; get_music refuses a footage clip.
 
 ## editor.v2.6 (2026-10-18)
 

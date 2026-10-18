@@ -291,14 +291,25 @@ type PacingProfile struct {
 	HasLongTakes  bool    `json:"has_long_takes"`
 	// ShotS is the distribution of every shot length of the references that have a cut (P6-06): what a shot of this creator lasts.
 	ShotS Range `json:"shot_s"`
-	// EndShotS is the length of the last shot of the references that have a cut (P6-05c): how long the creator holds the ending.
-	EndShotS Range `json:"end_shot_s"`
+	// ShotP90S is the 90th percentile of those shot lengths (how long the creator's longer shots run, a stray long take left out), and
+	// EndingS the length of the last shot of each reference that has a cut (how long the creator holds the ending). 0 and empty in a
+	// profile made before they were measured: the pace targets then fall back to ratios of the median (internal/agents/editor/pace.go).
+	ShotP90S float64 `json:"shot_p90_s,omitempty"`
+	EndingS  Range   `json:"ending_s"`
+}
+
+// P90 is the 90th percentile shot length: ShotP90S, or the shot range's own (both are the same measure; 0 when neither was measured).
+func (pc PacingProfile) P90() float64 {
+	if pc.ShotP90S > 0 {
+		return pc.ShotP90S
+	}
+	return pc.ShotS.P90
 }
 
 // LongEndingHold says the creator holds the last shot clearly longer than their other shots: at least 2.5 s and 1.5 times the median
 // shot.
 func (pc PacingProfile) LongEndingHold() bool {
-	return pc.EndShotS.Median >= 2.5 && (pc.ShotS.Median == 0 || pc.EndShotS.Median >= 1.5*pc.ShotS.Median)
+	return pc.EndingS.Median >= 2.5 && (pc.ShotS.Median == 0 || pc.EndingS.Median >= 1.5*pc.ShotS.Median)
 }
 
 // CameraProfile is the camera motion of the references (P6-06): Verdict is static or handheld (the majority), ShiftPctPerS the drift of
@@ -328,6 +339,18 @@ type TransitionsProfile struct {
 	Used     string   `json:"used,omitempty"`
 	Kinds    []string `json:"kinds,omitempty"`
 	Share    float64  `json:"share"`
+}
+
+// Level is the transitions setting the creator's videos stand for: "" when they do not measurably use transitions (plain cuts, no cuts,
+// or not measured), subtle when some of their cuts have one, lots when half of them or more do.
+func (tp TransitionsProfile) Level() string {
+	switch {
+	case tp.Used != TransitionsSome:
+		return ""
+	case tp.Share >= 0.5:
+		return LevelLots
+	}
+	return LevelSubtle
 }
 
 // The uses of transitions.
@@ -409,6 +432,9 @@ type TextProfile struct {
 	CaptionShare float64        `json:"caption_share"`
 	// Examples are up to three titles as read: the creator's own words, untrusted.
 	Examples []string `json:"examples,omitempty"`
+	// Titles are every title read from the references (untrusted). They are never shown to the editor: check_edit compares an edit's
+	// titles with them, so a reference's title is never reused word for word (title_copied).
+	Titles []string `json:"titles,omitempty"`
 	// Templates are the forms the titles take with the changing words as slots (P6-05c), most common first. Entrance is the most common
 	// way the title comes on (of EntranceRead reads). ChapterRead is how many multi-shot references were read for chapter titles,
 	// ChapterShare the share of those that have numbered chapter titles, ChapterTemplates their forms and ChapterExamples a couple of
@@ -520,7 +546,7 @@ func Aggregate(refs []Measures) *Profile {
 		luma, lumaP, sat, vig = append(luma, m.Video.LumaMean), append(lumaP, m.Video.LumaP90), append(sat, m.Video.SatMean), append(vig, m.Video.VignetteRatio)
 	}
 	// The camera (P6-06): the drift of the picture, apart from effects; and every shot length of the references with a cut.
-	var shift, allShots []float64
+	var shift, allShots, endings []float64
 	var verdicts []string
 	handheld := 0.0
 	for _, m := range refs {
@@ -531,8 +557,9 @@ func Aggregate(refs []Measures) *Profile {
 				handheld++
 			}
 		}
-		if len(m.CutsS) > 0 {
+		if len(m.CutsS) > 0 && len(m.ShotsS) > 0 {
 			allShots = append(allShots, m.ShotsS...)
+			endings = append(endings, m.ShotsS[len(m.ShotsS)-1])
 		}
 	}
 	if len(verdicts) > 0 {
@@ -549,7 +576,10 @@ func Aggregate(refs []Measures) *Profile {
 	p.Format = FormatProfile{DurationS: RangeOf(dur), FPS: RangeOf(fps).Median}
 	pace := PacingProfile{
 		CutsPerVideo: RangeOf(cutsPer), CutsPerMinute: RangeOf(cutsMin), ShotMedianS: RangeOf(shotMed), LongestShotS: RangeOf(longest),
-		ShortestShotS: RangeOf(shortest), ZeroCutShare: round2(zeroCuts / float64(n)), ShotS: RangeOf(allShots), EndShotS: RangeOf(endShots(refs)),
+		ShortestShotS: RangeOf(shortest), ZeroCutShare: round2(zeroCuts / float64(n)), ShotS: RangeOf(allShots), EndingS: RangeOf(endings),
+	}
+	if len(allShots) > 0 {
+		pace.ShotP90S = round2(percentile(sortedCopy(allShots), 0.9))
 	}
 	if allTime > 0 {
 		pace.LongTakeShare = round2(longTime / allTime)
@@ -772,6 +802,7 @@ func aggregateText(refs []Measures) *TextProfile {
 		}
 	}
 	t.Templates = templatesOf(shapes)
+	t.Titles = titleTexts
 	switch {
 	case oneMax > 0 && twoMin > oneMax:
 		t.OneLineChars = (oneMax + twoMin) / 2 // between the longest title that fitted one line and the shortest that wrapped
@@ -1039,9 +1070,7 @@ func (p *Profile) CompactBlock() string {
 		}
 		b.WriteString("\n")
 	}
-	if p.Pacing.ShotS.Median > 0 {
-		fmt.Fprintf(&b, "shot lengths (every shot of the videos with a cut): %s s\n", p.Pacing.ShotS)
-	}
+	// The shot lengths, their 90th percentile and the ending are in structureLines.
 	if p.Audio.DropS.Median > 0 {
 		fmt.Fprintf(&b, "drop: the music drops at %s s in %.0f %% of the videos; the hook ends on it\n", p.Audio.DropS, p.Audio.DropShare*100)
 	}
@@ -1084,16 +1113,6 @@ func labelsWord(t *TextProfile) string {
 	return fmt.Sprintf("in %.0f %% of the videos", t.LabelShare*100)
 }
 
-// endShots are the lengths of the last shots of the references that have a cut.
-func endShots(refs []Measures) []float64 {
-	var out []float64
-	for _, m := range refs {
-		if len(m.CutsS) > 0 && len(m.ShotsS) > 0 {
-			out = append(out, m.ShotsS[len(m.ShotsS)-1])
-		}
-	}
-	return out
-}
 
 func aggregateTransitions(refs []Measures) TransitionsProfile {
 	var tp TransitionsProfile

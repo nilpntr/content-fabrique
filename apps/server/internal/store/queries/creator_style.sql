@@ -37,6 +37,7 @@ SELECT * FROM style_references WHERE workspace_id = @workspace_id AND asset_id =
 INSERT INTO style_references (workspace_id, asset_id, name, status)
 VALUES (@workspace_id, @asset_id, @name, 'queued')
 ON CONFLICT (asset_id) DO UPDATE SET status = 'queued', failure_reason = NULL, name = EXCLUDED.name
+WHERE style_references.workspace_id = EXCLUDED.workspace_id
 RETURNING *;
 
 -- Every asset reference of the workspace goes back to the queue (learning the style again).
@@ -84,6 +85,26 @@ DELETE FROM style_references WHERE workspace_id = @workspace_id;
 UPDATE assets SET deleted_at = now()
 WHERE workspace_id = @workspace_id AND purpose = 'style_reference' AND deleted_at IS NULL
 RETURNING *;
+
+-- ---- learning again ------------------------------------------------------------------------------------------------------------
+
+-- Serialises a workspace's "learn again" (the in-flight check and the day's count hold however many requests race).
+-- name: LockWorkspaceStyle :exec
+SELECT pg_advisory_xact_lock(hashtextextended('style:' || @workspace_id::text, 0));
+
+-- The references of a workspace that are being measured: queued or analysing, with an asset that is ready and not deleted, and a row
+-- that changed after @since (a row older than that belongs to a job that gave up, and holds nothing back).
+-- name: CountStyleReferencesInFlight :one
+SELECT count(*) FROM style_references r
+JOIN assets a ON a.workspace_id = r.workspace_id AND a.id = r.asset_id
+WHERE r.workspace_id = @workspace_id AND r.status IN ('queued', 'analysing') AND r.updated_at > @since
+  AND a.deleted_at IS NULL AND a.status = 'ready';
+
+-- name: CountStyleLearnPasses :one
+SELECT count(*) FROM style_learn_passes WHERE workspace_id = @workspace_id AND created_at >= @since;
+
+-- name: InsertStyleLearnPass :exec
+INSERT INTO style_learn_passes (workspace_id, started_by) VALUES (@workspace_id, sqlc.narg('started_by')::uuid);
 
 -- ---- the creator's settings ---------------------------------------------------------------------------------------------------
 

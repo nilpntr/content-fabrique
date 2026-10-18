@@ -108,9 +108,18 @@ func TestTheTitleGoesAboveAHeadAt17PercentAndWarnsWhenItEndsOverTheBody(t *testi
 	if len(plan.Warnings) != 1 || plan.Warnings[0].Code != "text_moved" || !strings.Contains(plan.Warnings[0].Message, "above") {
 		t.Errorf("warnings %+v", plan.Warnings)
 	}
-	// A head at 14.6 %: no room above at any size, the person is all around, and the clip is the whole video: the title is never put over
-	// the body (P6-06), so it is left out, and the render says so.
+	// A head at 14.6 %: no room above at any size, but the wall beside the head is clear, so the title is stacked there, wrapped and
+	// smaller, its letters above the shoulder line (wrap and stack before retiming).
 	plan, err = Compile(spec, Final, resolver(0.146, 0.14, 0.78))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Warnings) != 1 || plan.Warnings[0].Code != "text_moved" || !strings.Contains(plan.Warnings[0].Message, "beside") {
+		t.Errorf("warnings %+v", plan.Warnings)
+	}
+	// Arms raised above the head (the box starts well above it): beside the head is an arm, there is no room anywhere, and the clip is the
+	// whole video: the title is never put over the body (P6-06), so it is left out, and the render says so.
+	plan, err = Compile(spec, Final, resolver(0.146, 0.08, 0.84))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +140,8 @@ const (
 
 func TestATitleWithNoRoomIsShownWhereItFits(t *testing.T) {
 	tracks := map[string]subject.Track{
-		"close": {Aspect: 0.5625, Samples: []subject.Sample{{AtMs: 1000, X: 0.05, Y: 0.14, W: 0.9, H: 0.86, HeadTopY: 0.146}}},
+		// A close-up with the arms raised above the head: no room above, beside (an arm) or below.
+		"close": {Aspect: 0.5625, Samples: []subject.Sample{{AtMs: 1000, X: 0.05, Y: 0.08, W: 0.9, H: 0.92, HeadTopY: 0.146}}},
 		"wide":  {Aspect: 0.5625, Samples: []subject.Sample{{AtMs: 1000, X: 0.3, Y: 0.34, W: 0.4, H: 0.6, HeadTopY: 0.35}}},
 	}
 	resolver := ResolverFunc(func(id string, _ Variant) (ResolvedAsset, error) {

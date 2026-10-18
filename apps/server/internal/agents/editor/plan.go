@@ -244,7 +244,7 @@ func BuildPlan(in planArgs, footage map[string]bool, f Features, style *stylepro
 func BeatMs(bpm int) int64 { return (60000*2 + int64(bpm)) / (2 * int64(bpm)) }
 
 // transitionEffects are the plan's effects that are transitions; the others (but none) move the camera or the speed.
-var transitionEffects = map[string]bool{"whip": true, "zoom_through": true, "flash": true}
+var transitionEffects = map[string]bool{"whip": true, "zoom_through": true, "flash": true, "punch": true}
 
 // planNotes are the things about a valid plan that the editor should hear now rather than at check_edit. set is the creator's
 // effective settings (nil for the defaults).
@@ -278,7 +278,7 @@ func planNotes(p Plan, style *styleprofile.Profile, set *styleprofile.Resolved) 
 			}
 		}
 		if lim.transitionsOff && trans > 0 {
-			notes = append(notes, fmt.Sprintf("%d shots of the plan have a transition. The creator's settings turn transitions off: make those cuts hard cuts.", trans))
+			notes = append(notes, fmt.Sprintf("%d shots of the plan have a transition. This style is plain cuts on the beat (transitions off): make those cuts plain cuts. Effect transitions read as an automatic AI edit to creators.", trans))
 		}
 		if lim.cameraOff && moves > 0 {
 			notes = append(notes, fmt.Sprintf("%d shots of the plan have a motion or a speed ramp. The creator's settings turn camera motion off: set those effects to none.", moves))
@@ -296,21 +296,21 @@ func planNotes(p Plan, style *styleprofile.Profile, set *styleprofile.Resolved) 
 			}
 		}
 		if n > 0 && energy {
-			notes = append(notes, fmt.Sprintf("%d shots of the plan have a speed ramp or a shake. This creator uses no gimmicks: keep the transitions, punch-ins and the living camera of the %s vibe, drop those.", n, VibeOr(p.Vibe)))
+			notes = append(notes, fmt.Sprintf("%d shots of the plan have a speed ramp or a shake. This creator uses no gimmicks: keep the punch-ins and the living camera of the %s vibe, drop those.", n, VibeOr(p.Vibe)))
 		} else if n > 0 {
-			notes = append(notes, fmt.Sprintf("%d shots of the plan have an effect. This creator's videos have none and the vibe is calm: keep at most one transition (on the drop) and the living camera (handheld), set the other effects to none.", n))
+			notes = append(notes, fmt.Sprintf("%d shots of the plan have an effect. This creator's videos have none and the vibe is calm: keep the living camera (handheld), set the other effects to none.", n))
 		}
 	}
-	if energy {
+	// Lots of transitions is the creator's own (their setting or their videos): a plan without them is not their style.
+	if lim := applyStyle(limits{}, style, set); set != nil && set.Transitions == styleprofile.LevelLots && !lim.transitionsOff && len(p.Shots) >= 3 {
 		transitions := 0
 		for _, s := range p.Shots[1:] {
-			switch s.Effect {
-			case "whip", "zoom_through", "flash", "punch":
+			if transitionEffects[s.Effect] {
 				transitions++
 			}
 		}
-		if len(p.Shots) >= 3 && transitions == 0 {
-			notes = append(notes, fmt.Sprintf("The vibe is %s and the plan has no transition: put whip, zoom_through, punch or flash on the cut into the drop and on the strong beats (phrase starts), 250 to 400 ms, never the same one three times in a row.", VibeOr(p.Vibe)))
+		if transitions == 0 {
+			notes = append(notes, "The creator's style has lots of transitions and the plan has none: put one on the cut into the drop and on the strong beats (phrase starts), never the same one three times in a row.")
 		}
 	}
 	var chapters []int
@@ -321,6 +321,26 @@ func planNotes(p Plan, style *styleprofile.Profile, set *styleprofile.Resolved) 
 	}
 	if len(chapters) >= 2 && (set == nil || set.ChapterTitles != styleprofile.LevelOff) {
 		notes = append(notes, fmt.Sprintf("The plan has %d chapters: give the first shot of each a numbered chapter title (\"1. <EXERCISE>\" in the creator's title style, in the top band above the head) that enters with the shot and leaves before the next chapter; inside a chapter switch the angle every 2 to 5 s at a rep boundary instead of one long take.", len(chapters)))
+	}
+	// The pace targets (pace.go): the shots between the hook and the ending, and the ending, against the creator's measured lengths.
+	if pace := Pace(style, p.ContentType, p.Vibe, paceSetting(set)); pace.Applies && len(p.Shots) >= 3 {
+		var lengths []int64
+		long := 0
+		for _, s := range p.Shots[1 : len(p.Shots)-1] {
+			lengths = append(lengths, s.LengthMs)
+			if s.LengthMs > pace.MaxShotMs {
+				long++
+			}
+		}
+		if med := medianOf(lengths); pace.FromProfile && med > pace.MedianHiMs {
+			notes = append(notes, fmt.Sprintf("The shots between the hook and the ending run %s at the median; the pace target is about %s. Use more, shorter shots: cut a slow rep at its turning point (half a rep on the beat) or switch angle there.", secs(med), secs(pace.MedianMs)))
+		}
+		if long > 0 {
+			notes = append(notes, fmt.Sprintf("%d shots of the plan are longer than %s, the longest the pace allows: cut them at a rep's turning point or switch angle there.", long, secs(pace.MaxShotMs)))
+		}
+		if end := p.Shots[len(p.Shots)-1].LengthMs; end > pace.EndingMs {
+			notes = append(notes, fmt.Sprintf("The ending is %s; hold it at most %s, or up to %s with a push and a punch-in on a beat (set_motion handheld with at_ms on the beat).", secs(end), secs(pace.EndingMs), secs(pace.EndingMovingMs)))
+		}
 	}
 	if hookMax := applyStyle(limits{}, style, set).hookMaxMs; p.Shots[0].LengthMs > hookMax {
 		if style != nil {
@@ -394,7 +414,11 @@ func (d Deps) planEdit(ctx context.Context, rc runtime.RunContext, in planArgs) 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Plan saved (it is shown to the creator). Content type %s, playbook %s.\n", plan.ContentType, plan.PlaybookVersion)
 	b.WriteString(plan.describe())
-	for _, n := range planNotes(plan, firmStyle(style), settingsOf(st)) {
+	set := settingsOf(st)
+	if d := Pace(firmStyle(style), plan.ContentType, plan.Vibe, paceSetting(set)).Describe(); d != "" {
+		b.WriteString(d + "\n")
+	}
+	for _, n := range planNotes(plan, firmStyle(style), set) {
 		b.WriteString("Note: " + n + "\n")
 	}
 	b.WriteString("\nThe playbook for this kind of video. Follow it; it is the craft of the genre, and check_edit will measure your edit against it.\n\n")

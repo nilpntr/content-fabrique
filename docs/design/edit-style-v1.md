@@ -95,7 +95,7 @@ The new craft features reach the editor agent as edit ops, whose descriptions in
 
 Every addition comes with schema fixtures, ops, validation rules (for example, a speed ramp must not exceed the source length, and a motion preset needs a long enough shot), compiler support and golden renders in all four formats.
 
-## 6. Editor v2 as built (`internal/agents/editor`, prompt `editor.v2.5`; v2.6: "Music, energy and text off the body" below)
+## 6. Editor v2 as built (`internal/agents/editor`, prompt `editor.v2.5`; v2.6: "Music, energy and text off the body" below; v2.7: "The pace, the hook title and the song" below)
 
 **The flow of a run.** Understand (`find_moments`, `view_clip`) → `plan_edit` → `edit_timeline` (in the order of section 7) → `render_preview` → `check_edit` → at most one revision (`edit_timeline`, `render_preview`, `check_edit`) → `finish`. The tools are in [agent-runtime-v1](agent-runtime-v1.md) section 5; the gates are the first `edit_timeline` of a run (refused without a plan) and `finish` (refused without a preview and a `check_edit` of the newest version the run made). Both gates keep their record in the worker and fall back to the run's events, so a run that resumes in another worker is not asked to plan or check again. The revision limit is guidance in the answer of `check_edit` ("this was the check after your revision pass: do not revise again"), not a refusal, so a run that cannot fix a check can still finish and say why; the run's budgets still bound it.
 
@@ -140,7 +140,7 @@ Every number is computed in Go from the stored timeline version and the stored c
 | `shot_pacing` | the median shot is at most 3 s (workout), 3.5 s (unboxing, general), 4 s (vlog), 5 s (tutorial) or 6 s (talking) | the type comes from the plan; without a plan it is general |
 | `shot_variety` | never more than two shots in a row within 8 % (or 100 ms) of each other, and not all within a 12 % spread (5 shots or more) | |
 | `pace_builds` | the second half's median shot is at most 15 % over the first half's, the last shot left out | workout, unboxing, vlog, general, 6 shots or more |
-| `rep_boundaries` | at least 85 % of the shot edges on clips with reps are within 150 ms of a rep start, a rep end or the turning point half-way between, or inside a hold | the half-way point is what makes "the strongest half of a rep" a legal cut |
+| `rep_boundaries` | at least 85 % of the shot edges on clips with reps are within the tolerance of a rep start, a rep end or its turning point, or inside a hold | the turning point is the analysis's measured one (`peak_ms`; the midpoint only when there is none); the tolerance is 150 ms at speed 1, more at a higher speed and on a slow rep (v2.7, below) |
 | `dead_time` | at most 5 % of the screen time is dead time | counted in output time, from the dead moments |
 | `effect_density` | between 0.15 and 0.5 effects per cut (the lower bound for workout, unboxing, vlog and general with 4 cuts or more), and at most 4 speed ramps | an effect is a motion preset, a transition that is not a cut, or a speed ramp |
 | `text_safe_zone` | the version has no `unsafe_text` or `text_overlaps_captions` issue | the validator already refuses `unsafe_text` for a stored version, so this mostly reports |
@@ -233,7 +233,7 @@ Sections 2 and 3 are the generic craft of a genre. A creator who shows us their 
 | `off_beat_cut` | a cut is more than 60 ms from a beat or a strong onset of the song (a transition counts at its start or its middle); n/a without a song |
 | `hook_misses_drop` | the first cut is more than 60 ms from the song's drop; the fix names the `source_offset_ms` that moves the drop onto it |
 | `static_shot` | a shot over 2 s has no camera motion and the footage does not move by itself; skipped at calm for a creator whose own camera is static |
-| `no_transitions_at_lively` | at lively or hype all cuts are hard, at hype fewer than a quarter are transitions, or the cut on the drop is hard |
+| `transitions_match_style` (replaced `no_transitions_at_lively` in `editor.v2.8`, D-36) | the edit has a transition where the creator's effective style has them off (the default at every vibe), fewer than a quarter of the cuts are transitions where it asks for lots, more than a few where it asks for subtle, or a kind or rate their videos do not have when the level was measured |
 | `transition_variety` | the same transition three times in a row |
 | `text_without_entrance` | at lively or hype a text has no entrance or no exit |
 | `chapter_titles` | the plan has two or more chapters and the edit fewer numbered titles |
@@ -242,3 +242,64 @@ Sections 2 and 3 are the generic craft of a genre. A creator who shows us their 
 `hook_length` lets a hook run until the song's drop (at most 5 s), `beat_sync` counts a transition at its middle, and `effect_density` allows 0.6 effects a cut at lively and 1.0 at hype (0.5 at calm, as before).
 
 **Verified** without a model: a hand-written montage of the founder's footage with the synthetic 124 BPM track (`/tmp/cf-p606`, local only) renders with motion on every shot, the cuts and transition middles on the beats, the hook ending on the drop, the chapter titles in the top band and none on a torso, at -14.0 LUFS; the checks pass 17 of 17 that apply, where the old static three-take cut fails 9 (`static_shot`, `no_transitions_at_lively`, `text_without_entrance`, `chapter_titles` among them).
+
+## The pace, the hook title and the song (P6-06 follow-up, `editor.v2.7`)
+
+> Built after a live run of `editor.v2.6` at lively ($0.60, 17 of 19 checks): every cut on the beat and the hook on the drop, and still
+> slow and off. Five shots in 20 s (a median of 3.97 s against the creator's measured median of about half that), a hook with no title
+> (the renderer moved it to the next shot: no room above a high head), a title copied word for word from one of the creator's reference
+> videos, an ending pose held for seconds, and gym clips whose own sound the analysis had read as music. **Nothing below is about one
+> creator**: every number comes from the creator's style profile, scaled by the vibe and by the creator's own pace setting, or from
+> general defaults written in one place.
+
+**The pace targets** (`pace.go`). The profile measures every shot of the creator's videos that have a cut: the median, the 90th
+percentile (`pacing.shot_p90_s`) and the last shot of each video (`pacing.ending_s`, how long they hold the ending). The targets of an
+edit are those three numbers times the vibe's factor (calm 1.3, lively 1.0, hype 0.7) times the creator's pace setting (`slower` 1.25,
+`like_my_videos` 1, `faster` 0.8; the input the "Your style" feature fills, `CheckInput.PaceSetting`):
+
+| Target | From | Check |
+|---|---|---|
+| the median shot, within ±40 % | the creator's measured median shot | `shot_pacing` (with a profile; without one the type's maximum, as before) |
+| the longest shot, the hook and the ending aside | the creator's measured 90th percentile shot | `long_shot` (new) |
+| the longest held ending | the creator's measured ending; 1.6 times that when it moves (a push with a punch-in on a beat) | `held_ending` (new) |
+
+The vibe factors are a beat either way on the shots this is about: a shot of 3 to 4 beats gets about one beat more at calm and one less
+at hype, the difference the playbook draws between a held moment (2 to 4 beats) and a hype cut (1 to 2), and they stay inside a
+creator's own spread (their quartiles run about 0.5 to 1.6 times their median). Lively is "like the creator's own cut-up videos". At
+calm a creator whose videos are long takes keeps them (no targets; the long-take thresholds of the profile hold). A profile stored
+before the two new measures is made again from its stored measures when it is read (`LoadProfile`); measures that cannot be read fall
+back to ratios of the median (7/4 and 5/4, the ratios of the defaults). **Without a profile** the defaults are counted in beats of the
+default 124 BPM grid, from the playbook: a typical shot of 4 beats (1.94 s), the longest of 7 (a full rep, 3.39 s), an ending of 5
+(2.42 s); talking and tutorial videos follow the speech and have no targets. plan_edit states the targets and notes a shot list that
+misses them; at lively and hype the style's pacing dimensions (cuts, long takes, shot length) give way to them, since a creator whose
+videos are partly single takes would otherwise forbid the pace of their own cut-up videos.
+
+**Slow lifts.** A rep of 4 to 5 s is longer than most creators' shots. The workout playbook (`workout.v4`) and the prompt name three
+tools, for when the pace target needs them: cut at the rep's turning point (half a rep, on the beat), switch at the turning point to
+another angle of the same exercise (front and behind), or play the rep faster. find_moments now gives each rep's `turn_ms`, the
+analysis's measured turning point (stored as `peak_ms` since the first analysis; read by `ListAssetSpans` as `turn_ms`).
+
+**The tolerance of `rep_boundaries`** was not loosened by taste. It is what can be measured: half a sample of the analysis (50 ms at
+10 Hz), the largest move of `snap_cuts_to_beats` (80 ms) and half an output frame (17 ms at 30 fps) add up to the 150 ms that was
+there. Two things were wrong with a fixed 150: the snap and the frame are output time, so at a speed over 1 they are longer in the
+source (the tolerance is 50 + 100 x speed ms), and a slow rep lingers at its turns: within 5 % of a rep's length of a turning point
+the movement has covered under 5 % of its range (1 - cos(2 pi x 0.05) = 0.049), so a 4.3 s rep accepts 217 ms (at most 250). The edge
+the live run flagged (153 ms from the end of a 4.3 s rep, on a beat, at speed 1.018) passes on the second ground; the same 153 ms on a
+1.5 s rep still fails. Being on a beat is not a reason by itself: the snap's 80 ms is already inside the 150.
+
+**The hook title stays in the hook** ([style profile v1](style-profile-v1.md), section 8d): the placement now shrinks a title to the
+smallest legible size, wraps it to two or three lines to stack it beside the head over the background, and only then moves it in time;
+`text_over_subject` then fails with the room it found in pixels and a fix in numbers. **Titles are new**: the profile's title templates
+are forms to fill ("<TOPIC> 101" with the length of the topic) and never the creator's titles, and `title_copied` (new) fails a title
+that is, without regard to case or spaces, the title of one of the references.
+
+**The song is the creator's.** The analyze job measures the sound of every asset with sound, and a gym plays music, so footage clips
+had music analyses. The editor now treats only an audio file the creator gave, or a video sound the creator chose for the edit (a
+`creator_audio` item already on the timeline), as a song: list_footage and the opening message show song lines for those only, and
+get_music refuses a footage clip (`TestOnlyTheCreatorsAudioIsTheSong`).
+
+**Verified** without a model: the live run's spec rendered with this branch (`cfctl render --profile preview --provider docker
+--subjects`, local files only) keeps the title in the hook, stacked in three lines at scale 0.6 over the wall beside the head; with
+boxes that do not measure the head (quicklook.v2) it is moved to 2.3 to 4.15 s exactly as in the live run. The checks over that spec
+fail `shot_pacing` (3.97 s against a target of about 2.2 s for the test fixture's profile) and `title_copied`.
+

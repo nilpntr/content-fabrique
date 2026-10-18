@@ -159,10 +159,27 @@ func TestAStyleReferenceIsLearntThroughTheQueue(t *testing.T) {
 	e.startWorker(t, jobs.WorkerOptions{Style: learner})
 
 	ref := e.styleReference(t, w, clip)
+	// The reference is measured from its 720 px proxy (what the clip analysis reads too), not the original of up to 1 GiB: the proxy is
+	// the clip, the original here is not a video at all. The frame rate is the original's.
+	data, err := os.ReadFile(clip) // #nosec G304 -- a file this test made
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyKey, err := storage.DerivativeKey(w.ID, ref.ID, "proxy_720.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s3c := storagetest.S3(e.cfg)
+	for key, body := range map[string][]byte{proxyKey: data, ref.R2Key: bytes.Repeat([]byte{0}, int(ref.SizeBytes))} {
+		if _, err := s3c.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(e.cfg.Bucket), Key: aws.String(key), Body: bytes.NewReader(body)}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if _, err := e.api.ClaimAssetForIngest(ctx, w.ID, ref.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.api.FinishAssetIngest(ctx, w.ID, ref.ID, store.IngestResult{DurationMs: 6000, Width: 270, Height: 480}); err != nil {
+	if _, err := e.api.FinishAssetIngest(ctx, w.ID, ref.ID, store.IngestResult{DurationMs: 6000, Width: 270, Height: 480, FPS: 60,
+		Derivatives: []store.NewDerivative{{Kind: store.DerivativeProxy720, Key: proxyKey, ContentType: "video/mp4", SizeBytes: int64(len(data))}}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, kind := range []string{"quick_look", "transcribe", "analyze"} {
@@ -179,7 +196,7 @@ func TestAStyleReferenceIsLearntThroughTheQueue(t *testing.T) {
 	})
 	row, _ := e.api.GetStyleReferenceByAsset(ctx, w.ID, ref.ID)
 	var m styleprofile.Measures
-	if err := json.Unmarshal(row.Measures, &m); err != nil || m.Name != "my-video.mp4" || m.Text == nil || m.Text.Text != "BACK DAY 101" || len(m.CutsS) != 1 {
+	if err := json.Unmarshal(row.Measures, &m); err != nil || m.Name != "my-video.mp4" || m.Text == nil || m.Text.Text != "BACK DAY 101" || len(m.CutsS) != 1 || m.FPS != 60 {
 		t.Fatalf("measures %+v %v", m, err)
 	}
 	eventually(t, "the profile to be made", func() bool {
@@ -190,7 +207,7 @@ func TestAStyleReferenceIsLearntThroughTheQueue(t *testing.T) {
 	if err != nil || st.Profile == nil || st.Profile.References != 1 || st.Summary == nil || !strings.HasPrefix(st.Summary.Text, "Long takes") {
 		t.Fatalf("style %+v %v", st, err)
 	}
-	if st.Mine.Vibe != styleprofile.VibeHype || st.Resolved.Vibe != styleprofile.VibeHype || st.Resolved.Transitions != styleprofile.LevelLots {
+	if st.Mine.Vibe != styleprofile.VibeHype || st.Resolved.Vibe != styleprofile.VibeHype || st.Resolved.CameraMotion != styleprofile.LevelLots {
 		t.Errorf("learning the style changed the creator's choice: %+v / %+v", st.Mine, st.Resolved.Settings)
 	}
 	if got := model.count(styleprofile.SummaryToolName); got != 1 {
@@ -237,4 +254,33 @@ func TestAStyleJobWaitsForAWorkerThatCanLearn(t *testing.T) {
 		t.Fatalf("the reference row: %+v %v", r, err)
 	}
 	eventually(t, "the style job to be snoozed", func() bool { s, _ := e.jobState(t, "style_reference", a.ID.String()); return s == "scheduled" })
+}
+
+// A reference's measuring is one job while it waits or runs (a second insert is the same work and the same model call), and a finished
+// one does not block the next pass of "learn again".
+func TestAStyleReferenceJobIsUniqueWhileItWaits(t *testing.T) {
+	e := newAssetsEnv(t)
+	ctx := context.Background()
+	w := e.newWorkspace(t, "org_style_unique")
+	a := e.newUploadedAsset(t, w, store.AssetKindVideo, "ref.mp4", []byte("data"))
+	args := jobs.StyleReferenceArgs{WorkspaceID: w.ID, AssetID: a.ID}
+	insert := func() {
+		t.Helper()
+		if err := e.api.InTx(ctx, func(tx *store.Store) error { _, err := e.enq.InsertInStore(ctx, tx, args, nil); return err }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 3 {
+		insert()
+	}
+	if n := e.countJobs(t, "style_reference", a.ID.String()); n != 1 {
+		t.Fatalf("%d jobs for one reference waiting", n)
+	}
+	if _, err := e.super.Exec(ctx, `UPDATE river_job SET state = 'completed', finalized_at = now() WHERE kind = 'style_reference'`); err != nil {
+		t.Fatal(err)
+	}
+	insert()
+	if n := e.countJobs(t, "style_reference", a.ID.String()); n != 2 {
+		t.Fatalf("%d jobs after the first finished", n)
+	}
 }

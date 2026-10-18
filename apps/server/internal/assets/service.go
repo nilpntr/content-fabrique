@@ -59,6 +59,7 @@ var (
 	errNotActive      = &Error{Status: 409, Code: api.ErrorCodeUploadNotActive, Message: "this upload is not in progress any more"}
 	errTooMany        = &Error{Status: 429, Code: api.ErrorCodeTooManyUploads, Message: "too many uploads are in progress; finish or abort one first"}
 	errTooManyRefs    = &Error{Status: 409, Code: api.ErrorCodeTooManyReferences, Message: "you have the most style videos already; remove one first"}
+	errIsReference    = &Error{Status: 409, Code: api.ErrorCodeStyleReference, Message: "this video is one of your style videos; remove it under Your style (DELETE /v1/style/references/{id})"}
 	errExpired        = &Error{Status: 409, Code: api.ErrorCodeUploadExpired, Message: "this upload expired; start a new one"}
 	errStorageDown    = &Error{Status: 503, Code: api.ErrorCodeStorageUnavailable, Message: "object storage did not answer; try again"}
 	errQueueMigration = &Error{Status: 503, Code: api.ErrorCodeQueueNotMigrated, Message: "the job queue is not ready; try again later"}
@@ -555,6 +556,11 @@ func (s *Service) Delete(ctx context.Context, who Actor, id ids.AssetID) *Error 
 	a, u, e := s.loadUpload(ctx, who, id)
 	if e != nil {
 		return e
+	}
+	// A style reference has measures and a place in the style (its purpose never changes): the style's own endpoint removes it with
+	// them and learns the style again; deleting only the asset would leave its measures in the profile.
+	if a.Purpose == store.PurposeStyleReference {
+		return errIsReference
 	}
 	if u.CompletedAt == nil && u.AbortedAt == nil {
 		return s.abort(ctx, who, a, u)

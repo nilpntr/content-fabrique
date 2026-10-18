@@ -363,6 +363,13 @@ type SpendHold struct {
 	CreatedAt      time.Time
 }
 
+type StyleLearnPass struct {
+	ID          uuid.UUID
+	WorkspaceID ids.WorkspaceID
+	StartedBy   pgtype.UUID
+	CreatedAt   time.Time
+}
+
 type StyleReference struct {
 	ID            uuid.UUID
 	WorkspaceID   ids.WorkspaceID
