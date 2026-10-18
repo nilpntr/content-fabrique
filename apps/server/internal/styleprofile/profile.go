@@ -172,6 +172,11 @@ type TextStyle struct {
 	Chapters []string `json:"chapters,omitempty"`
 	// ChaptersRead says the later frames were read (a read of stylevision.v2 did not look for chapters).
 	ChaptersRead bool `json:"chapters_read,omitempty"`
+	// ShotTexts are the text in a frame of each shot (P6-05d, stylevision.v4): the lines are the creator's words, untrusted. ShotsRead says
+	// the shots were read (a read of stylevision.v3 or older did not), and Language is the language of the text (ISO 639-1, "" unknown).
+	ShotTexts []ShotText `json:"shot_texts,omitempty"`
+	ShotsRead bool       `json:"shots_read,omitempty"`
+	Language  string     `json:"language,omitempty"`
 }
 
 // AudioStats are the sound measures of a reference.
@@ -461,6 +466,15 @@ type TextProfile struct {
 	ChapterShare     float64         `json:"chapter_share,omitempty"`
 	ChapterTemplates []TitleTemplate `json:"chapter_templates,omitempty"`
 	ChapterExamples  []string        `json:"chapter_examples,omitempty"`
+	// Pattern is the creator's text pattern (P6-05d: single_title, story_captions, dialogue or none; "" when no read saw the shots), the
+	// majority of PatternRead reads, PatternShare its share; PatternsSeen the captions and dialogue patterns seen in any read; LineLook
+	// the look of the pattern's lines (nil without any); Language the language of the text (ISO 639-1).
+	Pattern      string    `json:"pattern,omitempty"`
+	PatternShare float64   `json:"pattern_share,omitempty"`
+	PatternRead  int       `json:"pattern_read,omitempty"`
+	PatternsSeen []string  `json:"patterns_seen,omitempty"`
+	LineLook     *TextLook `json:"line_look,omitempty"`
+	Language     string    `json:"language,omitempty"`
 }
 
 // NumberedChapters says the creator's multi-exercise videos have numbered chapter titles (half of the ones read or more).
@@ -730,6 +744,7 @@ func aggregateText(refs []Measures) *TextProfile {
 		return nil
 	}
 	t := &TextProfile{Read: len(read)}
+	aggregatePattern(t, read)
 	var titled []*TextStyle
 	var labels, captions float64
 	for _, r := range read {

@@ -396,6 +396,12 @@
       "title": "Alignment",
       "description": "How the lines of a text of more than one line sit against each other in its box: left, center or right. Default center."
     },
+    "textAvoid": {
+      "enum": ["body", "face"],
+      "default": "body",
+      "title": "What to keep off",
+      "description": "What of the person the text keeps off when it avoids the subject: body (the default: the head and the torso, for titles) or face (only the head and shoulders: a story caption over the chest, for a creator whose captions sit mid-frame over the body)."
+    },
     "textAvoidSubject": {
       "type": "boolean",
       "default": true,
@@ -895,6 +901,9 @@
         },
         "avoid_subject": {
           "$ref": "#/$defs/textAvoidSubject"
+        },
+        "avoid": {
+          "$ref": "#/$defs/textAvoid"
         }
       },
       "oneOf": [
@@ -976,6 +985,9 @@
         },
         "avoid_subject": {
           "$ref": "#/$defs/textAvoidSubject"
+        },
+        "avoid": {
+          "$ref": "#/$defs/textAvoid"
         }
       },
       "anyOf": [
@@ -1081,6 +1093,14 @@
           ],
           "properties": {
             "avoid_subject": {}
+          }
+        },
+        {
+          "required": [
+            "avoid"
+          ],
+          "properties": {
+            "avoid": {}
           }
         }
       ],

@@ -49,6 +49,9 @@ func (p *Profile) structureLines(withWords bool) []string {
 		out = append(out, "cuts against the movement: not measurable (the shots around the cuts are too short to find reps in)")
 	}
 	if t := p.Text; t != nil {
+		if w := t.patternWords(); w != "" {
+			out = append(out, w)
+		}
 		if t.Entrance != "" {
 			out = append(out, "title entrance: "+t.Entrance)
 		}

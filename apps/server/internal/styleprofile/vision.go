@@ -21,6 +21,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/media"
+	"github.com/nilpntr/content-fabrique/internal/sandbox"
 	"github.com/nilpntr/content-fabrique/internal/textclean"
 )
 
@@ -34,7 +35,7 @@ import (
 const VisionStage = "stylevision"
 
 // VisionPromptVersion names the prompt and the tool; it is stored with the read.
-const VisionPromptVersion = "stylevision.v3"
+const VisionPromptVersion = "stylevision.v4"
 
 // VisionToolName is the one tool the model is made to call.
 const VisionToolName = "describe_title_style"
@@ -46,9 +47,10 @@ const MaxVisionMicros int64 = 10_000
 // MaxTitleChars is the longest title text kept.
 const MaxTitleChars = 120
 
-// VisionFrames is how many frames of the hook the model sees, LaterFrames how many frames just after later cuts (for the chapter
-// titles), and visionLongSide the long side of each in pixels. The first two hook frames are a fraction of a second apart, so the model
-// can see how the title comes on.
+// VisionFrames is how many frames of the hook the model sees, LaterFrames how many frames just after later cuts a read of stylevision.v3
+// saw (v4 sees a frame of every shot instead: ShotTimes, up to MaxShotFrames), and visionLongSide the long side of each in pixels. The
+// first two hook frames are a fraction of a second apart, so the model can see how the title comes on. Fifteen frames of 512 px are about
+// 4,000 input tokens: on Haiku 5.5 about $0.0005 a read with its answer, far under MaxVisionMicros.
 const (
 	VisionFrames   = 5
 	LaterFrames    = 3
@@ -58,7 +60,7 @@ const (
 // MaxChapterTitles is the most chapter titles a read keeps.
 const MaxChapterTitles = 4
 
-const visionSystem = `You describe how the on-screen titles of a short vertical video look, for a video editor that has to reproduce the style. You see frames from the first seconds of one video (the first two a fraction of a second apart) and, when the video has cuts, a frame just after some of its later cuts. Call describe_title_style once.
+const visionSystem = `You describe the on-screen text of a short vertical video, for a video editor that has to reproduce the style. You see frames from the first seconds of one video (the first two a fraction of a second apart) and then one frame of each of its shots. Call describe_title_style once.
 
 title_present: true when the video shows a title or headline (large text added by the editor of the video). Subtitles and spoken-word captions are not titles.
 text: the title as written, at most 120 characters, keeping its line breaks as spaces. Empty when there is no title.
@@ -74,7 +76,9 @@ shadow: none (flat letters with nothing behind them), soft (a faint shadow) or s
 exercise_labels: true when there are small labels besides the title that name an exercise, a muscle or a tag.
 captions: true when spoken-word captions are shown.
 title_entrance: how the title comes on, from the first frames: pop (it grows or bounces in), slide (it moves in), fade (it gets more opaque), typewriter (letters appear one by one), none (it is simply there in full), unknown (the frames do not show it).
-chapter_titles: in the frames just after later cuts, the numbered section titles of a list video (a number and a name, such as "2. <EXERCISE>"), as written, at most 4; an empty list when there are none. The main title is not a chapter title.
+chapter_titles: in the frames of the shots, the numbered section titles of a list video (a number and a name, such as "2. <EXERCISE>"), as written, at most 4; an empty list when there are none. The main title is not a chapter title.
+shot_texts: one entry for each frame of a shot (not the opening frames), in order, with "frame" its number as given. For each: text, the main line of text added by the editor of the video that is visible in that frame, as written, at most 120 characters (empty when there is none; not text that is part of the filmed scene, such as a logo on a shirt); position, top, upper_third, middle or lower_third, where that text sits (none when there is no text); text_height_pct, the height of its capital letters as a percentage of the frame height (0 for none); colour, the colour of its letters as a hex code (empty for none); shadow, none, soft or strong; over_body, true when the text lies over the person's body (the chest, the torso or the head) rather than over the background; dialogue, true when the line is a character speaking (a quoted line, or one of two speakers answering each other), not a caption or a title.
+language: the language the on-screen text is written in, as a two-letter ISO 639-1 code such as en or nl; empty when there is no text.
 
 Rules:
 - Describe only what is visible. Never name a person.
@@ -100,9 +104,25 @@ var visionSchema = json.RawMessage(`{
     "exercise_labels": {"type": "boolean", "description": "True when small labels name an exercise or a tag."},
     "captions": {"type": "boolean", "description": "True when spoken-word captions are shown."},
     "title_entrance": {"type": "string", "enum": ["none", "pop", "slide", "fade", "typewriter", "unknown"], "description": "How the title comes on."},
-    "chapter_titles": {"type": "array", "items": {"type": "string"}, "description": "Numbered chapter titles seen after later cuts, at most 4."}
+    "chapter_titles": {"type": "array", "items": {"type": "string"}, "description": "Numbered chapter titles seen in the shots, at most 4."},
+    "shot_texts": {"type": "array", "description": "The text in the frame of each shot, in order.", "items": {
+      "type": "object",
+      "properties": {
+        "frame": {"type": "integer", "description": "The number of the frame, as given."},
+        "text": {"type": "string", "description": "The main line of added text, at most 120 characters; empty for none."},
+        "position": {"type": "string", "enum": ["top", "upper_third", "middle", "lower_third", "none"]},
+        "text_height_pct": {"type": "number", "description": "The cap height as a percentage of the frame height; 0 for none."},
+        "colour": {"type": "string", "description": "A hex code like #FFFFFF; empty for none."},
+        "shadow": {"type": "string", "enum": ["none", "soft", "strong"]},
+        "over_body": {"type": "boolean", "description": "True when the text lies over the person's body."},
+        "dialogue": {"type": "boolean", "description": "True when the line is a character speaking."}
+      },
+      "required": ["frame", "text", "position", "text_height_pct", "colour", "shadow", "over_body", "dialogue"],
+      "additionalProperties": false
+    }},
+    "language": {"type": "string", "description": "The ISO 639-1 code of the language of the text, such as en or nl; empty for none."}
   },
-  "required": ["title_present", "text", "case", "colour", "position", "alignment", "weight", "condensed", "lines", "text_height_pct", "shadow", "exercise_labels", "captions", "title_entrance", "chapter_titles"],
+  "required": ["title_present", "text", "case", "colour", "position", "alignment", "weight", "condensed", "lines", "text_height_pct", "shadow", "exercise_labels", "captions", "title_entrance", "chapter_titles", "shot_texts", "language"],
   "additionalProperties": false
 }`)
 
@@ -111,7 +131,7 @@ func visionTool() llm.Tool {
 }
 
 // BuildVisionRequest is the Messages request for a text read, before the route (model, max_tokens) is applied. The frames after
-// hookFrames are the ones just after later cuts.
+// hookFrames are the frames of the shots.
 func BuildVisionRequest(frames [][]byte, atS []float64, hookFrames ...int) llm.Request {
 	hook := len(frames)
 	if len(hookFrames) > 0 {
@@ -121,14 +141,14 @@ func BuildVisionRequest(frames [][]byte, atS []float64, hookFrames ...int) llm.R
 	for i, f := range frames {
 		where := "from the opening"
 		if i >= hook {
-			where = "just after a later cut"
+			where = "a frame of a shot"
 		}
 		content = append(content,
 			llm.TextBlock(fmt.Sprintf("Frame %d of %d, %s, %.2f s into the video:", i+1, len(frames), where, atS[i])),
 			llm.Block{Type: llm.BlockImage, Image: &llm.Image{MediaType: "image/jpeg", Data: f}},
 		)
 	}
-	content = append(content, llm.TextBlock("Describe the title of this video."))
+	content = append(content, llm.TextBlock("Describe the title and the text of the shots of this video."))
 	return llm.Request{
 		System:     []llm.Block{llm.TextBlock(visionSystem)},
 		Messages:   []llm.Message{{Role: llm.RoleUser, Content: content}},
@@ -176,6 +196,17 @@ func ValidateTitleStyle(raw json.RawMessage) (TextStyle, error) {
 		Captions       *bool    `json:"captions"`
 		TitleEntrance  *string  `json:"title_entrance"`
 		ChapterTitles  []string `json:"chapter_titles"`
+		ShotTexts      []struct {
+			Frame         *int     `json:"frame"`
+			Text          *string  `json:"text"`
+			Position      *string  `json:"position"`
+			TextHeightPct *float64 `json:"text_height_pct"`
+			Colour        *string  `json:"colour"`
+			Shadow        *string  `json:"shadow"`
+			OverBody      *bool    `json:"over_body"`
+			Dialogue      *bool    `json:"dialogue"`
+		} `json:"shot_texts"`
+		Language *string `json:"language"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
@@ -187,7 +218,7 @@ func ValidateTitleStyle(raw json.RawMessage) (TextStyle, error) {
 	}
 	if in.TitlePresent == nil || in.Text == nil || in.Case == nil || in.Colour == nil || in.Position == nil || in.Alignment == nil ||
 		in.Weight == nil || in.Condensed == nil || in.Lines == nil || in.TextHeightPct == nil || in.Shadow == nil || in.ExerciseLabels == nil || in.Captions == nil ||
-		in.TitleEntrance == nil || in.ChapterTitles == nil {
+		in.TitleEntrance == nil || in.ChapterTitles == nil || in.ShotTexts == nil || in.Language == nil {
 		return TextStyle{}, reject("a field is missing")
 	}
 	oneOf := func(name, v string, allowed ...string) error {
@@ -234,6 +265,49 @@ func ValidateTitleStyle(raw json.RawMessage) (TextStyle, error) {
 		return TextStyle{}, reject("%d chapter titles", len(in.ChapterTitles))
 	}
 	t := TextStyle{TitlePresent: *in.TitlePresent, ExerciseLabels: *in.ExerciseLabels, Captions: *in.Captions, ChaptersRead: true}
+	if len(in.ShotTexts) > 2*MaxShotFrames {
+		return TextStyle{}, reject("%d shot texts", len(in.ShotTexts))
+	}
+	lang := strings.ToLower(strings.TrimSpace(*in.Language))
+	if lang != "" && !languageCode.MatchString(lang) {
+		return TextStyle{}, reject("language %q is not a two-letter code", lang)
+	}
+	t.Language = lang
+	for _, st := range in.ShotTexts {
+		if st.Frame == nil || st.Text == nil || st.Position == nil || st.TextHeightPct == nil || st.Colour == nil || st.Shadow == nil || st.OverBody == nil || st.Dialogue == nil {
+			return TextStyle{}, reject("a field of a shot text is missing")
+		}
+		if err := oneOf("shot position", *st.Position, "top", "upper_third", "middle", "lower_third", "none"); err != nil {
+			return TextStyle{}, err
+		}
+		if err := oneOf("shot shadow", *st.Shadow, "none", "soft", "strong"); err != nil {
+			return TextStyle{}, err
+		}
+		c := strings.TrimSpace(*st.Colour)
+		if c != "" && !hexColour.MatchString(c) {
+			return TextStyle{}, reject("shot colour %q is not a hex code", c)
+		}
+		if h := *st.TextHeightPct; math.IsNaN(h) || math.IsInf(h, 0) || h < 0 || h > 30 {
+			return TextStyle{}, reject("shot text_height_pct is %v", h)
+		}
+		// A line is the creator's words: one that is too long or looks like a link or an order is kept as no text (the frame still
+		// counts as seen), never cut.
+		line, _ := textclean.Model(*st.Text, 4*MaxShotTextChars)
+		if utf8.RuneCountInString(line) > MaxShotTextChars || suspicious.MatchString(strings.ToLower(norm.NFKC.String(line))) {
+			line = ""
+		}
+		s := ShotText{Frame: *st.Frame, Text: line, HeightPct: math.Round(*st.TextHeightPct*10) / 10}
+		if line != "" {
+			s.Position, s.Colour, s.Shadow, s.OverBody, s.Dialogue = *st.Position, strings.ToUpper(c), *st.Shadow, *st.OverBody, *st.Dialogue
+			if s.Position == "none" {
+				s.Position = ""
+			}
+		} else {
+			s.HeightPct = 0
+		}
+		t.ShotTexts = append(t.ShotTexts, s)
+	}
+	t.ShotsRead = true
 	// A chapter title is the creator's words like the title: one that is too long or looks like a link or an order is left out (the read
 	// keeps the others), never cut.
 	for _, c := range in.ChapterTitles {
@@ -310,13 +384,17 @@ func (r *Reader) Frames(ctx context.Context, path string, atS []float64) ([][]by
 	for i, t := range atS {
 		specs[i] = media.FrameSpec{AtMs: int64(t * 1000), Output: media.OutputPath(fmt.Sprintf("f%d.jpg", i))}
 	}
-	args, err := media.FramesArgs(media.InputPath(0), specs, visionLongSide)
-	if err != nil {
-		return nil, nil, err
-	}
-	res, err := r.Runner.Run(ctx, media.Invocation{Args: args, Inputs: []media.Input{{Host: abs, Container: media.InputPath(0)}}, OutputDir: dir, Timeout: 2 * time.Minute})
-	if err != nil {
-		return nil, nil, fmt.Errorf("styleprofile: ffmpeg: %w", err)
+	// One ffmpeg pass cuts at most media.MaxFrameBatch frames: the hook and the shots take two.
+	var res sandbox.Result
+	for start := 0; start < len(specs); start += media.MaxFrameBatch {
+		args, err := media.FramesArgs(media.InputPath(0), specs[start:min(start+media.MaxFrameBatch, len(specs))], visionLongSide)
+		if err != nil {
+			return nil, nil, err
+		}
+		res, err = r.Runner.Run(ctx, media.Invocation{Args: args, Inputs: []media.Input{{Host: abs, Container: media.InputPath(0)}}, OutputDir: dir, Timeout: 2 * time.Minute})
+		if err != nil {
+			return nil, nil, fmt.Errorf("styleprofile: ffmpeg: %w", err)
+		}
 	}
 	var out [][]byte
 	var kept []float64
@@ -371,7 +449,7 @@ func (r *Reader) ReadWith(ctx context.Context, ws ids.WorkspaceID, runID uuid.UU
 		return VisionResult{}, fmt.Errorf("model client: %w", err)
 	}
 	hook := HookTimes(durationS)
-	atS := append(slices.Clone(hook), LaterTimes(cutsS, durationS)...)
+	atS := append(slices.Clone(hook), ShotTimes(cutsS, durationS)...)
 	frames, atS, err := r.Frames(ctx, path, atS) // atS is now the times of the frames that were cut, in step with them
 	if err != nil {
 		return VisionResult{}, err
@@ -412,9 +490,26 @@ func (r *Reader) ReadWith(ctx context.Context, ws ids.WorkspaceID, runID uuid.UU
 			res.Reason = "invalid_output"
 			return res, nil
 		}
+		ts.placeShots(atS, hookCut)
 		res.Text = &ts
 		return res, nil
 	}
 	res.Reason = "no_answer"
 	return res, nil
+}
+
+// placeShots gives each shot text the time of its frame (the frames after the hook ones are the shots', numbered from 1 with the hook
+// frames), and drops an entry whose frame is not a shot's.
+func (t *TextStyle) placeShots(atS []float64, hookFrames int) {
+	var kept []ShotText
+	for _, s := range t.ShotTexts {
+		i := s.Frame - 1
+		if i < hookFrames || i >= len(atS) {
+			continue
+		}
+		s.AtS = atS[i]
+		s.Frame = 0
+		kept = append(kept, s)
+	}
+	t.ShotTexts = kept
 }

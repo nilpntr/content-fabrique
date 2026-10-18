@@ -534,6 +534,12 @@
           "default": true,
           "title": "Avoid the subject",
           "description": "Whether the renderer keeps this text off the head of the person in the footage: when it would cover the head it is moved above or below it inside the safe zone, or shrunk within the allowed scale. true by default; set false to place the text exactly where its anchor or position puts it."
+        },
+        "avoid": {
+          "enum": ["body", "face"],
+          "default": "body",
+          "title": "What to keep off",
+          "description": "What of the person the text keeps off when it avoids the subject: body (the default: the head and the torso, for titles) or face (only the head and shoulders: a story caption the creator puts over the chest, mid-frame)."
         }
       },
       "oneOf": [
