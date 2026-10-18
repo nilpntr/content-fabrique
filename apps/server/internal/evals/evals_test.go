@@ -361,6 +361,67 @@ func TestJudgeScoresCachesAndStaysInBudget(t *testing.T) {
 	}
 }
 
+// The baseline hash covers the format library and how a live new idea is made: each hashed path exists in the repository, and a change
+// to a format card, to the suite's rubric or to a new-idea case is a new hash.
+func TestTheCodeHashCoversFormats(t *testing.T) {
+	repo := "../../../.."
+	for _, p := range HashedPaths {
+		if _, err := os.Stat(filepath.Join(repo, p)); err != nil {
+			t.Errorf("hashed path %s: %v", p, err)
+		}
+	}
+	for _, want := range []string{"apps/server/internal/formats", "apps/server/config/formats", "apps/server/cmd/cfctl/eval_suite.go"} {
+		if !slices.Contains(HashedPaths, want) {
+			t.Errorf("%s is not hashed", want)
+		}
+	}
+	root := t.TempDir()
+	for _, p := range HashedPaths {
+		dir, name := filepath.Join(root, p), "a.yaml"
+		if strings.HasSuffix(p, ".go") {
+			dir, name = filepath.Join(root, filepath.Dir(p)), filepath.Base(p)
+		}
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		write(t, dir, name, "x: 1\n")
+	}
+	write(t, root, "fb.yaml", "feedback: []\n")
+	suite := "suite: s\nfeedback: fb.yaml\nrubric:\n  - id: clear-concept\n    text: a concept\n    weight: 1\ncases:\n  - id: idea\n    new_idea: true\n    idea_from: 1\n    stored: {project: prj_x, version: 2}\n"
+	path := write(t, root, "s.yaml", suite)
+	hash := func() string {
+		t.Helper()
+		s, err := LoadSuite(path, os.DevNull)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h, err := CodeHash(root, s, RunKey{Live: true, Repeat: 3, Judge: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+	h0 := hash()
+	write(t, filepath.Join(root, "apps/server/config/formats"), "a.yaml", "x: 2\n")
+	h1 := hash()
+	if h1 == h0 {
+		t.Error("a format card change kept the hash")
+	}
+	write(t, filepath.Join(root, "apps/server/cmd/cfctl"), "eval_suite.go", "package main\n// changed\n")
+	h2 := hash()
+	if h2 == h1 {
+		t.Error("a change to how live cases are made kept the hash")
+	}
+	write(t, root, "s.yaml", strings.Replace(suite, "idea_from: 1", "idea_from: 2", 1))
+	if h3 := hash(); h3 == h2 {
+		t.Error("a new-idea case change kept the hash")
+	}
+	write(t, root, "s.yaml", strings.Replace(suite, "a concept", "another concept", 1))
+	if h4 := hash(); h4 == h2 {
+		t.Error("a suite rubric change kept the hash")
+	}
+}
+
 // The suite's rubric reaches every case but the calibration ones, under the case's own items.
 func TestSuiteRubricAndNewIdeaCases(t *testing.T) {
 	s, err := LoadSuite("../../../../suites/back-day.yaml", os.DevNull)
@@ -392,6 +453,13 @@ func TestSuiteRubricAndNewIdeaCases(t *testing.T) {
 	c.Stored = nil
 	if m := c.Missing(true); strings.Join(m, ",") != "workspace,stored" {
 		t.Errorf("a new idea without stored: %v", m)
+	}
+	// The version a live new idea rethinks: idea_from, else the stored version; the same for every --repeat sample.
+	if idea.IdeaBase() != 1 {
+		t.Errorf("idea base %d, want the suite's idea_from 1", idea.IdeaBase())
+	}
+	if b := (Case{Stored: &Stored{Version: 3}}).IdeaBase(); b != 3 {
+		t.Errorf("idea base without idea_from: %d", b)
 	}
 	// A case's own item of the same id wins over the suite's.
 	c = Case{ID: "x", Expectations: []Expectation{{ID: "clear-concept", Text: "mine", Weight: 2}}}

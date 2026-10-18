@@ -31,7 +31,7 @@ const JudgeStage = "judge_edit"
 
 // JudgePromptVersion names the judge's prompt and tool. A change to either is a new version: cached verdicts of the old one are not
 // reused.
-const JudgePromptVersion = "judge_edit.v4"
+const JudgePromptVersion = "judge_edit.v5"
 
 // MaxJudgeMicros is the hard budget of one judge call: $0.10. It is a llm.Budget, so a call whose worst case does not fit is cut (its
 // max_tokens) or refused before it is sent.

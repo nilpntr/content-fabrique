@@ -366,7 +366,17 @@ type FormatHistory interface {
 // ProjectFormats are the formats of the project's versions that editor runs made, newest first, each once, at most MaxAvoidFormats: what
 // a new idea avoids. A version made by hand, or by a run from before formats, adds none.
 func ProjectFormats(ctx context.Context, st FormatHistory, ws ids.WorkspaceID, pid ids.ProjectID) ([]string, error) {
-	versions, err := st.ListTimelineVersions(ctx, ws, pid, 0, 200)
+	return ProjectFormatsUpTo(ctx, st, ws, pid, 0)
+}
+
+// ProjectFormatsUpTo is ProjectFormats over the versions up to upTo (0 for all): an eval that makes several new ideas from one stored
+// version (--repeat) avoids the formats of the versions before it, not those of its own earlier samples, so the samples are alike.
+func ProjectFormatsUpTo(ctx context.Context, st FormatHistory, ws ids.WorkspaceID, pid ids.ProjectID, upTo int) ([]string, error) {
+	before := 0
+	if upTo > 0 {
+		before = upTo + 1 // ListTimelineVersions lists the versions below before
+	}
+	versions, err := st.ListTimelineVersions(ctx, ws, pid, before, 200)
 	if err != nil {
 		return nil, err
 	}

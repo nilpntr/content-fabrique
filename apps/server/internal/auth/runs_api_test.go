@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/nilpntr/content-fabrique/internal/agents/editor"
 	"github.com/nilpntr/content-fabrique/internal/api"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
@@ -205,6 +206,20 @@ func TestRunsStartANewIdea(t *testing.T) {
 	}
 	// Another workspace cannot start one on this project.
 	e.fail(http.MethodPost, editPath(p), "bob", map[string]any{"new_idea": true}, http.StatusNotFound, api.ErrorCodeNotFound)
+
+	// The idea makes version 2 as a POV: a later idea avoids both, newest first; an eval's samples rethinking version 1 avoid only its.
+	e.appendEvent("ada", idea, store.EventArtifact, `{"kind":"creative_plan","tool_use_id":"toolu_2","data":{"version":1,"content_type":"workout","format":{"id":"pov","name":"POV","why":"x","new_to_creator":true,"library":"x"},"shots":[]}}`)
+	if _, err := e.st.AddTimelineVersion(context.Background(), e.ws["ada"], pid, store.NewTimelineVersion{
+		Version: 2, Parent: 1, Spec: json.RawMessage(`{"schema":"x"}`), AuthorKind: store.AuthorAgent, AuthorID: idea.Id,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := editor.ProjectFormats(context.Background(), e.st, e.ws["ada"], pid); err != nil || strings.Join(got, ",") != "pov,tutorial_101" {
+		t.Errorf("the project's formats: %v %v", got, err)
+	}
+	if got, err := editor.ProjectFormatsUpTo(context.Background(), e.st, e.ws["ada"], pid, 1); err != nil || strings.Join(got, ",") != "tutorial_101" {
+		t.Errorf("the formats up to version 1: %v %v", got, err)
+	}
 }
 
 // Two requests at once make one run.

@@ -946,7 +946,7 @@ up to fifteen frames, still under its $0.01 budget.
 - **Detected on the creator's references with no model call**, from the measures and the text the style read already reads; the profile keeps the share of each format ("Your go-to formats" in Your style).
 - **The editor picks a format first**: `list_formats` ranks the formats that fit the footage by fit and the creator's use, marks one or two new to the creator; `plan_edit` records the format and why; at most one new format per edit unless asked (prompt `editor.v2.11`, playbooks bumped); `check_edit`'s `format_followed` holds the edit to the format's beats. The creator's own settings still win (their text pattern over the format's).
 - **"Try another idea"**: `POST /v1/projects/{id}/edit` with `new_idea` makes a new version in a format none of the project's versions used, priced as a revision (`409 no_video_yet` without a version); the app has the button next to "Make the changes" and names the version "Version 3 · new idea: ...".
-- **Evals**: `judge_edit.v4` sees the format; suites have a suite-wide `clear-concept` item and a new-idea case with `novelty`.
+- **Evals**: `judge_edit.v5` (#165's anchors with the format) sees the format; suites have a suite-wide `clear-concept` item and a new-idea case with `novelty`.
 
 **Alternatives.** A model call to propose ideas (the `ideation` stage): more cost per edit and nothing the editor cannot do with a good list in front of it. A format setting the creator picks: possible later; the editor choosing from fit and the creator's own use needs no new decision from them. Formats as playbooks: a playbook is the craft of a genre (how to cut lifts), a format the structure of one video (a reveal on the drop); a workout can be any of them.
 

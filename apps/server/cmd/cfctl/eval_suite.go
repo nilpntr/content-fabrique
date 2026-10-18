@@ -531,7 +531,7 @@ func editLive(ctx context.Context, st *store.Store, svc *projects.Service, rt *a
 		if pid, err = ids.ParseProjectID(c.Stored.Project); err != nil {
 			return evals.Target{}, fmt.Errorf("stored.project: %w", err)
 		}
-		if opts.AvoidFormats, err = editor.ProjectFormats(ctx, st, w.ID, pid); err != nil {
+		if opts.AvoidFormats, err = editor.ProjectFormatsUpTo(ctx, st, w.ID, pid, c.IdeaBase()); err != nil {
 			return evals.Target{}, fmt.Errorf("the formats of the project: %w", err)
 		}
 		opts.NewIdea = true

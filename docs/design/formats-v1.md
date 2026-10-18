@@ -43,7 +43,7 @@ The library's version is `formats@<hash of the files>`: a profile tagged with an
 
 ## 6. Evals
 
-`judge_edit.v4` is shown the chosen card (name, pitch, beats; a new idea and "new to this creator" said) and the creator's usual formats (in the style profile), and is told how to score concept and novelty items. Suites get a suite-wide `rubric` (every case but the calibration ones; a case's item of the same id wins): `clear-concept`. A case with `new_idea: true` is judged on its stored version, and with `--live` is made as a new idea on its stored project; `back-day-new-idea` has a `novelty` item.
+`judge_edit.v5` (the calibration anchors of `judge_edit.v4` plus the formats) is shown the chosen card (name, pitch, beats; a new idea and "new to this creator" said) and the creator's usual formats (in the style profile), and is told how to score concept and novelty items. Suites get a suite-wide `rubric` (every case but the calibration ones; a case's item of the same id wins): `clear-concept`. A case with `new_idea: true` is judged on its stored version, and with `--live` is made as a new idea on its stored project, avoiding the formats of the versions up to `idea_from` (default: the stored version), so every `--repeat` sample avoids the same formats; `back-day-new-idea` has a `novelty` item. The baseline cache hashes the format library (`internal/formats`, `config/formats`) and `cfctl`'s `eval_suite.go` (how a live case is made) besides #165's paths; the suite file (its rubric and cases) is hashed already.
 
 ## 7. Checking the library on real references
 

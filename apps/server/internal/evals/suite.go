@@ -71,6 +71,20 @@ type Case struct {
 	// NewIdea makes the live edit a "Try another idea" run on the stored project (a new version in a format none of its versions
 	// used) instead of a first edit of new footage; judged without --live, it is the stored version as it is.
 	NewIdea bool `yaml:"new_idea"`
+	// IdeaFrom is the version a live new idea rethinks: the formats of the versions up to it are avoided, so that every sample of a
+	// --repeat avoids the same formats (not those of the samples before it). 0 is stored.version.
+	IdeaFrom int `yaml:"idea_from"`
+}
+
+// IdeaBase is the version a live new idea rethinks (IdeaFrom, else the stored version), 0 without a stored version.
+func (c Case) IdeaBase() int {
+	switch {
+	case c.IdeaFrom > 0:
+		return c.IdeaFrom
+	case c.Stored != nil:
+		return c.Stored.Version
+	}
+	return 0
 }
 
 // Stored names a project's timeline version.
@@ -209,6 +223,9 @@ func (s *Suite) merge(o *Suite) {
 		}
 		if oc.NewIdea {
 			c.NewIdea = true
+		}
+		if oc.IdeaFrom > 0 {
+			c.IdeaFrom = oc.IdeaFrom
 		}
 	}
 }
