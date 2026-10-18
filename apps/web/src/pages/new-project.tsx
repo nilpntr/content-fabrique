@@ -11,8 +11,10 @@ import { notify } from "@/components/ui/toast";
 import type { ApiAsset } from "@/lib/api/client";
 import { useAssets } from "@/lib/api/hooks";
 import { useCreateProject, useStartEdit } from "@/lib/api/project-hooks";
+import { useStyle } from "@/lib/api/style-hooks";
 import { ASSETS_QUERY_KEY } from "@/lib/query-client";
 import { useRefreshThrottle } from "@/lib/refresh-throttle";
+import { sourceNote } from "@/lib/style-words";
 
 /** A clip the editor can use: a video that has finished processing. */
 export const isUsableClip = (asset: ApiAsset): boolean => asset.kind === "video" && asset.status === "ready";
@@ -39,6 +41,11 @@ export function NewProjectPage({ onOpenProject }: { onOpenProject: (projectId: s
   const createProject = useCreateProject();
   const startEdit = useStartEdit();
   const queryClient = useQueryClient();
+  // The vibe picker starts on the creator's style's vibe (a style that cannot be loaded leaves it on lively).
+  const style = useStyle();
+  const styleVibe = style.data?.effective.vibe ?? "lively";
+  const vibeSource = style.data ? sourceNote(style.data.effective.sources.vibe) : null;
+  const vibeNote = style.data?.effective.sources.vibe === "you" ? "From your style." : vibeSource ? `${vibeSource}.` : undefined;
 
   // The picker needs the whole library to search it, so the remaining pages are fetched as they come. After a failure it stops,
   // and a button asks again: a loop of retries against a failing API helps nobody.
@@ -61,7 +68,8 @@ export function NewProjectPage({ onOpenProject }: { onOpenProject: (projectId: s
       ...(input.brief ? { brief: input.brief } : {}),
     });
     try {
-      const run = await startEdit.mutateAsync({ projectId: project.id, body: input.brief ? { instructions: input.brief } : {} });
+      const body = { ...(input.brief ? { instructions: input.brief } : {}), ...(input.vibe ? { vibe: input.vibe } : {}) };
+      const run = await startEdit.mutateAsync({ projectId: project.id, body });
       onOpenProject(project.id, run.id);
     } catch (error) {
       // The project exists; only the editor did not start. Its page offers "Start the editor".
@@ -128,7 +136,15 @@ export function NewProjectPage({ onOpenProject }: { onOpenProject: (projectId: s
           </Button>
         </div>
       ) : null}
-      <NewProjectFlow assets={clips} onCreate={onCreate} onMediaError={refresh} costNote="About one video from your plan, with room for two rounds of changes." describeError={describeError} />
+      <NewProjectFlow
+        assets={clips}
+        onCreate={onCreate}
+        onMediaError={refresh}
+        costNote="About one video from your plan, with room for two rounds of changes."
+        describeError={describeError}
+        defaultVibe={styleVibe}
+        vibeNote={vibeNote}
+      />
     </div>
   );
 }

@@ -1,6 +1,8 @@
-import { annotation, apiAsset, assetId, event, project, projectId, projectSummary, readyRender, renderId, run, runId, callIdOf, timelineVersion, v2Artifacts, v2Run, v2Spec, versionSummary } from "@/test-fixtures";
+import type { CreatorStyle, StyleSettings } from "@/lib/api/client";
+import { withMySettings } from "@/lib/style-words";
+import { annotation, apiAsset, assetId, callIdOf, emptyStyle, event, learntStyle, project, projectId, projectSummary, readyRender, renderId, run, runId, styleReference, timelineVersion, v2Artifacts, v2Run, v2Spec, versionSummary } from "@/test-fixtures";
 
-/** The scenario of a page, from its address: `?credits=ok|low|empty|none&run=done|working|failed|question&runcredits=charged|revision|refunded|none&artifacts=api|none&video=<url>&posters=<url with {n}>&projects=some|none`. */
+/** The scenario of a page, from its address: `?credits=ok|low|empty|none&run=done|working|failed|question&runcredits=charged|revision|refunded|none&artifacts=api|none&video=<url>&posters=<url with {n}>&projects=some|none&style=ready|learning|empty`. */
 export interface Scenario {
   credits: "none" | "ok" | "low" | "empty";
   run: "done" | "working" | "failed" | "question";
@@ -14,6 +16,8 @@ export interface Scenario {
   posters?: string;
   /** `none`: a brand-new workspace with no projects yet. */
   projects: "some" | "none";
+  /** The creator's style: learnt from five videos, being learnt, or nothing yet. */
+  style: "ready" | "learning" | "empty";
 }
 
 export function scenarioOf(search: URLSearchParams): Scenario {
@@ -29,6 +33,7 @@ export function scenarioOf(search: URLSearchParams): Scenario {
     video: search.get("video") ?? undefined,
     posters: search.get("posters") ?? undefined,
     projects: pick("projects", ["some", "none"], "some"),
+    style: pick("style", ["ready", "learning", "empty"], "ready"),
   };
 }
 
@@ -99,6 +104,26 @@ function runFor(kind: Scenario["run"], runCredits: Scenario["runCredits"]) {
   return run({ ...v2Run({ credits: null }), status: "failed", failure_reason: "budget", summary: "I made v1 and previewed it, but ran out of steps before the second check.", events: [...finished.filter((e) => e.seq <= 23), event(24, "status", "failed reason=budget limit=tool_calls")], last_seq: 24 });
 }
 
+/** The style of a scenario, with gradient stills for the reference videos. */
+function styleFor(kind: Scenario["style"]): CreatorStyle {
+  if (kind === "empty") return emptyStyle();
+  const learnt = learntStyle();
+  const refs = learnt.references.map((ref, i) => ({ ...ref, poster_url: poster(i + 7) }));
+  if (kind === "ready") return { ...learnt, references: refs };
+  return {
+    ...emptyStyle(),
+    status: "learning",
+    progress: { done: 2, total: 4 },
+    references: [
+      refs[0] ?? styleReference(1),
+      refs[1] ?? styleReference(2),
+      { ...(refs[2] ?? styleReference(3)), status: "analysing" },
+      { ...styleReference(4), status: "processing", progress: 45, poster_url: null },
+      { ...styleReference(5), name: "old-vlog.mov", status: "failed", failure_reason: "too_long", poster_url: null },
+    ],
+  };
+}
+
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const notFound = () => json({ error: { code: "not_found", message: "not found" } }, 404);
 
@@ -115,6 +140,7 @@ export function installFakeApi(scenario: Scenario): void {
   const render = readyRender({ project_id: projectId(1), timeline_version: 2, duration_ms: 10_900, files: { mp4: { url: scenario.video ?? "https://files.invalid/preview.mp4", content_type: "video/mp4", size_bytes: 1000 }, contact_sheet: null, time_map: { url: "https://files.invalid/time-map.json", content_type: "application/json", size_bytes: 10 } } as never });
 
   const finals: ReturnType<typeof readyRender>[] = [];
+  let style = styleFor(scenario.style);
   const original = window.fetch.bind(window);
   window.fetch = async (input, init) => {
     const request = typeof input === "string" || input instanceof URL ? new Request(input, init) : input;
@@ -158,6 +184,26 @@ export function installFakeApi(scenario: Scenario): void {
       }
       if (path === "/v1/annotations") return json({ items: [annotation(1, { timeline_version: 2, start_ms: 2900, end_ms: 4400, body: "The ramp on the cable row is great. Hold the slow part a beat longer." }), annotation(2, { timeline_version: 2, start_ms: 6200, end_ms: 6200, body: "Title here, please." })], next_cursor: null });
       if (path === "/v1/library/summary") return json({ total: CLIPS.length });
+      if (path === "/v1/style") return json(style);
+    }
+    // The style: settings are kept for the page's life, a removed reference goes, learning again starts over.
+    if (method === "PUT" && path === "/v1/style") {
+      const body = (await request.json()) as { settings: StyleSettings };
+      style = withMySettings(style, body.settings);
+      return json(style);
+    }
+    if (method === "POST" && path === "/v1/style/relearn") {
+      style = { ...style, status: "learning", progress: { done: 0, total: style.references.length } };
+      return json(style, 202);
+    }
+    if (method === "DELETE" && path.startsWith("/v1/style/references/")) {
+      const id = path.slice("/v1/style/references/".length);
+      style = { ...style, references: style.references.filter((ref) => ref.asset_id !== id) };
+      return new Response(null, { status: 204 });
+    }
+    if (method === "DELETE" && path === "/v1/style") {
+      style = emptyStyle();
+      return new Response(null, { status: 204 });
     }
     // A download: the final video is ready at once (the viewer has no renderer).
     if (method === "POST" && path === `/v1/projects/${projectId(1)}/renders`) {

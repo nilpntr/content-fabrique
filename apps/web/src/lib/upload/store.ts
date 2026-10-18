@@ -27,6 +27,8 @@ export interface UploadRecord {
   createdAt: number;
   /** Chrome's File System Access handle of the file, to read it again after a reload without asking. */
   handle?: unknown;
+  /** `style_reference` for one of the creator's own videos uploaded to learn their style (never footage); absent for footage. */
+  purpose?: "style_reference";
 }
 
 export interface UploadStore {

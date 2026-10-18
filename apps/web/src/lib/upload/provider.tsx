@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { notify } from "@/components/ui/toast";
 import { useApiClient } from "@/lib/api/provider";
-import { ASSETS_QUERY_KEY, ME_QUERY_KEY, isPlanRequired } from "@/lib/query-client";
+import { ASSETS_QUERY_KEY, ME_QUERY_KEY, STYLE_QUERY_KEY, isPlanRequired } from "@/lib/query-client";
 import { createUploadApi } from "./api";
 import type { PickedFile } from "./files";
 import { type AddResult, UploadManager, type UploadSnapshot } from "./manager";
@@ -20,8 +20,8 @@ const EMPTY: UploadSnapshot = {
 export interface UploadCommands {
   /** False outside a signed-in workspace: there is nothing to upload to. */
   available: boolean;
-  /** Adds files to the queue and tells the user about those that were left out. */
-  addFiles(files: readonly (File | PickedFile)[]): Promise<AddResult | null>;
+  /** Adds files to the queue and tells the user about those that were left out. `purpose: "style_reference"` for style videos. */
+  addFiles(files: readonly (File | PickedFile)[], options?: { purpose?: "style_reference" }): Promise<AddResult | null>;
   /** `abortOnServer: false` when the caller deletes the asset itself. */
   cancel(id: string, options?: { abortOnServer?: boolean }): void;
   retry(id: string): void;
@@ -87,7 +87,10 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     // The library lists what the server has: tell it when an upload starts, finishes or is removed (at most twice a second).
     const stopEvents = created.subscribeEvents(() => {
       clearTimeout(refresh);
-      refresh = setTimeout(() => void queryClient.invalidateQueries({ queryKey: [ASSETS_QUERY_KEY] }), 500);
+      refresh = setTimeout(() => {
+        void queryClient.invalidateQueries({ queryKey: [ASSETS_QUERY_KEY] });
+        void queryClient.invalidateQueries({ queryKey: [STYLE_QUERY_KEY] });
+      }, 500);
     });
     void created.init();
     setManager(created);
@@ -127,8 +130,8 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       manager
         ? {
             available: true,
-            async addFiles(files) {
-              const result = await manager.add(files);
+            async addFiles(files, options) {
+              const result = await manager.add(files, options);
               const leftOut = describeLeftOut(result);
               if (leftOut) notify(leftOut.title, { description: leftOut.description, type: "error" });
               return result;
