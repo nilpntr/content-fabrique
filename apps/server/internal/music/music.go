@@ -427,4 +427,3 @@ func trimF(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
 func secs(ms int64) string { return strconv.FormatFloat(float64(ms)/1000, 'f', 1, 64) + " s" }
 
 func secs2(ms int64) string { return strconv.FormatFloat(float64(ms)/1000, 'f', 2, 64) + " s" }
-

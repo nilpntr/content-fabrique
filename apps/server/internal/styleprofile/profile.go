@@ -360,7 +360,7 @@ const (
 
 // AudioProfile is how the creator's videos sound.
 type AudioProfile struct {
-	IntroS    Range   `json:"intro_s"`
+	IntroS Range `json:"intro_s"`
 	// DropS is where the music drops in the references that have a drop, DropShare the share that do (P6-06).
 	DropS     Range   `json:"drop_s"`
 	DropShare float64 `json:"drop_share"`

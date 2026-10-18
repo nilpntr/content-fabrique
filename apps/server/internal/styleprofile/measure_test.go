@@ -184,7 +184,6 @@ func TestTempoFromFlux(t *testing.T) {
 	}
 }
 
-
 // A report with a quiet 2.3 s intro and a lift, onsets near the cuts and a build to the end reads as the creator's sound.
 func TestAnalyseAudio(t *testing.T) {
 	c := curve(func(t float64) float64 {
