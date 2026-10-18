@@ -108,7 +108,13 @@ func TestCameraWindowStaysInsideTheFrame(t *testing.T) {
 	}
 	for _, fps := range []int{24, 25, 30, 60} {
 		for _, s := range []float64{0.05, 0.12, 0.35} {
-			for _, preset := range []string{timeline.MotionPunchIn, timeline.MotionPushIn, timeline.MotionPullBack, timeline.MotionShake} {
+			// handheld: alone, and as the second clip (the drift runs the other way) with a punch-in at 1.2 s.
+			hh := timeline.Motion{Preset: timeline.MotionHandheld, Strength: ptr(s)}
+			hp := timeline.Motion{Preset: timeline.MotionHandheld, Strength: ptr(s), AtMs: ptr(int64(1200))}
+			check(fmt.Sprintf("%dfps/handheld/%v/pair", fps, s), []timeline.VideoItem{
+				clipAt("c1", assetA, 0, 4500, 0, withMotion(hh)), clipAt("c2", assetA, 0, 4500, 4500, withMotion(hp)),
+			}, fps)
+			for _, preset := range []string{timeline.MotionPunchIn, timeline.MotionPushIn, timeline.MotionPullBack, timeline.MotionShake, timeline.MotionHandheld} {
 				for _, id := range []string{"c1", "a", "shaky_clip", "z9"} {
 					motion := timeline.Motion{Preset: preset, Strength: ptr(s)}
 					check(fmt.Sprintf("%dfps/%s/%v/%s", fps, preset, s, id), []timeline.VideoItem{clipAt(id, assetA, 0, 2000, 0, withMotion(motion))}, fps)

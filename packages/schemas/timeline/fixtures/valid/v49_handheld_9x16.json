@@ -1,0 +1,61 @@
+{
+  "schema": "contentfabrique.timeline/v1",
+  "output": {
+    "format": "9:16",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000"
+  },
+  "tracks": [
+    {
+      "id": "main",
+      "type": "video",
+      "items": [
+        {
+          "id": "c1",
+          "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+          "source": {
+            "in_ms": 2000,
+            "out_ms": 4500
+          },
+          "at_ms": 0,
+          "motion": {
+            "preset": "handheld"
+          }
+        },
+        {
+          "id": "c2",
+          "asset_id": "ast_01jex6xx15ayjx8epfhfjj9s11",
+          "source": {
+            "in_ms": 1000,
+            "out_ms": 3500
+          },
+          "at_ms": 2500,
+          "motion": {
+            "preset": "handheld",
+            "at_ms": 900,
+            "strength": 0.12
+          }
+        },
+        {
+          "id": "c3",
+          "asset_id": "ast_01jdsx72atvnb7ssgbc57zbxj9",
+          "source": {
+            "in_ms": 5000,
+            "out_ms": 7000
+          },
+          "reframe": {
+            "mode": "blur_fill"
+          },
+          "at_ms": 5000,
+          "motion": {
+            "preset": "handheld",
+            "strength": 0.05
+          }
+        }
+      ]
+    }
+  ],
+  "markers": []
+}

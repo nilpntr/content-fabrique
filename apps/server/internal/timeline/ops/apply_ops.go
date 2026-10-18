@@ -311,19 +311,32 @@ func (a *applier) setSpeedRamp(o *SetSpeedRamp) bool {
 }
 
 func (a *applier) setMotion(o *SetMotion) bool {
+	if o.Preset == timeline.MotionNone && (o.AtMs != nil || o.Strength != nil) {
+		return a.errf(CodeBadArgument, "the preset none takes no at_ms or strength; leave them out, or choose punch_in, push_in, pull_back, shake or handheld")
+	}
+	set := func(i int) {
+		if o.Preset == timeline.MotionNone {
+			a.main.Items[i].Motion = nil
+		} else {
+			a.main.Items[i].Motion = &timeline.Motion{Preset: o.Preset, AtMs: copyPtr(o.AtMs), Strength: copyPtr(o.Strength)}
+		}
+		a.touch(a.main.Items[i].ID)
+	}
+	if o.ID == "" {
+		// Every clip of the main track (the living camera of a whole edit): a moment to land on belongs to one clip.
+		if o.AtMs != nil {
+			return a.errf(CodeBadArgument, "at_ms belongs to one clip: give an id with it, or leave at_ms out to set every clip")
+		}
+		for i := range a.main.Items {
+			set(i)
+		}
+		return true
+	}
 	i, ok := a.clip(o.ID)
 	if !ok {
 		return false
 	}
-	if o.Preset == timeline.MotionNone {
-		if o.AtMs != nil || o.Strength != nil {
-			return a.errf(CodeBadArgument, "the preset none takes no at_ms or strength; leave them out, or choose punch_in, push_in, pull_back or shake")
-		}
-		a.main.Items[i].Motion = nil
-	} else {
-		a.main.Items[i].Motion = &timeline.Motion{Preset: o.Preset, AtMs: copyPtr(o.AtMs), Strength: copyPtr(o.Strength)}
-	}
-	a.touch(o.ID)
+	set(i)
 	return true
 }
 

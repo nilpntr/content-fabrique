@@ -662,15 +662,15 @@ export type FocusY = number;
  */
 export type Zoom = number;
 /**
- * none, punch_in, push_in, pull_back or shake.
+ * none, punch_in, push_in, pull_back, shake or handheld.
  */
-export type Preset = "none" | "punch_in" | "push_in" | "pull_back" | "shake";
+export type Preset = "none" | "punch_in" | "push_in" | "pull_back" | "shake" | "handheld";
 /**
- * Only for punch_in (where the zoom has landed) and shake (where it starts): milliseconds from the clip's first frame, inside the clip. Without it punch_in zooms over the first frames of the clip and shake starts at its first frame.
+ * Only for punch_in (where the zoom has landed), shake (where it starts) and handheld (where its punch-in lands): milliseconds from the clip's first frame, inside the clip. Without it punch_in zooms over the first frames of the clip, shake starts at its first frame and handheld has no punch-in.
  */
 export type At = number;
 /**
- * The peak scale increase, 0.05 (5 % bigger) to 0.35. Defaults: punch_in 0.15, push_in 0.1, pull_back 0.15, shake 0.08 (also the size of the shake).
+ * The peak scale increase, 0.05 (5 % bigger) to 0.35. Defaults: punch_in 0.15, push_in 0.1, pull_back 0.15, shake 0.08 (also the size of the shake), handheld 0.08 (the push over the clip).
  */
 export type Strength = number;
 /**
@@ -1257,19 +1257,19 @@ export type GainInDB1 = number;
  */
 export type Op19 = "set_motion";
 /**
- * The id of the main-track clip.
+ * The id of the main-track clip. Leave it out to set every clip of the main track.
  */
 export type ClipId8 = string;
 /**
- * none, punch_in, push_in, pull_back or shake.
+ * none, punch_in, push_in, pull_back, shake or handheld.
  */
-export type Preset3 = "none" | "punch_in" | "push_in" | "pull_back" | "shake";
+export type Preset3 = "none" | "punch_in" | "push_in" | "pull_back" | "shake" | "handheld";
 /**
- * Only for punch_in (where the zoom has landed) and shake (where it starts): milliseconds from the clip's first frame, inside the clip. Without it punch_in zooms over the first frames of the clip and shake starts at its first frame.
+ * Only for punch_in (where the zoom has landed), shake (where it starts) and handheld (where its punch-in lands), and only with an id: milliseconds from the clip's first frame, inside the clip. Without it punch_in zooms over the first frames of the clip, shake starts at its first frame and handheld has no punch-in.
  */
 export type At1 = number;
 /**
- * The peak scale increase, 0.05 (5 % bigger) to 0.35. Defaults: punch_in 0.15, push_in 0.1, pull_back 0.15, shake 0.08 (also the size of the shake).
+ * The peak scale increase, 0.05 (5 % bigger) to 0.35. Defaults: punch_in 0.15, push_in 0.1, pull_back 0.15, shake 0.08 (also the size of the shake), handheld 0.08 (the push over the clip).
  */
 export type Strength1 = number;
 /**
@@ -1364,7 +1364,7 @@ export interface FocusPoint {
   y: FocusY;
 }
 /**
- * A camera move on the clip, applied as a digital zoom on the already-reframed frame (after reframe, so it composes with every reframe mode and never shows a border). punch_in is a fast zoom (about 5 frames) that lands at at_ms and holds, push_in a slow continuous zoom over the whole clip, pull_back the reverse (starts zoomed, pulls back to the full frame) and shake a short camera shake that starts at at_ms and dies out (deterministic: the pattern comes from the clip's id). Needs a clip of at least 400 ms (checked by the Go layer).
+ * A camera move on the clip, applied as a digital zoom on the already-reframed frame (after reframe, so it composes with every reframe mode and never shows a border). punch_in is a fast zoom (about 5 frames) that lands at at_ms and holds, push_in a slow continuous zoom over the whole clip, pull_back the reverse (starts zoomed, pulls back to the full frame), shake a short camera shake that starts at at_ms and dies out (deterministic: the pattern comes from the clip's id), and handheld the living camera of a tripod shot: a slow push over the whole clip, a gentle drift that alternates direction from one clip to the next and a slow sway, so the shot never sits dead still, with a punch-in of 6 % that lands at at_ms when it is given (the drop or a strong beat); the renderer keeps the push off the subject's head and body when the clip has a subject box. Needs a clip of at least 400 ms (checked by the Go layer).
  */
 export interface Motion {
   preset: Preset;
@@ -1608,11 +1608,11 @@ export interface SetClipAudio2 {
   gain_db?: GainInDB1;
 }
 /**
- * Set the camera move of a clip: a digital zoom or a shake on the already-reframed frame. punch_in is a fast zoom (about 5 frames) that lands at at_ms and holds: use it on a beat. push_in is a slow zoom over the whole clip, pull_back starts zoomed and pulls back to the full frame, shake is a short camera shake that starts at at_ms. This replaces the clip's whole motion, so fields you leave out go back to their defaults; none removes it. The clip must play for at least 400 ms, and at_ms (only for punch_in and shake) counts from the clip's own first frame, so it stays right when the clip moves.
+ * Set the camera move of a clip: a digital zoom or a shake on the already-reframed frame. punch_in is a fast zoom (about 5 frames) that lands at at_ms and holds: use it on a beat. push_in is a slow zoom over the whole clip, pull_back starts zoomed and pulls back to the full frame, shake is a short camera shake that starts at at_ms, and handheld is the living camera of a tripod shot (a slow push, a gentle drift that alternates from clip to clip, a slow sway, and a 6 % punch-in at at_ms when given: put it on the drop or a strong beat). handheld is camera motion, not an effect: give it to every static shot of a creator whose own videos are handheld, so no shot sits dead still. This replaces the clip's whole motion, so fields you leave out go back to their defaults; none removes it. Without id it sets every clip of the main track (no at_ms then): set_motion with preset handheld and no id is the living camera for the whole edit, and a later set_motion with an id changes one clip. The clip must play for at least 400 ms, and at_ms (only for punch_in, shake and handheld) counts from the clip's own first frame, so it stays right when the clip moves.
  */
 export interface SetMotion {
   op: Op19;
-  id: ClipId8;
+  id?: ClipId8;
   preset: Preset3;
   at_ms?: At1;
   strength?: Strength1;

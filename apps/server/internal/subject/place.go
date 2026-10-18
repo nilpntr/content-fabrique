@@ -100,6 +100,9 @@ const (
 	shakeSeconds        = 0.4
 	shakeAttackF        = 2
 	shakeRoom           = 0.9
+	// handheldBase and handheldPunch are the living camera's (render.HandheldBase, render.HandheldPunch).
+	handheldBase  = 0.03
+	handheldPunch = 0.06
 )
 
 // camera is the zoom the camera gives one clip over a window of its play: the range of the total zoom (the factors of the motion preset and
@@ -185,6 +188,23 @@ func motionAt(m timeline.Motion, outF int64, fps int) func(f int64) (z, shake fl
 		return func(f int64) (float64, float64) { return 1 + s*smooth(ramp(float64(f), last)), 1 }
 	case timeline.MotionPullBack:
 		return func(f int64) (float64, float64) { return 1 + s*(1-smooth(ramp(float64(f), last))), 1 }
+	case timeline.MotionHandheld:
+		// The living camera (render/camera.go): a push from handheldBase to the strength, a punch-in landing at at_ms, and a drift and a
+		// sway inside the room the push leaves, which the shake's pad covers (it is 0.9 of that room; the camera uses at most 0.85).
+		rampF := int64(min(max(math.Floor(punchSeconds*float64(fps)+0.5), punchMinF), punchMaxF))
+		start := max(at-rampF, 0)
+		return func(f int64) (float64, float64) {
+			push := 1 + handheldBase + (s-handheldBase)*smooth(ramp(float64(f), last))
+			z := push
+			if at >= 0 {
+				if at == start {
+					z *= 1 + handheldPunch
+				} else {
+					z *= 1 + handheldPunch*(1-math.Pow(1-ramp(float64(f-start), float64(at-start)), 3))
+				}
+			}
+			return z, push
+		}
 	case timeline.MotionShake:
 		start := max(at, 0)
 		length := max(int64(math.Floor(shakeSeconds*float64(fps)+0.5)), shakeAttackF+1)
