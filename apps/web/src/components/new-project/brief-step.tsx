@@ -57,15 +57,15 @@ export function BriefStep({
       {onTitleChange ? (
         <div className="space-y-2">
           <label htmlFor={titleId} className="block font-medium">
-            Project name <span className="font-normal text-subtle-foreground">(optional)</span>
+            Name <span className="font-normal text-subtle-foreground">(optional)</span>
           </label>
-          <Input id={titleId} value={title} maxLength={TITLE_MAX_LENGTH} placeholder="Untitled project" onChange={(event) => onTitleChange(event.target.value)} className="sm:max-w-md" />
+          <Input id={titleId} value={title} maxLength={TITLE_MAX_LENGTH} placeholder="For example: Back day" onChange={(event) => onTitleChange(event.target.value)} className="sm:max-w-md" />
         </div>
       ) : null}
       <div className="space-y-2">
         <div className="flex items-baseline justify-between gap-3">
           <label htmlFor={textareaId} className="font-medium">
-            Instructions <span className="font-normal text-subtle-foreground">(optional)</span>
+            What you want <span className="font-normal text-subtle-foreground">(optional)</span>
           </label>
           <span id={counterId} className={cn("text-[12.5px] tabular-nums", remaining <= 200 ? "text-foreground" : "text-subtle-foreground")}>
             {value.length} / {BRIEF_MAX_LENGTH}
@@ -82,7 +82,7 @@ export function BriefStep({
           value={value}
           maxLength={BRIEF_MAX_LENGTH}
           rows={6}
-          placeholder="Tell the editor what you want: which clip opens, any titles, the pace, the music."
+          placeholder="Which clip opens, any titles, the pace, the music."
           onChange={(event) => onChange(event.target.value)}
         />
         <p id={hintId} className="text-[13px] text-muted-foreground">
@@ -92,7 +92,7 @@ export function BriefStep({
 
       <div className="space-y-2">
         <h3 className="font-medium">Examples</h3>
-        <ul aria-label="Example instructions" className="grid gap-2 sm:grid-cols-2">
+        <ul aria-label="Examples" className="grid gap-2 sm:grid-cols-2">
           {EXAMPLE_PROMPTS.map((example) => {
             const fits = withExample(value, example).length <= BRIEF_MAX_LENGTH;
             return (
@@ -104,7 +104,7 @@ export function BriefStep({
                   className="w-full cursor-pointer rounded-xl bg-surface-raised px-3 py-2 text-left text-[13px] leading-5 text-muted-foreground shadow-raised transition-[color,box-shadow,translate] duration-(--dur-fast) ease-out hover:text-foreground hover:shadow-pop disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:text-muted-foreground disabled:hover:shadow-raised motion-safe:hover:-translate-y-px motion-safe:disabled:hover:translate-y-0"
                 >
                   {example}
-                  {fits ? null : <span className="mt-0.5 block text-[12px] text-subtle-foreground">Not enough room left in the instructions</span>}
+                  {fits ? null : <span className="mt-0.5 block text-[12px] text-subtle-foreground">Not enough room left</span>}
                 </button>
               </li>
             );

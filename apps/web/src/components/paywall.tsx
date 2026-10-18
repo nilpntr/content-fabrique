@@ -1,5 +1,5 @@
 import { CheckIcon } from "lucide-react";
-import { cardClassName } from "@/components/page-placeholder";
+import { cardClassName } from "@/components/page";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Me, PlanName } from "@/lib/api";
 import { isLapsed } from "@/lib/paywall";

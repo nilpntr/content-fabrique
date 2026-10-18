@@ -24,7 +24,7 @@ function renderAt(path: string) {
 
 const sidebarLink = (name: string) => within(document.querySelector('[data-slot="sidebar"]') as HTMLElement).getByRole("link", { name });
 
-test("/projects lists the projects as cards that open the project, and the nav has Projects above New project", async () => {
+test("/projects lists the projects as cards that open the project, and the nav has Projects above New video", async () => {
   installApi({
     "GET /v1/me": ME,
     "GET /v1/projects": {
@@ -40,27 +40,37 @@ test("/projects lists the projects as cards that open the project, and the nav h
   const card = await screen.findByRole("link", { name: /Back day/ });
   expect(card.getAttribute("href")).toBe(`/projects/${projectId(1)}`);
   expect(card.textContent).toContain("4 clips");
-  expect(card.textContent).toContain("v3");
-  expect(card.textContent).toContain("In review");
-  expect(card.textContent).toContain("9:16");
+  // Where it is, in plain words: no "v3", no format codes.
+  expect(card.textContent).toContain("Ready to watch");
+  expect(card.textContent).not.toContain("v3");
   const second = screen.getByRole("link", { name: /Leg day/ });
   expect(second.textContent).toContain("1 clip");
-  expect(second.textContent).toContain("no cut yet");
-  expect(second.textContent).toContain("Editing");
-  expect(second.textContent).toContain("16:9");
+  expect(second.textContent).toContain("Editing…");
 
   const links = within(document.querySelector('[data-slot="sidebar"]') as HTMLElement).getAllByRole("link").map((link) => link.textContent);
   expect(links.indexOf("Projects")).toBeGreaterThan(-1);
-  expect(links.indexOf("Projects")).toBeLessThan(links.indexOf("New project"));
+  expect(links.indexOf("Projects")).toBeLessThan(links.indexOf("New video"));
   expect(sidebarLink("Projects").hasAttribute("data-active")).toBe(true);
-  expect(sidebarLink("New project").hasAttribute("data-active")).toBe(false);
+  expect(sidebarLink("New video").hasAttribute("data-active")).toBe(false);
+});
+
+test("a project card shows a frame of its first clip that is still there", async () => {
+  installApi({
+    "GET /v1/me": ME,
+    "GET /v1/projects": { items: [projectSummary(1, { title: "Back day", status: "review", current_timeline_version: 1 })], next_cursor: null },
+    "GET /v1/projects/{id}": project(1, { title: "Back day" }),
+    "GET /v1/assets": { items: [apiAsset(1), apiAsset(2)], next_cursor: null },
+  });
+  renderAt("/projects");
+  const card = await screen.findByRole("link", { name: /Back day/ });
+  await waitFor(() => expect(card.querySelector("img")?.getAttribute("src")).toBe("https://cdn.test/poster-1.jpg"));
 });
 
 test("/projects with none offers to start the first one", async () => {
   installApi({ "GET /v1/me": ME, "GET /v1/projects": { items: [], next_cursor: null } });
   renderAt("/projects");
   expect(await screen.findByText("No projects yet")).toBeTruthy();
-  expect(screen.getByRole("link", { name: "Start your first project" }).getAttribute("href")).toBe("/projects/new");
+  expect(screen.getByRole("link", { name: "Make your first video" }).getAttribute("href")).toBe("/projects/new");
 });
 
 test("/projects pages through the list, and says when it cannot be loaded", async () => {
@@ -89,8 +99,8 @@ test("/projects shows the error and tries again", async () => {
 test("/projects/new keeps its own nav item and heading, and /projects/<id> belongs to Projects", async () => {
   installApi({ "GET /v1/me": ME, "GET /v1/assets": { items: [apiAsset(1)], next_cursor: null } });
   renderAt("/projects/new");
-  expect(await screen.findByRole("heading", { name: "New project" })).toBeTruthy();
-  expect(sidebarLink("New project").hasAttribute("data-active")).toBe(true);
+  expect(await screen.findByRole("heading", { name: "New video" })).toBeTruthy();
+  expect(sidebarLink("New video").hasAttribute("data-active")).toBe(true);
   expect(sidebarLink("Projects").hasAttribute("data-active")).toBe(false);
   act(() => root?.unmount());
 
@@ -103,7 +113,7 @@ test("/projects/new keeps its own nav item and heading, and /projects/<id> belon
   renderAt(`/projects/${id}`);
   expect(await screen.findByRole("heading", { name: "Back day" })).toBeTruthy();
   expect(sidebarLink("Projects").hasAttribute("data-active")).toBe(true);
-  expect(sidebarLink("New project").hasAttribute("data-active")).toBe(false);
+  expect(sidebarLink("New video").hasAttribute("data-active")).toBe(false);
 });
 
 test("?run= on a project page follows that run; a value that is not a run id is ignored", async () => {
@@ -114,13 +124,13 @@ test("?run= on a project page follows that run; a value that is not a run id is 
     "GET /v1/runs/{id}": run({ id: runId(3), status: "succeeded", summary: "All done." }),
   });
   renderAt(`/projects/${projectId(1)}?run=${runId(3)}`);
-  expect(await screen.findByRole("heading", { name: "The editor finished" })).toBeTruthy();
-  expect(api.callsTo("GET /v1/runs/{id}")[0]?.path).toBe(`/v1/runs/${runId(3)}`);
+  await waitFor(() => expect(api.callsTo("GET /v1/runs/{id}")[0]?.path).toBe(`/v1/runs/${runId(3)}`));
+  expect(await screen.findByRole("heading", { name: "No video yet" })).toBeTruthy();
   act(() => root?.unmount());
 
   const before = api.callsTo("GET /v1/runs/{id}").length;
   renderAt(`/projects/${projectId(1)}?run=not-a-run`);
-  expect(await screen.findByRole("heading", { name: "No cut yet" })).toBeTruthy();
+  expect(await screen.findByRole("heading", { name: "No video yet" })).toBeTruthy();
   expect(api.callsTo("GET /v1/runs/{id}")).toHaveLength(before);
 });
 
@@ -139,11 +149,11 @@ test("creating a project opens its page on the run that was started", async () =
   fireEvent.click(await screen.findByRole("checkbox", { name: /Back pose/ }));
   fireEvent.click(screen.getByRole("button", { name: /^Next/ }));
   fireEvent.click(screen.getAllByRole("button", { name: /^Review/ }).at(-1) as HTMLElement);
-  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  fireEvent.click(screen.getByRole("button", { name: "Make my video" }));
 
   await waitFor(() => expect(router.state.location.pathname).toBe(`/projects/${projectId(1)}`));
   expect(router.state.location.search).toEqual({ run: runId(8) });
-  expect(await screen.findByRole("heading", { name: "The editor is working" })).toBeTruthy();
+  expect(await screen.findByRole("heading", { name: "I'm making your video" })).toBeTruthy();
   expect(api.callsTo("POST /v1/projects/{id}/edit")).toHaveLength(1);
 });
 
@@ -159,5 +169,5 @@ test("a project page whose versions exist shows the review for the route's proje
   vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
   renderAt(`/projects/${projectId(1)}`);
   expect(await screen.findByRole("group", { name: "Version" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Edit again" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Make the changes" })).toBeTruthy();
 });

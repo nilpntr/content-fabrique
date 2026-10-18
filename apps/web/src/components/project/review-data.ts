@@ -138,6 +138,21 @@ export function markersOf(spec: unknown): BeatMarker[] {
   return out.sort((a, b) => a.at_ms - b.at_ms);
 }
 
+/** The texts on screen (the `text` tracks: titles, captions), in time order. */
+export function textItems(spec: unknown): { at_ms: number; text: string }[] {
+  if (!isRecord(spec) || !Array.isArray(spec.tracks)) return [];
+  const out: { at_ms: number; text: string }[] = [];
+  for (const track of spec.tracks) {
+    if (!isRecord(track) || track.type !== "text" || !Array.isArray(track.items)) continue;
+    for (const raw of track.items) {
+      const at = isRecord(raw) ? num(raw.at_ms) : undefined;
+      if (at === undefined || !isRecord(raw) || typeof raw.text !== "string" || raw.text.trim() === "") continue;
+      out.push({ at_ms: at, text: raw.text.trim() });
+    }
+  }
+  return out.sort((a, b) => a.at_ms - b.at_ms);
+}
+
 /** Where the last clip ends: the length of the video. */
 export function specDurationMs(items: readonly VideoItem[]): number {
   return items.reduce((end, item) => Math.max(end, item.at_ms + itemOutputDurationMs(item)), 0);
@@ -221,6 +236,7 @@ export function toReviewVersion(input: VersionInputs, projectFormat: OutputForma
     items,
     sfx: sfxItems(input.version.spec),
     markers: markersOf(input.version.spec),
+    texts: textItems(input.version.spec),
     time_map: timeMap,
     ...(input.previewUrl ? { preview_url: input.previewUrl } : {}),
   };

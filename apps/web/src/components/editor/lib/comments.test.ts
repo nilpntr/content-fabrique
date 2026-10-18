@@ -31,7 +31,7 @@ test("the same comment is mapped, and addressed, on the version it was made on",
   const pulldown = find(resolve(v1), "ann_pulldown");
   expect(pulldown.mapped).toEqual({ start_ms: 4500, end_ms: 6500, item_id: "c2" });
   expect(pulldown.status).toEqual({ kind: "addressed", version: 2 });
-  expect(statusLabel(pulldown.status)).toBe("Addressed in v2");
+  expect(statusLabel(pulldown.status)).toBe("Addressed in Version 2");
 });
 
 test("a comment from v1 maps onto v3 through item and source time", () => {
@@ -48,7 +48,7 @@ test("a comment made on a newer version is not on an earlier one yet: it is not 
   const logo = find(resolve(v1), "ann_logo");
   expect(logo.mapped).toBeNull();
   expect(logo.status).toEqual({ kind: "newer", version: 3 });
-  expect(statusLabel(logo.status)).toBe("Made on v3 (newer)");
+  expect(statusLabel(logo.status)).toBe("Made on Version 3 (newer)");
   // Not "no longer mapped", and not open on that version.
   expect(filterComments(resolve(v1), "open").map((item) => item.comment.id)).not.toContain("ann_logo");
   expect(find(resolve(v2), "ann_hook").status).toEqual({ kind: "open" });

@@ -16,7 +16,7 @@ export function ReviewStep({
   brief,
   onEdit,
   disabled = false,
-  budgetUsd,
+  costNote,
   title = "",
   onMediaError,
 }: {
@@ -27,8 +27,8 @@ export function ReviewStep({
   onEdit: (step: StepId) => void;
   /** Locks the Edit buttons, e.g. while the project is being created. */
   disabled?: boolean;
-  /** The most the editor may spend on the first cut, in dollars. Shown, not editable. */
-  budgetUsd?: number;
+  /** What making the video uses from the plan, in plain words (never dollars). */
+  costNote?: string;
   /** The project's name, when the creator gave one. */
   title?: string;
   /** A poster would not load: the caller can fetch the list again for fresh URLs. */
@@ -79,18 +79,15 @@ export function ReviewStep({
       <Row disabled={disabled} term="Instructions" onEdit={() => onEdit("brief")} editLabel="Edit instructions">
         {title.trim() === "" ? null : <p className="mb-1 font-medium">{title.trim()}</p>}
         {text === "" ? (
-          <p className="text-muted-foreground">None. The editor will pick a cut from your clips.</p>
+          <p className="text-muted-foreground">None. I'll decide from your clips.</p>
         ) : (
           <p className="max-w-prose whitespace-pre-line">{text}</p>
         )}
       </Row>
-      {budgetUsd === undefined ? null : (
+      {costNote === undefined ? null : (
         <div className="grid gap-x-6 gap-y-2 p-4 sm:grid-cols-[8rem_1fr_auto]">
-          <dt className="text-muted-foreground">Spending cap</dt>
-          <dd className="min-w-0">
-            <p className="font-medium tabular-nums">${budgetUsd.toFixed(2)}</p>
-            <p className="text-muted-foreground">The most the editor spends on this cut. It stops there, whatever it has made so far is kept.</p>
-          </dd>
+          <dt className="text-muted-foreground">Uses</dt>
+          <dd className="min-w-0 text-muted-foreground">{costNote}</dd>
         </div>
       )}
     </dl>

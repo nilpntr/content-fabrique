@@ -1,6 +1,6 @@
 import { annotation, apiAsset, assetId, event, project, projectId, projectSummary, readyRender, renderId, run, runId, callIdOf, timelineVersion, v2Artifacts, v2Run, v2Spec, versionSummary } from "@/test-fixtures";
 
-/** The scenario of a page, from its address: `?credits=ok|low|empty|none&run=done|working|failed|question&runcredits=charged|revision|refunded|none&artifacts=api|none&video=<url>`. */
+/** The scenario of a page, from its address: `?credits=ok|low|empty|none&run=done|working|failed|question&runcredits=charged|revision|refunded|none&artifacts=api|none&video=<url>&posters=<url with {n}>&projects=some|none`. */
 export interface Scenario {
   credits: "none" | "ok" | "low" | "empty";
   run: "done" | "working" | "failed" | "question";
@@ -10,6 +10,10 @@ export interface Scenario {
   artifacts: "api" | "none";
   /** An MP4 to play as the preview (the viewer has none of its own). */
   video?: string;
+  /** Posters for the clips instead of gradients: an address with `{n}` for the clip's number. */
+  posters?: string;
+  /** `none`: a brand-new workspace with no projects yet. */
+  projects: "some" | "none";
 }
 
 export function scenarioOf(search: URLSearchParams): Scenario {
@@ -23,6 +27,8 @@ export function scenarioOf(search: URLSearchParams): Scenario {
     runCredits: pick("runcredits", ["charged", "revision", "refunded", "none"], "charged"),
     artifacts: pick("artifacts", ["api", "none"], "api"),
     video: search.get("video") ?? undefined,
+    posters: search.get("posters") ?? undefined,
+    projects: pick("projects", ["some", "none"], "some"),
   };
 }
 
@@ -41,18 +47,21 @@ const CLIPS = [
   { n: 5, title: "Treadmill warm-up", description: "", tags: [] },
 ];
 
-const clipAsset = (clip: (typeof CLIPS)[number]) =>
+const clipAsset = (clip: (typeof CLIPS)[number], posters?: string) =>
   apiAsset(clip.n, {
     title: clip.title,
     description: clip.description,
     tags: clip.tags,
     quick_look_status: clip.description ? "succeeded" : "pending",
-    derivatives: { poster: { url: poster(clip.n) } } as never,
+    derivatives: { poster: { url: posters && clip.n <= 3 ? posters.replace("{n}", String(clip.n)) : poster(clip.n) } } as never,
   });
 
 const NAMES: Record<number, string> = { 1: "Heaviest lat pulldown", 2: "Seated cable row", 3: "Back pose, held" };
 
-function fixtureProject() {
+function fixtureProject(n = 1) {
+  if (n === 3) {
+    return project(3, { title: "Leg day", brief: "", status: "editing", asset_count: 1, assets: [{ asset_id: assetId(2), position: 0, title: "Seated cable row", kind: "video", status: "ready", duration_ms: 12_000, available: true }] } as never);
+  }
   return project(1, {
     title: "Gino's back day",
     brief: "Open on the heaviest pulldown, cut to the beat, end on the pose.",
@@ -105,6 +114,7 @@ export function installFakeApi(scenario: Scenario): void {
   const versions = [versionSummary(2, { summary: ["Evened out the brightness of c4 and c5"], author_id: runId(1) }), versionSummary(1, { summary: ["First edit: hook, rows and the pose"], author_id: runId(1) })];
   const render = readyRender({ project_id: projectId(1), timeline_version: 2, duration_ms: 10_900, files: { mp4: { url: scenario.video ?? "https://files.invalid/preview.mp4", content_type: "video/mp4", size_bytes: 1000 }, contact_sheet: null, time_map: { url: "https://files.invalid/time-map.json", content_type: "application/json", size_bytes: 10 } } as never });
 
+  const finals: ReturnType<typeof readyRender>[] = [];
   const original = window.fetch.bind(window);
   window.fetch = async (input, init) => {
     const request = typeof input === "string" || input instanceof URL ? new Request(input, init) : input;
@@ -114,9 +124,21 @@ export function installFakeApi(scenario: Scenario): void {
     const method = request.method;
     if (method === "GET") {
       if (path === "/v1/me") return json(me);
-      if (path === "/v1/assets") return json({ items: CLIPS.map(clipAsset), next_cursor: null });
-      if (path === "/v1/projects") return json({ items: [projectSummary(1, { title: "Gino's back day", status: "review", asset_count: 3, current_timeline_version: 2 }), projectSummary(2, { title: "Pose practice", status: "draft" })], next_cursor: null });
+      if (path === "/v1/assets") return json({ items: CLIPS.map((clip) => clipAsset(clip, scenario.posters)), next_cursor: null });
+      if (path === "/v1/projects" && scenario.projects === "none") return json({ items: [], next_cursor: null });
+      if (path === "/v1/projects") {
+        const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
+        return json({
+          items: [
+            projectSummary(1, { title: "Gino's back day", status: "review", asset_count: 3, current_timeline_version: 2, updated_at: hoursAgo(2) }),
+            projectSummary(3, { title: "Leg day", status: "editing", asset_count: 1, updated_at: hoursAgo(0.2) }),
+            projectSummary(2, { title: "Pose practice", status: "draft", asset_count: 0, updated_at: hoursAgo(30) }),
+          ],
+          next_cursor: null,
+        });
+      }
       if (path === `/v1/projects/${projectId(1)}`) return json(fixtureProject());
+      if (path === `/v1/projects/${projectId(3)}`) return json(fixtureProject(3));
       if (path === `/v1/projects/${projectId(1)}/timelines`) return json({ items: versions, next_before: null });
       const version = /\/timelines\/(\d+)$/.exec(path)?.[1];
       if (version) {
@@ -124,7 +146,9 @@ export function installFakeApi(scenario: Scenario): void {
         const spec = Number(version) === 2 ? v2Spec() : (full as { spec: unknown }).spec;
         return json({ ...full, spec: Number(version) === 1 ? withoutEffects(v2Spec()) : spec });
       }
-      if (path === `/v1/projects/${projectId(1)}/renders`) return json({ items: [render] });
+      if (path === `/v1/projects/${projectId(1)}/renders`) return json({ items: url.searchParams.get("profile") === "final" ? finals : [render] });
+      const finalId = finals.find((candidate) => path === `/v1/renders/${candidate.id}`);
+      if (finalId) return json(finalId);
       if (path === `/v1/renders/${renderId(1)}`) return json(render);
       if (path === `/v1/runs/${runId(1)}`) return json(runFor(scenario.run, scenario.runCredits));
       if (path === `/v1/runs/${runId(1)}/artifacts`) {
@@ -134,6 +158,13 @@ export function installFakeApi(scenario: Scenario): void {
       }
       if (path === "/v1/annotations") return json({ items: [annotation(1, { timeline_version: 2, start_ms: 2900, end_ms: 4400, body: "The ramp on the cable row is great. Hold the slow part a beat longer." }), annotation(2, { timeline_version: 2, start_ms: 6200, end_ms: 6200, body: "Title here, please." })], next_cursor: null });
       if (path === "/v1/library/summary") return json({ total: CLIPS.length });
+    }
+    // A download: the final video is ready at once (the viewer has no renderer).
+    if (method === "POST" && path === `/v1/projects/${projectId(1)}/renders`) {
+      const body = (await request.json()) as { version: number; profile: string };
+      const made = readyRender({ id: renderId(50 + body.version), project_id: projectId(1), timeline_version: body.version, profile: "final", files: { mp4: { url: scenario.video ?? "https://files.invalid/final.mp4", content_type: "video/mp4", size_bytes: 1000 }, contact_sheet: null, time_map: { url: "https://files.invalid/time-map.json", content_type: "application/json", size_bytes: 10 } } as never });
+      finals.push(made);
+      return json(made, 201);
     }
     // Starting an edit with no credits left is refused, as the API will (402 credits_exhausted).
     if (method === "POST" && path === `/v1/projects/${projectId(1)}/edit` && scenario.credits === "empty") return json({ error: { code: "credits_exhausted", message: "not enough credits" } }, 402);

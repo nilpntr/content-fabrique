@@ -25,8 +25,8 @@ function removeStub(name: "animate" | "getAnimations" | "scrollTo") {
 }
 
 test("renders the shell with the sidebar nav and the current page", async () => {
-  renderAt("/reports");
-  expect(await screen.findByRole("heading", { name: "Reports" })).toBeTruthy();
+  renderAt("/settings");
+  expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
   expect(screen.getByText("Content Fabrique")).toBeTruthy();
   // Clerk's controls sit in the sidebar, and the workspace line comes from the API (GET /v1/me).
   expect(screen.getByTestId("clerk-organization-switcher")).toBeTruthy();
@@ -36,27 +36,27 @@ test("renders the shell with the sidebar nav and the current page", async () => 
 });
 
 test("the lens marks the current page and moves with navigation", async () => {
-  const router = renderAt("/reports");
+  const router = renderAt("/library");
   const nav = within(await screen.findByRole("navigation", { name: "Main" }));
-  const reports = nav.getByRole("link", { name: "Reports" });
-  expect(reports.hasAttribute("data-active")).toBe(true);
-  expect(reports.querySelector('[data-slot="sidebar-menu-lens"]')).toBeTruthy();
+  const library = nav.getByRole("link", { name: "Library" });
+  expect(library.hasAttribute("data-active")).toBe(true);
+  expect(library.querySelector('[data-slot="sidebar-menu-lens"]')).toBeTruthy();
 
   await act(() => router.navigate({ to: "/settings" }));
   expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
   expect(nav.getByRole("link", { name: "Settings" }).hasAttribute("data-active")).toBe(true);
-  expect(nav.getByRole("link", { name: "Reports" }).hasAttribute("data-active")).toBe(false);
+  expect(nav.getByRole("link", { name: "Library" }).hasAttribute("data-active")).toBe(false);
 });
 
 test("the active item and the title come from the router's match, also with a trailing slash", async () => {
-  renderAt("/reports/");
+  renderAt("/settings/");
   const nav = within(await screen.findByRole("navigation", { name: "Main" }));
-  expect(nav.getByRole("link", { name: "Reports" }).hasAttribute("data-active")).toBe(true);
-  expect(document.querySelector('[data-slot="breadcrumb-page"]')?.textContent).toBe("Reports");
+  expect(nav.getByRole("link", { name: "Settings" }).hasAttribute("data-active")).toBe(true);
+  expect(document.querySelector('[data-slot="breadcrumb-page"]')?.textContent).toBe("Settings");
 });
 
 test("an unknown path under a nav page is Not found with no active item", async () => {
-  renderAt("/reports/does-not-exist");
+  renderAt("/settings/does-not-exist");
   const nav = within(await screen.findByRole("navigation", { name: "Main" }));
   expect(await screen.findByText("Nothing at this address")).toBeTruthy();
   expect(document.querySelector('[data-slot="breadcrumb-page"]')?.textContent).toBe("Not found");
@@ -64,9 +64,9 @@ test("an unknown path under a nav page is Not found with no active item", async 
 });
 
 test("keyboard focus moves through the nav", async () => {
-  renderAt("/reports");
+  renderAt("/settings");
   const nav = within(await screen.findByRole("navigation", { name: "Main" }));
-  const overview = nav.getByRole("link", { name: "Overview" });
+  const overview = nav.getByRole("link", { name: "Home" });
   const settings = nav.getByRole("link", { name: "Settings" });
   act(() => overview.focus());
   expect(document.activeElement).toBe(overview);
@@ -86,20 +86,20 @@ describe("the sidebar", () => {
   test("starts collapsed when the cookie says so", async () => {
     // biome-ignore lint/suspicious/noDocumentCookie: sets up the cookie the sidebar reads.
     document.cookie = "sidebar_state=false; path=/";
-    renderAt("/reports");
-    await screen.findByRole("heading", { name: "Reports" });
+    renderAt("/library");
+    await screen.findByRole("heading", { name: "Library" });
     expect(state()).toBe("collapsed");
   });
 
   test("starts open without a cookie", async () => {
-    renderAt("/reports");
-    await screen.findByRole("heading", { name: "Reports" });
+    renderAt("/library");
+    await screen.findByRole("heading", { name: "Library" });
     expect(state()).toBe("expanded");
   });
 
   test("Ctrl/Cmd+B toggles it and stores the state, but not while typing or with Alt", async () => {
-    renderAt("/reports");
-    await screen.findByRole("heading", { name: "Reports" });
+    renderAt("/library");
+    await screen.findByRole("heading", { name: "Library" });
     const field = document.body.appendChild(document.createElement("input"));
 
     fireEvent.keyDown(field, { key: "b", ctrlKey: true });
@@ -129,8 +129,8 @@ describe("the page scroll", () => {
   afterEach(() => removeStub("scrollTo"));
 
   test("a new page opens at the top of the scrolling <main>", async () => {
-    const router = renderAt("/reports");
-    await screen.findByRole("heading", { name: "Reports" });
+    const router = renderAt("/library");
+    await screen.findByRole("heading", { name: "Library" });
     const main = document.querySelector<HTMLElement>('[data-slot="sidebar-inset"]');
     if (!main) throw new Error("no <main>");
     main.scrollTop = 300;
@@ -150,7 +150,7 @@ describe("the lens hand-off", () => {
     // Each nav item gets its own place, so the lens has somewhere to glide from.
     vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
       const label = this.closest("a")?.textContent ?? "";
-      const top = ["Overview", "Reports", "Settings"].indexOf(label) * 40;
+      const top = ["Home", "Library", "Settings"].indexOf(label) * 40;
       return { top, left: 0, width: 200, height: 36, right: 200, bottom: top + 36, x: 0, y: top, toJSON: () => ({}) };
     });
   });
@@ -161,16 +161,16 @@ describe("the lens hand-off", () => {
   });
 
   test("glides between items", async () => {
-    const router = renderAt("/reports");
-    await screen.findByRole("heading", { name: "Reports" });
+    const router = renderAt("/library");
+    await screen.findByRole("heading", { name: "Library" });
     expect(animate).not.toHaveBeenCalled();
     await act(() => router.navigate({ to: "/settings" }));
     expect(animate).toHaveBeenCalled();
   });
 
   test("still glides after a stop on a page outside the nav", async () => {
-    const router = renderAt("/reports");
-    await screen.findByRole("heading", { name: "Reports" });
+    const router = renderAt("/library");
+    await screen.findByRole("heading", { name: "Library" });
     await act(() => router.navigate({ to: "/nowhere" as never }));
     expect(await screen.findByText("Nothing at this address")).toBeTruthy();
     expect(animate).not.toHaveBeenCalled();

@@ -2,14 +2,15 @@ import { CircleAlert, Clapperboard, Info, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { PreviewRenderState } from "@/lib/api/project-hooks";
 import { cn } from "@/lib/utils";
+import { versionName } from "@/lib/words";
 import { renderFailureMessage } from "./errors";
 
 const STAGES: Readonly<Record<string, string>> = {
-  staging: "Getting the footage",
-  measuring: "Measuring the sound",
-  rendering: "Rendering",
-  contact_sheet: "Making a contact sheet",
-  uploading: "Saving the video",
+  staging: "Gathering your clips",
+  measuring: "Balancing the sound",
+  rendering: "Putting your video together",
+  contact_sheet: "Almost there",
+  uploading: "Almost there",
 };
 
 const BAR = "flex flex-wrap items-center gap-x-3 gap-y-2 rounded-[10px] bg-wash px-3 py-2 text-[12.5px] shadow-[inset_0_0_0_1px_var(--border)]";
@@ -48,7 +49,7 @@ export function PreviewStatus({
     return (
       <p role="status" className={cn(BAR, "text-muted-foreground", className)}>
         <Loader2 aria-hidden className="size-3.5 motion-safe:animate-spin" />
-        Looking for a preview of v{version}…
+        Loading {versionName(version)}…
       </p>
     );
   }
@@ -57,21 +58,21 @@ export function PreviewStatus({
     return (
       <p role="note" className={cn(BAR, "text-muted-foreground", className)}>
         <Info aria-hidden className="size-3.5 shrink-0 text-subtle-foreground" />
-        Video previews aren't available yet. The timeline below shows the cut; the picture arrives with previews.
+        Videos can't be played here yet. The clips below show how it's cut.
       </p>
     );
   }
 
   if (state.kind === "working") {
     const percent = Math.min(100, Math.max(0, Math.round(state.render.progress)));
-    const stage = state.render.stage ? (STAGES[state.render.stage] ?? "Rendering") : state.render.status === "queued" ? "Waiting in line" : "Rendering";
+    const stage = state.render.stage ? (STAGES[state.render.stage] ?? "Putting your video together") : state.render.status === "queued" ? "Getting ready" : "Putting your video together";
     return (
       <div className={cn(BAR, className)}>
         <Loader2 aria-hidden className="size-3.5 text-brand motion-safe:animate-spin" />
         <p role="status" className="text-foreground">
-          {stage} a preview of v{version}… <span className="tabular-nums">{percent}%</span>
+          {stage}… <span className="tabular-nums">{percent}%</span>
         </p>
-        <div role="progressbar" aria-label={`Preview of v${version}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} className="h-1.5 min-w-24 flex-1 overflow-hidden rounded-full bg-border">
+        <div role="progressbar" aria-label={`Preparing ${versionName(version)}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} className="h-1.5 min-w-24 flex-1 overflow-hidden rounded-full bg-border">
           <div className="h-full rounded-full bg-brand transition-[width] duration-(--dur-slow)" style={{ width: `${percent}%` }} />
         </div>
         {error}
@@ -85,13 +86,13 @@ export function PreviewStatus({
       {failed ? <CircleAlert aria-hidden className="size-3.5 shrink-0 text-critical" /> : <Clapperboard aria-hidden className="size-3.5 shrink-0 text-subtle-foreground" />}
       <p role={failed || state.kind === "error" ? "alert" : "note"} className={failed || state.kind === "error" ? "text-destructive" : "text-muted-foreground"}>
         {failed
-          ? `The preview of v${version} could not be made: ${renderFailureMessage(state.render.failure_reason)}.`
+          ? `${versionName(version)} could not be shown: ${renderFailureMessage(state.render.failure_reason)}.`
           : state.kind === "error"
-            ? state.message
-            : `There is no video preview of v${version} yet.`}
+            ? "The video could not be loaded. Try again."
+            : `${versionName(version)} isn't ready to watch yet.`}
       </p>
       <Button size="sm" variant="secondary" className="ml-auto" onClick={onRequest} disabled={requesting}>
-        {requesting ? "Starting…" : failed ? "Try again" : "Render preview"}
+        {requesting ? "Starting…" : failed ? "Try again" : "Show me"}
       </Button>
       {error}
     </div>

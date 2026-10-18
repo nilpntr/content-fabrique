@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
@@ -28,14 +28,14 @@ test("a signed-out visitor gets the sign-in page, never the app", async () => {
   expect(router.state.location.pathname).toBe("/sign-in");
   expect(appChrome()).toBeNull();
   expect(screen.queryByRole("navigation", { name: "Main" })).toBeNull();
-  expect(screen.queryByRole("heading", { name: "Overview" })).toBeNull();
+  expect(screen.queryByRole("heading", { name: /^Good (morning|afternoon|evening)/ })).toBeNull();
 });
 
 test("every app page is protected, and sign-in remembers where the visitor was going", async () => {
   clerkMock.session = { isAuthenticated: false, userId: null, orgId: null };
   for (const [path, redirectUrl] of [
     ["/settings", "/settings"],
-    ["/reports", "/reports"],
+    ["/library", "/library"],
     ["/not-a-page", "/not-a-page"],
   ] as const) {
     const router = renderAt(path);
@@ -73,7 +73,7 @@ test("a signed-in user without a workspace picks one before anything else", asyn
 
 test("a member with a workspace goes from the picker straight to the app", async () => {
   const router = renderAt("/workspace");
-  expect(await screen.findByRole("heading", { name: "Overview" })).toBeTruthy();
+  expect(await screen.findByRole("heading", { level: 1, name: /^Good (morning|afternoon|evening)/ })).toBeTruthy();
   expect(router.state.location.pathname).toBe("/");
 });
 
@@ -83,7 +83,9 @@ test("Settings shows what GET /v1/me returned, fetched with the session token", 
   expect(screen.getByText("usr_01test")).toBeTruthy();
   expect(screen.getByText("Fit Studio", { selector: "dd" })).toBeTruthy();
   expect(screen.getByText("wks_01test")).toBeTruthy();
-  expect(screen.getByText("owner", { selector: "dd" })).toBeTruthy();
+  expect(screen.getByText("Owner", { selector: "dd" })).toBeTruthy();
+  // The ids are there for support, behind a closed "Details".
+  expect(screen.getByText("usr_01test").closest("details")?.open).toBe(false);
 
   const calls = vi.mocked(fetch).mock.calls;
   expect(calls.length).toBeGreaterThan(0);
@@ -108,12 +110,14 @@ test("Settings says so when the API refuses", async () => {
   );
   renderAt("/settings");
   const alert = await screen.findByRole("alert");
-  await waitFor(() => expect(alert.textContent).toContain("this workspace was deleted (workspace_deleted)"));
+  await waitFor(() => expect(alert.textContent).toContain("this workspace was deleted"));
+  // The code is only in the details.
+  expect(within(alert).getByText("workspace_deleted").closest("details")?.open).toBe(false);
 });
 
 test("navigating in the browser uses Clerk's in-memory state and does not ask the server again", async () => {
-  const router = renderAt("/reports");
-  await screen.findByRole("heading", { name: "Reports" });
+  const router = renderAt("/library");
+  await screen.findByRole("heading", { name: "Library" });
   await act(() => router.navigate({ to: "/settings" }));
   expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
   expect(clerkMock.serverSessionCalls).toBe(0);
@@ -122,16 +126,16 @@ test("navigating in the browser uses Clerk's in-memory state and does not ask th
 test("a stale session cookie on the server does not bounce a user Clerk knows is signed in", async () => {
   // The server only sees the 60-second __session cookie, which can be out of date while Clerk's own state is current.
   clerkMock.serverSession = { isAuthenticated: false, userId: null, orgId: null };
-  const router = renderAt("/reports");
-  await screen.findByRole("heading", { name: "Reports" });
+  const router = renderAt("/library");
+  await screen.findByRole("heading", { name: "Library" });
   await act(() => router.navigate({ to: "/settings" }));
   expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
   expect(router.state.location.pathname).toBe("/settings");
 });
 
 test("signing out in the browser sends the next navigation to sign-in", async () => {
-  const router = renderAt("/reports");
-  await screen.findByRole("heading", { name: "Reports" });
+  const router = renderAt("/library");
+  await screen.findByRole("heading", { name: "Library" });
   clerkMock.session = { isAuthenticated: false, userId: null, orgId: null };
   await act(() => router.navigate({ to: "/settings" }));
   expect(await screen.findByTestId("clerk-sign-in")).toBeTruthy();
