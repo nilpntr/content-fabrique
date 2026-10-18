@@ -53,6 +53,9 @@ const (
 	DefaultGraphicsEnergy       = EnergyLively
 )
 
+// MaxGraphicsItems is the most items a graphics track may hold (the schema's maxItems): cf-motion renders at most 64 in one run.
+const MaxGraphicsItems = 64
+
 // GraphicsTrack holds the motion-graphics overlays.
 type GraphicsTrack struct {
 	ID    string         `json:"id"`
@@ -115,6 +118,33 @@ func (g GraphicsItem) EndMs() int64 { return g.AtMs + g.DurationMs }
 
 // AvoidsSubject says whether the renderer keeps the item off the subject (the default).
 func (g GraphicsItem) AvoidsSubject() bool { return g.AvoidSubject == nil || *g.AvoidSubject }
+
+// IsTitle says whether the item is a title (a hook title or a chapter title: title_pop, blur_in, chapter_card), as a text item in a
+// title_ style is; the other templates (a counter, a marked word, a label, a loop card) are labels.
+func (g GraphicsItem) IsTitle() bool {
+	switch g.Template {
+	case TemplateTitlePop, TemplateBlurIn, TemplateChapterCard:
+		return true
+	}
+	return false
+}
+
+// Retimed is the item shown at another time (at, for dur ms): a moved item keeps its accents where they were in it (shifted with it), a
+// shortened one keeps the accents its new time still holds.
+func (g GraphicsItem) Retimed(at, dur int64, moved bool) GraphicsItem {
+	shift := int64(0)
+	if moved {
+		shift = at - g.AtMs
+	}
+	var acc []int64
+	for _, a := range g.Params.AccentsMs {
+		if a += shift; a >= at && a < at+dur {
+			acc = append(acc, a)
+		}
+	}
+	g.AtMs, g.DurationMs, g.Params.AccentsMs = at, dur, acc
+	return g
+}
 
 // EnergyOrDefault is the item's energy, lively when left out.
 func (p GraphicsParams) EnergyOrDefault() string {

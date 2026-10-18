@@ -476,7 +476,19 @@ type TextItem struct {
 	Align  string   `json:"align,omitempty"`
 	// AvoidSubject false keeps the renderer from moving the text off the subject's head (true, the default, moves it; see avoid.go).
 	AvoidSubject *bool `json:"avoid_subject,omitempty"`
+	// Avoid is what of the person the text keeps off (P6-05d): "body" (the default, empty: the head and the torso, for titles) or "face"
+	// (only the head: a story caption that the creator puts over the chest, mid-frame).
+	Avoid string `json:"avoid,omitempty"`
 }
+
+// The placement modes of a text (TextItem.Avoid).
+const (
+	AvoidBody = "body"
+	AvoidFace = "face"
+)
+
+// AvoidsFaceOnly says the text keeps off the head only (Avoid face), not the torso.
+func (t TextItem) AvoidsFaceOnly() bool { return t.Avoid == AvoidFace }
 
 // StyleOverrides are the item's per-item style changes.
 func (t TextItem) StyleOverrides() style.Overrides {

@@ -464,7 +464,7 @@ func (a *applier) addText(o *AddText) bool {
 	tt.Items = append(tt.Items, timeline.TextItem{
 		ID: id, AtMs: o.AtMs, DurationMs: o.DurationMs, Text: o.Text, Style: o.Style,
 		Anchor: o.Anchor, Position: copyPtr(o.Position), Animation: o.Animation, Exit: o.Exit,
-		Fill: o.Fill, Scale: copyPtr(o.Scale), Shadow: o.Shadow, Align: o.Align, AvoidSubject: copyPtr(o.AvoidSubject),
+		Fill: o.Fill, Scale: copyPtr(o.Scale), Shadow: o.Shadow, Align: o.Align, AvoidSubject: copyPtr(o.AvoidSubject), Avoid: avoidMode(o.Avoid),
 	})
 	a.touch(id)
 	a.created = append(a.created, Created{OpIndex: a.idx, Kind: "text", ID: id})
@@ -473,7 +473,7 @@ func (a *applier) addText(o *AddText) bool {
 
 func (a *applier) updateText(o *UpdateText) bool {
 	if o.AtMs == nil && o.DurationMs == nil && o.Text == nil && o.Style == "" && o.Anchor == "" && o.Position == nil && o.Animation == "" && o.Exit == "" &&
-		o.Fill == "" && o.Scale == nil && o.Shadow == "" && o.Align == "" && o.AvoidSubject == nil {
+		o.Fill == "" && o.Scale == nil && o.Shadow == "" && o.Align == "" && o.AvoidSubject == nil && o.Avoid == "" {
 		return a.errf(CodeBadArgument, "give at least one field to change on the text item %q", o.ID)
 	}
 	if o.Anchor != "" && o.Position != nil {
@@ -527,8 +527,19 @@ func (a *applier) updateText(o *UpdateText) bool {
 	if o.AvoidSubject != nil {
 		ti.AvoidSubject = copyPtr(o.AvoidSubject)
 	}
+	if o.Avoid != "" {
+		ti.Avoid = avoidMode(o.Avoid)
+	}
 	a.touch(o.ID)
 	return true
+}
+
+// avoidMode stores the default placement mode (body) as empty, so a spec that never names one keeps its bytes.
+func avoidMode(v string) string {
+	if v == timeline.AvoidBody {
+		return ""
+	}
+	return v
 }
 
 func (a *applier) removeText(o *RemoveText) bool {

@@ -42,6 +42,7 @@
 | D-35 | Motion graphics are versioned HTML templates (Web Animations API) the editor picks by name and params, rendered frame by frame by chrome-headless-shell on a virtual clock inside the media sandbox and composited by ffmpeg; ASS text stays as the fallback; amends D-26's render column for graphic templates | Proposed (engineering, 2026-10-18; security review by the director, licence question for P0-12) |
 | D-36 | The creator's style is three layers (measured, the AI's suggestion, the creator's settings), the creator always wins; reference videos are assets with purpose style_reference | Proposed (director, 2026-10-18; the founder confirms) |
 | D-37 | Plain cuts on the beat by default: no vibe asks for transitions; they come from the creator's setting or their own videos | Proposed (director, from a creator's verdict, 2026-10-18; the founder confirms) |
+| D-38 | The text of a video follows the creator's pattern (one title, story captions, dialogue); lines that the creator puts on the body keep off the face only, titles keep off the whole body | Proposed (director, from a second creator's references, 2026-10-18; the founder confirms) |
 
 ---
 
@@ -894,7 +895,27 @@ Text entrances and exits are unchanged. The onboarding's vibe cards no longer pr
 **Revisit** when creators ask for transitions in numbers, or when the measured transitions of their references are reliable enough
 to name the exact effect.
 
-## D-38 Local traces and evals in Arize Phoenix
+## D-38 Text follows the creator's pattern; lines on the body keep off the face only
+
+**Context.** P6-06 made "never over the body" a rule for every text, from the first creator, whose single title sits above the head. A
+second creator tells his videos in short sentence-case captions, a new line on each shot, white, small, in the middle of the frame and
+often over the chest, and in meme dialogue before a reveal. Under the rule his lines would be pushed off the frame's middle or dropped.
+
+**Decision.** The style measures the text of every shot and keeps a text pattern (single_title, story_captions, dialogue, none) and
+where the lines sit, overridable in "Your style". A text item has a placement mode: `avoid` body (the default, the old rule) or face
+(only the head and shoulders). The face mode is allowed only for a style told in lines whose lines sit in the middle of the frame or lie
+over the body in the creator's own videos; titles keep the stricter rule. The editor writes story captions and dialogue in the creator's
+language and look, and the checks hold it to a line per shot, a second per line and never a face.
+
+**Alternatives.** Removing the body rule for everyone: the first creator's titles over the torso were the founder's complaint. A
+caption style in the renderer's library: the existing small clean style with the creator's fill does the job.
+
+**Consequences.** A title creator's edits and checks are unchanged. A caption creator's lines may cover the chest. The text read sees
+up to fifteen frames, still under its $0.01 budget.
+
+**Revisit** when a third creator's text fits none of the four patterns.
+
+## D-39 Local traces and evals in Arize Phoenix
 
 > Status: **Proposed** by engineering (2026-10-18), on the founder's request for "an MLflow-like tool in the local Docker stack to follow each step". Reversible: the spans are plain OpenTelemetry with the OpenInference conventions, so any other OTLP viewer reads them; Phoenix is a compose profile that nothing else depends on.
 

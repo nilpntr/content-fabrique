@@ -94,7 +94,7 @@ func TestTransitionsMatchTheStyleNotTheVibe(t *testing.T) {
 
 	// Videos that blend at a fifth of their cuts: a crossfade is theirs, a punch is not.
 	p := ginoProfile(t)
-	p.Transitions = styleprofile.TransitionsProfile{Measured: 5, Cuts: 20, Used: styleprofile.TransitionsSome, Kinds: []string{"blend"}, Share: 0.2}
+	p.Transitions = styleprofile.TransitionsProfile{Measured: 5, Cuts: 20, Used: styleprofile.TransitionsSome, Kinds: []string{"blend"}, Share: 0.2, Videos: 3}
 	measured := styleprofile.Resolve(p, nil, styleprofile.Settings{}, "")
 	if measured.Transitions != styleprofile.LevelSubtle || measured.Sources.Transitions != styleprofile.SourceMeasured {
 		t.Fatalf("measured %+v", measured)

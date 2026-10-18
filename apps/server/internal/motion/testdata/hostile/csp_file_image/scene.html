@@ -1,0 +1,6 @@
+<!doctype html>
+<!-- A hostile page with the scene's CSP: an image from file:///etc/passwd. On a file: page 'self' matches every file: URL, so the CSP lets it through and the runner's request allowlist must refuse it. -->
+<html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; child-src 'none'; manifest-src 'none'; base-uri 'none'; form-action 'none'">
+<script src="hostile.js"></script>
+</head><body><div id="stage"></div></body></html>

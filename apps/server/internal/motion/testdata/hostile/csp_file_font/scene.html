@@ -1,0 +1,7 @@
+<!doctype html>
+<!-- A hostile page with the scene's CSP: an @font-face (in a stylesheet of the bundle) whose src is file:///etc/passwd. The CSP's 'self' matches it on a file: page; the runner's request allowlist must refuse it. -->
+<html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; child-src 'none'; manifest-src 'none'; base-uri 'none'; form-action 'none'">
+<link rel="stylesheet" href="hostile.css">
+<script src="hostile.js"></script>
+</head><body><div id="stage"></div></body></html>

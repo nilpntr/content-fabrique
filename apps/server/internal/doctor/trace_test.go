@@ -2,7 +2,7 @@ package doctor
 
 import "testing"
 
-// OTEL_TRACE_CONTENT (D-38): empty is valid everywhere (metadata-only spans); 1 is for the local stack and its own Phoenix only.
+// OTEL_TRACE_CONTENT (D-39): empty is valid everywhere (metadata-only spans); 1 is for the local stack and its own Phoenix only.
 func TestTraceContentIsLocalOnly(t *testing.T) {
 	ep := Endpoints{Anthropic: "http://127.0.0.1:1", Clerk: "http://127.0.0.1:1"}
 	for _, tc := range []struct {

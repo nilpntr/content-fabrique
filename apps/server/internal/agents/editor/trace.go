@@ -56,6 +56,19 @@ func traceChecks(ctx context.Context, report Report, nth int) {
 	}
 }
 
+// traceTitleRecipe notes, on edit_timeline's span, that title graphics got the creator's title look (graphics_recipe.go): how many, and
+// what was applied when content capture is on.
+func traceTitleRecipe(ctx context.Context, notes []string) {
+	if len(notes) == 0 {
+		return
+	}
+	attrs := []attribute.KeyValue{attribute.Int("cf.title_recipe.applied", len(notes))}
+	if telemetry.Content() {
+		attrs = append(attrs, attribute.StringSlice("cf.title_recipe.notes", notes))
+	}
+	runtime.TraceEvent(ctx, "title_recipe", attrs...)
+}
+
 // traceBudgetLow notes, on the span of the tool whose answer says so, that the run told the model it is running out.
 func traceBudgetLow(ctx context.Context, l runtime.BudgetLeft, perCall int64) {
 	if !l.Known || !budgetLow(l, perCall) {
