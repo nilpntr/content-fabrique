@@ -86,18 +86,34 @@ func (c *compiler) cameraFor(cl clip) (*camera, error) {
 	}
 	// zoom_through: the outgoing clip zooms in over the first half of the transition and holds, the incoming clip holds
 	// the zoom over the first half and zooms out over the second half, so at the middle of the crossfade both are zoomed.
-	if cl.transition == timeline.TransitionZoomThrough && cl.overlapFrames > 0 {
+	// A punch is the same move, smaller (punchStrength): the outgoing clip scales 1.0 to 1.15 into the cut and the incoming one lands from
+	// 1.15 to the full frame.
+	if s := throughStrength(cl.transition); s > 0 && cl.overlapFrames > 0 {
 		half := float64(cl.overlapFrames) / 2
-		k.zooms = append(k.zooms, fmt.Sprintf("1+%s*pow(1-%s,3)", num(zoomThroughStrength), progress("in-"+num(half), num(half))))
+		k.zooms = append(k.zooms, fmt.Sprintf("1+%s*pow(1-%s,3)", num(s), progress("in-"+num(half), num(half))))
 	}
 	if cl.idx+1 < len(c.clips) {
-		if next := c.clips[cl.idx+1]; next.transition == timeline.TransitionZoomThrough && next.overlapFrames > 0 {
+		if next := c.clips[cl.idx+1]; throughStrength(next.transition) > 0 && next.overlapFrames > 0 {
 			half := float64(next.overlapFrames) / 2
 			start := cl.outFrames - next.overlapFrames
-			k.zooms = append(k.zooms, fmt.Sprintf("1+%s*pow(%s,3)", num(zoomThroughStrength), progress(fmt.Sprintf("in-%d", start), num(half))))
+			k.zooms = append(k.zooms, fmt.Sprintf("1+%s*pow(%s,3)", num(throughStrength(next.transition)), progress(fmt.Sprintf("in-%d", start), num(half))))
 		}
 	}
 	return k, nil
+}
+
+// punchStrength is how far a punch transition scales into the cut (P6-06).
+const punchStrength = 0.15
+
+// throughStrength is the zoom of a transition that zooms through the cut: zoom_through and punch; 0 for the others.
+func throughStrength(transition string) float64 {
+	switch transition {
+	case timeline.TransitionZoomThrough:
+		return zoomThroughStrength
+	case timeline.TransitionPunch:
+		return punchStrength
+	}
+	return 0
 }
 
 // progress is the expression for how far through a window of length `length` the clip is, from 0 to 1.

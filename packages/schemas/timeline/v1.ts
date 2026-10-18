@@ -759,9 +759,10 @@ export type TransitionIn =
  */
 export type Type = "cut";
 /**
- * crossfade blends the two clips. dip_to_black fades out to black and in again. whip_left is a fast slide to the left with motion blur (whip is the same, kept for older edits); whip_right slides to the right. zoom_through zooms into the outgoing clip and out of the incoming one through a blur. flash dips to white.
+ * crossfade blends the two clips. dip_to_black fades out to black and in again. whip_left is a fast slide to the left with motion blur (whip is the same, kept for older edits); whip_right slides to the right. zoom_through zooms into the outgoing clip and out of the incoming one through a blur. flash dips to white. punch is a fast scale of 1.0 to 1.15 into the cut through a blur, settling on the incoming clip: a hit for a strong beat. The whips, zoom_through and punch ride a motion-blur trail that peaks at the middle of the transition, where the picture switches; the frames before and after it are sharp.
  */
-export type Type1 = "crossfade" | "dip_to_black" | "whip" | "whip_left" | "whip_right" | "zoom_through" | "flash";
+export type Type1 =
+  "crossfade" | "dip_to_black" | "whip" | "whip_left" | "whip_right" | "zoom_through" | "flash" | "punch";
 /**
  * Length of the transition in ms, 100 to 1000. It must be shorter than both clips it joins (checked by the Go layer).
  */
@@ -840,9 +841,13 @@ export type PositionX = number;
  */
 export type PositionY = number;
 /**
- * How the text enters: none, pop_in, fade, typewriter or slide_up. Default none.
+ * How the text enters: none, pop_in, fade, typewriter, slide_up or pop (scales up past its size and settles back, with a fade: the lively entrance). Default none.
  */
-export type Animation = "none" | "pop_in" | "fade" | "typewriter" | "slide_up";
+export type Animation = "none" | "pop_in" | "fade" | "typewriter" | "slide_up" | "pop";
+/**
+ * How the text leaves at its end: none (it is cut), fade, pop_out (shrinks away with a fade) or slide_down (sinks a little with a fade). Default none.
+ */
+export type Exit = "none" | "fade" | "pop_out" | "slide_down";
 /**
  * The colour of the letters as #RRGGBB, for this text only (for example #F2E9A0). Without it the style's own colour is used.
  */
@@ -1228,6 +1233,7 @@ export interface TextItem2 {
   anchor?: Anchor;
   position?: Position;
   animation?: Animation;
+  exit?: Exit;
   fill?: FillColour;
   scale?: SizeScale;
   shadow?: Shadow;

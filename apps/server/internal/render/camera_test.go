@@ -214,6 +214,7 @@ func TestNewTransitionsMapToFixedXfades(t *testing.T) {
 		timeline.TransitionWhipRight:   "slideright",
 		timeline.TransitionZoomThrough: "fade",
 		timeline.TransitionFlash:       "fadewhite",
+		timeline.TransitionPunch:       "fade",
 	} {
 		spec := specOf(30, []timeline.VideoItem{
 			clipAt("c1", assetA, 0, 2000, 0),
@@ -223,7 +224,7 @@ func TestNewTransitionsMapToFixedXfades(t *testing.T) {
 		if !strings.Contains(plan.FilterComplex, "xfade=transition="+want+":") {
 			t.Errorf("%s: want xfade %s in %s", typ, want, plan.FilterComplex)
 		}
-		blur := strings.Contains(plan.FilterComplex, "gblur")
+		blur := strings.Contains(plan.FilterComplex, "gblur") || strings.Contains(plan.FilterComplex, "dblur")
 		if blur != (typ != timeline.TransitionFlash) {
 			t.Errorf("%s: blur window present = %v", typ, blur)
 		}

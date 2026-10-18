@@ -44,15 +44,23 @@ type Input struct {
 	Instructions string `json:"instructions,omitempty"`
 	// PromptVersion is the version of the system prompt the run was started with.
 	PromptVersion string `json:"prompt_version"`
+	// Vibe is the energy of the edit (calm, lively or hype, P6-06); empty is the default (lively).
+	Vibe string `json:"vibe,omitempty"`
 }
 
-// NewInput returns the input for a run, and checks the instructions.
-func NewInput(instructions string) (json.RawMessage, error) {
+// NewInput returns the input for a run with the default vibe, and checks the instructions.
+func NewInput(instructions string) (json.RawMessage, error) { return NewEditInput(instructions, "") }
+
+// NewEditInput returns the input for a run, and checks the instructions and the vibe ("" is the default).
+func NewEditInput(instructions, vibe string) (json.RawMessage, error) {
 	instructions = strings.TrimSpace(instructions)
 	if err := checkInstructions(instructions); err != nil {
 		return nil, err
 	}
-	return json.Marshal(Input{Instructions: instructions, PromptVersion: PromptVersion})
+	if vibe != "" && !ValidVibe(vibe) {
+		return nil, fmt.Errorf("editor: the vibe must be one of %v", Vibes)
+	}
+	return json.Marshal(Input{Instructions: instructions, PromptVersion: PromptVersion, Vibe: vibe})
 }
 
 func checkInstructions(s string) error {

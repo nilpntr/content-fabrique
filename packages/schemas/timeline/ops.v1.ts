@@ -701,9 +701,10 @@ export type TransitionIn =
  */
 export type Type = "cut";
 /**
- * crossfade blends the two clips. dip_to_black fades out to black and in again. whip_left is a fast slide to the left with motion blur (whip is the same, kept for older edits); whip_right slides to the right. zoom_through zooms into the outgoing clip and out of the incoming one through a blur. flash dips to white.
+ * crossfade blends the two clips. dip_to_black fades out to black and in again. whip_left is a fast slide to the left with motion blur (whip is the same, kept for older edits); whip_right slides to the right. zoom_through zooms into the outgoing clip and out of the incoming one through a blur. flash dips to white. punch is a fast scale of 1.0 to 1.15 into the cut through a blur, settling on the incoming clip: a hit for a strong beat. The whips, zoom_through and punch ride a motion-blur trail that peaks at the middle of the transition, where the picture switches; the frames before and after it are sharp.
  */
-export type Type1 = "crossfade" | "dip_to_black" | "whip" | "whip_left" | "whip_right" | "zoom_through" | "flash";
+export type Type1 =
+  "crossfade" | "dip_to_black" | "whip" | "whip_left" | "whip_right" | "zoom_through" | "flash" | "punch";
 /**
  * Length of the transition in ms, 100 to 1000. It must be shorter than both clips it joins (checked by the Go layer).
  */
@@ -892,9 +893,13 @@ export type PositionX = number;
  */
 export type PositionY = number;
 /**
- * How the text enters: none, pop_in, fade, typewriter or slide_up. Default none.
+ * How the text enters: none, pop_in, fade, typewriter, slide_up or pop (scales up past its size and settles back, with a fade: the lively entrance). Default none.
  */
-export type Animation = "none" | "pop_in" | "fade" | "typewriter" | "slide_up";
+export type Animation = "none" | "pop_in" | "fade" | "typewriter" | "slide_up" | "pop";
+/**
+ * How the text leaves at its end: none (it is cut), fade, pop_out (shrinks away with a fade) or slide_down (sinks a little with a fade). Default none.
+ */
+export type Exit = "none" | "fade" | "pop_out" | "slide_down";
 /**
  * The colour of the letters as #RRGGBB, for this text only (for example #F2E9A0). Without it the style's own colour is used.
  */
@@ -942,6 +947,9 @@ export type UpdateText1 =
       animation: unknown;
     }
   | {
+      exit: unknown;
+    }
+  | {
       fill: unknown;
     }
   | {
@@ -977,7 +985,7 @@ export type Op9 = "remove_text";
  */
 export type TextId2 = string;
 /**
- * Set how a clip begins. cut is instant. crossfade, dip_to_black, whip_left (whip is the same), whip_right, zoom_through and flash blend with the previous clip over duration_ms (100 to 1000) and the clip then starts that long before the previous one ends, so the clips after it ripple earlier. whip_left and whip_right are fast slides with motion blur, zoom_through zooms into the outgoing clip and out of the incoming one, flash dips to white. The first clip must have a cut, and a transition must be shorter than both clips it joins.
+ * Set how a clip begins. cut is instant. crossfade, dip_to_black, whip_left (whip is the same), whip_right, zoom_through, flash and punch blend with the previous clip over duration_ms (100 to 1000) and the clip then starts that long before the previous one ends, so the clips after it ripple earlier. whip_left and whip_right are fast slides with motion blur, zoom_through zooms into the outgoing clip and out of the incoming one, flash dips to white, punch scales the outgoing clip 1.0 to 1.15 into the cut and lands on the incoming one (a hit on a strong beat). The whips, zoom_through and punch ride a motion-blur trail that peaks at the middle of the transition, where the picture switches: to put that switch on a beat, start the transition half its length before the beat (snap_cuts_to_beats snaps at_ms; check_edit accepts either). Use 250 to 400 ms, and never the same transition three times in a row. The first clip must have a cut, and a transition must be shorter than both clips it joins.
  */
 export type SetTransition = SetTransition1 & SetTransition2;
 export type SetTransition1 =
@@ -985,7 +993,7 @@ export type SetTransition1 =
       type?: "cut";
     }
   | {
-      type?: "crossfade" | "dip_to_black" | "whip" | "whip_left" | "whip_right" | "zoom_through" | "flash";
+      type?: "crossfade" | "dip_to_black" | "whip" | "whip_left" | "whip_right" | "zoom_through" | "flash" | "punch";
     };
 /**
  * "set_transition".
@@ -996,10 +1004,10 @@ export type Op10 = "set_transition";
  */
 export type ClipId5 = string;
 /**
- * cut, crossfade, dip_to_black, whip (same as whip_left), whip_left, whip_right, zoom_through or flash.
+ * cut, crossfade, dip_to_black, whip (same as whip_left), whip_left, whip_right, zoom_through, flash or punch.
  */
 export type Type2 =
-  "cut" | "crossfade" | "dip_to_black" | "whip" | "whip_left" | "whip_right" | "zoom_through" | "flash";
+  "cut" | "crossfade" | "dip_to_black" | "whip" | "whip_left" | "whip_right" | "zoom_through" | "flash" | "punch";
 /**
  * Length of the transition in ms, 100 to 1000. It must be shorter than both clips it joins (checked by the Go layer).
  */
@@ -1452,6 +1460,7 @@ export interface AddText2 {
   anchor?: Anchor;
   position?: Position;
   animation?: Animation;
+  exit?: Exit;
   fill?: FillColour;
   scale?: SizeScale;
   shadow?: Shadow;
@@ -1475,6 +1484,7 @@ export interface UpdateText2 {
   anchor?: Anchor;
   position?: Position;
   animation?: Animation;
+  exit?: Exit;
   fill?: FillColour;
   scale?: SizeScale;
   shadow?: Shadow;

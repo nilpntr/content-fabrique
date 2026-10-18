@@ -104,9 +104,10 @@ func anchorOf(box style.Rect, pad int, align string) (an string, x float64) {
 	return `\an5`, cx
 }
 
-// addText adds a text item (or the watermark) at a box: the animation tags, then the lines. align is left, center or right ("" is
-// centre): how the lines sit against each other.
-func (b *builder) addText(layer int, start, end int64, lay style.Layout, zone style.Zone, box style.Rect, anim, align string) {
+// addText adds a text item (or the watermark) at a box: the entrance and exit tags, then the lines. align is left, center or right (""
+// is centre): how the lines sit against each other. Every tag is one of a fixed set with numbers in it; nothing of the spec's text is
+// a tag.
+func (b *builder) addText(layer int, start, end int64, lay style.Layout, zone style.Zone, box style.Rect, anim, exit, align string) {
 	st := lay.Style
 	an, cx := anchorOf(box, lay.Pad, align)
 	_, cy := centre(box)
@@ -115,24 +116,64 @@ func (b *builder) addText(layer int, start, end int64, lay style.Layout, zone st
 	tags.WriteString(an)
 	pos := fmt.Sprintf(`\pos(%s,%s)`, num(cx), num(cy))
 	body := escapeLines(lay.Lines)
+	fadeIn, fadeOut := 0, 0
+	moved := false // a \move is in the tags (an event has one \pos or one \move)
+	var scale strings.Builder
 	switch anim {
 	case style.AnimFade:
-		fad := fadeMs(durMs)
-		fmt.Fprintf(&tags, `%s\fad(%d,%d)`, pos, fad, fad)
+		tags.WriteString(pos)
+		fadeIn = fadeMs(durMs)
+		if exit == "" || exit == style.ExitNone {
+			fadeOut = fadeIn // the fade in and out, as it always was
+		}
 	case style.AnimPopIn:
-		fmt.Fprintf(&tags, `%s\fscx60\fscy60\t(0,180,0.6,\fscx100\fscy100)\fad(%d,0)`, pos, min(100, fadeMs(durMs)))
+		tags.WriteString(pos)
+		scale.WriteString(`\fscx60\fscy60\t(0,180,0.6,\fscx100\fscy100)`)
+		fadeIn = min(100, fadeMs(durMs))
+	case style.AnimPop:
+		// Up past its size and back: 70 % to 112 % in 140 ms, then settling to 100 % by 240 ms (an overshoot, the lively entrance).
+		tags.WriteString(pos)
+		up, settle := popTimes(durMs)
+		fmt.Fprintf(&scale, `\fscx70\fscy70\t(0,%d,\fscx112\fscy112)\t(%d,%d,\fscx100\fscy100)`, up, up, settle)
+		fadeIn = min(80, fadeMs(durMs))
 	case style.AnimSlideUp:
 		d := min(int(math.Floor(0.02*float64(b.h)+0.5)), zone.SlideRoom(box))
 		if d > 0 {
-			fmt.Fprintf(&tags, `\move(%s,%s,%s,%s,0,250)\fad(%d,0)`, num(cx), num(cy+float64(d)), num(cx), num(cy), min(120, fadeMs(durMs)))
+			fmt.Fprintf(&tags, `\move(%s,%s,%s,%s,0,250)`, num(cx), num(cy+float64(d)), num(cx), num(cy))
+			moved = true
 		} else {
-			fmt.Fprintf(&tags, `%s\fad(%d,0)`, pos, min(120, fadeMs(durMs)))
+			tags.WriteString(pos)
 		}
+		fadeIn = min(120, fadeMs(durMs))
 	case style.AnimTypewriter:
 		tags.WriteString(pos)
 		body = typewriter(lay, durMs)
 	default:
 		tags.WriteString(pos)
+	}
+	// The exit, at the end of the event.
+	out := min(exitMs, fadeMs(durMs))
+	switch exit {
+	case style.ExitFade:
+		fadeOut = fadeMs(durMs)
+	case style.ExitPopOut:
+		if out > 0 {
+			fmt.Fprintf(&scale, `\t(%d,%d,\fscx80\fscy80)`, durMs-int64(out), durMs)
+			fadeOut = out
+		}
+	case style.ExitSlideDown:
+		d := min(int(math.Floor(0.015*float64(b.h)+0.5)), zone.SlideRoom(box))
+		if d > 0 && !moved && out > 0 {
+			// The \pos becomes a \move that sinks over the last moments (an event has one position tag).
+			s := tags.String()
+			tags.Reset()
+			tags.WriteString(strings.Replace(s, pos, fmt.Sprintf(`\move(%s,%s,%s,%s,%d,%d)`, num(cx), num(cy), num(cx), num(cy+float64(d)), durMs-int64(out), durMs), 1))
+		}
+		fadeOut = max(out, 0)
+	}
+	tags.WriteString(scale.String())
+	if fadeIn > 0 || fadeOut > 0 {
+		fmt.Fprintf(&tags, `\fad(%d,%d)`, fadeIn, fadeOut)
 	}
 	b.add(layer, start, end, st, "{"+tags.String()+"}"+body)
 	if layer == layerWatermark {
@@ -140,6 +181,18 @@ func (b *builder) addText(layer int, start, end int64, lay style.Layout, zone st
 	} else {
 		b.counts.text++
 	}
+}
+
+// exitMs is the length of an exit (pop_out, slide_down), at most a quarter of the event like a fade.
+const exitMs = 180
+
+// popTimes are the moments of a pop entrance, in ms: the overshoot peaks at up and settles by settle (scaled down for a very short text).
+func popTimes(durMs int64) (up, settle int64) {
+	up, settle = 140, 240
+	if limit := durMs / 3; settle > limit {
+		up, settle = max(limit*7/12, 1), max(limit, 2)
+	}
+	return up, settle
 }
 
 // fadeMs is the length of a fade in or out: 150 ms, at most a quarter of the event.

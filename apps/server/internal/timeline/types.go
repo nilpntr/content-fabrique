@@ -124,6 +124,8 @@ const (
 	TransitionWhipRight   = "whip_right"
 	TransitionZoomThrough = "zoom_through"
 	TransitionFlash       = "flash"
+	// TransitionPunch is a fast scale of 1.0 to 1.15 into the cut through a blur, landing on the incoming clip (P6-06).
+	TransitionPunch = "punch"
 
 	MotionNone     = "none"
 	MotionPunchIn  = "punch_in"
@@ -463,6 +465,8 @@ type TextItem struct {
 	Anchor     string `json:"anchor,omitempty"`
 	Position   *Point `json:"position,omitempty"`
 	Animation  string `json:"animation,omitempty"`
+	// Exit is how the text leaves at its end (none, fade, pop_out or slide_down; P6-06). Empty is none.
+	Exit string `json:"exit,omitempty"`
 	// Fill, Scale, Shadow and Align change the style for this item (P6-05): a #RRGGBB fill colour, a scale of the style's size
 	// (0.6 to 1.4), a shadow (none, soft or strong) and the alignment of the lines (left, center or right). Each is left out to keep
 	// the style's own.

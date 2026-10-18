@@ -103,6 +103,8 @@ const (
 	// handheldBase and handheldPunch are the living camera's (render.HandheldBase, render.HandheldPunch).
 	handheldBase  = 0.03
 	handheldPunch = 0.06
+	// punchStrength is the zoom of a punch transition (render.punchStrength).
+	punchStrength = 0.15
 )
 
 // camera is the zoom the camera gives one clip over a window of its play: the range of the total zoom (the factors of the motion preset and
@@ -127,10 +129,13 @@ func cameraOver(items []timeline.VideoItem, i int, fps int, fromMs, toMs int64) 
 	}
 	// The transitions into and out of the clip that are zoom_throughs, with the frames they overlap (the first clip never has one in).
 	var inOverlap, outOverlap int64
-	if i > 0 && it.TransitionIn != nil && it.TransitionIn.Type == timeline.TransitionZoomThrough {
+	var inS, outS float64
+	if i > 0 && it.TransitionIn != nil && throughStrength(it.TransitionIn.Type) > 0 {
+		inS = throughStrength(it.TransitionIn.Type)
 		inOverlap = max(timeline.Frame(timeline.EndMs(items[i-1]), fps)-startF, 0)
 	}
-	if i+1 < len(items) && items[i+1].TransitionIn != nil && items[i+1].TransitionIn.Type == timeline.TransitionZoomThrough {
+	if i+1 < len(items) && items[i+1].TransitionIn != nil && throughStrength(items[i+1].TransitionIn.Type) > 0 {
+		outS = throughStrength(items[i+1].TransitionIn.Type)
 		outOverlap = max(timeline.Frame(timeline.EndMs(it), fps)-timeline.Frame(items[i+1].AtMs, fps), 0)
 	}
 	motion := func(int64) (z, shake float64) { return 1, 1 }
@@ -144,11 +149,11 @@ func cameraOver(items []timeline.VideoItem, i int, fps int, fromMs, toMs int64) 
 		z, sh := motion(f)
 		if inOverlap > 0 { // zoomed through the first half of the overlap, then zooming out over the second half
 			half := float64(inOverlap) / 2
-			z *= 1 + zoomThroughStrength*math.Pow(1-ramp(float64(f)-half, half), 3)
+			z *= 1 + inS*math.Pow(1-ramp(float64(f)-half, half), 3)
 		}
 		if outOverlap > 0 { // zooming in over the first half of the overlap, then held to the end
 			half := float64(outOverlap) / 2
-			z *= 1 + zoomThroughStrength*math.Pow(ramp(float64(f-(outF-outOverlap)), half), 3)
+			z *= 1 + outS*math.Pow(ramp(float64(f-(outF-outOverlap)), half), 3)
 		}
 		c.lo, c.hi, c.shake = math.Min(c.lo, z), math.Max(c.hi, z), math.Max(c.shake, sh)
 	}
@@ -156,6 +161,17 @@ func cameraOver(items []timeline.VideoItem, i int, fps int, fromMs, toMs int64) 
 		c.lo = 1
 	}
 	return c
+}
+
+// throughStrength is the zoom of a transition that zooms through the cut (zoom_through, punch), 0 for the others.
+func throughStrength(t string) float64 {
+	switch t {
+	case timeline.TransitionZoomThrough:
+		return zoomThroughStrength
+	case timeline.TransitionPunch:
+		return punchStrength
+	}
+	return 0
 }
 
 // ramp is how far through a window of length `length` a point is, from 0 to 1 (clamped).

@@ -46,6 +46,7 @@ status, totals, every event and the usage_ledger rows, which is how a run's cost
                (MEDIA_SANDBOX_PROVIDER, MEDIA_TOOLS_IMAGE, MEDIA_TEMP_DIR), because the editor looks at frames of the footage
   --input      the user's message; or a JSON object, which is the run's input as it is. For the editor it is the extra
                instructions of the run and may be left out
+  --vibe       the energy of an editor run: calm, lively (the default) or hype (P6-06)
   --profile    a routing profile for this run, instead of ROUTING_PROFILE (dev-cheap, dev-mid, v1-start)
   --budget-usd, --max-tool-calls, --max-tokens, --wall-clock
                override the agent's budgets (dollars, count, tokens, duration such as 5m)
@@ -168,6 +169,7 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 	agentName := flags.String("agent", "", "agent")
 	workspaceArg := flags.String("workspace", "", "workspace id")
 	input := flags.String("input", "", "message or JSON input")
+	vibe := flags.String("vibe", "", "editor vibe: calm, lively or hype")
 	projectArg := flags.String("project", "", "project id")
 	profile := flags.String("profile", "", "routing profile")
 	budgetUSD := flags.Float64("budget-usd", 0, "dollar budget")
@@ -209,7 +211,7 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 	if !json.Valid(runInput) || !strings.HasPrefix(strings.TrimSpace(*input), "{") {
 		if isEditor {
 			var err error
-			if runInput, err = editor.NewInput(*input); err != nil {
+			if runInput, err = editor.NewEditInput(*input, *vibe); err != nil {
 				_, _ = fmt.Fprintf(stderr, "cfctl agent run: %v\n", err)
 				return 2
 			}

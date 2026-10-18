@@ -48,11 +48,51 @@
           "reframe": {
             "mode": "blur_fill"
           },
-          "at_ms": 5000,
+          "at_ms": 4700,
+          "transition_in": {
+            "type": "punch",
+            "duration_ms": 300
+          },
           "motion": {
             "preset": "handheld",
             "strength": 0.05
           }
+        }
+      ]
+    },
+    {
+      "id": "text",
+      "type": "text",
+      "items": [
+        {
+          "id": "t1",
+          "at_ms": 100,
+          "duration_ms": 2200,
+          "text": "BACK DAY 101",
+          "style": "title_series",
+          "anchor": "upper_third",
+          "animation": "pop",
+          "exit": "pop_out"
+        },
+        {
+          "id": "t2",
+          "at_ms": 2600,
+          "duration_ms": 1800,
+          "text": "1. ROWS",
+          "style": "title_series",
+          "anchor": "upper_third",
+          "animation": "slide_up",
+          "exit": "fade"
+        },
+        {
+          "id": "t3",
+          "at_ms": 4800,
+          "duration_ms": 1700,
+          "text": "2. PULLDOWN",
+          "style": "title_series",
+          "anchor": "upper_third",
+          "animation": "fade",
+          "exit": "slide_down"
         }
       ]
     }

@@ -137,6 +137,7 @@ type AddText struct {
 	Anchor     string          `json:"anchor,omitempty"`
 	Position   *timeline.Point `json:"position,omitempty"`
 	Animation  string          `json:"animation,omitempty"`
+	Exit       string          `json:"exit,omitempty"`
 	Fill       string          `json:"fill,omitempty"`
 	Scale      *float64        `json:"scale,omitempty"`
 	Shadow     string          `json:"shadow,omitempty"`
@@ -155,6 +156,7 @@ type UpdateText struct {
 	Anchor     string          `json:"anchor,omitempty"`
 	Position   *timeline.Point `json:"position,omitempty"`
 	Animation  string          `json:"animation,omitempty"`
+	Exit       string          `json:"exit,omitempty"`
 	Fill       string          `json:"fill,omitempty"`
 	Scale      *float64        `json:"scale,omitempty"`
 	Shadow     string          `json:"shadow,omitempty"`

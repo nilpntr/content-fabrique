@@ -423,7 +423,8 @@ export interface paths {
          *     (`422 assets_not_usable`; an audio file is not a clip to cut).
          *     `instructions` is the creator's extra instruction for this run (text, at most 2,000 characters; the model treats it as data
          *     that steers the content of the video, nothing else). `profile` picks the model profile of the run; the default is the
-         *     server's.
+         *     server's. `vibe` is the energy of the edit (`calm`, `lively` or `hype`, default `lively`): see `EditVibe`. An audio file in
+         *     the project's footage is a song the edit can be cut to (D-34): the export then has the song and no clip sound under it.
          *
          *     **Credits.** The run costs credits, set aside (held) in the same step that creates the run: the server decides from the
          *     project whether it is the first edit (6 credits: the project has no charged edit yet) or a revision (2 credits), and the
@@ -1312,9 +1313,19 @@ export interface components {
             /** @description Extra instructions for this run, in the creator's words. Data for the model, not commands. */
             instructions?: string;
             profile?: components["schemas"]["RunProfile"];
+            vibe?: components["schemas"]["EditVibe"];
             /** @description Ignored. The run's spend cap is set by the server from the plan (it used to be the caller's, up to $5). */
             budget_usd?: number;
         };
+        /**
+         * @description The energy of the edit (P6-06). The creator's style profile still decides the colours, the fonts, the title's look and place and
+         *     the rough shot length; the vibe decides how much moves: `calm` stays close to the creator's own restraint (hard cuts, a quiet
+         *     title), `lively` (the default) puts transitions on the strong beats and the drop, gives every text an entrance and an exit and
+         *     keeps the camera moving, `hype` does that on more beats with faster shots.
+         * @default lively
+         * @enum {string}
+         */
+        EditVibe: "calm" | "lively" | "hype";
         ReplyRequest: {
             /** @description The answer to the run's question. */
             text: string;
