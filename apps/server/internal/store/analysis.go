@@ -56,9 +56,10 @@ func (s *Store) SetAnalysisHook(fn func(ctx context.Context, tx *Store, a Asset)
 	s.hooks.analysisDue = fn
 }
 
-// analysisDue runs the analysis hook for a just-finished video.
+// analysisDue runs the analysis hook for a just-finished video or audio asset (an audio asset is a creator's song: its music analysis,
+// P6-06).
 func (s *Store) analysisDue(ctx context.Context, a Asset) error {
-	if a.Kind != AssetKindVideo || s.hooks == nil || s.hooks.analysisDue == nil {
+	if (a.Kind != AssetKindVideo && a.Kind != AssetKindAudio) || s.hooks == nil || s.hooks.analysisDue == nil {
 		return nil
 	}
 	if err := s.hooks.analysisDue(ctx, s, a); err != nil {

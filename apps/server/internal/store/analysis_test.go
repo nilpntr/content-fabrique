@@ -386,6 +386,78 @@ func analysisSuite(t *testing.T, st *store.Store, suffix string) {
 		}
 	})
 
+	t.Run("music: save, read, replace, stale, tenancy", func(t *testing.T) {
+		a := ready(wa, ua, "music-track")
+		doc := []byte(`{"version":1,"tempo_bpm":124,"beats_ms":[0,484]}`)
+		if err := st.SaveAssetMusic(ctx, wa.ID, a.ID, 1, a.IngestedAt, doc); err != nil {
+			t.Fatal(err)
+		}
+		rows, err := st.ListAssetMusic(ctx, wa.ID, []ids.AssetID{a.ID})
+		if err != nil || len(rows) != 1 || rows[0].Version != 1 || !strings.Contains(string(rows[0].Analysis), `"tempo_bpm": 124`) {
+			t.Fatalf("read %+v %v", rows, err)
+		}
+		if err := st.SaveAssetMusic(ctx, wa.ID, a.ID, 2, a.IngestedAt, []byte(`{"version":2}`)); err != nil {
+			t.Fatal(err)
+		}
+		if m, err := st.GetAssetMusicMeta(ctx, wa.ID, a.ID); err != nil || m.Version != 2 {
+			t.Fatalf("replace %+v %v", m, err)
+		}
+		// An analysis of another ingest is stale; one of another workspace's asset is not found; neither is read across workspaces.
+		old := a.IngestedAt.Add(-time.Minute)
+		if err := st.SaveAssetMusic(ctx, wa.ID, a.ID, 3, &old, doc); !errors.Is(err, store.ErrStaleAnalysis) {
+			t.Errorf("stale: %v", err)
+		}
+		if err := st.SaveAssetMusic(ctx, wb.ID, a.ID, 1, a.IngestedAt, doc); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("another workspace: %v", err)
+		}
+		if rows, _ := st.ListAssetMusic(ctx, wb.ID, []ids.AssetID{a.ID}); len(rows) != 0 {
+			t.Errorf("read across workspaces: %+v", rows)
+		}
+		if _, err := st.GetAssetMusicMeta(ctx, wb.ID, a.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("meta across workspaces: %v", err)
+		}
+		if err := st.SaveAssetMusic(ctx, wa.ID, a.ID, 1, a.IngestedAt, []byte(`not json`)); !errors.Is(err, store.ErrInvalid) {
+			t.Errorf("not json: %v", err)
+		}
+		if err := st.DeleteAssetMusic(ctx, wa.ID, a.ID); err != nil {
+			t.Fatal(err)
+		}
+		if rows, _ := st.ListAssetMusic(ctx, wa.ID, []ids.AssetID{a.ID}); len(rows) != 0 {
+			t.Errorf("deleted: %+v", rows)
+		}
+		_ = ub
+	})
+
+	t.Run("the hook runs for a ready audio asset too", func(t *testing.T) {
+		var seen []string
+		st.SetAnalysisHook(func(_ context.Context, _ *store.Store, a store.Asset) error {
+			seen = append(seen, a.Kind)
+			return nil
+		})
+		defer st.SetAnalysisHook(nil)
+		id, _ := st.NewAssetID(ctx)
+		b, _, err := st.CreateAssetWithUpload(ctx, wa.ID, store.NewAsset{
+			ID: id, Kind: store.AssetKindAudio, Filename: "song.m4a", ContentType: "audio/mp4", SizeBytes: 1 << 20, Title: "song",
+			R2Key: "ws/" + wa.ID.String() + "/assets/" + id.String() + "/original", CreatedBy: ua, R2UploadID: "r2-" + id.String(),
+			PartSize: 16 << 20, PartCount: 1, ExpiresAt: time.Now().Add(time.Hour),
+		}, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.InTx(ctx, func(tx *store.Store) error { _, err := tx.CompleteUpload(ctx, wa.ID, b.ID); return err }); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.ClaimAssetForIngest(ctx, wa.ID, b.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.FinishAssetIngest(ctx, wa.ID, b.ID, store.IngestResult{DurationMs: 30000, HasAudio: true}); err != nil {
+			t.Fatal(err)
+		}
+		if len(seen) != 1 || seen[0] != store.AssetKindAudio {
+			t.Fatalf("hook saw %v", seen)
+		}
+	})
+
 	t.Run("hook runs in the ingest transaction", func(t *testing.T) {
 		var seen []ids.AssetID
 		st.SetAnalysisHook(func(_ context.Context, tx *store.Store, a store.Asset) error {

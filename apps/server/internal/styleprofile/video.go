@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/nilpntr/content-fabrique/internal/camshift"
 	"github.com/nilpntr/content-fabrique/internal/media"
 )
 
@@ -422,6 +423,7 @@ func MeasureVideo(ctx context.Context, runner media.Runner, path string) (Measur
 	v := &m.Video
 	v.LumaMean, v.LumaP90, v.SatMean, v.SatP90 = lightOf(frames)
 	v.MotionMedian, v.ZoomEvents, v.PushInShare, v.Flashes, v.VignetteRatio = motionStats(thumbs(raw))
+	v.Camera = camshift.Measure(thumbs(raw), tsz, media.StyleThumbFPS)
 	if mins := m.DurationS / 60; mins > 0 {
 		v.EffectsPerMinute = round1(float64(v.ZoomEvents+v.Flashes) / mins)
 	}

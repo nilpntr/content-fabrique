@@ -82,6 +82,16 @@ const (
 	AnimFade       = "fade"
 	AnimTypewriter = "typewriter"
 	AnimSlideUp    = "slide_up"
+	// AnimPop scales up past the text's size and settles back, with a short fade: the lively entrance (P6-06).
+	AnimPop = "pop"
+)
+
+// The text exits (P6-06): how a text leaves at its end.
+const (
+	ExitNone      = "none"
+	ExitFade      = "fade"
+	ExitPopOut    = "pop_out"
+	ExitSlideDown = "slide_down"
 )
 
 // Style is one entry of the style registry. EmPct is the size of the font's em (the width of one unit-per-em square, so

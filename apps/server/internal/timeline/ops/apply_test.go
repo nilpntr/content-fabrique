@@ -520,7 +520,7 @@ func TestSound(t *testing.T) {
 		for js, code := range map[string]string{
 			`[{"op":"set_sound","kind":"licensed_track","asset_id":"` + musicMine + `","license_id":"` + licence + `"}]`:                       "unlicensed_audio",
 			`[{"op":"set_sound","kind":"creator_audio","asset_id":"ast_01j5ntfevbyp8fy4vwn751jmjq"}]`:                                          "unlicensed_audio",
-			`[{"op":"set_sound","kind":"creator_audio","asset_id":"` + vid60 + `"}]`:                                                           "wrong_asset_kind",
+			`[{"op":"set_sound","kind":"licensed_track","asset_id":"` + vid60 + `","license_id":"` + licence + `"}]`:                           "wrong_asset_kind",
 			`[{"op":"set_sound","kind":"creator_audio","asset_id":"` + musicMine + `","at_ms":10000}]`:                                         "outside_timeline",
 			`[{"op":"set_sound","kind":"creator_audio","asset_id":"` + musicMine + `","duration_ms":1000,"fade_in_ms":900,"fade_out_ms":900}]`: "fade_too_long",
 			`[{"op":"set_sound","kind":"creator_audio","asset_id":"` + musicMine + `","id":"c1"}]`:                                             "id_taken",

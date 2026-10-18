@@ -31,7 +31,7 @@ func TestGetBrief(t *testing.T) {
 		"Output format: 9:16, 1080x1920 pixels at 30 fps (portrait)",
 		"must be 1 to 180 seconds long", "Target 15 to 45 seconds", "none shorter than 300 ms",
 		"Safe zone for text", "x 120 to 960", "y 240 to 1260", "x 900 to 1080, y 840 to 1920",
-		"Constraints: no structured constraints yet", "Music: none",
+		"Constraints: no structured constraints yet", "Music: a song the creator gave",
 		`<untrusted_data kind="brief">` + "\nMake it punchy.\nShow the lat pulldown first.\n</untrusted_data>",
 		`<untrusted_data kind="instructions">` + "\nKeep it under 20 seconds\n</untrusted_data>",
 	} {
@@ -1052,10 +1052,10 @@ func TestOpeningAndContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	blocks, err := ag.Opening(in)
-	if err != nil || len(blocks) != 3 || !strings.Contains(blocks[2].Text, `<untrusted_data kind="instructions">`) || !strings.Contains(blocks[2].Text, "Open on the heaviest set.") {
+	if err != nil || len(blocks) != 4 || !strings.Contains(blocks[1].Text, "Vibe of this edit: lively") || !strings.Contains(blocks[3].Text, `<untrusted_data kind="instructions">`) || !strings.Contains(blocks[3].Text, "Open on the heaviest set.") {
 		t.Fatalf("opening: %+v %v", blocks, err)
 	}
-	if blocks, err = ag.Opening(json.RawMessage(`{}`)); err != nil || len(blocks) != 1 {
+	if blocks, err = ag.Opening(json.RawMessage(`{}`)); err != nil || len(blocks) != 2 {
 		t.Fatalf("opening without instructions: %+v %v", blocks, err)
 	}
 	for name, raw := range map[string]string{"not json": `x`, "too long": `{"instructions":"` + strings.Repeat("x", MaxInstructionsChars+1) + `"}`, "NUL": `{"instructions":"a\u0000b"}`} {

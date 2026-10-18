@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
+	"github.com/nilpntr/content-fabrique/internal/camshift"
 	"github.com/nilpntr/content-fabrique/internal/styleprofile"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
@@ -31,6 +32,10 @@ func ginoProfile(t *testing.T) *styleprofile.Profile {
 	p := styleprofile.Aggregate(ginoMeasures(t))
 	if p == nil {
 		t.Fatal("no profile")
+	}
+	// The fixture's measures predate the camera measure; the references measured static (P6-06: eight of ten at 0 % of the frame a second).
+	if p.Camera.Verdict == "" {
+		p.Camera = styleprofile.CameraProfile{Verdict: camshift.Static, HandheldShare: 0.1}
 	}
 	return p
 }
@@ -84,7 +89,8 @@ func failedIDs(r Report) []string { return r.Failed() }
 // their profile, and without it the same timeline fails on what the generic playbook wants.
 func TestBuildingLatsPassesWithTheProfileAndFailsWithout(t *testing.T) {
 	spec := buildingLats(t)
-	with := RunChecks(CheckInput{Version: 1, Spec: spec, Plan: workoutPlan(), Style: ginoProfile(t)})
+	// At the calm vibe: the creator's own restraint (at lively the same cut is asked for transitions and text motion).
+	with := RunChecks(CheckInput{Version: 1, Spec: spec, Plan: workoutPlan(), Style: ginoProfile(t), Vibe: VibeCalm})
 	if f := failedIDs(with); len(f) != 0 {
 		t.Fatalf("with the profile the edit fails %v:\n%s", f, with.Text())
 	}
@@ -119,7 +125,7 @@ func TestAGenericEditFailsTheStyleMatch(t *testing.T) {
 		{asset: assetA, in: 0, out: 2800, ramp: true}, {asset: assetA, in: 0, out: 1700}, {asset: assetA, in: 0, out: 2400},
 	}
 	spec := specOf(t, shots, title(0), nil)
-	r := RunChecks(CheckInput{Spec: spec, Plan: workoutPlan(), Style: ginoProfile(t)})
+	r := RunChecks(CheckInput{Spec: spec, Plan: workoutPlan(), Style: ginoProfile(t), Vibe: VibeCalm})
 	c := wantStatus(t, r, CheckStyleMatch, CheckFail)
 	for _, want := range []string{"effects", "cuts"} {
 		if !strings.Contains(c.Detail, want) {
@@ -242,7 +248,7 @@ func TestRunContextAndPlanCarryTheStoredStyle(t *testing.T) {
 	// plan_edit: the generic workout plan has effects and a beat grid; the answer says what this creator does instead.
 	res := e.ok(rc, ToolPlanEdit, planCall(validPlanArgs(a.String())))
 	text := textOf(res)
-	for _, want := range []string{"Creator style:", "lets takes run", "This creator's videos have none: set every effect to none"} {
+	for _, want := range []string{"Creator style:", "lets takes run"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("plan_edit's answer lacks %q:\n%s", want, text)
 		}
@@ -291,7 +297,7 @@ func TestTheEarliestTitleIsJudged(t *testing.T) {
 	spec := buildingLats(t)
 	texts := &timeline.TextTrack{ID: "text2", Items: []timeline.TextItem{{ID: "t9", AtMs: 9000, DurationMs: 1000, Text: "later words", Style: "title_bold", Anchor: "upper_third"}}}
 	spec.Tracks = append([]timeline.Track{texts}, spec.Tracks...) // the later title's track comes first
-	r := RunChecks(CheckInput{Spec: spec, Plan: workoutPlan(), Style: ginoProfile(t)})
+	r := RunChecks(CheckInput{Spec: spec, Plan: workoutPlan(), Style: ginoProfile(t), Vibe: VibeCalm})
 	for _, d := range r.Style.Dimensions {
 		if d.ID == "title_case" && !d.OK {
 			t.Errorf("the case of the wrong title was judged: %+v", d)

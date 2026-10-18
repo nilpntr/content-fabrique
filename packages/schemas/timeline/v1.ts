@@ -717,15 +717,15 @@ export type FocusY = number;
  */
 export type Zoom = number;
 /**
- * none, punch_in, push_in, pull_back or shake.
+ * none, punch_in, push_in, pull_back, shake or handheld.
  */
-export type Preset = "none" | "punch_in" | "push_in" | "pull_back" | "shake";
+export type Preset = "none" | "punch_in" | "push_in" | "pull_back" | "shake" | "handheld";
 /**
- * Only for punch_in (where the zoom has landed) and shake (where it starts): milliseconds from the clip's first frame, inside the clip. Without it punch_in zooms over the first frames of the clip and shake starts at its first frame.
+ * Only for punch_in (where the zoom has landed), shake (where it starts) and handheld (where its punch-in lands): milliseconds from the clip's first frame, inside the clip. Without it punch_in zooms over the first frames of the clip, shake starts at its first frame and handheld has no punch-in.
  */
 export type At = number;
 /**
- * The peak scale increase, 0.05 (5 % bigger) to 0.35. Defaults: punch_in 0.15, push_in 0.1, pull_back 0.15, shake 0.08 (also the size of the shake).
+ * The peak scale increase, 0.05 (5 % bigger) to 0.35. Defaults: punch_in 0.15, push_in 0.1, pull_back 0.15, shake 0.08 (also the size of the shake), handheld 0.08 (the push over the clip).
  */
 export type Strength = number;
 /**
@@ -759,9 +759,10 @@ export type TransitionIn =
  */
 export type Type = "cut";
 /**
- * crossfade blends the two clips. dip_to_black fades out to black and in again. whip_left is a fast slide to the left with motion blur (whip is the same, kept for older edits); whip_right slides to the right. zoom_through zooms into the outgoing clip and out of the incoming one through a blur. flash dips to white.
+ * crossfade blends the two clips. dip_to_black fades out to black and in again. whip_left is a fast slide to the left with motion blur (whip is the same, kept for older edits); whip_right slides to the right. zoom_through zooms into the outgoing clip and out of the incoming one through a blur. flash dips to white. punch is a fast scale of 1.0 to 1.15 into the cut through a blur, settling on the incoming clip: a hit for a strong beat. The whips, zoom_through and punch ride a motion-blur trail that peaks at the middle of the transition, where the picture switches; the frames before and after it are sharp.
  */
-export type Type1 = "crossfade" | "dip_to_black" | "whip" | "whip_left" | "whip_right" | "zoom_through" | "flash";
+export type Type1 =
+  "crossfade" | "dip_to_black" | "whip" | "whip_left" | "whip_right" | "zoom_through" | "flash" | "punch";
 /**
  * Length of the transition in ms, 100 to 1000. It must be shorter than both clips it joins (checked by the Go layer).
  */
@@ -840,9 +841,13 @@ export type PositionX = number;
  */
 export type PositionY = number;
 /**
- * How the text enters: none, pop_in, fade, typewriter or slide_up. Default none.
+ * How the text enters: none, pop_in, fade, typewriter, slide_up or pop (scales up past its size and settles back, with a fade: the lively entrance). Default none.
  */
-export type Animation = "none" | "pop_in" | "fade" | "typewriter" | "slide_up";
+export type Animation = "none" | "pop_in" | "fade" | "typewriter" | "slide_up" | "pop";
+/**
+ * How the text leaves at its end: none (it is cut), fade, pop_out (shrinks away with a fade) or slide_down (sinks a little with a fade). Default none.
+ */
+export type Exit = "none" | "fade" | "pop_out" | "slide_down";
 /**
  * The colour of the letters as #RRGGBB, for this text only (for example #F2E9A0). Without it the style's own colour is used.
  */
@@ -1177,7 +1182,7 @@ export interface FocusPoint {
   y: FocusY;
 }
 /**
- * A camera move on the clip, applied as a digital zoom on the already-reframed frame (after reframe, so it composes with every reframe mode and never shows a border). punch_in is a fast zoom (about 5 frames) that lands at at_ms and holds, push_in a slow continuous zoom over the whole clip, pull_back the reverse (starts zoomed, pulls back to the full frame) and shake a short camera shake that starts at at_ms and dies out (deterministic: the pattern comes from the clip's id). Needs a clip of at least 400 ms (checked by the Go layer).
+ * A camera move on the clip, applied as a digital zoom on the already-reframed frame (after reframe, so it composes with every reframe mode and never shows a border). punch_in is a fast zoom (about 5 frames) that lands at at_ms and holds, push_in a slow continuous zoom over the whole clip, pull_back the reverse (starts zoomed, pulls back to the full frame), shake a short camera shake that starts at at_ms and dies out (deterministic: the pattern comes from the clip's id), and handheld the living camera of a tripod shot: a slow push over the whole clip, a gentle drift that alternates direction from one clip to the next and a slow sway, so the shot never sits dead still, with a punch-in of 6 % that lands at at_ms when it is given (the drop or a strong beat); the renderer keeps the push off the subject's head and body when the clip has a subject box. Needs a clip of at least 400 ms (checked by the Go layer).
  *
  * This interface was referenced by `Timeline`'s JSON-Schema
  * via the `definition` "motion".
@@ -1228,6 +1233,7 @@ export interface TextItem2 {
   anchor?: Anchor;
   position?: Position;
   animation?: Animation;
+  exit?: Exit;
   fill?: FillColour;
   scale?: SizeScale;
   shadow?: Shadow;

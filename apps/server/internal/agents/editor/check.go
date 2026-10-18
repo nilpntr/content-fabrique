@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/nilpntr/content-fabrique/internal/analysis"
+	"github.com/nilpntr/content-fabrique/internal/music"
 	"github.com/nilpntr/content-fabrique/internal/styleprofile"
 	"github.com/nilpntr/content-fabrique/internal/subject"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
@@ -109,6 +110,8 @@ type AssetAnalysis struct {
 	// Series holds the luma and 90th percentile luma of the clip, when the stored analysis has them.
 	Series    analysis.Series
 	HasSeries bool
+	// Camera is static or handheld when the analysis measured it (P6-06): footage that moves by itself is not a static shot.
+	Camera string
 }
 
 // CheckInput is what Check reads.
@@ -136,6 +139,11 @@ type CheckInput struct {
 	// audio checks do not apply).
 	Audio     *AudioResult
 	AudioSkip string
+	// Music is the edit's song on the timeline (its beats, hits and drop), nil when the edit has none or it was not analysed: the music
+	// checks do not apply then (P6-06).
+	Music *TimelineMusic
+	// Vibe is the energy of the edit (calm, lively or hype; P6-06); empty takes the plan's, else the default (lively).
+	Vibe string
 }
 
 // Metrics are the numbers behind the checks, for the run feed and for comparing runs.
@@ -228,6 +236,8 @@ type limits struct {
 	styled             bool
 	// looseBeat says the creator's cuts are known not to sit on a beat grid, so beat_sync does not apply.
 	looseBeat bool
+	// effectsMax is the most effects a cut (0.5, more at lively and hype).
+	effectsMax float64
 }
 
 // applyStyle sets the thresholds from the creator's style profile: a creator who lets takes run, uses no effects, cuts loosely near the
@@ -289,7 +299,18 @@ func RunChecks(in CheckInput) Report {
 	}
 	items := slices.Clone(main.Items)
 	slices.SortStableFunc(items, func(a, b timeline.VideoItem) int { return cmp.Compare(a.AtMs, b.AtMs) })
+	if in.Vibe == "" && in.Plan != nil {
+		in.Vibe = in.Plan.Vibe
+	}
 	lim := applyStyle(typeLimits[typ], in.Style)
+	// The vibe (P6-06): at lively and hype a creator's "no effects" is no gimmicks (speed ramps, shakes), not no transitions or text motion,
+	// and a busier edit is allowed more effects a cut.
+	vibe := VibeOr(in.Vibe)
+	lim.effectsMax = effectsMax
+	if energetic(vibe) {
+		lim.noEffects = false
+		lim.effectsMax = map[string]float64{VibeLively: 0.6, VibeHype: 1.0}[vibe]
+	}
 	weakStyle := ""
 	if in.Style != nil && !in.Style.Firm() {
 		weakStyle = fmt.Sprintf("the creator style profile rests on %d reference videos; it sets thresholds from %d", in.Style.References, styleprofile.MinReferences)
@@ -316,6 +337,7 @@ func RunChecks(in CheckInput) Report {
 	r.Checks = []Check{
 		c.hookLength(), c.hookTitle(), c.shotPacing(), c.shotVariety(), c.paceBuilds(), c.repBoundaries(), c.deadTime(),
 		c.effectDensity(), c.textSafe(), c.textOverSubject(), c.duration(targetS), c.brightness(), c.crushed(), c.beatSync(), c.styleMatch(),
+		c.offBeatCut(), c.hookMissesDrop(), c.staticShot(), c.noTransitions(), c.transitionVariety(), c.textWithoutEntrance(), c.chapterTitles(),
 	}
 	if a := in.Audio; a != nil {
 		r.Checks = append(r.Checks, audioChecks(*a)...)
@@ -355,6 +377,10 @@ func (c *checker) skip(id, format string, a ...any) Check {
 func (c *checker) hookLength() Check {
 	d := c.durs[0]
 	limit := c.lim.hookMaxMs
+	// With a song, the hook runs until its drop (P6-06: the references drop 2 to 4.5 s in): up to the drop, a transition into it included.
+	if m := c.in.Music; m != nil && m.HasDrop && m.DropMs+maxDropHookSlackMs > limit {
+		limit = min(m.DropMs+maxDropHookSlackMs, maxDropHookMs)
+	}
 	if d > limit {
 		if c.lim.styled {
 			return c.fail(CheckHookLength, "the first shot (%s) is %s long; the creator's first cut comes by %s", c.items[0].ID, secs2(d), secs2(limit))
@@ -594,7 +620,7 @@ func (c *checker) deadTime() Check {
 // countEffects counts the effects of the main track: motion presets, transitions that are not cuts and speed ramps (also separately).
 func countEffects(items []timeline.VideoItem) (effects, ramps int) {
 	for i, it := range items {
-		if it.Motion.Active() {
+		if it.Motion.Active() && it.Motion.Preset != timeline.MotionHandheld { // the living camera is camera motion, not an effect
 			effects++
 		}
 		if i > 0 && it.TransitionIn != nil && it.TransitionIn.Type != timeline.TransitionCut && it.TransitionIn.Type != "" {
@@ -624,7 +650,7 @@ func (c *checker) effectDensity() Check {
 	per := float64(effects) / float64(cuts)
 	c.m.EffectsPerCut = math.Round(per*100) / 100
 	switch {
-	case per > effectsMax:
+	case per > c.lim.effectsMax:
 		return c.fail(CheckEffectDensity, "%d effects in %d cuts (%.2f per cut) is too busy; use about one per 3 or 4 cuts and keep the ones on the best moments", effects, cuts, per)
 	case ramps > rampsMax:
 		return c.fail(CheckEffectDensity, "%d shots have a speed ramp; at most %d, on the shots that deserve it", ramps, rampsMax)
@@ -654,96 +680,6 @@ func (c *checker) textSafe() Check {
 		return c.skip(CheckTextSafe, "there is no text")
 	}
 	return c.pass(CheckTextSafe, "%d texts, all inside the safe zones", texts)
-}
-
-// textOverSubject checks the texts against the person in the clips they are on top of: the head is protected (a title on it fails), the
-// body too (a title on it is a note, and a failure on a pose or physique shot, where the body is the picture). A text that covers them is
-// cleared by the renderer when it can be (PlaceTextAvoiding, the same function: above the person at any size down to 0.6, else below all
-// of them), which the line says; one that cannot be cleared, or that asks not to avoid the subject, is reported with what to change.
-func (c *checker) textOverSubject() Check {
-	if len(c.in.Subjects) == 0 {
-		return c.skip(CheckTextOverSubject, "the clips have no subject boxes (the quick look reads them: run cfctl assets quicklook --subjects for older clips)")
-	}
-	out := c.in.Spec.Output
-	var texts int
-	var bad, notes []string
-	for _, tr := range c.in.Spec.Tracks {
-		tt, ok := tr.(*timeline.TextTrack)
-		if !ok {
-			continue
-		}
-		for _, it := range tt.Items {
-			regions := subject.Regions(c.in.Spec, c.in.Subjects.Lookup, it.AtMs, it.AtMs+it.DurationMs)
-			if len(regions) == 0 {
-				continue
-			}
-			texts++
-			// The text as placed, then as the renderer places it.
-			cover, err := timeline.TextCovers(out, it, regions)
-			if err != nil || !cover.Body {
-				continue
-			}
-			top := regions[0].Head.Top
-			for _, r := range regions[1:] {
-				top = min(top, r.Head.Top)
-			}
-			where := fmt.Sprintf("the head starts at y %d (%.0f %% from the top) and the clear band above it is %d px tall", top, float64(top)/float64(max(out.Height, 1))*100, max(top-c.zoneTop(), 0))
-			bodyFix := "use one line and a smaller scale (0.6 at the least) so the title fits in the band above the head"
-			if !it.AvoidsSubject() {
-				// Where it stands: the ink at its anchor, and whether it is on the body of a clip that shows off the physique.
-				pose := false
-				if pl, err := timeline.PlaceText(out, it); err == nil {
-					if box, ok := pl.Zone.Fit(pl.Box); ok {
-						pose = coversPose(pl.Layout.InkBox(box), regions)
-					}
-				}
-				switch {
-				case cover.Head:
-					bad = append(bad, fmt.Sprintf("%s covers the head and is set not to avoid it (%s): remove avoid_subject false, or use one line at the top of the safe zone", it.ID, where))
-				case pose:
-					bad = append(bad, fmt.Sprintf("%s covers the body in a pose shot and is set not to avoid it (%s): remove avoid_subject false, or %s", it.ID, where, bodyFix))
-				default:
-					notes = append(notes, fmt.Sprintf("borderline: %s covers the body and is set not to avoid it (%s)", it.ID, where))
-				}
-				continue
-			}
-			placed, av, _ := timeline.PlaceTextAvoiding(out, it, regions)
-			pose := coversPose(placed.Layout.InkBox(placed.Box), regions)
-			switch {
-			case av.OverHead:
-				bad = append(bad, fmt.Sprintf("%s covers the head and cannot be moved off it inside the safe zone (%s): use one line, a lower scale (0.6 at the least) or a shorter text", it.ID, where))
-			case av.OverBody && pose:
-				bad = append(bad, fmt.Sprintf("%s ends up over the body in a pose shot, because it does not fit above the head or below the body (%s): %s, or a shorter text", it.ID, where, bodyFix))
-			case av.OverBody:
-				notes = append(notes, fmt.Sprintf("borderline: %s ends up over the body, because it does not fit above the head or below the body (%s): %s", it.ID, where, bodyFix))
-			case av.Where == timeline.WhereSmaller:
-				notes = append(notes, fmt.Sprintf("%s covers the subject, so the renderer shrinks it to scale %g (%s); one line keeps it at its size above the head", it.ID, av.Scale, where))
-			case av.Where == timeline.WhereAbove && av.Scale > 0:
-				notes = append(notes, fmt.Sprintf("%s covers the subject, so the renderer moves it above the head at scale %g (%s); one line keeps it at its size", it.ID, av.Scale, where))
-			case av.Overlapped:
-				notes = append(notes, fmt.Sprintf("%s covers the subject, so the renderer moves it %s them (%s); one line and a smaller scale keep it above the head", it.ID, av.Where, where))
-			}
-		}
-	}
-	switch {
-	case len(bad) > 0:
-		return c.fail(CheckTextOverSubject, "%s", strings.Join(bad[:min(3, len(bad))], "; "))
-	case texts == 0:
-		return c.skip(CheckTextOverSubject, "no text is on top of a clip with a subject box")
-	case len(notes) > 0:
-		return c.pass(CheckTextOverSubject, "%s", strings.Join(notes[:min(3, len(notes))], "; "))
-	}
-	return c.pass(CheckTextOverSubject, "%d texts, none on the person", texts)
-}
-
-// coversPose says whether the ink is on the body of a person in a pose or physique shot (the clip's labels say so, subject.Track.ShowsOff).
-func coversPose(ink style.Rect, regions []timeline.Subject) bool {
-	for _, r := range regions {
-		if r.ShowsOff && ink.Overlaps(r.Body) {
-			return true
-		}
-	}
-	return false
 }
 
 // zoneTop is the top of the safe zone of the output, in pixels (0 for an unknown format).
@@ -932,6 +868,9 @@ func (c *checker) editStats() styleprofile.EditStats {
 		e.FirstCutS = float64(c.items[1].AtMs) / 1000
 	}
 	e.Effects, _ = countEffects(c.items)
+	if energetic(c.in.Vibe) {
+		e.Effects = countGimmicks(c.items) // at lively and hype the creator's "no effects" is held to no gimmicks
+	}
 	for _, it := range c.items {
 		if it.Look != nil && it.Look.Preset != "" && it.Look.Preset != timeline.LookNone {
 			e.Graded = true
@@ -1063,13 +1002,12 @@ func (c *checker) beatSync() Check {
 	var off []string
 	for i := 1; i < len(c.items); i++ {
 		at := c.items[i].AtMs
-		j, _ := slices.BinarySearch(beats, at)
-		d := int64(math.MaxInt64)
-		if j < len(beats) {
-			d = min(d, beats[j]-at)
-		}
-		if j > 0 {
-			d = min(d, at-beats[j-1])
+		_, d, _ := music.Nearest(beats, at)
+		if it := c.items[i]; isTransition(it) {
+			// A transition switches the picture at its middle (P6-06): that may be the moment on the beat.
+			if _, md, _ := music.Nearest(beats, at+it.TransitionIn.DurationMs/2); md < d {
+				d = md
+			}
 		}
 		if d <= tol {
 			on++

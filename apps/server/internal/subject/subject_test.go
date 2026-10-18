@@ -370,6 +370,23 @@ func TestATitleBeforeTheCameraMovesStaysAboveTheHead(t *testing.T) {
 		if av.Overlapped != wantMoved {
 			t.Errorf("%s: overlapped %v, want %v (head %+v)", name, av.Overlapped, wantMoved, rs)
 		}
+		if wantMoved && !av.Cleared {
+			// No room at its own time (the head zoomed in fills the top of the frame): it is shown at another time, clear of the person.
+			fit, err := FitText(sp, ix.Lookup, ti, timeline.TotalDuration(sp))
+			if err != nil || fit.How == FitInPlace {
+				t.Fatalf("%s: fitted %+v, %v", name, fit.How, err)
+			}
+			if fit.How == FitDropped {
+				return
+			}
+			pl, rs = fit.Placement, fit.Regions
+			for _, r := range rs {
+				if ink := pl.Layout.InkBox(pl.Box); ink.Overlaps(r.Torso) {
+					t.Errorf("%s: the title %+v is on the torso %+v at %d ms", name, ink, r.Torso, fit.AtMs)
+				}
+			}
+			av = fit.Avoidance
+		}
 		for _, r := range rs {
 			if ink := pl.Layout.InkBox(pl.Box); ink.Overlaps(r.Head) {
 				t.Errorf("%s: the title %+v is on the head %+v", name, ink, r.Head)

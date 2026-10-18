@@ -45,7 +45,8 @@ func TestWrongAssetKind(t *testing.T) {
 	wantCodes(t, validateSpec(t, withClips(baseSpec(), VideoItem{ID: "c1", AssetID: assetUnknown, Source: Source{OutMs: 3000}})), CodeUnknownAsset)
 	// A wrong-kind audio asset raises this code only, not also the rights code.
 	wantCodes(t, validateSpec(t, addTrack(baseSpec(), audioTrack(licensed("s1", assetVideo60, 0, 0, nil)))), CodeWrongAssetKind)
-	wantCodes(t, validateSpec(t, addTrack(baseSpec(), audioTrack(creator("s1", assetVideo30, 0, 0, nil)))), CodeWrongAssetKind)
+	// The sound of one of the creator's own videos may be the music (creator_audio, D-34).
+	wantCodes(t, validateSpec(t, addTrack(baseSpec(), audioTrack(creator("s1", assetVideo30, 0, 0, nil)))))
 }
 
 func TestUnknownStyleIsAnError(t *testing.T) {

@@ -147,6 +147,16 @@ type AssetDerivative struct {
 	UpdatedAt   time.Time
 }
 
+type AssetMusic struct {
+	WorkspaceID      ids.WorkspaceID
+	AssetID          ids.AssetID
+	Version          int32
+	SourceIngestedAt *time.Time
+	Analysis         json.RawMessage
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
 type AssetSignal struct {
 	WorkspaceID      ids.WorkspaceID
 	AssetID          ids.AssetID

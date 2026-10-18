@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "a543443bf7e027c47c70191229cb0ff7ddf6ad80479cde0426ed693469710722",
-  "recorded_at": "2026-10-18T00:28:37Z",
+  "key": "47cca19cec3bbe815cbde4efa6df97afd64a8e6f0bc8a68e322c75f4d669d636",
+  "recorded_at": "2026-10-18T04:45:15Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,
@@ -12,6 +12,7 @@
       {
         "role": "user",
         "blocks": [
+          "text",
           "text",
           "text",
           "text",
@@ -106,6 +107,18 @@
         "blocks": [
           "tool_result"
         ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
+        ]
       }
     ],
     "tools": [
@@ -113,6 +126,7 @@
       "list_footage",
       "view_clip",
       "find_moments",
+      "get_music",
       "plan_edit",
       "get_timeline",
       "get_comments",
@@ -157,6 +171,11 @@
         "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
         "media_type": "image/jpeg",
         "bytes": 9284
+      },
+      {
+        "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
+        "media_type": "image/jpeg",
+        "bytes": 9284
       }
     ]
   },
@@ -167,17 +186,17 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_8",
-        "name": "render_preview",
+        "id": "toolu_ed_9",
+        "name": "check_edit",
         "input": {}
       }
     ],
     "usage": {
-      "input_tokens": 400,
-      "cache_write_tokens": 600,
+      "input_tokens": 420,
+      "cache_write_tokens": 700,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 15000,
-      "output_tokens": 40
+      "cache_read_tokens": 15600,
+      "output_tokens": 38
     }
   },
   "count_tokens": 9000

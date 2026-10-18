@@ -62,7 +62,7 @@ func exposureFilter(ev float64) []string {
 
 // xfadeName maps a transition type to the xfade transition that renders it, from a fixed list: nothing from the spec is
 // written into the graph. A whip is a slide, with a blur added by the caller (whip is the old name of whip_left). A
-// zoom_through is a plain fade between two clips that the camera has zoomed (camera.go), with a blur added by the caller. A
+// zoom_through and a punch are plain fades between two clips that the camera has zoomed (camera.go), with a blur added by the caller. A
 // flash is a dip to white.
 func xfadeName(transition string) string {
 	switch transition {
@@ -74,7 +74,7 @@ func xfadeName(transition string) string {
 		return "slideleft"
 	case timeline.TransitionWhipRight:
 		return "slideright"
-	case timeline.TransitionZoomThrough:
+	case timeline.TransitionZoomThrough, timeline.TransitionPunch:
 		return "fade"
 	case timeline.TransitionFlash:
 		return "fadewhite"
@@ -82,14 +82,55 @@ func xfadeName(transition string) string {
 	return ""
 }
 
-// blurred says whether a transition has a short blur while it lasts: the whips, which slide, and the zoom_through.
+// blurred says whether a transition rides a motion-blur trail: the whips, which slide, the zoom_through and the punch.
 func blurred(transition string) bool {
 	switch transition {
-	case timeline.TransitionWhip, timeline.TransitionWhipLeft, timeline.TransitionWhipRight, timeline.TransitionZoomThrough:
+	case timeline.TransitionWhip, timeline.TransitionWhipLeft, timeline.TransitionWhipRight, timeline.TransitionZoomThrough, timeline.TransitionPunch:
 		return true
 	}
 	return false
 }
+
+// blurTrail is the motion blur of a transition (P6-06): three blurs stacked over nested windows of the transition (the whole of it, its
+// middle half and its middle quarter), so the blur grows to a peak at the middle frame, where the picture switches, and falls off again;
+// the frames before and after the transition are sharp (every window is end-exclusive). A whip slides, so its blur is directional and
+// horizontal (dblur at 0 degrees); a zoom_through and a punch zoom, so theirs is a Gaussian blur. The strengths are fractions of the short
+// side of the frame, so a blur looks the same in every format.
+func (c *compiler) blurTrail(cl clip) []string {
+	short := float64(min(c.w, c.h))
+	n := cl.overlapFrames
+	start := cl.startFrame
+	type window struct{ from, to int64 }
+	q := max(n/4, 0)
+	wins := []window{
+		{start, start + n},
+		{start + n/4, start + n - n/4},
+		{start + n/2 - max(q/2, 0), start + n/2 + max(q/2, 0) + 1},
+	}
+	var out []string
+	for k, w := range wins {
+		if w.to <= w.from {
+			continue
+		}
+		enable := fmt.Sprintf("enable='gte(t,%s)*lt(t,%s)'", c.frameSecs(w.from), c.frameSecs(w.to))
+		switch cl.transition {
+		case timeline.TransitionZoomThrough, timeline.TransitionPunch:
+			sigma := max(1, int(math.Round(short/blurSigmaDiv[k])))
+			out = append(out, fmt.Sprintf("gblur=sigma=%d:%s", sigma, enable))
+		default:
+			radius := max(2, int(math.Round(short/blurRadiusDiv[k])))
+			out = append(out, fmt.Sprintf("dblur=angle=0:radius=%d:%s", radius, enable))
+		}
+	}
+	return out
+}
+
+// The blur of each window of a trail: the short side of the frame over these (a 1080 px side: sigma 9, 15 and 24; a directional radius of
+// 22, 36 and 60 px).
+var (
+	blurSigmaDiv  = [3]float64{120, 72, 45}
+	blurRadiusDiv = [3]float64{50, 30, 18}
+)
 
 // videoGraph returns the statements of the video part of the filter_complex. Its output pad is [vout]: the joined clips, with
 // the ass filter after the join when there is something to draw (text, captions, the preview watermark).
@@ -274,15 +315,11 @@ func (c *compiler) joinGraph(final string) []string {
 			acc = out
 			continue
 		}
-		// A whip or a zoom_through: the transition with a short blur while it lasts.
+		// A whip, a zoom_through or a punch: the transition rides a motion-blur trail that peaks where the picture switches.
 		mid := fmt.Sprintf("w%d", i)
-		sigma := max(2, min(c.w, c.h)/90)
 		stmts = append(stmts,
 			chain(pair, []string{xf}, mid),
-			chain([]string{mid}, []string{
-				// End-exclusive: the first frame after the transition is not blurred.
-				fmt.Sprintf("gblur=sigma=%d:enable='gte(t,%s)*lt(t,%s)'", sigma, offset, c.frameSecs(cl.startFrame+cl.overlapFrames)),
-			}, out),
+			chain([]string{mid}, c.blurTrail(cl), out),
 		)
 		acc = out
 	}
