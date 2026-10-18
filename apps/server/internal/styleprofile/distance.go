@@ -42,6 +42,11 @@ type EditStats struct {
 	// TitleCase is "upper", "lower" or "mixed" for the first title ("" when there is none); TitleAtS is when it starts.
 	TitleCase string
 	TitleAtS  float64
+	// Energetic says the edit's vibe is lively or hype: its pace is then held by the pace targets of the editor's check (from the creator's
+	// measured shot lengths, scaled by the vibe), not by the cut count of their videos, so the pacing dimensions (cuts, long takes, shot
+	// length) do not apply. A creator whose videos are one or two long takes and a few cuts would otherwise forbid the pace of their own
+	// cut-up videos.
+	Energetic bool
 	// Graded says some clip has a look other than none; SFX counts the sound effects; Captions says the captions are on.
 	Graded   bool
 	SFX      int
@@ -146,12 +151,16 @@ func (p *Profile) Compare(e EditStats) Distance {
 	if e.DurationS > 0 {
 		perMin = float64(cuts) / e.DurationS * 60
 	}
-	add("cuts", fmt.Sprintf("%d cuts (%.0f a minute)", cuts, perMin), fmt.Sprintf("%.0f to %.0f cuts, %s a minute", lo, hi, pc.CutsPerMinute),
-		inRange(float64(cuts), lo, hi) && perMin <= th.CutsPerMinHi,
-		cutsFix(pc, float64(cuts), perMin, lo, hi, th.CutsPerMinHi))
+	if !e.Energetic {
+		add("cuts", fmt.Sprintf("%d cuts (%.0f a minute)", cuts, perMin), fmt.Sprintf("%.0f to %.0f cuts, %s a minute", lo, hi, pc.CutsPerMinute),
+			inRange(float64(cuts), lo, hi) && perMin <= th.CutsPerMinHi,
+			cutsFix(pc, float64(cuts), perMin, lo, hi, th.CutsPerMinHi))
+	}
 
-	// Long takes: when the creator lets takes run, so should the edit.
-	if pc.HasLongTakes {
+	// Long takes: when the creator lets takes run, so should the edit (at a calm vibe; lively and hype have the pace targets).
+	switch {
+	case e.Energetic: // the pace targets of the editor's check hold the shot lengths
+	case pc.HasLongTakes:
 		longest := 0.0
 		for _, s := range e.ShotsS {
 			longest = math.Max(longest, s)
@@ -159,7 +168,7 @@ func (p *Profile) Compare(e EditStats) Distance {
 		need := th.LongTakeNeedS
 		add("long_takes", fmt.Sprintf("longest shot %.1f s", longest), fmt.Sprintf("a shot of %.0f s or more (the creator's longest is %s s)", need, pc.LongestShotS),
 			longest >= need, fmt.Sprintf("keep one take running for %.0f s or more (a full set), instead of cutting it up", need))
-	} else if pc.ShotMedianS.Median > 0 {
+	case pc.ShotMedianS.Median > 0:
 		shorts := slices.Clone(e.ShotsS)
 		slices.Sort(shorts)
 		med := 0.0
@@ -340,11 +349,11 @@ func titlePatternFix(t *TextProfile) string {
 		return ""
 	}
 	p := t.Patterns[0]
-	s := "write the title as " + kindWords(p.Kind)
+	s := "write a new title as " + kindWords(p.Kind) + ", " + p.Template()
 	if p.Number != "" {
-		s += " ending in " + p.Number
+		s += ", ending in " + p.Number
 	}
-	return s + ", with a topic from the footage"
+	return s
 }
 
 // titleSizeFix says what scale to set, as a number in the range the ops take (0.6 to 1.4, from the title's own scale and how far off it is).

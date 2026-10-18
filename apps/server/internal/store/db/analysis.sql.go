@@ -395,7 +395,9 @@ func (q *Queries) ListAssetShots(ctx context.Context, arg ListAssetShotsParams) 
 }
 
 const listAssetSpans = `-- name: ListAssetSpans :many
-SELECT asset_id, kind, start_ms, end_ms FROM moments
+SELECT asset_id, kind, start_ms, end_ms,
+  COALESCE(CASE WHEN jsonb_typeof(attrs->'peak_ms') = 'number' THEN round((attrs->>'peak_ms')::numeric) END, 0)::int AS turn_ms
+FROM moments
 WHERE workspace_id = $1 AND asset_id = ANY($2::uuid[]) AND kind IN ('rep', 'hold', 'dead')
 ORDER BY asset_id, start_ms
 `
@@ -410,9 +412,11 @@ type ListAssetSpansRow struct {
 	Kind    string
 	StartMs int32
 	EndMs   int32
+	TurnMs  int32
 }
 
-// The reps, holds and dead moments of several assets in one read (every source), for the editor's check_edit.
+// The reps, holds and dead moments of several assets in one read (every source), for the editor's check_edit. turn_ms is a rep's measured
+// turning point (the analysis stores it as peak_ms in attrs), 0 when it has none.
 func (q *Queries) ListAssetSpans(ctx context.Context, arg ListAssetSpansParams) ([]ListAssetSpansRow, error) {
 	rows, err := q.db.Query(ctx, listAssetSpans, arg.WorkspaceID, arg.AssetIds)
 	if err != nil {
@@ -427,6 +431,7 @@ func (q *Queries) ListAssetSpans(ctx context.Context, arg ListAssetSpansParams) 
 			&i.Kind,
 			&i.StartMs,
 			&i.EndMs,
+			&i.TurnMs,
 		); err != nil {
 			return nil, err
 		}

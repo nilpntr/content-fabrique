@@ -61,8 +61,8 @@ type footageOpts struct {
 	Analysis map[ids.AssetID]analysis.Summary
 	// Subjects is where the person is in each clip (the quick look's boxes): numbers only, printed as a line about where the head is.
 	Subjects subject.Index
-	// Music is the music analysis of the clips whose sound is a song (an audio clip, or a video of the creator's): numbers only, printed
-	// as a line about the tempo, the drop and the phrases (P6-06).
+	// Music is the music analysis of the clips that are songs (an audio file the creator gave, or a video whose sound the creator chose for
+	// the edit; never a footage clip's own sound): numbers only, printed as a line about the tempo, the drop and the phrases (P6-06).
 	Music map[string]music.Analysis
 }
 

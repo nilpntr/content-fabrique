@@ -16,7 +16,6 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/quicklook"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
-	"github.com/nilpntr/content-fabrique/internal/subject"
 )
 
 const assetsQuickLookUsage = `Usage:
@@ -35,8 +34,9 @@ failed, or still pending. The frames it cut before are reused.
   --all        every ready video of the workspace, also those that have a quick look: it runs again and replaces the
                description and tags (and the title, unless a person edited it)
   --asset      only this asset (an ast_... id); it runs again even when it has a quick look
-  --subjects   only the videos whose quick look has no subject boxes yet (where the person is in each of the four frames: the
-               editor keeps titles off the head with them): it makes the same ONE call, stores the boxes and the frames, and
+  --subjects   only the videos whose quick look has no subject boxes yet, or boxes read before quicklook.v3 (where the person,
+               their head and their shoulders are in each of the four frames: the editor keeps titles off the head and the body
+               with them, and beside a narrow head): it makes the same ONE call, stores the boxes and the frames, and
                leaves the title, description and tags as they are (a person's edits and the earlier labels stay). About
                $0.0005 a video. With --asset it is that asset, with the boxes added and the labels kept.
   --limit      at most this many videos (default 200)
@@ -209,8 +209,9 @@ func cmdAssetsQuickLook(args []string, stdout, stderr io.Writer, lookup lookupEn
 	if *subjectsOnly && wantAsset == nil {
 		var missing []store.Asset
 		for _, a := range targets {
-			// Without boxes, and never asked for them: a clip with nobody in it was asked and has none, and is not asked again.
-			if _, ok := subject.FromDetail(a.QuickLook); !ok && !quicklook.SubjectsRead(a.QuickLook) && a.QuickLookStatus != nil && *a.QuickLookStatus == store.QuickLookSucceeded {
+			// Without boxes and never asked for them, or with boxes of an older prompt (before quicklook.v3 the head alone and the shoulder
+			// line were not read): a clip with nobody in it was asked and has none, and is not asked again.
+			if !quicklook.SubjectsCurrent(a.QuickLook) && a.QuickLookStatus != nil && *a.QuickLookStatus == store.QuickLookSucceeded {
 				missing = append(missing, a)
 			}
 		}

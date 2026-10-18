@@ -67,8 +67,8 @@ func title(at int64) []timeline.TextItem {
 func repsClip() AssetAnalysis {
 	return AssetAnalysis{
 		Analysed: true,
-		Reps:     []Span{{2000, 5000}, {5000, 8000}},
-		Dead:     []Span{{0, 2000}, {8000, 12000}},
+		Reps:     []Span{{2000, 5000, 0}, {5000, 8000, 0}},
+		Dead:     []Span{{0, 2000, 0}, {8000, 12000, 0}},
 	}
 }
 
@@ -174,13 +174,13 @@ func TestRepBoundaryCheck(t *testing.T) {
 	mid := specOf(t, []shot{{asset: assetA, in: 2700, out: 4400}, {asset: assetA, in: 5000, out: 8000}}, title(0), nil)
 	r = RunChecks(CheckInput{Spec: mid, Assets: assets})
 	c := wantStatus(t, r, CheckRepBoundaries, CheckFail)
-	if !strings.Contains(c.Detail, "c1 starts at 2700 ms (nearest rep boundary 2000 ms)") || !strings.Contains(c.Detail, "2 of 4") {
+	if !strings.Contains(c.Detail, "c1 starts at 2700 ms (nearest rep boundary 2000 ms, 700 ms off") || !strings.Contains(c.Detail, "2 of 4") {
 		t.Errorf("rep boundary reason: %s", c.Detail)
 	}
 
 	// A clip with a hold (a pose): an edge inside the hold is not mid-rep.
 	held := repsClip()
-	held.Holds = []Span{{9000, 12000}}
+	held.Holds = []Span{{9000, 12000, 0}}
 	hold := specOf(t, []shot{{asset: assetA, in: 2000, out: 3500}, {asset: assetA, in: 9500, out: 11000}}, title(0), nil)
 	wantStatus(t, RunChecks(CheckInput{Spec: hold, Assets: map[string]AssetAnalysis{assetA: held}}), CheckRepBoundaries, CheckPass)
 
@@ -407,7 +407,7 @@ func TestBeatSyncCheck(t *testing.T) {
 func TestReportText(t *testing.T) {
 	r := RunChecks(CheckInput{Version: 3, Spec: specOf(t, []shot{{asset: assetA, in: 0, out: 3500}, {asset: assetA, in: 0, out: 1000}}, nil, nil), Plan: &Plan{ContentType: TypeWorkout, TargetLengthS: 5}})
 	pass, fail, skip := r.Counts()
-	if pass+fail+skip != 25 || fail == 0 {
+	if pass+fail+skip != 28 || fail == 0 {
 		t.Errorf("counts %d %d %d", pass, fail, skip)
 	}
 	text := r.Text()
@@ -448,7 +448,7 @@ func TestShotLengthsCountTheTransitionOverlap(t *testing.T) {
 func TestDeadTimeIsMappedThroughTheSpeedRamp(t *testing.T) {
 	// 6 s of source. The first 2 s are dead and play at 3x (the ramp: 3x, then slow for the middle, then 3x); the clip's output is longer
 	// than 2/6 of it would suggest.
-	assets := map[string]AssetAnalysis{assetA: {Analysed: true, Dead: []Span{{0, 2000}}}}
+	assets := map[string]AssetAnalysis{assetA: {Analysed: true, Dead: []Span{{0, 2000, 0}}}}
 	ramped := specOf(t, []shot{{asset: assetA, in: 0, out: 6000, ramp: true}}, title(0), nil)
 	rt, _, _ := timeline.MainTrack(ramped)
 	it := rt.Items[0]

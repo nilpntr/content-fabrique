@@ -36,7 +36,10 @@ func TestEvalPrintsTheStyleDistance(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out, errOut = r.runEval("editor", "--workspace", r.ws.ID.String(), "--project", pid.String())
-	if code != 0 || !strings.Contains(out, "style distance:") || !strings.Contains(out, "OUT  long_takes") || !strings.Contains(out, "ok   effects") {
+	// At the default (lively) vibe the shot lengths are held by the pace targets (shot_pacing, long_shot, held_ending), not by the long
+	// takes of the creator's single-take videos.
+	if code != 0 || !strings.Contains(out, "style distance:") || strings.Contains(out, "long_takes") || !strings.Contains(out, "ok   effects") ||
+		!strings.Contains(out, "from the creator's measured shot lengths at the lively vibe") {
 		t.Fatalf("with a profile: %d\n%s%s", code, out, errOut)
 	}
 }
