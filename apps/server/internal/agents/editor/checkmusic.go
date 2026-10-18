@@ -20,6 +20,13 @@ const (
 // offBeatToleranceMs is how far a cut may be from a beat or a strong onset of the song.
 const offBeatToleranceMs = 60
 
+// With a song, the hook may run until its drop: maxDropHookSlackMs past it (a transition into the drop starts before it and the cut
+// lands a frame or two off), and never more than maxDropHookMs (a drop later than that is not where a short video's hook ends).
+const (
+	maxDropHookSlackMs = 200
+	maxDropHookMs      = 5000
+)
+
 func (c *checker) offBeatCut() Check {
 	m := c.in.Music
 	if m == nil {

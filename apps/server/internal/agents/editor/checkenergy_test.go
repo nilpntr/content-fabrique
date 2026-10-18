@@ -60,6 +60,16 @@ func TestTheLivelyEditPassesTheEnergyChecks(t *testing.T) {
 	wantStatus(t, RunChecks(CheckInput{Spec: spec, Plan: workoutPlan(), Vibe: VibeHype}), CheckNoTransitions, CheckPass)
 }
 
+// A transition switches the picture at its middle: beat_sync counts it on the beat when its middle is.
+func TestATransitionIsOnTheBeatAtItsMiddle(t *testing.T) {
+	// The first shot is 2000 ms, so the whip (150 ms in specOf) starts at 1850 and switches at 1925; the second cut is hard at 3850.
+	spec := specOf(t, []shot{{asset: assetA, in: 0, out: 2000}, {asset: assetA, in: 0, out: 2000, trans: timeline.TransitionWhipLeft}, {asset: assetB, in: 0, out: 2000}}, nil,
+		[]timeline.Marker{{AtMs: 1925, Kind: timeline.MarkerBeat}, {AtMs: 3850, Kind: timeline.MarkerBeat}})
+	if c := wantStatus(t, RunChecks(CheckInput{Spec: spec, Plan: workoutPlan()}), CheckBeatSync, CheckPass); !strings.Contains(c.Detail, "2 of 2 cuts") {
+		t.Errorf("%s", c.Detail)
+	}
+}
+
 func TestTransitionVariety(t *testing.T) {
 	mk := func(types ...string) *timeline.Spec {
 		shots := []shot{{asset: assetA, in: 0, out: 2000}}
@@ -127,6 +137,10 @@ func TestCutsOnTheMusicAndTheHookOnTheDrop(t *testing.T) {
 	}
 	r := RunChecks(CheckInput{Spec: spec, Music: m})
 	wantStatus(t, r, CheckHookMissesDrop, CheckPass)
+	// The hook runs until the drop (2.9 s): with a song that is not too long for a hook.
+	if c := wantStatus(t, r, CheckHookLength, CheckPass); !strings.Contains(c.Detail, "at most 3.10 s") {
+		t.Errorf("hook: %s", c.Detail)
+	}
 	c := wantStatus(t, r, CheckOffBeatCut, CheckFail)
 	if !strings.Contains(c.Detail, "2 of 3 cuts land on the song's beats") || !strings.Contains(c.Detail, "c4 at 7338 ms") || !strings.Contains(c.Detail, "sound_id song") {
 		t.Errorf("off beat: %s", c.Detail)

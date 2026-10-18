@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/nilpntr/content-fabrique/internal/analysis"
+	"github.com/nilpntr/content-fabrique/internal/music"
 	"github.com/nilpntr/content-fabrique/internal/styleprofile"
 	"github.com/nilpntr/content-fabrique/internal/subject"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
@@ -376,6 +377,10 @@ func (c *checker) skip(id, format string, a ...any) Check {
 func (c *checker) hookLength() Check {
 	d := c.durs[0]
 	limit := c.lim.hookMaxMs
+	// With a song, the hook runs until its drop (P6-06: the references drop 2 to 4.5 s in): up to the drop, a transition into it included.
+	if m := c.in.Music; m != nil && m.HasDrop && m.DropMs+maxDropHookSlackMs > limit {
+		limit = min(m.DropMs+maxDropHookSlackMs, maxDropHookMs)
+	}
 	if d > limit {
 		if c.lim.styled {
 			return c.fail(CheckHookLength, "the first shot (%s) is %s long; the creator's first cut comes by %s", c.items[0].ID, secs2(d), secs2(limit))
@@ -997,13 +1002,12 @@ func (c *checker) beatSync() Check {
 	var off []string
 	for i := 1; i < len(c.items); i++ {
 		at := c.items[i].AtMs
-		j, _ := slices.BinarySearch(beats, at)
-		d := int64(math.MaxInt64)
-		if j < len(beats) {
-			d = min(d, beats[j]-at)
-		}
-		if j > 0 {
-			d = min(d, at-beats[j-1])
+		_, d, _ := music.Nearest(beats, at)
+		if it := c.items[i]; isTransition(it) {
+			// A transition switches the picture at its middle (P6-06): that may be the moment on the beat.
+			if _, md, _ := music.Nearest(beats, at+it.TransitionIn.DurationMs/2); md < d {
+				d = md
+			}
 		}
 		if d <= tol {
 			on++
