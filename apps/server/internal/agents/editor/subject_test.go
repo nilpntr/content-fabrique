@@ -51,15 +51,15 @@ func TestTextOverSubject(t *testing.T) {
 		it.AvoidSubject = &f
 	})
 	c = wantStatus(t, run(off, headAt22()), CheckTextOverSubject, CheckFail)
-	if !strings.Contains(c.Detail, "set not to avoid it") || !strings.Contains(c.Detail, "one line") {
+	if !strings.Contains(c.Detail, "set not to avoid them") || !strings.Contains(c.Detail, "remove avoid_subject false") {
 		t.Errorf("off: %s", c.Detail)
 	}
-	// A subject that fills the zone leaves nowhere to go: a failure that says to shrink or shorten.
-	// two moments in the clip: the head high at one and lower at the other, so there is no clear band above it or below it for the whole title
+	// Two moments in the clip: the head high at one and lower at the other, so there is no clear band for the whole title; the second half
+	// of its time has room, so the renderer shows it then, and the check says so.
 	wall := subject.Index{assetA: {Aspect: 0.5625, Samples: []subject.Sample{{AtMs: 500, X: 0.2, Y: 0.1, W: 0.6, H: 0.8, HeadTopY: 0.12}, {AtMs: 1500, X: 0.2, Y: 0.45, W: 0.6, H: 0.5, HeadTopY: 0.5}}}}
 	wide := withTitle(t, buildingLats(t), func(it *timeline.TextItem) { it.Text = "BACK DAY\nBLUEPRINT" })
-	c = wantStatus(t, run(wide, wall), CheckTextOverSubject, CheckFail)
-	if !strings.Contains(c.Detail, "cannot be moved off it") || !strings.Contains(c.Detail, "lower scale") {
+	c = wantStatus(t, run(wide, wall), CheckTextOverSubject, CheckPass)
+	if !strings.Contains(c.Detail, "fits clear of the person's body only at 1000-2000 ms") || !strings.Contains(c.Detail, "scale down to 0.6") {
 		t.Errorf("wall: %s", c.Detail)
 	}
 	// No boxes at all: not applicable, and it says how to get them. A subject in another clip than the one the title is on: nothing to
@@ -72,41 +72,40 @@ func TestTextOverSubject(t *testing.T) {
 	}
 }
 
-// The body is protected too: a title that ends up over it because there is no room above the head or below the body is a note, and a
-// failure on a pose or physique shot (the clip's title or tags say so), where the body is the picture.
-func TestTextOverTheBodyIsANoteOrAFailureOnAPoseShot(t *testing.T) {
-	// The head starts at 14.6 % (280 px): 40 px of band above it, too little for the title even at 0.6.
-	track := func(showsOff bool) subject.Index {
-		return subject.Index{assetA: {Aspect: 0.5625, Samples: []subject.Sample{{AtMs: 1000, X: 0.2, Y: 0.14, W: 0.6, H: 0.75, HeadTopY: 0.146}}, ShowsOff: showsOff}}
+// The body is protected like the head (P6-06): a title with no room clear of the body at its own time is moved by the renderer, and the
+// check fails for a hook or chapter title that ends up elsewhere, notes it for any other text, and fails any text set not to avoid the
+// person that covers their torso.
+func TestTextOverTheBodyNeverStays(t *testing.T) {
+	// The head starts at 14.6 % (280 px): 40 px of band above it, too little for the title even at 0.6, and the person is wide.
+	track := subject.Index{assetA: {Aspect: 0.5625, Samples: []subject.Sample{{AtMs: 1000, X: 0.05, Y: 0.14, W: 0.9, H: 0.85, HeadTopY: 0.146}}}}
+	run := func(spec *timeline.Spec) Report {
+		return RunChecks(CheckInput{Spec: spec, Plan: workoutPlan(), Style: ginoProfile(t), Subjects: track})
 	}
-	run := func(ix subject.Index) Report {
-		return RunChecks(CheckInput{Spec: buildingLats(t), Plan: workoutPlan(), Style: ginoProfile(t), Subjects: ix})
-	}
-	c := wantStatus(t, run(track(false)), CheckTextOverSubject, CheckPass)
-	for _, want := range []string{"borderline", "over the body", "the head starts at y 280"} {
+	// The hook title: the renderer shows it on the last shot (another clip, with nobody in its box); that is not a hook any more.
+	c := wantStatus(t, run(buildingLats(t)), CheckTextOverSubject, CheckFail)
+	for _, want := range []string{"has no room clear of the person's body at 0-2000 ms", "the renderer shows it at", "the head starts at y 280", "one line"} {
 		if !strings.Contains(c.Detail, want) {
-			t.Errorf("a note lacks %q: %s", want, c.Detail)
+			t.Errorf("the hook: lacks %q: %s", want, c.Detail)
 		}
 	}
-	c = wantStatus(t, run(track(true)), CheckTextOverSubject, CheckFail)
-	for _, want := range []string{"over the body in a pose shot", "one line and a smaller scale"} {
-		if !strings.Contains(c.Detail, want) {
-			t.Errorf("a failure lacks %q: %s", want, c.Detail)
-		}
+	// A later label in the same place is a note: the renderer moves it.
+	later := withTitle(t, buildingLats(t), func(it *timeline.TextItem) { it.AtMs, it.Text = 2500, "ROWS" })
+	c = wantStatus(t, run(later), CheckTextOverSubject, CheckPass)
+	if !strings.Contains(c.Detail, "the renderer shows it at") {
+		t.Errorf("a label: %s", c.Detail)
 	}
-	// A title set not to avoid the subject that covers the body only: a note, and a failure on a pose shot.
-	offTitle := func() *timeline.Spec {
-		return withTitle(t, buildingLats(t), func(it *timeline.TextItem) {
-			f := false
-			it.AvoidSubject = &f
-			it.Anchor = timeline.AnchorCenter // over the chest: the body, and not the head
-		})
-	}
-	side := track
-	wantStatus(t, RunChecks(CheckInput{Spec: offTitle(), Plan: workoutPlan(), Style: ginoProfile(t), Subjects: side(false)}), CheckTextOverSubject, CheckPass)
-	c = wantStatus(t, RunChecks(CheckInput{Spec: offTitle(), Plan: workoutPlan(), Style: ginoProfile(t), Subjects: side(true)}), CheckTextOverSubject, CheckFail)
-	if !strings.Contains(c.Detail, "set not to avoid it") {
-		t.Errorf("off, pose: %s", c.Detail)
+	// A chapter title is essential wherever it is.
+	chapter := withTitle(t, buildingLats(t), func(it *timeline.TextItem) { it.AtMs, it.Text = 2500, "1. ROWS" })
+	wantStatus(t, run(chapter), CheckTextOverSubject, CheckFail)
+	// A title set not to avoid the subject that covers the torso only: a failure.
+	off := withTitle(t, buildingLats(t), func(it *timeline.TextItem) {
+		f := false
+		it.AvoidSubject = &f
+		it.Anchor = timeline.AnchorCenter // over the chest: the torso, and not the head
+	})
+	c = wantStatus(t, run(off), CheckTextOverSubject, CheckFail)
+	if !strings.Contains(c.Detail, "covers the person's torso and is set not to avoid them") {
+		t.Errorf("off: %s", c.Detail)
 	}
 }
 

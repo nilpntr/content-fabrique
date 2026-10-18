@@ -193,6 +193,17 @@ func (s Sample) Body() (x0, y0, x1, y1 float64) {
 	return s.X, top, s.X + s.W, s.Y + s.H
 }
 
+// Torso is the part of the person below the head and shoulders as a box of fractions, across the whole width of the subject box: from the
+// bottom of Head to the bottom of the box. When an arm or a hand is raised above the head (the box starts clearly above the head top) the
+// torso is the whole body box, because what is beside the head is then an arm or the lift, not the background.
+func (s Sample) Torso() (x0, y0, x1, y1 float64) {
+	if s.HeadTopY-s.Y > raisedAbove {
+		return s.Body()
+	}
+	_, _, _, hy1 := s.Head()
+	return s.X, hy1, s.X + s.W, s.Y + s.H
+}
+
 // TopPct is the top of the head of the highest sample as a percentage of the frame height, for the editor's line about a clip.
 func TopPct(samples []Sample) (pct float64, ok bool) {
 	if len(samples) == 0 {

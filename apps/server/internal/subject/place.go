@@ -78,7 +78,12 @@ func Regions(spec *timeline.Spec, lookup Lookup, startMs, endMs int64) []timelin
 			head := MapBox(x0, y0, x1, y1, tr.Aspect, rf, spec.Output)
 			bx0, by0, bx1, by1 := s.Body()
 			body := MapBox(bx0, by0, bx1, by1, tr.Aspect, rf, spec.Output)
-			out = append(out, timeline.Subject{Head: withCamera(head, cam, spec.Output), Body: withCamera(body, cam, spec.Output), ShowsOff: tr.ShowsOff})
+			tx0, ty0, tx1, ty1 := s.Torso()
+			torso := MapBox(tx0, ty0, tx1, ty1, tr.Aspect, rf, spec.Output)
+			out = append(out, timeline.Subject{
+				Head: withCamera(head, cam, spec.Output), Body: withCamera(body, cam, spec.Output), Torso: withCamera(torso, cam, spec.Output),
+				ShowsOff: tr.ShowsOff,
+			})
 		}
 	}
 	return out
