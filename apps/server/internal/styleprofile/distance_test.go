@@ -25,26 +25,28 @@ func TestAnEditInTheCreatorsStylePasses(t *testing.T) {
 	for _, x := range d.Dimensions {
 		ids[x.ID] = true
 	}
-	for _, want := range []string{"cuts", "long_takes", "first_cut", "effects", "title", "labels", "title_case", "captions", "grade", "sfx", "duration"} {
+	for _, want := range []string{"cuts", "long_takes", "first_cut", "transitions", "title", "labels", "title_case", "captions", "grade", "sfx", "duration"} {
 		if !ids[want] {
 			t.Errorf("no %s dimension: %v", want, ids)
 		}
 	}
 }
 
-// What a generic fast workout edit does to the same footage, each thing a fix names.
+// What a generic fast workout edit does to the same footage, for a creator who turned transitions and camera motion off: each thing a
+// fix names.
 func TestAGenericEditIsOutOfRangeWithFixes(t *testing.T) {
 	p := Aggregate(referenceMeasures(t))
 	generic := EditStats{
 		DurationS: 28, ShotsS: []float64{1.5, 1.5, 3, 3, 1, 1, 3, 3, 1.5, 3, 3, 3.5, 1, 1.5}, FirstCutS: 0.8,
-		Effects: 6, Titles: 1, Labels: 3, TitleCase: "mixed", Graded: true, SFX: 4, Captions: true,
+		Effects: 6, Transitions: 3, Motions: 2, Ramps: 1, Titles: 1, Labels: 3, TitleCase: "mixed", Graded: true, SFX: 4, Captions: true,
 	}
-	d := p.Compare(generic)
+	r := Resolve(p, nil, Settings{Transitions: LevelOff, CameraMotion: LevelOff}, "")
+	d := p.CompareWith(generic, &r)
 	bad := map[string]Dimension{}
 	for _, x := range d.Failed() {
 		bad[x.ID] = x
 	}
-	for _, id := range []string{"cuts", "long_takes", "first_cut", "effects", "labels", "title_case", "captions", "grade", "sfx"} {
+	for _, id := range []string{"cuts", "long_takes", "first_cut", "transitions", "camera_motion", "labels", "title_case", "captions", "grade", "sfx"} {
 		x, ok := bad[id]
 		if !ok || x.Fix == "" || strings.Contains(x.Fix, "\n") {
 			t.Errorf("%s is not out of range with a fix: %+v", id, x)
@@ -53,11 +55,11 @@ func TestAGenericEditIsOutOfRangeWithFixes(t *testing.T) {
 	if d.Score > 0.4 {
 		t.Errorf("score %.2f", d.Score)
 	}
-	if !strings.Contains(bad["effects"].Fix, "none") || !strings.Contains(bad["long_takes"].Fix, "keep one take running") {
-		t.Errorf("fixes: %q / %q", bad["effects"].Fix, bad["long_takes"].Fix)
+	if !strings.Contains(bad["transitions"].Fix, "plain cut on the beat") || !strings.Contains(bad["long_takes"].Fix, "keep one take running") {
+		t.Errorf("fixes: %q / %q", bad["transitions"].Fix, bad["long_takes"].Fix)
 	}
 	text := d.Text()
-	if !strings.Contains(text, "OUT  effects") || !strings.Contains(text, "ok   duration") {
+	if !strings.Contains(text, "OUT  transitions") || !strings.Contains(text, "OUT  camera_motion") || !strings.Contains(text, "ok   duration") {
 		t.Errorf("text:\n%s", text)
 	}
 }

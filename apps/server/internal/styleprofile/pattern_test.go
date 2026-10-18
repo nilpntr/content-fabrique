@@ -165,7 +165,7 @@ func TestTheLinesAndPatternDimensions(t *testing.T) {
 	// The pattern is soft: a label in capitals is borderline, and does not fail the edit.
 	label := base
 	label.TitleKind = KindCaps
-	d = p.Compare(label)
+	d = p.CompareWith(label, still(p))
 	x, ok = dim(d, "title_pattern")
 	if !ok || x.OK || !x.Soft || !strings.Contains(x.Fix, "ending in 101") {
 		t.Fatalf("pattern %+v", x)
@@ -178,14 +178,14 @@ func TestTheLinesAndPatternDimensions(t *testing.T) {
 	if b := d.Borderline(); len(b) != 1 || b[0].ID != "title_pattern" {
 		t.Errorf("borderline %+v", b)
 	}
-	if x, _ := dim(p.Compare(base), "title_pattern"); !x.OK {
+	if x, _ := dim(p.CompareWith(base, still(p)), "title_pattern"); !x.OK {
 		t.Errorf("a series title: %+v", x)
 	}
 	if !strings.Contains(d.Text(), "adv  title_pattern") || strings.Contains(d.Text(), "OUT  title_pattern") {
 		t.Errorf("text:\n%s", d.Text())
 	}
 	// Advice does not count in the share: the same edit with a title in the creator's form has the same score.
-	if good := p.Compare(base); good.Score != d.Score {
+	if good := p.CompareWith(base, still(p)); good.Score != d.Score {
 		t.Errorf("score %v against %v", d.Score, good.Score)
 	}
 }

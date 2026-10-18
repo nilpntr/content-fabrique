@@ -11,9 +11,9 @@ import (
 
 // PromptVersion names the system prompt below. It is stored in every run's input (Input.PromptVersion), so a run can be tied to
 // the text it was given. prompts/CHANGELOG.md says what each version changed.
-const PromptVersion = "editor.v2.8"
+const PromptVersion = "editor.v2.9"
 
-//go:embed prompts/editor.v2.8.md
+//go:embed prompts/editor.v2.9.md
 var systemPromptTemplate string
 
 // systemPrompt is the prompt for the features of this build, rendered once: the sections about an effect or a look that the build
@@ -44,14 +44,14 @@ type Input struct {
 	Instructions string `json:"instructions,omitempty"`
 	// PromptVersion is the version of the system prompt the run was started with.
 	PromptVersion string `json:"prompt_version"`
-	// Vibe is the energy of the edit (calm, lively or hype, P6-06); empty is the default (lively).
+	// Vibe is the energy of the edit (calm, lively or hype, P6-06); empty is the workspace's style's (lively when it has none).
 	Vibe string `json:"vibe,omitempty"`
 }
 
-// NewInput returns the input for a run with the default vibe, and checks the instructions.
+// NewInput returns the input for a run with the workspace's vibe, and checks the instructions.
 func NewInput(instructions string) (json.RawMessage, error) { return NewEditInput(instructions, "") }
 
-// NewEditInput returns the input for a run, and checks the instructions and the vibe ("" is the default).
+// NewEditInput returns the input for a run, and checks the instructions and the vibe ("" is the workspace's).
 func NewEditInput(instructions, vibe string) (json.RawMessage, error) {
 	instructions = strings.TrimSpace(instructions)
 	if err := checkInstructions(instructions); err != nil {

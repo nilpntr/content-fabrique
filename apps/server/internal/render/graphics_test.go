@@ -276,3 +276,47 @@ func TestIntegrationGraphicsRenderInDocker(t *testing.T) {
 		})
 	}
 }
+
+// A song and motion graphics in one edit: the song is an input after the clips, and the overlay segments come after it. Before the
+// audio graph was built ahead of the video graph, the first overlay segment was numbered as the song's input, so ffmpeg read [k:v]
+// from an audio-only file and every render of an edit with a song and a title failed ("Stream specifier ':v' ... matches no streams").
+func TestGraphicsWithASongNumberTheOverlaysAfterIt(t *testing.T) {
+	spec := loadFixture(t, "v50_graphics_9x16", testAssets(t))
+	spec.Tracks = append(spec.Tracks, &timeline.AudioTrack{ID: "music", Items: []timeline.AudioItem{
+		&timeline.CreatorAudio{AudioCommon: timeline.AudioCommon{ID: "song", Export: timeline.ExportLicensed}, AssetID: "ast_song"},
+	}})
+	for _, prof := range Profiles() {
+		plan, err := Compile(spec, prof, graphicsResolver("/assets"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if plan.Motion == nil {
+			t.Fatalf("%s: no motion plan", prof.Name)
+		}
+		song := -1
+		for _, in := range plan.Inputs {
+			if in.ItemID == "song" {
+				song = in.Index
+			}
+		}
+		if song < 0 {
+			t.Fatalf("%s: the song is not an input: %+v", prof.Name, plan.Inputs)
+		}
+		base := len(plan.Inputs)
+		if song >= base {
+			t.Fatalf("%s: the song is input %d, not before the overlays at %d", prof.Name, song, base)
+		}
+		g := plan.FilterComplex
+		if strings.Contains(g, "["+itoa(song)+":v]") {
+			t.Errorf("%s: the graph reads video from the song's input %d: %s", prof.Name, song, PrettyFilter(g))
+		}
+		if !strings.Contains(g, "["+itoa(base)+":v]setpts=PTS-STARTPTS+") {
+			t.Errorf("%s: the first overlay is not input %d, right after the clips and the song", prof.Name, base)
+		}
+		// The -i arguments are in index order: the overlays' patterns come after every regular input.
+		args := strings.Join(plan.Args, " ")
+		if i, j := strings.Index(args, "-i /assets/ast_song"), strings.Index(args, "-i motion/s0/"); i < 0 || j < 0 || i > j {
+			t.Errorf("%s: input order: song at %d, first overlay at %d", prof.Name, i, j)
+		}
+	}
+}

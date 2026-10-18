@@ -1,4 +1,4 @@
-# Playbook: talking to camera and opinion (talking.v2)
+# Playbook: talking to camera and opinion (talking.v3)
 
 You chose this playbook because a person speaks to the camera: an opinion, a take, a story, advice. Target 20 to 45 seconds.
 
@@ -15,7 +15,7 @@ You chose this playbook because a person speaks to the camera: an opinion, a tak
 
 **Text.** Captions are the main text: word-highlight captions on (set_captions), and then texts only in the upper third. One keyword on screen at a time when a point needs emphasis.
 
-**Energy.** Restraint: a punch_in on the emphasis, now and then a short zoom_through for a change of topic. No whips, no ramps.
+**Energy.** Restraint: a punch_in on the emphasis, a plain cut for a change of topic (a transition only when the creator's style has them: their settings or their own videos). No ramps.
 
 **Sound.** The speaker's audio is the point: set_clip_audio mode full on every clip with speech (it is the programme, ducked under any sound effect). A clip without speech, such as a cutaway, is a bed.
 

@@ -107,7 +107,7 @@ RETURNING *;
 -- The ready videos of a workspace for cfctl's backfill, oldest first; only those without a successful quick look unless include_done.
 -- name: ListAssetsForQuickLook :many
 SELECT * FROM assets
-WHERE workspace_id = @workspace_id AND kind = 'video' AND status = 'ready' AND deleted_at IS NULL
+WHERE workspace_id = @workspace_id AND kind = 'video' AND status = 'ready' AND deleted_at IS NULL AND purpose = 'footage'
   AND (@include_done::boolean OR quick_look_status IS DISTINCT FROM 'succeeded')
 ORDER BY id
 LIMIT @row_limit;

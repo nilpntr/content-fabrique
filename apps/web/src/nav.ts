@@ -18,6 +18,11 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { title: "Settings", to: "/settings", icon: SettingsIcon },
 ];
 
+/** The header title of a page that is no nav item's (an onboarding step), by its path. */
+const PAGE_TITLES: Readonly<Record<string, string>> = { "/welcome/style": "Welcome" };
+
+export const pageTitle = (pathname: string): string | undefined => PAGE_TITLES[pathname.length > 1 ? pathname.replace(/\/$/, "") : pathname];
+
 /** Whether a matched route is the nav item's route or one of its children (`/projects/$id` under `/projects`). */
 export function matchesNavItem(item: NavItem, routeId: string): boolean {
   const id = routeId.length > 1 ? routeId.replace(/\/$/, "") : routeId;

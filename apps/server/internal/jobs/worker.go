@@ -44,6 +44,8 @@ type WorkerOptions struct {
 	Transcribe Transcriber
 	// Analysis is the clip analysis, for the analyze job. Nil when the sandbox or object storage is not set up.
 	Analysis Analyzer
+	// Style learns creator styles, for the style jobs. Nil when the sandbox, object storage or model access is not set up.
+	Style StyleLearner
 	// Render is the render pipeline, for the jobs that render timelines. Nil when the sandbox or object storage is not set up.
 	Render Renderer
 	// Meter writes the ledger rows of the media jobs' compute. Nil records nothing.
@@ -114,7 +116,7 @@ func StartWorker(ctx context.Context, opts WorkerOptions) (*Worker, error) {
 		}
 	}
 
-	client, err := NewWorkerClient(pool, cfg, Deps{Store: opts.Store, Logger: logger, Objects: opts.Objects, Ingest: opts.Ingest, QuickLook: opts.QuickLook, Transcribe: opts.Transcribe, Analysis: opts.Analysis, Render: opts.Render, Meter: opts.Meter, Credits: opts.Credits, Register: opts.Register})
+	client, err := NewWorkerClient(pool, cfg, Deps{Store: opts.Store, Logger: logger, Objects: opts.Objects, Ingest: opts.Ingest, QuickLook: opts.QuickLook, Transcribe: opts.Transcribe, Analysis: opts.Analysis, Style: opts.Style, Render: opts.Render, Meter: opts.Meter, Credits: opts.Credits, Register: opts.Register})
 	if err != nil {
 		pool.Close()
 		return nil, err
@@ -124,6 +126,7 @@ func StartWorker(ctx context.Context, opts WorkerOptions) (*Worker, error) {
 		opts.Store.SetQuickLookHook(NewEnqueuer(client, logger).EnqueueQuickLook)
 		opts.Store.SetTranscribeHook(NewEnqueuer(client, logger).EnqueueTranscribe)
 		opts.Store.SetAnalysisHook(NewEnqueuer(client, logger).EnqueueAnalysis)
+		opts.Store.SetStyleReferenceHook(NewEnqueuer(client, logger).EnqueueStyleReference)
 	}
 	w := &Worker{runner: NewRunner(client, pool, logger), pool: pool, direct: direct, logger: logger}
 

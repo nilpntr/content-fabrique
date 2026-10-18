@@ -11,13 +11,15 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LibraryRouteImport } from './routes/library'
-import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as WorkspaceRouteImport } from './routes/workspace'
 import { Route as ProjectsIndexRouteImport } from './routes/projects.index'
 import { Route as ProjectsProjectIdRouteImport } from './routes/projects.$projectId'
 import { Route as ProjectsNewRouteImport } from './routes/projects.new'
+import { Route as SettingsIndexRouteImport } from './routes/settings.index'
+import { Route as SettingsStyleRouteImport } from './routes/settings.style'
 import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
 import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
+import { Route as WelcomeStyleRouteImport } from './routes/welcome.style'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -27,11 +29,6 @@ const IndexRoute = IndexRouteImport.update({
 const LibraryRoute = LibraryRouteImport.update({
   id: '/library',
   path: '/library',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SettingsRoute = SettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const WorkspaceRoute = WorkspaceRouteImport.update({
@@ -54,6 +51,16 @@ const ProjectsNewRoute = ProjectsNewRouteImport.update({
   path: '/projects/new',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsIndexRoute = SettingsIndexRouteImport.update({
+  id: '/settings/',
+  path: '/settings/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsStyleRoute = SettingsStyleRouteImport.update({
+  id: '/settings/style',
+  path: '/settings/style',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SignInSplatRoute = SignInSplatRouteImport.update({
   id: '/sign-in/$',
   path: '/sign-in/$',
@@ -64,87 +71,106 @@ const SignUpSplatRoute = SignUpSplatRouteImport.update({
   path: '/sign-up/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WelcomeStyleRoute = WelcomeStyleRouteImport.update({
+  id: '/welcome/style',
+  path: '/welcome/style',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/library': typeof LibraryRoute
-  '/settings': typeof SettingsRoute
   '/workspace': typeof WorkspaceRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/projects/new': typeof ProjectsNewRoute
+  '/settings/style': typeof SettingsStyleRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/welcome/style': typeof WelcomeStyleRoute
   '/projects/': typeof ProjectsIndexRoute
+  '/settings/': typeof SettingsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/library': typeof LibraryRoute
-  '/settings': typeof SettingsRoute
   '/workspace': typeof WorkspaceRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/projects/new': typeof ProjectsNewRoute
+  '/settings/style': typeof SettingsStyleRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/welcome/style': typeof WelcomeStyleRoute
   '/projects': typeof ProjectsIndexRoute
+  '/settings': typeof SettingsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/library': typeof LibraryRoute
-  '/settings': typeof SettingsRoute
   '/workspace': typeof WorkspaceRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/projects/new': typeof ProjectsNewRoute
+  '/settings/style': typeof SettingsStyleRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/welcome/style': typeof WelcomeStyleRoute
   '/projects/': typeof ProjectsIndexRoute
+  '/settings/': typeof SettingsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/library'
-    | '/settings'
     | '/workspace'
     | '/projects/$projectId'
     | '/projects/new'
+    | '/settings/style'
     | '/sign-in/$'
     | '/sign-up/$'
+    | '/welcome/style'
     | '/projects/'
+    | '/settings/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/library'
-    | '/settings'
     | '/workspace'
     | '/projects/$projectId'
     | '/projects/new'
+    | '/settings/style'
     | '/sign-in/$'
     | '/sign-up/$'
+    | '/welcome/style'
     | '/projects'
+    | '/settings'
   id:
     | '__root__'
     | '/'
     | '/library'
-    | '/settings'
     | '/workspace'
     | '/projects/$projectId'
     | '/projects/new'
+    | '/settings/style'
     | '/sign-in/$'
     | '/sign-up/$'
+    | '/welcome/style'
     | '/projects/'
+    | '/settings/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LibraryRoute: typeof LibraryRoute
-  SettingsRoute: typeof SettingsRoute
   WorkspaceRoute: typeof WorkspaceRoute
   ProjectsProjectIdRoute: typeof ProjectsProjectIdRoute
   ProjectsNewRoute: typeof ProjectsNewRoute
+  SettingsStyleRoute: typeof SettingsStyleRoute
   SignInSplatRoute: typeof SignInSplatRoute
   SignUpSplatRoute: typeof SignUpSplatRoute
+  WelcomeStyleRoute: typeof WelcomeStyleRoute
   ProjectsIndexRoute: typeof ProjectsIndexRoute
+  SettingsIndexRoute: typeof SettingsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -161,13 +187,6 @@ declare module '@tanstack/react-router' {
       path: '/library'
       fullPath: '/library'
       preLoaderRoute: typeof LibraryRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/settings': {
-      id: '/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/workspace': {
@@ -198,6 +217,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsNewRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/': {
+      id: '/settings/'
+      path: '/settings'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof SettingsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/style': {
+      id: '/settings/style'
+      path: '/settings/style'
+      fullPath: '/settings/style'
+      preLoaderRoute: typeof SettingsStyleRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sign-in/$': {
       id: '/sign-in/$'
       path: '/sign-in/$'
@@ -212,19 +245,28 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SignUpSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/welcome/style': {
+      id: '/welcome/style'
+      path: '/welcome/style'
+      fullPath: '/welcome/style'
+      preLoaderRoute: typeof WelcomeStyleRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LibraryRoute: LibraryRoute,
-  SettingsRoute: SettingsRoute,
   WorkspaceRoute: WorkspaceRoute,
   ProjectsProjectIdRoute: ProjectsProjectIdRoute,
   ProjectsNewRoute: ProjectsNewRoute,
+  SettingsStyleRoute: SettingsStyleRoute,
   SignInSplatRoute: SignInSplatRoute,
   SignUpSplatRoute: SignUpSplatRoute,
+  WelcomeStyleRoute: WelcomeStyleRoute,
   ProjectsIndexRoute: ProjectsIndexRoute,
+  SettingsIndexRoute: SettingsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

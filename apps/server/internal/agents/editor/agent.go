@@ -62,7 +62,11 @@ func opening(raw json.RawMessage) ([]llm.Block, error) {
 	if err != nil {
 		return nil, err
 	}
-	blocks := []llm.Block{llm.TextBlock("Make the video for this project now. The brief, the clips and the state of the timeline follow."), llm.TextBlock(vibeNote(in.Vibe))}
+	blocks := []llm.Block{llm.TextBlock("Make the video for this project now. The brief, the clips and the state of the timeline follow.")}
+	// A vibe picked for this run is said here; without one the run context says the workspace's (its style's, else lively).
+	if in.Vibe != "" {
+		blocks = append(blocks, llm.TextBlock(vibeNote(in.Vibe)))
+	}
 	if in.Instructions != "" {
 		blocks = append(blocks,
 			llm.TextBlock("The creator added these instructions for this run:"),
@@ -138,7 +142,15 @@ func (d Deps) runContext(ctx context.Context, rc runtime.RunContext) ([]llm.Bloc
 		return nil, err
 	}
 	hint := contentTypeHint(det.Project.Brief, rows, sums)
-	styleBlk := styleBlocks(d.style(ctx, ws))
+	st := d.styleFor(ctx, ws, rc.Input)
+	styleBlk := styleBlocks(st)
+	if in, _ := parseInput(rc.Input); in.Vibe == "" {
+		vibe := DefaultVibe
+		if st != nil {
+			vibe = st.Resolved.Vibe
+		}
+		styleBlk = append(styleBlk, llm.TextBlock(vibeNote(vibe)))
+	}
 	subjects := d.subjects(ctx, ws, rows)
 	songs := d.musicOf(ctx, ws, rows, chosen)
 	for _, caps := range contextSteps {

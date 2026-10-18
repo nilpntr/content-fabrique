@@ -41,9 +41,10 @@ func newComputeMeter(cfg config.Config, st *store.Store, logger *slog.Logger) *s
 		BilledTo:     setup.BilledTo(cfg.Env),
 		// The vCPUs of each wall-time-metered stage are the CPU limits of the sandboxes they run in.
 		VCPUs: map[string]float64{
-			"ingest":     ingestLimits().CPU,
-			"analysis":   analysisLimits().CPU,
-			"quick_look": agentset.FrameLimits().CPU,
+			"ingest":          ingestLimits().CPU,
+			"analysis":        analysisLimits().CPU,
+			"style_reference": styleLimits().CPU,
+			"quick_look":      agentset.FrameLimits().CPU,
 		},
 		Log: logger,
 	}

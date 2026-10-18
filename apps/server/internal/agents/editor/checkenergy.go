@@ -6,17 +6,21 @@ import (
 	"strings"
 
 	"github.com/nilpntr/content-fabrique/internal/camshift"
+	"github.com/nilpntr/content-fabrique/internal/styleprofile"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
-// The energy checks (P6-06): an edit must not sit dead still, and at the lively and hype vibes it uses transitions on the strong beats
-// and the drop (with variety), and text that enters and leaves. The founder's verdict on the edits before these checks: "static/stiff,
-// not playful/vibey", "all hard cuts, no visual effects on entering the text".
+// The energy checks (P6-06): an edit must not sit dead still, and at the lively and hype vibes its text enters and leaves. The founder's
+// verdict on the edits before these checks: "static/stiff, not playful/vibey", "no visual effects on entering the text". Transitions are
+// not energy: a creator's verdict on edits with punch and zoom_through transitions was "nobody uses those transition effects, only
+// someone who throws it into an automatic edit", so an edit has the transitions of the creator's effective style and no more
+// (transitions_match_style): none by default at every vibe, the kinds and the rate of their own videos when those use them, or what the
+// creator set.
 
 // The check ids.
 const (
 	CheckStaticShot          = "static_shot"
-	CheckNoTransitions       = "no_transitions_at_lively"
+	CheckTransitionsStyle    = "transitions_match_style"
 	CheckTransitionVariety   = "transition_variety"
 	CheckTextWithoutEntrance = "text_without_entrance"
 	CheckChapterTitles       = "chapter_titles"
@@ -25,8 +29,20 @@ const (
 // staticShotMaxMs is the longest a shot may sit with no camera motion at all: past it a tripod shot reads as dead.
 const staticShotMaxMs = 2000
 
-// hypeTransitionShare is the share of the cuts that are transitions at hype.
-const hypeTransitionShare = 0.25
+// lotsTransitionShare is the share of the cuts that are transitions, at least, when the style asks for lots; subtleTransitionShare the
+// most when it asks for a few.
+const (
+	lotsTransitionShare   = 0.25
+	subtleTransitionShare = 0.25
+)
+
+// measuredTransitionTypes are the transitions of the timeline that stand for each kind measured at the creator's cuts (styleprofile's
+// transitions: a blend spread over frames, a flash, a zoom).
+var measuredTransitionTypes = map[string][]string{
+	"blend": {timeline.TransitionCrossfade, timeline.TransitionDipToBlack},
+	"flash": {timeline.TransitionFlash},
+	"zoom":  {timeline.TransitionZoomThrough, timeline.TransitionPunch},
+}
 
 // countGimmicks counts the effects a creator of no effects never uses whatever the vibe: speed ramps and shakes.
 func countGimmicks(items []timeline.VideoItem) int {
@@ -74,36 +90,57 @@ func (c *checker) staticShot() Check {
 	return c.pass(CheckStaticShot, "no shot longer than %s sits still", secs(staticShotMaxMs))
 }
 
-func (c *checker) noTransitions() Check {
-	vibe := VibeOr(c.in.Vibe)
-	cuts := len(c.items) - 1
-	switch {
-	case !energetic(vibe):
-		return c.skip(CheckNoTransitions, "the vibe is calm: hard cuts are the style")
-	case cuts < 2:
-		return c.skip(CheckNoTransitions, "fewer than two cuts")
+// transitionsMatch holds the edit to the transitions of the creator's effective style: none when it is off (the default of every vibe),
+// at least one cut in four when it is lots, a few when it is subtle; and when the level was measured from the creator's videos, only
+// the kinds those use, at about their rate.
+func (c *checker) transitionsMatch() Check {
+	r := styleprofile.Resolve(c.in.Style, nil, styleprofile.Settings{}, c.in.Vibe)
+	if c.in.Settings != nil {
+		r = *c.in.Settings
 	}
-	n := 0
+	cuts := len(c.items) - 1
+	var ids, kinds []string
 	for _, it := range c.items[1:] {
 		if isTransition(it) {
-			n++
+			ids = append(ids, it.ID)
+			kinds = append(kinds, transitionKind(it.TransitionIn.Type))
 		}
 	}
-	if n == 0 {
-		return c.fail(CheckNoTransitions, "the vibe is %s and all %d cuts are hard cuts: make the cut into the drop and the cuts on strong beats or phrase starts a whip_left, whip_right, zoom_through, punch or flash of 250 to 400 ms (set_transition), and keep the cuts on ordinary beats hard", vibe, cuts)
+	n := len(ids)
+	from := sourceWords(r.Sources.Transitions)
+	switch r.Transitions {
+	case styleprofile.LevelOff:
+		if n > 0 {
+			return c.fail(CheckTransitionsStyle, "%d %s (%s) but this style is plain cuts on the beat (transitions off, %s): set_transition cut on each. Effect transitions read as an automatic AI edit to creators; the energy comes from the cuts on the beat, the pace, the camera and the text",
+				n, plural(n, "transition", "transitions"), strings.Join(ids[:min(4, n)], ", "), from)
+		}
+		return c.pass(CheckTransitionsStyle, "plain cuts on the beat, as the style asks (transitions off, %s)", from)
+	case styleprofile.LevelLots:
+		if cuts >= 2 && float64(n) < lotsTransitionShare*float64(cuts) {
+			return c.fail(CheckTransitionsStyle, "%d of %d cuts are transitions; the style asks for lots (%s): one on at least every fourth cut, on the strong beats and the drop", n, cuts, from)
+		}
+	default: // subtle
+		if hi := max(1, int(subtleTransitionShare*float64(cuts)+0.5)); n > hi {
+			return c.fail(CheckTransitionsStyle, "%d of %d cuts are transitions; the style asks for a few (%s): at most %d, on the strongest moments, plain cuts elsewhere", n, cuts, from, hi)
+		}
 	}
-	if vibe == VibeHype && float64(n) < hypeTransitionShare*float64(cuts) {
-		return c.fail(CheckNoTransitions, "the vibe is hype and %d of %d cuts are transitions: put one on at least every fourth cut (the strong beats, the phrase starts, the drop)", n, cuts)
-	}
-	// The cut that lands on the drop carries the hit.
-	if m := c.in.Music; m != nil && m.HasDrop {
-		for _, it := range c.items[1:] {
-			if absI(it.AtMs-m.DropMs) <= offBeatToleranceMs*2 && !isTransition(it) {
-				return c.fail(CheckNoTransitions, "the cut on the drop (%s at %d ms) is a hard cut: make it a punch, zoom_through or whip (250 to 400 ms), the hit of the video", it.ID, it.AtMs)
+	if r.Sources.Transitions == styleprofile.SourceMeasured && c.in.Style != nil {
+		tp := c.in.Style.Transitions
+		var allowed []string
+		for _, k := range tp.Kinds {
+			allowed = append(allowed, measuredTransitionTypes[k]...)
+		}
+		for i, k := range kinds {
+			if !slices.Contains(allowed, k) {
+				return c.fail(CheckTransitionsStyle, "%s is a %s transition; the creator's videos use only %s at their cuts: use one of %s, or a plain cut",
+					ids[i], k, strings.Join(tp.Kinds, " and "), strings.Join(allowed, ", "))
 			}
 		}
+		if hi := int(tp.Share*float64(cuts)*1.5 + 1); n > hi {
+			return c.fail(CheckTransitionsStyle, "%d of %d cuts are transitions; the creator's videos have one on %.0f %% of their cuts: at most %d here", n, cuts, tp.Share*100, hi)
+		}
 	}
-	return c.pass(CheckNoTransitions, "%d of %d cuts are transitions", n, cuts)
+	return c.pass(CheckTransitionsStyle, "%d of %d cuts are transitions (transitions %s, %s)", n, cuts, r.Transitions, from)
 }
 
 func (c *checker) transitionVariety() Check {
@@ -118,7 +155,7 @@ func (c *checker) transitionVariety() Check {
 	}
 	for i := 2; i < len(kinds); i++ {
 		if kinds[i] == kinds[i-1] && kinds[i] == kinds[i-2] {
-			return c.fail(CheckTransitionVariety, "three %s transitions in a row: vary them (whip_left, whip_right, zoom_through, punch, flash)", kinds[i])
+			return c.fail(CheckTransitionVariety, "three %s transitions in a row: vary them, or make one a plain cut", kinds[i])
 		}
 	}
 	return c.pass(CheckTransitionVariety, "%d transitions, never the same three in a row", len(kinds))
@@ -156,6 +193,9 @@ func (c *checker) textWithoutEntrance() Check {
 }
 
 func (c *checker) chapterTitles() Check {
+	if s := c.in.Settings; s != nil && s.ChapterTitles == styleprofile.LevelOff {
+		return c.skip(CheckChapterTitles, "the creator's settings turn chapter titles off")
+	}
 	var chapters []int
 	if c.in.Plan != nil {
 		for _, s := range c.in.Plan.Shots {

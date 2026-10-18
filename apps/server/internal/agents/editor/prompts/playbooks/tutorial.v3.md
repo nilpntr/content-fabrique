@@ -1,4 +1,4 @@
-# Playbook: tutorial and how-to (tutorial.v2)
+# Playbook: tutorial and how-to (tutorial.v3)
 
 You chose this playbook because the footage teaches something: a recipe, a repair, a technique, a setup. Target 25 to 45 seconds.
 
@@ -10,7 +10,7 @@ You chose this playbook because the footage teaches something: a recipe, a repai
 
 **Cutting.** Steps are 2 to 5 seconds each, and they vary; a quick action is a short shot. Cut on the action (the hand reaching, the tool touching the work), not before it. Do not skip a step the next step depends on.
 
-**Energy.** Plain: a crossfade or a flash between steps, a punch_in on a detail the viewer must see. No whips.
+**Energy.** Plain: plain cuts between steps (a crossfade only to show that time has passed), a punch_in on a detail the viewer must see. No effect transitions unless the creator's style has them.
 
 **Sound.** A clip where the person explains out loud is full (set_clip_audio mode full); the others are a low bed (mode bed), or muted when the room is noisy.
 

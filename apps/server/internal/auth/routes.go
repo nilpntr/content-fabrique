@@ -12,6 +12,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/annotations"
 	"github.com/nilpntr/content-fabrique/internal/assets"
 	"github.com/nilpntr/content-fabrique/internal/config"
+	"github.com/nilpntr/content-fabrique/internal/creatorstyle"
 	"github.com/nilpntr/content-fabrique/internal/credits"
 	"github.com/nilpntr/content-fabrique/internal/projects"
 	"github.com/nilpntr/content-fabrique/internal/renderjobs"
@@ -36,6 +37,8 @@ type Deps struct {
 	// Runs starts, reads, cancels and answers agent runs (agentset builds it, definition only: the worker executes them). Nil
 	// means agent runs are not configured: the runs operations answer 503 model_not_configured.
 	Runs *runtime.Service
+	// Style is the creator's style (P6-05b). Nil answers the style operations with 503.
+	Style *creatorstyle.Service
 	// PriceList is the price list the API shows credits and videos from (what a video costs in credits, how many videos a plan pays for
 	// per period). Nil means the embedded one (credits.LoadDefault).
 	PriceList *credits.PriceList
@@ -130,6 +133,7 @@ func Mount(mux *http.ServeMux, d Deps) (*V1, error) {
 		return nil, err
 	}
 	srv.CommentAPI = annotations.NewAPI(annotationsSvc, callerOf, logger)
+	srv.styleAPI = &styleAPI{creatorstyle.NewHandler(d.Style, callerOf, logger)}
 	for pattern, h := range apiRoutes(srv, logger) {
 		if open[pattern] {
 			mux.Handle(pattern, mw(h))

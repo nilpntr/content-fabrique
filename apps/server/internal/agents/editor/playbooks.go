@@ -38,12 +38,12 @@ var ContentTypes = []string{TypeTalking, TypeUnboxing, TypeWorkout, TypeVlog, Ty
 
 // playbookVersions maps a playbook to its current version, which is also the name of its file.
 var playbookVersions = map[string]string{
-	TypeTalking:  "talking.v2",
-	TypeUnboxing: "unboxing_product.v2",
-	TypeWorkout:  "workout.v5",
-	TypeVlog:     "vlog.v2",
-	TypeTutorial: "tutorial.v2",
-	TypeGeneral:  "general.v2",
+	TypeTalking:  "talking.v3",
+	TypeUnboxing: "unboxing_product.v3",
+	TypeWorkout:  "workout.v6",
+	TypeVlog:     "vlog.v3",
+	TypeTutorial: "tutorial.v3",
+	TypeGeneral:  "general.v3",
 }
 
 //go:embed prompts/playbooks/*.md
