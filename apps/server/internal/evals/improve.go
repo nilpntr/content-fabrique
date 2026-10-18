@@ -3,7 +3,6 @@ package evals
 import (
 	"context"
 	"fmt"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,8 +42,8 @@ type ImproveDeps struct {
 	Repo Repo
 	// Root is the repository root of the current checkout (the baseline's code).
 	Root string
-	// Baseline runs the suite on the current code.
-	Baseline func(ctx context.Context) (*RunResult, error)
+	// Baseline runs the suite on the current code, or returns a recent run of the same code (baseline.go); cached says it did.
+	Baseline func(ctx context.Context) (res *RunResult, cached bool, err error)
 	// Evaluate runs the suite on the code in the scratch worktree dir, with a label and a spending limit.
 	Evaluate func(ctx context.Context, dir, label string, live bool, maxMicros int64) (*RunResult, error)
 	// Propose asks the improver.
@@ -66,9 +65,9 @@ type ImproveOptions struct {
 	// Live lets a change that affects the model be judged with live editor runs (inside MaxMicros); without it such a change is
 	// reported as not evaluated.
 	Live bool
-	// MinGain is how much the mean must rise (points of 100); MaxRegression how far one case may drop; HeldOutSlack how far the held-out
-	// mean may drop.
-	MinGain, MaxRegression, HeldOutSlack float64
+	// Rule is the acceptance rule (stats.go): a noise-aware gain, no case regression beyond the noise, the held-out cases and the failure
+	// rate holding.
+	Rule Rule
 	// LowCases is how many of the lowest-scoring cases the improver is shown.
 	LowCases int
 	// WorkDir holds the scratch worktree; ReportDir the report.
@@ -86,55 +85,20 @@ type Iteration struct {
 	After      *RunResult
 	Accepted   bool
 	Reasons    []string
+	Decision   *Decision
 	Diff       string
 	CostMicros int64
 }
 
 // ImproveResult is the loop's outcome.
 type ImproveResult struct {
-	Branch     string
-	Kept       bool
-	Iterations []Iteration
-	Report     string
-	Spent      int64
-}
-
-// Accept applies the rule: the mean rises by at least minGain, no case (scored in both, not calibration, not held out) drops by more
-// than maxRegression, and the held-out mean does not drop by more than heldOutSlack. It returns the decision and its reasons.
-func Accept(before, after *RunResult, minGain, maxRegression, heldOutSlack float64) (bool, []string) {
-	var reasons []string
-	ok := true
-	if before.Mean == nil || after.Mean == nil {
-		return false, []string{"a run has no mean score"}
-	}
-	gain := *after.Mean - *before.Mean
-	if gain < minGain {
-		ok = false
-		reasons = append(reasons, fmt.Sprintf("the mean moved %+.1f (from %.1f to %.1f), less than the required %+.1f", gain, *before.Mean, *after.Mean, minGain))
-	} else {
-		reasons = append(reasons, fmt.Sprintf("the mean rose %+.1f (from %.1f to %.1f)", gain, *before.Mean, *after.Mean))
-	}
-	for _, b := range before.Cases {
-		a, found := after.ByCase(b.Case)
-		if !found || b.Score == nil || a.Score == nil || b.Calibration != nil || b.HeldOut {
-			continue
-		}
-		if d := *a.Score - *b.Score; d < -maxRegression {
-			ok = false
-			reasons = append(reasons, fmt.Sprintf("case %s dropped %.1f (from %.1f to %.1f), more than %.1f", b.Case, -d, *b.Score, *a.Score, maxRegression))
-		}
-	}
-	switch {
-	case before.HeldOut != nil && after.HeldOut == nil:
-		ok = false
-		reasons = append(reasons, "the held-out cases were not scored after the change")
-	case before.HeldOut != nil && *after.HeldOut < *before.HeldOut-heldOutSlack:
-		ok = false
-		reasons = append(reasons, fmt.Sprintf("the held-out mean dropped from %.1f to %.1f", *before.HeldOut, *after.HeldOut))
-	case before.HeldOut != nil:
-		reasons = append(reasons, fmt.Sprintf("the held-out mean held (%.1f to %.1f)", *before.HeldOut, *after.HeldOut))
-	}
-	return ok, reasons
+	// BaselineCached says the baseline was a recent run of the same code, reused.
+	BaselineCached bool
+	Branch         string
+	Kept           bool
+	Iterations     []Iteration
+	Report         string
+	Spent          int64
 }
 
 // lowest are the n lowest-scoring cases that the improver may see (scored, not held out, not calibration).
@@ -175,13 +139,17 @@ func Improve(ctx context.Context, d ImproveDeps, o ImproveOptions) (*ImproveResu
 		telemetry.Kind(telemetry.KindChain), attribute.String("cf.suite", o.Suite.Name), attribute.String("cf.branch", res.Branch)))
 	defer span.End()
 
-	logf("baseline: running the suite on the current code")
-	before, err := d.Baseline(ctx)
+	before, cached, err := d.Baseline(ctx)
 	if err != nil {
 		span.SetStatus(codes.Error, "baseline")
 		return res, fmt.Errorf("baseline: %w", err)
 	}
-	res.Spent += before.SpentMicro
+	if cached {
+		logf("baseline: reusing %s (the same code, %s old): no new runs", cmpOr(before.JSONL, before.RunID), o.Now().Sub(baselineTime(before)).Round(time.Minute))
+	} else {
+		res.Spent += before.SpentMicro
+	}
+	res.BaselineCached = cached
 	if before.Mean == nil {
 		return res, fmt.Errorf("the baseline scored no case; fill the local suite file (or judge first) before improving")
 	}
@@ -258,7 +226,7 @@ func Improve(ctx context.Context, d ImproveDeps, o ImproveOptions) (*ImproveResu
 		if it.Diff, err = d.Repo.Commit(ctx, dir, msg); err != nil {
 			return res, fmt.Errorf("commit the change: %w", err)
 		}
-		after, err := d.Evaluate(ctx, dir, fmt.Sprintf("candidate %d: %s", n, p.Title), p.AffectsModel && o.Live, o.MaxMicros-res.Spent)
+		after, err := d.Evaluate(ctx, dir, fmt.Sprintf("candidate %d: %s", n, p.Title), o.Live, o.MaxMicros-res.Spent) // live when the baseline was: like against like
 		if err != nil {
 			it.NotRun = "the suite did not run on the change: " + err.Error()
 			_ = d.Repo.DropLast(ctx, dir)
@@ -269,7 +237,11 @@ func Improve(ctx context.Context, d ImproveDeps, o ImproveOptions) (*ImproveResu
 		it.After = after
 		it.CostMicros += after.SpentMicro
 		res.Spent += after.SpentMicro
-		it.Accepted, it.Reasons = Accept(before, after, o.MinGain, o.MaxRegression, o.HeldOutSlack)
+		dec := Accept(before, after, o.Rule)
+		it.Decision, it.Accepted, it.Reasons = &dec, dec.Accepted, dec.Reasons
+		for _, r := range dec.Reasons {
+			logf("  %s", r)
+		}
 		if it.Accepted {
 			res.Kept = true
 			before = after
@@ -324,20 +296,17 @@ func traceIteration(ctx context.Context, it Iteration) {
 	s.End()
 }
 
-func fmtScore(p *float64) string {
-	if p == nil || math.IsNaN(*p) {
-		return "-"
-	}
-	return fmt.Sprintf("%.1f", *p)
-}
-
 // writeReport writes the loop's report (markdown) and returns its path.
 func writeReport(res *ImproveResult, o ImproveOptions, d ImproveDeps) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Eval improve: %s\n\n", o.Suite.Name)
 	fmt.Fprintf(&b, "- Branch: `%s` (%s)\n", res.Branch, map[bool]string{true: "kept: review it and open a PR; it was never pushed", false: "nothing was kept; the branch was deleted"}[res.Kept])
 	fmt.Fprintf(&b, "- Spent: $%.3f of $%.2f\n", float64(res.Spent)/1e6, float64(o.MaxMicros)/1e6)
-	fmt.Fprintf(&b, "- Rule: the mean rises by %.1f or more, no case drops by more than %.1f, the held-out mean drops by %.1f at most\n\n", o.MinGain, o.MaxRegression, o.HeldOutSlack)
+	fmt.Fprintf(&b, "- Rule (paired by case, noise-aware, docs/design/observability-v1.md section 9): the mean gain is at least %.1f and more than twice its standard error; no case drops by more than max(%.1f, twice its noise); the held-out mean drops by at most max(%.1f, twice its noise); the failure rate does not rise. A live case scored once is given a noise sd of %.1f\n", o.Rule.MinGain, o.Rule.MaxRegression, o.Rule.HeldOutSlack, cmpF(o.Rule.NoiseSD, DefaultNoiseSD))
+	if res.BaselineCached {
+		b.WriteString("- The baseline is a recent run of the same code, reused (no new runs)\n")
+	}
+	b.WriteString("\n")
 	for _, it := range res.Iterations {
 		fmt.Fprintf(&b, "## Iteration %d: %s\n\n", it.N, cmpOr(it.Proposal.Title, "(no proposal)"))
 		switch {
@@ -353,6 +322,9 @@ func writeReport(res *ImproveResult, o ImproveOptions, d ImproveDeps) (string, e
 		if it.Proposal.Kind != "" {
 			fmt.Fprintf(&b, "- Kind: %s, file `%s`, affects the model: %v\n- Rationale: %s\n- Expected: %s\n- Cost: $%.3f\n\n", it.Proposal.Kind, it.Proposal.File(),
 				it.Proposal.AffectsModel, it.Proposal.Rationale, it.Proposal.ExpectedEffect, float64(it.CostMicros)/1e6)
+		}
+		if it.Decision != nil {
+			fmt.Fprintf(&b, "- Mean gain %+.2f ± %.2f over %d cases\n", it.Decision.Gain, it.Decision.GainSE, it.Decision.Cases)
 		}
 		for _, r := range it.Reasons {
 			fmt.Fprintf(&b, "- %s\n", r)
@@ -372,9 +344,17 @@ func writeReport(res *ImproveResult, o ImproveOptions, d ImproveDeps) (string, e
 				if bc.Calibration != nil {
 					name += " (calibration)"
 				}
-				fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s |\n", name, fmtScore(bc.Score), fmtScore(ac.Score), delta, link(d, bc.TraceID), link(d, ac.TraceID))
+				fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s |\n", name, ScoreText(bc), ScoreText(ac), delta, link(d, bc.TraceID), link(d, ac.TraceID))
 			}
-			fmt.Fprintf(&b, "| **mean** | %s | %s | | | |\n| held out | %s | %s | | | |\n\n", fmtScore(it.Before.Mean), fmtScore(it.After.Mean), fmtScore(it.Before.HeldOut), fmtScore(it.After.HeldOut))
+			fmt.Fprintf(&b, "| **mean** | %s | %s | | | |\n| held out | %s | %s | | | |\n| failure rate | %.0f %% (%d/%d) | %.0f %% (%d/%d) | | | |\n\n",
+				MeanText(it.Before.Mean, it.Before.MeanSE), MeanText(it.After.Mean, it.After.MeanSE), MeanText(it.Before.HeldOut, it.Before.HeldOutSE),
+				MeanText(it.After.HeldOut, it.After.HeldOutSE), 100*it.Before.FailureRate, it.Before.Failures, it.Before.Samples,
+				100*it.After.FailureRate, it.After.Failures, it.After.Samples)
+			for _, r := range []*RunResult{it.Before, it.After} {
+				for _, f := range failureList(r) {
+					fmt.Fprintf(&b, "- Failed sample (%s, scored 0): %s\n", cmpOr(r.Label, r.RunID), f)
+				}
+			}
 			for _, r := range []*RunResult{it.Before, it.After} {
 				if r.Experiment != "" {
 					fmt.Fprintf(&b, "- Phoenix experiment (%s): %s\n", cmpOr(r.Label, r.RunID), r.Experiment)
@@ -468,4 +448,11 @@ func (g GitRepo) Build(ctx context.Context, dir string) error {
 		}
 	}
 	return nil
+}
+
+func cmpF(a, b float64) float64 {
+	if a > 0 {
+		return a
+	}
+	return b
 }

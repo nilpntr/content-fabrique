@@ -62,6 +62,24 @@ const (
 // ErrNoRender says the version has no ready preview render.
 var ErrNoRender = errors.New("the version has no ready preview render")
 
+// Sheet returns the contact sheet of the version's newest ready preview render (a judge anchor needs no strips).
+func (p *Pictures) Sheet(ctx context.Context, t Target) (*Picture, error) {
+	list, err := p.Renders.ListRenders(ctx, t.Workspace, t.Project, store.RenderFilter{Version: t.Version, Profile: store.ProfilePreview}, 5)
+	if err != nil {
+		return nil, err
+	}
+	for i := range list {
+		if r := list[i]; r.Status == store.RenderReady && r.ContactSheetKey != nil && r.ObjectsPurgedAt == nil {
+			sheet, err := p.read(ctx, *r.ContactSheetKey, maxSheetBytes)
+			if err != nil {
+				return nil, err
+			}
+			return &Picture{Label: "contact sheet", JPEG: sheet}, nil
+		}
+	}
+	return nil, ErrNoRender
+}
+
 // Render returns the version's contact sheet and the strips around its cuts.
 func (p *Pictures) Render(ctx context.Context, t Target, spec *timeline.Spec) (*Picture, []Picture, error) {
 	list, err := p.Renders.ListRenders(ctx, t.Workspace, t.Project, store.RenderFilter{Version: t.Version, Profile: store.ProfilePreview}, 5)

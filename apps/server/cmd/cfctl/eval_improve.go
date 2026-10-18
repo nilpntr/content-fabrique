@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/evals"
 	"github.com/nilpntr/content-fabrique/internal/ids"
@@ -23,7 +24,10 @@ const evalImproveUsage = `Usage:
   cfctl eval improve --max-usd N [--iterations N] [--live] [suite flags]
 
 DEVELOPMENT ONLY. The improvement loop (docs/design/observability-v1.md section 8):
-  1. runs the suite on the current code: the baseline;
+  0. estimates the cost (the baseline unless it is cached, and per iteration the improver plus a candidate run, from the recent
+     runs' costs) and refuses to start when it is over --max-usd;
+  1. runs the suite on the current code: the baseline. A run of the same code (a hash of the editor, renderer, timeline, style,
+     scoring and routing code, the suite files and the run options) younger than --baseline-max-age is reused instead;
   2. shows the lowest-scoring cases (failing checks, the judge's rationales, failed human feedback) to the improver (improve_edit,
      Opus 5.5, at most --improver-usd a call) with the files it may change;
   3. the improver proposes ONE change: exact replacements in one file of the allowlist (the editor prompt, a playbook, a check
@@ -31,8 +35,10 @@ DEVELOPMENT ONLY. The improvement loop (docs/design/observability-v1.md section 
   4. the change is applied and committed on a scratch branch (improve/<suite>-<time>) in a scratch worktree under .eval-worktrees/,
      built, and the suite runs again on that code (go run in the worktree). A change to what the editor is told (prompt, playbook)
      needs --live: stored versions cannot show its effect; without --live it is reported, not evaluated;
-  5. the change is kept when the mean rises by --min-gain, no case drops by more than --max-regression and the held-out mean drops by
-     --held-out-slack at most; otherwise it is dropped from the branch;
+  5. the change is kept only when, case by case, the mean gain is at least --min-gain and more than twice its standard error, no case
+     drops by more than --max-regression or twice its noise, the held-out mean drops by no more than --held-out-slack or twice its
+     noise, and the failure rate does not rise (a failed sample scores 0); otherwise it is dropped from the branch. Live cases run
+     --repeat times (default 2), so each has a mean and a spread;
   6. a markdown report (before and after per case, the diff, the trace links) goes to eval-results/improve/.
 It never pushes: a kept change is a local branch for you to review and turn into a PR. Every iteration is a span in Phoenix, and every
 suite run an experiment. Nothing is spent beyond --max-usd (improver calls, judge calls and live editor runs together).
@@ -40,9 +46,11 @@ suite run an experiment. Nothing is spent beyond --max-usd (improver calls, judg
   --max-usd         the hard total (required, more than 0)
   --iterations      changes to try, each on top of the last kept one; default 1
   --improver-usd    the budget of one improver call; default 0.50
-  --min-gain        the least rise of the mean that keeps a change, in points of 100; default 0.5
-  --max-regression  the most one case may drop; default 5
-  --held-out-slack  the most the held-out mean may drop; default 1
+  --min-gain        the least rise of the mean that keeps a change, in points of 100, whatever the noise; default 0.5
+  --max-regression  the most one case may drop beyond its noise; default 5
+  --held-out-slack  the most the held-out mean may drop beyond its noise; default 1
+  --noise-sd        the standard deviation of a live case scored once (with --repeat 1); default 4
+  --baseline-max-age  how old a cached baseline of the same code may be; default 24h, 0 always runs it
   --low             how many low cases the improver sees; default 2
   --proposal        a change of your own to try instead of asking the improver: a JSON file {"title", "rationale", "expected_effect",
                     "edits": [{"path", "old", "new"}]} with the same rules (one file of the allowlist, each old text once)
@@ -62,6 +70,8 @@ func cmdEvalImprove(args []string, stdout, stderr io.Writer, lookup lookupEnv, d
 	maxRegression := fs.Float64("max-regression", 5, "most one case may drop")
 	heldOutSlack := fs.Float64("held-out-slack", 1, "most the held-out mean may drop")
 	low := fs.Int("low", 2, "low cases shown")
+	noiseSD := fs.Float64("noise-sd", evals.DefaultNoiseSD, "sd of a live case scored once")
+	maxAge := fs.Duration("baseline-max-age", 24*time.Hour, "how old a cached baseline may be")
 	proposalFile := fs.String("proposal", "", "a proposal (JSON) to try instead of asking the improver")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -101,13 +111,47 @@ func cmdEvalImprove(args []string, stdout, stderr io.Writer, lookup lookupEnv, d
 	baseOpts := se.opts
 	baseOpts.Label = "baseline"
 	baseOpts.Live = f.live // with --live, the baseline edits again too, so a change to the prompt is compared live against live
+
+	// The cost guard: the baseline (unless a recent run of the same code can stand in for it), then per iteration the improver call and a
+	// candidate run.
+	history := evals.RecentRuns(outDir, se.suite.Name, 10)
+	cachedBase, cached := (*evals.RunResult)(nil), false
+	if *maxAge > 0 && se.opts.CodeHash != "" {
+		cachedBase, cached = evals.LookupBaseline(outDir, se.suite.Name, se.opts.CodeHash, *maxAge, time.Now())
+	}
+	run := evals.EstimateRun(se.suite, baseOpts, se.deps.Edit != nil, history)
+	var lines []string
+	improverMicros := int64(*improverUSD * 1e6)
+	if *proposalFile != "" {
+		improverMicros = 0 // your own change: no improver call
+	}
+	total := int64(*iterations) * (improverMicros + run.Micros)
+	if cached {
+		lines = append(lines, "baseline: a run of the same code from "+cachedBase.RunID+" is reused: $0")
+	} else {
+		total += run.Micros
+		lines = append(lines, fmt.Sprintf("baseline: $%.2f", float64(run.Micros)/1e6))
+	}
+	lines = append(lines, fmt.Sprintf("per iteration: improver up to $%.2f + candidate run $%.2f, × %d", float64(improverMicros)/1e6, float64(run.Micros)/1e6, *iterations))
+	lines = append(lines, run.Lines...)
+	if !guardCost(out, errOut, name, total, f.maxUSD, lines) {
+		return 2
+	}
+
 	d := evals.ImproveDeps{
 		Repo: evals.GitRepo{Root: se.env.root},
 		Root: se.env.root,
-		Baseline: func(ctx context.Context) (*evals.RunResult, error) {
+		Baseline: func(ctx context.Context) (*evals.RunResult, bool, error) {
+			if cached {
+				return cachedBase, true, nil
+			}
 			o := baseOpts
-			o.MaxMicros = maxMicros / 2 // the candidates need room too
-			return evals.Run(ctx, se.suite, se.deps, o)
+			o.MaxMicros = maxMicros - int64(*iterations)*(improverMicros+run.Micros) // the candidates keep their share
+			r, err := evals.Run(ctx, se.suite, se.deps, o)
+			if err == nil && complete(r) {
+				_ = evals.RecordBaseline(outDir, r, time.Now())
+			}
+			return r, false, err
 		},
 		Evaluate: func(ctx context.Context, dir, label string, live bool, left int64) (*evals.RunResult, error) {
 			return evaluateIn(ctx, se, f, dir, label, live, left, outDir)
@@ -128,8 +172,9 @@ func cmdEvalImprove(args []string, stdout, stderr io.Writer, lookup lookupEnv, d
 	}
 	res, err := evals.Improve(ctx, d, evals.ImproveOptions{
 		Suite: se.suite, Iterations: *iterations, MaxMicros: maxMicros, ImproverMicros: int64(*improverUSD * 1e6), Live: f.live,
-		MinGain: *minGain, MaxRegression: *maxRegression, HeldOutSlack: *heldOutSlack, LowCases: *low,
-		WorkDir: filepath.Join(se.env.root, ".eval-worktrees"), ReportDir: filepath.Join(outDir, "improve"),
+		Rule:     evals.Rule{MinGain: *minGain, MaxRegression: *maxRegression, HeldOutSlack: *heldOutSlack, NoiseSD: *noiseSD},
+		LowCases: *low,
+		WorkDir:  filepath.Join(se.env.root, ".eval-worktrees"), ReportDir: filepath.Join(outDir, "improve"),
 	})
 	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "cfctl %s: %v\n", name, err)
@@ -178,7 +223,7 @@ func evaluateIn(ctx context.Context, se *suiteEnv, f suiteFlags, dir, label stri
 		}
 	}
 	args := []string{"run", "./cmd/cfctl", "eval", "suite", "--suite", se.suite.Path, "--out", outDir, "--label", label,
-		"--max-usd", strconv.FormatFloat(float64(max(left, 0))/1e6, 'f', 6, 64)}
+		"--max-usd", strconv.FormatFloat(float64(max(left, 0))/1e6, 'f', 6, 64), "--repeat", strconv.Itoa(se.opts.Repeat)}
 	if _, err := os.Stat(se.env.path); err == nil {
 		args = append(args, "--env-file", se.env.path)
 	}

@@ -26,22 +26,23 @@ func result(mean, held float64, cases map[string]float64) *RunResult {
 	return r
 }
 
-func TestAcceptRule(t *testing.T) {
+func TestAcceptRuleOnStoredScores(t *testing.T) {
 	before := result(70, 80, map[string]float64{"a": 60, "b": 80, "held": 80})
+	rule := Rule{MinGain: 0.5, MaxRegression: 5, HeldOutSlack: 1}
 	for _, c := range []struct {
 		name  string
 		after *RunResult
 		want  bool
 		why   string
 	}{
-		{"better everywhere", result(75, 81, map[string]float64{"a": 66, "b": 84, "held": 81}), true, "rose"},
-		{"too small a gain", result(70.2, 80, map[string]float64{"a": 60.4, "b": 80, "held": 80}), false, "less than"},
+		{"better everywhere", result(75, 81, map[string]float64{"a": 66, "b": 84, "held": 81}), true, "exceeds twice its standard error"},
+		{"too small a gain", result(70.2, 80, map[string]float64{"a": 60.4, "b": 80, "held": 80}), false, "below the minimum"},
 		{"one case regresses", result(76, 80, map[string]float64{"a": 80, "b": 72, "held": 80}), false, "case b dropped"},
 		{"held out regresses", result(76, 70, map[string]float64{"a": 66, "b": 86, "held": 70}), false, "held-out mean dropped"},
 	} {
-		ok, reasons := Accept(before, c.after, 0.5, 5, 1)
-		if ok != c.want || !strings.Contains(strings.Join(reasons, "; "), c.why) {
-			t.Errorf("%s: %v %v", c.name, ok, reasons)
+		d := Accept(before, c.after, rule)
+		if d.Accepted != c.want || !strings.Contains(strings.Join(d.Reasons, "; "), c.why) {
+			t.Errorf("%s: %v %v", c.name, d.Accepted, d.Reasons)
 		}
 	}
 	if l := lowest(before, 1); len(l) != 1 || l[0].Case != "a" {
@@ -198,8 +199,8 @@ func TestImproveKeepsAChangeThatHelps(t *testing.T) {
 	var shown ImproverInput
 	d := ImproveDeps{
 		Repo: repo, Root: repoRoot(t),
-		Baseline: func(context.Context) (*RunResult, error) {
-			return result(70, 80, map[string]float64{"a": 60, "b": 80, "held": 80}), nil
+		Baseline: func(context.Context) (*RunResult, bool, error) {
+			return result(70, 80, map[string]float64{"a": 60, "b": 80, "held": 80}), false, nil
 		},
 		Propose: func(_ context.Context, in ImproverInput, budget int64) (Proposal, int64, error) {
 			proposals++
@@ -223,8 +224,7 @@ func TestImproveKeepsAChangeThatHelps(t *testing.T) {
 		},
 		TraceURL: func(id string) string { return "http://phoenix/" + id },
 	}
-	res, err := Improve(context.Background(), d, ImproveOptions{Suite: s, MaxMicros: 1_000_000, ImproverMicros: 400_000, MinGain: 0.5, MaxRegression: 5,
-		HeldOutSlack: 1, WorkDir: work, ReportDir: filepath.Join(work, "reports")})
+	res, err := Improve(context.Background(), d, ImproveOptions{Suite: s, MaxMicros: 1_000_000, ImproverMicros: 400_000, Rule: Rule{MinGain: 0.5, MaxRegression: 5, HeldOutSlack: 1}, WorkDir: work, ReportDir: filepath.Join(work, "reports")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,8 +276,8 @@ func TestImproveRejectsAndExplains(t *testing.T) {
 		}
 		d := ImproveDeps{
 			Repo: repo, Root: repoRoot(t),
-			Baseline: func(context.Context) (*RunResult, error) {
-				return result(70, 80, map[string]float64{"a": 60, "b": 80, "held": 80}), nil
+			Baseline: func(context.Context) (*RunResult, bool, error) {
+				return result(70, 80, map[string]float64{"a": 60, "b": 80, "held": 80}), false, nil
 			},
 			Propose: func(context.Context, ImproverInput, int64) (Proposal, int64, error) { return tc.proposal, 1000, nil },
 			Evaluate: func(context.Context, string, string, bool, int64) (*RunResult, error) {
@@ -288,8 +288,7 @@ func TestImproveRejectsAndExplains(t *testing.T) {
 				return tc.after, nil
 			},
 		}
-		res, err := Improve(context.Background(), d, ImproveOptions{Suite: s, MaxMicros: 500_000, ImproverMicros: 100_000, MinGain: 0.5, MaxRegression: 5,
-			HeldOutSlack: 1, WorkDir: work, ReportDir: filepath.Join(work, "r-"+strings.ReplaceAll(name, " ", "-"))})
+		res, err := Improve(context.Background(), d, ImproveOptions{Suite: s, MaxMicros: 500_000, ImproverMicros: 100_000, Rule: Rule{MinGain: 0.5, MaxRegression: 5, HeldOutSlack: 1}, WorkDir: work, ReportDir: filepath.Join(work, "r-"+strings.ReplaceAll(name, " ", "-"))})
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
