@@ -55,6 +55,9 @@ type FactoryOptions struct {
 	Images ImageResolver
 	// Keys replaces the managed key resolver (P4-00b). Optional.
 	Keys KeyResolver
+	// Caps are what each model accepts (capabilities.go). Nil uses the embedded config/routing/models.yaml; a model it does not list is
+	// refused.
+	Caps Capabilities
 	// HTTPClient replaces the SDK's transport; tests pass a fake one. Optional.
 	HTTPClient *http.Client
 	Logger     *slog.Logger
@@ -141,7 +144,7 @@ func (f *Factory) For(ctx context.Context, workspace ids.WorkspaceID, stage stri
 		}
 		sdk := newAnthropicClient(anthropicConfig{
 			APIKey: key, BaseURL: s.BaseURL, GatewayToken: strings.TrimSpace(f.opts.Getenv("CF_AIG_TOKEN")),
-			HTTPClient: f.opts.HTTPClient, Workspace: workspace.String(), Stage: stage,
+			HTTPClient: f.opts.HTTPClient, Workspace: workspace.String(), Stage: stage, Caps: f.opts.Caps,
 		})
 		inner = newLimited(sdk, f.limiters.forKey(key, s.Concurrency), f.opts.retry, f.opts.Logger)
 	}

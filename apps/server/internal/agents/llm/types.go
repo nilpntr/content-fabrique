@@ -143,6 +143,8 @@ type ToolChoice struct {
 	Type string
 	// Name is the tool, for Type "tool".
 	Name string
+	// DisableParallelToolUse makes the model call at most one tool (exactly one for any and tool).
+	DisableParallelToolUse bool
 }
 
 // ThinkingMode picks how the model thinks.

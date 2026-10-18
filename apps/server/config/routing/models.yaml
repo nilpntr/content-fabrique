@@ -1,12 +1,33 @@
 # Model catalogue: each native Anthropic model ID (what the routing profiles use, and what the direct API and the
-# gateway's /anthropic endpoint take) mapped to its Cloudflare REST name (provider/model).
+# gateway's /anthropic endpoint take) mapped to its Cloudflare REST name (provider/model), and what the model accepts.
 #
 # The dotted Cloudflare spelling is the founder's. Cloudflare's docs show no 5.5 model, so treat it as unverified
 # until `cfctl doctor` resolves it with CF_AI_API_TOKEN set (docs/06-setup-and-credentials.md §3.1).
+#
+# Capabilities (the llm client maps a request to them before it is sent; a model that is not listed here is refused):
+#   thinking_off            how a request that asks for thinking off (llm.ThinkingDisabled) is sent:
+#                             disabled       {"type":"disabled"}
+#                             between_tools  {"type":"between_tools"} and no other field (Sonnet 5.5: "disabled" is a 400)
+#                             omit           no thinking field: the model cannot turn thinking off (Opus 5.5: "disabled" is a 400 at
+#                                            every effort); it thinks adaptively, and the caller keeps it short with effort
+#   thinking_off_max_effort the highest effort at which thinking can be turned off; a request above it is refused before it is sent
+#   forced_tool_choice      whether tool_choice any or tool is accepted (on Sonnet and Opus 5.5 it is a 400, count_tokens too). When it
+#                           is not, a forced choice is sent as auto with disable_parallel_tool_use and the named tool strict, and the
+#                           caller (llm.CallTool) asks once more when the answer has no call to it
+# Source: the Claude API docs (claude-api skill, 2026-10). Haiku 5.5's "disabled" at effort high or below is what the quick look and
+# the style reads have run on since P1-04b.
 models:
   claude-opus-5-5:
     cloudflare: anthropic/claude-opus-5.5
+    thinking_off: omit
+    forced_tool_choice: false
   claude-sonnet-5-5:
     cloudflare: anthropic/claude-sonnet-5.5
+    thinking_off: between_tools
+    thinking_off_max_effort: high
+    forced_tool_choice: false
   claude-haiku-5-5:
     cloudflare: anthropic/claude-haiku-5.5
+    thinking_off: disabled
+    thinking_off_max_effort: high
+    forced_tool_choice: true

@@ -31,7 +31,7 @@ const JudgeStage = "judge_edit"
 
 // JudgePromptVersion names the judge's prompt and tool. A change to either is a new version: cached verdicts of the old one are not
 // reused.
-const JudgePromptVersion = "judge_edit.v2"
+const JudgePromptVersion = "judge_edit.v3"
 
 // MaxJudgeMicros is the hard budget of one judge call: $0.10. It is a llm.Budget, so a call whose worst case does not fit is cut (its
 // max_tokens) or refused before it is sent.
@@ -193,13 +193,18 @@ func (j *Judge) Score(ctx context.Context, ws ids.WorkspaceID, runID uuid.UUID, 
 	b := llm.NewRunBudget(min(budget, MaxJudgeMicros))
 	req := route.Apply(BuildJudgeRequest(in))
 	req.Run = llm.RunInfo{ID: runID, Profile: route.Profile, Budget: b}
-	resp, err := client.Messages(ctx, req)
+	// Sonnet 5.5 cannot be forced to call the tool: the client sends auto with the tool strict, and CallTool asks once more when the
+	// answer has no call (both calls inside the same $0.10 budget).
+	resp, call, ok, err := llm.CallTool(ctx, client, req, JudgeToolName)
 	v.CostMicros = b.Spent()
 	if resp.Model != "" {
 		v.Model = resp.Model
 	}
 	var capErr *llm.CapError
 	switch {
+	case errors.Is(err, llm.ErrNoToolCall):
+		v.Reason = "no_answer"
+		return v, nil
 	case err == nil, errors.Is(err, llm.ErrLedger) && len(resp.Content) > 0:
 	case errors.As(err, &capErr):
 		v.Reason = "spend_cap"
@@ -207,28 +212,24 @@ func (j *Judge) Score(ctx context.Context, ws ids.WorkspaceID, runID uuid.UUID, 
 	default:
 		return v, fmt.Errorf("model call: %w", err)
 	}
-	switch resp.StopReason {
-	case "refusal":
+	switch {
+	case resp.StopReason == "refusal":
 		v.Reason = "refused"
 		return v, nil
-	case "max_tokens":
+	case resp.StopReason == "max_tokens" && !ok:
 		v.Reason = "truncated"
 		return v, nil
-	}
-	for _, u := range resp.ToolUses() {
-		if u.Name != JudgeToolName {
-			continue
-		}
-		scores, exp, verr := ValidateJudgement(u.Input, in.Expectations)
-		if verr != nil {
-			v.Reason = "invalid_output"
-			return v, nil
-		}
-		v.Scores, v.Expectations = scores, exp
-		j.store(key, v)
+	case !ok:
+		v.Reason = "no_answer"
 		return v, nil
 	}
-	v.Reason = "no_answer"
+	scores, exp, verr := ValidateJudgement(call.Input, in.Expectations)
+	if verr != nil {
+		v.Reason = "invalid_output"
+		return v, nil
+	}
+	v.Scores, v.Expectations = scores, exp
+	j.store(key, v)
 	return v, nil
 }
 
@@ -287,6 +288,8 @@ Score each dimension from 1 to 5 and write the rationale first, two to four sent
 - story_arc: does it have a beginning, a build and an ending that pays off the hook? 5 = a complete little story.
 
 Then score each rubric item of the case the same way (5 = fully met).
+
+Answer only by calling score_edit, once; do not write the scores as text.
 
 The recorded feedback of the creator's team is listed under human_feedback: it describes what they dislike and it outweighs your own taste; take it into account in ai_look, energy_pace, text and style_match.
 The music sync is measured, not judged: it is given to you as a fact; do not score it.
@@ -374,11 +377,13 @@ func BuildJudgeRequest(in JudgeInput) llm.Request {
 	}
 	c = append(c, llm.TextBlock("Score this edit."))
 	return llm.Request{
-		System:     []llm.Block{llm.TextBlock(judgeSystem)},
-		Messages:   []llm.Message{{Role: llm.RoleUser, Content: c}},
-		Tools:      []llm.Tool{{Name: JudgeToolName, Description: "Record the scores of the edit.", InputSchema: judgeSchema(), Strict: true}},
+		System:   []llm.Block{llm.TextBlock(judgeSystem)},
+		Messages: []llm.Message{{Role: llm.RoleUser, Content: c}},
+		Tools:    []llm.Tool{{Name: JudgeToolName, Description: "Record the scores of the edit.", InputSchema: judgeSchema(), Strict: true}},
+		// One call of the tool, and no thinking: the client sends each the way the model takes it (models.yaml; on Sonnet 5.5 auto with the
+		// tool strict, and thinking between_tools), and the rationale comes first in the tool's input instead.
 		ToolChoice: &llm.ToolChoice{Type: "tool", Name: JudgeToolName},
-		Thinking:   &llm.Thinking{Mode: llm.ThinkingDisabled}, // a forced tool call rules thinking out; the rationale comes first instead
+		Thinking:   &llm.Thinking{Mode: llm.ThinkingDisabled},
 	}
 }
 
