@@ -47,3 +47,4 @@ apps/server/internal/render/testdata/.cache/
 /eval-results/
 /apps/server/eval-results/
 suites/*.local.yaml
+/.eval-worktrees/

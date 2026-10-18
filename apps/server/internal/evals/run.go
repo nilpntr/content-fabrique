@@ -227,6 +227,38 @@ func Run(ctx context.Context, s *Suite, d Deps, o Options) (*RunResult, error) {
 	return res, nil
 }
 
+// LoadResults reads a results file back: the cases and the summary line.
+func LoadResults(path string) (*RunResult, error) {
+	raw, err := os.ReadFile(path) // #nosec G304 -- a results file of ours
+	if err != nil {
+		return nil, err
+	}
+	var res *RunResult
+	var cases []CaseResult
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		if strings.HasPrefix(line, `{"summary":`) {
+			var s struct {
+				Summary RunResult `json:"summary"`
+			}
+			if err := json.Unmarshal([]byte(line), &s); err != nil {
+				return nil, fmt.Errorf("%s: %w", path, err)
+			}
+			res = &s.Summary
+			continue
+		}
+		var c CaseResult
+		if err := json.Unmarshal([]byte(line), &c); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		cases = append(cases, c)
+	}
+	if res == nil {
+		return nil, fmt.Errorf("%s has no summary line: the run did not finish", path)
+	}
+	res.Cases, res.JSONL = cases, path
+	return res, nil
+}
+
 func writeLine(w io.Writer, v any) error {
 	raw, err := json.Marshal(v)
 	if err != nil {

@@ -8,7 +8,7 @@ Three parts, each its own PR:
 
 1. **Traces (this note, sections 2 to 6).** Every agent run is a trace: the run, its context, every model call with what was sent and what came back, every tool call with its arguments and result, the checks of `check_edit`, the budget notes, and the renders the run asked for. Locally they go to Arize Phoenix in the compose stack. Stored runs from before can be replayed into it (`cfctl trace export`).
 2. **Eval suite and judge** (section 7, with PR 2).
-3. **The improvement loop** (section 8, with PR 3).
+3. **The improvement loop** (section 8, with PR 3): `cfctl eval improve`.
 
 ## 2. Phoenix in the local stack
 
@@ -58,3 +58,16 @@ No paid calls: the LLM span is tested over the llm package's fake API (metadata 
 - **Calibration:** `calibration-founder-v4` is v4 of the founder's "sick, except its transitions" project: the judge should give a high hook and energy and an ai_look of 3 or more (the transitions), and the feedback detector fails it for its punch and zoom transitions.
 
 Tests: suite loading and merging (the checked-in file has only placeholders), the detectors, the weights (a failed feedback item costs more than a perfect judge gives), music sync and calibration, the judge over a fake model (its request, the strict tool, untrusted data, the $0.10 budget, the cache, bad answers refused), Phoenix over a fake server, and a whole run over fakes (nothing spent without a budget, the edit and judge budgets inside `--max-usd`, placeholders skipped, the JSONL and the experiment written).
+
+## 8. The improvement loop
+
+`cfctl eval improve --max-usd N [--iterations N] [--live]` (`internal/evals/improve.go`, `improver.go`) tweaks the editor one change at a time and keeps only what the suite says helped.
+
+1. **Baseline:** the suite on the current code (in-process, label `baseline`, with up to half of `--max-usd`).
+2. **Low cases:** the lowest-scoring cases (`--low`, default 2; never held-out or calibration cases) with their failing checks, the judge's scores and rationales, the failed human feedback and the music sync.
+3. **The improver** (`improve_edit`, prompt `improve_edit.v2`; Opus 5.5, resolved from `v1-start` whatever `ROUTING_PROFILE` says; at most `--improver-usd` a call, default $0.50, inside `--max-usd`): it is shown the allowlist's files (the editor prompt and the playbooks whole; `check.go`, `pace.go`, `checktext.go`, `check_graphics.go`, `checkmusic.go` (the text, caption, face, overlay and music checks), `render/profile.go` and `styleprofile/thresholds.go` as their top-level const and var blocks only), the recorded feedback and what was already tried, and proposes **one change**: 1 to 4 exact replacements in one file (strict forced tool). The allowlist is code (`evals.AllowedFiles`): prompt, playbook, check threshold, renderer default, style rule; anything else is refused, and so is an `old` text that does not occur exactly once. `--proposal file.json` tries a change of your own instead, with no model call.
+4. **Apply and measure:** a scratch worktree under `.eval-worktrees/` (gitignored) on a new branch `improve/<suite>-<time>` from HEAD; the change is applied, built (`go build`, `go vet` of the touched packages) and committed, and the suite runs on that code (`go run ./cmd/cfctl eval suite` in the worktree, with the same suite, local file, env file and results directory, so the judge's cache is shared and an unchanged render is not judged again). A check-threshold, renderer or style change is measured on the stored versions; a prompt or playbook change changes only what the model is told, so it needs `--live` (the baseline is then live too); without it the change is reported as not evaluated.
+5. **Keep or drop:** kept when the mean rises by `--min-gain` (0.5 points), no case drops by more than `--max-regression` (5) and the held-out mean drops by `--held-out-slack` (1) at most; otherwise the commit is dropped from the scratch branch. With `--iterations` above 1 the next change builds on the last kept one.
+6. **Report:** `eval-results/improve/<branch>.md`: per iteration the change, its rationale, the decision and its reasons, before and after per case with the trace links of both runs, the Phoenix experiments and the diff. The worktree is removed; the branch stays only when something was kept. **It never pushes**: the director reviews the branch and opens the PR.
+
+Every iteration is a span (`eval.improve.iteration`) under the loop's `eval.improve` span, with the change, the means before and after, the decision and the diff; each suite run is an experiment (`baseline`, `candidate N: <title>`). Spend: nothing beyond `--max-usd` (the improver calls, the judge calls and any live editor runs together). Tests: the rule, the allowlist and the excerpts, validation and application, the loop over fakes (kept, rejected, refused, not built, not evaluated without `--live`; the improver never sees a held-out case), the git side over a temporary repository, and the improver's request and answer over a fake model.
