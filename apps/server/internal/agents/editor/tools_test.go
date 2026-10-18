@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/media"
@@ -1047,15 +1049,16 @@ func TestOpeningAndContext(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	in, err := NewInput("  Open on the heaviest set.  ")
+	// A vibe picked for the run is in the opening; without one the run context says the workspace's.
+	in, err := NewEditInput("  Open on the heaviest set.  ", "hype")
 	if err != nil {
 		t.Fatal(err)
 	}
 	blocks, err := ag.Opening(in)
-	if err != nil || len(blocks) != 4 || !strings.Contains(blocks[1].Text, "Vibe of this edit: lively") || !strings.Contains(blocks[3].Text, `<untrusted_data kind="instructions">`) || !strings.Contains(blocks[3].Text, "Open on the heaviest set.") {
+	if err != nil || len(blocks) != 4 || !strings.Contains(blocks[1].Text, "Vibe of this edit: hype") || !strings.Contains(blocks[3].Text, `<untrusted_data kind="instructions">`) || !strings.Contains(blocks[3].Text, "Open on the heaviest set.") {
 		t.Fatalf("opening: %+v %v", blocks, err)
 	}
-	if blocks, err = ag.Opening(json.RawMessage(`{}`)); err != nil || len(blocks) != 2 {
+	if blocks, err = ag.Opening(json.RawMessage(`{}`)); err != nil || len(blocks) != 1 {
 		t.Fatalf("opening without instructions: %+v %v", blocks, err)
 	}
 	for name, raw := range map[string]string{"not json": `x`, "too long": `{"instructions":"` + strings.Repeat("x", MaxInstructionsChars+1) + `"}`, "NUL": `{"instructions":"a\u0000b"}`} {
@@ -1093,7 +1096,9 @@ func TestOpeningAndContext(t *testing.T) {
 	// After an edit it says where the timeline stands, and the context of a project of another workspace is refused.
 	e.ok(e.runCtx(e.wsA, prj, ""), ToolEditTimeline, e.opsArgs(prj, addClipOp(a, 0, 8000)))
 	ctxBlocks, err = ag.Context(context.Background(), e.runCtx(e.wsA, prj, ""))
-	if err != nil || !strings.Contains(ctxBlocks[len(ctxBlocks)-1].Text, "Timeline: version 1: 8000 ms (8.0 s) long, 1 clips") {
+	if err != nil || !slices.ContainsFunc(ctxBlocks, func(b llm.Block) bool {
+		return strings.Contains(b.Text, "Timeline: version 1: 8000 ms (8.0 s) long, 1 clips")
+	}) {
 		t.Fatalf("context after an edit: %+v %v", ctxBlocks, err)
 	}
 	var te *runtime.ToolError

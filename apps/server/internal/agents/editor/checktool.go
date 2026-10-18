@@ -123,7 +123,7 @@ func LoadAssetAnalysis(ctx context.Context, src AnalysisSource, ws ids.Workspace
 //
 // sampler measures the version's preview render for the checks that look at the rendered picture; nil, or a version with no preview,
 // leaves those checks "not applicable".
-func CheckVersion(ctx context.Context, projects Projects, src AnalysisSource, ws ids.WorkspaceID, pid ids.ProjectID, version int, plan *Plan, sampler RenderSampler, style *styleprofile.Profile) (Report, error) {
+func CheckVersion(ctx context.Context, projects Projects, src AnalysisSource, ws ids.WorkspaceID, pid ids.ProjectID, version int, plan *Plan, sampler RenderSampler, style *styleprofile.Style) (Report, error) {
 	vd, perr := projects.Version(ctx, actor(ws), pid, version)
 	if perr != nil {
 		return Report{}, projectErr(perr)
@@ -136,7 +136,7 @@ func CheckVersion(ctx context.Context, projects Projects, src AnalysisSource, ws
 	if err != nil {
 		return Report{}, err
 	}
-	in := CheckInput{Version: version, Spec: spec, Plan: plan, Assets: assets, Issues: vd.Issues, Style: style}
+	in := CheckInput{Version: version, Spec: spec, Plan: plan, Assets: assets, Issues: vd.Issues, Style: profileOf(style), Settings: settingsOf(style)}
 	// The song, when the edit has one and the source can read its analysis (P6-06).
 	if mr, ok := src.(MusicReader); ok {
 		var songs []ids.AssetID
@@ -219,7 +219,7 @@ func (d Deps) checkEdit(ctx context.Context, rc runtime.RunContext, _ noArgs) (r
 	if d.previewsOn() && !d.previewOK(ctx, rc, v) {
 		return runtime.Result{}, runtime.UserErrorf("version %d has not been previewed. Call render_preview first, then check_edit: the checks measure the rendered picture (a look can crush the footage), not only the timeline", v)
 	}
-	report, err := CheckVersion(ctx, d.Projects, d.Store, ws, pid, v, plan, d.Rendered, d.style(ctx, ws))
+	report, err := CheckVersion(ctx, d.Projects, d.Store, ws, pid, v, plan, d.Rendered, d.styleFor(ctx, ws, rc.Input))
 	if err != nil {
 		return runtime.Result{}, err
 	}

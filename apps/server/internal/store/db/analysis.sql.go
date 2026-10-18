@@ -45,7 +45,7 @@ func (q *Queries) DeleteAssetShots(ctx context.Context, arg DeleteAssetShotsPara
 
 const getAssetForAnalysisSave = `-- name: GetAssetForAnalysisSave :one
 
-SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason FROM assets
+SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose FROM assets
 WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL
 FOR UPDATE
 `
@@ -100,6 +100,7 @@ func (q *Queries) GetAssetForAnalysisSave(ctx context.Context, arg GetAssetForAn
 		&i.Search,
 		&i.TranscriptStatus,
 		&i.TranscriptFailureReason,
+		&i.Purpose,
 	)
 	return i, err
 }
@@ -439,9 +440,9 @@ func (q *Queries) ListAssetSpans(ctx context.Context, arg ListAssetSpansParams) 
 }
 
 const listAssetsForAnalysis = `-- name: ListAssetsForAnalysis :many
-SELECT a.id, a.workspace_id, a.kind, a.status, a.filename, a.content_type, a.size_bytes, a.sha256, a.title, a.description, a.tags, a.r2_key, a.failure_reason, a.created_by, a.created_at, a.updated_at, a.deleted_at, a.duration_ms, a.width, a.height, a.fps, a.rotation, a.video_codec, a.audio_codec, a.has_audio, a.hdr, a.probe, a.ingest_progress, a.ingest_stage, a.ingested_at, a.title_source, a.quick_look_status, a.quick_look, a.quick_look_at, a.search, a.transcript_status, a.transcript_failure_reason FROM assets a
+SELECT a.id, a.workspace_id, a.kind, a.status, a.filename, a.content_type, a.size_bytes, a.sha256, a.title, a.description, a.tags, a.r2_key, a.failure_reason, a.created_by, a.created_at, a.updated_at, a.deleted_at, a.duration_ms, a.width, a.height, a.fps, a.rotation, a.video_codec, a.audio_codec, a.has_audio, a.hdr, a.probe, a.ingest_progress, a.ingest_stage, a.ingested_at, a.title_source, a.quick_look_status, a.quick_look, a.quick_look_at, a.search, a.transcript_status, a.transcript_failure_reason, a.purpose FROM assets a
 LEFT JOIN asset_signals s ON s.workspace_id = a.workspace_id AND s.asset_id = a.id
-WHERE a.workspace_id = $1 AND a.kind = 'video' AND a.status = 'ready' AND a.deleted_at IS NULL
+WHERE a.workspace_id = $1 AND a.kind = 'video' AND a.status = 'ready' AND a.deleted_at IS NULL AND a.purpose = 'footage'
   AND ($2::boolean OR s.asset_id IS NULL OR s.version < $3::integer OR s.source_ingested_at IS DISTINCT FROM a.ingested_at)
 ORDER BY a.id
 LIMIT $4
@@ -508,6 +509,7 @@ func (q *Queries) ListAssetsForAnalysis(ctx context.Context, arg ListAssetsForAn
 			&i.Search,
 			&i.TranscriptStatus,
 			&i.TranscriptFailureReason,
+			&i.Purpose,
 		); err != nil {
 			return nil, err
 		}

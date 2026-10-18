@@ -9,6 +9,8 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 )
 
@@ -21,12 +23,142 @@ func (q *Queries) DeleteCreatorStyle(ctx context.Context, workspaceID ids.Worksp
 	return err
 }
 
-const getCreatorStyle = `-- name: GetCreatorStyle :one
-
-SELECT workspace_id, version, profile, measures, references_count, created_at, updated_at FROM creator_style_profiles WHERE workspace_id = $1
+const deleteCreatorStyleSettings = `-- name: DeleteCreatorStyleSettings :exec
+DELETE FROM creator_style_settings WHERE workspace_id = $1
 `
 
-// The creator style profile (P6-05). EVERY query filters by workspace_id.
+func (q *Queries) DeleteCreatorStyleSettings(ctx context.Context, workspaceID ids.WorkspaceID) error {
+	_, err := q.db.Exec(ctx, deleteCreatorStyleSettings, workspaceID)
+	return err
+}
+
+const deleteFileStyleReferences = `-- name: DeleteFileStyleReferences :exec
+DELETE FROM style_references WHERE workspace_id = $1 AND asset_id IS NULL
+`
+
+func (q *Queries) DeleteFileStyleReferences(ctx context.Context, workspaceID ids.WorkspaceID) error {
+	_, err := q.db.Exec(ctx, deleteFileStyleReferences, workspaceID)
+	return err
+}
+
+const deleteStyleReference = `-- name: DeleteStyleReference :exec
+DELETE FROM style_references WHERE workspace_id = $1 AND id = $2
+`
+
+type DeleteStyleReferenceParams struct {
+	WorkspaceID ids.WorkspaceID
+	ID          uuid.UUID
+}
+
+func (q *Queries) DeleteStyleReference(ctx context.Context, arg DeleteStyleReferenceParams) error {
+	_, err := q.db.Exec(ctx, deleteStyleReference, arg.WorkspaceID, arg.ID)
+	return err
+}
+
+const deleteStyleReferenceByAsset = `-- name: DeleteStyleReferenceByAsset :exec
+DELETE FROM style_references WHERE workspace_id = $1 AND asset_id = $2
+`
+
+type DeleteStyleReferenceByAssetParams struct {
+	WorkspaceID ids.WorkspaceID
+	AssetID     pgtype.UUID
+}
+
+func (q *Queries) DeleteStyleReferenceByAsset(ctx context.Context, arg DeleteStyleReferenceByAssetParams) error {
+	_, err := q.db.Exec(ctx, deleteStyleReferenceByAsset, arg.WorkspaceID, arg.AssetID)
+	return err
+}
+
+const deleteStyleReferences = `-- name: DeleteStyleReferences :exec
+DELETE FROM style_references WHERE workspace_id = $1
+`
+
+func (q *Queries) DeleteStyleReferences(ctx context.Context, workspaceID ids.WorkspaceID) error {
+	_, err := q.db.Exec(ctx, deleteStyleReferences, workspaceID)
+	return err
+}
+
+const failStyleReference = `-- name: FailStyleReference :one
+UPDATE style_references SET status = 'failed', failure_reason = $1, detail = $2
+WHERE workspace_id = $3 AND asset_id = $4
+RETURNING id, workspace_id, asset_id, name, status, failure_reason, measures, detail, analysed_at, created_at, updated_at
+`
+
+type FailStyleReferenceParams struct {
+	FailureReason *string
+	Detail        json.RawMessage
+	WorkspaceID   ids.WorkspaceID
+	AssetID       pgtype.UUID
+}
+
+func (q *Queries) FailStyleReference(ctx context.Context, arg FailStyleReferenceParams) (StyleReference, error) {
+	row := q.db.QueryRow(ctx, failStyleReference,
+		arg.FailureReason,
+		arg.Detail,
+		arg.WorkspaceID,
+		arg.AssetID,
+	)
+	var i StyleReference
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AssetID,
+		&i.Name,
+		&i.Status,
+		&i.FailureReason,
+		&i.Measures,
+		&i.Detail,
+		&i.AnalysedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const finishStyleReference = `-- name: FinishStyleReference :one
+UPDATE style_references SET status = 'ready', failure_reason = NULL, measures = $1, detail = $2, analysed_at = now()
+WHERE workspace_id = $3 AND asset_id = $4
+RETURNING id, workspace_id, asset_id, name, status, failure_reason, measures, detail, analysed_at, created_at, updated_at
+`
+
+type FinishStyleReferenceParams struct {
+	Measures    []byte
+	Detail      json.RawMessage
+	WorkspaceID ids.WorkspaceID
+	AssetID     pgtype.UUID
+}
+
+func (q *Queries) FinishStyleReference(ctx context.Context, arg FinishStyleReferenceParams) (StyleReference, error) {
+	row := q.db.QueryRow(ctx, finishStyleReference,
+		arg.Measures,
+		arg.Detail,
+		arg.WorkspaceID,
+		arg.AssetID,
+	)
+	var i StyleReference
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AssetID,
+		&i.Name,
+		&i.Status,
+		&i.FailureReason,
+		&i.Measures,
+		&i.Detail,
+		&i.AnalysedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getCreatorStyle = `-- name: GetCreatorStyle :one
+
+SELECT workspace_id, version, profile, measures, references_count, created_at, updated_at, summary, reference_ids FROM creator_style_profiles WHERE workspace_id = $1
+`
+
+// The creator style profile (P6-05) and the style in the app (P6-05b): the profile, the reference videos it is learnt from and the
+// settings the creator chose. EVERY query filters by workspace_id: a row of another workspace is never returned or changed.
 func (q *Queries) GetCreatorStyle(ctx context.Context, workspaceID ids.WorkspaceID) (CreatorStyleProfile, error) {
 	row := q.db.QueryRow(ctx, getCreatorStyle, workspaceID)
 	var i CreatorStyleProfile
@@ -38,16 +170,380 @@ func (q *Queries) GetCreatorStyle(ctx context.Context, workspaceID ids.Workspace
 		&i.ReferencesCount,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Summary,
+		&i.ReferenceIds,
+	)
+	return i, err
+}
+
+const getCreatorStyleSettings = `-- name: GetCreatorStyleSettings :one
+
+SELECT workspace_id, settings, updated_by, created_at, updated_at FROM creator_style_settings WHERE workspace_id = $1
+`
+
+// ---- the creator's settings ---------------------------------------------------------------------------------------------------
+func (q *Queries) GetCreatorStyleSettings(ctx context.Context, workspaceID ids.WorkspaceID) (CreatorStyleSetting, error) {
+	row := q.db.QueryRow(ctx, getCreatorStyleSettings, workspaceID)
+	var i CreatorStyleSetting
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.Settings,
+		&i.UpdatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getStyleReferenceByAsset = `-- name: GetStyleReferenceByAsset :one
+SELECT id, workspace_id, asset_id, name, status, failure_reason, measures, detail, analysed_at, created_at, updated_at FROM style_references WHERE workspace_id = $1 AND asset_id = $2
+`
+
+type GetStyleReferenceByAssetParams struct {
+	WorkspaceID ids.WorkspaceID
+	AssetID     pgtype.UUID
+}
+
+// The reference row of an asset.
+func (q *Queries) GetStyleReferenceByAsset(ctx context.Context, arg GetStyleReferenceByAssetParams) (StyleReference, error) {
+	row := q.db.QueryRow(ctx, getStyleReferenceByAsset, arg.WorkspaceID, arg.AssetID)
+	var i StyleReference
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AssetID,
+		&i.Name,
+		&i.Status,
+		&i.FailureReason,
+		&i.Measures,
+		&i.Detail,
+		&i.AnalysedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const insertFileStyleReference = `-- name: InsertFileStyleReference :one
+INSERT INTO style_references (workspace_id, asset_id, name, status, measures, detail, analysed_at)
+VALUES ($1, NULL, $2, 'ready', $3, $4, now())
+RETURNING id, workspace_id, asset_id, name, status, failure_reason, measures, detail, analysed_at, created_at, updated_at
+`
+
+type InsertFileStyleReferenceParams struct {
+	WorkspaceID ids.WorkspaceID
+	Name        string
+	Measures    []byte
+	Detail      json.RawMessage
+}
+
+// A file measured by cfctl: no asset, ready at once.
+func (q *Queries) InsertFileStyleReference(ctx context.Context, arg InsertFileStyleReferenceParams) (StyleReference, error) {
+	row := q.db.QueryRow(ctx, insertFileStyleReference,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.Measures,
+		arg.Detail,
+	)
+	var i StyleReference
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AssetID,
+		&i.Name,
+		&i.Status,
+		&i.FailureReason,
+		&i.Measures,
+		&i.Detail,
+		&i.AnalysedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const listStyleReferenceAssets = `-- name: ListStyleReferenceAssets :many
+
+SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose FROM assets
+WHERE workspace_id = $1 AND purpose = 'style_reference' AND deleted_at IS NULL
+ORDER BY id
+`
+
+// ---- reference videos ---------------------------------------------------------------------------------------------------------
+// The style reference assets of a workspace that are not deleted, oldest first.
+func (q *Queries) ListStyleReferenceAssets(ctx context.Context, workspaceID ids.WorkspaceID) ([]Asset, error) {
+	rows, err := q.db.Query(ctx, listStyleReferenceAssets, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Asset
+	for rows.Next() {
+		var i Asset
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Kind,
+			&i.Status,
+			&i.Filename,
+			&i.ContentType,
+			&i.SizeBytes,
+			&i.Sha256,
+			&i.Title,
+			&i.Description,
+			&i.Tags,
+			&i.R2Key,
+			&i.FailureReason,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.DurationMs,
+			&i.Width,
+			&i.Height,
+			&i.Fps,
+			&i.Rotation,
+			&i.VideoCodec,
+			&i.AudioCodec,
+			&i.HasAudio,
+			&i.Hdr,
+			&i.Probe,
+			&i.IngestProgress,
+			&i.IngestStage,
+			&i.IngestedAt,
+			&i.TitleSource,
+			&i.QuickLookStatus,
+			&i.QuickLook,
+			&i.QuickLookAt,
+			&i.Search,
+			&i.TranscriptStatus,
+			&i.TranscriptFailureReason,
+			&i.Purpose,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStyleReferences = `-- name: ListStyleReferences :many
+SELECT id, workspace_id, asset_id, name, status, failure_reason, measures, detail, analysed_at, created_at, updated_at FROM style_references WHERE workspace_id = $1 ORDER BY id
+`
+
+// Every measured or measuring reference of a workspace, oldest first (asset references and the files of cfctl).
+func (q *Queries) ListStyleReferences(ctx context.Context, workspaceID ids.WorkspaceID) ([]StyleReference, error) {
+	rows, err := q.db.Query(ctx, listStyleReferences, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []StyleReference
+	for rows.Next() {
+		var i StyleReference
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.AssetID,
+			&i.Name,
+			&i.Status,
+			&i.FailureReason,
+			&i.Measures,
+			&i.Detail,
+			&i.AnalysedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const queueStyleReference = `-- name: QueueStyleReference :one
+INSERT INTO style_references (workspace_id, asset_id, name, status)
+VALUES ($1, $2, $3, 'queued')
+ON CONFLICT (asset_id) DO UPDATE SET status = 'queued', failure_reason = NULL, name = EXCLUDED.name
+RETURNING id, workspace_id, asset_id, name, status, failure_reason, measures, detail, analysed_at, created_at, updated_at
+`
+
+type QueueStyleReferenceParams struct {
+	WorkspaceID ids.WorkspaceID
+	AssetID     pgtype.UUID
+	Name        string
+}
+
+// A reference asset is ready to be measured (or measured again): its row is queued. The composite foreign key refuses an asset of
+// another workspace.
+func (q *Queries) QueueStyleReference(ctx context.Context, arg QueueStyleReferenceParams) (StyleReference, error) {
+	row := q.db.QueryRow(ctx, queueStyleReference, arg.WorkspaceID, arg.AssetID, arg.Name)
+	var i StyleReference
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AssetID,
+		&i.Name,
+		&i.Status,
+		&i.FailureReason,
+		&i.Measures,
+		&i.Detail,
+		&i.AnalysedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const requeueStyleReferences = `-- name: RequeueStyleReferences :many
+UPDATE style_references SET status = 'queued', failure_reason = NULL
+WHERE workspace_id = $1 AND asset_id IS NOT NULL
+RETURNING id, workspace_id, asset_id, name, status, failure_reason, measures, detail, analysed_at, created_at, updated_at
+`
+
+// Every asset reference of the workspace goes back to the queue (learning the style again).
+func (q *Queries) RequeueStyleReferences(ctx context.Context, workspaceID ids.WorkspaceID) ([]StyleReference, error) {
+	rows, err := q.db.Query(ctx, requeueStyleReferences, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []StyleReference
+	for rows.Next() {
+		var i StyleReference
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.AssetID,
+			&i.Name,
+			&i.Status,
+			&i.FailureReason,
+			&i.Measures,
+			&i.Detail,
+			&i.AnalysedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const softDeleteStyleReferenceAssets = `-- name: SoftDeleteStyleReferenceAssets :many
+UPDATE assets SET deleted_at = now()
+WHERE workspace_id = $1 AND purpose = 'style_reference' AND deleted_at IS NULL
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose
+`
+
+// Soft-deletes every reference asset of the workspace (resetting the style), and returns them so their objects can be removed.
+func (q *Queries) SoftDeleteStyleReferenceAssets(ctx context.Context, workspaceID ids.WorkspaceID) ([]Asset, error) {
+	rows, err := q.db.Query(ctx, softDeleteStyleReferenceAssets, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Asset
+	for rows.Next() {
+		var i Asset
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Kind,
+			&i.Status,
+			&i.Filename,
+			&i.ContentType,
+			&i.SizeBytes,
+			&i.Sha256,
+			&i.Title,
+			&i.Description,
+			&i.Tags,
+			&i.R2Key,
+			&i.FailureReason,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.DurationMs,
+			&i.Width,
+			&i.Height,
+			&i.Fps,
+			&i.Rotation,
+			&i.VideoCodec,
+			&i.AudioCodec,
+			&i.HasAudio,
+			&i.Hdr,
+			&i.Probe,
+			&i.IngestProgress,
+			&i.IngestStage,
+			&i.IngestedAt,
+			&i.TitleSource,
+			&i.QuickLookStatus,
+			&i.QuickLook,
+			&i.QuickLookAt,
+			&i.Search,
+			&i.TranscriptStatus,
+			&i.TranscriptFailureReason,
+			&i.Purpose,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const startStyleReference = `-- name: StartStyleReference :one
+UPDATE style_references SET status = 'analysing', failure_reason = NULL
+WHERE workspace_id = $1 AND asset_id = $2
+RETURNING id, workspace_id, asset_id, name, status, failure_reason, measures, detail, analysed_at, created_at, updated_at
+`
+
+type StartStyleReferenceParams struct {
+	WorkspaceID ids.WorkspaceID
+	AssetID     pgtype.UUID
+}
+
+// The analysis of a reference started. No row: it was removed meanwhile.
+func (q *Queries) StartStyleReference(ctx context.Context, arg StartStyleReferenceParams) (StyleReference, error) {
+	row := q.db.QueryRow(ctx, startStyleReference, arg.WorkspaceID, arg.AssetID)
+	var i StyleReference
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AssetID,
+		&i.Name,
+		&i.Status,
+		&i.FailureReason,
+		&i.Measures,
+		&i.Detail,
+		&i.AnalysedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const upsertCreatorStyle = `-- name: UpsertCreatorStyle :one
-INSERT INTO creator_style_profiles (workspace_id, version, profile, measures, references_count)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO creator_style_profiles (workspace_id, version, profile, measures, references_count, summary, reference_ids)
+VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::uuid[])
 ON CONFLICT (workspace_id) DO UPDATE
-SET version = EXCLUDED.version, profile = EXCLUDED.profile, measures = EXCLUDED.measures, references_count = EXCLUDED.references_count
-RETURNING workspace_id, version, profile, measures, references_count, created_at, updated_at
+SET version = EXCLUDED.version, profile = EXCLUDED.profile, measures = EXCLUDED.measures, references_count = EXCLUDED.references_count,
+    summary = EXCLUDED.summary, reference_ids = EXCLUDED.reference_ids
+RETURNING workspace_id, version, profile, measures, references_count, created_at, updated_at, summary, reference_ids
 `
 
 type UpsertCreatorStyleParams struct {
@@ -56,6 +552,8 @@ type UpsertCreatorStyleParams struct {
 	Profile         json.RawMessage
 	Measures        json.RawMessage
 	ReferencesCount int32
+	Summary         []byte
+	ReferenceIds    []uuid.UUID
 }
 
 func (q *Queries) UpsertCreatorStyle(ctx context.Context, arg UpsertCreatorStyleParams) (CreatorStyleProfile, error) {
@@ -65,6 +563,8 @@ func (q *Queries) UpsertCreatorStyle(ctx context.Context, arg UpsertCreatorStyle
 		arg.Profile,
 		arg.Measures,
 		arg.ReferencesCount,
+		arg.Summary,
+		arg.ReferenceIds,
 	)
 	var i CreatorStyleProfile
 	err := row.Scan(
@@ -73,6 +573,34 @@ func (q *Queries) UpsertCreatorStyle(ctx context.Context, arg UpsertCreatorStyle
 		&i.Profile,
 		&i.Measures,
 		&i.ReferencesCount,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Summary,
+		&i.ReferenceIds,
+	)
+	return i, err
+}
+
+const upsertCreatorStyleSettings = `-- name: UpsertCreatorStyleSettings :one
+INSERT INTO creator_style_settings (workspace_id, settings, updated_by)
+VALUES ($1, $2, $3::uuid)
+ON CONFLICT (workspace_id) DO UPDATE SET settings = EXCLUDED.settings, updated_by = EXCLUDED.updated_by
+RETURNING workspace_id, settings, updated_by, created_at, updated_at
+`
+
+type UpsertCreatorStyleSettingsParams struct {
+	WorkspaceID ids.WorkspaceID
+	Settings    json.RawMessage
+	UpdatedBy   pgtype.UUID
+}
+
+func (q *Queries) UpsertCreatorStyleSettings(ctx context.Context, arg UpsertCreatorStyleSettingsParams) (CreatorStyleSetting, error) {
+	row := q.db.QueryRow(ctx, upsertCreatorStyleSettings, arg.WorkspaceID, arg.Settings, arg.UpdatedBy)
+	var i CreatorStyleSetting
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.Settings,
+		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

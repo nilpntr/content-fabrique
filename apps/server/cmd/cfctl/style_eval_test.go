@@ -36,7 +36,7 @@ func TestEvalPrintsTheStyleDistance(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out, errOut = r.runEval("editor", "--workspace", r.ws.ID.String(), "--project", pid.String())
-	if code != 0 || !strings.Contains(out, "style distance:") || !strings.Contains(out, "OUT  long_takes") || !strings.Contains(out, "ok   effects") {
+	if code != 0 || !strings.Contains(out, "style distance:") || !strings.Contains(out, "OUT  long_takes") || !strings.Contains(out, "ok   transitions") {
 		t.Fatalf("with a profile: %d\n%s%s", code, out, errOut)
 	}
 }

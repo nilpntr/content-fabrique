@@ -132,6 +132,10 @@ func (s *Store) FinishAssetIngest(ctx context.Context, ws ids.WorkspaceID, id id
 		if err := mapErr(tx.q.DeleteStaleAssetDerivatives(ctx, db.DeleteStaleAssetDerivativesParams{WorkspaceID: ws, AssetID: id, Keep: keep})); err != nil {
 			return err
 		}
+		if a.Purpose == PurposeStyleReference {
+			// A style reference is never footage: no quick look, transcript or clip analysis, only the measuring of its style.
+			return tx.styleReferenceDue(ctx, a)
+		}
 		if a, err = tx.quickLookDue(ctx, a); err != nil {
 			return err
 		}

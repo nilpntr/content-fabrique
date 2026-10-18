@@ -800,6 +800,34 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 
 **Revisit** when the founder has listened to edits with real songs, or when uploads get an explicit consent step.
 
+## D-35 The creator's style is three layers, and the creator always wins
+
+**Context.** The style profile (P6-05) existed only through `cfctl style analyze`, with no API and no UI, so no creator could set,
+see or change it. It also acted as a hidden rule: it measured "no effects" in the founder's reference videos and the editor obeyed,
+so the edits were static. The founder asked for three things: let AI set the style from the creator's example videos, let the creator
+tweak it, and keep uploading videos as references.
+
+**Decision.** The effective style the editor follows is made of three layers, the creator always winning: (1) what was measured from
+the creator's reference videos; (2) the defaults an AI summary proposes from those measures (one cheap call per (re)analysis,
+`stylesummary`, at most $0.03); (3) the creator's own settings (vibe, transitions, text animation, camera motion, title colour, place
+and case, music, pace), stored apart from the measures (`creator_style_settings`), so re-learning never overwrites them. The vibe of one
+edit (P6-06) sits on top of the vibe setting. A measured "no effects" is a fact about the creator's posted videos, never a rule: it
+does not turn transitions, text animation or camera motion off by itself; at a lively or hype vibe an AI suggestion of "off" does not
+hold either. Reference videos are uploaded through the normal upload path as assets with `purpose = style_reference`: never footage,
+never in the library, never in a project, with their own limits (10 a workspace, 1 GiB, 3 minutes).
+
+**Alternatives.** A per-dimension override inside the profile (the original design note): re-learning would have had to merge into it,
+and a creator's choice and a measure would have been one field. An `assets.kind` of `style_reference`: the kind is the media type,
+used everywhere (the ingest, the editor, the renderer), and a reference is a video; the purpose is a separate column. A summary on
+every request, or several per analysis: the summary is for the creator to read and changes only when the references do.
+
+**Consequences.** The checks take the settings: `effect_density` fails what the settings turn off and allows more at "lots",
+`style_match` has `transitions`, `camera_motion` and `text_animation` (hard when the creator chose them, advice otherwise) in place of
+the measured `effects`. Existing workspaces with a profile and no settings get the lively defaults: their edits now move. Prompt
+`editor.v2.7`; migration `00023_style_references`.
+
+**Revisit** when the founder has watched edits made with the settings, or when a creator asks for a setting that is not here.
+
 ## Template for new decisions
 
 ```

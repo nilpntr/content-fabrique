@@ -136,7 +136,7 @@ func (s *Service) Create(ctx context.Context, who Actor, req api.CreateProjectRe
 		}
 		if len(notUsable) > 0 {
 			shown := notUsable[:min(len(notUsable), 5)]
-			msg := "these assets are not ready or are images, so they cannot be edited: " + strings.Join(shown, ", ")
+			msg := "these assets are not ready, are images or are style references, so they cannot be edited: " + strings.Join(shown, ", ")
 			if len(notUsable) > len(shown) {
 				msg += fmt.Sprintf(" and %d more", len(notUsable)-len(shown))
 			}
@@ -173,7 +173,8 @@ func (s *Service) Create(ctx context.Context, who Actor, req api.CreateProjectRe
 // usable says whether an asset can be part of a project: probed and ingested (ready), and something the timeline has an
 // item for (a video or an audio file; an image is not).
 func usable(a store.Asset) bool {
-	return a.Status == store.AssetReady && a.DurationMs != nil && (a.Kind == store.AssetKindVideo || a.Kind == store.AssetKindAudio)
+	// A style reference (P6-05b) is one of the creator's finished videos, never footage.
+	return a.Status == store.AssetReady && a.DurationMs != nil && (a.Kind == store.AssetKindVideo || a.Kind == store.AssetKindAudio) && a.Purpose != store.PurposeStyleReference
 }
 
 func validateCreate(req api.CreateProjectRequest) (title, brief, format string, assetIDs []ids.AssetID, e *Error) {

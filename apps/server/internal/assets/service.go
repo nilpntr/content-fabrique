@@ -31,6 +31,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/jobs"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
+	"github.com/nilpntr/content-fabrique/internal/styleprofile"
 	"github.com/nilpntr/content-fabrique/internal/textclean"
 )
 
@@ -57,6 +58,7 @@ var (
 	errNotFound       = &Error{Status: 404, Code: api.ErrorCodeNotFound, Message: "no such asset"}
 	errNotActive      = &Error{Status: 409, Code: api.ErrorCodeUploadNotActive, Message: "this upload is not in progress any more"}
 	errTooMany        = &Error{Status: 429, Code: api.ErrorCodeTooManyUploads, Message: "too many uploads are in progress; finish or abort one first"}
+	errTooManyRefs    = &Error{Status: 409, Code: api.ErrorCodeTooManyReferences, Message: "you have the most style videos already; remove one first"}
 	errExpired        = &Error{Status: 409, Code: api.ErrorCodeUploadExpired, Message: "this upload expired; start a new one"}
 	errStorageDown    = &Error{Status: 503, Code: api.ErrorCodeStorageUnavailable, Message: "object storage did not answer; try again"}
 	errQueueMigration = &Error{Status: 503, Code: api.ErrorCodeQueueNotMigrated, Message: "the job queue is not ready; try again later"}
@@ -138,6 +140,15 @@ func (s *Service) Create(ctx context.Context, who Actor, req api.CreateAssetRequ
 	if active >= MaxActiveUploads { // the quick no; the exact check is in CreateAssetWithUpload
 		return Created{}, errTooMany
 	}
+	if sp.Purpose == store.PurposeStyleReference {
+		refs, err := s.store.CountStyleReferenceAssets(ctx, who.Workspace)
+		if err != nil {
+			return Created{}, s.internal(ctx, "count style references", err)
+		}
+		if refs >= styleprofile.MaxReferences { // the quick no; the exact check is in CreateAssetWithUpload
+			return Created{}, errTooManyRefs
+		}
+	}
 
 	assetID, err := s.store.NewAssetID(ctx)
 	if err != nil {
@@ -154,12 +165,16 @@ func (s *Service) Create(ctx context.Context, who Actor, req api.CreateAssetRequ
 		ID: assetID, Kind: sp.Kind, Filename: sp.Filename, ContentType: sp.ContentType, SizeBytes: sp.Size,
 		SHA256: sp.SHA256, Title: sp.Title, R2Key: key, CreatedBy: who.User,
 		R2UploadID: r2UploadID, PartSize: partSize, PartCount: partCount, ExpiresAt: s.now().Add(UploadTTL),
+		Purpose: sp.Purpose, MaxReferences: styleprofile.MaxReferences,
 	}, MaxActiveUploads)
 	if err != nil {
 		// Nothing was stored: discard the multipart upload, best effort (the bucket's lifecycle rule is the backstop).
 		s.discardMultipart(ctx, key, r2UploadID)
 		if errors.Is(err, store.ErrTooManyUploads) {
 			return Created{}, errTooMany
+		}
+		if errors.Is(err, store.ErrTooManyReferences) {
+			return Created{}, errTooManyRefs
 		}
 		return Created{}, s.internal(ctx, "store asset", err)
 	}
@@ -614,6 +629,14 @@ const (
 // cursor is the id of the last asset of the page. With a non-empty query only the assets that match the search words are
 // listed (store.SearchWords says how the text becomes words).
 func (s *Service) List(ctx context.Context, who Actor, query string, limit int, cursor string) ([]View, string, *Error) {
+	return s.ListOf(ctx, who, store.PurposeFootage, query, limit, cursor)
+}
+
+// ListOf is List for the assets of one purpose (store.PurposeFootage, the library, or store.PurposeStyleReference).
+func (s *Service) ListOf(ctx context.Context, who Actor, purpose, query string, limit int, cursor string) ([]View, string, *Error) {
+	if purpose != store.PurposeFootage && purpose != store.PurposeStyleReference {
+		return nil, "", invalid("purpose must be footage or style_reference")
+	}
 	if limit == 0 {
 		limit = DefaultPageSize
 	}
@@ -634,7 +657,7 @@ func (s *Service) List(ctx context.Context, who Actor, query string, limit int, 
 		}
 		before = &id
 	}
-	rows, err := s.store.SearchAssets(ctx, who.Workspace, store.SearchWords(query), before, limit+1)
+	rows, err := s.store.SearchAssetsOf(ctx, who.Workspace, purpose, store.SearchWords(query), before, limit+1)
 	if err != nil {
 		return nil, "", s.internal(ctx, "list assets", err)
 	}

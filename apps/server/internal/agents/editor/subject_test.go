@@ -127,7 +127,7 @@ func TestTheFootageListSaysWhereTheHeadIs(t *testing.T) {
 // The style note names the creator's title format without quoting their words, and the block (untrusted data) holds the templates.
 func TestTheStyleNoteNamesTheTitleTemplate(t *testing.T) {
 	p := ginoProfile(t)
-	note := styleNote(p)
+	note := styleNote(styleOf(p))
 	for _, want := range []string{"series format, <TOPIC> <number> in capitals (always ending in 101)", "do not invent a name", "Keep a title of up to 22 characters on one line"} {
 		if !strings.Contains(note, want) {
 			t.Errorf("the note lacks %q:\n%s", want, note)
@@ -136,7 +136,7 @@ func TestTheStyleNoteNamesTheTitleTemplate(t *testing.T) {
 	if strings.Contains(note, "BUILDING") || strings.Contains(note, "BRACHIORADIALIS") {
 		t.Errorf("the creator's words are in our note:\n%s", note)
 	}
-	data := styleBlocks(p)[1].Text
+	data := styleBlocks(styleOf(p))[1].Text
 	if !strings.Contains(data, "title templates: a series title") || !strings.Contains(data, "'BUILDING LATS 101'") {
 		t.Errorf("the block lacks the templates:\n%s", data)
 	}
@@ -145,9 +145,9 @@ func TestTheStyleNoteNamesTheTitleTemplate(t *testing.T) {
 // A title that is not in a form the creator uses is borderline: the check passes and says so.
 func TestAnOddTitleIsBorderlineNotAFailure(t *testing.T) {
 	spec := withTitle(t, buildingLats(t), func(it *timeline.TextItem) { it.Text = "BACK BLUEPRINT" })
-	r := RunChecks(CheckInput{Spec: spec, Plan: workoutPlan(), Style: ginoProfile(t), Vibe: VibeCalm})
+	r := RunChecks(CheckInput{Spec: spec, Plan: workoutPlan(), Style: ginoProfile(t), Settings: stillSettings(ginoProfile(t))})
 	c := wantStatus(t, r, CheckStyleMatch, CheckPass)
-	if !strings.Contains(c.Detail, "borderline, not a failure: title_pattern") || !strings.Contains(c.Detail, "ending in 101") {
+	if !strings.Contains(c.Detail, "borderline, not a failure:") || !strings.Contains(c.Detail, "title_pattern") || !strings.Contains(c.Detail, "ending in 101") {
 		t.Errorf("detail: %s", c.Detail)
 	}
 	if len(r.Failed()) != 0 {
@@ -189,7 +189,7 @@ func TestTheLinesAreEnforcedFromTheProfile(t *testing.T) {
 func TestTheNoteFollowsOnlyARealTemplate(t *testing.T) {
 	p := ginoProfile(t)
 	p.Text.Patterns = patternsFor("BUILDING LATS 101", "how to bake a croissant tricep", "is this the best row?", "BACK DAY", "Heavy Lat Day")
-	if note := styleNote(p); strings.Contains(note, "series format") {
+	if note := styleNote(styleOf(p)); strings.Contains(note, "series format") {
 		t.Errorf("a form at 20 %% in the note:\n%s", note)
 	}
 }

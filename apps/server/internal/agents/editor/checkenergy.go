@@ -2,6 +2,7 @@ package editor
 
 import (
 	"fmt"
+	"github.com/nilpntr/content-fabrique/internal/styleprofile"
 	"slices"
 	"strings"
 
@@ -159,6 +160,9 @@ func (c *checker) textWithoutEntrance() Check {
 }
 
 func (c *checker) chapterTitles() Check {
+	if s := c.in.Settings; s != nil && s.ChapterTitles == styleprofile.LevelOff {
+		return c.skip(CheckChapterTitles, "the creator's settings turn chapter titles off")
+	}
 	var chapters []int
 	if c.in.Plan != nil {
 		for _, s := range c.in.Plan.Shots {

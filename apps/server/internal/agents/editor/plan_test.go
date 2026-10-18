@@ -108,7 +108,7 @@ func TestPlanNotes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	notes := strings.Join(planNotes(p, nil), "\n")
+	notes := strings.Join(planNotes(p, nil, nil), "\n")
 	for _, want := range []string{"adds up to 10.6 s but your target is 60 s", "Shots 2 to 5 are all 4 beats long", "The hook shot is 2.9 s long"} {
 		if !strings.Contains(notes, want) {
 			t.Errorf("notes lack %q:\n%s", want, notes)

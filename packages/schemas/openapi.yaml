@@ -46,6 +46,8 @@ tags:
     description: Agent runs. The editor agent edits a project's timeline in a run; the run is a record of every step, its cost and its result (paid-only).
   - name: renders
     description: Renders of a project's timeline versions, the preview and the final MP4, with their time map and contact sheet (paid-only).
+  - name: style
+    description: The creator's style - the summary of how their finished videos look, the settings they choose, and the reference videos it is learnt from (paid-only).
   - name: annotations
     description: Comments on a clip, on a render or on a version of a timeline - on a range of time, with a kind and an optional pin on the frame (paid-only).
   - name: webhooks
@@ -145,6 +147,12 @@ paths:
         `POST /v1/assets/{id}/parts`, and finishes with `POST /v1/assets/{id}/complete`. A part URL is valid for 15 minutes;
         the upload as a whole for 24 hours.
         Only owners and editors may upload. At most 25 uploads can be in progress per workspace.
+
+        `purpose: style_reference` uploads one of the creator's own finished videos as a style reference (see `getStyle`): it is
+        never listed with the footage and cannot be used in a project, and once its ingest is done its style is measured in the
+        background. A style reference must be a video of at most 1 GiB (`413 file_too_large`, `415 unsupported_content_type`) and
+        at most 3 minutes long (a longer one ends `failed` with `too_long`); a workspace has at most 10 that are not failed
+        (`409 too_many_references`).
       requestBody:
         required: true
         content:
@@ -166,14 +174,20 @@ paths:
           $ref: "#/components/responses/PlanRequired"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          description: "`too_many_references`: the workspace has its 10 style references already (remove one first)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "413":
-          description: "`file_too_large`: more than 20 GB."
+          description: "`file_too_large`: more than 20 GB, or a style reference of more than 1 GiB."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
         "415":
-          description: "`unsupported_content_type`: not one of the accepted media types."
+          description: "`unsupported_content_type`: not one of the accepted media types, or a style reference that is not a video."
           content:
             application/json:
               schema:
@@ -199,7 +213,14 @@ paths:
         must occur, as the start of a word, in the asset's title, description, tags or file name, with English stemming
         (`row` finds "Barbell rows"). Characters other than letters and digits only separate words; a `q` without any
         word lists everything.
+        Only the assets of one `purpose` are listed: the footage by default, the style references with `purpose=style_reference`.
       parameters:
+        - name: purpose
+          in: query
+          required: false
+          description: Which assets to list (default `footage`, the library).
+          schema:
+            $ref: "#/components/schemas/AssetPurpose"
         - name: q
           in: query
           required: false
@@ -569,7 +590,7 @@ paths:
         ingested) and a video or an audio file. An asset id that is unknown, deleted or belongs to another workspace is
         `404 not_found` (the same answer for all three, so an id from another workspace cannot be told from one that never
         existed); assets that exist but are not usable (still uploading or processing, failed, or an image) make it
-        `422 assets_not_usable`.
+        `422 assets_not_usable`. A style reference is never footage: naming one is `422 assets_not_usable` too.
         The project starts with no timeline: `current_timeline_version` is `null`. A timeline needs at least one clip, so
         version 1 is made by the first edit (`POST /v1/projects/{id}/timelines` with `base_version` 0, or the editor run).
         Only owners and editors may create projects.
@@ -860,8 +881,9 @@ paths:
         (`422 assets_not_usable`; an audio file is not a clip to cut).
         `instructions` is the creator's extra instruction for this run (text, at most 2,000 characters; the model treats it as data
         that steers the content of the video, nothing else). `profile` picks the model profile of the run; the default is the
-        server's. `vibe` is the energy of the edit (`calm`, `lively` or `hype`, default `lively`): see `EditVibe`. An audio file in
-        the project's footage is a song the edit can be cut to (D-34): the export then has the song and no clip sound under it.
+        server's. `vibe` is the energy of this edit (`calm`, `lively` or `hype`); without it the workspace's style decides
+        (`GET /v1/style`, `effective.vibe`, `lively` when nothing is set): see `EditVibe`. An audio file in the project's footage is a
+        song the edit can be cut to (D-34): the export then has the song and no clip sound under it.
 
         **Credits.** The run costs credits, set aside (held) in the same step that creates the run: the server decides from the
         project whether it is the first edit (6 credits: the project has no charged edit yet) or a revision (2 credits), and the
@@ -1281,6 +1303,151 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /v1/style:
+    get:
+      operationId: getStyle
+      tags: [style]
+      summary: The creator's style
+      description: |
+        Everything the editor knows of how this creator's videos look and what the creator chose:
+
+        - `summary`: a short description in plain words written by a model from the measures of the reference videos, with the
+          settings it suggests (`summary.suggested`); `null` until the references were learnt.
+        - `measures`: what was measured from the reference videos, in plain words (`lines`); `null` without any.
+        - `settings`: the creator's own settings (`PUT /v1/style`). A setting that is absent is not set.
+        - `effective`: what the editor follows, every setting decided, with where each came from (`sources`): the creator's own
+          setting wins, then the suggestion, then the measures, then the default. A measured "no effects" never turns transitions or
+          text animation off at a lively or hype vibe on its own.
+        - `references`: the reference videos (uploaded with `POST /v1/assets` and `purpose: style_reference`) with the state of their
+          analysis, and `status`/`progress` for the whole: `learning` while any reference is being uploaded, ingested or measured, or
+          the profile is being made from them.
+
+        A workspace with nothing has `status: empty` and the default settings. Every role may read it.
+      responses:
+        "200":
+          description: The style.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatorStyle"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    put:
+      operationId: updateStyle
+      tags: [style]
+      summary: Set the creator's settings
+      description: |
+        Replaces the creator's settings with `settings`: a setting that is absent is not set (the suggestion and the measures decide
+        it). Learning the style again never changes them. Only owners and editors may change them.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateStyleRequest"
+      responses:
+        "200":
+          description: The style as it is now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatorStyle"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    delete:
+      operationId: resetStyle
+      tags: [style]
+      summary: Forget the creator's style
+      description: |
+        Deletes the reference videos (their files are removed in the background), everything measured from them, the summary and the
+        creator's settings. Only owners and editors may reset it.
+      responses:
+        "204":
+          description: Forgotten.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/style/relearn:
+    post:
+      operationId: relearnStyle
+      tags: [style]
+      summary: Learn the style again from the reference videos
+      description: |
+        Measures every reference video again and writes a new summary, in the background (`202`; follow `status` with
+        `GET /v1/style`). The creator's settings stay. Each reference costs at most $0.01 of model time and the summary at most $0.03,
+        metered like every model call. Only owners and editors may start it.
+      responses:
+        "202":
+          description: Learning; the style as it is now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatorStyle"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/style/references/{id}:
+    parameters:
+      - $ref: "#/components/parameters/AssetIdPath"
+    delete:
+      operationId: removeStyleReference
+      tags: [style]
+      summary: Remove a reference video
+      description: |
+        Deletes the reference video and what was measured from it, and makes the profile again from the others in the background. An
+        asset that is not a style reference of this workspace is `404 not_found`. Only owners and editors may remove one.
+      responses:
+        "204":
+          description: Removed.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
   /v1/annotations:
     post:
       operationId: createAnnotation
@@ -1681,6 +1848,7 @@ components:
         - too_many_uncharged_runs # 429: the workspace has had its day's editor runs that spent money and ended without a charge (see startEdit)
         - byok_key_required # 402: the plan uses the workspace's own Anthropic key (BYOK) and none is set up, so no model run can start
         - version_not_charged # 422: a final render of a version that contains editor work that was not charged (a failed or released run)
+        - too_many_references # 409: the workspace has its 10 style references already
 
     ErrorDetail:
       type: object
@@ -1926,6 +2094,12 @@ components:
     AssetKind:
       type: string
       enum: [video, audio, image]
+    AssetPurpose:
+      type: string
+      description: |
+        What an asset is for: `footage` (a clip the editor may cut, the default) or `style_reference` (one of the creator's own
+        finished videos, uploaded only so that their style can be learnt: never listed with the footage, never used in a project).
+      enum: [footage, style_reference]
     AssetStatus:
       type: string
       description: |
@@ -1967,6 +2141,9 @@ components:
           $ref: "#/components/schemas/AssetId"
         kind:
           $ref: "#/components/schemas/AssetKind"
+        purpose:
+          $ref: "#/components/schemas/AssetPurpose"
+          description: Present on every asset the server returns (optional in the schema only so older clients and fixtures still type-check).
         status:
           $ref: "#/components/schemas/AssetStatus"
         filename:
@@ -2298,6 +2475,9 @@ components:
           type: string
           pattern: "^[0-9a-fA-F]{64}$"
           description: Optional SHA-256 of the file, in hex.
+        purpose:
+          $ref: "#/components/schemas/AssetPurpose"
+          description: "`style_reference` for one of the creator's finished videos uploaded as a style reference; the default is `footage`."
 
     UploadStatus:
       type: string
@@ -2791,12 +2971,12 @@ components:
     EditVibe:
       type: string
       enum: [calm, lively, hype]
-      default: lively
       description: |
-        The energy of the edit (P6-06). The creator's style profile still decides the colours, the fonts, the title's look and place and
-        the rough shot length; the vibe decides how much moves: `calm` stays close to the creator's own restraint (hard cuts, a quiet
-        title), `lively` (the default) puts transitions on the strong beats and the drop, gives every text an entrance and an exit and
-        keeps the camera moving, `hype` does that on more beats with faster shots.
+        The energy of the edit (P6-06). The creator's style still decides the colours, the fonts, the title's look and place and the
+        rough shot length; the vibe decides how much moves: `calm` stays close to the creator's own restraint (hard cuts, a quiet
+        title), `lively` puts transitions on the strong beats and the drop, gives every text an entrance and an exit and keeps the
+        camera moving, `hype` does that on more beats with faster shots. A run without one uses the workspace's
+        (`GET /v1/style`, `effective.vibe`; `lively` when nothing is set).
 
     ReplyRequest:
       type: object
@@ -3209,6 +3389,320 @@ components:
         next_cursor:
           type: [string, "null"]
           description: Pass it as `cursor` for the next page. Null on the last page.
+
+    # ── The creator's style ─────────────────────────────────────────────────────
+
+    StyleLevel:
+      type: string
+      description: "`off`, `subtle` (a few, on the strongest moments) or `lots` (on most strong beats)."
+      enum: ["off", subtle, lots]
+    StyleToggle:
+      type: string
+      enum: ["off", "on"]
+    StyleTitlePosition:
+      type: string
+      description: "`top` (at the top of the safe area, above the person), `upper_third` (a third of the way down) or `auto` (the editor picks, never on the person)."
+      enum: [top, upper_third, auto]
+    StyleTitleCase:
+      type: string
+      description: "`upper` (ALL CAPS), `lower` (all lowercase) or `as_typed`."
+      enum: [upper, lower, as_typed]
+    StyleMusic:
+      type: string
+      description: "`always` (every video is cut to music), `when_added` (only when the creator adds a song) or `never`."
+      enum: [always, when_added, never]
+    StylePace:
+      type: string
+      description: "`slower`, `like_mine` (like the creator's own videos) or `faster`."
+      enum: [slower, like_mine, faster]
+    StyleEndingHold:
+      type: string
+      description: "`long` (the last shot is held clearly longer than the others) or `short` (it is as long as the others)."
+      enum: [short, long]
+    StyleCutTiming:
+      type: string
+      description: "`full_reps` (cuts fall at the end of a rep) or `mid_rep` (cuts fall on the beat, also in the middle of a rep)."
+      enum: [full_reps, mid_rep]
+    StyleSettingSource:
+      type: string
+      description: |
+        Where an effective setting came from: `this_video` (the vibe of one edit), `you` (the creator's own setting), `suggested`
+        (the AI's suggestion from the reference videos), `measured` (measured from them), `vibe` (what the vibe asks for) or `default`.
+      enum: [this_video, you, suggested, measured, vibe, default]
+
+    StyleSettings:
+      type: object
+      additionalProperties: false
+      description: Settings of the creator's style. A property that is absent is not set.
+      properties:
+        vibe:
+          $ref: "#/components/schemas/EditVibe"
+        transitions:
+          $ref: "#/components/schemas/StyleLevel"
+        text_animation:
+          $ref: "#/components/schemas/StyleToggle"
+        camera_motion:
+          $ref: "#/components/schemas/StyleLevel"
+        title_colour:
+          type: string
+          pattern: "^#[0-9A-Fa-f]{6}$"
+          description: The colour of the title's letters, like `#RRGGBB`.
+        title_position:
+          $ref: "#/components/schemas/StyleTitlePosition"
+        title_case:
+          $ref: "#/components/schemas/StyleTitleCase"
+        music:
+          $ref: "#/components/schemas/StyleMusic"
+        pace:
+          $ref: "#/components/schemas/StylePace"
+        chapter_titles:
+          $ref: "#/components/schemas/StyleToggle"
+        title_template:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: |
+            The form of the titles, the words that change as slots in capitals between angle brackets, such as `<TOPIC> <N>` or
+            `<N> MOVES FOR <GOAL>`. Letters, digits, spaces, slots and common punctuation.
+        ending_hold:
+          $ref: "#/components/schemas/StyleEndingHold"
+        cut_timing:
+          $ref: "#/components/schemas/StyleCutTiming"
+        angle_switches:
+          $ref: "#/components/schemas/StyleToggle"
+
+    StyleSettingSources:
+      type: object
+      required: [vibe, transitions, text_animation, camera_motion, title_colour, title_position, title_case, music, pace, chapter_titles, title_template, ending_hold, cut_timing, angle_switches]
+      properties:
+        vibe:
+          $ref: "#/components/schemas/StyleSettingSource"
+        transitions:
+          $ref: "#/components/schemas/StyleSettingSource"
+        text_animation:
+          $ref: "#/components/schemas/StyleSettingSource"
+        camera_motion:
+          $ref: "#/components/schemas/StyleSettingSource"
+        title_colour:
+          $ref: "#/components/schemas/StyleSettingSource"
+        title_position:
+          $ref: "#/components/schemas/StyleSettingSource"
+        title_case:
+          $ref: "#/components/schemas/StyleSettingSource"
+        music:
+          $ref: "#/components/schemas/StyleSettingSource"
+        pace:
+          $ref: "#/components/schemas/StyleSettingSource"
+        chapter_titles:
+          $ref: "#/components/schemas/StyleSettingSource"
+        title_template:
+          $ref: "#/components/schemas/StyleSettingSource"
+        ending_hold:
+          $ref: "#/components/schemas/StyleSettingSource"
+        cut_timing:
+          $ref: "#/components/schemas/StyleSettingSource"
+        angle_switches:
+          $ref: "#/components/schemas/StyleSettingSource"
+
+    EffectiveStyleSettings:
+      type: object
+      description: |
+        What the editor follows. `title_colour` is `null` when nothing decides it (the editor then uses the title style's own), and
+        `title_template` when no form was learnt or set (the editor picks the words).
+      required: [vibe, transitions, text_animation, camera_motion, title_colour, title_position, title_case, music, pace, chapter_titles, title_template, ending_hold, cut_timing, angle_switches, sources]
+      properties:
+        vibe:
+          $ref: "#/components/schemas/EditVibe"
+        transitions:
+          $ref: "#/components/schemas/StyleLevel"
+        text_animation:
+          $ref: "#/components/schemas/StyleToggle"
+        camera_motion:
+          $ref: "#/components/schemas/StyleLevel"
+        title_colour:
+          type: [string, "null"]
+        title_position:
+          $ref: "#/components/schemas/StyleTitlePosition"
+        title_case:
+          $ref: "#/components/schemas/StyleTitleCase"
+        music:
+          $ref: "#/components/schemas/StyleMusic"
+        pace:
+          $ref: "#/components/schemas/StylePace"
+        chapter_titles:
+          $ref: "#/components/schemas/StyleToggle"
+        title_template:
+          type: [string, "null"]
+        ending_hold:
+          $ref: "#/components/schemas/StyleEndingHold"
+        cut_timing:
+          $ref: "#/components/schemas/StyleCutTiming"
+        angle_switches:
+          $ref: "#/components/schemas/StyleToggle"
+        sources:
+          $ref: "#/components/schemas/StyleSettingSources"
+
+    StyleSummary:
+      type: object
+      description: |
+        The description of the style in plain words, written by a model from the measures and a few frames of the reference videos
+        (untrusted model text: show it as text), and the settings it suggests.
+      required: [text, suggested, references, prompt_version, written_at]
+      properties:
+        text:
+          type: string
+          maxLength: 320
+        suggested:
+          $ref: "#/components/schemas/StyleSettings"
+        references:
+          type: integer
+          minimum: 0
+          description: How many reference videos it was written from.
+        prompt_version:
+          type: string
+        written_at:
+          type: string
+          format: date-time
+
+    StyleMeasure:
+      type: object
+      required: [id, label, value]
+      properties:
+        id:
+          type: string
+          description: |
+            A stable name of the line (`shots`, `first_cut`, `effects`, `look`, `title`, `music`, `length`, `ending`, `shot_tail`,
+            `transitions`, `camera`, `cuts`, `title_entrance`, `title_form`, `chapters` ...).
+        label:
+          type: string
+        value:
+          type: string
+
+    StyleMeasures:
+      type: object
+      description: What was measured from the reference videos, in plain words.
+      required: [references, confidence, firm, lines]
+      properties:
+        references:
+          type: integer
+          minimum: 0
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        firm:
+          type: boolean
+          description: Enough videos (3 or more) for the editor's checks to hold an edit to the measures; fewer are a hint.
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/StyleMeasure"
+
+    StyleReferenceStatus:
+      type: string
+      description: "`uploading`, `processing` (the file is being prepared), `analysing` (its style is being measured), `ready` or `failed`."
+      enum: [uploading, processing, analysing, ready, failed]
+
+    StyleReference:
+      type: object
+      required: [asset_id, name, status, failure_reason, progress, duration_ms, poster_url, created_at]
+      properties:
+        asset_id:
+          type: [string, "null"]
+          pattern: "^ast_[0-7][0-9a-hjkmnp-tv-z]{25}$"
+          description: The reference's asset; `null` for a video measured by the team from a file (it can only be removed by resetting the style).
+        name:
+          type: string
+          description: The file's name.
+        status:
+          $ref: "#/components/schemas/StyleReferenceStatus"
+        failure_reason:
+          type: [string, "null"]
+          description: |
+            Why it is `failed`, a code that is safe to show: an upload or ingest code of the asset (see `Asset.failure_reason`), or
+            `too_long` (over 3 minutes), `no_video_stream`, `analysis_failed`.
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: How far the preparation of the file is while `processing`.
+        duration_ms:
+          type: [integer, "null"]
+        poster_url:
+          type: [string, "null"]
+          description: A short-lived URL of a still of the video, until `poster_urls_expire_at`.
+        created_at:
+          type: string
+          format: date-time
+
+    StyleLimits:
+      type: object
+      required: [max_references, max_size_bytes, max_duration_ms]
+      properties:
+        max_references:
+          type: integer
+        max_size_bytes:
+          type: integer
+          format: int64
+        max_duration_ms:
+          type: integer
+
+    StyleProgress:
+      type: object
+      required: [done, total]
+      properties:
+        done:
+          type: integer
+          minimum: 0
+          description: References measured.
+        total:
+          type: integer
+          minimum: 0
+          description: References that are not failed.
+
+    CreatorStyle:
+      type: object
+      required: [status, progress, summary, measures, settings, effective, references, limits, learned_at]
+      properties:
+        status:
+          type: string
+          description: "`empty` (nothing learnt and no reference), `learning` (references are being uploaded or measured, or the profile made) or `ready`."
+          enum: [empty, learning, ready]
+        progress:
+          $ref: "#/components/schemas/StyleProgress"
+        summary:
+          oneOf:
+            - $ref: "#/components/schemas/StyleSummary"
+            - type: "null"
+        measures:
+          oneOf:
+            - $ref: "#/components/schemas/StyleMeasures"
+            - type: "null"
+        settings:
+          $ref: "#/components/schemas/StyleSettings"
+        effective:
+          $ref: "#/components/schemas/EffectiveStyleSettings"
+        references:
+          type: array
+          items:
+            $ref: "#/components/schemas/StyleReference"
+        limits:
+          $ref: "#/components/schemas/StyleLimits"
+        learned_at:
+          type: [string, "null"]
+          format: date-time
+          description: When the profile was last made.
+        poster_urls_expire_at:
+          type: string
+          format: date-time
+          description: When the `poster_url`s stop working. Present when one is.
+
+    UpdateStyleRequest:
+      type: object
+      required: [settings]
+      properties:
+        settings:
+          $ref: "#/components/schemas/StyleSettings"
 
     # ── Annotations ─────────────────────────────────────────────────────────────
 

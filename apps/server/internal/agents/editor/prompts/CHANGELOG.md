@@ -1,6 +1,6 @@
 # Editor system prompt: changelog
 
-The editor agent's system prompt is `editor.v2.6.md`, embedded in the Go binary, and the genre playbooks are the files in
+The editor agent's system prompt is `editor.v2.7.md`, embedded in the Go binary, and the genre playbooks are the files in
 `playbooks/`, embedded too. The text the model receives is the runtime's preamble (`runtime.SystemPreamble`, the untrusted-data
 rule) followed by this file. The prompt version (`PromptVersion` in `prompt.go`) is stored in every run's input, so a run can
 always be tied to the text it was given; a playbook has its own version (`workout.v2`, in `playbooks.go`) that the run's plan
@@ -21,6 +21,23 @@ Rules for changing it:
 - The cache hit rate of a run is visible: `cfctl agent show <run>` prints the cache write and read tokens of every model call and
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
+
+## editor.v2.7 (2026-10-18)
+
+The creator's style as data and settings (P6-05b and P6-05c). The style is three layers, the creator always winning: what was measured
+from their reference videos, the defaults an AI summary suggests from those measures, and the creator's own settings (the vibe,
+transitions, text animation, camera motion, the title's colour, place, case and form, chapter titles, the ending hold, cuts against the
+movement, angles, music, pace), which the run context lists in our words after the creator_style block, with a title_form data block
+when a form is set. The file is `editor.v2.7.md`, a patch of v2.6:
+
+- **New section "Following the creator's settings"**: what each setting asks for; a setting the creator chose is a hard rule and the
+  others are the plan; what the settings turn off stays off at every vibe.
+- **No creator's numbers in the prompt**: the examples that were one creator's (a title colour, a letter size, a series number, a
+  listicle title and a chapter title, the seconds between angle switches) are now slots and references to the creator_style block, which
+  holds each creator's own (title forms with slots, chapter forms, the ending hold, cuts against the movement).
+- **Checks**: `style_match` has `transitions`, `camera_motion` and `text_animation` from the settings in place of the measured `effects`,
+  and `ending_hold` and `title_form`; `effect_density` fails what the settings turn off; `rep_boundaries` does not apply when the cuts
+  are mid-rep; `chapter_titles` does not apply when chapter titles are off.
 
 ## editor.v2.6 (2026-10-18)
 

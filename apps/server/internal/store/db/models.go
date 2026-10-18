@@ -132,6 +132,7 @@ type Asset struct {
 	Search                  pgtype.TSVector
 	TranscriptStatus        string
 	TranscriptFailureReason *string
+	Purpose                 string
 }
 
 type AssetDerivative struct {
@@ -196,6 +197,16 @@ type CreatorStyleProfile struct {
 	ReferencesCount int32
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+	Summary         []byte
+	ReferenceIds    []uuid.UUID
+}
+
+type CreatorStyleSetting struct {
+	WorkspaceID ids.WorkspaceID
+	Settings    json.RawMessage
+	UpdatedBy   pgtype.UUID
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type CreditAccount struct {
@@ -350,6 +361,20 @@ type SpendHold struct {
 	ExpiresAt      time.Time
 	IdempotencyKey string
 	CreatedAt      time.Time
+}
+
+type StyleReference struct {
+	ID            uuid.UUID
+	WorkspaceID   ids.WorkspaceID
+	AssetID       pgtype.UUID
+	Name          string
+	Status        string
+	FailureReason *string
+	Measures      []byte
+	Detail        json.RawMessage
+	AnalysedAt    *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type TimelineVersion struct {

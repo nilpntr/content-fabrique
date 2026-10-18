@@ -189,7 +189,104 @@ The compact block the editor reads says them, and that a static camera gets the 
 
 ## 10. Not built, and what comes next
 
-- The upload route, the worker job and the endpoints in section 6; the creator's edit of a dimension; evidence frames (the plan's wording asks for them; the numbers and the example titles are there, the frames are not stored).
+- Evidence frames (the plan's wording asks for them; the numbers and the example titles are there, the frames are not stored). The upload route, the worker jobs, the endpoints and the creator's settings are built: section 11.
 - Left-aligned titles; animation and colour of captions (no reference has captions).
 - A live vision run on the five references (section 4) and a live editor run with the profile; the editor's prompt was checked with the cassettes and the unit tests only.
 - Per-genre profiles (a creator may edit a talking video differently from a workout), speech detection for the audio profile, and the trend-sound matching of P5-02.
+
+## 11. The style in the app (P6-05b)
+
+The founder's request: "let AI set the style for Gino based on the example folder, or add an option in the profile to tweak a person's
+settings, or still upload videos as a reference for styling". Built as one feature ([D-35](../05-decisions.md#d-35-the-creators-style-is-three-layers-and-the-creator-always-wins)):
+
+**Reference uploads.** A creator uploads 3 to 10 of their own finished videos through the normal upload path (`POST /v1/assets` with
+`purpose: style_reference`). The asset is a video like any other (`assets.purpose`, migration `00023_style_references`), but it is never
+footage: the library does not list it (`GET /v1/assets?purpose=style_reference` does), a project refuses it (`422 assets_not_usable`),
+and its ingest runs no quick look, transcript or clip analysis. Limits: 10 that are not failed per workspace (`409 too_many_references`,
+counted under the workspace's upload lock), 1 GiB (`413`), a video (`415`), 3 minutes (a longer one ends `failed`, `too_long`). The plan's
+storage quota (`PlanLimits.storage_gb`) is not enforced anywhere yet, so the references do not count against it.
+
+**The jobs.** The transaction that marks a reference ready queues its row in `style_references` and enqueues `style_reference` (the
+analysis queue): the original is downloaded into the worker's media directory, measured in the sandbox (`Analyzer.TempDir`, so the
+sandbox writes inside its allowed root) and its title read with the `stylevision` call ($0.01 at most). The row holds the measures; a
+reference that cannot be measured on its last attempt is `failed` with a code (`analysis_failed`, `no_video_stream`, `too_long`). Every
+reference that finishes, fails or is removed enqueues `style_profile` for the next 15 s slot (`jobs.StyleProfileWindow`; five uploads
+make one job): it aggregates the newest 10 measured references whose asset is live (and the files of cfctl), writes the summary and
+stores the profile with the ids it was made from. A profile already made from exactly those references is left alone (no model call);
+with none left it is removed. A failed summary call is retried; on the last attempt the profile is kept with its previous summary.
+
+**The summary** (`stylesummary`, prompt `stylesummary.v1`, Haiku 5.5 in dev-cheap and dev-mid, Sonnet 5.5 in v1-start, `max_tokens`
+800, a run budget of $0.03; from the price table about $0.0008 on Haiku and $0.015 on Sonnet, the worst case $0.021). It reads the
+measures in our words (`Profile.SummaryFacts`: `Describe` plus a note that "effects" counts only effects applied to the picture; no file
+names, no title texts) and up to three posters of the references, and calls a forced strict tool that returns one or two sentences
+in the second person ("Handheld gym shots that follow you, music on every video ...") and a value for each setting. The answer is
+untrusted: unknown or missing fields, a value outside its enum, a colour that is not a hex code, an empty summary or one over 320
+characters, a link, a handle or words aimed at a reader make it `invalid_output` and the profile is stored without a new summary.
+
+**Three layers** (`styleprofile.Resolve`): the vibe is this edit's, else the creator's, else the suggestion's, else lively. Transitions,
+text animation and camera motion are the creator's, else (when a person chose the vibe) the vibe's, else the suggestion's (except an
+"off" at a lively or hype vibe), else the vibe's. The title's colour, place and case are the creator's, else the suggestion's, else
+measured. Music is the creator's, else the suggestion's, else "always" when the videos have music. Pace is the creator's, else the
+suggestion's, else "like my videos". Every value carries its source (`you`, `suggested`, `measured`, `vibe`, `this_video`, `default`),
+which the API returns and the app shows. `Style.Applied()` puts the creator's title colour and case on a copy of the profile, so the
+title recipe and the checks follow them.
+
+**The editor** (prompt `editor.v2.7`): the run context lists the effective settings in our words after the `creator_style` block (enums
+and a hex colour, so outside the untrusted block), with where each came from; the block's effects line now reads "applied punch-ins,
+flashes and speed ramps measured in the picture". `plan_edit` points out a plan's transitions or motions when the settings turn them
+off. `check_edit`: `effect_density` fails a transition when transitions are off and a motion or ramp when camera motion is off, and
+allows 1.5 effects a cut (not 0.5) at "lots"; `style_match` replaces the measured `effects` dimension with `transitions`,
+`camera_motion` and `text_animation` from the settings (hard when the creator chose them, advice when they came from the vibe, the
+suggestion or the default), and turns the pacing dimensions into advice at a pace other than "like my videos". Music "never" drops
+the beat grid. A workspace with neither a profile nor settings, and a run without a vibe, have the context of before.
+
+**API** (contract first, tag `style`, paid-only, any role reads, owners and editors change): `GET /v1/style` (the summary, the measures
+in plain words, the settings, the effective settings with their sources, the references with their state and a poster, the overall
+status `empty`, `learning` or `ready` and the progress), `PUT /v1/style` (replaces the settings), `DELETE /v1/style` (the references,
+their measures, the profile and the settings), `POST /v1/style/relearn` (every reference measured again, then the profile),
+`DELETE /v1/style/references/{id}`. `POST /v1/projects/{id}/edit` takes `vibe`. Tenancy: the workspace comes from the token; every
+query filters by it; an asset of another workspace is `404`.
+
+**cfctl** (`cfctl style analyze|show|set|clear`) goes through the same code: the files are stored as references without an asset
+(replacing the earlier files, or added with `--append`), `creatorstyle.Learn` makes the profile and the summary (`--no-summary`,
+`--no-vision`), `show` prints the service's view, `set` the creator's settings, `clear` the app's reset.
+
+**Not built:** the storage quota of the plan; trimming a long reference instead of refusing it; the creator editing the summary text.
+
+## 12. Learning what was tuned by hand (P6-05c, profile version 2)
+
+What the first creator's edits were tuned for by hand (a series title, numbered chapter titles, long holds at the end, angle switches,
+no transitions) is now measured per creator and kept as data, so no creator's words or numbers live in code, prompts or constants
+(they are in the test fixtures only). `ProfileVersion` is 2; a version 1 profile is still read (the new parts are then unknown and
+the settings fall back to the defaults). Every measure is per reference (`Measures`) and aggregated:
+
+| Measure | Per reference | In the profile | How |
+|---|---|---|---|
+| Title form | the title as read | `Text.Templates`: a template, its share, typical length and lines | a word that comes back in two titles or more stays, a counting number at the start and every other run of words are slots (`<N>`, `<TOPIC>`, `<GOAL>`): "<TOPIC> <N>", "<N> MOVES FOR <GOAL>" (`template.go`) |
+| Chapter titles | `Text.Chapters`, read from a frame 0.6 s after up to 3 later cuts (`stylevision.v3`) | `ChapterShare` of the multi-shot videos read, `ChapterTemplates` ("<N>. <TOPIC> FOR <GOAL>") | the same template learning |
+| Title entrance | `Text.Entrance` (pop, slide, fade, typewriter, none), from two frames 0.08 s and 0.3 s in | the majority | the vision read |
+| Shot lengths | the shots | `Pacing.ShotS` with `p90`, `Pacing.EndShotS` (the last shot of the videos with a cut); "a long hold at the end" when it is 2.5 s or more and 1.5 times the median shot | |
+| Transitions | `Transitions`: each cut hard, blend (a change spread over several frames), flash or zoom | `Transitions.Used` none, cut_only or some, with the kinds and the share | the scene scores and thumbnails around each cut (`cuts.go`); a proxy, not a reading of the effect picked |
+| Camera | P6-06's `camshift` | `Camera.Level` static, subtle (a drift of 0.3 % of the frame a second or more) or handheld | |
+| Cuts against the movement | `Movement`: per cut after a shot with reps, on a rep boundary (within 150 ms, or after the set), mid-rep, or inside a set (reps at the same pace on both sides) | the shares, known from 3 measured cuts | the clip analysis' rep detection run on the reference |
+
+**What the rep detection allows, and what not.** It finds reps in a stretch of a few seconds of one set, so a cut after a long take
+is measured and a cut between two short shots is not: on edits of 1 to 3 s shots the measure is "not measurable", and the profile says
+so (`cuts against the movement: not measurable`). It does not know which exercise a shot shows, so an **angle switch within one exercise**
+is a proxy: a cut with reps at the same pace (within 25 %) on both sides. A local check on four of the founder's reference videos (not
+committed, no model call) measured plain cuts only, a long hold at the end (8.1 s at the median against 2.7 s shots) and a static camera,
+and found the cuts not measurable against the movement: their shots around the cuts are too short for the rep detection.
+
+**Settings.** Five more are overridable, with the same precedence (the creator, then the AI suggestion, then the measures, then the
+default): `chapter_titles` (on, off), `title_template` (a form the creator types, validated: letters, digits, spaces, slots in capitals,
+80 characters; it reaches the editor as an untrusted `title_form` block), `ending_hold` (long, short), `cut_timing` (full_reps, mid_rep)
+and `angle_switches` (on, off). The summary call (`stylesummary.v2`) suggests the four enums too and is asked to mention what stands
+out ("long holds at the end", "numbered chapter titles", "cuts mid-rep"); it sees that the titles follow a form but not the form's words.
+
+**The editor** (`editor.v2.7`): the creator_style block lists the title forms ("fill the slots from the footage; never copy a title of
+theirs") and the chapter forms, with the creator's titles as examples never to reuse; the settings say each choice in our words;
+`style_match` adds `ending_hold` and `title_form` (hard when the creator chose them); `rep_boundaries` does not apply when the cuts are
+mid-rep and `chapter_titles` not when chapter titles are off. The prompt's examples that were one creator's are now slots.
+
+**The text read** shows the model up to 8 frames (5 of the hook, 3 after later cuts) with `max_tokens` 800; the worst case on Haiku 5.5
+is about $0.002, under its $0.01 budget.

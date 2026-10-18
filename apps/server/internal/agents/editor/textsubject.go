@@ -9,7 +9,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
-// chapterTitle matches a numbered chapter title of a listicle ("1. SHRUGS", "2) STRAPS", "3 - PULL").
+// chapterTitle matches a numbered chapter title of a listicle ("1. SQUATS", "2) ROWS", "3 - PULL").
 var chapterTitle = regexp.MustCompile(`^\s*[0-9]{1,2}\s*[.):\-]\s*\S`)
 
 // IsChapterTitle says whether a text is a numbered chapter title.

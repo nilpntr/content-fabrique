@@ -59,7 +59,7 @@ func (q *Queries) FailTranscript(ctx context.Context, arg FailTranscriptParams) 
 }
 
 const getAssetForTranscriptSave = `-- name: GetAssetForTranscriptSave :one
-SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason FROM assets
+SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose FROM assets
 WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL
 FOR UPDATE
 `
@@ -112,6 +112,7 @@ func (q *Queries) GetAssetForTranscriptSave(ctx context.Context, arg GetAssetFor
 		&i.Search,
 		&i.TranscriptStatus,
 		&i.TranscriptFailureReason,
+		&i.Purpose,
 	)
 	return i, err
 }

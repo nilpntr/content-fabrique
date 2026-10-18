@@ -12,6 +12,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/annotations"
 	"github.com/nilpntr/content-fabrique/internal/api"
 	"github.com/nilpntr/content-fabrique/internal/assets"
+	"github.com/nilpntr/content-fabrique/internal/creatorstyle"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
 	"github.com/nilpntr/content-fabrique/internal/projects"
 	"github.com/nilpntr/content-fabrique/internal/renderjobs"
@@ -30,6 +31,7 @@ type apiServer struct {
 	*runapi.Runs
 	*renderjobs.RenderAPI
 	*annotations.CommentAPI
+	*styleAPI
 	ents EntitlementReader
 	// credits reads the credit balance for GET /v1/me; nil leaves it out.
 	credits CreditReader
@@ -45,12 +47,16 @@ func newAPIServer(ents EntitlementReader, logger *slog.Logger) *apiServer {
 	// Without a configured object store the assets operations answer 503 storage_not_configured (Mount replaces this
 	// handler when it is given a service).
 	srv := &apiServer{Handler: assets.NewHandler(nil, callerOf, logger), API: projects.NewAPI(nil, callerOf, logger),
-		Runs: runapi.New(nil, callerOf, logger), RenderAPI: renderjobs.NewAPI(nil, callerOf, logger), CommentAPI: annotations.NewAPI(nil, callerOf, logger), ents: ents, logger: logger}
+		Runs: runapi.New(nil, callerOf, logger), RenderAPI: renderjobs.NewAPI(nil, callerOf, logger), CommentAPI: annotations.NewAPI(nil, callerOf, logger),
+		styleAPI: &styleAPI{creatorstyle.NewHandler(nil, callerOf, logger)}, ents: ents, logger: logger}
 	if cr, ok := ents.(CreditReader); ok {
 		srv.credits = cr
 	}
 	return srv
 }
+
+// styleAPI is the style operations (package creatorstyle), named so that its embedded Handler does not clash with the assets one.
+type styleAPI struct{ *creatorstyle.Handler }
 
 // callerOf is how the handlers learn who is calling: the Principal the authentication middleware resolved from the verified
 // token. Nothing else names the workspace.
