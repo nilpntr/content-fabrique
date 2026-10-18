@@ -30,13 +30,13 @@ test("a setting is set, changed and given back to the suggestion", () => {
 
 test("the controls move at once: a chosen setting shows as the creator's", () => {
   const style = emptyStyle();
-  const next = withMySettings(style, { transitions: "off", title_colour: "#FF0000" });
-  expect(next.effective.transitions).toBe("off");
+  const next = withMySettings(style, { transitions: "lots", title_colour: "#FF0000" });
+  expect(next.effective.transitions).toBe("lots");
   expect(next.effective.sources.transitions).toBe("you");
   expect(next.effective.title_colour).toBe("#FF0000");
   expect(next.effective.camera_motion).toBe("subtle");
   expect(next.effective.sources.camera_motion).toBe("vibe");
-  expect(style.effective.transitions).toBe("subtle"); // the old one is not changed
+  expect(style.effective.transitions).toBe("off"); // the old one is not changed
 });
 
 test("the references in words", () => {

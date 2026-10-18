@@ -21,6 +21,8 @@ import { chosenCount, learningLine, sourceNote, withMySettings, withSetting } fr
 function failure(error: unknown): string {
   if (error instanceof ApiError && error.code === "insufficient_role") return "Only owners and editors can change the style.";
   if (error instanceof ApiError && error.code === "network_error") return "We couldn't reach the server. Check your connection and try again.";
+  if (error instanceof ApiError && error.code === "style_learning_in_progress") return "Your videos are still being learnt. Try again when that's done.";
+  if (error instanceof ApiError && error.code === "too_many_relearns") return "You've learnt your style again as often as you can today. Try again tomorrow.";
   return "That didn't save. Try again in a moment.";
 }
 

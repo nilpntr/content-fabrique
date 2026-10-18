@@ -471,7 +471,7 @@ export function emptyStyle(over: Partial<CreatorStyle> = {}): CreatorStyle {
     settings: {},
     effective: {
       vibe: "lively",
-      transitions: "subtle",
+      transitions: "off",
       text_animation: "on",
       camera_motion: "subtle",
       title_colour: null,
@@ -486,7 +486,7 @@ export function emptyStyle(over: Partial<CreatorStyle> = {}): CreatorStyle {
       angle_switches: "on",
       sources: {
         vibe: "default",
-        transitions: "vibe",
+        transitions: "default",
         text_animation: "vibe",
         camera_motion: "vibe",
         title_colour: "default",
@@ -517,9 +517,9 @@ export function learntStyle(over: Partial<CreatorStyle> = {}): CreatorStyle {
     progress: { done: 5, total: 5 },
     summary: {
       text: "Handheld gym shots that follow you, music on every video with a lift around 3 s, cream all-caps titles above your head, mostly 2-second shots, cuts mid-rep, numbered chapter titles and a long hold at the end.",
-      suggested: { vibe: "lively", transitions: "subtle", text_animation: "on", camera_motion: "subtle", title_colour: "#FFF4D6", title_position: "top", title_case: "upper", music: "always", pace: "like_mine", chapter_titles: "on", ending_hold: "long", cut_timing: "mid_rep", angle_switches: "on" },
+      suggested: { vibe: "lively", transitions: "off", text_animation: "on", camera_motion: "subtle", title_colour: "#FFF4D6", title_position: "top", title_case: "upper", music: "always", pace: "like_mine", chapter_titles: "on", ending_hold: "long", cut_timing: "mid_rep", angle_switches: "on" },
       references: 5,
-      prompt_version: "stylesummary.v1",
+      prompt_version: "stylesummary.v3",
       written_at: NOW,
     },
     measures: {

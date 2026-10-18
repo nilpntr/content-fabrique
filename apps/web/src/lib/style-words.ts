@@ -38,7 +38,7 @@ export const SETTINGS: readonly ChoiceWords[] = [
   {
     key: "transitions",
     label: "Transitions",
-    explain: "Swipes, zooms and flashes between shots.",
+    explain: "Swipes, zooms and flashes between shots. Off keeps plain cuts on the beat, the way most creators edit.",
     options: [
       { value: "off", label: "Off" },
       { value: "subtle", label: "A few" },
