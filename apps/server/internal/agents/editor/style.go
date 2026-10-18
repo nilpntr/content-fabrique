@@ -98,12 +98,8 @@ func styleBlocks(st *styleprofile.Style) []llm.Block {
 	var blocks []llm.Block
 	if p := profileOf(st); p != nil {
 		body := p.CompactBlock()
-		if t := p.Text; t != nil && len(t.Examples) > 0 {
-			body += "\nexamples of the creator's titles (their own words; never reuse one verbatim): " + strings.Join(t.Examples, " | ")
-		}
-		if t := p.Text; t != nil && len(t.ChapterExamples) > 0 {
-			body += "\nexamples of the creator's chapter titles (never reuse one verbatim): " + strings.Join(t.ChapterExamples, " | ")
-		}
+		// The creator's own titles are not in the block: the templates give their form, and a title shown is a title copied
+		// (title_copied).
 		weak := ""
 		if !p.Firm() {
 			weak = fmt.Sprintf(" This profile rests on only %d reference videos (confidence %.0f %%): treat it as a hint, not a rule; the checks do not use it yet.", p.References, p.Confidence*100)
@@ -246,19 +242,21 @@ func styleNote(st *styleprofile.Style) string {
 	b.WriteString("\nCreator style: ")
 	if p != nil {
 		pc := p.Pacing
-		switch pc.Style {
-		case styleprofile.PaceLongTake:
+		switch {
+		case energetic(r.Vibe) && pc.ShotS.Median > 0:
+			fmt.Fprintf(&b, "at the %s vibe the shots follow the creator's cut-up videos (a shot of %.1f s at the median, measured), not their long takes: see the pace targets above. ", r.Vibe, pc.ShotS.Median)
+		case pc.Style == styleprofile.PaceLongTake:
 			fmt.Fprintf(&b, "this creator lets takes run (the longest shot of a video is about %.0f s, %.0f to %.0f cuts a video). Plan a few long takes of full sets, with short details between them, and not many short shots. ", pc.LongestShotS.Median, pc.CutsPerVideo.Min, pc.CutsPerVideo.Max)
-		case styleprofile.PaceMontage:
+		case pc.Style == styleprofile.PaceMontage:
 			fmt.Fprintf(&b, "this creator cuts fast (a shot of %.1f s at the median). ", pc.ShotMedianS.Median)
 		default:
 			fmt.Fprintf(&b, "this creator mixes long takes (up to %.0f s) with quick cuts. ", pc.LongestShotS.Median)
 		}
 		switch r.Pace {
 		case styleprofile.PaceFaster:
-			b.WriteString("For this video they want it faster than that: shorter shots, more cuts. ")
+			b.WriteString("They want their videos faster than that: shorter shots, more cuts (the pace targets above have it). ")
 		case styleprofile.PaceSlower:
-			b.WriteString("For this video they want it slower than that: longer shots, fewer cuts. ")
+			b.WriteString("They want their videos slower than that: longer shots, fewer cuts (the pace targets above have it). ")
 		}
 		if p.Hook.FirstCutS.Median > 0 {
 			fmt.Fprintf(&b, "The first cut comes at about %.1f s, so the opening shot (the hook) runs that long. ", p.Hook.FirstCutS.Median)
@@ -274,16 +272,18 @@ func styleNote(st *styleprofile.Style) string {
 		}
 		if rec := p.TitleRecipe(); rec != nil {
 			b.WriteString(rec.Describe() + " ")
-			if p.Text != nil && len(p.Text.Patterns) > 0 && p.Text.Patterns[0].Share >= styleprofile.PatternMinShare {
+			if r.TitleTemplate != "" && r.Sources.TitleTemplate == styleprofile.SourceYou {
+				b.WriteString("They chose the form of their titles (the title_form block): write a new title in it, the slots filled from this footage; do not invent a name and never reuse one of their titles. ")
+			} else if p.Text != nil && len(p.Text.Patterns) > 0 && p.Text.Patterns[0].Share >= styleprofile.PatternMinShare {
 				switch top := p.Text.Patterns[0]; top.Kind {
 				case styleprofile.KindSeries:
 					b.WriteString("Their titles follow a series format, <TOPIC> <number> in capitals")
 					if top.Number != "" {
 						b.WriteString(" (always ending in " + top.Number + ")")
 					}
-					b.WriteString(": use it, with the muscle or the exercise of the footage as the topic, and do not invent a name. ")
+					b.WriteString(": write a new title in it, with the muscle, the exercise or the session of this footage as the topic; do not invent a name and never reuse one of their titles. ")
 				case styleprofile.KindLowercase:
-					b.WriteString("Their titles are mostly a lowercase witty line about the footage: write one in that voice. ")
+					b.WriteString("Their titles are mostly a lowercase witty line about the footage: write a new one about this video in that voice. ")
 				}
 			}
 		}

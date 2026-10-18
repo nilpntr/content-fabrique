@@ -824,7 +824,7 @@ every request, or several per analysis: the summary is for the creator to read a
 **Consequences.** The checks take the settings: `effect_density` fails what the settings turn off and allows more at "lots",
 `style_match` has `transitions`, `camera_motion` and `text_animation` (hard when the creator chose them, advice otherwise) in place of
 the measured `effects`. Existing workspaces with a profile and no settings get the lively defaults: their edits now move. Prompt
-`editor.v2.7`; migration `00023_style_references`.
+`editor.v2.8`; migration `00023_style_references`.
 
 **Revisit** when the founder has watched edits made with the settings, or when a creator asks for a setting that is not here.
 

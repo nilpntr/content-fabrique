@@ -297,7 +297,7 @@ func Resolve(p *Profile, suggested *Settings, mine Settings, runVibe string) Res
 				mTemplate = t.Templates[0].Template
 			}
 		}
-		if p.Pacing.EndShotS.Median > 0 {
+		if p.Pacing.EndingS.Median > 0 {
 			mHold = map[bool]string{true: HoldLong, false: HoldShort}[p.Pacing.LongEndingHold()]
 		}
 		if p.Movement.Known() {
@@ -382,7 +382,11 @@ func (s *Style) Applied() *Profile {
 		t.Position = "upper_third"
 	}
 	if r.TitleTemplate != "" && r.Sources.TitleTemplate == SourceYou {
+		// The creator's own form is the one title template: it goes first, and the measured kinds of title (whose "most common template"
+		// would say something else) give way to it. The reference titles stay, for title_copied.
+		t.Titles = s.Profile.ReferenceTitles()
 		t.Templates = append([]TitleTemplate{{Template: r.TitleTemplate, Share: 1}}, t.Templates...)
+		t.Patterns = nil
 	}
 	p.Text = &t
 	return &p

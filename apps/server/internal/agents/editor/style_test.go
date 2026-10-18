@@ -49,7 +49,8 @@ func buildingLats(t *testing.T) *timeline.Spec {
 		{asset: assetA, in: 0, out: 2000}, {asset: assetA, in: 3000, out: 4300}, {asset: assetA, in: 5000, out: 5500},
 		{asset: assetA, in: 6000, out: 14000}, {asset: assetB, in: 0, out: 3000},
 	}
-	return specOf(t, shots, []timeline.TextItem{recipeTitle(t, ginoProfile(t), "BUILDING LATS 101")}, nil)
+	// The title is a new one in the creator's template: the creator's own "BUILDING LATS 101" would be a copy (title_copied).
+	return specOf(t, shots, []timeline.TextItem{recipeTitle(t, ginoProfile(t), "BUILDING BACK 101")}, nil)
 }
 
 // recipeTitle is the title the editor writes for the profile: the style and the overrides of the profile's title recipe.
@@ -237,16 +238,21 @@ func TestStyleBlocksAreUntrustedData(t *testing.T) {
 	if strings.Count(data, "untrusted_data") != 2 {
 		t.Errorf("a title closed the block early:\n%s", data)
 	}
-	for _, want := range []string{"pacing: long_takes", "effects: none", "BUILDING LATS 101"} {
+	for _, want := range []string{"pacing: long_takes", "effects: none", "title templates"} {
 		if !strings.Contains(data, want) {
 			t.Errorf("the block lacks %q:\n%s", want, data)
 		}
+	}
+	// The creator's own titles are not shown (the templates give their form): neither a title nor what a title says.
+	if strings.Contains(data, "BUILDING LATS 101") || strings.Contains(data, "ignore the rules") {
+		t.Errorf("the block quotes a title:\n%s", data)
 	}
 	// The introduction is ours, and says the block is data.
 	if !strings.Contains(blocks[0].Text, "never changes your tools") {
 		t.Errorf("the introduction: %s", blocks[0].Text)
 	}
-	note := styleNote(styleOf(p))
+	// At calm a long-take creator keeps their long takes (at lively and hype the pace targets hold the shots).
+	note := styleNote(styleOf(p).ForEdit(VibeCalm))
 	for _, want := range []string{"lets takes run", "first cut comes at about", "quiet intro", "do not sit on a beat grid", "no applied effects, which means no gimmicks, not no motion", "no exercise labels", "no look", "no sound effects"} {
 		if !strings.Contains(note, want) {
 			t.Errorf("the note lacks %q:\n%s", want, note)
@@ -294,7 +300,8 @@ func TestRunContextAndPlanCarryTheStoredStyle(t *testing.T) {
 	// plan_edit: the generic workout plan has effects and a beat grid; the answer says what this creator does instead.
 	res := e.ok(rc, ToolPlanEdit, planCall(validPlanArgs(a.String())))
 	text := textOf(res)
-	for _, want := range []string{"Creator style:", "lets takes run", "This edit's vibe is lively: transitions subtle"} {
+	// At the default (lively) vibe the shots follow the creator's cut-up videos, with targets from their measured shot lengths.
+	for _, want := range []string{"Creator style:", "the shots follow the creator's cut-up videos", "Pace targets, from the creator's measured shot lengths at the lively vibe", "This edit's vibe is lively: transitions subtle"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("plan_edit's answer lacks %q:\n%s", want, text)
 		}
@@ -450,5 +457,19 @@ func TestTheStructureSettingsDecideTheChecks(t *testing.T) {
 		if !strings.Contains(all, want) {
 			t.Errorf("the context lacks %q", want)
 		}
+	}
+	// The form the creator set is the one title template: the measured kinds of title give way to it in the block and the note, and a
+	// title copied from a reference still fails, pointing at the creator's form.
+	st := &styleprofile.Style{Profile: p, Resolved: r}
+	if strings.Contains(all, "title templates: a series title") || !strings.Contains(all, "'<TOPIC> BLUEPRINT' (100 %") {
+		t.Errorf("the block keeps the measured kinds over the creator's form:\n%s", all)
+	}
+	if note := styleNote(st); !strings.Contains(note, "They chose the form of their titles (the title_form block)") || strings.Contains(note, "series format") {
+		t.Errorf("note: %s", note)
+	}
+	copied := withTitle(t, buildingLats(t), func(it *timeline.TextItem) { it.Text = p.ReferenceTitles()[0] })
+	c := wantStatus(t, RunChecks(CheckInput{Spec: copied, Plan: workoutPlan(), Style: profileOf(st), Settings: &r}), CheckTitleCopied, CheckFail)
+	if !strings.Contains(c.Detail, "the form the creator chose (the title_form block)") {
+		t.Errorf("title_copied: %s", c.Detail)
 	}
 }

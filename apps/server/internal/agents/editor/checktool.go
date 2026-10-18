@@ -105,7 +105,7 @@ func LoadAssetAnalysis(ctx context.Context, src AnalysisSource, ws ids.Workspace
 		if !ok {
 			continue
 		}
-		sp := Span{StartMs: int64(m.StartMs), EndMs: int64(m.EndMs)}
+		sp := Span{StartMs: int64(m.StartMs), EndMs: int64(m.EndMs), TurnMs: int64(m.TurnMs)}
 		switch m.Kind {
 		case store.MomentRep:
 			a.Reps = append(a.Reps, sp)

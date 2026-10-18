@@ -98,8 +98,21 @@ func Load(ctx context.Context, st StyleReader, ws ids.WorkspaceID) (*Profile, []
 // LoadProfile returns only the profile (the editor reads it on every tool call and has no use for the measures), or nil when the
 // workspace has none or the stored shape is one this version does not know.
 func LoadProfile(ctx context.Context, st StyleReader, ws ids.WorkspaceID) (*Profile, error) {
-	p, _, err := loadRow(ctx, st, ws)
-	return p, err
+	p, row, err := loadRow(ctx, st, ws)
+	if p == nil || err != nil {
+		return p, err
+	}
+	// A profile stored before a measure was added is made again from its stored measures (the same function, so it only gains the new
+	// numbers: the 90th percentile shot and the ending of the pacing); a read that fails keeps the stored profile.
+	if p.Pacing.ShotS.Median > 0 && p.Pacing.ShotP90S == 0 {
+		var ms []Measures
+		if json.Unmarshal(row.Measures, &ms) == nil {
+			if fresh := Aggregate(ms); fresh != nil {
+				return fresh, nil
+			}
+		}
+	}
+	return p, nil
 }
 
 func loadRow(ctx context.Context, st StyleReader, ws ids.WorkspaceID) (*Profile, store.CreatorStyle, error) {

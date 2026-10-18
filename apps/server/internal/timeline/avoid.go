@@ -2,6 +2,7 @@ package timeline
 
 import (
 	"math"
+	"strings"
 
 	"github.com/nilpntr/content-fabrique/internal/timeline/style"
 )
@@ -45,9 +46,25 @@ type Avoidance struct {
 	OverHead, OverBody bool
 	// Where says how it was cleared: "above" the subject, "beside" the head (over the background next to it), "below" all of it, "smaller"
 	// for a smaller size where it stands, or "" for not moved. Scale is the scale it was placed at when the avoidance shrank it (0 when the
-	// size is the item's own).
+	// size is the item's own); it may be under style.MinScale, down to the style's legibility floor (style.FitFloor).
 	Where string
 	Scale float64
+	// Lines is how many lines the text takes when the avoidance wrapped it narrower to stack it beside the head (0 when it keeps its own
+	// lines).
+	Lines int
+	// Tried is the room the avoidance found around the subject, for a caller that has to explain why an item could not be placed.
+	Tried Tried
+}
+
+// Tried is the room PlaceTextAvoiding found around the subjects, in output pixels.
+type Tried struct {
+	// AboveBandPx is the tallest clear band between the top of the safe zone and the subject (a gap left out).
+	AboveBandPx int
+	// BesideWidthPx and BesideHeightPx are the widest room beside a head (inside the zone, a gap from the head) and how tall it is (from
+	// the top of the zone to the shoulder line).
+	BesideWidthPx, BesideHeightPx int
+	// FloorScale is the smallest scale tried (the style's legibility floor), 0 when nothing under the item's own was tried.
+	FloorScale float64
 }
 
 // The places a title can be put.
@@ -58,8 +75,15 @@ const (
 	WhereSmaller = "smaller"
 )
 
-// avoidFactors are the shrinks tried, in order, within the allowed scale range.
+// avoidFactors are the shrinks tried first, relative to the item's own size, down to style.MinScale; under it the scales go on in steps
+// of fitStep (absolute) down to the style's legibility floor.
 var avoidFactors = []float64{1, 0.9, 0.8, 0.7, 0.6}
+
+// fitStep is the step of the scales tried under style.MinScale.
+const fitStep = 0.05
+
+// MaxBesideLines is the most lines a title stacked beside a head may take.
+const MaxBesideLines = 3
 
 // avoidGapPct is the clear space kept between a title and the subject, as a percentage of the output height.
 const avoidGapPct = 1.0
@@ -77,18 +101,96 @@ func covers(box style.Rect, subs []Subject) (head, body bool) {
 	return head, body
 }
 
+// FitScales are the scales the avoidance tries for an item, largest first: its own, the shrinks of avoidFactors down to style.MinScale,
+// then steps of fitStep down to the legibility floor of its style on this output (style.FitFloor: capitals of at least 2.2 % of the
+// height, and never under style.MinFitScale). An item whose own scale is at or under the floor is only tried at its own.
+func FitScales(out Output, it TextItem) []float64 {
+	base := 1.0
+	if it.Scale != nil {
+		base = *it.Scale
+	}
+	floor := style.MinScale
+	if st, ok := style.Lookup(it.Style); ok {
+		floor = st.FitFloor(out.ShortSide(), out.Height)
+	}
+	floor = math.Min(floor, base)
+	scales := []float64{base}
+	seen := map[float64]bool{base: true}
+	add := func(sc float64) {
+		sc = math.Round(sc*100) / 100
+		if sc >= floor && sc < base && !seen[sc] {
+			seen[sc] = true
+			scales = append(scales, sc)
+		}
+	}
+	for _, f := range avoidFactors[1:] {
+		add(math.Max(base*f, style.MinScale))
+	}
+	for sc := math.Min(style.MinScale, base) - fitStep; sc > floor+1e-9; sc -= fitStep {
+		add(sc)
+	}
+	add(floor)
+	return scales
+}
+
+// placeScaled is PlaceText at a scale the avoidance chose (absolute: relative to the style's own size), wrapped so that its box is at
+// most maxBoxWidth wide (0: the zone's centre column, as PlaceText). A scale under style.MinScale is not one a spec may ask for, so the
+// style is shrunk directly.
+func placeScaled(out Output, it TextItem, scale float64, maxBoxWidth int) (TextPlacement, bool) {
+	cand := it
+	shrink := 1.0
+	if scale < style.MinScale {
+		cand.Scale, shrink = nil, scale
+	} else {
+		cand.Scale = &scale
+	}
+	pl, err := PlaceText(out, cand)
+	if err != nil {
+		return pl, false
+	}
+	if shrink == 1 && maxBoxWidth <= 0 {
+		return pl, true
+	}
+	st := pl.Style
+	if shrink != 1 {
+		st = st.Shrunk(shrink)
+	}
+	if maxBoxWidth <= 0 {
+		maxBoxWidth = style.MaxBoxWidth(pl.Zone, out.Width)
+	}
+	lay := style.Measure(st, out.ShortSide(), it.Text, maxBoxWidth)
+	w, h := lay.Box()
+	var box style.Rect
+	if it.Position != nil {
+		box = style.PlacePosition(out.Width, out.Height, it.Position.X, it.Position.Y, w, h)
+	} else {
+		box = style.PlaceAnchor(pl.Zone, it.Anchor, out.Width, out.Height, w, h)
+	}
+	pl.Style, pl.Layout, pl.Box = st, lay, box
+	return pl, true
+}
+
+// wholeWords says the layout broke the text only between words (Measure breaks a word that is wider than a line between its letters,
+// which a title stacked beside a head must not do).
+func wholeWords(lay style.Layout, text string) bool {
+	return strings.Join(strings.Fields(strings.Join(lay.Lines, " ")), " ") == strings.Join(strings.Fields(text), " ")
+}
+
 // PlaceTextAvoiding places a text item like PlaceText and, when its ink covers the subject's head or torso, moves it where it does not,
 // inside the safe zone. A text is never left over the body (P6-06): the order is
 //
 //  1. where its anchor puts it, when that is clear of the head and the torso;
-//  2. above the subject (the band above the head, or above a raised hand), at the item's own size and then at smaller ones down to the
-//     lowest scale the item may have (0.6 of its style's), or where it stands at a smaller size when that is already clear;
-//  3. beside the head, over the background next to it (left or right, its letters above the shoulder line), at every size;
+//  2. above the subject (the band above the head, or above a raised hand), at the item's own size and then at smaller ones, down to the
+//     legibility floor of its style (style.FitFloor: capitals of at least 2.2 % of the frame height, and never under a scale of 0.45), or
+//     where it stands at a smaller size when that is already clear;
+//  3. beside the head, over the background next to it (left or right, above the shoulder line): wrapped to the width of the room there in
+//     up to MaxBesideLines lines of whole words, at every size down to the floor; at the item's own height when that is clear (the top
+//     band, where a title belongs), else with its letters just above the shoulders;
 //  4. below all of the subject (the lower part of the frame), at every size, when there is room: that is background too.
 //
-// When none of these fits, the item is returned as PlaceText placed it, not Cleared, with what it covers there (OverHead, OverBody): it
-// must not be drawn at this time (FitText in package subject moves it in time or leaves it out). An item that does not avoid the subject
-// (avoid_subject false), or a call with no subjects, is PlaceText's result untouched and Cleared.
+// When none of these fits, the item is returned as PlaceText placed it, not Cleared, with what it covers there (OverHead, OverBody) and
+// the room that was found (Tried): it must not be drawn at this time (FitText in package subject moves it in time or leaves it out). An
+// item that does not avoid the subject (avoid_subject false), or a call with no subjects, is PlaceText's result untouched and Cleared.
 func PlaceTextAvoiding(out Output, it TextItem, subs []Subject) (TextPlacement, Avoidance, error) {
 	pl, err := PlaceText(out, it)
 	if err != nil {
@@ -106,19 +208,7 @@ func PlaceTextAvoiding(out Output, it TextItem, subs []Subject) (TextPlacement, 
 		return pl, Avoidance{Cleared: true}, nil
 	}
 	gap := int(math.Round(avoidGapPct / 100 * float64(out.Height)))
-	base := 1.0
-	if it.Scale != nil {
-		base = *it.Scale
-	}
-	// The scales to try: the item's own, then smaller ones down to the lowest allowed.
-	var scales []float64
-	seen := map[float64]bool{}
-	for _, f := range avoidFactors {
-		if sc := math.Max(math.Round(base*f*100)/100, style.MinScale); !seen[sc] {
-			seen[sc] = true
-			scales = append(scales, sc)
-		}
-	}
+	scales := FitScales(out, it)
 	// The placement at each scale, measured once. The first is the item's own size, whatever the rounding of the scales did to it.
 	type sized struct {
 		pl      TextPlacement
@@ -126,12 +216,10 @@ func PlaceTextAvoiding(out Output, it TextItem, subs []Subject) (TextPlacement, 
 		ok      bool
 	}
 	placed := make([]sized, len(scales))
-	for i, sc := range scales {
-		cand := it
-		if i > 0 {
-			cand.Scale, placed[i].applied = &sc, sc
-		}
-		placed[i].pl, placed[i].ok = PlaceTextOK(out, cand)
+	placed[0] = sized{pl: pl, ok: true}
+	for i := 1; i < len(scales); i++ {
+		placed[i].pl, placed[i].ok = placeScaled(out, it, scales[i], 0)
+		placed[i].applied = scales[i]
 	}
 	at := func(i int) (TextPlacement, float64, bool) { return placed[i].pl, placed[i].applied, placed[i].ok }
 	// What is tested against the person is the ink of the text, not its layout box: the line box of a title in capitals is twice as tall as
@@ -174,14 +262,19 @@ func PlaceTextAvoiding(out Output, it TextItem, subs []Subject) (TextPlacement, 
 		_, body := covers(inkPadded(cpl, nb), subs)
 		return z, !body
 	}
-	done := func(cpl TextPlacement, nb style.Rect, z style.Zone, where string, applied float64) (TextPlacement, Avoidance, error) {
+	var tried Tried
+	if len(scales) > 1 {
+		tried.FloorScale = scales[len(scales)-1]
+	}
+	done := func(cpl TextPlacement, nb style.Rect, z style.Zone, where string, applied float64, lines int) (TextPlacement, Avoidance, error) {
 		cpl.Box, cpl.Zone = nb, z
-		return cpl, Avoidance{Overlapped: true, Cleared: true, Where: where, Scale: applied}, nil
+		return cpl, Avoidance{Overlapped: true, Cleared: true, Where: where, Scale: applied, Lines: lines, Tried: tried}, nil
 	}
 	var all []style.Rect
 	for _, s := range subs {
 		all = append(all, s.Body, s.Head)
 	}
+	zoneTop := pl.Zone.Inner.Top
 	// 2. Above the subject, the biggest size first; where it stands at a smaller size counts at that size.
 	for i := range scales {
 		cpl, applied, ok := at(i)
@@ -191,34 +284,58 @@ func PlaceTextAvoiding(out Output, it TextItem, subs []Subject) (TextPlacement, 
 		if i > 0 {
 			if b, ok := cpl.Zone.Fit(cpl.Box); ok {
 				if _, body := covers(inkPadded(cpl, b), subs); !body {
-					return cpl, Avoidance{Overlapped: true, Cleared: true, Where: WhereSmaller, Scale: applied}, nil
+					return cpl, Avoidance{Overlapped: true, Cleared: true, Where: WhereSmaller, Scale: applied, Tried: tried}, nil
 				}
 			}
 		}
-		nb := withInkBottom(cpl, obstacleTop(cpl.Box, all)-gap)
+		top := obstacleTop(cpl.Box, all)
+		tried.AboveBandPx = max(tried.AboveBandPx, top-gap-zoneTop)
+		nb := withInkBottom(cpl, top-gap)
 		if z, ok := clearAt(cpl, nb); ok {
-			return done(cpl, nb, z, WhereAbove, applied)
+			return done(cpl, nb, z, WhereAbove, applied, 0)
 		}
 	}
 	// 3. Beside the head, over the background next to it: the letters end a gap above the highest shoulder line (the top of the torsos) and
-	// stand a gap to the left or the right of a head.
+	// stand a gap to the left or the right of a head. The text is wrapped to the width of the room on that side, in whole words and at most
+	// MaxBesideLines lines, so a long title stacks beside the head instead of running into it.
 	shoulders := torsoTop(subs) - gap
-	for i := range scales {
-		cpl, applied, ok := at(i)
-		if !ok {
-			continue
-		}
+	inner := pl.Zone.Inner
+	tried.BesideHeightPx = max(shoulders-zoneTop, 0)
+	ownLines := len(pl.Layout.Lines)
+	for i, sc := range scales {
+		applied := placed[i].applied
 		for _, s := range subs {
 			for _, left := range []bool{true, false} {
-				nb := withInkBottom(cpl, shoulders)
-				ink := cpl.Layout.InkBox(nb)
-				dx := (s.Head.Right + gap) - ink.Left
+				room := inner.Right - (s.Head.Right + gap)
 				if left {
-					dx = (s.Head.Left - gap) - ink.Right
+					room = (s.Head.Left - gap) - inner.Left
 				}
-				nb.Left, nb.Right = nb.Left+dx, nb.Right+dx
-				if z, ok := clearAt(cpl, nb); ok {
-					return done(cpl, nb, z, WhereBeside, applied)
+				tried.BesideWidthPx = max(tried.BesideWidthPx, room)
+				if room <= 0 {
+					continue
+				}
+				cpl, ok := placeScaled(out, it, sc, room)
+				if !ok || len(cpl.Layout.Lines) > MaxBesideLines || !wholeWords(cpl.Layout, it.Text) || cpl.Box.Width() > room {
+					continue
+				}
+				lines := 0
+				if n := len(cpl.Layout.Lines); n != ownLines {
+					lines = n
+				}
+				// The layout box hugs the head on its side; the ink is as wide as the box.
+				hug := func(nb style.Rect) style.Rect {
+					ink := cpl.Layout.InkBox(nb)
+					dx := (s.Head.Right + gap) - ink.Left
+					if left {
+						dx = (s.Head.Left - gap) - ink.Right
+					}
+					nb.Left, nb.Right = nb.Left+dx, nb.Right+dx
+					return nb
+				}
+				for _, nb := range []style.Rect{hug(cpl.Box), hug(withInkBottom(cpl, shoulders))} {
+					if z, ok := clearAt(cpl, nb); ok {
+						return done(cpl, nb, z, WhereBeside, applied, lines)
+					}
 				}
 			}
 		}
@@ -231,10 +348,12 @@ func PlaceTextAvoiding(out Output, it TextItem, subs []Subject) (TextPlacement, 
 		}
 		nb := withInkTop(cpl, obstacleBottom(cpl.Box, all)+gap)
 		if z, ok := clearAt(cpl, nb); ok {
-			return done(cpl, nb, z, WhereBelow, applied)
+			return done(cpl, nb, z, WhereBelow, applied, 0)
 		}
 	}
-	return pl, Avoidance{Overlapped: true, OverHead: firstHead, OverBody: true}, nil
+	tried.AboveBandPx = max(tried.AboveBandPx, 0)
+	tried.BesideWidthPx = max(tried.BesideWidthPx, 0)
+	return pl, Avoidance{Overlapped: true, OverHead: firstHead, OverBody: true, Tried: tried}, nil
 }
 
 // torsoTop is the highest top of the subjects' torsos: the shoulder line a text beside a head must stay above.

@@ -176,10 +176,42 @@ When none fits at the text's own time, **`subject.FitText`** (shared by the rend
 The profile gets three measures, so that "no effects" no longer reads as "no motion":
 
 - **`camera`**: package `camshift` finds, for frames one second apart, the sub-pixel shift of the whole thumbnail that best matches (the background dominates the match, so a person moving in front of a tripod reads as no shift); the median, in percent of the frame width a second, is the camera motion, and from 0.8 % a second a reference is hand-held. The verdict is the majority. The clip analysis summary gets the same measure (`camera static` or `camera hand-held` in the editor's analysis line), so `static_shot` can tell footage that moves by itself. Calibration: the founder's five tripod clips read 0; of the ten references eight read 0, the lifestyle video 4.5 % a second and one 1.2 %. The references are mostly fixed-camera too.
-- **`pacing.shot_s`**: every shot length of the references that have a cut (median 1.7 s, quartiles 1.1 to 3.2 s for the ten).
+- **`pacing.shot_s`**: every shot length of the references that have a cut (median 1.7 s, quartiles 1.1 to 3.2 s for the ten), its 90th percentile (`pacing.shot_p90_s`) and the last shot of each of those references (`pacing.ending_s`): the pace targets of an edit (edit style v1, "The pace, the hook title and the song").
 - **`audio.drop_s`**: the drop of the music (`music.FindDrop`, the same function the song analysis uses): 3.1 s at the median (1.9 to 7.3 s), in nine of the ten.
 
 The compact block the editor reads says them, and that a static camera gets the living camera; a profile made before P6-06 has none of them and reads as before. Clip analyses made before it have no camera field; `cfctl assets analyze --all --force` makes them again.
+## 8d. Room beside the head, legible sizes and new titles (P6-06 follow-up)
+
+A live run put its hook title on a posing shot whose head reached 14 % of the frame once the living camera moved: about 30 px of band
+above it, no title fits there, and the renderer moved the title to the next shot. The hook had no title. Three things change, all in
+the placement that the renderer, `check_edit` and the coming motion-graphics overlay share (`timeline.PlaceTextAvoiding`,
+`subject.FitText`; the signatures are unchanged, `Avoidance` gains `Lines` and `Tried`, `Fit` gains `OwnTime`).
+
+- **Smaller, down to legible.** The sizes tried go under the spec's smallest scale (0.6) to the style's legibility floor
+  (`style.FitFloor`): capitals of at least 2.2 % of the frame height and never under a scale of 0.45 (`title_series` stops at 0.56 on
+  9:16). A placement-only scale is not an override a spec can ask for (`style.Shrunk`).
+- **Wrapped and stacked beside the head.** Beside the head the text is wrapped to the width of the room on that side, in up to three
+  lines of whole words (a word is never broken), at every size down to the floor, at its own height (the top band) when that is clear,
+  else just above the shoulders. Above the head is tried first at every size, below the person last; only then is a text moved in time.
+- **The head itself.** The quick look's box is the whole person, arms out included, and the head was taken as the middle 60 % of it:
+  half the frame wide in a lat spread, so there was never room beside it. `quicklook.v3` also reads the head alone (`head_x`, `head_w`)
+  and the shoulder line (`shoulder_y`); the head is then that box widened by 15 % of its width each side, and the torso starts at the
+  shoulder line. All three are optional and bounded like the rest (inside the person's box, below the head top); a value out of bounds is
+  dropped, not repaired. Boxes read before v3 keep the old head, and `cfctl assets quicklook --subjects` reads them again (the detail
+  records `subjects_prompt`). The cost is the quick look's own (a few more output tokens).
+
+When a hook or chapter title still has no place at its own time, `text_over_subject` fails with what was tried and the room found
+("above the head (a band of 32 px), beside it (at most 221 x 265 px of background) ... down to the smallest legible scale 0.56") and a
+fix in numbers (at most N characters a line in up to three lines, another shot where it fits, or the command that measures the head).
+Golden tests: `TestAHookTitleOverAHighHeadStacksBesideItInTheHook` (boxes shaped like the live posing shot: the head at 14 % with the
+camera, about 30 px above it, the wall beside it clear) and `TestWithoutAMeasuredHeadTheLongTitleCannotStayInTheHook`.
+
+**New titles.** The block the editor reads no longer holds the creator's titles: an editor shown their titles as examples wrote a
+title that was word for word one of them. The templates are forms to fill: `"<TOPIC> 101" in capitals (a topic of 2
+words: the muscle, the exercise or the session of this video)`, with the word counts measured from the titles, never the words. The
+profile keeps every title read (`text.titles`, untrusted, never shown) so that `title_copied` can fail a copy, compared without case or
+spaces.
+
 ## 9. Security
 
 - A reference video is untrusted media: it is only an input of the sandbox job (no network, resource limits, the same runner as the clip analysis), results come back as regular files in the output directory with size caps, the parsers refuse malformed or oversize prints, and nothing of the file is kept.
@@ -231,7 +263,7 @@ suggestion's, else "like my videos". Every value carries its source (`you`, `sug
 which the API returns and the app shows. `Style.Applied()` puts the creator's title colour and case on a copy of the profile, so the
 title recipe and the checks follow them.
 
-**The editor** (prompt `editor.v2.7`): the run context lists the effective settings in our words after the `creator_style` block (enums
+**The editor** (prompt `editor.v2.8`): the run context lists the effective settings in our words after the `creator_style` block (enums
 and a hex colour, so outside the untrusted block), with where each came from; the block's effects line now reads "applied punch-ins,
 flashes and speed ramps measured in the picture". `plan_edit` points out a plan's transitions or motions when the settings turn them
 off. `check_edit`: `effect_density` fails a transition when transitions are off and a motion or ramp when camera motion is off, and
@@ -265,7 +297,7 @@ the settings fall back to the defaults). Every measure is per reference (`Measur
 | Title form | the title as read | `Text.Templates`: a template, its share, typical length and lines | a word that comes back in two titles or more stays, a counting number at the start and every other run of words are slots (`<N>`, `<TOPIC>`, `<GOAL>`): "<TOPIC> <N>", "<N> MOVES FOR <GOAL>" (`template.go`) |
 | Chapter titles | `Text.Chapters`, read from a frame 0.6 s after up to 3 later cuts (`stylevision.v3`) | `ChapterShare` of the multi-shot videos read, `ChapterTemplates` ("<N>. <TOPIC> FOR <GOAL>") | the same template learning |
 | Title entrance | `Text.Entrance` (pop, slide, fade, typewriter, none), from two frames 0.08 s and 0.3 s in | the majority | the vision read |
-| Shot lengths | the shots | `Pacing.ShotS` with `p90`, `Pacing.EndShotS` (the last shot of the videos with a cut); "a long hold at the end" when it is 2.5 s or more and 1.5 times the median shot | |
+| Shot lengths | the shots | `Pacing.ShotS` with `p90` and P6-06b's `ShotP90S`, `Pacing.EndingS` (the last shot of the videos with a cut); "a long hold at the end" when it is 2.5 s or more and 1.5 times the median shot | |
 | Transitions | `Transitions`: each cut hard, blend (a change spread over several frames), flash or zoom | `Transitions.Used` none, cut_only or some, with the kinds and the share | the scene scores and thumbnails around each cut (`cuts.go`); a proxy, not a reading of the effect picked |
 | Camera | P6-06's `camshift` | `Camera.Level` static, subtle (a drift of 0.3 % of the frame a second or more) or handheld | |
 | Cuts against the movement | `Movement`: per cut after a shot with reps, on a rep boundary (within 150 ms, or after the set), mid-rep, or inside a set (reps at the same pace on both sides) | the shares, known from 3 measured cuts | the clip analysis' rep detection run on the reference |
@@ -283,10 +315,14 @@ default): `chapter_titles` (on, off), `title_template` (a form the creator types
 and `angle_switches` (on, off). The summary call (`stylesummary.v2`) suggests the four enums too and is asked to mention what stands
 out ("long holds at the end", "numbered chapter titles", "cuts mid-rep"); it sees that the titles follow a form but not the form's words.
 
-**The editor** (`editor.v2.7`): the creator_style block lists the title forms ("fill the slots from the footage; never copy a title of
-theirs") and the chapter forms, with the creator's titles as examples never to reuse; the settings say each choice in our words;
+**The editor** (`editor.v2.8`): the creator_style block lists the title forms ("fill the slots from the footage; never copy a title of
+theirs") and the chapter forms, never the creator's titles (P6-06b's `title_copied` fails a copy); the settings say each choice in our words;
 `style_match` adds `ending_hold` and `title_form` (hard when the creator chose them); `rep_boundaries` does not apply when the cuts are
 mid-rep and `chapter_titles` not when chapter titles are off. The prompt's examples that were one creator's are now slots.
 
 **The text read** shows the model up to 8 frames (5 of the hook, 3 after later cuts) with `max_tokens` 800; the worst case on Haiku 5.5
 is about $0.002, under its $0.01 budget.
+
+**With P6-06b's pace targets.** The creator's `pace` setting scales the pace targets of `internal/agents/editor/pace.go` after the vibe
+(slower x1.25, like my videos x1, faster x0.8), in plan_edit and in check_edit; the title form the creator sets is the form those
+targets' title instruction fills. The two measures of the ending are one: `Pacing.EndingS`.

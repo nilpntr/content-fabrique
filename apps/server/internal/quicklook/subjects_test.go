@@ -20,6 +20,11 @@ func TestValidateReadsSubjectsAndLeavesOutIncompleteOnes(t *testing.T) {
 	if err != nil || len(out.Subjects) != 1 || out.Subjects[0].Frame != 1 || !out.Subjects[0].Present || out.Subjects[0].HeadTopY != 0.22 {
 		t.Fatalf("%+v %v", out, err)
 	}
+	// quicklook.v3: the head alone and the shoulder line are read when given; an answer without them (v2) reads them as 0.
+	out, err = Validate(answerWith(`[{"frame":1,"present":true,"x":0.1,"y":0.2,"w":0.8,"h":0.8,"head_top_y":0.2,"head_x":0.42,"head_w":0.16,"shoulder_y":0.32}]`))
+	if err != nil || len(out.Subjects) != 1 || out.Subjects[0].HeadX != 0.42 || out.Subjects[0].HeadW != 0.16 || out.Subjects[0].ShoulderY != 0.32 {
+		t.Fatalf("v3 head: %+v %v", out, err)
+	}
 	// No subjects member at all (a model that dropped it): the labels stand.
 	out, err = Validate(json.RawMessage(`{"title":"Row","description":"A row.","tags":[]}`))
 	if err != nil || len(out.Subjects) != 0 {

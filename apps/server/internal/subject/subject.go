@@ -31,6 +31,10 @@ const (
 	// the box's width that the head spans around its centre line.
 	headFraction = 0.22
 	headCentre   = 0.6
+	// MinHeadW is the narrowest head that is read as one; headPad widens a measured head on each side by this share of its width (the
+	// hair, the ears and the reader's error), so a title beside it keeps clear of it.
+	MinHeadW = 0.02
+	headPad  = 0.15
 )
 
 // Sample is the subject in one sampled frame.
@@ -44,6 +48,13 @@ type Sample struct {
 	H float64 `json:"h"`
 	// HeadTopY is the top of the head as a fraction of the frame height, inside the box.
 	HeadTopY float64 `json:"head_top_y"`
+	// HeadX and HeadW are the left edge and the width of the head itself (hair and ears, not the shoulders), and ShoulderY the top of the
+	// shoulders (the shoulder line, where the trapezius meets the neck), as fractions of the frame (quicklook.v3). They are optional: 0
+	// means not read, and then the head is the middle 60 % of the box down to a fifth of its height, as before. A box is wide for a pose
+	// with the arms out, so the head measured on its own is what leaves room for a title beside it.
+	HeadX     float64 `json:"head_x,omitempty"`
+	HeadW     float64 `json:"head_w,omitempty"`
+	ShoulderY float64 `json:"shoulder_y,omitempty"`
 }
 
 // Track is the subject of a clip: the aspect of the frames the fractions refer to (width over height) and the samples, by time.
@@ -85,12 +96,37 @@ func (s Sample) Valid() bool {
 		s.HeadTopY >= s.Y-eps && s.HeadTopY <= s.Y+s.H*0.6
 }
 
-// Clamp keeps a valid sample inside the frame exactly (the hair a box overran by, and a head top a hair above the box).
+// Clamp keeps a valid sample inside the frame exactly (the hair a box overran by, and a head top a hair above the box). The head
+// box and the shoulder line are optional: when they are not inside the person's box they are dropped (set to 0, not read), never moved,
+// and the sample keeps its box.
 func (s Sample) Clamp() Sample {
 	s.W = math.Min(s.W, 1-s.X)
 	s.H = math.Min(s.H, 1-s.Y)
 	s.HeadTopY = math.Max(s.HeadTopY, s.Y)
+	if !s.headValid() {
+		s.HeadX, s.HeadW = 0, 0
+	}
+	if !s.shoulderValid() {
+		s.ShoulderY = 0
+	}
 	return s
+}
+
+// headValid says the measured head is a head inside the person's box (with the reader's hair of overrun), or is not there at all.
+func (s Sample) headValid() bool {
+	const eps = 0.02
+	if s.HeadX == 0 && s.HeadW == 0 {
+		return true
+	}
+	return finite(s.HeadX) && finite(s.HeadW) && s.HeadW >= MinHeadW && s.HeadW <= s.W+eps && s.HeadX >= s.X-eps && s.HeadX+s.HeadW <= s.X+s.W+eps
+}
+
+// shoulderValid says the shoulder line is under the top of the head (by at least a little: a neck) and inside the box, or is not there.
+func (s Sample) shoulderValid() bool {
+	if s.ShoulderY == 0 {
+		return true
+	}
+	return finite(s.ShoulderY) && s.ShoulderY >= s.HeadTopY+MinHeadW && s.ShoulderY <= s.Y+s.H
 }
 
 // Clean returns the track with every invalid sample dropped, the rest clamped, sorted by time and cut to MaxSamples. ok is false when the
@@ -172,11 +208,21 @@ func abs64(v int64) int64 {
 }
 
 // Head is the head and shoulders of a sample as a box of fractions: the middle 60 % of the subject's width, from the top of the head down
-// 22 % of the subject's height. It is the part a title must not cover.
+// 22 % of the subject's height. It is the part a title must not cover. When the reader measured the head itself (HeadX, HeadW), it is that
+// head widened by 15 % of its width on each side, and when it read the shoulder line, the head ends there (the torso starts there).
 func (s Sample) Head() (x0, y0, x1, y1 float64) {
 	cx := s.X + s.W/2
 	half := s.W * headCentre / 2
-	return cx - half, s.HeadTopY, cx + half, math.Min(s.HeadTopY+s.H*headFraction, s.Y+s.H)
+	x0, x1 = cx-half, cx+half
+	if s.HeadW > 0 {
+		pad := s.HeadW * headPad
+		x0, x1 = math.Max(s.HeadX-pad, 0), math.Min(s.HeadX+s.HeadW+pad, 1)
+	}
+	y1 = math.Min(s.HeadTopY+s.H*headFraction, s.Y+s.H)
+	if s.ShoulderY > 0 {
+		y1 = s.ShoulderY
+	}
+	return x0, s.HeadTopY, x1, y1
 }
 
 // raisedAbove is how far above the top of the head, as a fraction of the frame height, the subject box must start for what is up there to
