@@ -162,6 +162,15 @@ func specWithClip(assetID string, in, out int64, rf *timeline.Reframe) *timeline
 	}
 }
 
+// HeadRects are the head regions of the subjects on screen between startMs and endMs (Regions without the bodies).
+func HeadRects(spec *timeline.Spec, lookup Lookup, startMs, endMs int64) []style.Rect {
+	var out []style.Rect
+	for _, s := range Regions(spec, lookup, startMs, endMs) {
+		out = append(out, s.Head)
+	}
+	return out
+}
+
 func TestHeadRectsFollowTheClipsOnScreen(t *testing.T) {
 	ix := Index{"a": {Aspect: 0.5625, Samples: []Sample{{AtMs: 1000, X: 0.2, Y: 0.2, W: 0.6, H: 0.7, HeadTopY: 0.22}, {AtMs: 8000, X: 0.2, Y: 0.4, W: 0.6, H: 0.5, HeadTopY: 0.42}}}}
 	spec := specWithClip("a", 0, 5000, nil)
@@ -203,7 +212,7 @@ func TestAPunchInBringsTheHeadBackUnderTheTitle(t *testing.T) {
 		t.Fatalf("still: %+v", rs)
 	}
 	out := still.Output
-	if _, av, _ := timeline.PlaceTextAvoiding(out, title, rs); av.Overlapped {
+	if _, av, _ := timeline.PlaceTextAvoiding(out, title, Regions(still, ix.Lookup, 0, 2000)); av.Overlapped {
 		t.Fatalf("the title should clear a still head: %+v", av)
 	}
 	// With a punch-in of 0.3 the head reaches (480 - 960) * 1.3 + 960 = 336 px: the union's top.
@@ -215,11 +224,12 @@ func TestAPunchInBringsTheHeadBackUnderTheTitle(t *testing.T) {
 	if len(rs) != 1 || rs[0].Top != 336 || rs[0].Bottom < 718 {
 		t.Fatalf("punch-in: %+v", rs)
 	}
-	pl, av, err := timeline.PlaceTextAvoiding(out, title, rs)
+	subs := Regions(punch, ix.Lookup, 0, 2000)
+	pl, av, err := timeline.PlaceTextAvoiding(out, title, subs)
 	if err != nil || !av.Overlapped || !av.Cleared {
 		t.Fatalf("under the punch-in: %+v %v", av, err)
 	}
-	if pl.Box.Overlaps(rs[0]) || !pl.Zone.Safe(pl.Box) {
+	if ink := pl.Layout.InkBox(pl.Box); ink.Overlaps(rs[0]) || ink.Overlaps(subs[0].Body) || !pl.Zone.Safe(pl.Box) {
 		t.Errorf("the title %+v is on the zoomed head %+v", pl.Box, rs[0])
 	}
 	// The head at the end of the zoom is inside the region too.
@@ -349,7 +359,7 @@ func TestATitleBeforeTheCameraMovesStaysAboveTheHead(t *testing.T) {
 	}
 	check := func(name string, sp *timeline.Spec, ti timeline.TextItem, wantMoved bool) {
 		t.Helper()
-		rs := HeadRects(sp, ix.Lookup, ti.AtMs, ti.AtMs+ti.DurationMs)
+		rs := Regions(sp, ix.Lookup, ti.AtMs, ti.AtMs+ti.DurationMs)
 		if len(rs) == 0 {
 			t.Fatalf("%s: no head", name)
 		}
@@ -361,12 +371,12 @@ func TestATitleBeforeTheCameraMovesStaysAboveTheHead(t *testing.T) {
 			t.Errorf("%s: overlapped %v, want %v (head %+v)", name, av.Overlapped, wantMoved, rs)
 		}
 		for _, r := range rs {
-			if pl.Box.Overlaps(r) {
-				t.Errorf("%s: the title %+v is on the head %+v", name, pl.Box, r)
+			if ink := pl.Layout.InkBox(pl.Box); ink.Overlaps(r.Head) {
+				t.Errorf("%s: the title %+v is on the head %+v", name, ink, r.Head)
 			}
 		}
-		if wantMoved && !av.Cleared {
-			t.Errorf("%s: not cleared: %+v", name, av)
+		if wantMoved && av.OverHead {
+			t.Errorf("%s: still on the head: %+v", name, av)
 		}
 	}
 	// A zoom_through at 4.7 s: a hook title over the first 2 s sees the head where it is, and stays at the top; the head at 25 % clears it.
@@ -433,5 +443,57 @@ func TestLoadCleansWhatTheStoreHolds(t *testing.T) {
 	}
 	if _, ok := ix.Lookup(a.String()); !ok {
 		t.Error("the good asset is missing")
+	}
+}
+
+// The body starts at the top of the head, unless a raised hand or arm is clearly above it.
+func TestTheBodyStartsAtTheHeadUnlessAnArmIsRaised(t *testing.T) {
+	jitter := Sample{X: 0.2, Y: 0.2, W: 0.6, H: 0.7, HeadTopY: 0.22} // the box starts 2 % above the hair
+	if _, y0, _, _ := jitter.Body(); y0 != 0.22 {
+		t.Errorf("a box a little above the head: body top %v", y0)
+	}
+	raised := Sample{X: 0.2, Y: 0.1, W: 0.6, H: 0.8, HeadTopY: 0.25} // a hand 15 % above the head
+	if _, y0, _, _ := raised.Body(); y0 != 0.1 {
+		t.Errorf("a raised hand: body top %v", y0)
+	}
+}
+
+func TestShowsOffTheBody(t *testing.T) {
+	for _, c := range []struct {
+		title string
+		tags  []string
+		want  bool
+	}{
+		{"Back pose from behind", nil, true},
+		{"Row", []string{"gym", "back pose"}, true},
+		{"", []string{"Posing routine"}, true},
+		{"Physique update", nil, true},
+		{"Lat spread flex", nil, true},
+		{"Hip flexor stretch", []string{"mobility"}, false},
+		{"Seated row", []string{"back", "machine"}, false},
+		{"Purpose", []string{"composed"}, false}, // "pose" inside a word is not the word
+		{"", nil, false},
+	} {
+		if got := ShowsOffTheBody(c.title, c.tags); got != c.want {
+			t.Errorf("%q %v = %v, want %v", c.title, c.tags, got, c.want)
+		}
+	}
+}
+
+// Load marks the clips whose labels say pose or physique.
+func TestLoadMarksPoseClips(t *testing.T) {
+	a, b := ids.AssetID{}, ids.AssetID{}
+	a.UUID[0], b.UUID[0] = 1, 2
+	good := []byte(`{"aspect":0.5625,"samples":[{"at_ms":0,"x":0.1,"y":0.1,"w":0.5,"h":0.5,"head_top_y":0.12}]}`)
+	rd := fakeReader{rows: []store.AssetSubjectsRow{
+		{AssetID: a, Subjects: good, Title: "Back pose", Tags: []string{"back"}},
+		{AssetID: b, Subjects: good, Title: "Seated row", Tags: []string{"row"}},
+	}}
+	ix, err := Load(context.Background(), rd, ids.WorkspaceID{}, []ids.AssetID{a, b})
+	if err != nil || len(ix) != 2 {
+		t.Fatalf("%+v %v", ix, err)
+	}
+	if !ix[a.String()].ShowsOff || ix[b.String()].ShowsOff {
+		t.Errorf("pose marks: a %v, b %v", ix[a.String()].ShowsOff, ix[b.String()].ShowsOff)
 	}
 }

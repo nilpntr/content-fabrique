@@ -33,6 +33,7 @@ func Load(ctx context.Context, st Reader, ws ids.WorkspaceID, assets []ids.Asset
 	ix := make(Index, len(rows))
 	for _, r := range rows {
 		if t, ok := FromSubjects(r.Subjects); ok {
+			t.ShowsOff = ShowsOffTheBody(r.Title, r.Tags)
 			ix[r.AssetID.String()] = t
 		}
 	}

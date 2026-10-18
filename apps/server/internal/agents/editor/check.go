@@ -656,15 +656,16 @@ func (c *checker) textSafe() Check {
 	return c.pass(CheckTextSafe, "%d texts, all inside the safe zones", texts)
 }
 
-// textOverSubject checks the texts against the head of the person in the clips they are on top of. A text that covers the head is
-// cleared by the renderer when it can be (above the head, below it or smaller: PlaceTextAvoiding, the same function), which the line says;
-// one that cannot be cleared, or that asks not to avoid the subject, fails with what to change.
+// textOverSubject checks the texts against the person in the clips they are on top of: the head is protected (a title on it fails), the
+// body too (a title on it is a note, and a failure on a pose or physique shot, where the body is the picture). A text that covers them is
+// cleared by the renderer when it can be (PlaceTextAvoiding, the same function: above the person at any size down to 0.6, else below all
+// of them), which the line says; one that cannot be cleared, or that asks not to avoid the subject, is reported with what to change.
 func (c *checker) textOverSubject() Check {
 	if len(c.in.Subjects) == 0 {
 		return c.skip(CheckTextOverSubject, "the clips have no subject boxes (the quick look reads them: run cfctl assets quicklook --subjects for older clips)")
 	}
 	out := c.in.Spec.Output
-	var texts, moved int
+	var texts int
 	var bad, notes []string
 	for _, tr := range c.in.Spec.Tracks {
 		tt, ok := tr.(*timeline.TextTrack)
@@ -672,33 +673,55 @@ func (c *checker) textOverSubject() Check {
 			continue
 		}
 		for _, it := range tt.Items {
-			obstacles := subject.HeadRects(c.in.Spec, c.in.Subjects.Lookup, it.AtMs, it.AtMs+it.DurationMs)
-			if len(obstacles) == 0 {
+			regions := subject.Regions(c.in.Spec, c.in.Subjects.Lookup, it.AtMs, it.AtMs+it.DurationMs)
+			if len(regions) == 0 {
 				continue
 			}
 			texts++
 			// The text as placed, then as the renderer places it.
-			if over, err := timeline.TextOverlaps(out, it, obstacles); err != nil || !over {
+			cover, err := timeline.TextCovers(out, it, regions)
+			if err != nil || !cover.Body {
 				continue
 			}
-			_, avoided, _ := timeline.PlaceTextAvoiding(out, it, obstacles)
-			head := obstacles[0]
-			for _, o := range obstacles[1:] {
-				head.Top = min(head.Top, o.Top)
+			top := regions[0].Head.Top
+			for _, r := range regions[1:] {
+				top = min(top, r.Head.Top)
 			}
-			band := head.Top - c.zoneTop()
-			where := fmt.Sprintf("the head starts at y %d (%.0f %% from the top) and the clear band above it is %d px tall", head.Top, float64(head.Top)/float64(max(out.Height, 1))*100, max(band, 0))
+			where := fmt.Sprintf("the head starts at y %d (%.0f %% from the top) and the clear band above it is %d px tall", top, float64(top)/float64(max(out.Height, 1))*100, max(top-c.zoneTop(), 0))
+			bodyFix := "use one line and a smaller scale (0.6 at the least) so the title fits in the band above the head"
+			if !it.AvoidsSubject() {
+				// Where it stands: the ink at its anchor, and whether it is on the body of a clip that shows off the physique.
+				pose := false
+				if pl, err := timeline.PlaceText(out, it); err == nil {
+					if box, ok := pl.Zone.Fit(pl.Box); ok {
+						pose = coversPose(pl.Layout.InkBox(box), regions)
+					}
+				}
+				switch {
+				case cover.Head:
+					bad = append(bad, fmt.Sprintf("%s covers the head and is set not to avoid it (%s): remove avoid_subject false, or use one line at the top of the safe zone", it.ID, where))
+				case pose:
+					bad = append(bad, fmt.Sprintf("%s covers the body in a pose shot and is set not to avoid it (%s): remove avoid_subject false, or %s", it.ID, where, bodyFix))
+				default:
+					notes = append(notes, fmt.Sprintf("borderline: %s covers the body and is set not to avoid it (%s)", it.ID, where))
+				}
+				continue
+			}
+			placed, av, _ := timeline.PlaceTextAvoiding(out, it, regions)
+			pose := coversPose(placed.Layout.InkBox(placed.Box), regions)
 			switch {
-			case it.AvoidsSubject() && avoided.Cleared && avoided.Where == "smaller":
-				moved++
-				notes = append(notes, fmt.Sprintf("%s covers the head, so the renderer shrinks it to scale %g (%s); one line keeps it at its size above the head", it.ID, avoided.Scale, where))
-			case it.AvoidsSubject() && avoided.Cleared:
-				moved++
-				notes = append(notes, fmt.Sprintf("%s covers the head, so the renderer moves it %s it (%s); one line and a smaller scale keep it above the head", it.ID, avoided.Where, where))
-			case it.AvoidsSubject():
+			case av.OverHead:
 				bad = append(bad, fmt.Sprintf("%s covers the head and cannot be moved off it inside the safe zone (%s): use one line, a lower scale (0.6 at the least) or a shorter text", it.ID, where))
-			default:
-				bad = append(bad, fmt.Sprintf("%s covers the head and is set not to avoid it (%s): remove avoid_subject false, or use one line at the top of the safe zone", it.ID, where))
+			case av.OverBody && pose:
+				bad = append(bad, fmt.Sprintf("%s ends up over the body in a pose shot, because it does not fit above the head or below the body (%s): %s, or a shorter text", it.ID, where, bodyFix))
+			case av.OverBody:
+				notes = append(notes, fmt.Sprintf("borderline: %s ends up over the body, because it does not fit above the head or below the body (%s): %s", it.ID, where, bodyFix))
+			case av.Where == timeline.WhereSmaller:
+				notes = append(notes, fmt.Sprintf("%s covers the subject, so the renderer shrinks it to scale %g (%s); one line keeps it at its size above the head", it.ID, av.Scale, where))
+			case av.Where == timeline.WhereAbove && av.Scale > 0:
+				notes = append(notes, fmt.Sprintf("%s covers the subject, so the renderer moves it above the head at scale %g (%s); one line keeps it at its size", it.ID, av.Scale, where))
+			case av.Overlapped:
+				notes = append(notes, fmt.Sprintf("%s covers the subject, so the renderer moves it %s them (%s); one line and a smaller scale keep it above the head", it.ID, av.Where, where))
 			}
 		}
 	}
@@ -707,10 +730,20 @@ func (c *checker) textOverSubject() Check {
 		return c.fail(CheckTextOverSubject, "%s", strings.Join(bad[:min(3, len(bad))], "; "))
 	case texts == 0:
 		return c.skip(CheckTextOverSubject, "no text is on top of a clip with a subject box")
-	case moved > 0:
+	case len(notes) > 0:
 		return c.pass(CheckTextOverSubject, "%s", strings.Join(notes[:min(3, len(notes))], "; "))
 	}
-	return c.pass(CheckTextOverSubject, "%d texts, none on the head of the person", texts)
+	return c.pass(CheckTextOverSubject, "%d texts, none on the person", texts)
+}
+
+// coversPose says whether the ink is on the body of a person in a pose or physique shot (the clip's labels say so, subject.Track.ShowsOff).
+func coversPose(ink style.Rect, regions []timeline.Subject) bool {
+	for _, r := range regions {
+		if r.ShowsOff && ink.Overlaps(r.Body) {
+			return true
+		}
+	}
+	return false
 }
 
 // zoneTop is the top of the safe zone of the output, in pixels (0 for an unknown format).

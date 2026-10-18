@@ -55,7 +55,9 @@ func TestTitlesAvoidTheSubjectInTheScript(t *testing.T) {
 	}
 	_, y1With := eventAt(t, with.Subtitles.ASS, "AAA")
 	_, y1Without := eventAt(t, without.Subtitles.ASS, "AAA")
-	if y1With <= y1Without+100 {
+	// The head starts at 22 % (422 px) and the title is at the top of the zone: it goes above the head, up into the margin the empty space
+	// of its line box may use, at a smaller size.
+	if y1With >= y1Without-30 {
 		t.Errorf("the two-line title was not moved off the head: y %v with the subject, %v without", y1With, y1Without)
 	}
 	_, y2With := eventAt(t, with.Subtitles.ASS, "CCC")
@@ -75,7 +77,7 @@ func TestTitlesAvoidTheSubjectInTheScript(t *testing.T) {
 			moved = append(moved, w.Message)
 		}
 	}
-	if len(moved) != 1 || !strings.Contains(moved[0], "t1") {
+	if len(moved) != 1 || !strings.Contains(moved[0], "t1") || !strings.Contains(moved[0], "above") {
 		t.Errorf("warnings %+v", with.Warnings)
 	}
 	if len(without.Warnings) != 0 {
@@ -84,3 +86,34 @@ func TestTitlesAvoidTheSubjectInTheScript(t *testing.T) {
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+// The hook of the back-day video: the head starts at 17 % of the frame, and the title goes above it, smaller, up into the margin its empty
+// line space may use. It is not put under the head over the back. A head too high for any title above it gets the body warning.
+func TestTheTitleGoesAboveAHeadAt17PercentAndWarnsWhenItEndsOverTheBody(t *testing.T) {
+	resolver := func(headTop, y, h float64) AssetResolver {
+		tr := subject.Track{Aspect: 0.5625, Samples: []subject.Sample{{AtMs: 1000, X: 0.2, Y: y, W: 0.6, H: h, HeadTopY: headTop}}}
+		return ResolverFunc(func(id string, _ Variant) (ResolvedAsset, error) {
+			return ResolvedAsset{Location: "/tmp/" + id + ".mp4", HasAudio: true, Subject: &tr}, nil
+		})
+	}
+	spec := overridesSpec(timeline.TextItem{ID: "t1", AtMs: 0, DurationMs: 1500, Text: "BACK DAY 101", Style: "title_series", Anchor: "upper_third"})
+	plan, err := Compile(spec, Final, resolver(0.17, 0.165, 0.78))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, y := eventAt(t, plan.Subtitles.ASS, "BACK")
+	if y >= 0.17*1920 {
+		t.Errorf("the title is at y %v, not above the head (326)", y)
+	}
+	if len(plan.Warnings) != 1 || plan.Warnings[0].Code != "text_moved" || !strings.Contains(plan.Warnings[0].Message, "above") {
+		t.Errorf("warnings %+v", plan.Warnings)
+	}
+	// A head at 14.6 %: no room above at any size, and the body is all around: the title goes under the head and the render says it is over the body.
+	plan, err = Compile(spec, Final, resolver(0.146, 0.14, 0.78))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Warnings) != 1 || plan.Warnings[0].Code != "text_over_subject" || !strings.Contains(plan.Warnings[0].Message, "body") {
+		t.Errorf("warnings %+v", plan.Warnings)
+	}
+}

@@ -3,6 +3,7 @@ package style
 import (
 	"math"
 	"strings"
+	"unicode"
 )
 
 // Layout is a text laid out in a style: the lines after word wrap, their widths and the box they take. All sizes are pixels
@@ -182,3 +183,70 @@ func PlaceWatermark(z Zone, w, h int) Rect {
 
 // MaxBoxWidth is the widest box a text may take in a zone: the width of the zone's centre column.
 func MaxBoxWidth(z Zone, outW int) int { return z.Column(outW).Width() }
+
+// inkAscender is how far above the capitals the ink of plain Latin text may rise (an ascender, a lowercase "f"), as a share of the cap
+// height; inkAccent is the same for text with accented capitals.
+const (
+	inkAscender = 0.08
+	inkAccent   = 0.30
+)
+
+// hasDescender says whether a character of the line hangs below the baseline: a descender, or an accented letter (a cedilla, an ogonek).
+// Punctuation outside Basic Latin (a curly apostrophe, a dash) does not.
+func hasDescender(line string) bool {
+	if strings.ContainsAny(line, "gjpqyQ,;()[]{}/|@_$") {
+		return true
+	}
+	for _, r := range line {
+		if r > 0x7F && unicode.IsLetter(r) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasAccent says whether the line has an accented letter, whose mark rises above the capitals.
+func hasAccent(line string) bool {
+	for _, r := range line {
+		if r > 0x7F && unicode.IsLetter(r) {
+			return true
+		}
+	}
+	return false
+}
+
+// InkBox is where the ink of the text can be inside box (the layout box placed on the output, padding included): the same width, and
+// vertically from just above the capitals of the first line to the baseline of the last, with room below it only when a character hangs
+// below the baseline. A line box is far taller than the capitals in it (Anton's is about twice as tall), so for a title in capitals the
+// ink box is about half the layout box: the part of the box a head can be in without touching a letter is the empty space of the line.
+// The layout box stays the one that must be inside the safe zone; this is what a head or a body is tested against. libass puts the
+// baseline of a line WinAscent font units under its top; a test renders every style and checks the ink against this box.
+func (l Layout) InkBox(box Rect) Rect {
+	t := tableOf(l.Style.FontOf())
+	total := t.WinAscent + t.WinDescent
+	if l.Style.Box || total == 0 || len(l.Lines) == 0 {
+		return box // a boxed style draws the box itself: the ink is all of the layout box
+	}
+	k := float64(l.LineHeight) / float64(total)
+	capH := float64(t.CapHeight) * k
+	if t.CapHeight == 0 {
+		capH = 0.7 * float64(t.UnitsPerEm) * k
+	}
+	up := inkAscender
+	if hasAccent(l.Lines[0]) { // only the first line sets the top of the ink
+		up = inkAccent
+	}
+	lineTop := float64(box.Top + l.Pad)
+	first := lineTop + float64(t.WinAscent)*k
+	last := first + float64(len(l.Lines)-1)*float64(l.LineHeight)
+	top := int(math.Floor(first-capH*(1+up))) - l.Pad
+	bottom := int(math.Ceil(last)) + l.Pad
+	if hasDescender(l.Lines[len(l.Lines)-1]) { // and only the last the bottom
+		bottom = int(math.Ceil(last+float64(t.WinDescent)*k)) + l.Pad
+	}
+	out := Rect{Left: box.Left, Top: max(top, box.Top), Right: box.Right, Bottom: min(bottom, box.Bottom)}
+	if out.Bottom <= out.Top {
+		return box
+	}
+	return out
+}
