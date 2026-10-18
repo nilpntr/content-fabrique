@@ -2,7 +2,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import type { ReactNode } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { installApi, renderApp } from "@/test-api";
-import { emptyStyle, learntStyle, styleReference } from "@/test-fixtures";
+import { emptyStyle, learntStyle, storyStyle, styleReference } from "@/test-fixtures";
 import { StylePage } from "./style";
 
 vi.mock("@tanstack/react-router", async (original) => ({
@@ -103,4 +103,17 @@ test("while it learns, the page says how far it is", async () => {
   expect(await screen.findByText("Learning your style… 1 of 3 videos done")).toBeTruthy();
   expect(screen.getByText("Getting it ready… 40 %")).toBeTruthy();
   expect(screen.getByText("Learning from it…")).toBeTruthy();
+});
+
+test("a style told in story captions shows its lines and where they sit, and the creator can turn it into one title", async () => {
+  const api = installApi({ "GET /v1/me": me(), "GET /v1/style": storyStyle(), "PUT /v1/style": ({ body }) => ({ ...storyStyle(), settings: (body as { settings: object }).settings }) });
+  renderApp(<StylePage />);
+  const pattern = await screen.findByRole("radiogroup", { name: "Text on screen" });
+  expect((within(pattern).getByRole("radio", { name: "A line per shot" }) as HTMLInputElement).checked).toBe(true);
+  const where = screen.getByRole("radiogroup", { name: "Where the lines sit" });
+  expect((within(where).getByRole("radio", { name: "Middle" }) as HTMLInputElement).checked).toBe(true);
+  expect(screen.getByText(/never on your face/)).toBeTruthy();
+  fireEvent.click(within(pattern).getByRole("radio", { name: "One title" }));
+  await waitFor(() => expect(api.callsTo("PUT /v1/style")).toHaveLength(1));
+  expect(api.callsTo("PUT /v1/style")[0]?.body).toEqual({ settings: { text_pattern: "single_title" } });
 });
