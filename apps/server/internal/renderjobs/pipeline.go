@@ -52,6 +52,8 @@ type Config struct {
 	// Meter writes the ledger row of the render's CPU time (kind render, vCPU-milliseconds from cpu_ms). Nil records nothing.
 	Meter  *spend.ComputeMeter
 	Logger *slog.Logger
+	// MotionFallback draws the graphics track as ASS text instead of motion-graphics overlays (MOTION_GRAPHICS=off, D-35).
+	MotionFallback bool
 
 	// subjects replaces the read of the subject boxes (a test makes it fail); nil reads them from the store.
 	subjects func(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) (subject.Index, error)
@@ -397,6 +399,7 @@ func (r *run) execute(ctx context.Context) (finished, error) {
 	if err != nil {
 		return finished{}, fileErr(ReasonInvalidTimeline, err)
 	}
+	profile.MotionFallback = r.p.cfg.MotionFallback
 	inputs, err := st.ListRenderInputs(ctx, r.ws, r.render.ProjectID)
 	if err != nil {
 		return finished{}, fmt.Errorf("render inputs: %w", err)
@@ -606,11 +609,18 @@ func hasCaptions(spec *timeline.Spec) bool {
 	return false
 }
 
-// hasAvoidingText reports whether the timeline has a text item that the renderer keeps off the subject's head, the one thing that reads
-// the subject boxes.
+// hasAvoidingText reports whether the timeline has a text item or a graphics item (D-35) that the renderer keeps off the subject's
+// head, the one thing that reads the subject boxes.
 func hasAvoidingText(spec *timeline.Spec) bool {
 	for _, t := range spec.Tracks {
-		if tt, ok := t.(*timeline.TextTrack); ok {
+		switch tt := t.(type) {
+		case *timeline.TextTrack:
+			for _, it := range tt.Items {
+				if it.AvoidsSubject() {
+					return true
+				}
+			}
+		case *timeline.GraphicsTrack:
 			for _, it := range tt.Items {
 				if it.AvoidsSubject() {
 					return true

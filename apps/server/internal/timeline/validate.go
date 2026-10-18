@@ -66,6 +66,10 @@ const (
 	CodeInvalidSpeedRamp Code = "invalid_speed_ramp"
 	// CodeTooManyEffects is a timeline whose sound effects add up to more than SFXBudgetBytes of the render's filter graph (P3-11).
 	CodeTooManyEffects Code = "too_many_effects"
+	// CodeInvalidGraphic is a graphics item whose params do not fit its template: a param the template does not take, an accent
+	// outside the item or out of order, a highlighted word that is not one of the text's words, a chapter card without a number, a
+	// counter without its values (D-35).
+	CodeInvalidGraphic Code = "invalid_graphic"
 	// CodeRampAudioMuted is a warning: a clip with a speed ramp and use_source on. Its own audio cannot follow the ramp and
 	// is left out of the mix (P3-10).
 	CodeRampAudioMuted Code = "ramp_audio_muted"

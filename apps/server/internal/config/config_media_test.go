@@ -42,6 +42,18 @@ func TestMediaSettings(t *testing.T) {
 	}
 }
 
+func TestMotionGraphicsSwitch(t *testing.T) {
+	for raw, want := range map[string]bool{"": true, "on": true, " OFF ": false, "off": false} {
+		c, err := Load(mediaEnv(map[string]string{"MOTION_GRAPHICS": raw}))
+		if err != nil || c.MotionGraphics != want {
+			t.Errorf("MOTION_GRAPHICS=%q: %v %v", raw, c.MotionGraphics, err)
+		}
+	}
+	if _, err := Load(mediaEnv(map[string]string{"MOTION_GRAPHICS": "maybe"})); err == nil || !strings.Contains(err.Error(), "MOTION_GRAPHICS") {
+		t.Errorf("MOTION_GRAPHICS=maybe: %v", err)
+	}
+}
+
 func TestMediaLocalProviderIsRefusedWhereItMatters(t *testing.T) {
 	for _, env := range []string{EnvLocal, EnvCI, EnvBench} {
 		if c, err := Load(mediaEnv(map[string]string{"CF_ENV": env, "MEDIA_SANDBOX_PROVIDER": "local"})); err != nil || c.MediaSandboxProvider != SandboxLocal {

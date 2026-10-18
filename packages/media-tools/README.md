@@ -42,6 +42,21 @@ SHA-256 first: `large-v3-turbo-q5_0` (574 MB, the default), `tiny.en` (78 MB, CI
 `cfctl transcribe models` fetches them ahead of time; `cfctl transcribe file clip.wav` runs the pipeline's steps on a file;
 `scripts/transcribe-eval` measures the word timing error.
 
+## Motion graphics (D-35)
+
+`cf-motion` (`motion-runner/`, Go standard library only, built statically in the `runner` stage) renders the motion-graphics overlays
+of a render with `chrome-headless-shell` (Chrome for Testing 155.0.8059.84, `/opt/chrome`, pinned by version and by the SHA-256 of each
+architecture's archive; locales other than en-US, hyphenation data and SwiftShader are left out). The worker mounts the template
+bundle read-only at `/in/0` and writes the job into the work directory:
+
+```sh
+cf-motion --bundle /in/0 --job /work/motion-job.json --out /work/motion   # Chrome and fonts default to the image's own
+```
+
+The runner speaks the DevTools protocol over a pipe (no port), refuses any request outside the bundle, loads the fonts of
+`/usr/share/fonts/cf` as bytes, and writes transparent PNGs and a `manifest.json` (every frame's SHA-256). The design and the security
+model are in [motion graphics v1](../../docs/design/motion-graphics-v1.md). The image carries the label `org.contentfabrique.motion=1`.
+
 ## Contents
 
 - `Dockerfile`: multi-stage; builds ffmpeg and whisper.cpp from checksummed tarballs, then assembles a `FROM scratch` image from the binaries,

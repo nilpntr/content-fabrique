@@ -143,11 +143,22 @@ func (c *compiler) videoGraph(subs *Subtitles) ([]string, error) {
 		}
 		stmts = append(stmts, s...)
 	}
-	if subs == nil {
+	if subs == nil && c.plan.Motion == nil {
 		return append(stmts, c.joinGraph("vout")...), nil
 	}
 	stmts = append(stmts, c.joinGraph("vj")...)
-	return append(stmts, chain([]string{"vj"}, []string{subs.filter()}, "vout")), nil
+	cur := "vj"
+	if c.plan.Motion != nil { // the motion-graphics overlays, under the text (graphics.go)
+		next := "vout"
+		if subs != nil {
+			next = "vg"
+		}
+		stmts, cur = append(stmts, c.overlayGraph(cur, next)...), next
+	}
+	if subs == nil {
+		return stmts, nil
+	}
+	return append(stmts, chain([]string{cur}, []string{subs.filter()}, "vout")), nil
 }
 
 // clipGraph is the graph of one clip, ending in the pad [v<idx>]: trim on the source, setpts to restart the clock,

@@ -1,0 +1,22 @@
+<!doctype html>
+<!--
+  The motion-graphics scene (docs/design/motion-graphics-v1.md). cf-motion opens this file from a read-only mount, mounts the
+  job's overlay items into #stage and seeks the virtual clock frame by frame. Everything the page loads is in this directory;
+  the Content-Security-Policy allows nothing else, and the runner refuses any request outside the bundle as well.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; child-src 'none'; manifest-src 'none'; base-uri 'none'; form-action 'none'">
+<link rel="stylesheet" href="base.css">
+<script src="runtime.js"></script>
+<script src="templates/title_pop.js"></script>
+<script src="templates/blur_in.js"></script>
+<script src="templates/chapter_card.js"></script>
+<script src="templates/highlight_word.js"></script>
+<script src="templates/counter.js"></script>
+<script src="templates/lower_label.js"></script>
+<script src="templates/outro_card.js"></script>
+</head>
+<body><div id="stage"></div></body>
+</html>

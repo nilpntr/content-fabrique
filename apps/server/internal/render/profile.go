@@ -54,6 +54,10 @@ type Profile struct {
 	Watermark bool `json:"watermark"`
 	// LoudnormPasses is 1 for a single dynamic pass and 2 for measure-then-apply.
 	LoudnormPasses int `json:"loudnorm_passes"`
+	// MotionFallback draws the graphics track as ASS text (each item's words, in its box, with its template's fallback animation)
+	// instead of rendering the motion-graphics overlays with headless Chrome (D-35). Off by default; the render jobs turn it on when
+	// motion graphics are disabled (CF_MOTION_GRAPHICS=off).
+	MotionFallback bool `json:"motion_fallback,omitempty"`
 }
 
 // Preview is the cheap profile the editor and the agent look at.

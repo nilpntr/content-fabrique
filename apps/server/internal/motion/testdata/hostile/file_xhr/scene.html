@@ -1,0 +1,19 @@
+<!doctype html>
+<!-- A hostile page for the motion sandbox test: it has no CSP and tries to read /etc/passwd with XMLHttpRequest. The run must fail loudly, and nothing may leak. -->
+<html><head><meta charset="utf-8"></head><body><div id="stage"></div><script>
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+window.__cfMotion = {
+  async mount(job) {
+    const it = job.items[0];
+    const d = document.createElement('div');
+    Object.assign(d.style, { position: 'absolute', left: it.box.x + 'px', top: it.box.y + 'px', width: it.box.w + 'px', height: it.box.h + 'px', background: '#fff', color: '#000', overflow: 'hidden', fontSize: '12px' });
+    document.getElementById('stage').appendChild(d);
+    try {
+      const x = new XMLHttpRequest(); x.open('GET', 'file:///etc/passwd', false); x.send(); d.textContent = x.responseText;
+    } catch (e) { /* swallowed on purpose: the browser and the runner must notice anyway */ }
+    await sleep(1000);
+    return { problems: [] };
+  },
+  seek() { return { problems: [] }; },
+};
+</script></body></html>
