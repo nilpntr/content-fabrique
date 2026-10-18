@@ -105,7 +105,7 @@ func LoadAssetAnalysis(ctx context.Context, src AnalysisSource, ws ids.Workspace
 		if !ok {
 			continue
 		}
-		sp := Span{StartMs: int64(m.StartMs), EndMs: int64(m.EndMs)}
+		sp := Span{StartMs: int64(m.StartMs), EndMs: int64(m.EndMs), TurnMs: int64(m.TurnMs)}
 		switch m.Kind {
 		case store.MomentRep:
 			a.Reps = append(a.Reps, sp)
@@ -269,11 +269,27 @@ func budgetLow(l runtime.BudgetLeft, perCall int64) bool {
 	return l.Known && (l.ToolCalls <= 7 || l.Wall < 3*time.Minute || (perCall > 0 && l.Micros < revisionCalls*perCall))
 }
 
-// callCostMicros is what one model call of the run costs, from what the run has spent so far: its cost over its tool calls (every model
-// turn of the editor makes one), raised by half because later calls read a longer conversation, and never under minCallMicros (the
-// figure before the first call has shown anything). It is the mean, so one long plan_edit does not make every later call look dear.
-func callCostMicros(costMicros int64, toolCalls int) int64 {
+// callCostMicros is what one more model call of the run is expected to cost, from what its recent calls cost (the usage ledger, oldest
+// first, one entry per model call). The first call is left out when there are others: it writes the whole prompt to the cache (in a live
+// run it was $0.23 of $0.57, and the calls after it cost $0.02 to $0.10), which no later call repeats. Of the rest the last three count, as
+// a mean, raised by half because later calls read a longer conversation; never under minCallMicros, which is also the figure before the
+// run has shown anything. Without ledger rows (replay writes none) the run's cost over its tool calls stands in, which overstates a run
+// that began with a big cache write: that only makes the warning come early.
+func callCostMicros(calls []int64, costMicros int64, toolCalls int) int64 {
+	if len(calls) >= 2 {
+		calls = calls[1:]
+	}
+	if len(calls) > 3 {
+		calls = calls[len(calls)-3:]
+	}
+	var sum int64
+	for _, c := range calls {
+		sum += c
+	}
 	mean := costMicros / int64(max(toolCalls, 1))
+	if len(calls) > 0 {
+		mean = sum / int64(len(calls))
+	}
 	return max(mean+mean/2, minCallMicros)
 }
 
@@ -313,8 +329,9 @@ func approxDuration(d time.Duration) string {
 	return fmt.Sprintf("%d minutes", int(d.Round(time.Minute).Minutes()))
 }
 
-// callCostMicros reads what the run has spent and how many calls it has made from its row, and returns what one more call is expected to
-// cost (the package-level callCostMicros). 0 when the budget is not known or the row cannot be read (the dollar warning is off then).
+// callCostMicros reads the run's model calls from the usage ledger (and the row, for the figures that stand in when the ledger has none)
+// and returns what one more call is expected to cost (the package-level callCostMicros). 0 when the budget is not known or the row cannot
+// be read (the dollar warning is off then).
 func (d Deps) callCostMicros(ctx context.Context, rc runtime.RunContext) int64 {
 	if !rc.Left.Known {
 		return 0
@@ -324,7 +341,17 @@ func (d Deps) callCostMicros(ctx context.Context, rc runtime.RunContext) int64 {
 		slog.WarnContext(ctx, "editor: the run row could not be read; the dollar warning is off", "run_id", rc.RunID.String(), "error", err)
 		return 0
 	}
-	return callCostMicros(run.CostMicros, int(run.ToolCalls))
+	var calls []int64
+	if rows, err := d.Store.UsageForRun(ctx, rc.WorkspaceID, rc.RunID); err != nil {
+		slog.WarnContext(ctx, "editor: the run's usage could not be read; its cost per tool call stands in", "run_id", rc.RunID.String(), "error", err)
+	} else {
+		for _, r := range rows {
+			if r.Kind == store.KindLLM {
+				calls = append(calls, r.ListCostMicros)
+			}
+		}
+	}
+	return callCostMicros(calls, run.CostMicros, int(run.ToolCalls))
 }
 
 // lastCheckOf is the version of the run's newest check_edit and the checks that failed in it. The newest edit_check event is the

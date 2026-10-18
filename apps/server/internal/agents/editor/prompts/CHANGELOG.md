@@ -1,6 +1,6 @@
 # Editor system prompt: changelog
 
-The editor agent's system prompt is `editor.v2.6.md`, embedded in the Go binary, and the genre playbooks are the files in
+The editor agent's system prompt is `editor.v2.7.md`, embedded in the Go binary, and the genre playbooks are the files in
 `playbooks/`, embedded too. The text the model receives is the runtime's preamble (`runtime.SystemPreamble`, the untrusted-data
 rule) followed by this file. The prompt version (`PromptVersion` in `prompt.go`) is stored in every run's input, so a run can
 always be tied to the text it was given; a playbook has its own version (`workout.v2`, in `playbooks.go`) that the run's plan
@@ -21,6 +21,34 @@ Rules for changing it:
 - The cache hit rate of a run is visible: `cfctl agent show <run>` prints the cache write and read tokens of every model call and
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
+
+## editor.v2.7 (2026-10-18)
+
+The pace, the hook title and the song, from the measured style and never from one creator (P6-06 follow-up). A live run of v2.6
+(lively, $0.60) passed 17 of 19 checks and still read slow and off: five shots in 20 s (a median of 3.97 s against the creator's
+measured median of about half that), a hook with no title (the renderer moved it to the next shot: no room above a high head), a title
+copied word for word from one of the creator's reference videos, and an ending pose held for 5 s. The file is `editor.v2.7.md`, the
+workout playbook is `workout.v4`; it changes behaviour on purpose, so it is a minor version.
+
+- **The pace targets.** plan_edit gives a median shot, the longest a shot may run (the hook and the ending aside) and the longest held
+  ending, from the creator's measured shot lengths (the median, the 90th percentile and the last shot of their videos with a cut),
+  scaled by the vibe (calm x1.3, lively x1.0, hype x0.7) and by the creator's own pace setting, or general defaults without a profile
+  (`pace.go`). check_edit holds the edit to them: `shot_pacing` (the median within ±40 % of the target), and the new `long_shot` and
+  `held_ending` (a longer ending passes only with a push and a punch-in on a beat). At lively and hype the style's pacing dimensions
+  (cuts, long takes, shot length) give way to the targets; at calm a long-take creator keeps their long takes.
+- **Slow lifts.** The prompt and the playbook name the tools for a rep longer than the pace allows: a cut at the rep's turning point
+  (`turn_ms` in find_moments, the analysis's measured turn), an angle switch at the turning point, a faster speed. They are tools for
+  when the pace needs them, not rules. `rep_boundaries` accepts the measured turn (the midpoint only when there is none) within a
+  tolerance from the measurement: 150 ms at speed 1, more at a higher speed, and 5 % of a slow rep's length (at most 250 ms).
+- **The title.** The style block gives the title templates as forms to fill ("<TOPIC> 101" with the length of the topic), never the
+  creator's titles; the prompt says to write a new title for this video. The new `title_copied` fails a title that is, without regard
+  to case or spaces, the title of one of the references.
+- **Never on the body, still in the hook.** The text says what the placement does now (smaller down to legible capitals of 2.2 % of the
+  frame, stacked beside the head in two or three lines, below the person) and that `text_over_subject` fails with the room in pixels
+  and the fix when a hook title still cannot stay.
+- **The song.** A footage clip's own sound is never the song, even when the gym's music is in it: only an audio file the creator gave,
+  or a video sound the creator chose for the edit (a creator_audio item already on the timeline). list_footage and the opening message
+  show song lines for those only; get_music refuses a footage clip.
 
 ## editor.v2.6 (2026-10-18)
 

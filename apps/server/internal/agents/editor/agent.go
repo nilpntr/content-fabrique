@@ -117,6 +117,7 @@ func (d Deps) runContext(ctx context.Context, rc runtime.RunContext) ([]llm.Bloc
 	}
 	status := "Timeline: none yet (version 0)."
 	now := timelineItems{ids: map[string]bool{}}
+	var chosen map[string]bool
 	if det.Project.CurrentTimelineVersion != nil {
 		v := int(*det.Project.CurrentTimelineVersion)
 		vd, perr := d.Projects.Version(ctx, actor(ws), pid, v)
@@ -129,6 +130,7 @@ func (d Deps) runContext(ctx context.Context, rc runtime.RunContext) ([]llm.Bloc
 		}
 		status = "Timeline: " + timelineLine(v, spec) + ". Call get_timeline to read it."
 		now = itemsOf(v, spec)
+		chosen = chosenSounds(spec)
 	}
 	// The creator's open comments on earlier versions, when there are any (a first run has none, and its context is unchanged).
 	comments, total, err := d.openComments(ctx, ws, pid, 0)
@@ -138,7 +140,7 @@ func (d Deps) runContext(ctx context.Context, rc runtime.RunContext) ([]llm.Bloc
 	hint := contentTypeHint(det.Project.Brief, rows, sums)
 	styleBlk := styleBlocks(d.style(ctx, ws))
 	subjects := d.subjects(ctx, ws, rows)
-	songs := d.musicOf(ctx, ws, rows)
+	songs := d.musicOf(ctx, ws, rows, chosen)
 	for _, caps := range contextSteps {
 		caps.subjects, caps.music = subjects, songs
 		blocks := contextBlocks(det.Project.Format, det.Project.Brief, rows, sums, status, caps)
