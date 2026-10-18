@@ -31,7 +31,7 @@ const JudgeStage = "judge_edit"
 
 // JudgePromptVersion names the judge's prompt and tool. A change to either is a new version: cached verdicts of the old one are not
 // reused.
-const JudgePromptVersion = "judge_edit.v3"
+const JudgePromptVersion = "judge_edit.v4"
 
 // MaxJudgeMicros is the hard budget of one judge call: $0.10. It is a llm.Budget, so a call whose worst case does not fit is cut (its
 // max_tokens) or refused before it is sent.
@@ -89,9 +89,21 @@ type Picture struct {
 	JPEG  []byte
 }
 
+// Anchor is a calibration case shown to the judge as a fixed point of its scale: its render's contact sheet, what the human said and the
+// range the human gives each dimension. The judge gave the founder-approved v4 a 3 for hook and energy where the founder says 4 to 5; an
+// anchor shows it what that founder's 4 or 5 looks like.
+type Anchor struct {
+	CaseID string
+	Sheet  Picture
+	Note   string
+	Expect map[string]Bnd
+}
+
 // JudgeInput is what the judge sees.
 type JudgeInput struct {
 	CaseID string
+	// Anchors are the calibration cases' renders with their human verdicts (never the case's own).
+	Anchors []Anchor
 	// Render is the version's contact sheet; Strips the frames before and after its cuts; References contact sheets of the creator's
 	// own videos.
 	Render     *Picture
@@ -151,6 +163,11 @@ func (in JudgeInput) Key(model string) string {
 		w(hex.EncodeToString(sum[:]))
 	}
 	pic(in.Render)
+	for i := range in.Anchors {
+		pic(&in.Anchors[i].Sheet)
+		w(in.Anchors[i].Note)
+		w(fmt.Sprint(sortedExpect(in.Anchors[i].Expect)))
+	}
 	for i := range in.Strips {
 		pic(&in.Strips[i])
 	}
@@ -326,11 +343,30 @@ func untrusted(kind, text string) llm.Block {
 	return llm.TextBlock(fmt.Sprintf("<untrusted_data kind=%q>\n%s\n</untrusted_data>", kind, text))
 }
 
+// sortedExpect is a calibration range list in a stable order: "hook 4-5, energy_pace 4-5".
+func sortedExpect(e map[string]Bnd) string {
+	var parts []string
+	for _, d := range Dimensions {
+		if b, ok := e[d]; ok {
+			parts = append(parts, fmt.Sprintf("%s %d-%d", d, b[0], b[1]))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
 // BuildJudgeRequest is the judge's request, before the route (model, max_tokens) is applied.
 func BuildJudgeRequest(in JudgeInput) llm.Request {
 	var c []llm.Block
 	img := func(p Picture) {
 		c = append(c, llm.TextBlock(p.Label), llm.Block{Type: llm.BlockImage, Image: &llm.Image{MediaType: "image/jpeg", Data: p.JPEG}})
+	}
+	// The anchors first: they set the scale before the edit is seen.
+	for i, a := range in.Anchors {
+		c = append(c, llm.TextBlock(fmt.Sprintf("Anchor %d, a different edit for this creator that the creator's team rated themselves (not the edit you judge): %s Their scores for it: %s. Use it to set your scale: an edit as good as this one on a dimension scores at least the bottom of its range there.", i+1, a.Note, sortedExpect(a.Expect))),
+			llm.Block{Type: llm.BlockImage, Image: &llm.Image{MediaType: "image/jpeg", Data: a.Sheet.JPEG}})
+	}
+	if len(in.Anchors) > 0 {
+		c = append(c, llm.TextBlock("Now the edit to judge."))
 	}
 	if in.Render != nil {
 		img(*in.Render)

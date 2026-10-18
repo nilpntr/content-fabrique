@@ -125,6 +125,10 @@ type CalibrationResult struct {
 	Note   string   `json:"note"`
 	Agrees bool     `json:"agrees"`
 	Off    []string `json:"off,omitempty"`
+	// Judged says there was a verdict to compare; Error is the mean distance, in score points, of the expected dimensions from their human
+	// ranges (0 inside a range; a 3 where the human says 4 to 5 is 1).
+	Judged bool    `json:"judged"`
+	Error  float64 `json:"error"`
 }
 
 // Calibrate compares a verdict with a calibration case's expected ranges.
@@ -132,7 +136,7 @@ func Calibrate(c *Calibration, v *Verdict, music *Score) *CalibrationResult {
 	if c == nil {
 		return nil
 	}
-	res := &CalibrationResult{Note: c.Note, Agrees: true}
+	res := &CalibrationResult{Note: c.Note, Agrees: true, Judged: true}
 	if v == nil {
 		return &CalibrationResult{Note: c.Note, Off: []string{"the judge did not run, so there is nothing to compare"}}
 	}
@@ -160,7 +164,11 @@ func Calibrate(c *Calibration, v *Verdict, music *Score) *CalibrationResult {
 		if s.Score < b[0] || s.Score > b[1] {
 			res.Off = append(res.Off, fmt.Sprintf("%s: %d, the human verdict says %d to %d", d, s.Score, b[0], b[1]))
 			res.Agrees = false
+			res.Error += float64(max(b[0]-s.Score, s.Score-b[1]))
 		}
+	}
+	if len(dims) > 0 {
+		res.Error = float64(int(100*res.Error/float64(len(dims)))) / 100
 	}
 	return res
 }
