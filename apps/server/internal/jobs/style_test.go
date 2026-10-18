@@ -43,7 +43,7 @@ func (m *styleModel) Messages(_ context.Context, req llm.Request) (llm.Response,
 	}
 	name := req.ToolChoice.Name
 	m.calls[name]++
-	input := `{"title_present":true,"text":"BACK DAY 101","case":"upper","colour":"#f2e9a0","position":"upper_third","alignment":"center","weight":"bold","condensed":true,"lines":1,"text_height_pct":4,"shadow":"none","exercise_labels":false,"captions":false,"title_entrance":"pop","chapter_titles":[]}`
+	input := `{"title_present":true,"text":"BACK DAY 101","case":"upper","colour":"#f2e9a0","position":"upper_third","alignment":"center","weight":"bold","condensed":true,"lines":1,"text_height_pct":4,"shadow":"none","exercise_labels":false,"captions":false,"title_entrance":"pop","chapter_titles":[],"shot_texts":[],"language":"en"}`
 	if name == styleprofile.SummaryToolName {
 		input = `{"summary":"Long takes of your sets, music on every video, cream capitals at the top, no flashy effects.","vibe":"lively","transitions":"subtle","text_animation":"on","camera_motion":"subtle","title_colour":"#F2E9A0","title_position":"top","title_case":"upper","music":"always","pace":"like_mine","chapter_titles":"off","ending_hold":"long","cut_timing":"full_reps","angle_switches":"off"}`
 	}

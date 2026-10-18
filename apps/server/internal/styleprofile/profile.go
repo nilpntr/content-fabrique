@@ -172,6 +172,11 @@ type TextStyle struct {
 	Chapters []string `json:"chapters,omitempty"`
 	// ChaptersRead says the later frames were read (a read of stylevision.v2 did not look for chapters).
 	ChaptersRead bool `json:"chapters_read,omitempty"`
+	// ShotTexts are the text in a frame of each shot (P6-05d, stylevision.v4): the lines are the creator's words, untrusted. ShotsRead says
+	// the shots were read (a read of stylevision.v3 or older did not), and Language is the language of the text (ISO 639-1, "" unknown).
+	ShotTexts []ShotText `json:"shot_texts,omitempty"`
+	ShotsRead bool       `json:"shots_read,omitempty"`
+	Language  string     `json:"language,omitempty"`
 }
 
 // AudioStats are the sound measures of a reference.
@@ -339,13 +344,28 @@ type TransitionsProfile struct {
 	Used     string   `json:"used,omitempty"`
 	Kinds    []string `json:"kinds,omitempty"`
 	Share    float64  `json:"share"`
+	// Videos is how many of the references have a transition at one of their cuts or more (0 in a profile made before it was counted).
+	Videos int `json:"videos,omitempty"`
+}
+
+// The least evidence of transitions that makes them the creator's style: on a fifth of the cuts, in two videos or more. Fewer is a
+// detector's stray reading or a one-off, and the style stays plain cuts.
+const (
+	TransitionsMinShare  = 0.2
+	TransitionsMinVideos = 2
+)
+
+// Evident says the references measurably use transitions: some cuts have one, on at least TransitionsMinShare of the cuts, in at least
+// TransitionsMinVideos videos.
+func (tp TransitionsProfile) Evident() bool {
+	return tp.Used == TransitionsSome && tp.Share >= TransitionsMinShare && tp.Videos >= TransitionsMinVideos
 }
 
 // Level is the transitions setting the creator's videos stand for: "" when they do not measurably use transitions (plain cuts, no cuts,
 // or not measured), subtle when some of their cuts have one, lots when half of them or more do.
 func (tp TransitionsProfile) Level() string {
 	switch {
-	case tp.Used != TransitionsSome:
+	case !tp.Evident():
 		return ""
 	case tp.Share >= 0.5:
 		return LevelLots
@@ -446,6 +466,15 @@ type TextProfile struct {
 	ChapterShare     float64         `json:"chapter_share,omitempty"`
 	ChapterTemplates []TitleTemplate `json:"chapter_templates,omitempty"`
 	ChapterExamples  []string        `json:"chapter_examples,omitempty"`
+	// Pattern is the creator's text pattern (P6-05d: single_title, story_captions, dialogue or none; "" when no read saw the shots), the
+	// majority of PatternRead reads, PatternShare its share; PatternsSeen the captions and dialogue patterns seen in any read; LineLook
+	// the look of the pattern's lines (nil without any); Language the language of the text (ISO 639-1).
+	Pattern      string    `json:"pattern,omitempty"`
+	PatternShare float64   `json:"pattern_share,omitempty"`
+	PatternRead  int       `json:"pattern_read,omitempty"`
+	PatternsSeen []string  `json:"patterns_seen,omitempty"`
+	LineLook     *TextLook `json:"line_look,omitempty"`
+	Language     string    `json:"language,omitempty"`
 }
 
 // NumberedChapters says the creator's multi-exercise videos have numbered chapter titles (half of the ones read or more).
@@ -715,6 +744,7 @@ func aggregateText(refs []Measures) *TextProfile {
 		return nil
 	}
 	t := &TextProfile{Read: len(read)}
+	aggregatePattern(t, read)
 	var titled []*TextStyle
 	var labels, captions float64
 	for _, r := range read {
@@ -1113,7 +1143,6 @@ func labelsWord(t *TextProfile) string {
 	return fmt.Sprintf("in %.0f %% of the videos", t.LabelShare*100)
 }
 
-
 func aggregateTransitions(refs []Measures) TransitionsProfile {
 	var tp TransitionsProfile
 	kinds := map[string]int{}
@@ -1126,6 +1155,9 @@ func aggregateTransitions(refs []Measures) TransitionsProfile {
 		tp.Measured++
 		tp.Cuts += t.Cuts
 		with += t.Blend + t.Flash + t.Zoom
+		if t.Blend+t.Flash+t.Zoom > 0 {
+			tp.Videos++
+		}
 		kinds["blend"] += t.Blend
 		kinds["flash"] += t.Flash
 		kinds["zoom"] += t.Zoom

@@ -924,6 +924,10 @@ export type Alignment = "left" | "center" | "right";
  */
 export type AvoidTheSubject = boolean;
 /**
+ * What of the person the text keeps off when it avoids the subject: body (the default: the head and the torso, for titles) or face (only the head and shoulders: a story caption over the chest, for a creator whose captions sit mid-frame over the body).
+ */
+export type WhatToKeepOff = "body" | "face";
+/**
  * Change fields of a text item; the fields you leave out stay as they are, except that changing the style resets fill, scale, shadow and align to the new style's own: restate the ones you want to keep. Setting anchor removes the position and the other way round. Give at least one field.
  */
 export type UpdateText = UpdateText1 & UpdateText2;
@@ -966,6 +970,9 @@ export type UpdateText1 =
     }
   | {
       avoid_subject: unknown;
+    }
+  | {
+      avoid: unknown;
     };
 /**
  * "update_text".
@@ -1547,6 +1554,7 @@ export interface AddText2 {
   shadow?: Shadow;
   align?: Alignment;
   avoid_subject?: AvoidTheSubject;
+  avoid?: WhatToKeepOff;
 }
 /**
  * A free place for the text's centre as fractions of the frame. The text must stay inside the format's safe zone (checked by the Go layer). Set this or anchor, not both.
@@ -1571,6 +1579,7 @@ export interface UpdateText2 {
   shadow?: Shadow;
   align?: Alignment;
   avoid_subject?: AvoidTheSubject;
+  avoid?: WhatToKeepOff;
 }
 /**
  * Remove a text item.

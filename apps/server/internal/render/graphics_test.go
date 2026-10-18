@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -153,6 +154,45 @@ func TestGraphicsNeverOverTheBody(t *testing.T) {
 	}
 	if dropped != 7 {
 		t.Fatalf("%d items left out with a warning, want 7: %+v", dropped, plan.Warnings)
+	}
+}
+
+// Never over another overlay (the demo's "3. M12 REPS ROW"): a counter on screen with a chapter card in the same band is stacked below
+// it, with a warning, in the motion job and in the fallback alike (motion.Layout; its goldens are in internal/motion).
+func TestGraphicsAreKeptApart(t *testing.T) {
+	spec, err := timeline.Parse([]byte(`{"schema":"contentfabrique.timeline/v1","output":{"format":"9:16","width":1080,"height":1920,"fps":30,"background":"#000000"},
+	"tracks":[{"id":"main","type":"video","items":[{"id":"c1","asset_id":"ast_01j3er3kwcgrasdgd4aznmxxe0","source":{"in_ms":0,"out_ms":30000},"at_ms":0}]},
+	 {"id":"graphics","type":"graphics","items":[
+	  {"id":"g4","template":"chapter_card","at_ms":19400,"duration_ms":2903,"anchor":"upper_third","params":{"text":"MACHINE ROW","number":3}},
+	  {"id":"g5","template":"counter","at_ms":20000,"duration_ms":2500,"anchor":"upper_third","params":{"text":"REPS","from":0,"to":12}}]}],"markers":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := Compile(spec, Final, graphicsResolver("/assets"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := plan.Motion.Job.Items
+	if len(items) != 2 {
+		t.Fatalf("job items %+v", items)
+	}
+	a, b := items[0].Box, items[1].Box
+	if a.Y < b.Y+b.H && b.Y < a.Y+a.H && a.X < b.X+b.W && b.X < a.X+a.W {
+		t.Fatalf("the overlays overlap: %+v and %+v", a, b)
+	}
+	if !slices.ContainsFunc(plan.Warnings, func(w Warning) bool {
+		return w.Code == "graphics_overlap" && strings.Contains(w.Message, "g5 was moved below g4")
+	}) {
+		t.Errorf("no graphics_overlap warning: %+v", plan.Warnings)
+	}
+	fb := Preview
+	fb.MotionFallback = true
+	fplan, err := Compile(spec, fb, graphicsResolver("/assets"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fplan.Subtitles == nil || fplan.Subtitles.TextEvents != 2 || !strings.Contains(fplan.Subtitles.ASS, "12 REPS") {
+		t.Fatalf("fallback %+v", fplan.Subtitles)
 	}
 }
 

@@ -333,5 +333,10 @@
     "code": "schema",
     "path": "/tracks",
     "keyword": "contains"
+  },
+  "i85_schema_too_many_graphics.json": {
+    "code": "schema",
+    "path": "/tracks/1/items",
+    "keyword": "maxItems"
   }
 }

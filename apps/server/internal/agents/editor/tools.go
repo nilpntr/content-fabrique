@@ -457,7 +457,12 @@ func (d Deps) editTimeline(ctx context.Context, rc runtime.RunContext, in editAr
 	// that is run again (a worker died after the version was stored and before the result was) finds its version and answers as
 	// the first call did; the author of the version is the run.
 	author := ops.Author{Kind: ops.AuthorAgent, ID: ids.Encode(ids.PrefixRun, rc.RunID)}
-	edit, perr := d.Projects.ApplyOpsOnce(ctx, ws, pid, in.BaseVersion, in.Ops, author, rc.IdempotencyKey)
+	// A title graphic that names no style gets the creator's title look (graphics_recipe.go), so it has their measured title height.
+	batch, recipeNotes := in.Ops, []string(nil)
+	if p := profileOf(d.styleFor(ctx, ws, rc.Input)); p != nil {
+		batch, recipeNotes = applyTitleRecipe(in.Ops, p.TitleRecipe())
+	}
+	edit, perr := d.Projects.ApplyOpsOnce(ctx, ws, pid, in.BaseVersion, batch, author, rc.IdempotencyKey)
 	if perr != nil {
 		if perr.Status == http.StatusConflict {
 			return runtime.Result{}, d.conflict(ctx, ws, pid, in.BaseVersion, perr)
@@ -496,6 +501,10 @@ func (d Deps) editTimeline(ctx context.Context, rc runtime.RunContext, in editAr
 		}
 		b.WriteByte('\n')
 	}
+	for _, n := range recipeNotes {
+		b.WriteString("Title look: " + n + ".\n")
+	}
+	traceTitleRecipe(ctx, recipeNotes)
 	if len(edit.Warnings) > 0 {
 		b.WriteString("Warnings (they do not block, but look at them):\n" + opIssuesText(edit.Warnings, maxIssueLines) + "\n")
 	}

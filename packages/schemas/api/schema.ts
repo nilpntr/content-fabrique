@@ -661,8 +661,9 @@ export interface paths {
         get: operations["getStyle"];
         /**
          * Set the creator's settings
-         * @description Replaces the creator's settings with `settings`: a setting that is absent is not set (the suggestion and the measures decide
-         *     it). Learning the style again never changes them. Only owners and editors may change them.
+         * @description Replaces the creator's settings with `settings`: **all of them**. A setting that is absent is not set (the suggestion and the
+         *     measures decide it), so a client sends the complete set it wants (the web app does). To change one setting and keep the others,
+         *     use `PATCH /v1/style`. Learning the style again never changes them. Only owners and editors may change them.
          */
         put: operations["updateStyle"];
         post?: never;
@@ -674,7 +675,14 @@ export interface paths {
         delete: operations["resetStyle"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Change some of the creator's settings
+         * @description Changes only the settings given in `settings` and gives the ones named in `clear` back to the suggestion, the measures or the
+         *     default; every other setting of the creator's stays as it is. A name that is not a setting, or one that is both given and
+         *     cleared, is `400`. The read and the write are one transaction, so two changes at once both land. Only owners and editors may
+         *     change them.
+         */
+        patch: operations["patchStyle"];
         trace?: never;
     };
     "/v1/style/relearn": {
@@ -1770,6 +1778,18 @@ export interface components {
          */
         StyleCutTiming: "full_reps" | "mid_rep";
         /**
+         * @description How the video's text is told: `single_title` (one title in the hook, chapter titles besides), `story_captions` (a new short
+         *     line on each shot that tells a little story), `dialogue` (quoted lines, often two speakers, before a reveal) or `none`.
+         * @enum {string}
+         */
+        StyleTextPattern: "single_title" | "story_captions" | "dialogue" | "none";
+        /**
+         * @description Where the lines of story captions and dialogue sit: `top`, `upper_third`, `middle`, `lower_third` or `auto` (the editor picks).
+         *     Lines in the middle, or a creator's lines that lie over the body, keep off the face only; a title keeps off the whole body.
+         * @enum {string}
+         */
+        StyleTextPosition: "top" | "upper_third" | "middle" | "lower_third" | "auto";
+        /**
          * @description Where an effective setting came from: `this_video` (the vibe of one edit), `you` (the creator's own setting), `suggested`
          *     (the AI's suggestion from the reference videos), `measured` (measured from them), `vibe` (what the vibe asks for) or `default`.
          * @enum {string}
@@ -1796,6 +1816,8 @@ export interface components {
             ending_hold?: components["schemas"]["StyleEndingHold"];
             cut_timing?: components["schemas"]["StyleCutTiming"];
             angle_switches?: components["schemas"]["StyleToggle"];
+            text_pattern?: components["schemas"]["StyleTextPattern"];
+            text_position?: components["schemas"]["StyleTextPosition"];
         };
         StyleSettingSources: {
             vibe: components["schemas"]["StyleSettingSource"];
@@ -1812,6 +1834,8 @@ export interface components {
             ending_hold: components["schemas"]["StyleSettingSource"];
             cut_timing: components["schemas"]["StyleSettingSource"];
             angle_switches: components["schemas"]["StyleSettingSource"];
+            text_pattern: components["schemas"]["StyleSettingSource"];
+            text_position: components["schemas"]["StyleSettingSource"];
         };
         /**
          * @description What the editor follows. `title_colour` is `null` when nothing decides it (the editor then uses the title style's own), and
@@ -1832,6 +1856,8 @@ export interface components {
             ending_hold: components["schemas"]["StyleEndingHold"];
             cut_timing: components["schemas"]["StyleCutTiming"];
             angle_switches: components["schemas"]["StyleToggle"];
+            text_pattern: components["schemas"]["StyleTextPattern"];
+            text_position: components["schemas"]["StyleTextPosition"];
             sources: components["schemas"]["StyleSettingSources"];
         };
         /**
@@ -1923,6 +1949,11 @@ export interface components {
              * @description When the `poster_url`s stop working. Present when one is.
              */
             poster_urls_expire_at?: string;
+        };
+        PatchStyleRequest: {
+            settings?: components["schemas"]["StyleSettings"];
+            /** @description The settings to give back to the suggestion, the measures or the default, by their names (such as `title_case`). */
+            clear?: string[];
         };
         UpdateStyleRequest: {
             settings: components["schemas"]["StyleSettings"];
@@ -3290,6 +3321,36 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    patchStyle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchStyleRequest"];
+            };
+        };
+        responses: {
+            /** @description The style as it is now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatorStyle"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthenticated"];
             402: components["responses"]["PlanRequired"];
             403: components["responses"]["Forbidden"];

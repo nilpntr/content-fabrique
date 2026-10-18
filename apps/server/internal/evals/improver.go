@@ -27,7 +27,7 @@ import (
 const ImproveStage = "improve_edit"
 
 // ImprovePromptVersion names the improver's prompt and tool.
-const ImprovePromptVersion = "improve_edit.v1"
+const ImprovePromptVersion = "improve_edit.v2"
 
 // The kinds of change the improver may make, and where.
 const (
@@ -54,6 +54,10 @@ var AllowedFiles = []AllowedFile{
 	{Path: "apps/server/internal/agents/editor/prompts/playbooks/", Kind: KindPlaybook, AffectsModel: true},
 	{Path: "apps/server/internal/agents/editor/check.go", Kind: KindCheckThreshold, Excerpt: true},
 	{Path: "apps/server/internal/agents/editor/pace.go", Kind: KindCheckThreshold, Excerpt: true},
+	// The text, caption and face checks (D-38), the overlay checks of the motion graphics (D-35) and the music checks.
+	{Path: "apps/server/internal/agents/editor/checktext.go", Kind: KindCheckThreshold, Excerpt: true},
+	{Path: "apps/server/internal/agents/editor/check_graphics.go", Kind: KindCheckThreshold, Excerpt: true},
+	{Path: "apps/server/internal/agents/editor/checkmusic.go", Kind: KindCheckThreshold, Excerpt: true},
 	{Path: "apps/server/internal/render/profile.go", Kind: KindRendererDefault, Excerpt: true},
 	{Path: "apps/server/internal/styleprofile/thresholds.go", Kind: KindStyleRule, Excerpt: true},
 }
@@ -258,7 +262,7 @@ const improverSystem = `You improve an automatic video editor for fitness creato
 
 The files you may change, and what a change there does:
 - prompt (prompts/editor.*.md) and playbook (prompts/playbooks/*.md): what the editor model is told. Only a live editor run can show the effect.
-- check_threshold (check.go, pace.go constants): the bar the self-review checks hold an edit to. The editor revises against failing checks, so a threshold that is too lax lets bad edits through and one that is too strict makes it chase noise.
+- check_threshold (check.go, pace.go, checktext.go, check_graphics.go, checkmusic.go constants): the bar the self-review checks hold an edit to. The editor revises against failing checks, so a threshold that is too lax lets bad edits through and one that is too strict makes it chase noise.
 - renderer_default (render/profile.go): defaults of the renderer.
 - style_rule (styleprofile/thresholds.go): how the creator's style profile sets the thresholds.
 

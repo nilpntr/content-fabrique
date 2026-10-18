@@ -29,6 +29,7 @@ const (
 	CheckOverlayReadable    = "overlay_readable"
 	CheckOverlayOverSubject = "overlay_over_subject"
 	CheckOverlayLegibility  = "overlay_legibility"
+	CheckGraphicsOverlap    = "graphics_overlap"
 )
 
 // minReadableMs is how long an overlay must stay fully entered: about the time it takes to read a few words.
@@ -70,37 +71,34 @@ func graphicsOf(spec *timeline.Spec) []timeline.GraphicsItem {
 	return nil
 }
 
-// fitGraphic is where and when the renderer draws a graphics item: subject.FitText on its text, the item given the fitted time (a moved
-// one keeps its accents where they were in it), and its box from motion.Resolve with the subjects at that time.
-func fitGraphic(spec *timeline.Spec, subjects subject.Index, g timeline.GraphicsItem, totalMs int64) (timeline.GraphicsItem, subject.Fit, motion.Resolved, error) {
+// layoutGraphics is where and when the renderer draws the graphics items: motion.Layout, the renderer's own (never over the body, never
+// over another overlay or a text on screen at the same time). Nil when the layout fails (the validator refuses such a spec first).
+func layoutGraphics(spec *timeline.Spec, subjects subject.Index, totalMs int64) []motion.Laid {
 	var lookup subject.Lookup
 	if len(subjects) > 0 {
 		lookup = subjects.Lookup
 	}
-	fit, err := subject.FitText(spec, lookup, g.AsText(), totalMs)
-	if err != nil || fit.How == subject.FitDropped {
-		return g, fit, motion.Resolved{}, err
+	laid, err := motion.Layout(spec, lookup, totalMs)
+	if err != nil {
+		return nil
 	}
-	if fit.How == subject.FitTrimmed || fit.How == subject.FitMoved {
-		shift := int64(0)
-		if fit.How == subject.FitMoved {
-			shift = fit.AtMs - g.AtMs
+	return laid
+}
+
+// laid is layoutGraphics for the checked version, computed once.
+func (c *checker) laid() []motion.Laid {
+	if c.laidOut == nil {
+		c.laidOut = layoutGraphics(c.in.Spec, c.in.Subjects, c.total)
+		if c.laidOut == nil {
+			c.laidOut = []motion.Laid{}
 		}
-		var acc []int64
-		for _, a := range g.Params.AccentsMs {
-			if a += shift; a >= fit.AtMs && a < fit.AtMs+fit.DurationMs {
-				acc = append(acc, a)
-			}
-		}
-		g.AtMs, g.DurationMs, g.Params.AccentsMs = fit.AtMs, fit.DurationMs, acc
 	}
-	r, err := motion.Resolve(spec.Output, g, fit.Regions)
-	return g, fit, r, err
+	return c.laidOut
 }
 
 // overlayProbes picks, for every overlay, a frame of the same shot where it is not drawn: the frame before it enters, else the one
 // after it leaves; an overlay that fills its shot (it starts and ends on cuts, or at the ends of the video) has none and is not probed.
-// The box and the time are the ones the renderer draws at (fitGraphic); a graphic the renderer leaves out is not probed.
+// The box and the time are the ones the renderer draws at (motion.Layout); a graphic the renderer leaves out is not probed.
 func overlayProbes(spec *timeline.Spec, subjects subject.Index) []RegionProbe {
 	out := spec.Output
 	fps := out.FPS
@@ -116,14 +114,14 @@ func overlayProbes(spec *timeline.Spec, subjects subject.Index) []RegionProbe {
 		return id
 	}
 	var probes []RegionProbe
-	for _, item := range graphicsOf(spec) {
+	for _, l := range layoutGraphics(spec, subjects, total) {
 		if len(probes) >= media.MaxRegions {
 			break
 		}
-		g, fit, r, err := fitGraphic(spec, subjects, item, total)
-		if err != nil || fit.How == subject.FitDropped {
+		if !l.Drawn() {
 			continue
 		}
+		g, r := l.Item, l.Resolved
 		frameMs := int64(1000 / max(fps, 1))
 		p := RegionProbe{ItemID: g.ID,
 			X: float64(r.Box.Left) / float64(out.Width), Y: float64(r.Box.Top) / float64(out.Height),
@@ -179,6 +177,10 @@ func (c *checker) overlayOverSubject() Check {
 	out := c.in.Spec.Output
 	var bad, notes []string
 	checked := 0
+	fits := map[string]subject.Fit{}
+	for _, l := range c.laid() {
+		fits[l.Original.ID] = l.Fit
+	}
 	for _, g := range items {
 		regions := subject.Regions(c.in.Spec, c.in.Subjects.Lookup, g.AtMs, g.EndMs())
 		if len(regions) == 0 {
@@ -193,12 +195,11 @@ func (c *checker) overlayOverSubject() Check {
 			}
 			continue
 		}
-		_, fit, _, err := fitGraphic(c.in.Spec, c.in.Subjects, g, c.total)
-		if err != nil {
+		fit, ok := fits[g.ID]
+		if !ok {
 			continue
 		}
-		// The hook title and the chapter titles must be where the editor put them; another graphic may move.
-		essential := g.AtMs <= hookTitleByMs || g.Template == timeline.TemplateChapterCard || IsChapterTitle(g.DisplayText())
+		essential := essentialGraphic(g)
 		switch fit.How {
 		case subject.FitDropped:
 			bad = append(bad, fmt.Sprintf("%s (%s) would cover the person's body at every time of the video, so the renderer leaves it out (%s): %s", g.ID, g.Template, where, c.titleFix(txt, fit)))
@@ -297,4 +298,97 @@ func firstNonEmpty(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// essentialGraphic says whether a graphic is the hook title or a chapter title, which must be shown where the editor put it; another
+// graphic may be moved.
+func essentialGraphic(g timeline.GraphicsItem) bool {
+	return (g.IsTitle() && g.AtMs <= hookTitleByMs) || g.Template == timeline.TemplateChapterCard || IsChapterTitle(g.DisplayText())
+}
+
+// graphicsOverlap checks that no overlay is drawn over another overlay or a text on screen at the same time. The renderer keeps them
+// apart (motion.Layout: stacked below or above the other, else moved next to it in time, else left out); the check fails what the
+// editor did not mean, a graphic left out or a hook or chapter graphic moved to another time, with the times that would fit.
+func (c *checker) graphicsOverlap() Check {
+	laid := c.laid()
+	if len(laid) == 0 {
+		return c.skip(CheckGraphicsOverlap, "there are no motion graphics")
+	}
+	var bad, notes []string
+	for _, l := range laid {
+		g := l.Original
+		if l.Clash == motion.ClashNone {
+			continue
+		}
+		with := c.describeItem(l.With)
+		both := fmt.Sprintf("%s %s is on screen at %s-%s s together with %s (on screen %s-%s s) in the same part of the frame",
+			g.ID, describeGraphic(g), secs2(g.AtMs), secs2(g.EndMs()), with, secs2(l.WithAtMs), secs2(l.WithEndMs))
+		switch l.Clash {
+		case motion.ClashDropped:
+			bad = append(bad, both+", and there is no room below or above it or next to it in time, so the renderer leaves it out: "+c.overlapFix(g, l))
+		case motion.ClashMoved:
+			msg := fmt.Sprintf("%s, so the renderer shows it at %d-%d ms", both, l.Item.AtMs, l.Item.EndMs())
+			if essentialGraphic(g) {
+				bad = append(bad, msg+": "+c.overlapFix(g, l))
+			} else {
+				notes = append(notes, msg+"; set at_ms there yourself")
+			}
+		default:
+			notes = append(notes, fmt.Sprintf("%s is stacked %s %s, which is on screen at the same time", g.ID, l.Clash, l.With))
+		}
+	}
+	switch {
+	case len(bad) > 0:
+		return c.fail(CheckGraphicsOverlap, "%s", strings.Join(bad[:min(3, len(bad))], "; "))
+	case len(notes) > 0:
+		return c.pass(CheckGraphicsOverlap, "%s", strings.Join(notes[:min(3, len(notes))], "; "))
+	}
+	return c.pass(CheckGraphicsOverlap, "%d motion graphics, none over another overlay or a text", len(laid))
+}
+
+// overlapFix is the fix for a graphic that clashes with another overlay: the times next to the other one where it would be alone
+// (inside the video), and the other ways out.
+func (c *checker) overlapFix(g timeline.GraphicsItem, l motion.Laid) string {
+	var times []string
+	if at := l.WithEndMs; at+g.DurationMs <= c.total {
+		times = append(times, fmt.Sprintf("start %s at %d ms, after %s", g.ID, at, l.With))
+	}
+	if end := l.WithAtMs; end-g.DurationMs >= 0 {
+		times = append(times, fmt.Sprintf("end it by %d ms (at_ms %d), before %s", end, end-g.DurationMs, l.With))
+	}
+	if d := l.WithAtMs - g.AtMs; d >= 500 && len(times) == 0 {
+		times = append(times, fmt.Sprintf("shorten it to %d ms so it leaves before %s enters", d, l.With))
+	}
+	times = append(times, "give it fewer words or a lower scale so both fit in the band, put one at another anchor, or remove one of them")
+	return strings.Join(times, "; or ")
+}
+
+// describeGraphic names a graphic for a message: its template and its words.
+func describeGraphic(g timeline.GraphicsItem) string {
+	return fmt.Sprintf("(%s %q)", g.Template, strings.ReplaceAll(g.DisplayText(), "\n", " "))
+}
+
+// describeItem names a text or graphics item of the version by id.
+func (c *checker) describeItem(id string) string {
+	for _, t := range c.in.Spec.Tracks {
+		switch t := t.(type) {
+		case *timeline.GraphicsTrack:
+			for _, g := range t.Items {
+				if g.ID == id {
+					return g.ID + " " + describeGraphic(g)
+				}
+			}
+		case *timeline.TextTrack:
+			for _, it := range t.Items {
+				if it.ID == id {
+					return fmt.Sprintf("text %s %q", it.ID, strings.ReplaceAll(it.Text, "\n", " "))
+				}
+			}
+		case *timeline.CaptionsTrack:
+			if t.ID == id {
+				return "the captions"
+			}
+		}
+	}
+	return id
 }

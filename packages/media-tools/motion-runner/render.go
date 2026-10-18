@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -173,8 +174,8 @@ func run(ctx context.Context, o Options) (err error) {
 				}
 			}
 			name := filepath.Join(o.Out, dir, fmt.Sprintf("f%06d.png", n-seg.StartFrame))
-			if err := os.WriteFile(name, png, 0o644); err != nil { //nolint:gosec // read by the worker
-				return fmt.Errorf("output: %w", err)
+			if err := writeNew(name, png); err != nil {
+				return err
 			}
 			sum := sha256.Sum256(png)
 			res.SHA256 = append(res.SHA256, hex.EncodeToString(sum[:]))
@@ -195,7 +196,21 @@ func run(ctx context.Context, o Options) (err error) {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(o.Out, "manifest.json"), out, 0o644) //nolint:gosec // read by the worker
+	return writeNew(filepath.Join(o.Out, "manifest.json"), out)
+}
+
+// writeNew writes an output file that must not exist yet, and never through a symlink in its place: the output directory is fresh
+// for every run, so anything already there is not ours.
+func writeNew(name string, data []byte) error {
+	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644) //nolint:gosec // read by the worker, which may be another uid
+	if err != nil {
+		return fmt.Errorf("output: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("output: %w", err)
+	}
+	return f.Close()
 }
 
 // session is the page the frames are drawn in.

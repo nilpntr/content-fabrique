@@ -37,6 +37,12 @@ func (c *checker) textOverSubject() Check {
 			continue
 		}
 		for _, it := range tt.Items {
+			if msg := c.faceOnlyMisused(it); msg != "" {
+				bad = append(bad, msg)
+				texts++
+				first = false
+				continue
+			}
 			essential := (first && it.AtMs <= hookTitleByMs) || IsChapterTitle(it.Text)
 			first = false
 			regions := subject.Regions(c.in.Spec, c.in.Subjects.Lookup, it.AtMs, it.AtMs+it.DurationMs)

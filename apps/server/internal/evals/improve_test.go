@@ -70,7 +70,7 @@ func TestAllowlistAndExcerpts(t *testing.T) {
 			t.Errorf("%s: the excerpt carries code", f.Path)
 		}
 	}
-	if kinds[KindPrompt] != 1 || kinds[KindPlaybook] < 5 || kinds[KindCheckThreshold] != 2 || kinds[KindRendererDefault] != 1 || kinds[KindStyleRule] != 1 {
+	if kinds[KindPrompt] != 1 || kinds[KindPlaybook] < 5 || kinds[KindCheckThreshold] != 5 || kinds[KindRendererDefault] != 1 || kinds[KindStyleRule] != 1 {
 		t.Errorf("kinds %v", kinds)
 	}
 	for path, want := range map[string]bool{

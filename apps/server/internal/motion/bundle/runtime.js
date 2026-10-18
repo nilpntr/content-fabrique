@@ -87,9 +87,11 @@
   }
 
   // Nothing in a template needs the network, workers or other windows; they are taken away so a mistake fails loudly here
-  // (the browser and the sandbox refuse them as well).
+  // (the browser and the sandbox refuse them as well). WebRTC is the one API that can open a socket around the proxy (the runner
+  // also limits it to proxied UDP).
   const refuse = (name) => () => { throw new Error(name + ' is not available to templates'); };
-  for (const name of ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker', 'open']) {
+  for (const name of ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker', 'open',
+    'RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel']) {
     try { Object.defineProperty(window, name, { value: refuse(name), configurable: false, writable: false }); } catch (e) { /* not defined here */ }
   }
   try { Object.defineProperty(navigator, 'sendBeacon', { value: refuse('sendBeacon'), configurable: false }); } catch (e) { /* ignore */ }

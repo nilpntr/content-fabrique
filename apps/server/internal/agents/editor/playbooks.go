@@ -40,7 +40,7 @@ var ContentTypes = []string{TypeTalking, TypeUnboxing, TypeWorkout, TypeVlog, Ty
 var playbookVersions = map[string]string{
 	TypeTalking:  "talking.v3",
 	TypeUnboxing: "unboxing_product.v3",
-	TypeWorkout:  "workout.v6",
+	TypeWorkout:  "workout.v7",
 	TypeVlog:     "vlog.v3",
 	TypeTutorial: "tutorial.v3",
 	TypeGeneral:  "general.v3",

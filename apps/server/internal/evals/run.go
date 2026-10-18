@@ -1,6 +1,7 @@
 package evals
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -455,7 +456,8 @@ func judgeInput(ctx context.Context, c Case, t Target, m Measurement, s *Suite, 
 	return in, nil
 }
 
-// describeTimeline is a few lines of where the clips, transitions and text are, for the judge.
+// describeTimeline is a few lines of where the clips, transitions and texts are, for the judge: every text item and every graphics item
+// (titles, story captions, chapter cards and the other motion-graphics templates), with its words, time, place and placement rule.
 func describeTimeline(spec *timeline.Spec) string {
 	if spec == nil {
 		return ""
@@ -471,6 +473,36 @@ func describeTimeline(spec *timeline.Spec) string {
 				fmt.Fprintf(&b, ", motion %s", it.Motion.Preset)
 			}
 			fmt.Fprintf(&b, ", own sound %s\n", timeline.ClipAudioMode(it.Audio))
+		}
+	}
+	text := func(kind string, t timeline.TextItem) {
+		keep := "keeps off the body"
+		if t.AvoidsFaceOnly() {
+			keep = "keeps off the face only"
+		}
+		place := cmp.Or(t.Anchor, "its style's place")
+		if t.Position != nil {
+			place = fmt.Sprintf("at %.2f, %.2f", t.Position.X, t.Position.Y)
+		}
+		fmt.Fprintf(&b, "%s %s at %.1f s for %.1f s, style %s, %s, %s: %q\n", kind, t.ID, float64(t.AtMs)/1000, float64(t.DurationMs)/1000,
+			t.Style, place, keep, t.Text)
+	}
+	for _, tr := range spec.Tracks {
+		switch tr := tr.(type) {
+		case *timeline.TextTrack:
+			for _, it := range tr.Items {
+				text("text", it)
+			}
+		case *timeline.GraphicsTrack:
+			for _, g := range tr.Items {
+				kind := "graphic " + g.Template
+				if g.Template == timeline.TemplateChapterCard {
+					kind = "chapter card"
+				} else if g.IsTitle() {
+					kind = "title graphic " + g.Template
+				}
+				text(kind, g.AsText())
+			}
 		}
 	}
 	fmt.Fprintf(&b, "total %.1f s, music: %v", float64(timeline.TotalDuration(spec))/1000, timeline.HasMusic(spec))

@@ -1,6 +1,6 @@
 # Editor system prompt: changelog
 
-The editor agent's system prompt is `editor.v2.9.md`, embedded in the Go binary, and the genre playbooks are the files in
+The editor agent's system prompt is `editor.v2.10.md`, embedded in the Go binary, and the genre playbooks are the files in
 `playbooks/`, embedded too. The text the model receives is the runtime's preamble (`runtime.SystemPreamble`, the untrusted-data
 rule) followed by this file. The prompt version (`PromptVersion` in `prompt.go`) is stored in every run's input, so a run can
 always be tied to the text it was given; a playbook has its own version (`workout.v2`, in `playbooks.go`) that the run's plan
@@ -21,6 +21,22 @@ Rules for changing it:
 - The cache hit rate of a run is visible: `cfctl agent show <run>` prints the cache write and read tokens of every model call and
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
+
+## editor.v2.10 and workout.v7 (2026-10-18)
+
+The text of the video as the creator tells it (P6-05d). A second creator tells his videos in short sentence-case story captions, a new
+line on each shot, white, small, in the middle of the frame and often over the chest, and in meme dialogue before a reveal; the first
+creator uses one title. The text read now reads every shot (stylevision.v4) and the style has `text_pattern` (single_title,
+story_captions, dialogue, none) and `text_position`. The file is `editor.v2.10.md`, a patch of v2.9:
+
+- **New paragraph "The text of the video"**: the four patterns, how story captions and dialogue are written (a mini-story about the
+  footage in the creator's language, one line per shot, at least 1 s each, never a line of theirs), and avoid "face" for lines that sit
+  on the body (the renderer then keeps them off the face only; a title keeps off the whole body).
+- **The settings line** names the pattern, the look of the lines (case, colour, size, words a line), where they sit and the language.
+- **Checks** for a style told in lines: `story_captions` (a line on every shot but the last, a new line with most cuts),
+  `caption_readable` (each line 1 s or more) and `text_over_face`; `text_over_subject` fails avoid "face" in a style whose text keeps
+  off the whole body.
+- `workout.v7`: the Text paragraph follows the creator's pattern.
 
 ## editor.v2.9, workout.v6 and the other playbooks v3 (2026-10-18)
 

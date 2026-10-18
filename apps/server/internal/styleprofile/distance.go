@@ -28,6 +28,9 @@ type EditStats struct {
 	Texts, Animated int
 	// Titles counts the texts that are titles and Labels the small labels (every text beyond the first title, and the label styles).
 	Titles, Labels int
+	// Chapters counts the numbered chapter titles (chapter cards, "1. ..." texts): neither the title nor labels; the chapter-titles
+	// setting governs them.
+	Chapters int
 	// TitleFill is the first title's fill as "#RRGGBB", TitleLines its number of lines, TitleHeightPct the height of its capitals as a
 	// percentage of the frame height and TitleShadow its shadow (none, soft or strong); all zero when it was not measured.
 	TitleFill      string
@@ -484,6 +487,16 @@ func compareStructure(e EditStats, r Resolved, add, addSoft func(id, value, expe
 			pick(r.Sources.EndingHold)("ending_hold", fmt.Sprintf("last shot %.1f s", last), fmt.Sprintf("under %.1f s, like the other shots", long), last < long,
 				"end on a shot as short as the others")
 		}
+	}
+	// Numbered chapter titles follow the effective chapter-titles setting: on (the default), they are expected in a video of several
+	// exercises and never counted against the one title (editor check chapter_titles counts them against the plan's chapters); off,
+	// there are none.
+	switch {
+	case r.ChapterTitles == LevelOff:
+		pick(r.Sources.ChapterTitles)("chapter_titles", fmt.Sprintf("%d chapter titles", e.Chapters), "none (chapter titles off)", e.Chapters == 0,
+			"take the numbered chapter titles out")
+	case e.Chapters > 0:
+		pick(r.Sources.ChapterTitles)("chapter_titles", fmt.Sprintf("%d chapter titles", e.Chapters), "numbered chapter titles, one per exercise (chapter titles on)", true, "")
 	}
 	if r.TitleTemplate != "" && e.TitleText != "" {
 		pick(r.Sources.TitleTemplate)("title_form", fmt.Sprintf("%d characters", len([]rune(e.TitleText))), "the form "+r.TitleTemplate, TemplateMatches(r.TitleTemplate, e.TitleText),

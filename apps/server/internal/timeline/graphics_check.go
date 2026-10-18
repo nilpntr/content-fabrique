@@ -17,6 +17,11 @@ func (c *checker) checkGraphics() {
 		if !ok {
 			continue
 		}
+		if len(gt.Items) > MaxGraphicsItems {
+			c.add(CodeInvalidGraphic, fmt.Sprintf("/tracks/%d/items", ti),
+				"the graphics track has %d items, at most %d are allowed; remove %d", len(gt.Items), MaxGraphicsItems, len(gt.Items)-MaxGraphicsItems)
+			continue
+		}
 		for i, it := range gt.Items {
 			path := fmt.Sprintf("/tracks/%d/items/%d", ti, i)
 			if field, err := it.CheckParams(); err != nil {

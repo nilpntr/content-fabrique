@@ -153,3 +153,45 @@ func TestStyleAnalyzeAStoredProfile(t *testing.T) {
 		t.Fatalf("a failed analysis changed the profile: %+v %v", row, err)
 	}
 }
+
+// cfctl style set changes only the settings it is given (a live run of set --chapter-titles on reset every earlier choice); a setting given
+// as "suggested", or named in --clear, goes back to the layers below.
+func TestStyleSetMergesIntoTheCreatorsSettings(t *testing.T) {
+	r := newProjectRig(t)
+	ws := r.ws.ID.String()
+	settings := func() styleprofile.Settings {
+		t.Helper()
+		row, err := r.st.GetCreatorStyleSettings(context.Background(), r.ws.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s, err := styleprofile.ParseSettings(row.Settings)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	if code, out, errOut := r.runStyle("set", "--workspace", ws, "--vibe", "hype", "--transitions", "lots", "--text-animation", "on", "--camera-motion", "lots", "--title-case", "upper"); code != 0 {
+		t.Fatalf("set: %d %s%s", code, out, errOut)
+	}
+	if code, out, errOut := r.runStyle("set", "--workspace", ws, "--chapter-titles", "on"); code != 0 || !strings.Contains(out, "the others stay") {
+		t.Fatalf("set chapter titles: %d %s%s", code, out, errOut)
+	}
+	want := styleprofile.Settings{Vibe: "hype", Transitions: "lots", TextAnimation: "on", CameraMotion: "lots", TitleCase: "upper", ChapterTitles: "on"}
+	if got := settings(); got != want {
+		t.Fatalf("the earlier settings did not stay: %+v", got)
+	}
+	if code, out, errOut := r.runStyle("set", "--workspace", ws, "--transitions", "suggested", "--clear", "title_case,camera-motion"); code != 0 {
+		t.Fatalf("clear: %d %s%s", code, out, errOut)
+	}
+	want.Transitions, want.TitleCase, want.CameraMotion = "", "", ""
+	if got := settings(); got != want {
+		t.Fatalf("after clearing: %+v", got)
+	}
+	if code, _, errOut := r.runStyle("set", "--workspace", ws, "--clear", "sky_colour"); code != 2 || !strings.Contains(errOut, "not a setting") {
+		t.Errorf("an unknown setting to clear: %d %s", code, errOut)
+	}
+	if got := settings(); got != want {
+		t.Errorf("a refused set changed the settings: %+v", got)
+	}
+}

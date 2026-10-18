@@ -341,3 +341,40 @@ func TestAnItemThatDoesNotFitTheZoneIsNotOverTheSubject(t *testing.T) {
 		t.Errorf("two lines on the head: %+v", c)
 	}
 }
+
+// A story caption of a creator who puts it mid-frame over the chest avoids the face only (avoid face): it stays on the torso where its
+// anchor puts it, and is still moved off the head; the same caption avoiding the body (the default) is moved off the torso too.
+func TestACaptionThatAvoidsTheFaceOnlyMayStandOnTheChest(t *testing.T) {
+	out := baseSpec().Output
+	caption := TextItem{ID: "c1", DurationMs: 1500, Text: "And I started to use my lats", Style: "subtitle_clean", Anchor: AnchorCenter}
+	if c, err := TextCovers(out, caption, standing); err != nil || !c.Body || c.Head {
+		t.Fatalf("the caption at the centre covers %+v (%v); the test wants it on the torso, off the head", c, err)
+	}
+	face := caption
+	face.Avoid = AvoidFace
+	pl, av, err := PlaceTextAvoiding(out, face, standing)
+	plain, _ := PlaceText(out, face)
+	if err != nil || av.Overlapped || !av.Cleared || pl.Box != plain.Box {
+		t.Errorf("a face-only caption on the chest was moved: %+v %v", av, err)
+	}
+	if c, _ := TextCovers(out, face, standing); c.Body || c.Head {
+		t.Errorf("a face-only caption on the chest covers %+v", c)
+	}
+	_, av, err = PlaceTextAvoiding(out, caption, standing)
+	if err != nil || !av.Overlapped {
+		t.Errorf("a caption that avoids the body was left on the chest: %+v %v", av, err)
+	}
+	// On the head, a face-only caption is moved like any text.
+	onHead := face
+	onHead.Anchor, onHead.Position = "", &Point{X: 0.5, Y: 0.3}
+	if c, _ := TextCovers(out, onHead, standing); !c.Head {
+		t.Fatalf("the test wants the caption on the head: %+v", c)
+	}
+	pl, av, err = PlaceTextAvoiding(out, onHead, standing)
+	if err != nil || !av.Overlapped || !av.Cleared {
+		t.Fatalf("a face-only caption on the head: %+v %v", av, err)
+	}
+	if ink := pl.Layout.InkBox(pl.Box); ink.Overlaps(standing[0].Head) {
+		t.Errorf("the caption stayed on the head: %+v", ink)
+	}
+}
