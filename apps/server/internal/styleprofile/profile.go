@@ -1143,7 +1143,6 @@ func labelsWord(t *TextProfile) string {
 	return fmt.Sprintf("in %.0f %% of the videos", t.LabelShare*100)
 }
 
-
 func aggregateTransitions(refs []Measures) TransitionsProfile {
 	var tp TransitionsProfile
 	kinds := map[string]int{}

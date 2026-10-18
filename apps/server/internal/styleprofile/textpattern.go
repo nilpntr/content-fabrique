@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"regexp"
-	"slices"
 	"strings"
 	"unicode"
 )
@@ -384,6 +383,3 @@ func LanguageName(code string) string {
 }
 
 var languageCode = regexp.MustCompile(`^[a-z]{2}$`)
-
-// validPattern says p is a text pattern.
-func validPattern(p string) bool { return slices.Contains(TextPatterns, p) }
