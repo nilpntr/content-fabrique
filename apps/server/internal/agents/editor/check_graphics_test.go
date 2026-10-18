@@ -62,6 +62,21 @@ func TestOverlayReadable(t *testing.T) {
 	}
 }
 
+// A motion-graphics title is the hook title, and chapter cards are the chapter titles (the checks of P6-06 count them).
+func TestGraphicsCountAsTitles(t *testing.T) {
+	spec := graphicsSpec(t, `{"id":"g1","template":"title_pop","at_ms":0,"duration_ms":2400,"anchor":"upper_third","params":{"text":"BACK DAY 101"}},
+		{"id":"g2","template":"chapter_card","at_ms":2400,"duration_ms":2500,"anchor":"upper_third","params":{"text":"SEATED ROW","number":1}},
+		{"id":"g3","template":"chapter_card","at_ms":5000,"duration_ms":2500,"anchor":"upper_third","params":{"text":"LAT PULLDOWN","number":2}}`)
+	plan := &Plan{ContentType: TypeWorkout, Shots: []PlanShot{{Role: "hook"}, {Role: "step", Chapter: 1}, {Role: "step", Chapter: 2}}}
+	got := runGraphicsChecks(t, CheckInput{Spec: spec, Plan: plan})
+	if c := got[CheckHookTitle]; c.Status != CheckPass {
+		t.Errorf("hook_title: %+v", c)
+	}
+	if c := got[CheckChapterTitles]; c.Status != CheckPass {
+		t.Errorf("chapter_titles: %+v", c)
+	}
+}
+
 func subjects(headTop, top float64) subject.Index {
 	return subject.Index{graphicsAsset: {Aspect: 0.5625, Samples: []subject.Sample{
 		{AtMs: 0, X: 0.1, Y: top, W: 0.8, H: 1 - top, HeadTopY: headTop},
