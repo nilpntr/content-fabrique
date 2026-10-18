@@ -52,13 +52,28 @@ const (
 	CheckStyleMatch    = "style_match"
 	// CheckTextOverSubject is the check for a title that covers the head of the person in the footage (the quick look's subject boxes).
 	CheckTextOverSubject = "text_over_subject"
+	// CheckTitleCopied fails a text that is, word for word, the title of one of the creator's reference videos.
+	CheckTitleCopied = "title_copied"
+	// CheckLongShot and CheckHeldEnding hold the shots to the pace targets (pace.go): no shot but the hook and the ending over the longest,
+	// and the ending held no longer than the creator holds theirs.
+	CheckLongShot   = "long_shot"
+	CheckHeldEnding = "held_ending"
 )
 
 // The thresholds that do not depend on the kind of video.
 const (
-	hookMaxMs         = 2000
-	hookTitleByMs     = 500
+	hookMaxMs     = 2000
+	hookTitleByMs = 500
+	// repToleranceMs is how far a shot edge may be from a rep's start, end or turning point. It is the measurement, not a taste: half a
+	// sample of the analysis (50 ms at 10 Hz), the largest move of snap_cuts_to_beats (80 ms) and half a frame (17 ms at 30 fps) add up to
+	// 147 ms. The snap and the frame are output time, so at a speed over 1 they are longer in the source: 50 + 100 x speed (repSnapMs).
+	// A slow rep is still at its turn for longer: within 5 % of its length of a turning point the movement has covered under 5 % of its
+	// range (1 - cos(2 pi x 0.05) = 0.049), so a rep of 4 s accepts 200 ms (repTurnShare, at most repTurnMaxMs).
 	repToleranceMs    = 150
+	repAnalysisHalfMs = 50
+	repSnapMs         = 100
+	repTurnShare      = 0.05
+	repTurnMaxMs      = 250
 	repEdgesShare     = 0.85
 	deadShareMax      = 0.05
 	effectsMax        = 0.5
@@ -98,8 +113,9 @@ type Check struct {
 	Detail string `json:"detail"`
 }
 
-// Span is a stretch of a clip, in the clip's own milliseconds.
-type Span struct{ StartMs, EndMs int64 }
+// Span is a stretch of a clip, in the clip's own milliseconds. TurnMs is, for a rep, its measured turning point (the opposite end of the
+// movement between its start and its end), 0 when the analysis has none: then the midpoint stands in for it.
+type Span struct{ StartMs, EndMs, TurnMs int64 }
 
 // AssetAnalysis is what check_edit knows about one clip from its stored analysis.
 type AssetAnalysis struct {
@@ -148,6 +164,9 @@ type CheckInput struct {
 	// OverlaySkip says why and overlay_legibility does not apply.
 	Overlay     map[string]RegionLuma
 	OverlaySkip string
+	// PaceSetting is the creator's own pace setting (PaceSettings: "slower", "like_my_videos", "faster"; "" for none), which scales the
+	// pace targets after the vibe.
+	PaceSetting string
 }
 
 // Metrics are the numbers behind the checks, for the run feed and for comparing runs.
@@ -178,6 +197,9 @@ type Metrics struct {
 	RenderedKept float64 `json:"rendered_kept"`
 	// StyleScore is the share of the style dimensions that are in the creator's range (0 when there is no profile).
 	StyleScore float64 `json:"style_score,omitempty"`
+	// PaceMedianMs and PaceMaxShotMs are the pace targets the shots were held to (0 when none applies).
+	PaceMedianMs  int64 `json:"pace_median_ms,omitempty"`
+	PaceMaxShotMs int64 `json:"pace_max_shot_ms,omitempty"`
 	// The ears (P3-12), when the preview was listened to: the profile ("programme" or "sound_ready"), the integrated loudness and the
 	// bed level (LUFS; the bed only in the sound-ready profile), what was measured ("stem" or "preview") and how long listening took.
 	AudioProfile string  `json:"audio_profile,omitempty"`
@@ -324,6 +346,10 @@ func RunChecks(in CheckInput) Report {
 		lim.beatGrid = false // the plan has no beat grid (a vlog or a general video that follows speech, say): the cuts are not judged against one
 	}
 	c := &checker{in: in, items: items, lim: lim, typ: typ, m: &r.Metrics, dist: &r.Style, weakStyle: weakStyle}
+	c.pace = Pace(in.Style, typ, vibe, in.PaceSetting)
+	if c.pace.Applies {
+		r.Metrics.PaceMedianMs, r.Metrics.PaceMaxShotMs = c.pace.MedianMs, c.pace.MaxShotMs
+	}
 	c.total = timeline.TotalDuration(in.Spec)
 	// A shot's length is what it is on screen: from where it starts to where the next one starts, so the overlap of a transition
 	// into the next shot is not counted (a 1.95 s hook with a 250 ms whip out of it is still a 1.95 s hook). The last shot runs to
@@ -339,8 +365,8 @@ func RunChecks(in CheckInput) Report {
 	}
 	r.Metrics.DurationMs, r.Metrics.Shots = c.total, len(items)
 	r.Checks = []Check{
-		c.hookLength(), c.hookTitle(), c.shotPacing(), c.shotVariety(), c.paceBuilds(), c.repBoundaries(), c.deadTime(),
-		c.effectDensity(), c.textSafe(), c.textOverSubject(), c.duration(targetS), c.brightness(), c.crushed(), c.beatSync(), c.styleMatch(),
+		c.hookLength(), c.hookTitle(), c.shotPacing(), c.longShot(), c.heldEnding(), c.shotVariety(), c.paceBuilds(), c.repBoundaries(), c.deadTime(),
+		c.effectDensity(), c.textSafe(), c.textOverSubject(), c.duration(targetS), c.brightness(), c.crushed(), c.beatSync(), c.styleMatch(), c.titleCopied(),
 		c.offBeatCut(), c.hookMissesDrop(), c.staticShot(), c.noTransitions(), c.transitionVariety(), c.textWithoutEntrance(), c.chapterTitles(),
 	}
 	if len(graphicsOf(in.Spec)) > 0 { // the motion-graphics checks (check_graphics.go), only for an edit that has some
@@ -369,6 +395,8 @@ type checker struct {
 	dist  **styleprofile.Distance
 	// weakStyle is why a profile that is there is not used (too few references), for the style_match line.
 	weakStyle string
+	// pace are the shot-length targets (pace.go).
+	pace PaceTargets
 }
 
 func (c *checker) pass(id, format string, a ...any) Check {
@@ -440,11 +468,107 @@ func (c *checker) shotStats() (minMs, medMs, maxMs int64) {
 func (c *checker) shotPacing() Check {
 	lo, med, hi := c.shotStats()
 	c.m.ShotMinMs, c.m.ShotMedianMs, c.m.ShotMaxMs = lo, med, hi
+	// With the creator's measured shot lengths, the median aims at theirs (scaled by the vibe and their pace setting), within ±40 %.
+	if p := c.pace; p.Applies && p.FromProfile {
+		switch {
+		case med > p.MedianHiMs:
+			return c.fail(CheckShotPacing, "the median shot is %s long; the target is about %s (%s to %s, from %s). Cut the long shots shorter: a slow rep at its turning point (half a rep on the beat), or switch to another angle of the same exercise at the turning point; or speed a shot up",
+				secs2(med), secs2(p.MedianMs), secs2(p.MedianLoMs), secs2(p.MedianHiMs), p.source())
+		case med < p.MedianLoMs:
+			return c.fail(CheckShotPacing, "the median shot is %s long; the target is about %s (%s to %s, from %s). Let the shots run longer: whole reps, fewer cuts",
+				secs2(med), secs2(p.MedianMs), secs2(p.MedianLoMs), secs2(p.MedianHiMs), p.source())
+		}
+		return c.pass(CheckShotPacing, "the median shot is %s long (the target is %s to %s, from %s)", secs2(med), secs2(p.MedianLoMs), secs2(p.MedianHiMs), p.source())
+	}
 	if med > c.lim.medianShotMs {
 		return c.fail(CheckShotPacing, "the median shot is %s long (at most %s for a %s video; shortest %s, longest %s). Make most shots 1 to 4 beats: take the strongest half of a long shot, or speed it up",
 			secs2(med), secs2(c.lim.medianShotMs), c.typ, secs2(lo), secs2(hi))
 	}
 	return c.pass(CheckShotPacing, "the median shot is %s long (at most %s for a %s video; shortest %s, longest %s)", secs2(med), secs2(c.lim.medianShotMs), c.typ, secs2(lo), secs2(hi))
+}
+
+// longShot fails a shot that runs longer than the pace allows (the creator's measured 90th percentile shot, scaled by the vibe and their
+// setting, or the default). The hook (held to the drop by hook_length) and the ending (held_ending) are left out.
+func (c *checker) longShot() Check {
+	p := c.pace
+	if !p.Applies {
+		return c.skip(CheckLongShot, "no pace target applies (a %s video, or a creator of long takes at the calm vibe)", c.typ)
+	}
+	if len(c.items) < 3 {
+		return c.skip(CheckLongShot, "only the hook and the ending")
+	}
+	var long []string
+	for i := 1; i < len(c.items)-1; i++ {
+		if c.durs[i] > p.MaxShotMs {
+			long = append(long, fmt.Sprintf("%s (%s)", c.items[i].ID, secs2(c.durs[i])))
+		}
+	}
+	if len(long) > 0 {
+		return c.fail(CheckLongShot, "%s %s longer than %s (from %s). Cut a slow rep at its turning point (half a rep, on the beat), switch to another angle of the same exercise at the turning point, or speed the shot up",
+			strings.Join(long, ", "), map[bool]string{true: "is", false: "are"}[len(long) == 1], secs2(p.MaxShotMs), p.source())
+	}
+	return c.pass(CheckLongShot, "no shot but the hook and the ending is over %s (from %s)", secs2(p.MaxShotMs), p.source())
+}
+
+// heldEnding fails an ending held longer than the creator holds theirs (scaled by the vibe), unless it moves: a push (the living camera,
+// push_in or pull_back) with a punch-in on a beat may hold up to 1.6 times as long.
+func (c *checker) heldEnding() Check {
+	p := c.pace
+	if !p.Applies {
+		return c.skip(CheckHeldEnding, "no pace target applies (a %s video, or a creator of long takes at the calm vibe)", c.typ)
+	}
+	n := len(c.items)
+	if n < 2 {
+		return c.skip(CheckHeldEnding, "there is one shot")
+	}
+	last, d := c.items[n-1], c.durs[n-1]
+	if d <= p.EndingMs {
+		return c.pass(CheckHeldEnding, "the ending is held %s (at most %s, from %s)", secs2(d), secs2(p.EndingMs), p.source())
+	}
+	moving := c.endingMoves(last)
+	if moving && d <= p.EndingMovingMs {
+		return c.pass(CheckHeldEnding, "the ending is held %s with a push and a punch-in on a beat (at most %s moving, %s still)", secs2(d), secs2(p.EndingMovingMs), secs2(p.EndingMs))
+	}
+	if moving {
+		return c.fail(CheckHeldEnding, "the ending (%s) is held %s, longer than %s even with its push and punch-in (from %s). Trim it to about %s: it loops back to the hook",
+			last.ID, secs2(d), secs2(p.EndingMovingMs), p.source(), secs2(p.EndingMs))
+	}
+	return c.fail(CheckHeldEnding, "the ending (%s) is held %s and sits still; at most %s (from %s). Trim it to about %s, or give it set_motion handheld with at_ms on a beat (a push with a punch-in on the beat) and keep it under %s",
+		last.ID, secs2(d), secs2(p.EndingMs), p.source(), secs2(p.EndingMs), secs2(p.EndingMovingMs))
+}
+
+// endingMoves says the shot has a push (handheld, push_in or pull_back) and a punch-in that lands on a beat or a hit of the song (a
+// handheld or punch_in with at_ms; without a grid any at_ms counts).
+func (c *checker) endingMoves(it timeline.VideoItem) bool {
+	m := it.Motion
+	if !m.Active() {
+		return false
+	}
+	switch m.Preset {
+	case timeline.MotionHandheld, timeline.MotionPushIn, timeline.MotionPullBack:
+	default:
+		return false
+	}
+	if m.Preset != timeline.MotionHandheld || m.AtMs == nil {
+		return false // a push_in or pull_back has no punch; a handheld without at_ms has none either
+	}
+	at := it.AtMs + *m.AtMs
+	var beats []int64
+	if c.in.Music != nil {
+		beats = c.in.Music.hits()
+	} else {
+		for _, mk := range c.in.Spec.Markers {
+			if mk.Kind == timeline.MarkerBeat || mk.Kind == timeline.MarkerDownbeat {
+				beats = append(beats, mk.AtMs)
+			}
+		}
+		slices.Sort(beats)
+	}
+	if len(beats) == 0 {
+		return true
+	}
+	_, d, _ := music.Nearest(beats, at)
+	return d <= int64(beatToleranceFrames)*1000/int64(max(c.in.Spec.Output.FPS, 1))
 }
 
 // nearlyEqual says two shot lengths are the same length: within 8 % or 100 ms.
@@ -531,10 +655,11 @@ func (c *checker) repBoundaries() Check {
 			at   int64
 		}{{"starts", it.Source.InMs}, {"ends", it.Source.OutMs}} {
 			total++
-			if near, d := nearestRepBoundary(a, e.at); d <= repToleranceMs || insideHold(a, e.at) {
+			near, d, repLen := nearestRepBoundary(a, e.at)
+			if tol := repTolerance(it.SpeedOrDefault(), repLen); d <= tol || insideHold(a, e.at) {
 				on++
 			} else {
-				misses = append(misses, miss{fmt.Sprintf("%s %s at %d ms (nearest rep boundary %d ms)", it.ID, e.name, e.at, near), d})
+				misses = append(misses, miss{fmt.Sprintf("%s %s at %d ms (nearest rep boundary %d ms, %d ms off; within %d ms counts)", it.ID, e.name, e.at, near, d, tol), d})
 			}
 		}
 	}
@@ -554,18 +679,32 @@ func (c *checker) repBoundaries() Check {
 	return c.pass(CheckRepBoundaries, "%d of %d shot edges on reps are within %d ms of a rep start, end or turning point", on, total, repToleranceMs)
 }
 
-// nearestRepBoundary is the rep boundary (a rep's start, its end or its midpoint, the turning point of the opposite phase)
-// nearest to t, and how far it is.
-func nearestRepBoundary(a AssetAnalysis, t int64) (at, dist int64) {
+// nearestRepBoundary is the rep boundary (a rep's start, its end or its turning point: the measured one, else the midpoint) nearest to t,
+// how far it is, and the length of the rep it belongs to.
+func nearestRepBoundary(a AssetAnalysis, t int64) (at, dist, repLen int64) {
 	dist = math.MaxInt64
 	for _, r := range a.Reps {
-		for _, b := range []int64{r.StartMs, r.EndMs, (r.StartMs + r.EndMs) / 2} {
+		turn := (r.StartMs + r.EndMs) / 2
+		if r.TurnMs > r.StartMs && r.TurnMs < r.EndMs {
+			turn = r.TurnMs
+		}
+		for _, b := range []int64{r.StartMs, r.EndMs, turn} {
 			if d := absI(b - t); d < dist {
-				at, dist = b, d
+				at, dist, repLen = b, d, r.EndMs-r.StartMs
 			}
 		}
 	}
-	return at, dist
+	return at, dist, repLen
+}
+
+// repTolerance is how far from a rep boundary an edge of a shot played at speed may be, for a rep repLen long (see repToleranceMs).
+func repTolerance(speed float64, repLen int64) int64 {
+	tol := float64(repToleranceMs)
+	if speed > 1 {
+		tol = repAnalysisHalfMs + repSnapMs*speed
+	}
+	turn := math.Min(repTurnShare*float64(repLen), repTurnMaxMs)
+	return int64(math.Round(math.Max(tol, turn)))
 }
 
 // insideHold says t is within a hold (a steady pose): a cut there is not in the middle of a rep.
@@ -873,7 +1012,7 @@ func (c *checker) crushed() Check {
 
 // editStats measures the edit against the dimensions of the creator's profile.
 func (c *checker) editStats() styleprofile.EditStats {
-	e := styleprofile.EditStats{DurationS: float64(c.total) / 1000, FirstCutS: -1}
+	e := styleprofile.EditStats{DurationS: float64(c.total) / 1000, FirstCutS: -1, Energetic: energetic(c.in.Vibe)}
 	for _, d := range c.durs {
 		e.ShotsS = append(e.ShotsS, float64(d)/1000)
 	}
@@ -987,6 +1126,42 @@ func (c *checker) styleMatch() Check {
 		return c.pass(CheckStyleMatch, "every style dimension that has to match is in the creator's range%s", soft)
 	}
 	return c.pass(CheckStyleMatch, "all %d style dimensions are in the creator's range", d.Hard())
+}
+
+// titleCopied fails a text that is the title of one of the creator's reference videos, compared without case or spaces: the style profile
+// gives the form of their titles ("<TOPIC> 101"), and a title copied from another of their videos is about that video, not this one.
+func (c *checker) titleCopied() Check {
+	p := c.in.Style
+	if p == nil {
+		return c.skip(CheckTitleCopied, "there is no creator style profile to compare the titles with")
+	}
+	refs := p.ReferenceTitles()
+	if len(refs) == 0 {
+		return c.skip(CheckTitleCopied, "no title was read from the creator's reference videos")
+	}
+	var copied []string
+	texts := 0
+	for _, t := range c.in.Spec.Tracks {
+		tt, ok := t.(*timeline.TextTrack)
+		if !ok {
+			continue
+		}
+		for _, it := range tt.Items {
+			texts++
+			if p.CopiesReferenceTitle(it.Text) {
+				copied = append(copied, it.ID)
+			}
+		}
+	}
+	if len(copied) > 0 {
+		form := "their most common form"
+		if p.Text != nil && len(p.Text.Patterns) > 0 {
+			form = p.Text.Patterns[0].Template()
+		}
+		return c.fail(CheckTitleCopied, "%s is word for word the title of one of the creator's reference videos: write a new title for this video in the creator's template, %s, with the topic of this footage",
+			strings.Join(copied, ", "), form)
+	}
+	return c.pass(CheckTitleCopied, "%d %s, none the title of one of the creator's %d reference titles", texts, plural(texts, "text", "texts"), len(refs))
 }
 
 func (c *checker) beatSync() Check {

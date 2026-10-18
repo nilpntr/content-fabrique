@@ -44,6 +44,9 @@ type Fit struct {
 	Avoidance timeline.Avoidance
 	// Regions are the subjects at that time.
 	Regions []timeline.Subject
+	// OwnTime is PlaceTextAvoiding's result at the item's own time (the same as Avoidance for FitInPlace and FitDropped): what was tried
+	// there and the room it found, for a caller that explains why the text moved.
+	OwnTime timeline.Avoidance
 }
 
 // FitText says where and when the text item it is shown: at its own time when PlaceTextAvoiding clears it there, else trimmed, moved or
@@ -62,6 +65,7 @@ func FitText(spec *timeline.Spec, lookup Lookup, it timeline.TextItem, totalMs i
 		return Fit{AtMs: at, DurationMs: dur, Placement: pl, Avoidance: av, Regions: regions}, err
 	}
 	own, err := place(it.AtMs, it.DurationMs)
+	own.OwnTime = own.Avoidance
 	if err != nil || own.Avoidance.Cleared {
 		own.How = FitInPlace
 		return own, err
@@ -69,7 +73,7 @@ func FitText(spec *timeline.Spec, lookup Lookup, it timeline.TextItem, totalMs i
 	// 1. The longest part of its own time where it fits, kept when it is long enough.
 	need := max(min(it.DurationMs, minTrimMs), it.DurationMs/2, MinTextMs)
 	if f, ok := longestFit(place, it.AtMs, it.AtMs+it.DurationMs, need); ok {
-		f.How = FitTrimmed
+		f.How, f.OwnTime = FitTrimmed, own.Avoidance
 		return f, nil
 	}
 	// 2. The nearest other time of the same length where it fits, inside the timeline.
@@ -84,7 +88,7 @@ func FitText(spec *timeline.Spec, lookup Lookup, it timeline.TextItem, totalMs i
 				return own, err
 			}
 			if f.Avoidance.Cleared {
-				f.How = FitMoved
+				f.How, f.OwnTime = FitMoved, own.Avoidance
 				return f, nil
 			}
 		}

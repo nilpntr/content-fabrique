@@ -70,7 +70,7 @@ func TestEvalEditorPrintsTheChecksOfAStoredVersion(t *testing.T) {
 			Shots int `json:"shots"`
 		}
 	}
-	if err := json.Unmarshal([]byte(out), &rec); err != nil || rec.Version != 1 || rec.Failed < 3 || rec.Metrics.Shots != 2 || len(rec.Checks) != 25 {
+	if err := json.Unmarshal([]byte(out), &rec); err != nil || rec.Version != 1 || rec.Failed < 3 || rec.Metrics.Shots != 2 || len(rec.Checks) != 28 {
 		t.Fatalf("json: %v %+v\n%s", err, rec, out)
 	}
 

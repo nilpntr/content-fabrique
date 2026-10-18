@@ -43,7 +43,8 @@ so run it through the validator first if it did not come from one.
   --ffmpeg     the ffmpeg binary used by --dry-run's printout, and ffprobe's directory (default: from PATH)
   --stem       also write the audio of a preview without its beat guide here (an M4A): what cfctl audio check should measure
   --subjects   a JSON file of subject boxes per asset id ({"ast_...": {"aspect": 0.5625, "samples": [{"at_ms": 1000, "x": 0.2,
-               "y": 0.2, "w": 0.6, "h": 0.7, "head_top_y": 0.22}]}}): titles that would cover the head are moved off it, as in the
+               "y": 0.2, "w": 0.6, "h": 0.7, "head_top_y": 0.22, "head_x": 0.42, "head_w": 0.16, "shoulder_y": 0.34}]}}; head_x, head_w
+               and shoulder_y are optional): titles that would cover the person are moved off them, as in the
                platform's renders, which read the boxes from the asset's quick look
   --motion-fallback  draw the graphics track (motion-graphics templates, D-35) as ASS text with each template's fallback animation,
                instead of rendering the overlays with headless Chrome in the sandbox

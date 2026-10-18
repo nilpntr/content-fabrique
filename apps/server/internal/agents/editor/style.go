@@ -69,10 +69,8 @@ func styleBlocks(p *styleprofile.Profile) []llm.Block {
 	if p == nil {
 		return nil
 	}
+	// The creator's own titles are not in the block: the templates give their form, and a title shown is a title copied (title_copied).
 	body := p.CompactBlock()
-	if t := p.Text; t != nil && len(t.Examples) > 0 {
-		body += "\ntitles the creator used (their own words): " + strings.Join(t.Examples, " | ")
-	}
 	weak := ""
 	if !p.Firm() {
 		weak = fmt.Sprintf(" This profile rests on only %d reference videos (confidence %.0f %%): treat it as a hint, not a rule; the checks do not use it yet.", p.References, p.Confidence*100)
@@ -84,18 +82,25 @@ func styleBlocks(p *styleprofile.Profile) []llm.Block {
 }
 
 // styleNote is what plan_edit adds to its answer for a creator with a profile: the points that decide the plan (the hook, the length of
-// the takes, the tempo). The numbers are ours (computed from the profile), no creator text.
-func styleNote(p *styleprofile.Profile) string {
+// the takes, the tempo). The numbers are ours (computed from the profile), no creator text. It is the note of a calm edit; styleNoteFor
+// gives the note for the edit's vibe.
+func styleNote(p *styleprofile.Profile) string { return styleNoteFor(p, VibeCalm) }
+
+// styleNoteFor is styleNote for a vibe: at lively and hype the pace follows the creator's cut-up videos (the pace targets of plan_edit),
+// not the long takes of their single-take videos.
+func styleNoteFor(p *styleprofile.Profile, vibe string) string {
 	if p == nil {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("\nCreator style: ")
 	pc := p.Pacing
-	switch pc.Style {
-	case styleprofile.PaceLongTake:
+	switch {
+	case energetic(vibe) && pc.ShotS.Median > 0:
+		fmt.Fprintf(&b, "at the %s vibe the shots follow the creator's cut-up videos (a shot of %.1f s at the median, measured), not their long takes: see the pace targets above. ", VibeOr(vibe), pc.ShotS.Median)
+	case pc.Style == styleprofile.PaceLongTake:
 		fmt.Fprintf(&b, "this creator lets takes run (the longest shot of a video is about %.0f s, %.0f to %.0f cuts a video). Plan a few long takes of full sets, with short details between them, and not many short shots. ", pc.LongestShotS.Median, pc.CutsPerVideo.Min, pc.CutsPerVideo.Max)
-	case styleprofile.PaceMontage:
+	case pc.Style == styleprofile.PaceMontage:
 		fmt.Fprintf(&b, "this creator cuts fast (a shot of %.1f s at the median). ", pc.ShotMedianS.Median)
 	default:
 		fmt.Fprintf(&b, "this creator mixes long takes (up to %.0f s) with quick cuts. ", pc.LongestShotS.Median)
@@ -124,9 +129,9 @@ func styleNote(p *styleprofile.Profile) string {
 				if top.Number != "" {
 					b.WriteString(" (always ending in " + top.Number + ")")
 				}
-				b.WriteString(": use it, with the muscle or the exercise of the footage as the topic, and do not invent a name. ")
+				b.WriteString(": write a new title in it, with the muscle, the exercise or the session of this footage as the topic; do not invent a name and never reuse one of their titles. ")
 			case styleprofile.KindLowercase:
-				b.WriteString("Their titles are mostly a lowercase witty line about the footage: write one in that voice. ")
+				b.WriteString("Their titles are mostly a lowercase witty line about the footage: write a new one about this video in that voice. ")
 			}
 		}
 	}

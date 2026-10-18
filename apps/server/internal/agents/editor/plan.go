@@ -298,6 +298,26 @@ func planNotes(p Plan, style *styleprofile.Profile) []string {
 	if len(chapters) >= 2 {
 		notes = append(notes, fmt.Sprintf("The plan has %d chapters: give the first shot of each a numbered chapter title (\"1. <EXERCISE>\" in the creator's title style, in the top band above the head) that enters with the shot and leaves before the next chapter; inside a chapter switch the angle every 2 to 5 s at a rep boundary instead of one long take.", len(chapters)))
 	}
+	// The pace targets (pace.go): the shots between the hook and the ending, and the ending, against the creator's measured lengths.
+	if pace := Pace(style, p.ContentType, p.Vibe, ""); pace.Applies && len(p.Shots) >= 3 {
+		var lengths []int64
+		long := 0
+		for _, s := range p.Shots[1 : len(p.Shots)-1] {
+			lengths = append(lengths, s.LengthMs)
+			if s.LengthMs > pace.MaxShotMs {
+				long++
+			}
+		}
+		if med := medianOf(lengths); pace.FromProfile && med > pace.MedianHiMs {
+			notes = append(notes, fmt.Sprintf("The shots between the hook and the ending run %s at the median; the pace target is about %s. Use more, shorter shots: cut a slow rep at its turning point (half a rep on the beat) or switch angle there.", secs(med), secs(pace.MedianMs)))
+		}
+		if long > 0 {
+			notes = append(notes, fmt.Sprintf("%d shots of the plan are longer than %s, the longest the pace allows: cut them at a rep's turning point or switch angle there.", long, secs(pace.MaxShotMs)))
+		}
+		if end := p.Shots[len(p.Shots)-1].LengthMs; end > pace.EndingMs {
+			notes = append(notes, fmt.Sprintf("The ending is %s; hold it at most %s, or up to %s with a push and a punch-in on a beat (set_motion handheld with at_ms on the beat).", secs(end), secs(pace.EndingMs), secs(pace.EndingMovingMs)))
+		}
+	}
 	if hookMax := applyStyle(limits{}, style).hookMaxMs; p.Shots[0].LengthMs > hookMax {
 		if style != nil {
 			notes = append(notes, fmt.Sprintf("The hook shot is %s long. The creator's first cut comes by %s.", secs(p.Shots[0].LengthMs), secs(hookMax)))
@@ -367,12 +387,15 @@ func (d Deps) planEdit(ctx context.Context, rc runtime.RunContext, in planArgs) 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Plan saved (it is shown to the creator). Content type %s, playbook %s.\n", plan.ContentType, plan.PlaybookVersion)
 	b.WriteString(plan.describe())
+	if d := Pace(firmStyle(style), plan.ContentType, plan.Vibe, "").Describe(); d != "" {
+		b.WriteString(d + "\n")
+	}
 	for _, n := range planNotes(plan, firmStyle(style)) {
 		b.WriteString("Note: " + n + "\n")
 	}
 	b.WriteString("\nThe playbook for this kind of video. Follow it; it is the craft of the genre, and check_edit will measure your edit against it.\n\n")
 	// The profile block itself is in the run context already; the note carries the points that decide the plan.
-	return runtime.Result{Content: []llm.Block{llm.TextBlock(b.String() + book + styleNote(style))}}, nil
+	return runtime.Result{Content: []llm.Block{llm.TextBlock(b.String() + book + styleNoteFor(style, plan.Vibe))}}, nil
 }
 
 // features is what the build offers (the tests of the gate replace it).

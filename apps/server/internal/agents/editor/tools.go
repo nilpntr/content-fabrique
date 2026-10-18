@@ -246,7 +246,7 @@ func briefBlocks(format, brief, instructions string) []llm.Block {
 	fmt.Fprintf(&b, "Shots: none shorter than %d ms. Text: 1 to 120 characters, at most 3 lines, on screen for at least 300 ms.\n", timeline.MinShotMs)
 	b.WriteString(safeZoneText(f, w, h))
 	b.WriteString("Constraints: no structured constraints yet (include, exclude and prefer lists come later). The brief below is the whole instruction; follow it.\n")
-	b.WriteString("Music: a song the creator gave is a clip with a song line in list_footage (an audio file, or a video whose sound is the song): put it on with set_sound kind creator_audio and cut to it (get_music). There is no other music: do not invent any. Without a song the export is sound-ready.\n")
+	b.WriteString("Music: a song the creator gave is a clip with a song line in list_footage (an audio file, or the sound of a video the creator chose for this edit; a footage clip's own sound is never a song, even when the gym plays music): put it on with set_sound kind creator_audio and cut to it (get_music). There is no other music: do not invent any. Without a song the export is sound-ready.\n")
 	blocks := []llm.Block{llm.TextBlock(b.String())}
 	if strings.TrimSpace(brief) == "" {
 		blocks = append(blocks, llm.TextBlock("Brief: the creator wrote none. Use your judgement and the rules you were given."))
@@ -286,7 +286,8 @@ func (d Deps) listFootage(ctx context.Context, rc runtime.RunContext, _ noArgs) 
 	if err != nil {
 		return runtime.Result{}, err
 	}
-	return runtime.Text(footageText(rows, footageOpts{Full: true, Analysis: sums, Subjects: d.subjects(ctx, ws, rows), Music: d.musicOf(ctx, ws, rows)})), nil
+	songs := d.musicOf(ctx, ws, rows, d.chosenSoundsOf(ctx, ws, pid))
+	return runtime.Text(footageText(rows, footageOpts{Full: true, Analysis: sums, Subjects: d.subjects(ctx, ws, rows), Music: songs})), nil
 }
 
 // ---- view_clip --------------------------------------------------------------------------------------------------

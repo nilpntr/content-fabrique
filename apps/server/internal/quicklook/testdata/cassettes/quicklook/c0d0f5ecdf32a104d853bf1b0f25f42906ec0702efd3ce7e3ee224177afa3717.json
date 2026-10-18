@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "quicklook",
-  "key": "f6b3ea1ab6dd9620076a520c791ed39d0c6f5112cc7ce1cc5af461ef0903594d",
-  "recorded_at": "2026-10-17T22:45:56Z",
+  "key": "c0d0f5ecdf32a104d853bf1b0f25f42906ec0702efd3ce7e3ee224177afa3717",
+  "recorded_at": "2026-10-18T05:35:01Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 700,
@@ -77,7 +77,10 @@
               "y": 0.2,
               "w": 0.56,
               "h": 0.7,
-              "head_top_y": 0.22
+              "head_top_y": 0.22,
+              "head_x": 0.44,
+              "head_w": 0.12,
+              "shoulder_y": 0.33
             },
             {
               "frame": 2,
@@ -86,7 +89,10 @@
               "y": 0.24,
               "w": 0.6,
               "h": 0.66,
-              "head_top_y": 0.26
+              "head_top_y": 0.26,
+              "head_x": 0,
+              "head_w": 0,
+              "shoulder_y": 0
             },
             {
               "frame": 3,

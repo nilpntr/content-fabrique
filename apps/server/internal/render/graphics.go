@@ -123,12 +123,27 @@ func (c *compiler) graphics() error {
 		}
 	}
 	var resolved []motion.Resolved
+	var lookup subject.Lookup
+	if len(subjects) > 0 {
+		lookup = subjects.Lookup
+	}
 	for _, it := range items {
-		var obstacles []timeline.Subject
-		if it.AvoidsSubject() && len(subjects) > 0 {
-			obstacles = subject.Regions(c.spec, subjects.Lookup, it.AtMs, it.EndMs())
+		// Never over the person's body, like a text item (P6-06): where there is no room at the item's own time it is shown in the part
+		// of its time that has room, or at the nearest time that has, or it is left out (subject.FitText, the renderer's and the check's).
+		fit, err := subject.FitText(c.spec, lookup, it.AsText(), c.totalMs)
+		if err != nil {
+			return fmt.Errorf("%w: graphics item %s: %w", ErrInvalidSpec, it.ID, err)
 		}
-		r, err := motion.Resolve(c.spec.Output, it, obstacles)
+		switch fit.How {
+		case subject.FitDropped:
+			c.warn("text_over_subject", "graphics item %s is left out: it would cover the subject and there is no room above the head, beside it or below the person at any time of the video", it.ID)
+			continue
+		case subject.FitTrimmed, subject.FitMoved:
+			c.warn("text_retimed", "graphics item %s was %s to %d-%d ms, where it fits clear of the subject (at %d-%d ms it would cover their body)",
+				it.ID, map[string]string{subject.FitTrimmed: "shortened", subject.FitMoved: "moved"}[fit.How], fit.AtMs, fit.AtMs+fit.DurationMs, it.AtMs, it.EndMs())
+			it = retime(it, fit.AtMs, fit.DurationMs, fit.How == subject.FitMoved)
+		}
+		r, err := motion.Resolve(c.spec.Output, it, fit.Regions)
 		if errors.Is(err, motion.ErrNotPlaceable) {
 			c.plan.Warnings = append(c.plan.Warnings, Warning{Code: "text_dropped", Message: fmt.Sprintf("graphics item %s is left out: its box cannot be put inside the %s safe zone", it.ID, c.spec.Output.Format)})
 			continue
@@ -161,6 +176,23 @@ func (c *compiler) graphics() error {
 	}
 	c.plan.Motion = &MotionPlan{Job: job, BundleHash: motion.BundleHash()}
 	return nil
+}
+
+// retime gives an item a new time: a moved item keeps its accents where they were in it (shifted with it), a shortened one keeps the
+// accents its new time still holds.
+func retime(it timeline.GraphicsItem, at, dur int64, moved bool) timeline.GraphicsItem {
+	shift := int64(0)
+	if moved {
+		shift = at - it.AtMs
+	}
+	var acc []int64
+	for _, a := range it.Params.AccentsMs {
+		if a += shift; a >= at && a < at+dur {
+			acc = append(acc, a)
+		}
+	}
+	it.AtMs, it.DurationMs, it.Params.AccentsMs = at, dur, acc
+	return it
 }
 
 // graphicsTimeMap adds the overlays to the time map like text items: [frame(at_ms), frame(end)). (In the fallback they are text items

@@ -47,6 +47,8 @@ type SubjectRead struct {
 	Frame                int
 	Present              bool
 	X, Y, W, H, HeadTopY float64
+	// HeadX, HeadW and ShoulderY are the head alone and the shoulder line (quicklook.v3); 0 when the model did not give them.
+	HeadX, HeadW, ShoulderY float64
 }
 
 // subjectIn is one subject entry of the answer, every member a pointer so that a missing one is told from a zero.
@@ -58,6 +60,10 @@ type subjectIn struct {
 	W        *float64 `json:"w"`
 	H        *float64 `json:"h"`
 	HeadTopY *float64 `json:"head_top_y"`
+	// The head alone and the shoulder line are optional: an answer of quicklook.v2 has none, and a missing one is 0 (not read).
+	HeadX     *float64 `json:"head_x"`
+	HeadW     *float64 `json:"head_w"`
+	ShoulderY *float64 `json:"shoulder_y"`
 }
 
 // MaxSubjects is the most subject entries read: one per frame, with room.
@@ -148,7 +154,14 @@ func Validate(raw json.RawMessage) (Output, error) {
 		if s.Frame == nil || s.Present == nil || s.X == nil || s.Y == nil || s.W == nil || s.H == nil || s.HeadTopY == nil {
 			continue
 		}
-		subjects = append(subjects, SubjectRead{Frame: *s.Frame, Present: *s.Present, X: *s.X, Y: *s.Y, W: *s.W, H: *s.H, HeadTopY: *s.HeadTopY})
+		r := SubjectRead{Frame: *s.Frame, Present: *s.Present, X: *s.X, Y: *s.Y, W: *s.W, H: *s.H, HeadTopY: *s.HeadTopY}
+		if s.HeadX != nil && s.HeadW != nil {
+			r.HeadX, r.HeadW = *s.HeadX, *s.HeadW
+		}
+		if s.ShoulderY != nil {
+			r.ShoulderY = *s.ShoulderY
+		}
+		subjects = append(subjects, r)
 	}
 	return Output{Title: title, Description: desc, Tags: tags, Subjects: subjects}, nil
 }

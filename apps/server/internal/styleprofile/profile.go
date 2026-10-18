@@ -271,6 +271,11 @@ type PacingProfile struct {
 	HasLongTakes  bool    `json:"has_long_takes"`
 	// ShotS is the distribution of every shot length of the references that have a cut (P6-06): what a shot of this creator lasts.
 	ShotS Range `json:"shot_s"`
+	// ShotP90S is the 90th percentile of those shot lengths (how long the creator's longer shots run, a stray long take left out), and
+	// EndingS the length of the last shot of each reference that has a cut (how long the creator holds the ending). 0 and empty in a
+	// profile made before they were measured: the pace targets then fall back to ratios of the median (internal/agents/editor/pace.go).
+	ShotP90S float64 `json:"shot_p90_s,omitempty"`
+	EndingS  Range   `json:"ending_s"`
 }
 
 // CameraProfile is the camera motion of the references (P6-06): Verdict is static or handheld (the majority), ShiftPctPerS the drift of
@@ -341,6 +346,9 @@ type TextProfile struct {
 	CaptionShare float64        `json:"caption_share"`
 	// Examples are up to three titles as read: the creator's own words, untrusted.
 	Examples []string `json:"examples,omitempty"`
+	// Titles are every title read from the references (untrusted). They are never shown to the editor: check_edit compares an edit's
+	// titles with them, so a reference's title is never reused word for word (title_copied).
+	Titles []string `json:"titles,omitempty"`
 }
 
 // Audio arcs.
@@ -436,7 +444,7 @@ func Aggregate(refs []Measures) *Profile {
 		luma, lumaP, sat, vig = append(luma, m.Video.LumaMean), append(lumaP, m.Video.LumaP90), append(sat, m.Video.SatMean), append(vig, m.Video.VignetteRatio)
 	}
 	// The camera (P6-06): the drift of the picture, apart from effects; and every shot length of the references with a cut.
-	var shift, allShots []float64
+	var shift, allShots, endings []float64
 	var verdicts []string
 	handheld := 0.0
 	for _, m := range refs {
@@ -447,8 +455,9 @@ func Aggregate(refs []Measures) *Profile {
 				handheld++
 			}
 		}
-		if len(m.CutsS) > 0 {
+		if len(m.CutsS) > 0 && len(m.ShotsS) > 0 {
 			allShots = append(allShots, m.ShotsS...)
+			endings = append(endings, m.ShotsS[len(m.ShotsS)-1])
 		}
 	}
 	if len(verdicts) > 0 {
@@ -457,7 +466,10 @@ func Aggregate(refs []Measures) *Profile {
 	p.Format = FormatProfile{DurationS: RangeOf(dur), FPS: RangeOf(fps).Median}
 	pace := PacingProfile{
 		CutsPerVideo: RangeOf(cutsPer), CutsPerMinute: RangeOf(cutsMin), ShotMedianS: RangeOf(shotMed), LongestShotS: RangeOf(longest),
-		ShortestShotS: RangeOf(shortest), ZeroCutShare: round2(zeroCuts / float64(n)), ShotS: RangeOf(allShots),
+		ShortestShotS: RangeOf(shortest), ZeroCutShare: round2(zeroCuts / float64(n)), ShotS: RangeOf(allShots), EndingS: RangeOf(endings),
+	}
+	if len(allShots) > 0 {
+		pace.ShotP90S = round2(percentile(sortedCopy(allShots), 0.9))
 	}
 	if allTime > 0 {
 		pace.LongTakeShare = round2(longTime / allTime)
@@ -643,6 +655,7 @@ func aggregateText(refs []Measures) *TextProfile {
 	t.Case, t.Colour, t.Position, t.Alignment, t.Weight = majority(cases), medianColour(colours), majority(positions), majority(aligns), majority(weights)
 	t.Shadow, t.OneLineShare = majority(shadows), round2(oneLine/float64(len(titled)))
 	t.Patterns = patternsOf(titleTexts)
+	t.Titles = titleTexts
 	switch {
 	case oneMax > 0 && twoMin > oneMax:
 		t.OneLineChars = (oneMax + twoMin) / 2 // between the longest title that fitted one line and the shortest that wrapped
@@ -905,7 +918,14 @@ func (p *Profile) CompactBlock() string {
 		b.WriteString("\n")
 	}
 	if p.Pacing.ShotS.Median > 0 {
-		fmt.Fprintf(&b, "shot lengths (every shot of the videos with a cut): %s s\n", p.Pacing.ShotS)
+		fmt.Fprintf(&b, "shot lengths (every shot of the videos with a cut): %s s", p.Pacing.ShotS)
+		if p.Pacing.ShotP90S > 0 {
+			fmt.Fprintf(&b, ", 90th percentile %.1f s", p.Pacing.ShotP90S)
+		}
+		if p.Pacing.EndingS.Median > 0 {
+			fmt.Fprintf(&b, "; the last shot is held %s s", p.Pacing.EndingS)
+		}
+		b.WriteString("\n")
 	}
 	if p.Audio.DropS.Median > 0 {
 		fmt.Fprintf(&b, "drop: the music drops at %s s in %.0f %% of the videos; the hook ends on it\n", p.Audio.DropS, p.Audio.DropShare*100)

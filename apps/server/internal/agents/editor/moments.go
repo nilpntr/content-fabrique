@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"slices"
 	"strings"
 
@@ -120,10 +121,14 @@ func (d Deps) findMoments(ctx context.Context, rc runtime.RunContext, in findMom
 		}
 		b.WriteString(". ")
 	} else {
-		fmt.Fprintf(&b, "%d %s, best first. Times are in the clip's own timeline, in milliseconds: use start_ms and end_ms as a clip's in and out points to cut on the rep boundaries. A rep runs from one turning point of the movement to the same turning point of the next, so cutting there never lands mid-rep. Scores run from 0 to 1; 0.7 and above are clean.\n", len(moments), plural(len(moments), "moment", "moments"))
+		fmt.Fprintf(&b, "%d %s, best first. Times are in the clip's own timeline, in milliseconds: use start_ms and end_ms as a clip's in and out points to cut on the rep boundaries. A rep runs from one turning point of the movement to the same turning point of the next, so cutting there never lands mid-rep; its turn (turn_ms) is the opposite turning point between them, also a clean cut: half a rep runs from the start to the turn or from the turn to the end, and an angle switch between two clips of the same exercise lands there. Scores run from 0 to 1; 0.7 and above are clean.\n", len(moments), plural(len(moments), "moment", "moments"))
 		for i, m := range moments {
-			fmt.Fprintf(&b, "%d. %s | %d to %d ms (%s to %s) | %s | score %.2f | %s\n",
-				i+1, m.AssetID, m.StartMs, m.EndMs, secs(int64(m.StartMs)), secs(int64(m.EndMs)), m.Kind, m.Score, m.Description)
+			turn := ""
+			if t, ok := turnOf(m.Attrs, int64(m.StartMs), int64(m.EndMs)); ok && m.Kind == store.MomentRep {
+				turn = fmt.Sprintf(" | turn_ms %d", t)
+			}
+			fmt.Fprintf(&b, "%d. %s | %d to %d ms (%s to %s)%s | %s | score %.2f | %s\n",
+				i+1, m.AssetID, m.StartMs, m.EndMs, secs(int64(m.StartMs)), secs(int64(m.EndMs)), turn, m.Kind, m.Score, m.Description)
 		}
 	}
 	if clamped {
@@ -134,6 +139,19 @@ func (d Deps) findMoments(ctx context.Context, rc runtime.RunContext, in findMom
 		fmt.Fprintf(&b, "\nNot analysed yet, so not covered here: %s.", strings.Join(waiting, ", "))
 	}
 	return runtime.Text(strings.TrimSpace(b.String())), nil
+}
+
+// turnOf reads a rep's measured turning point (the analysis's peak_ms) from its attributes; false when there is none or it is not inside
+// the rep.
+func turnOf(attrs []byte, start, end int64) (int64, bool) {
+	var a struct {
+		PeakMs *float64 `json:"peak_ms"`
+	}
+	if len(attrs) == 0 || json.Unmarshal(attrs, &a) != nil || a.PeakMs == nil {
+		return 0, false
+	}
+	t := int64(math.Round(*a.PeakMs))
+	return t, t > start && t < end
 }
 
 // momentKinds turns the tool's kind into the moment kinds to search.
