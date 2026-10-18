@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/rand/v2"
 	"time"
 
@@ -300,7 +301,7 @@ func (m *metered) reserveCaps(ctx context.Context, reqp *Request, rsv *reservati
 		tokens, counted = n, true
 		return nil
 	}
-	// marksFor is the strict marks and the budget's: the same, with the claimed prefix as cache reads.
+	// budgetMarks is the marks with the claimed prefix as cache reads: the budget's worst case (the strict one is priced with marks).
 	budgetMarks := func() CacheMarks {
 		bm := marks
 		if marks.Any {
@@ -311,31 +312,46 @@ func (m *metered) reserveCaps(ctx context.Context, reqp *Request, rsv *reservati
 	estimate := func() (strict, budget int64, err error) {
 		maxTokens = asked
 		if rb, ok := req.Run.Budget.(RemainingBudget); ok {
-			full, err := m.prices.EstimateMax(req.Model, tokens, asked, budgetMarks())
+			// Two rooms. The run's budget has what it has left, and the worst case against it counts the claimed cached prefix as reads.
+			// One call may cost no more than LLM_MAX_REQUEST_MICROS, and the worst case against that is the strict one. Fitting to the
+			// budget alone would send a long-input call at a max_tokens whose strict worst case the per-call cap then refuses
+			// (request_cap), which fails a run that a smaller answer could have served: fit to both.
+			roomBudget := max(rb.Remaining(), 0)
+			roomCap := int64(math.MaxInt64)
+			if m.maxRequest > 0 {
+				roomCap = m.maxRequest
+			}
+			over := func() (bool, error) {
+				b, err := m.prices.EstimateMax(req.Model, tokens, asked, budgetMarks())
+				if err != nil {
+					return false, err
+				}
+				st, err := m.prices.EstimateMax(req.Model, tokens, asked, marks)
+				return b > roomBudget || st > roomCap, err
+			}
+			tooBig, err := over()
 			if err != nil {
 				return 0, 0, err
 			}
-			// The room is what the run's budget has left, and no more than one call may cost (LLM_MAX_REQUEST_MICROS): fitting to the
-			// budget alone would send a long-input call at a max_tokens whose worst case the per-call cap then refuses (request_cap),
-			// which fails a run that a smaller answer could have served.
-			room := max(rb.Remaining(), 0)
-			if m.maxRequest > 0 {
-				room = min(room, m.maxRequest)
-			}
-			if full > room && !counted {
+			if tooBig && !counted {
 				// The local bound of the input leans very high; do not give up output room for it. Count the input exactly first.
 				if err := count(); err != nil {
 					return 0, 0, err
 				}
-				if full, err = m.prices.EstimateMax(req.Model, tokens, asked, budgetMarks()); err != nil {
+				if tooBig, err = over(); err != nil {
 					return 0, 0, err
 				}
 			}
-			if full > room {
-				fit, err := m.prices.FitOutputTokens(req.Model, tokens, asked, budgetMarks(), room)
+			if tooBig {
+				fitBudget, err := m.prices.FitOutputTokens(req.Model, tokens, asked, budgetMarks(), roomBudget)
 				if err != nil {
 					return 0, 0, err
 				}
+				fitCap, err := m.prices.FitOutputTokens(req.Model, tokens, asked, marks, roomCap)
+				if err != nil {
+					return 0, 0, err
+				}
+				fit := min(fitBudget, fitCap)
 				if fit = fit - fit%16; fit >= minOut && thinkingFits(req.Thinking, fit) { // whole sixteens: tidier requests, never more than fit
 					maxTokens = fit
 				}
