@@ -246,6 +246,10 @@ test("the cost line shows the credits of a run only when it is given them", () =
   expect(screen.getByText("6 credits")).toBeTruthy();
   rerender(<RunCostLine run={run} credits={{ state: "charged", action: "edit.revision", credits: 2 }} />);
   expect(screen.getByText("2 credits · revision")).toBeTruthy();
+  rerender(<RunCostLine run={run} credits={{ state: "charged", action: "edit.first.max", credits: 16 }} />);
+  expect(screen.getByText("16 credits · extra careful")).toBeTruthy();
+  rerender(<RunCostLine run={run} credits={{ state: "charged", action: "edit.revision.max", credits: 7 }} />);
+  expect(screen.getByText("7 credits · revision · extra careful")).toBeTruthy();
   rerender(<RunCostLine run={run} credits={{ state: "held", action: "edit.first", credits: 6 }} />);
   expect(screen.getByText("Holding 6 credits…")).toBeTruthy();
   rerender(<RunCostLine run={run} credits={{ state: "refunded", action: "edit.first", credits: 6 }} />);

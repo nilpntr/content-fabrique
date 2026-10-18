@@ -65,49 +65,50 @@ Credits are the customer's currency. The UI shows them as **videos**: a video is
 - Allowance is used first, then top-ups, oldest expiry first.
 - BYOK workspaces use the same price list. Their credits pay the platform fee, while tokens go to their own key.
 
-## 3a. Update 2026-10c: the editor thinks at max effort (D-31, pending founder confirmation)
+## 3a. Update 2026-10c: the extra careful edit, opt-in per edit (D-31, pending founder confirmation)
 
-> **Pending founder confirmation.** The numbers below are the engineering answer to "Opus 5.5 at max effort, $2 for an edit is not a problem and maybe needed". Sections 3 and 4 above describe the original list (`2026-10.yaml`, kept as it was); where they differ, this section is the list that prices new charges. `2026-10c.yaml` is not deployed yet, so it may still be edited until the numbers are confirmed; after that a change is a new file.
+> **Pending founder confirmation.** The numbers below are the engineering answer to "Opus 5.5 at max effort is needed for the best results; $2 for an edit is not a problem and maybe needed", and to the founder's decision that max effort is **not** for everyone: it is an option chosen per edit. Sections 3 and 4 above describe the original list (`2026-10.yaml`, kept as it was). `2026-10c.yaml` is that list plus the extra careful actions; it is not deployed yet, so it may still be edited until the numbers are confirmed, and after that a change is a new file.
 
-**Measured first.** A live max-effort edit cost **$1.01**, its largest call wrote **13,203 output tokens**, and it took 4 minutes. The sizes below follow from that.
+**Two qualities, chosen per edit** (`quality: standard | max` on the start-edit request, for a first edit or a revision; the default is `standard`):
+- **standard** is exactly what it was: the `editor` and `revision` routing entries (effort medium, 24,000 and 12,000 tokens), `edit.first` 6 credits and `edit.revision` 2 credits, the run budgets of 2026-10 ($0.96 and $0.32 on creator). Nobody's videos per month change: the plan prices, allowances and standard budgets are those of 2026-10, and a test (`TestStandardIsUnchangedFromTheOriginalList`) pins it.
+- **max**, "extra careful", thinks longer about every cut: the `editor_max` and `revision_max` entries (Opus 5.5 at effort `max`, 32,000 and 16,000 tokens), a run budget of **$2.00** for a first edit and **$0.80** for a revision, priced as their own actions `edit.first.max` and `edit.revision.max` in the price list. A live max-effort edit cost $1.01 and its largest call wrote 13,203 output tokens, so 32,000 tokens is more than twice the largest call seen. The profit invariant holds for them like for any action and `max_cogs_share` stays 0.40.
+- **Who may use it.** Each plan says `quality_max: true|false` (a list that prices the max actions makes every plan say). The trial cannot: `402 quality_not_in_plan`, nothing is created or held. Studio (BYOK) may, on the creator's own key (run cap $2.00). Managed plans may.
 
-**What changed.**
-- **Routing** (`config/routing/v1-start.yaml`): the `editor` and `revision` entries run `claude-opus-5-5` at effort `max` (they were `medium`). `max_tokens` went from 24,000 to **32,000** (editor, more than twice the largest call seen) and from 12,000 to **16,000** (revision). There is no `escalate` entry any more: nothing is above `max`, and `routing.Entry` refuses an `escalate` whose effort is not above the stage's own. `dev-cheap` and `dev-mid` stay at effort `medium` and 24,000 tokens (they exist for cheap smoke tests; their limits are not production's).
-- **Run budgets** (`config/plans/2026-10c.yaml`, a new file; `2026-10.yaml` is untouched because ledger rows name the version that priced them): a first edit gets a hard run budget of **$2.00** (was $0.96 on creator), a revision **$0.80** (was $0.32), on every managed plan. A real edit costs about half of the first budget; the budget is the backstop. A call's worst case is `max_tokens` at the output price ($0.64 for 32,000 tokens on Opus 5.5), reserved before it is sent and settled at its real cost, so budget fitting (section 5) shortens late calls instead of refusing early ones.
-- **The per-call cap is part of the fit.** The metered client refuses a call whose worst case is over `LLM_MAX_REQUEST_MICROS` ($2 by default). Fitting `max_tokens` to the run's budget alone sent a long-input call (say 200,000 input tokens: $0.80 before any output) at a size whose worst case the cap then refused (`request_cap`), failing a run that a smaller answer could have served, and an unbilled one. `max_tokens` is now fitted to the lesser of the run's budget left and the cap (`TestLongInputCallIsFittedToThePerRequestCap`).
-- **Not loosened:** plan prices, the merchant fee, the exchange rate and `max_cogs_share` (0.40) are those of 2026-10, and so are the creator and pro allowances. The profit invariant holds for every plan (`TestEveryPriceListFileHoldsTheProfitInvariant`), and `TestMaxEffortBudgetsFitTheInvariantWithTheFewestCredits` checks that nothing above moved and that one credit less on an edit would break the invariant for some plan.
-- **Editor wall clock 15 -> 30 minutes** (`runtime.MaxWallClock`).
-- **The low-budget prompts** judge the run by what it has spent per call, not by a call's worst case (see "The editor is told", section 5).
-
-**Credits per action went up, not the budgets' share.** An action's credits are one number for all plans, so they must cover the plan that earns least per credit of its allowance (pro: 400 credits for 129 euro, $0.3296 net per credit, so 40 % is $0.1318): $2.00 / $0.1318 = 15.2 credits and $0.80 / $0.1318 = 6.1 credits.
+**Credits of the max actions.** An action's credits are one number for all plans, so they must cover the plan that earns least per credit of its allowance (pro: 400 credits for 129 euro, $0.3296 net per credit, so 40 % is $0.1318): $2.00 / $0.1318 = 15.2 credits, $0.80 / $0.1318 = 6.1 credits.
 
 | Action | 2026-10 | 2026-10c |
 |---|---|---|
-| `edit.first` | 6 | **16** |
-| `edit.revision` | 2 | **7** |
-| `export.final` | 0 | 0 |
-| `ideation.run` | 1 | 1 |
-| **1 video** (first edit + 2 revisions) | 10 credits | **30 credits** |
+| `edit.first` | 6 | 6 |
+| `edit.revision` | 2 | 2 |
+| `edit.first.max` | (none) | **16** (2.7 times a standard first edit) |
+| `edit.revision.max` | (none) | **7** (3.5 times a standard revision) |
+| `export.final`, `ideation.run` | 0, 1 | 0, 1 |
+| a video (first edit + 2 revisions) | 10 credits | 10 standard, 30 extra careful |
 
-A video's cost in credits is **derived** from the list (`credits.PriceList.CreditsPerVideo`: first edit plus two revisions), never written down elsewhere. The API exposes it as `credits.credits_per_video` in `GET /v1/me` (the web app divides credits by it) and the videos a plan pays for per period as `limits.exports` in `GET /v1/workspace/plan` (`PriceList.VideosPerPeriod`, whole videos); `cfctl credits show` uses it for "N videos". The paywall cards state no video counts (they cannot ask the API before there is a plan).
+`TestMaxEditsFitTheInvariantWithTheFewestCredits` checks that one credit less on a max action would break the invariant for some plan. The multiple is not a promise in the UI: the app shows the exact credits ("Uses 16 credits instead of 6"), from the API.
 
-**Plans** (allowance in credits; videos = allowance / 30, whole videos in the API):
+| Plan | Allowance | Videos per period, standard | Extra careful first edit + 2 revisions | Max run budget first / revision | Max edits |
+|---|---|---|---|---|---|
+| `trial` | 20 once | 2 | not available | (0) | `quality_not_in_plan` |
+| `studio` (BYOK) | 600 | 60 | 30 credits, so 20 | $2.00 / $2.00 on their key | yes; our non-LLM budgets are unchanged ($0.100 / $0.033) |
+| `creator` | 150 | 15 | 30 credits, so 5 | $2.00 / $0.80 | yes |
+| `pro` | 400 | 40 | 30 credits, so 13 | $2.00 / $0.80 | yes |
 
-| Plan | Allowance (2026-10 -> 2026-10c) | Videos per period (was -> now) | Run budget first edit / revision | Note |
-|---|---|---|---|---|
-| `trial` | 20 -> **30** once | 2 -> **1** | $2.00 / $0.80 | The same per-edit budgets as a paying plan (the first impression should be the best result). Its fixed COGS allowance goes from $2.50 to **$3.75** (30 credits x $0.125): the one place this change costs us more per customer. Worst case is $3.75 per trial for one video instead of $2.50 for two. |
-| `studio` (BYOK) | 600 -> **1800** | 60 -> 60 | $2.00 / $2.00 on the creator's own key | The allowance scales with the credits per video so that studio keeps its 60 videos; our cost is only the non-LLM budgets, which are $0.089 for a first edit (was $0.100), $0.033 for a revision (same) and $0.005 for an idea run (was $0.016: 1 credit earns a third as much on an 1800-credit allowance; an idea run has no compute of its own). |
-| `creator` | 150 (unchanged) | 15 -> **5** | $2.00 / $0.80 | The invariant would allow up to 192 credits (6.4 videos) at these budgets; the allowance was not raised. |
-| `pro` | 400 (unchanged) | 40 -> **13** (13.3) | $2.00 / $0.80 | The plan that sets the credit prices: 16 credits allow $2.11, 7 credits $0.92. |
+Credits that a creator spends on an extra careful edit come out of the same allowance as the rest: a creator who makes every edit extra careful gets a third of the videos. Nothing else changes for anybody.
 
-**Why videos per month fall so far.** The invariant is about the worst case. A video can now cost up to $3.60 (three runs at their hard budgets) against $1.60 before, and the plan's net revenue pays for 40 % of itself: creator earns about $60 net a month, so $24 of COGS, so at most 6.7 worst-case videos. The real cost of a video is much lower than its budgets, so most creators will not use them. If the beta shows that, the lever is lower budgets for revisions or more allowance, both a new list version, not an edit.
+**How the price reaches the screen.** `GET /v1/me` has `credits.credits_per_video` (derived from the list: a standard first edit plus two revisions) and `credits.edit_costs {standard {first_edit, revision}, max {first_edit, revision} | null}` (`max` is null when the workspace's plan does not include it). The web app shows an "Extra careful" option (off by default) on New video and on "Make the changes" with the line "Thinks longer about every cut. Uses 16 credits instead of 6.", only when `max` is not null; it carries no number. `limits.exports` of `GET /v1/workspace/plan` is the standard videos a period (`PriceList.VideosPerPeriod`). The run's credits (`credits.action`) say `edit.first.max` / `edit.revision.max` for an extra careful edit.
 
-**Existing workspaces when the list switches.** A trial's allowance is granted once (its key is `allowance:<ws>:trial:once`), so a trial that got 20 credits under 2026-10 would never get the new list's 30; a studio workspace would keep 600 credits until its next period. When the list changes, the periodic job (`credits_periods`) therefore adds the difference once, as a positive adjustment (`store.TopUpAllowanceToList`):
-- It applies to any plan whose current allowance (granted under an older list) is smaller than the allowance the new list gives that plan: today the trial (+10, expiring after 12 months, the list's top-up expiry) and studio (+1200, expiring with the period). Creator and pro are not touched: their allowance did not change.
-- The ledger row has the actor `system:price-list-switch`, a reason that says which list and how many credits were missing, the new list's version, and the key `listswitch:<allowance row id>:<list version>`, so a second pass, a second worker or a restart adds nothing. What an earlier switch added counts as part of the allowance, so a later list adds only what is still missing. A list that makes an allowance smaller takes nothing away.
-- **Balances and top-ups that creators already hold keep their credits** (nothing is converted or expired), but a credit now buys fewer videos: 10 credits was a video and 30 is. For creator and pro the next refill brings the same 150 / 400 credits as before, so they get fewer videos per month from then on. That is the price of the max-effort budgets under an unchanged price, and it is the founder's decision to confirm. No paying customer holds credits yet (checkout, P7-01c, is not built; plans are granted by hand), so nothing is lost today. If one did, the options are an adjustment at the switch to keep the videos (not done, because it would break the profit rule the list exists for) or a refund at the old rate.
+**What the hold and the charge use.** `credits.QuoteEdit` decides first edit or revision from the project, then the action from the quality: the hold, the run's budget and the ledger row (action, credits, list version) are those of that action. A project whose first edit was extra careful and charged counts as having a charged edit (its next edit is a revision, at either quality). The credit tables' action checks were widened by migration 00023.
 
-**Other limits to watch.** `DAILY_SPEND_CAP_MICROS` (default $20 per workspace per UTC day) now covers about ten worst-case first edits. The cap on runs that end without a charge (5 per day) allows up to $10 of unbilled model spend per workspace per day in the worst case (it was $4.80); a trial workspace is the one to watch. A 32,000-token call is not streamed (the client uses a long timeout).
+**General fixes that came with this work.**
+- **A call's `max_tokens` is fitted to the run's budget and to the per-call cap.** The metered client refuses a call whose worst case is over `LLM_MAX_REQUEST_MICROS` ($2 by default). Fitting only to the run's budget sent a long-input call at a size that the cap then refused (`request_cap`), failing a run that a smaller answer could have served. It now fits to both (`TestLongInputCallIsFittedToThePerRequestCap`).
+- **The prompt cache is priced in the run's reservation** (section 5, "Budget-fitted calls": the cache-aware reservation).
+- **`routing.Entry` refuses an `escalate` whose effort is not above the stage's own** (nothing is above `max`, and the `_max` entries have none).
+- **The low-budget prompts of the editor judge the run by what its recent calls cost** (section 5).
+
+**Existing workspaces when a list gives a plan a larger allowance.** A trial's allowance is granted once (its key is `allowance:<ws>:trial:once`), so a trial that got its credits under an older list would never get a larger allowance of a newer one. When a list does that, the periodic job (`credits_periods`) adds the difference once, as a positive adjustment (`store.TopUpAllowanceToList`): for any plan whose current allowance (granted under an older list) is smaller than the allowance the new list gives that plan. The row has the actor `system:price-list-switch`, a reason, the new list's version and the key `listswitch:<allowance row id>:<list version>`, so a second pass, a second worker or a restart adds nothing; what an earlier switch added counts as part of the allowance, and a list that makes an allowance smaller takes nothing away. The switch to 2026-10c changes no allowance, so it adds nothing (`TestCreditsPeriodsJobAddsNothingForTheRealSwitch`). Balances and top-ups that creators already hold keep their credits, and a credit buys the same standard video as before.
+
+**Other limits to watch.** `DAILY_SPEND_CAP_MICROS` (default $20 per workspace per UTC day) covers about ten worst-case extra careful first edits. The cap on runs that end without a charge (5 per day) allows up to $10 of unbilled model spend per workspace per day in the worst case if every one of them is extra careful. A 32,000-token call is not streamed (the client uses a long timeout).
 
 ## 4. Profit invariant: COGS budgets are derived from price
 

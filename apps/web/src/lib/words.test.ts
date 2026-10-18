@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
 import { greeting, projectStatusWords, videosIn, videosLeftText, videosShort, versionName } from "./words";
 
-const credits = (available: number, over: Partial<{ allowance: number; period_end: string | null; credits_per_video: number }> = {}) => ({ credits_per_video: 30, available, allowance: 150, period_end: "2099-11-14T00:00:00Z", low: false, top_ups: [], ...over });
+const EDIT_COSTS = { standard: { first_edit: 6, revision: 2 }, max: { first_edit: 16, revision: 7 } };
+const credits = (available: number, over: Partial<{ allowance: number; period_end: string | null; credits_per_video: number }> = {}) => ({ credits_per_video: 30, edit_costs: EDIT_COSTS, available, allowance: 150, period_end: "2099-11-14T00:00:00Z", low: false, top_ups: [], ...over });
 
 test("credits are shown as videos, by the price list's credits per video", () => {
   expect(videosIn(0, 30)).toBe(0);

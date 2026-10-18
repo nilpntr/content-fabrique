@@ -30,6 +30,7 @@ export function startEditMessage(error: unknown): string {
   if (code(error) === "assets_not_usable") return "None of this video's clips can be used any more. Check that they're still in your library.";
   if (code(error) === "credits_exhausted") return "You've used up your videos for now. See your plan in Settings.";
   if (code(error) === "byok_key_required") return "Your plan uses your own AI key, and none is set up yet. Add it in Settings.";
+  if (code(error) === "quality_not_in_plan") return "Extra careful edits aren't part of your plan. Turn it off and try again, or see your plan in Settings.";
   if (code(error) === "too_many_uncharged_runs") return "You've started and stopped a lot of edits today. Try again tomorrow.";
   if (status(error) === 402) return "You need an active plan to edit videos. Choose one in Settings.";
   if (status(error) === 403) return "Your role in this workspace can't edit videos. Ask the owner to change it.";
