@@ -210,9 +210,12 @@ paths:
         Cursor pagination. Deleted assets are not listed. A `ready` asset carries its `media` facts and short-lived
         `derivatives` URLs, as in `getAsset`.
         With `q` only the assets that match the search are listed (still newest first, same cursor): every word of `q`
-        must occur, as the start of a word, in the asset's title, description, tags or file name, with English stemming
-        (`row` finds "Barbell rows"). Characters other than letters and digits only separate words; a `q` without any
-        word lists everything.
+        must occur, as the start of a word, in the asset's title, exercise, labels (`facets`), description or file name, with
+        English stemming (`row` finds "Barbell rows", `lifting` finds the clips labelled Lifting). Characters other than letters
+        and digits only separate words; a `q` without any word lists everything.
+        `body`, `type`, `angle`, `movement` and `equipment` keep only the clips labelled with that value of the facet (all of
+        them, when several are given). A value the vocabulary does not have is `400 invalid_request`; `listAssetFacets` lists
+        the values the workspace's clips have, with counts.
         Only the assets of one `purpose` are listed: the footage by default, the style references with `purpose=style_reference`.
       parameters:
         - name: purpose
@@ -228,6 +231,11 @@ paths:
           schema:
             type: string
             maxLength: 100
+        - $ref: "#/components/parameters/FacetBody"
+        - $ref: "#/components/parameters/FacetType"
+        - $ref: "#/components/parameters/FacetAngle"
+        - $ref: "#/components/parameters/FacetMovement"
+        - $ref: "#/components/parameters/FacetEquipment"
         - name: limit
           in: query
           required: false
@@ -251,6 +259,57 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ListAssetsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/assets/facets:
+    get:
+      operationId: listAssetFacets
+      tags: [assets]
+      summary: The labels of the workspace's clips, with counts
+      description: |
+        The values of the label facets (the type of clip, the body part, the movement, the angle, the equipment) that the
+        workspace's clips have, each with how many clips have it: what the library's filters offer. Only values that at least
+        one clip has are listed, in the vocabulary's order, and a facet without any is left out.
+        The counts follow the same `q` and facet filters as `listAssets`, except that each facet's own filter is left out of its
+        counts (with `body=back`, the `body` counts still list every body part, and the `angle` counts are of the back clips).
+        At most the newest 20,000 labelled clips are counted.
+      parameters:
+        - name: purpose
+          in: query
+          required: false
+          description: Which assets to count (default `footage`, the library).
+          schema:
+            $ref: "#/components/schemas/AssetPurpose"
+        - name: q
+          in: query
+          required: false
+          description: Search words, as in `listAssets`.
+          schema:
+            type: string
+            maxLength: 100
+        - $ref: "#/components/parameters/FacetBody"
+        - $ref: "#/components/parameters/FacetType"
+        - $ref: "#/components/parameters/FacetAngle"
+        - $ref: "#/components/parameters/FacetMovement"
+        - $ref: "#/components/parameters/FacetEquipment"
+      responses:
+        "200":
+          description: The facets and their values.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListAssetFacetsResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1795,6 +1854,46 @@ components:
       schema:
         $ref: "#/components/schemas/RunId"
 
+    FacetBody:
+      name: body
+      in: query
+      required: false
+      description: Only the clips labelled with this body part (a value id of the `body` facet, such as `back`).
+      schema:
+        $ref: "#/components/schemas/FacetValueId"
+
+    FacetType:
+      name: type
+      in: query
+      required: false
+      description: Only the clips of this type (a value id of the `type` facet, such as `lift` or `slow_motion`).
+      schema:
+        $ref: "#/components/schemas/FacetValueId"
+
+    FacetAngle:
+      name: angle
+      in: query
+      required: false
+      description: Only the clips filmed from this angle (a value id of the `angle` facet, such as `side`).
+      schema:
+        $ref: "#/components/schemas/FacetValueId"
+
+    FacetMovement:
+      name: movement
+      in: query
+      required: false
+      description: Only the clips of this movement (a value id of the `movement` facet, such as `row`).
+      schema:
+        $ref: "#/components/schemas/FacetValueId"
+
+    FacetEquipment:
+      name: equipment
+      in: query
+      required: false
+      description: Only the clips with this equipment (a value id of the `equipment` facet, such as `cable`).
+      schema:
+        $ref: "#/components/schemas/FacetValueId"
+
   responses:
     Unauthenticated:
       description: |
@@ -2219,8 +2318,8 @@ components:
     QuickLookStatus:
       type: string
       description: |
-        `pending` (the clip is ready and its quick look has not finished), `succeeded` (title, description and tags were
-        written), `failed` (the clip is usable but has no description or tags; the title is still the file name) or
+        `pending` (the clip is ready and its quick look has not finished), `succeeded` (title, description, exercise and labels were
+        written), `failed` (the clip is usable but has no description or labels; the title is still the file name) or
         `skipped` (nothing is owed: the asset failed its ingest, or the job could not run for a day).
       enum: [pending, succeeded, failed, skipped]
 
@@ -2236,7 +2335,7 @@ components:
 
     Asset:
       type: object
-      required: [id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, failure_reason, ingest_progress, ingest_stage, transcript_status, created_at, updated_at]
+      required: [id, kind, status, filename, content_type, size_bytes, sha256, title, description, exercise, facets, failure_reason, ingest_progress, ingest_stage, transcript_status, created_at, updated_at]
       properties:
         id:
           $ref: "#/components/schemas/AssetId"
@@ -2267,14 +2366,19 @@ components:
         description:
           type: string
           description: A one-line description written by the quick look (at most 160 characters). Empty until then.
-        tags:
+        exercise:
+          type: string
+          maxLength: 80
+          description: The exercise (or pose) the clip shows, as a coach names it ("seated cable row"), written by the quick look. Empty when it shows none, the quick look was not sure, or has not run.
+        facets:
           type: array
+          maxItems: 16
           items:
-            type: string
-          description: At most 8 lowercase tags of one to three words, written by the quick look. Empty until then.
+            $ref: "#/components/schemas/AssetFacet"
+          description: The clip's labels from the fixed vocabulary (the type of clip, the body part, the movement, the angle, the equipment), in the vocabulary's order. Written by the quick look; slow motion comes from the file's frame rate. Empty until then.
         quick_look_status:
           $ref: "#/components/schemas/QuickLookStatus"
-          description: The state of the quick look (the title, description and tags a video gets right after its ingest). Absent for an asset it does not apply to (audio, images, and videos from before it existed).
+          description: The state of the quick look (the title, description, exercise and labels a video gets right after its ingest). Absent for an asset it does not apply to (audio, images, and videos from before it existed).
         failure_reason:
           type: [string, "null"]
           description: |
@@ -2725,6 +2829,64 @@ components:
         next_cursor:
           type: [string, "null"]
           description: Pass it as `cursor` for the next page. Null on the last page.
+
+    FacetId:
+      type: string
+      description: A facet of the clip labels (`type`, `body`, `movement`, `angle`, `equipment`).
+      pattern: "^[a-z][a-z_]{0,23}$"
+
+    FacetValueId:
+      type: string
+      description: A value of a facet (`back`, `side`, `slow_motion`). The vocabulary is versioned on the server; `listAssetFacets` lists the values in use.
+      pattern: "^[a-z][a-z_]{0,23}$"
+
+    AssetFacet:
+      type: object
+      required: [facet, value, label]
+      properties:
+        facet:
+          $ref: "#/components/schemas/FacetId"
+        value:
+          $ref: "#/components/schemas/FacetValueId"
+        label:
+          type: string
+          description: The value in the creator's words ("Back view").
+
+    FacetCount:
+      type: object
+      required: [value, label, count]
+      properties:
+        value:
+          $ref: "#/components/schemas/FacetValueId"
+        label:
+          type: string
+        count:
+          type: integer
+          minimum: 1
+          description: How many clips have the value.
+
+    FacetSummary:
+      type: object
+      required: [facet, label, values]
+      properties:
+        facet:
+          $ref: "#/components/schemas/FacetId"
+        label:
+          type: string
+          description: The facet in the creator's words ("Body part").
+        values:
+          type: array
+          items:
+            $ref: "#/components/schemas/FacetCount"
+
+    ListAssetFacetsResponse:
+      type: object
+      required: [facets]
+      properties:
+        facets:
+          type: array
+          items:
+            $ref: "#/components/schemas/FacetSummary"
 
     # ── Projects and timelines ──────────────────────────────────────────────────
 

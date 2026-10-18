@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
+	"github.com/nilpntr/content-fabrique/internal/taxonomy"
 	"github.com/nilpntr/content-fabrique/internal/textclean"
 )
 
@@ -18,15 +19,21 @@ import (
 // untrusted input however strict the schema was: it is parsed strictly, cleaned as model text (package textclean) and held to
 // the limits. The rules differ in what a fault costs:
 //
-//   - a title or description that is empty, too long or not the right shape rejects the whole answer;
+//   - a title or description that is empty, too long, not the right shape or placeholder text ("placeholder", "n/a") rejects the
+//     whole answer: such a title is never stored;
 //   - anything that looks like a link, an address, an @handle or words aimed at a reader rejects the whole answer, wherever it
 //     is, because it means the model repeated something from the footage that was meant for someone else;
-//   - a single tag that does not fit the tag format is dropped and the rest are kept.
+//   - a label outside the vocabulary is mapped through the synonym map onto its facet, or dropped; "unsure" is dropped; an exercise
+//     name that does not fit (too long, placeholder text) is dropped. The rest of the answer is kept.
 //
-// A rejected answer leaves the asset's title, description and tags alone and marks the quick look failed.
+// A rejected answer leaves the asset's title, description and labels alone and marks the quick look failed.
 
 // ErrInvalidOutput is wrapped by every rejection of Validate.
 var ErrInvalidOutput = errors.New("quicklook: the model's answer is not acceptable")
+
+// ErrPlaceholder is wrapped (with ErrInvalidOutput) by the rejection of an answer whose title or description is placeholder text: the
+// model filled the fields without describing the frames. The service asks once more before it gives up.
+var ErrPlaceholder = errors.New("quicklook: the answer is placeholder text")
 
 func reject(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrInvalidOutput, fmt.Sprintf(format, args...))
@@ -36,7 +43,10 @@ func reject(format string, args ...any) error {
 type Output struct {
 	Title       string
 	Description string
-	Tags        []string
+	// Exercise is the exercise's or pose's name, lowercase; "" when the model gave none (or one that did not fit).
+	Exercise string
+	// Facets are the labels, in the vocabulary (the exercise name has filled the facets the model left unsure).
+	Facets taxonomy.Set
 	// Subjects are the subject boxes the model gave, by frame number (1 based), as read: bounded numbers, not yet checked against the
 	// clip (package subject cleans them).
 	Subjects []SubjectRead
@@ -86,67 +96,148 @@ var suspicious = regexp.MustCompile(`(?i)(` +
 // scripts are not folded; the checks look at what the text says to a person typing it, not at every possible disguise.
 func foldForChecks(s string) string { return strings.ToLower(norm.NFKC.String(s)) }
 
-// tagWord is one word of a tag: letters and digits, optionally joined by hyphens, apostrophes or "&".
-var tagWord = regexp.MustCompile(`^[\p{L}\p{N}]+(?:['&-][\p{L}\p{N}]+)*$`)
-
-// Validate parses the arguments of the describe_clip call and returns the cleaned answer, or an error that wraps
-// ErrInvalidOutput. The rules:
+// Validate parses the arguments of the describe_clip call against the vocabulary and returns the cleaned answer, or an error that
+// wraps ErrInvalidOutput. The rules:
 //
-//   - the JSON is an object with exactly title, description and tags (no unknown field, no trailing data);
-//   - title and description are cleaned (textclean.Model) and must be non-empty and within 60 and 160 characters; they are
-//     rejected, not cut, when they are too long;
-//   - tags are lower-cased and cleaned; a tag that is empty, longer than 32 characters, more than three words, or has any
-//     character other than letters, digits and "-", "'" or "&" inside a word is dropped; duplicates are dropped; at most 8 are
-//     kept (the first 8 that fit); an empty list is allowed;
+//   - the JSON is an object with title, description, exercise, a member per facet of the vocabulary and subjects (no unknown member,
+//     no trailing data); a facet that is missing counts as unsure;
+//   - title and description are cleaned (textclean.Model) and must be non-empty, within 60 and 160 characters, and not placeholder
+//     text (ErrPlaceholder); they are rejected, not cut;
+//   - a facet's values are kept when the vocabulary has them; any other word is mapped through the synonym map onto that facet, or
+//     dropped; "unsure" is dropped; at most the facet's max are kept; a value the file sets (slow motion) is never taken from the model;
+//   - the exercise is cleaned and lower-cased; at most 40 characters of words, else it is dropped; what it names fills the facets the
+//     model left empty ("seated cable row": a row, with a cable);
 //   - nothing contains a link, an e-mail address, an @handle or words that address a reader (see suspicious), after folding
 //     compatibility forms: that rejects the whole answer.
-func Validate(raw json.RawMessage) (Output, error) {
-	var in struct {
-		Title       *string      `json:"title"`
-		Description *string      `json:"description"`
-		Tags        *[]string    `json:"tags"`
-		Subjects    *[]subjectIn `json:"subjects"`
-	}
+func Validate(raw json.RawMessage, tax *taxonomy.Taxonomy) (Output, error) {
+	var members map[string]json.RawMessage
 	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&in); err != nil {
+	if err := dec.Decode(&members); err != nil || members == nil {
 		return Output{}, reject("not the expected JSON object: %v", err)
 	}
 	if dec.More() {
 		return Output{}, reject("data after the JSON object")
 	}
-	if in.Title == nil || in.Description == nil || in.Tags == nil {
-		return Output{}, reject("title, description and tags are all required")
+	for k := range members {
+		if _, facet := tax.Facet(k); !facet && k != "title" && k != "description" && k != "exercise" && k != "subjects" {
+			return Output{}, reject("unknown member %q", k)
+		}
 	}
-
-	title, err := cleanLine("title", *in.Title, MaxTitleChars)
+	str := func(k string) (*string, error) {
+		v, ok := members[k]
+		if !ok || string(v) == "null" {
+			return nil, nil
+		}
+		var s string
+		if err := json.Unmarshal(v, &s); err != nil {
+			return nil, reject("%s is not a string", k)
+		}
+		return &s, nil
+	}
+	titleIn, err := str("title")
 	if err != nil {
 		return Output{}, err
 	}
-	desc, err := cleanLine("description", *in.Description, MaxDescriptionChars)
+	descIn, err := str("description")
 	if err != nil {
 		return Output{}, err
 	}
-	seen := map[string]bool{}
-	tags := make([]string, 0, MaxTags)
-	for _, t := range *in.Tags {
-		tag, ok, err := cleanTag(t)
-		if err != nil {
+	if titleIn == nil || descIn == nil {
+		return Output{}, reject("title and description are both required")
+	}
+	exIn, err := str("exercise")
+	if err != nil {
+		return Output{}, err
+	}
+	// The checks that reject the whole answer for what it says run first, so a link anywhere is reported as a link.
+	title, terr := cleanLine("title", *titleIn, MaxTitleChars)
+	desc, derr := cleanLine("description", *descIn, MaxDescriptionChars)
+	for _, e := range []error{terr, derr} {
+		if e != nil && !errors.Is(e, ErrPlaceholder) {
+			return Output{}, e
+		}
+	}
+	exercise := ""
+	if exIn != nil {
+		if exercise, err = cleanExercise(*exIn); err != nil {
 			return Output{}, err
 		}
-		if !ok || seen[tag] || len(tags) == MaxTags {
+	}
+
+	var given []taxonomy.Ref
+	for _, fc := range tax.Facets {
+		v, ok := members[fc.ID]
+		if !ok || string(v) == "null" {
 			continue
 		}
-		seen[tag] = true
-		tags = append(tags, tag)
+		var list []string
+		if err := json.Unmarshal(v, &list); err != nil {
+			var one string
+			if err := json.Unmarshal(v, &one); err != nil {
+				return Output{}, reject("%s is not a value or a list of values", fc.ID)
+			}
+			list = []string{one}
+		}
+		for _, word := range list[:min(len(list), 8)] {
+			if suspicious.MatchString(foldForChecks(word)) {
+				return Output{}, reject("a label holds a link, an address, a handle or an instruction")
+			}
+			given = append(given, facetValues(tax, fc, word)...)
+		}
 	}
-	// The subject boxes are numbers: an entry that is not complete or not a plain number is left out (the labels are still good), never
-	// repaired. package subject holds the bounds a box must meet.
-	var subjects []SubjectRead
+	subjects, err := readSubjects(members["subjects"])
+	if err != nil {
+		return Output{}, err
+	}
+	if terr != nil {
+		return Output{}, terr
+	}
+	if derr != nil {
+		return Output{}, derr
+	}
+	var hints []string
+	if exercise != "" {
+		hints = append(hints, exercise)
+	}
+	return Output{Title: title, Description: desc, Exercise: exercise, Facets: tax.Build(given, hints...), Subjects: subjects}, nil
+}
+
+// facetValues reads one label the model gave for a facet: the value itself when the vocabulary has it (and the model may set it), else
+// what the synonym map makes of the word within that facet; nothing for "unsure" or a word that maps to nothing there.
+func facetValues(tax *taxonomy.Taxonomy, fc taxonomy.Facet, word string) []taxonomy.Ref {
+	w := strings.TrimSpace(strings.ToLower(word))
+	if w == "" || w == taxonomy.Unsure {
+		return nil
+	}
+	r := taxonomy.Ref{Facet: fc.ID, Value: w}
+	if tax.Known(r) {
+		if tax.FromProbe(r) {
+			return nil
+		}
+		return []taxonomy.Ref{r}
+	}
+	var out []taxonomy.Ref
+	for _, m := range tax.Phrases(word) {
+		if m.Facet == fc.ID {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// readSubjects reads the subject boxes. The boxes are numbers: an entry that is not complete or not a plain number is left out (the
+// labels are still good), never repaired. package subject holds the bounds a box must meet.
+func readSubjects(raw json.RawMessage) ([]SubjectRead, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
 	var entries []subjectIn
-	if in.Subjects != nil {
-		entries = *in.Subjects
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&entries); err != nil {
+		return nil, reject("subjects is not a list of boxes: %v", err)
 	}
+	var subjects []SubjectRead
 	for _, s := range entries {
 		if len(subjects) == MaxSubjects {
 			break
@@ -163,7 +254,48 @@ func Validate(raw json.RawMessage) (Output, error) {
 		}
 		subjects = append(subjects, r)
 	}
-	return Output{Title: title, Description: desc, Tags: tags, Subjects: subjects}, nil
+	return subjects, nil
+}
+
+// placeholders are what a model writes when it fills a field instead of describing the frames (as taxonomy.Normalize folds them).
+var placeholders = map[string]bool{
+	"placeholder": true, "placeholder text": true, "placeholder title": true, "placeholder description": true, "n a": true, "na": true,
+	"none": true, "null": true, "nil": true, "undefined": true, "unknown": true, "untitled": true, "no title": true, "title": true,
+	"description": true, "clip": true, "video": true, "video clip": true, "tbd": true, "todo": true, "example": true, "sample": true,
+	"string": true, "test": true, "text": true, "lorem ipsum": true, "xxx": true, "unsure": true, "not sure": true, "exercise": true,
+	"describe this clip": true, "your title here": true, "title here": true,
+}
+
+// IsPlaceholder says whether a text is placeholder words and not a description: empty, one of the placeholders as a whole, or a text
+// that says "placeholder" or "lorem ipsum" anywhere.
+func IsPlaceholder(s string) bool {
+	f := taxonomy.Normalize(s)
+	return f == "" || placeholders[f] || strings.Contains(f, "placeholder") || strings.Contains(f, "lorem ipsum")
+}
+
+// exerciseWord is one word of an exercise name: letters and digits, optionally joined by hyphens, apostrophes, "&" or "/".
+var exerciseWord = regexp.MustCompile(`^[\p{L}\p{N}]+(?:['&/-][\p{L}\p{N}]+)*$`)
+
+// cleanExercise returns the exercise name cleaned and lower-cased, "" when it does not fit (too long, odd characters, placeholder text),
+// and an error when it holds something that rejects the whole answer.
+func cleanExercise(s string) (string, error) {
+	if suspicious.MatchString(foldForChecks(s)) {
+		return "", reject("the exercise holds a link, an address, a handle or an instruction")
+	}
+	clean, ok := textclean.Model(strings.ToLower(s), 4*MaxExerciseChars)
+	if !ok || utf8.RuneCountInString(clean) > MaxExerciseChars || IsPlaceholder(clean) {
+		return "", nil
+	}
+	words := strings.Fields(strings.NewReplacer(",", " ", "(", " ", ")", " ").Replace(clean))
+	if len(words) == 0 || len(words) > 6 {
+		return "", nil
+	}
+	for _, w := range words {
+		if !exerciseWord.MatchString(w) {
+			return "", nil
+		}
+	}
+	return strings.Join(words, " "), nil
 }
 
 func cleanLine(field, s string, limit int) (string, error) {
@@ -178,30 +310,8 @@ func cleanLine(field, s string, limit int) (string, error) {
 	if suspicious.MatchString(foldForChecks(s)) || suspicious.MatchString(foldForChecks(clean)) {
 		return "", reject("%s holds a link, an address, a handle or an instruction", field)
 	}
+	if IsPlaceholder(clean) {
+		return "", fmt.Errorf("%w: %w: %s is %q", ErrInvalidOutput, ErrPlaceholder, field, clean)
+	}
 	return clean, nil
-}
-
-// cleanTag returns the tag cleaned, ok false when it does not fit the tag format (the caller drops it), and an error when it
-// holds something that rejects the whole answer.
-func cleanTag(s string) (tag string, ok bool, err error) {
-	if suspicious.MatchString(foldForChecks(s)) {
-		return "", false, reject("a tag holds a link, an address, a handle or an instruction")
-	}
-	clean, ok := textclean.Model(strings.ToLower(s), 4*maxTagChars)
-	if !ok || utf8.RuneCountInString(clean) > maxTagChars {
-		return "", false, nil
-	}
-	words := strings.Fields(clean)
-	if len(words) < 1 || len(words) > MaxTagWords {
-		return "", false, nil
-	}
-	for _, w := range words {
-		if !tagWord.MatchString(w) {
-			return "", false, nil
-		}
-	}
-	if suspicious.MatchString(foldForChecks(clean)) {
-		return "", false, reject("a tag holds a link, an address, a handle or an instruction")
-	}
-	return clean, true, nil
 }

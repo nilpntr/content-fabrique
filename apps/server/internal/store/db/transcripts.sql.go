@@ -59,7 +59,7 @@ func (q *Queries) FailTranscript(ctx context.Context, arg FailTranscriptParams) 
 }
 
 const getAssetForTranscriptSave = `-- name: GetAssetForTranscriptSave :one
-SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose FROM assets
+SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search FROM assets
 WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL
 FOR UPDATE
 `
@@ -85,7 +85,7 @@ func (q *Queries) GetAssetForTranscriptSave(ctx context.Context, arg GetAssetFor
 		&i.Sha256,
 		&i.Title,
 		&i.Description,
-		&i.Tags,
+		&i.LegacyTags,
 		&i.R2Key,
 		&i.FailureReason,
 		&i.CreatedBy,
@@ -109,10 +109,13 @@ func (q *Queries) GetAssetForTranscriptSave(ctx context.Context, arg GetAssetFor
 		&i.QuickLookStatus,
 		&i.QuickLook,
 		&i.QuickLookAt,
-		&i.Search,
 		&i.TranscriptStatus,
 		&i.TranscriptFailureReason,
 		&i.Purpose,
+		&i.Facets,
+		&i.Exercise,
+		&i.FacetWords,
+		&i.Search,
 	)
 	return i, err
 }

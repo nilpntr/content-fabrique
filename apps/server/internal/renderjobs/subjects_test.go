@@ -58,7 +58,7 @@ func TestTheRenderKeepsTheTitleOffTheHeadAndRetriesWhenTheBoxesCannotBeRead(t *t
 
 	// With the head under it (a quick look's subject boxes, the head at 22 % of the frame) it is moved off the person.
 	detail := []byte(`{"prompt_version":"quicklook.v2","subjects":{"aspect":0.5625,"samples":[{"at_ms":500,"x":0.2,"y":0.2,"w":0.6,"h":0.75,"head_top_y":0.22}]}}`)
-	if _, err := e.st.ApplyQuickLook(ctx, w.ID, a.ID, store.QuickLookResult{Title: "Row", Description: "A row.", Tags: []string{"row"}, Detail: detail}); err != nil {
+	if _, err := e.st.ApplyQuickLook(ctx, w.ID, a.ID, store.QuickLookResult{Title: "Row", Description: "A row.", Facets: []string{"movement:row"}, Detail: detail}); err != nil {
 		t.Fatal(err)
 	}
 	moved := &scriptRecorder{Runner: e.runner}

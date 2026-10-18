@@ -2,15 +2,17 @@ package quicklook
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
 	configfiles "github.com/nilpntr/content-fabrique/config"
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
+	"github.com/nilpntr/content-fabrique/internal/taxonomy"
 )
 
 // The acceptance criterion: a quick look costs at most $0.003. This works the cost out from the price table for the request
 // the service really builds, counting every image at the pessimistic 1,600 tokens the llm layer uses when it cannot count
-// (a 512 x 512 picture is about 350), and 120 output tokens, which is what a title, a sentence and eight tags take.
+// (a 512 x 512 picture is about 350), and 120 output tokens, which is what a title, a sentence and the labels take.
 func TestACallCostsLessThanTheBudget(t *testing.T) {
 	prices, err := llm.LoadPriceTable(configfiles.Pricing(), llm.PriceFile)
 	if err != nil {
@@ -33,7 +35,7 @@ func TestACallCostsLessThanTheBudget(t *testing.T) {
 		for i := range frames {
 			frames[i] = fixtureFrame(i)
 		}
-		req := route.Apply(buildRequest(frames, []int{12, 37, 62, 87}))
+		req := route.Apply(buildRequest(taxonomy.Default(), frames, []int{12, 37, 62, 87}, false))
 		tokens, err := llm.EstimateTokens(req)
 		if err != nil {
 			t.Fatal(err)
@@ -70,18 +72,31 @@ func TestACallCostsLessThanTheBudget(t *testing.T) {
 	}
 }
 
-// Strict tool use takes a subset of JSON Schema: no length or count keywords. The limits live in the prompt and in Validate.
+// Strict tool use takes a subset of JSON Schema: no length or count keywords (an enum is fine: the facets are enums of the vocabulary).
+// The limits live in the prompt and in Validate.
 func TestTheToolSchemaIsStrictAndPlain(t *testing.T) {
 	var schema map[string]any
-	if err := json.Unmarshal(inputSchema, &schema); err != nil {
+	if err := json.Unmarshal(inputSchema(taxonomy.Default()), &schema); err != nil {
 		t.Fatal(err)
 	}
 	if schema["type"] != "object" || schema["additionalProperties"] != false {
 		t.Errorf("schema = %v", schema)
 	}
 	required, _ := schema["required"].([]any)
-	if len(required) != 4 {
-		t.Errorf("required = %v, want title, description, tags and subjects", required)
+	want := []any{"title", "description", "exercise", "type", "body", "movement", "angle", "equipment", "subjects"}
+	if !slices.Equal(required, want) {
+		t.Errorf("required = %v, want %v", required, want)
+	}
+	// The facets are the vocabulary's values, less slow motion (the file says it), plus unsure; a facet of one value is a string.
+	props, _ := schema["properties"].(map[string]any)
+	typ, _ := props["type"].(map[string]any)
+	if enum, _ := typ["enum"].([]any); typ["type"] != "string" || !slices.Equal(enum, []any{"lift", "pose", "talk", "b_roll", "product", "before_after", "unsure"}) {
+		t.Errorf("type = %v", typ)
+	}
+	body, _ := props["body"].(map[string]any)
+	items, _ := body["items"].(map[string]any)
+	if enum, _ := items["enum"].([]any); body["type"] != "array" || len(enum) != 9 {
+		t.Errorf("body = %v", body)
 	}
 	var walk func(v any)
 	walk = func(v any) {
@@ -89,7 +104,7 @@ func TestTheToolSchemaIsStrictAndPlain(t *testing.T) {
 		case map[string]any:
 			for k, child := range x {
 				switch k {
-				case "minLength", "maxLength", "minItems", "maxItems", "minimum", "maximum", "pattern", "format", "enum", "$ref", "oneOf", "anyOf", "allOf":
+				case "minLength", "maxLength", "minItems", "maxItems", "minimum", "maximum", "pattern", "format", "$ref", "oneOf", "anyOf", "allOf":
 					t.Errorf("strict tool use does not take %q", k)
 				}
 				walk(child)
@@ -101,7 +116,7 @@ func TestTheToolSchemaIsStrictAndPlain(t *testing.T) {
 		}
 	}
 	walk(schema)
-	if tl := tool(); !tl.Strict || tl.Name != ToolName {
+	if tl := tool(taxonomy.Default()); !tl.Strict || tl.Name != ToolName {
 		t.Errorf("tool = %+v", tl)
 	}
 }

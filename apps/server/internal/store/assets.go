@@ -198,17 +198,59 @@ func (s *Store) SearchAssets(ctx context.Context, ws ids.WorkspaceID, words []st
 
 // SearchAssetsOf is SearchAssets for the assets of one purpose.
 func (s *Store) SearchAssetsOf(ctx context.Context, ws ids.WorkspaceID, purpose string, words []string, before *ids.AssetID, limit int) ([]Asset, error) {
-	if limit < 1 {
-		return nil, fmt.Errorf("%w: limit %d", ErrInvalid, limit)
+	return s.FindAssets(ctx, ws, AssetQuery{Purpose: purpose, Words: words, Before: before, Limit: limit})
+}
+
+// AssetQuery says which assets FindAssets lists.
+type AssetQuery struct {
+	// Purpose is PurposeFootage (the default when empty) or PurposeStyleReference.
+	Purpose string
+	// Words are search words (SearchWords); every one must match. None: no search.
+	Words []string
+	// Facets are labels as stored ("body:back"); the assets must have all of them. None: no filter. The caller checks them against the
+	// vocabulary (an unknown one simply matches nothing here).
+	Facets []string
+	// Before is the cursor: only assets older than it.
+	Before *ids.AssetID
+	Limit  int
+}
+
+// FindAssets lists the assets of the workspace that match q, newest first.
+func (s *Store) FindAssets(ctx context.Context, ws ids.WorkspaceID, q AssetQuery) ([]Asset, error) {
+	if q.Limit < 1 {
+		return nil, fmt.Errorf("%w: limit %d", ErrInvalid, q.Limit)
+	}
+	if q.Purpose == "" {
+		q.Purpose = PurposeFootage
 	}
 	var cursor pgtype.UUID
-	if before != nil {
-		cursor = pgtype.UUID{Bytes: before.UUID, Valid: true}
+	if q.Before != nil {
+		cursor = pgtype.UUID{Bytes: q.Before.UUID, Valid: true}
 	}
+	words, facets := q.Words, q.Facets
 	if len(words) == 0 {
 		words = nil // NULL: no filter
 	}
-	rows, err := s.q.ListAssets(ctx, db.ListAssetsParams{WorkspaceID: ws, Before: cursor, Words: words, Purpose: purpose, RowLimit: int32(min(limit, 1000))}) //nolint:gosec // capped
+	if len(facets) == 0 {
+		facets = nil
+	}
+	rows, err := s.q.ListAssets(ctx, db.ListAssetsParams{WorkspaceID: ws, Before: cursor, Words: words, Facets: facets, Purpose: q.Purpose, RowLimit: int32(min(q.Limit, 1000))}) //nolint:gosec // capped
+	return rows, mapErr(err)
+}
+
+// MaxFacetRows is how many assets ListAssetFacets reads at most: the counts of a larger library are of its newest clips.
+const MaxFacetRows = 20000
+
+// ListAssetFacets returns the labels of the assets of one purpose that match the search words (none: all), newest first, only of the
+// assets that have any. The caller counts them.
+func (s *Store) ListAssetFacets(ctx context.Context, ws ids.WorkspaceID, purpose string, words []string) ([][]string, error) {
+	if purpose == "" {
+		purpose = PurposeFootage
+	}
+	if len(words) == 0 {
+		words = nil
+	}
+	rows, err := s.q.ListAssetFacets(ctx, db.ListAssetFacetsParams{WorkspaceID: ws, Purpose: purpose, Words: words, RowLimit: MaxFacetRows})
 	return rows, mapErr(err)
 }
 

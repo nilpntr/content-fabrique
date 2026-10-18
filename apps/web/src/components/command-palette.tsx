@@ -7,6 +7,7 @@ import { HighlightGlider } from "@/components/ui/highlight-glider";
 import { Kbd } from "@/components/ui/kbd";
 import { toggleTheme, useTheme } from "@/hooks/use-theme";
 import { useAssets } from "@/lib/api/hooks";
+import { cardBadges } from "@/lib/facets";
 import { useProjects } from "@/lib/api/project-hooks";
 import { searchClips, searchProjects } from "@/lib/search";
 import { projectStatusWords } from "@/lib/words";
@@ -16,7 +17,7 @@ interface PaletteItem {
   id: string;
   label: string;
   icon: LucideIcon;
-  /** A line after the label: the status of a project, the tags of a clip. */
+  /** A line after the label: the status of a project, the labels of a clip. */
   hint?: string;
   /** A small picture instead of the icon (a clip's poster). */
   thumb?: string;
@@ -91,7 +92,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
     id: `clip:${asset.id}`,
     label: asset.title || asset.filename,
     icon: FilmIcon,
-    hint: asset.tags.length > 0 ? asset.tags.slice(0, 2).join(" · ") : "Library",
+    hint: (asset.facets ?? []).length > 0 ? cardBadges(asset.facets).map((f) => f.label).join(" · ") : "Library",
     thumb: asset.derivatives?.poster?.url,
     run: () => {
       close();

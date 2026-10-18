@@ -2,6 +2,8 @@
 export const FORMAT_IDS = ["9:16", "1:1", "4:5", "16:9"] as const;
 export type Format = (typeof FORMAT_IDS)[number];
 
+import type { Facet } from "@/lib/facets";
+
 /** A TypeID: the `ast_` prefix plus a base32 UUIDv7 (D-24). */
 export type AssetId = `ast_${string}`;
 
@@ -14,7 +16,12 @@ export interface Asset {
   /** A short muted loop, played while the pointer rests on the card. */
   hoverPreviewUrl?: string;
   durationMs: number;
-  tags: string[];
+  /** The exercise the quick look named ("seated cable row"); the card's heading unless the creator named the clip. */
+  exercise?: string;
+  /** `user` when the creator named the clip: that name is the heading then. */
+  titleSource?: string;
+  /** The clip's labels (the type, the body part, the angle...). */
+  facets: Facet[];
 }
 
 /** What "Create project" hands to the caller. `assetIds` are in the order the clips were picked. */

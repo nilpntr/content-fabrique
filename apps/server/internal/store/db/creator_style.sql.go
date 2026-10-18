@@ -316,7 +316,7 @@ func (q *Queries) InsertStyleLearnPass(ctx context.Context, arg InsertStyleLearn
 
 const listStyleReferenceAssets = `-- name: ListStyleReferenceAssets :many
 
-SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose FROM assets
+SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search FROM assets
 WHERE workspace_id = $1 AND purpose = 'style_reference' AND deleted_at IS NULL
 ORDER BY id
 `
@@ -343,7 +343,7 @@ func (q *Queries) ListStyleReferenceAssets(ctx context.Context, workspaceID ids.
 			&i.Sha256,
 			&i.Title,
 			&i.Description,
-			&i.Tags,
+			&i.LegacyTags,
 			&i.R2Key,
 			&i.FailureReason,
 			&i.CreatedBy,
@@ -367,10 +367,13 @@ func (q *Queries) ListStyleReferenceAssets(ctx context.Context, workspaceID ids.
 			&i.QuickLookStatus,
 			&i.QuickLook,
 			&i.QuickLookAt,
-			&i.Search,
 			&i.TranscriptStatus,
 			&i.TranscriptFailureReason,
 			&i.Purpose,
+			&i.Facets,
+			&i.Exercise,
+			&i.FacetWords,
+			&i.Search,
 		); err != nil {
 			return nil, err
 		}
@@ -508,7 +511,7 @@ func (q *Queries) RequeueStyleReferences(ctx context.Context, workspaceID ids.Wo
 const softDeleteStyleReferenceAssets = `-- name: SoftDeleteStyleReferenceAssets :many
 UPDATE assets SET deleted_at = now()
 WHERE workspace_id = $1 AND purpose = 'style_reference' AND deleted_at IS NULL
-RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search
 `
 
 // Soft-deletes every reference asset of the workspace (resetting the style), and returns them so their objects can be removed.
@@ -532,7 +535,7 @@ func (q *Queries) SoftDeleteStyleReferenceAssets(ctx context.Context, workspaceI
 			&i.Sha256,
 			&i.Title,
 			&i.Description,
-			&i.Tags,
+			&i.LegacyTags,
 			&i.R2Key,
 			&i.FailureReason,
 			&i.CreatedBy,
@@ -556,10 +559,13 @@ func (q *Queries) SoftDeleteStyleReferenceAssets(ctx context.Context, workspaceI
 			&i.QuickLookStatus,
 			&i.QuickLook,
 			&i.QuickLookAt,
-			&i.Search,
 			&i.TranscriptStatus,
 			&i.TranscriptFailureReason,
 			&i.Purpose,
+			&i.Facets,
+			&i.Exercise,
+			&i.FacetWords,
+			&i.Search,
 		); err != nil {
 			return nil, err
 		}

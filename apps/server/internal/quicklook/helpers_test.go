@@ -190,7 +190,7 @@ func (f *fakeStore) ApplyQuickLook(_ context.Context, ws ids.WorkspaceID, id ids
 	if f.asset.TitleSource != store.TitleFromUser {
 		f.asset.Title, f.asset.TitleSource = r.Title, store.TitleFromQuickLook
 	}
-	f.asset.Description, f.asset.Tags = r.Description, r.Tags
+	f.asset.Description, f.asset.Exercise, f.asset.Facets = r.Description, r.Exercise, r.Facets
 	st := store.QuickLookSucceeded
 	f.asset.QuickLookStatus, f.asset.QuickLook = &st, r.Detail
 	return f.asset, nil
@@ -258,7 +258,7 @@ func newReadyVideo(t *testing.T, objs *memObjects) (*fakeStore, store.Asset) {
 	dur, pending := int64(12_000), store.QuickLookPending
 	a := store.Asset{
 		ID: id, WorkspaceID: ws, Kind: store.AssetKindVideo, Status: store.AssetReady, Filename: "IMG_0042.MOV", Title: "IMG_0042",
-		TitleSource: store.TitleFromFilename, Tags: []string{}, DurationMs: &dur, QuickLookStatus: &pending,
+		TitleSource: store.TitleFromFilename, Facets: []string{}, DurationMs: &dur, QuickLookStatus: &pending,
 		R2Key: storage.OriginalKey(ws, id),
 	}
 	proxyKey := storage.AssetPrefix(ws, id) + "proxy_720.mp4"
@@ -340,7 +340,7 @@ func (f *fakeAPI) messageCalls() []apiCall {
 func (f *fakeAPI) total() int { f.mu.Lock(); defer f.mu.Unlock(); return len(f.calls) }
 
 // goodAnswer is a describe_clip call as the model would make it.
-const goodAnswer = `{"title":"Barbell row","description":"A lifter does bent-over barbell rows in a gym, filmed from the side.","tags":["barbell row","back","gym","side view","lats"],"subjects":[{"frame":1,"present":true,"x":0.22,"y":0.2,"w":0.56,"h":0.7,"head_top_y":0.22,"head_x":0.44,"head_w":0.12,"shoulder_y":0.33},{"frame":2,"present":true,"x":0.2,"y":0.24,"w":0.6,"h":0.66,"head_top_y":0.26,"head_x":0,"head_w":0,"shoulder_y":0},{"frame":3,"present":true,"x":0.2,"y":0.22,"w":0.6,"h":0.68,"head_top_y":0.25},{"frame":4,"present":false,"x":0,"y":0,"w":0,"h":0,"head_top_y":0}]}`
+const goodAnswer = `{"title":"Barbell row","description":"A lifter does bent-over barbell rows in a gym, filmed from the side.","exercise":"barbell row","type":"lift","body":["back"],"movement":"row","angle":["side"],"equipment":["barbell"],"subjects":[{"frame":1,"present":true,"x":0.22,"y":0.2,"w":0.56,"h":0.7,"head_top_y":0.22,"head_x":0.44,"head_w":0.12,"shoulder_y":0.33},{"frame":2,"present":true,"x":0.2,"y":0.24,"w":0.6,"h":0.66,"head_top_y":0.26,"head_x":0,"head_w":0,"shoulder_y":0},{"frame":3,"present":true,"x":0.2,"y":0.22,"w":0.6,"h":0.68,"head_top_y":0.25},{"frame":4,"present":false,"x":0,"y":0,"w":0,"h":0,"head_top_y":0}]}`
 
 // toolReply is a Messages API answer in which the model calls describe_clip with input.
 func toolReply(input string, in, out int) (int, string) {

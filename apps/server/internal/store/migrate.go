@@ -49,7 +49,8 @@ func NewMigrator(dsn string) (*Migrator, error) {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("migration lock: %w", err)
 	}
-	p, err := goose.NewProvider(goose.DialectPostgres, sqlDB, MigrationsFS(), goose.WithSessionLocker(locker))
+	// The migrations are the SQL files, and one Go migration that labels the existing clips with the vocabulary (migrate_facets.go).
+	p, err := goose.NewProvider(goose.DialectPostgres, sqlDB, MigrationsFS(), goose.WithSessionLocker(locker), goose.WithGoMigrations(facetBackfill()))
 	if err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("migrations: %w", err)
@@ -74,9 +75,17 @@ func results(rs []*goose.MigrationResult) []Result {
 		if r == nil {
 			continue
 		}
-		out = append(out, Result{Version: r.Source.Version, Name: path.Base(r.Source.Path), Direction: r.Direction, Duration: r.Duration})
+		out = append(out, Result{Version: r.Source.Version, Name: sourceName(r.Source), Direction: r.Direction, Duration: r.Duration})
 	}
 	return out
+}
+
+// sourceName is a migration's file name; a Go migration has none, so it is named after the function's file (migrate_facets.go).
+func sourceName(s *goose.Source) string {
+	if s.Path == "" && s.Version == FacetBackfillVersion {
+		return fmt.Sprintf("%05d_facet_backfill.go", s.Version)
+	}
+	return path.Base(s.Path)
 }
 
 // Up applies every pending migration.
@@ -145,7 +154,7 @@ func (m *Migrator) Status(ctx context.Context) ([]Status, error) {
 	out := make([]Status, 0, len(ss))
 	for _, s := range ss {
 		out = append(out, Status{
-			Version: s.Source.Version, Name: path.Base(s.Source.Path), Applied: s.State == goose.StateApplied, AppliedAt: s.AppliedAt,
+			Version: s.Source.Version, Name: sourceName(s.Source), Applied: s.State == goose.StateApplied, AppliedAt: s.AppliedAt,
 		})
 	}
 	return out, nil

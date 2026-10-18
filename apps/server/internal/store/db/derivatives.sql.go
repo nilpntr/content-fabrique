@@ -17,28 +17,33 @@ const applyQuickLook = `-- name: ApplyQuickLook :one
 UPDATE assets
 SET title = CASE WHEN title_source = 'user' THEN title ELSE $1::text END,
     title_source = CASE WHEN title_source = 'user' THEN title_source ELSE 'quicklook' END,
-    description = $2::text, tags = $3::text[],
-    quick_look_status = 'succeeded', quick_look = $4::jsonb, quick_look_at = now()
-WHERE workspace_id = $5 AND id = $6 AND status = 'ready' AND deleted_at IS NULL
-RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose
+    description = $2::text, exercise = $3::text, facets = $4::text[], facet_words = $5::text,
+    quick_look_status = 'succeeded', quick_look = $6::jsonb, quick_look_at = now()
+WHERE workspace_id = $7 AND id = $8 AND status = 'ready' AND deleted_at IS NULL
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search
 `
 
 type ApplyQuickLookParams struct {
 	Title       string
 	Description string
-	Tags        []string
+	Exercise    string
+	Facets      []string
+	FacetWords  string
 	Detail      json.RawMessage
 	WorkspaceID ids.WorkspaceID
 	ID          ids.AssetID
 }
 
-// The quick look succeeded. The title changes only while it is not the user's; the description and tags are the quick look's.
+// The quick look succeeded. The title changes only while it is not the user's; the description, the exercise and the facets are the
+// quick look's (the old free-form tags, legacy_tags, are left as they are).
 // One statement, so a title edited at the same moment wins: the CASE sees the row as it is when the update applies.
 func (q *Queries) ApplyQuickLook(ctx context.Context, arg ApplyQuickLookParams) (Asset, error) {
 	row := q.db.QueryRow(ctx, applyQuickLook,
 		arg.Title,
 		arg.Description,
-		arg.Tags,
+		arg.Exercise,
+		arg.Facets,
+		arg.FacetWords,
 		arg.Detail,
 		arg.WorkspaceID,
 		arg.ID,
@@ -55,7 +60,7 @@ func (q *Queries) ApplyQuickLook(ctx context.Context, arg ApplyQuickLookParams) 
 		&i.Sha256,
 		&i.Title,
 		&i.Description,
-		&i.Tags,
+		&i.LegacyTags,
 		&i.R2Key,
 		&i.FailureReason,
 		&i.CreatedBy,
@@ -79,10 +84,13 @@ func (q *Queries) ApplyQuickLook(ctx context.Context, arg ApplyQuickLookParams) 
 		&i.QuickLookStatus,
 		&i.QuickLook,
 		&i.QuickLookAt,
-		&i.Search,
 		&i.TranscriptStatus,
 		&i.TranscriptFailureReason,
 		&i.Purpose,
+		&i.Facets,
+		&i.Exercise,
+		&i.FacetWords,
+		&i.Search,
 	)
 	return i, err
 }
@@ -93,7 +101,7 @@ UPDATE assets
 SET status = 'processing', failure_reason = NULL, ingest_progress = 0, ingest_stage = 'starting'
 WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL
   AND status IN ('uploaded', 'processing', 'ready')
-RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search
 `
 
 type ClaimAssetForIngestParams struct {
@@ -119,7 +127,7 @@ func (q *Queries) ClaimAssetForIngest(ctx context.Context, arg ClaimAssetForInge
 		&i.Sha256,
 		&i.Title,
 		&i.Description,
-		&i.Tags,
+		&i.LegacyTags,
 		&i.R2Key,
 		&i.FailureReason,
 		&i.CreatedBy,
@@ -143,10 +151,13 @@ func (q *Queries) ClaimAssetForIngest(ctx context.Context, arg ClaimAssetForInge
 		&i.QuickLookStatus,
 		&i.QuickLook,
 		&i.QuickLookAt,
-		&i.Search,
 		&i.TranscriptStatus,
 		&i.TranscriptFailureReason,
 		&i.Purpose,
+		&i.Facets,
+		&i.Exercise,
+		&i.FacetWords,
+		&i.Search,
 	)
 	return i, err
 }
@@ -187,7 +198,7 @@ const failAssetIngest = `-- name: FailAssetIngest :one
 UPDATE assets
 SET status = 'failed', failure_reason = $1::text, ingest_stage = NULL
 WHERE workspace_id = $2 AND id = $3 AND status IN ('uploaded', 'processing') AND deleted_at IS NULL
-RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search
 `
 
 type FailAssetIngestParams struct {
@@ -212,7 +223,7 @@ func (q *Queries) FailAssetIngest(ctx context.Context, arg FailAssetIngestParams
 		&i.Sha256,
 		&i.Title,
 		&i.Description,
-		&i.Tags,
+		&i.LegacyTags,
 		&i.R2Key,
 		&i.FailureReason,
 		&i.CreatedBy,
@@ -236,10 +247,13 @@ func (q *Queries) FailAssetIngest(ctx context.Context, arg FailAssetIngestParams
 		&i.QuickLookStatus,
 		&i.QuickLook,
 		&i.QuickLookAt,
-		&i.Search,
 		&i.TranscriptStatus,
 		&i.TranscriptFailureReason,
 		&i.Purpose,
+		&i.Facets,
+		&i.Exercise,
+		&i.FacetWords,
+		&i.Search,
 	)
 	return i, err
 }
@@ -247,7 +261,7 @@ func (q *Queries) FailAssetIngest(ctx context.Context, arg FailAssetIngestParams
 const failQuickLook = `-- name: FailQuickLook :one
 UPDATE assets SET quick_look_status = 'failed', quick_look = $1::jsonb, quick_look_at = now()
 WHERE workspace_id = $2 AND id = $3 AND deleted_at IS NULL
-RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search
 `
 
 type FailQuickLookParams struct {
@@ -272,7 +286,7 @@ func (q *Queries) FailQuickLook(ctx context.Context, arg FailQuickLookParams) (A
 		&i.Sha256,
 		&i.Title,
 		&i.Description,
-		&i.Tags,
+		&i.LegacyTags,
 		&i.R2Key,
 		&i.FailureReason,
 		&i.CreatedBy,
@@ -296,10 +310,13 @@ func (q *Queries) FailQuickLook(ctx context.Context, arg FailQuickLookParams) (A
 		&i.QuickLookStatus,
 		&i.QuickLook,
 		&i.QuickLookAt,
-		&i.Search,
 		&i.TranscriptStatus,
 		&i.TranscriptFailureReason,
 		&i.Purpose,
+		&i.Facets,
+		&i.Exercise,
+		&i.FacetWords,
+		&i.Search,
 	)
 	return i, err
 }
@@ -311,7 +328,7 @@ SET status = 'ready', failure_reason = NULL, ingest_progress = 100, ingest_stage
     rotation = $5::integer, video_codec = $6::text, audio_codec = $7::text,
     has_audio = $8::boolean, hdr = $9::boolean, probe = $10::jsonb
 WHERE workspace_id = $11 AND id = $12 AND status = 'processing' AND deleted_at IS NULL
-RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search
 `
 
 type FinishAssetIngestParams struct {
@@ -357,7 +374,7 @@ func (q *Queries) FinishAssetIngest(ctx context.Context, arg FinishAssetIngestPa
 		&i.Sha256,
 		&i.Title,
 		&i.Description,
-		&i.Tags,
+		&i.LegacyTags,
 		&i.R2Key,
 		&i.FailureReason,
 		&i.CreatedBy,
@@ -381,10 +398,13 @@ func (q *Queries) FinishAssetIngest(ctx context.Context, arg FinishAssetIngestPa
 		&i.QuickLookStatus,
 		&i.QuickLook,
 		&i.QuickLookAt,
-		&i.Search,
 		&i.TranscriptStatus,
 		&i.TranscriptFailureReason,
 		&i.Purpose,
+		&i.Facets,
+		&i.Exercise,
+		&i.FacetWords,
+		&i.Search,
 	)
 	return i, err
 }
@@ -432,7 +452,7 @@ func (q *Queries) ListAssetDerivatives(ctx context.Context, arg ListAssetDerivat
 }
 
 const listAssetSubjects = `-- name: ListAssetSubjects :many
-SELECT id AS asset_id, (quick_look -> 'subjects')::jsonb AS subjects, title, tags FROM assets
+SELECT id AS asset_id, (quick_look -> 'subjects')::jsonb AS subjects, title, facets FROM assets
 WHERE workspace_id = $1 AND id = ANY($2::uuid[]) AND status = 'ready' AND deleted_at IS NULL
   AND quick_look_status = 'succeeded' AND jsonb_typeof(quick_look -> 'subjects') = 'object'
 `
@@ -446,11 +466,12 @@ type ListAssetSubjectsRow struct {
 	AssetID  ids.AssetID
 	Subjects json.RawMessage
 	Title    string
-	Tags     []string
+	Facets   []string
 }
 
 // Where the person is in the sampled frames of several videos (the quick look's "subjects" member), for the editor's checks and the
-// compiler's title placement, with the title and tags (a pose or physique shot is told by them). A video with none is not in the result.
+// compiler's title placement, with the title and the facets (a pose or physique shot is told by them: "type:pose"). A video with none is
+// not in the result.
 func (q *Queries) ListAssetSubjects(ctx context.Context, arg ListAssetSubjectsParams) ([]ListAssetSubjectsRow, error) {
 	rows, err := q.db.Query(ctx, listAssetSubjects, arg.WorkspaceID, arg.AssetIds)
 	if err != nil {
@@ -464,7 +485,7 @@ func (q *Queries) ListAssetSubjects(ctx context.Context, arg ListAssetSubjectsPa
 			&i.AssetID,
 			&i.Subjects,
 			&i.Title,
-			&i.Tags,
+			&i.Facets,
 		); err != nil {
 			return nil, err
 		}
@@ -477,7 +498,7 @@ func (q *Queries) ListAssetSubjects(ctx context.Context, arg ListAssetSubjectsPa
 }
 
 const listAssetsForQuickLook = `-- name: ListAssetsForQuickLook :many
-SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose FROM assets
+SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search FROM assets
 WHERE workspace_id = $1 AND kind = 'video' AND status = 'ready' AND deleted_at IS NULL AND purpose = 'footage'
   AND ($2::boolean OR quick_look_status IS DISTINCT FROM 'succeeded')
 ORDER BY id
@@ -511,7 +532,7 @@ func (q *Queries) ListAssetsForQuickLook(ctx context.Context, arg ListAssetsForQ
 			&i.Sha256,
 			&i.Title,
 			&i.Description,
-			&i.Tags,
+			&i.LegacyTags,
 			&i.R2Key,
 			&i.FailureReason,
 			&i.CreatedBy,
@@ -535,10 +556,13 @@ func (q *Queries) ListAssetsForQuickLook(ctx context.Context, arg ListAssetsForQ
 			&i.QuickLookStatus,
 			&i.QuickLook,
 			&i.QuickLookAt,
-			&i.Search,
 			&i.TranscriptStatus,
 			&i.TranscriptFailureReason,
 			&i.Purpose,
+			&i.Facets,
+			&i.Exercise,
+			&i.FacetWords,
+			&i.Search,
 		); err != nil {
 			return nil, err
 		}
@@ -555,7 +579,7 @@ const markQuickLookPending = `-- name: MarkQuickLookPending :one
 UPDATE assets SET quick_look_status = 'pending'
 WHERE workspace_id = $1 AND id = $2 AND kind = 'video' AND deleted_at IS NULL
   AND (quick_look_status IS NULL OR quick_look_status = 'pending')
-RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search
 `
 
 type MarkQuickLookPendingParams struct {
@@ -580,7 +604,7 @@ func (q *Queries) MarkQuickLookPending(ctx context.Context, arg MarkQuickLookPen
 		&i.Sha256,
 		&i.Title,
 		&i.Description,
-		&i.Tags,
+		&i.LegacyTags,
 		&i.R2Key,
 		&i.FailureReason,
 		&i.CreatedBy,
@@ -604,10 +628,13 @@ func (q *Queries) MarkQuickLookPending(ctx context.Context, arg MarkQuickLookPen
 		&i.QuickLookStatus,
 		&i.QuickLook,
 		&i.QuickLookAt,
-		&i.Search,
 		&i.TranscriptStatus,
 		&i.TranscriptFailureReason,
 		&i.Purpose,
+		&i.Facets,
+		&i.Exercise,
+		&i.FacetWords,
+		&i.Search,
 	)
 	return i, err
 }
@@ -615,7 +642,7 @@ func (q *Queries) MarkQuickLookPending(ctx context.Context, arg MarkQuickLookPen
 const mergeQuickLookDetail = `-- name: MergeQuickLookDetail :one
 UPDATE assets SET quick_look = COALESCE(quick_look, '{}'::jsonb) || $1::jsonb, quick_look_at = now()
 WHERE workspace_id = $2 AND id = $3 AND status = 'ready' AND deleted_at IS NULL AND quick_look_status = 'succeeded'
-RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search
 `
 
 type MergeQuickLookDetailParams struct {
@@ -625,7 +652,7 @@ type MergeQuickLookDetailParams struct {
 }
 
 // A run that only adds to a good quick look (the subject boxes, the frames): only those keys of the detail are written, the title, the
-// description, the tags and the rest of the detail stay as they are, whatever changed while the model call ran.
+// description, the labels and the rest of the detail stay as they are, whatever changed while the model call ran.
 func (q *Queries) MergeQuickLookDetail(ctx context.Context, arg MergeQuickLookDetailParams) (Asset, error) {
 	row := q.db.QueryRow(ctx, mergeQuickLookDetail, arg.Patch, arg.WorkspaceID, arg.ID)
 	var i Asset
@@ -640,7 +667,7 @@ func (q *Queries) MergeQuickLookDetail(ctx context.Context, arg MergeQuickLookDe
 		&i.Sha256,
 		&i.Title,
 		&i.Description,
-		&i.Tags,
+		&i.LegacyTags,
 		&i.R2Key,
 		&i.FailureReason,
 		&i.CreatedBy,
@@ -664,10 +691,13 @@ func (q *Queries) MergeQuickLookDetail(ctx context.Context, arg MergeQuickLookDe
 		&i.QuickLookStatus,
 		&i.QuickLook,
 		&i.QuickLookAt,
-		&i.Search,
 		&i.TranscriptStatus,
 		&i.TranscriptFailureReason,
 		&i.Purpose,
+		&i.Facets,
+		&i.Exercise,
+		&i.FacetWords,
+		&i.Search,
 	)
 	return i, err
 }
@@ -701,7 +731,7 @@ func (q *Queries) SetIngestProgress(ctx context.Context, arg SetIngestProgressPa
 const skipQuickLook = `-- name: SkipQuickLook :one
 UPDATE assets SET quick_look_status = 'skipped'
 WHERE workspace_id = $1 AND id = $2 AND quick_look_status = 'pending' AND deleted_at IS NULL
-RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search
 `
 
 type SkipQuickLookParams struct {
@@ -725,7 +755,7 @@ func (q *Queries) SkipQuickLook(ctx context.Context, arg SkipQuickLookParams) (A
 		&i.Sha256,
 		&i.Title,
 		&i.Description,
-		&i.Tags,
+		&i.LegacyTags,
 		&i.R2Key,
 		&i.FailureReason,
 		&i.CreatedBy,
@@ -749,10 +779,13 @@ func (q *Queries) SkipQuickLook(ctx context.Context, arg SkipQuickLookParams) (A
 		&i.QuickLookStatus,
 		&i.QuickLook,
 		&i.QuickLookAt,
-		&i.Search,
 		&i.TranscriptStatus,
 		&i.TranscriptFailureReason,
 		&i.Purpose,
+		&i.Facets,
+		&i.Exercise,
+		&i.FacetWords,
+		&i.Search,
 	)
 	return i, err
 }
@@ -760,7 +793,7 @@ func (q *Queries) SkipQuickLook(ctx context.Context, arg SkipQuickLookParams) (A
 const updateAssetTitle = `-- name: UpdateAssetTitle :one
 UPDATE assets SET title = $1::text, title_source = 'user'
 WHERE workspace_id = $2 AND id = $3 AND deleted_at IS NULL
-RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search
 `
 
 type UpdateAssetTitleParams struct {
@@ -784,7 +817,7 @@ func (q *Queries) UpdateAssetTitle(ctx context.Context, arg UpdateAssetTitlePara
 		&i.Sha256,
 		&i.Title,
 		&i.Description,
-		&i.Tags,
+		&i.LegacyTags,
 		&i.R2Key,
 		&i.FailureReason,
 		&i.CreatedBy,
@@ -808,10 +841,13 @@ func (q *Queries) UpdateAssetTitle(ctx context.Context, arg UpdateAssetTitlePara
 		&i.QuickLookStatus,
 		&i.QuickLook,
 		&i.QuickLookAt,
-		&i.Search,
 		&i.TranscriptStatus,
 		&i.TranscriptFailureReason,
 		&i.Purpose,
+		&i.Facets,
+		&i.Exercise,
+		&i.FacetWords,
+		&i.Search,
 	)
 	return i, err
 }

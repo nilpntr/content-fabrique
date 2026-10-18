@@ -1,3 +1,4 @@
+import { sampleFacets } from "@/lib/sample-facets";
 import { expect, test } from "vitest";
 import { apiAsset, projectSummary } from "@/test-fixtures";
 import { matchesQuery, searchClips, searchProjects } from "./search";
@@ -21,8 +22,8 @@ test("projects are found by title, and capped", () => {
 
 test("clips are found by what the quick look wrote and by file name, and images are not clips", () => {
   const assets = [
-    apiAsset(1, { title: "Seated cable row", description: "Controlled rows with a pause", tags: ["back day"] }),
-    apiAsset(2, { title: "Clip 2", description: "", tags: ["lat pulldown"] }),
+    apiAsset(1, { title: "Seated cable row", description: "Controlled rows with a pause", facets: sampleFacets("type:lift", "body:back") }),
+    apiAsset(2, { title: "Clip 2", description: "", exercise: "lat pulldown" }),
     apiAsset(3, { title: "Clip 3", filename: "treadmill-warmup.mp4" }),
     apiAsset(4, { title: "Row photo", kind: "image" }),
   ];

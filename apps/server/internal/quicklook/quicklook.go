@@ -1,6 +1,7 @@
 // Package quicklook is the quick look (P1-04b, docs/04): right after the ingest marks a video ready, four sharp frames spread
-// over the clip go to Haiku 5.5 in one call, and what comes back, a title, a one-line description and up to eight tags, is
-// stored on the asset and found by the library's search.
+// over the clip go to Haiku 5.5 in one call, and what comes back, a title, a one-line description, an exercise name and labels from the
+// fixed vocabulary (package taxonomy: the type of clip, the body part, the movement, the angle, the equipment), is stored on the asset
+// and found by the library's search and filters. Slow motion is not asked: the file's frame rate says it (the probe).
 //
 // The steps of Service.Run:
 //
@@ -11,12 +12,13 @@
 //  2. One model call through the llm layer: stage "quicklook" (config/routing, claude-haiku-5-5 in every profile), a strict
 //     tool whose arguments are the answer, and a per-call budget of $0.003 reserved before sending (llm.Budget). The call is
 //     metered in usage_ledger like any other, with the asset's id as the run_id, so a clip's cost is one query.
-//  3. The answer is untrusted: Validate cleans it like an asset title and rejects what does not fit. Only then is it stored,
-//     and the title only while a person has not edited it (assets.title_source).
+//  3. The answer is untrusted: Validate cleans it like an asset title, holds the labels to the vocabulary and rejects what does not
+//     fit. An answer of placeholder words ("placeholder" as the title) is asked once more and never stored. Only then is it
+//     stored, and the title only while a person has not edited it (assets.title_source).
 //
 // A failure of ours that a retry can fix (the sandbox, object storage, a busy API) is returned as an error and the job runs
 // again. A failure that no retry fixes (the answer did not validate, the model refused, a spend cap) marks the quick look
-// `failed` with a code and ends the job. The asset is usable either way: it only lacks its description and tags.
+// `failed` with a code and ends the job. The asset is usable either way: it only lacks its description and labels.
 //
 // Tenancy: the asset is looked up with the workspace of the job, and every object key is built from the ids of that row.
 package quicklook
@@ -41,6 +43,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/subject"
+	"github.com/nilpntr/content-fabrique/internal/taxonomy"
 )
 
 // The codes a failed quick look records in assets.quick_look (the "error" field). Safe to show.
@@ -98,6 +101,8 @@ type Config struct {
 	Models llm.ClientFactory
 	Router Router
 	Logger *slog.Logger
+	// Taxonomy is the vocabulary of the labels; nil is the embedded one (taxonomy.Default).
+	Taxonomy *taxonomy.Taxonomy
 }
 
 // Service runs quick looks. It holds no per-job state.
@@ -113,6 +118,9 @@ func New(cfg Config) (*Service, error) {
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
+	}
+	if cfg.Taxonomy == nil {
+		cfg.Taxonomy = taxonomy.Default()
 	}
 	return &Service{cfg: cfg}, nil
 }
@@ -147,10 +155,11 @@ type Result struct {
 	Outcome Outcome `json:"outcome"`
 	// Reason is the failure code when Outcome is failed.
 	Reason string `json:"reason,omitempty"`
-	// Title, Description and Tags are what was stored (the title may differ on the asset when a person edited it).
+	// Title, Description, Exercise and Facets are what was stored (the title may differ on the asset when a person edited it).
 	Title       string   `json:"title,omitempty"`
 	Description string   `json:"description,omitempty"`
-	Tags        []string `json:"tags,omitempty"`
+	Exercise    string   `json:"exercise,omitempty"`
+	Facets      []string `json:"facets,omitempty"`
 	// Usage is what the model call consumed; zero when no call was made.
 	Usage llm.Usage `json:"usage"`
 	// Model is the model that answered.
@@ -268,7 +277,7 @@ func (s *Service) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, o
 	}
 	if keep {
 		// Only the new keys of the detail are written: what a person edited while the model call ran stays, and so do the labels.
-		res.Title, res.Description, res.Tags = a.Title, a.Description, a.Tags
+		res.Title, res.Description, res.Exercise, res.Facets = a.Title, a.Description, a.Exercise, a.Facets
 		if !d.SubjectsRead {
 			// An answer with no usable boxes writes nothing: it must not clear boxes an earlier run found, or the marker that they were read.
 			res.Outcome, res.Reason = OutcomeFailed, FailNoSubjects
@@ -287,7 +296,14 @@ func (s *Service) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, o
 		res.Outcome = OutcomeDone
 		return res, nil
 	}
-	out := store.QuickLookResult{Title: res.Title, Description: res.Description, Tags: res.Tags, Detail: d.json()}
+	labels := s.cfg.Taxonomy.Normalize(res.Facets)
+	if media.SlowMotionProbe(a.Probe) {
+		// Slow motion is the file's to say (its frame rate), never the model's.
+		labels = s.cfg.Taxonomy.WithProbe(labels, taxonomy.Ref{Facet: "type", Value: "slow_motion"})
+	}
+	res.Facets = labels.Strings()
+	out := store.QuickLookResult{Title: res.Title, Description: res.Description, Exercise: res.Exercise, Facets: res.Facets,
+		FacetWords: s.cfg.Taxonomy.SearchText(labels), Detail: d.json()}
 	if _, err := s.cfg.Store.ApplyQuickLook(ctx, ws, id, out); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return Result{Outcome: OutcomeGone}, nil
@@ -295,7 +311,7 @@ func (s *Service) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, o
 		return Result{}, fmt.Errorf("store the quick look: %w", err)
 	}
 	res.Outcome = OutcomeDone
-	log.InfoContext(ctx, "quick look done", "tags", len(res.Tags), "input_tokens", res.Usage.InputTokens, "output_tokens", res.Usage.OutputTokens)
+	log.InfoContext(ctx, "quick look done", "facets", len(res.Facets), "input_tokens", res.Usage.InputTokens, "output_tokens", res.Usage.OutputTokens)
 	return res, nil
 }
 
@@ -350,14 +366,53 @@ func (s *Service) ask(ctx context.Context, a store.Asset, fr frameSet, d *detail
 			positions[i] = int(min(max(at*100/dur, 0), 100))
 		}
 	}
-	req := route.Apply(buildRequest(fr.jpegs, positions))
-	// The asset's id is the ledger's run_id: one query gives a clip's cost. The budget is the acceptance criterion.
-	req.Run = llm.RunInfo{ID: a.ID.UUID, Profile: route.Profile, Budget: llm.NewRunBudget(MaxMicros), MemberUserID: a.CreatedBy}
+	// The asset's id is the ledger's run_id: one query gives a clip's cost. The budget is the acceptance criterion, shared by the call
+	// and the one repeat a placeholder answer gets.
+	budget := llm.NewRunBudget(MaxMicros)
+	res := Result{Model: route.Model}
+	var out Output
+	for attempt := 0; ; attempt++ {
+		req := route.Apply(buildRequest(s.cfg.Taxonomy, fr.jpegs, positions, attempt > 0))
+		req.Run = llm.RunInfo{ID: a.ID.UUID, Profile: route.Profile, Budget: budget, MemberUserID: a.CreatedBy}
+		input, reason, err := s.call(ctx, client, req, &res, log)
+		if err != nil || reason != "" {
+			return res, reason, err
+		}
+		out, err = Validate(input, s.cfg.Taxonomy)
+		if err == nil {
+			break
+		}
+		if errors.Is(err, ErrPlaceholder) && attempt == 0 {
+			// The model filled the fields with placeholder words ("placeholder" as the title of a clear clip of hammer curls, 2026-10-18):
+			// it saw the frames and did not describe them. One more call with a note costs a few hundredths of a cent; a second
+			// placeholder answer fails the quick look, and nothing of it is stored.
+			log.Warn("quick look: the answer was placeholder text; asking once more", "error", err)
+			continue
+		}
+		log.Warn("quick look: the model's answer was rejected", "error", err)
+		return res, FailInvalidOutput, nil
+	}
+	res.Title, res.Description, res.Exercise, res.Facets = out.Title, out.Description, out.Exercise, out.Facets.Strings()
+	d.Subjects = subjectTrack(out.Subjects, fr)
+	// The boxes count as asked for when the answer had usable ones, or said for the frames it spoke of that nobody is there; an answer that
+	// had none, or only boxes that did not hold up, leaves the clip to be asked again.
+	d.SubjectsRead = d.Subjects != nil || nobodyThere(out.Subjects)
+	if d.SubjectsRead {
+		d.SubjectsPrompt = PromptVersion
+	}
+	if d.Subjects != nil {
+		res.Subjects = len(d.Subjects.Samples)
+	}
+	return res, "", nil
+}
 
+// call makes one model call and returns the arguments of its describe_clip call. It adds what the call used to res. reason is the
+// failure code when the clip cannot be labelled; err is a failure a retry of the job may fix.
+func (s *Service) call(ctx context.Context, client llm.Client, req llm.Request, res *Result, log *slog.Logger) (json.RawMessage, string, error) {
 	resp, err := client.Messages(ctx, req)
-	res := Result{Usage: resp.Usage, Model: resp.Model}
-	if res.Model == "" {
-		res.Model = route.Model
+	res.Usage = addUsage(res.Usage, resp.Usage)
+	if resp.Model != "" {
+		res.Model = resp.Model
 	}
 	var capErr *llm.CapError
 	var apiErr *llm.APIError
@@ -370,56 +425,44 @@ func (s *Service) ask(ctx context.Context, a store.Asset, fr frameSet, d *detail
 	case errors.As(err, &capErr) && (capErr.Kind == llm.CapPlatform || capErr.Kind == llm.CapPlatformBusy):
 		// The platform breaker is open (D-31): nothing was sent, and it closes at the next UTC day. The job waits (snoozed, no attempt
 		// used) like one without model access, rather than failing the clip's label for good.
-		return Result{}, "", fmt.Errorf("%w: %w", ErrModelUnavailable, err)
+		return nil, "", fmt.Errorf("%w: %w", ErrModelUnavailable, err)
 	case errors.As(err, &capErr):
-		return res, FailSpendCap, nil
+		return nil, FailSpendCap, nil
 	case errors.Is(err, llm.ErrReplayMiss):
-		return res, FailReplayMiss, nil
+		return nil, FailReplayMiss, nil
 	case errors.Is(err, llm.ErrUnpriced):
-		return Result{}, "", fmt.Errorf("%w: %w", ErrModelUnavailable, err)
+		return nil, "", fmt.Errorf("%w: %w", ErrModelUnavailable, err)
 	case errors.As(err, &apiErr) && !apiErr.Retryable():
 		log.Warn("quick look: the API refused the request", "status", apiErr.Status, "type", apiErr.Type)
-		return res, FailModelRejected, nil
+		return nil, FailModelRejected, nil
 	default:
 		// Busy or down (the llm layer already retried), a request whose outcome is unknown (it may have been billed: the
 		// ledger holds an estimated row at the worst case) or a cancelled context: the job runs again. A call costs a tenth of
 		// a cent and every attempt has its own $0.003 budget, so a few repeats stay well inside the acceptance bound.
-		return Result{}, "", fmt.Errorf("model call: %w", err)
+		return nil, "", fmt.Errorf("model call: %w", err)
 	}
 
 	switch resp.StopReason {
 	case "refusal":
-		return res, FailRefused, nil
+		return nil, FailRefused, nil
 	case "max_tokens":
-		return res, FailTruncated, nil
+		return nil, FailTruncated, nil
 	}
-	var call *llm.Block
 	for _, u := range resp.ToolUses() {
 		if u.Name == ToolName {
-			call = &u
-			break
+			return u.Input, "", nil
 		}
 	}
-	if call == nil {
-		return res, FailNoAnswer, nil
+	return nil, FailNoAnswer, nil
+}
+
+// addUsage is the sum of what two calls used.
+func addUsage(a, b llm.Usage) llm.Usage {
+	return llm.Usage{
+		InputTokens: a.InputTokens + b.InputTokens, CacheWriteTokens: a.CacheWriteTokens + b.CacheWriteTokens,
+		CacheWrite1hTokens: a.CacheWrite1hTokens + b.CacheWrite1hTokens, CacheReadTokens: a.CacheReadTokens + b.CacheReadTokens,
+		OutputTokens: a.OutputTokens + b.OutputTokens, CacheWriteSplitMissing: a.CacheWriteSplitMissing || b.CacheWriteSplitMissing,
 	}
-	out, err := Validate(call.Input)
-	if err != nil {
-		log.Warn("quick look: the model's answer was rejected", "error", err)
-		return res, FailInvalidOutput, nil
-	}
-	res.Title, res.Description, res.Tags = out.Title, out.Description, out.Tags
-	d.Subjects = subjectTrack(out.Subjects, fr)
-	// The boxes count as asked for when the answer had usable ones, or said for the frames it spoke of that nobody is there; an answer that
-	// had none, or only boxes that did not hold up, leaves the clip to be asked again.
-	d.SubjectsRead = d.Subjects != nil || nobodyThere(out.Subjects)
-	if d.SubjectsRead {
-		d.SubjectsPrompt = PromptVersion
-	}
-	if d.Subjects != nil {
-		res.Subjects = len(d.Subjects.Samples)
-	}
-	return res, "", nil
 }
 
 // subjectsPatch is what a subjects-only run writes into the detail of a good quick look: the frames it saw, the subject boxes (null when

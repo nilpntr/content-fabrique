@@ -1,3 +1,4 @@
+import { sampleFacets } from "@/lib/sample-facets";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, expect, test, vi } from "vitest";
@@ -26,7 +27,7 @@ afterEach(() => {
 const LIBRARY = {
   items: [
     apiAsset(1, { title: "Back pose" }),
-    apiAsset(2, { title: "Barbell row", tags: ["exercise"] }),
+    apiAsset(2, { title: "Barbell row", facets: sampleFacets("type:lift") }),
     apiAsset(3, { title: "Still processing", status: "processing", derivatives: undefined, media: undefined }),
     apiAsset(4, { title: "A photo", kind: "image" }),
     apiAsset(5, { title: "Broken", status: "failed", failure_reason: "corrupt_media" }),

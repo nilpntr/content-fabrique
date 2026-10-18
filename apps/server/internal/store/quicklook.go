@@ -66,7 +66,11 @@ func (s *Store) quickLookDue(ctx context.Context, a Asset) (Asset, error) {
 type QuickLookResult struct {
 	Title       string
 	Description string
-	Tags        []string
+	// Exercise is the exercise's name ("" for none); Facets the labels as stored ("body:back", package taxonomy) and FacetWords their
+	// labels for the search (taxonomy.SearchText).
+	Exercise   string
+	Facets     []string
+	FacetWords string
 	// Detail is the jsonb detail: the cached frames, the model, the prompt version.
 	Detail json.RawMessage
 }
@@ -78,24 +82,25 @@ func (s *Store) SkipQuickLook(ctx context.Context, ws ids.WorkspaceID, id ids.As
 	return a, mapErr(err)
 }
 
-// ApplyQuickLook stores the result on a ready asset: the description and tags always, the title only while its source is not
-// the user's. It returns the row as it is afterwards. ErrNotFound when the asset is not ready in this workspace any more.
+// ApplyQuickLook stores the result on a ready asset: the description, the exercise and the facets always, the title only while its
+// source is not the user's. It returns the row as it is afterwards. ErrNotFound when the asset is not ready in this workspace any more.
 func (s *Store) ApplyQuickLook(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, r QuickLookResult) (Asset, error) {
-	tags := r.Tags
-	if tags == nil {
-		tags = []string{}
+	facets := r.Facets
+	if facets == nil {
+		facets = []string{}
 	}
 	var a Asset
 	err := s.inTx(ctx, func(tx *Store) error {
 		var err error
 		a, err = tx.q.ApplyQuickLook(ctx, db.ApplyQuickLookParams{
-			WorkspaceID: ws, ID: id, Title: r.Title, Description: r.Description, Tags: tags, Detail: detailOrEmpty(r.Detail),
+			WorkspaceID: ws, ID: id, Title: r.Title, Description: r.Description, Exercise: r.Exercise, Facets: facets, FacetWords: r.FacetWords,
+			Detail: detailOrEmpty(r.Detail),
 		})
 		if err != nil {
 			return mapErr(err)
 		}
-		// The tags label the clip analysis's moments too (the analysis may have run before the quick look landed).
-		return mapErr(tx.q.RelabelAssetMoments(ctx, db.RelabelAssetMomentsParams{WorkspaceID: ws, AssetID: id, Labels: tags}))
+		// The facets label the clip analysis's moments too (the analysis may have run before the quick look landed).
+		return mapErr(tx.q.RelabelAssetMoments(ctx, db.RelabelAssetMomentsParams{WorkspaceID: ws, AssetID: id, Labels: facets}))
 	})
 	return a, err
 }

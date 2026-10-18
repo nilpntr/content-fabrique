@@ -32,6 +32,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/styleprofile"
+	"github.com/nilpntr/content-fabrique/internal/taxonomy"
 	"github.com/nilpntr/content-fabrique/internal/textclean"
 )
 
@@ -89,6 +90,8 @@ type Service struct {
 	objects Objects
 	jobs    Enqueuer
 	logger  *slog.Logger
+	// tax is the vocabulary of the clip labels (the filters, the counts and the labels of the API).
+	tax *taxonomy.Taxonomy
 	// Now replaces time.Now (tests).
 	Now func() time.Time
 }
@@ -101,7 +104,7 @@ func NewService(st *store.Store, objects Objects, enq Enqueuer, logger *slog.Log
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Service{store: st, objects: objects, jobs: enq, logger: logger}, nil
+	return &Service{store: st, objects: objects, jobs: enq, logger: logger, tax: taxonomy.Default()}, nil
 }
 
 func (s *Service) now() time.Time {
@@ -640,8 +643,66 @@ func (s *Service) List(ctx context.Context, who Actor, query string, limit int, 
 
 // ListOf is List for the assets of one purpose (store.PurposeFootage, the library, or store.PurposeStyleReference).
 func (s *Service) ListOf(ctx context.Context, who Actor, purpose, query string, limit int, cursor string) ([]View, string, *Error) {
+	return s.Find(ctx, who, ListRequest{Purpose: purpose, Query: query, Limit: limit, Cursor: cursor})
+}
+
+// FacetFilter is the label filters of a request: a value id by facet id ("body": "back"), as the query string gives them.
+type FacetFilter map[string]string
+
+// ListRequest is what Find lists.
+type ListRequest struct {
+	Purpose string
+	Query   string
+	Facets  FacetFilter
+	Limit   int
+	Cursor  string
+}
+
+// stored checks the filter against the vocabulary and returns it as stored labels ("body:back"), in the vocabulary's order. A facet
+// or a value the vocabulary does not have is a bad request: a typo must not look like a library without such clips.
+func (f FacetFilter) stored(tax *taxonomy.Taxonomy) ([]string, *Error) {
+	var out []string
+	for _, fc := range tax.Facets {
+		v, ok := f[fc.ID]
+		if !ok || v == "" {
+			continue
+		}
+		r := taxonomy.Ref{Facet: fc.ID, Value: v}
+		if !tax.Known(r) {
+			return nil, invalid(fmt.Sprintf("%s=%s is not a label; GET /v1/assets/facets lists them", fc.ID, v))
+		}
+		out = append(out, r.String())
+	}
+	for k := range f {
+		if _, ok := tax.Facet(k); !ok {
+			return nil, invalid(fmt.Sprintf("%s is not a label facet", k))
+		}
+	}
+	return out, nil
+}
+
+// checkSearch checks the purpose and the search text of a list request.
+func checkSearch(purpose, query string) *Error {
 	if purpose != store.PurposeFootage && purpose != store.PurposeStyleReference {
-		return nil, "", invalid("purpose must be footage or style_reference")
+		return invalid("purpose must be footage or style_reference")
+	}
+	if utf8.RuneCountInString(query) > store.MaxSearchQueryChars {
+		return invalid("q can have at most 100 characters")
+	}
+	if !utf8.ValidString(query) {
+		return invalid("q is not valid text")
+	}
+	return nil
+}
+
+// Find lists the assets of a purpose that match the search words and carry every label of the filter, newest first.
+func (s *Service) Find(ctx context.Context, who Actor, req ListRequest) ([]View, string, *Error) {
+	purpose, query, limit, cursor := req.Purpose, req.Query, req.Limit, req.Cursor
+	if purpose == "" {
+		purpose = store.PurposeFootage
+	}
+	if e := checkSearch(purpose, query); e != nil {
+		return nil, "", e
 	}
 	if limit == 0 {
 		limit = DefaultPageSize
@@ -649,11 +710,9 @@ func (s *Service) ListOf(ctx context.Context, who Actor, purpose, query string, 
 	if limit < 1 || limit > MaxPageSize {
 		return nil, "", invalid("limit must be between 1 and 100")
 	}
-	if utf8.RuneCountInString(query) > store.MaxSearchQueryChars {
-		return nil, "", invalid("q can have at most 100 characters")
-	}
-	if !utf8.ValidString(query) {
-		return nil, "", invalid("q is not valid text")
+	facets, e := req.Facets.stored(s.tax)
+	if e != nil {
+		return nil, "", e
 	}
 	var before *ids.AssetID
 	if cursor != "" {
@@ -663,7 +722,7 @@ func (s *Service) ListOf(ctx context.Context, who Actor, purpose, query string, 
 		}
 		before = &id
 	}
-	rows, err := s.store.SearchAssetsOf(ctx, who.Workspace, purpose, store.SearchWords(query), before, limit+1)
+	rows, err := s.store.FindAssets(ctx, who.Workspace, store.AssetQuery{Purpose: purpose, Words: store.SearchWords(query), Facets: facets, Before: before, Limit: limit + 1})
 	if err != nil {
 		return nil, "", s.internal(ctx, "list assets", err)
 	}

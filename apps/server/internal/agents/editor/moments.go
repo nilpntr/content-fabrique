@@ -18,7 +18,8 @@ import (
 // find_moments: the clip analysis (P2-02, P2-03, deterministic P2-09) as the editor reads it. The analysis finds, without a model,
 // where the reps of a set start and end (the turning points of the movement), the still holds of a pose, and the dead time between
 // them, and scores each by how clean and how well exposed it is. Everything it says is computed from the pixels, so none of it is
-// untrusted text; the clip's own title and tags never appear in what this tool returns.
+// untrusted text; the clip's own title, description and exercise name never appear in what this tool returns (its labels do: they are
+// the fixed vocabulary's words, not the model's).
 
 // Limits of find_moments.
 const (
@@ -131,6 +132,9 @@ func (d Deps) findMoments(ctx context.Context, rc runtime.RunContext, in findMom
 				i+1, m.AssetID, m.StartMs, m.EndMs, secs(int64(m.StartMs)), secs(int64(m.EndMs)), turn, m.Kind, m.Score, m.Description)
 		}
 	}
+	if line := momentClipLabels(scope, moments); line != "" {
+		b.WriteString(line)
+	}
 	if clamped {
 		fmt.Fprintf(&b, "(limit lowered to %d.) ", maxMoments)
 	}
@@ -139,6 +143,30 @@ func (d Deps) findMoments(ctx context.Context, rc runtime.RunContext, in findMom
 		fmt.Fprintf(&b, "\nNot analysed yet, so not covered here: %s.", strings.Join(waiting, ", "))
 	}
 	return runtime.Text(strings.TrimSpace(b.String())), nil
+}
+
+// momentClipLabels is one line per clip of the listed moments that has labels (the vocabulary's words, never model text): which clip
+// is the side view of the row and which the pose, without a call to list_footage. "" when none has any.
+func momentClipLabels(scope []store.ProjectFootageRow, moments []store.Moment) string {
+	seen := map[ids.AssetID]bool{}
+	var b strings.Builder
+	for _, m := range moments {
+		if seen[m.AssetID] {
+			continue
+		}
+		seen[m.AssetID] = true
+		i := slices.IndexFunc(scope, func(r store.ProjectFootageRow) bool { return r.AssetID == m.AssetID })
+		if i < 0 {
+			continue
+		}
+		if line := labelLine(scope[i].Facets); line != "" {
+			fmt.Fprintf(&b, "- %s: %s\n", m.AssetID, line)
+		}
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	return "Clip labels:\n" + b.String()
 }
 
 // turnOf reads a rep's measured turning point (the analysis's peak_ms) from its attributes; false when there is none or it is not inside

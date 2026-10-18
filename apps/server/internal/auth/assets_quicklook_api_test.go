@@ -49,17 +49,19 @@ func titles(items []api.Asset) string {
 func TestAssetsSearch(t *testing.T) {
 	e := newAssetsEnv(t)
 	rows := e.quickLooked("ada", "IMG_0001.mp4", &store.QuickLookResult{
-		Title: "Barbell row", Description: "Bent-over barbell rows in a gym, filmed from the side.", Tags: []string{"barbell row", "back", "lats"},
+		Title: "Barbell row", Description: "Bent-over barbell rows in a gym, filmed from the side.", Exercise: "barbell row",
+		Facets: []string{"type:lift", "body:back", "movement:row", "angle:side"}, FacetWords: "Lifting lift Back back Row row Side view side",
 	})
 	posing := e.quickLooked("ada", "IMG_0002.mp4", &store.QuickLookResult{
-		Title: "Front double biceps", Description: "A competitor hits front poses on stage.", Tags: []string{"posing", "stage"},
+		Title: "Front double biceps", Description: "A competitor hits front poses on stage.", Exercise: "front double biceps",
+		Facets: []string{"type:pose", "body:arms", "angle:front"}, FacetWords: "Posing pose Arms arms Front view front",
 	})
 	raw := e.quickLooked("ada", "Leg press session.mp4", nil) // no quick look: found by its file name
-	theirs := e.quickLooked("bob", "Rows.mp4", &store.QuickLookResult{Title: "Seated cable row", Description: "Cable rows.", Tags: []string{"cable"}})
+	theirs := e.quickLooked("bob", "Rows.mp4", &store.QuickLookResult{Title: "Seated cable row", Description: "Cable rows.", Facets: []string{"type:lift", "body:back"}, FacetWords: "Lifting lift Back back"})
 
 	// What the API says about the quick look.
 	if deref(rows.TitleSource) != api.TitleSource(store.TitleFromQuickLook) || rows.QuickLookStatus == nil || *rows.QuickLookStatus != api.QuickLookStatusSucceeded ||
-		rows.Description == "" || len(rows.Tags) != 3 {
+		rows.Description == "" || len(rows.Facets) != 4 || rows.Exercise != "barbell row" || rows.Facets[3].Label != "Side view" {
 		t.Errorf("a quick-looked asset = %+v", rows)
 	}
 	if deref(raw.TitleSource) != api.TitleSource(store.TitleFromFilename) || raw.Title != "Leg press session" || raw.QuickLookStatus == nil || *raw.QuickLookStatus != api.QuickLookStatusPending {
@@ -70,10 +72,10 @@ func TestAssetsSearch(t *testing.T) {
 		"row":                    rows.Id,   // the criterion: a search for "row" finds the clip
 		"ROWS":                   rows.Id,   // case and stemming
 		"barb":                   rows.Id,   // a prefix, as typed
-		"lats":                   rows.Id,   // a tag
+		"lifting":                rows.Id,   // a label
 		"filmed side":            rows.Id,   // words of the description, in any order
 		"gym row":                rows.Id,   // every word must match
-		"posing":                 posing.Id, // another clip's tag
+		"posing":                 posing.Id, // another clip's label
 		"stage":                  posing.Id,
 		"leg press":              raw.Id,    // the title is the file name
 		"IMG_0002":               posing.Id, // the original file name, which the quick look's title replaced
@@ -148,7 +150,7 @@ func TestAssetsSearch(t *testing.T) {
 
 func TestAssetsRenameTitle(t *testing.T) {
 	e := newAssetsEnv(t)
-	a := e.quickLooked("ada", "IMG_0042.mp4", &store.QuickLookResult{Title: "Barbell row", Description: "Rows in a gym.", Tags: []string{"back"}})
+	a := e.quickLooked("ada", "IMG_0042.mp4", &store.QuickLookResult{Title: "Barbell row", Description: "Rows in a gym.", Facets: []string{"body:back"}})
 	b := e.quickLooked("bob", "bobs.mp4", nil)
 	path := "/v1/assets/" + a.Id
 
@@ -169,7 +171,7 @@ func TestAssetsRenameTitle(t *testing.T) {
 
 	// The quick look run again does not take the title back, and the new title is searchable.
 	id, _ := ids.ParseAssetID(a.Id)
-	if _, err := e.st.ApplyQuickLook(context.Background(), e.ws["ada"], id, store.QuickLookResult{Title: "Overhead press", Description: "Pressing.", Tags: []string{"shoulders"}}); err != nil {
+	if _, err := e.st.ApplyQuickLook(context.Background(), e.ws["ada"], id, store.QuickLookResult{Title: "Overhead press", Description: "Pressing.", Facets: []string{"body:shoulders"}}); err != nil {
 		t.Fatal(err)
 	}
 	e.call(http.MethodGet, path, "ada", nil, http.StatusOK, &fetched)

@@ -119,7 +119,7 @@ func fixture(t *testing.T) (*Service, *fakeStore, *fakeRunner) {
 	a := store.Asset{
 		IngestedAt: &ingested,
 		ID:         id, WorkspaceID: ws, Kind: store.AssetKindVideo, Status: store.AssetReady, Filename: "lat-pulldown.mov", Title: "Lat pulldown",
-		Tags: []string{"lat pulldown", "back"}, DurationMs: &dur,
+		Facets: []string{"type:lift", "body:back", "movement:pull"}, DurationMs: &dur,
 	}
 	key := storage.AssetPrefix(ws, id) + "proxy_720.mp4"
 	st := &fakeStore{asset: a, derivs: []store.Derivative{{WorkspaceID: ws, AssetID: id, Kind: store.DerivativeProxy720, R2Key: key}}}

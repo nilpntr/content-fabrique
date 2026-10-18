@@ -1,3 +1,4 @@
+import { sampleFacets } from "@/lib/sample-facets";
 import type { Asset, AssetId } from "./types";
 
 /** Sample library for the new-project flow, until it is wired to the API. No network: posters are inline SVG. */
@@ -23,29 +24,30 @@ export function poster(hue: number, figure: Figure = "standing"): string {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
-const clip = (n: number, title: string, seconds: number, tags: string[], hue: number, figure?: Figure): Asset => ({
+const clip = (n: number, title: string, seconds: number, labels: string[], hue: number, figure?: Figure, exercise?: string): Asset => ({
   id: assetId(n),
   title,
   posterUrl: poster(hue, figure),
   durationMs: seconds * 1000,
-  tags,
+  facets: sampleFacets(...labels),
+  ...(exercise ? { exercise } : {}),
 });
 
 export const SAMPLE_ASSETS: Asset[] = [
-  clip(1, "Back double biceps pose", 8, ["posing", "back"], 262, "standing"),
-  clip(2, "Lat pulldown, slow reps", 34, ["exercise", "back"], 205, "bar"),
-  clip(3, "Barbell row, side angle", 27, ["exercise", "back"], 228, "bar"),
-  clip(4, "Front lat spread", 6, ["posing", "back"], 280, "standing"),
-  clip(5, "Gym walk-in, wide shot", 12, ["b-roll", "gym"], 150, "wide"),
-  clip(6, "Chalk up and grip", 5, ["b-roll", "gym"], 40, "wide"),
-  clip(7, "Deadlift lockout", 19, ["exercise", "legs"], 12, "bar"),
-  clip(8, "Squat, rear view", 31, ["exercise", "legs"], 330, "bar"),
-  clip(9, "Most muscular pose", 7, ["posing", "chest"], 300, "standing"),
-  clip(10, "Cable fly, close up", 22, ["exercise", "chest"], 185, "bar"),
-  clip(11, "Bench press, set of 8", 41, ["exercise", "chest"], 250, "bar"),
-  clip(12, "Pre-workout shake", 9, ["lifestyle", "nutrition"], 95, "wide"),
-  clip(13, "Meal prep timelapse", 64, ["lifestyle", "nutrition"], 70, "wide"),
-  clip(14, "Mirror check, before", 11, ["progress", "posing"], 350, "standing"),
-  clip(15, "Mirror check, six months later", 13, ["progress", "posing"], 170, "standing"),
-  clip(16, "Cool-down stretch", 48, ["lifestyle", "legs"], 120, "wide"),
+  clip(1, "Back double biceps pose", 8, ["type:pose", "body:back", "angle:back"], 262, "standing", "back double biceps"),
+  clip(2, "Lat pulldown, slow reps", 34, ["type:lift", "body:back", "movement:pull", "angle:front", "equipment:cable"], 205, "bar", "lat pulldown"),
+  clip(3, "Barbell row, side angle", 27, ["type:lift", "body:back", "movement:row", "angle:side", "equipment:barbell"], 228, "bar", "barbell row"),
+  clip(4, "Front lat spread", 6, ["type:pose", "body:back", "angle:front"], 280, "standing", "front lat spread"),
+  clip(5, "Gym walk-in, wide shot", 12, ["type:b_roll", "angle:wide"], 150, "wide"),
+  clip(6, "Chalk up and grip", 5, ["type:b_roll", "angle:close_up"], 40, "wide"),
+  clip(7, "Deadlift lockout", 19, ["type:lift", "body:legs", "movement:hinge", "angle:side", "equipment:barbell"], 12, "bar", "deadlift"),
+  clip(8, "Squat, rear view", 31, ["type:lift", "body:legs", "movement:squat", "angle:back", "equipment:barbell"], 330, "bar", "back squat"),
+  clip(9, "Most muscular pose", 7, ["type:pose", "body:chest", "angle:front"], 300, "standing", "most muscular"),
+  clip(10, "Cable fly, close up", 22, ["type:lift", "body:chest", "movement:fly", "angle:close_up", "equipment:cable"], 185, "bar", "cable fly"),
+  clip(11, "Bench press, set of 8", 41, ["type:lift", "body:chest", "movement:press", "angle:side", "equipment:barbell"], 250, "bar", "bench press"),
+  clip(12, "Pre-workout shake", 9, ["type:product", "angle:close_up"], 95, "wide"),
+  clip(13, "Hammer curls, slow motion", 29, ["type:lift", "type:slow_motion", "body:arms", "movement:curl", "angle:front", "equipment:dumbbell"], 70, "bar", "hammer curl"),
+  clip(14, "Mirror check, before", 11, ["type:before_after", "body:full_body", "angle:front"], 350, "standing"),
+  clip(15, "Morning check-in", 13, ["type:talk", "angle:front"], 170, "standing"),
+  clip(16, "Cool-down stretch", 48, ["body:legs", "movement:stretch", "angle:wide"], 120, "wide", "hamstring stretch"),
 ];

@@ -26,7 +26,9 @@ export function toPickerAsset(asset: ApiAsset): Asset {
   return {
     id: asset.id as AssetId,
     title: asset.title || asset.filename,
-    tags: asset.tags,
+    ...(asset.exercise ? { exercise: asset.exercise } : {}),
+    ...(asset.title_source ? { titleSource: asset.title_source } : {}),
+    facets: asset.facets ?? [],
     durationMs: asset.media?.duration_ms ?? 0,
     posterUrl: asset.derivatives?.poster?.url,
     hoverPreviewUrl: asset.derivatives?.hover_preview?.url,

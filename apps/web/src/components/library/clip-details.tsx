@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ApiError } from "@/lib/api/client";
+import { sentenceCase } from "@/lib/facets";
 import { cn } from "@/lib/utils";
 import { StatusChip } from "./clip-card";
 import type { Asset } from "./types";
@@ -112,8 +113,8 @@ function TitleEditor({ title, onRename }: { title: string; onRename: (title: str
 }
 
 /**
- * A clip in the library, opened: the loop, the name (which can be changed), what the quick look wrote (a one-line description and
- * the tags) and the facts of the file. Renaming keeps the name for good: the quick look never overwrites a name the creator wrote.
+ * A clip in the library, opened: the loop, the name (which can be changed), what the quick look wrote (a one-line description, the
+ * exercise and the labels) and the facts of the file. Renaming keeps the name for good: the quick look never overwrites a name the creator wrote.
  */
 export function ClipDetails({ asset, onClose, onRename }: { asset: Asset | null; onClose: () => void; onRename: (asset: Asset, title: string) => Promise<void> }) {
   const note = asset ? quickLookNote(asset) : undefined;
@@ -152,11 +153,16 @@ export function ClipDetails({ asset, onClose, onRename }: { asset: Asset | null;
               </h3>
               {asset.description?.trim() ? <p className="text-[13.5px] leading-relaxed text-pretty">{asset.description}</p> : null}
               {note ? <p className="text-[13px] text-muted-foreground">{note}</p> : null}
-              {asset.tags.length > 0 ? (
-                <ul aria-label="Tags" className="flex flex-wrap gap-1.5">
-                  {asset.tags.map((tag) => (
-                    <li key={tag} className={cn("rounded-full bg-wash px-2.5 py-0.5 text-[12px] text-muted-foreground")}>
-                      {tag}
+              {asset.exercise?.trim() ? (
+                <p className="text-[13px] text-muted-foreground">
+                  Exercise: <span className="text-foreground">{sentenceCase(asset.exercise.trim())}</span>
+                </p>
+              ) : null}
+              {asset.facets.length > 0 ? (
+                <ul aria-label="Labels" className="flex flex-wrap gap-1.5">
+                  {asset.facets.map((facet) => (
+                    <li key={`${facet.facet}:${facet.value}`} className={cn("rounded-full bg-wash px-2.5 py-0.5 text-[12px] text-muted-foreground")}>
+                      {facet.label}
                     </li>
                   ))}
                 </ul>

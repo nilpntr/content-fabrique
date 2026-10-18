@@ -77,9 +77,12 @@ type Metadata struct {
 	// default (autorotate). See ClockwiseDegrees.
 	Rotation int `json:"rotation"`
 
-	FPS    FPS    `json:"fps"`
-	Codecs Codecs `json:"codecs"`
-	PixFmt string `json:"pixFmt,omitempty"`
+	FPS FPS `json:"fps"`
+	// BaseFPS is the stream's base frame rate (ffprobe's r_frame_rate) when it differs from FPS by a frame or more: a phone's slow-motion clip conformed to
+	// 30 frames a second, or re-encoded by an app, keeps the 120 or 240 it was shot at here. Absent when it is FPS.
+	BaseFPS *FPS   `json:"baseFps,omitempty"`
+	Codecs  Codecs `json:"codecs"`
+	PixFmt  string `json:"pixFmt,omitempty"`
 
 	ColorSpace     string `json:"colorSpace,omitempty"`
 	ColorTransfer  string `json:"colorTransfer,omitempty"`
@@ -231,6 +234,32 @@ func (m *Metadata) fillVideo(s *rawStream) {
 		fr = parseRational(s.RFrameRate)
 	}
 	m.FPS = FPS{Rational: fr, Value: fr.Float()}
+	if base := parseRational(s.RFrameRate); base.Float() > 0 && math.Abs(base.Float()-fr.Float()) >= 1 {
+		m.BaseFPS = &FPS{Rational: base, Value: base.Float()}
+	}
+}
+
+// Slow motion (the clip type "slow_motion" of package taxonomy) is told from the frame rate, never from the pictures: a clip recorded
+// at SlowMotionMinFPS or more, by its average rate or its base rate. A base rate above SlowMotionMaxFPS is a time base, not a frame
+// rate (some files carry 90000/1), and says nothing.
+const (
+	SlowMotionMinFPS = 100
+	SlowMotionMaxFPS = 1000
+)
+
+// SlowMotion says whether the probe found a high-frame-rate (slow-motion) recording.
+func (m Metadata) SlowMotion() bool {
+	in := func(f float64) bool { return f >= SlowMotionMinFPS && f <= SlowMotionMaxFPS }
+	return in(m.FPS.Value) || (m.BaseFPS != nil && in(m.BaseFPS.Value))
+}
+
+// SlowMotionProbe is SlowMotion of a stored probe (assets.probe, the JSON of a Metadata); false when it cannot be read.
+func SlowMotionProbe(probe []byte) bool {
+	var m Metadata
+	if len(probe) == 0 || json.Unmarshal(probe, &m) != nil {
+		return false
+	}
+	return m.SlowMotion()
 }
 
 // rotation reads the display-matrix side data (ffmpeg 6 and later), falling back to the legacy "rotate" tag, which

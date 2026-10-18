@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nilpntr/content-fabrique/internal/quicklook"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/subject"
@@ -42,13 +43,13 @@ func (f *fakeAnthropic) RoundTrip(r *http.Request) (*http.Response, error) {
 		status, body = 200, `{"input_tokens": 1750}`
 	case strings.HasSuffix(r.URL.Path, "/v1/messages"):
 		f.messages++
-		title, tags, subjects := "Barbell row", `["barbell row","back","gym"]`, ""
+		title, labels, subjects := "Barbell row", `"exercise":"barbell row","type":"lift","body":["back"],"movement":"row"`, ""
 		if f.withSubjects { // a later model pass that would label the clip differently
-			title, tags = "Another title", `["other","tags"]`
+			title, labels = "Another title", `"exercise":"","type":"pose","body":["legs"],"movement":"unsure"`
 			subjects = `,"subjects":[{"frame":1,"present":true,"x":0.2,"y":0.2,"w":0.6,"h":0.7,"head_top_y":0.22},{"frame":2,"present":true,"x":0.2,"y":0.2,"w":0.6,"h":0.7,"head_top_y":0.23}]`
 		}
 		status, body = 200, `{"id":"msg_fake","type":"message","role":"assistant","model":"claude-haiku-5-5","content":[{"type":"tool_use","id":"toolu_1","name":"describe_clip",`+
-			`"input":{"title":"`+title+`","description":"A lifter does bent-over barbell rows in a gym.","tags":`+tags+subjects+`}}],"stop_reason":"tool_use","stop_sequence":null,`+
+			`"input":{"title":"`+title+`","description":"A lifter does bent-over barbell rows in a gym.",`+labels+subjects+`}}],"stop_reason":"tool_use","stop_sequence":null,`+
 			`"usage":{"input_tokens":1750,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":110}}`
 	}
 	h := http.Header{"Content-Type": {"application/json"}, "Request-Id": {fmt.Sprintf("req_cli_%d", f.messages+f.counts)}}
@@ -143,7 +144,7 @@ func TestAssetsQuickLook(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("quicklook = %d\n%s%s", code, out, errOut)
 	}
-	if !strings.Contains(out, a.ID.String()) || !strings.Contains(out, `"Barbell row"`) || !strings.Contains(out, "[barbell row, back, gym]") ||
+	if !strings.Contains(out, a.ID.String()) || !strings.Contains(out, `"Barbell row"`) || !strings.Contains(out, "[Lifting, Back, Row, Barbell]") || !strings.Contains(out, `exercise "barbell row"`) ||
 		!strings.Contains(out, "1 video(s)") || !strings.Contains(out, "total cost $0.000") {
 		t.Fatalf("output:\n%s", out)
 	}
@@ -152,7 +153,7 @@ func TestAssetsQuickLook(t *testing.T) {
 	}
 	got, err := r.st.GetAsset(ctx, r.ws.ID, a.ID)
 	if err != nil || got.Title != "Barbell row" || got.TitleSource != store.TitleFromQuickLook || *got.QuickLookStatus != store.QuickLookSucceeded ||
-		strings.Join(got.Tags, ",") != "barbell row,back,gym" {
+		strings.Join(got.Facets, ",") != "type:lift,body:back,movement:row,equipment:barbell" || got.Exercise != "barbell row" {
 		t.Fatalf("asset = %+v %v", got, err)
 	}
 
@@ -189,8 +190,8 @@ func TestAssetsQuickLook(t *testing.T) {
 		t.Fatalf("--subjects = %d, %d calls\n%s%s", code, api.messages, out, errOut)
 	}
 	after, err := r.st.GetAsset(ctx, r.ws.ID, a.ID)
-	if err != nil || after.Title != "Gino rows" || strings.Join(after.Tags, ",") != "barbell row,back,gym" {
-		t.Errorf("--subjects changed the labels: %q %v %v", after.Title, after.Tags, err)
+	if err != nil || after.Title != "Gino rows" || strings.Join(after.Facets, ",") != "type:lift,body:back,movement:row,equipment:barbell" {
+		t.Errorf("--subjects changed the labels: %q %v %v", after.Title, after.Facets, err)
 	}
 	if tr, ok := subject.FromDetail(after.QuickLook); !ok || len(tr.Samples) != 2 || tr.Samples[0].HeadTopY != 0.22 {
 		t.Errorf("the boxes were not stored: %s", after.QuickLook)
@@ -214,6 +215,31 @@ func TestAssetsQuickLook(t *testing.T) {
 	}
 	if code, out, _ := r.quickLook("--workspace", other.ID.String(), "--all"); code != 0 || !strings.Contains(out, "0 video(s)") {
 		t.Errorf("another workspace lists %d: %s", code, out)
+	}
+
+	// cfctl assets retag: the quick look again for the clips labelled by an older prompt, under a spending cap that must be given.
+	retag := func(extra ...string) (int, string, string) {
+		var out, errb bytes.Buffer
+		code := cmdAssets(append([]string{"retag", "--env-file", r.envFile, "--yes"}, extra...), &out, &errb, fakeProcessEnv(map[string]string{}))
+		return code, out.String(), errb.String()
+	}
+	calls := api.messages
+	if code, _, errOut := retag("--workspace", r.ws.ID.String()); code != 2 || !strings.Contains(errOut, "--max-usd is required") || api.messages != calls {
+		t.Errorf("retag without a cap: exit %d: %s", code, errOut)
+	}
+	if code, out, errOut := retag("--workspace", r.ws.ID.String(), "--max-usd", "0.05"); code != 0 || !strings.Contains(out, "0 video(s)") || api.messages != calls {
+		t.Errorf("retag of a clip labelled by %s = %d\n%s%s", quicklook.PromptVersion, code, out, errOut)
+	}
+	if _, err := r.st.MergeQuickLookDetail(ctx, r.ws.ID, a.ID, []byte(`{"prompt_version":"quicklook.v3"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if code, out, errOut := retag("--workspace", r.ws.ID.String(), "--max-usd", "0.05"); code != 0 || !strings.Contains(out, "1 video(s)") ||
+		!strings.Contains(out, "spending cap $0.050000") || !strings.Contains(out, "[Lifting, Back, Row, Barbell]") || api.messages != calls+1 {
+		t.Errorf("retag of an old clip = %d, %d calls\n%s%s", code, api.messages-calls, out, errOut)
+	}
+	// A cap below one clip's worst case stops before the call.
+	if code, out, errOut := retag("--workspace", r.ws.ID.String(), "--all", "--max-usd", "0.001"); code != 0 || !strings.Contains(out, "stopped before 1 more video(s)") || api.messages != calls+1 {
+		t.Errorf("retag over the cap = %d\n%s%s", code, out, errOut)
 	}
 
 	// Arguments and the guards.

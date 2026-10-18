@@ -1,3 +1,4 @@
+import { sampleFacets } from "@/lib/sample-facets";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { ClipCard } from "./clip-card";
@@ -10,7 +11,7 @@ const GRID = { cols: 5, rows: 4, intervalMs: 1000, tileW: 100, tileH: 180 };
 const READY: Asset = {
   id: "ast_01jh7qtest000000000000001",
   title: "Lat pulldown",
-  tags: ["exercise", "back", "cable"],
+  facets: sampleFacets("type:lift", "body:back", "angle:side", "equipment:cable"),
   status: "ready",
   durationMs: 20_000,
   width: 1080,
@@ -302,9 +303,9 @@ test("status chips and progress for every status", () => {
   expect(screen.getByText("Ready")).toBeTruthy();
   expect(screen.getByText("0:20")).toBeTruthy();
   expect(screen.queryByRole("progressbar")).toBeNull();
-  expect(screen.getByText("exercise")).toBeTruthy();
-  expect(screen.getByText("+2")).toBeTruthy();
-  expect(screen.queryByText("back")).toBeNull();
+  // At most two labels, the telling ones: the body part and the angle of a lift ("Lifting" and "Cable" are left out).
+  expect([...document.querySelectorAll("[data-slot=facet-badge]")].map((b) => b.textContent)).toEqual(["Back", "Side view"]);
+  expect(screen.queryByText("Lifting")).toBeNull();
   unmount();
 
   render(<ClipCard asset={clip({ status: "processing", progress: 42 })} />);

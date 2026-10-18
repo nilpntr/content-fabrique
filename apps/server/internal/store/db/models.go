@@ -105,7 +105,7 @@ type Asset struct {
 	Sha256                  *string
 	Title                   string
 	Description             string
-	Tags                    []string
+	LegacyTags              []string
 	R2Key                   string
 	FailureReason           *string
 	CreatedBy               ids.UserID
@@ -129,10 +129,13 @@ type Asset struct {
 	QuickLookStatus         *string
 	QuickLook               []byte
 	QuickLookAt             *time.Time
-	Search                  pgtype.TSVector
 	TranscriptStatus        string
 	TranscriptFailureReason *string
 	Purpose                 string
+	Facets                  []string
+	Exercise                string
+	FacetWords              string
+	Search                  pgtype.TSVector
 }
 
 type AssetDerivative struct {

@@ -12,6 +12,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
+	"github.com/nilpntr/content-fabrique/internal/taxonomy"
 )
 
 // Caller and CallerFunc are the shared ones of package httpapi: the workspace, user and role the verified token resolved to.
@@ -69,17 +70,25 @@ func undocumented(op string, e *Error) error {
 
 // ---- Conversions -----------------------------------------------------------------------------------------------
 
-func assetOf(a store.Asset) api.Asset {
-	tags := a.Tags
-	if tags == nil {
-		tags = []string{}
+// facetsOf is the labels of an asset as the API shows them: each stored label the vocabulary knows, with its label, in its order. The
+// old free-form tags (legacy_tags) are never shown.
+func facetsOf(stored []string) []api.AssetFacet {
+	tax := taxonomy.Default()
+	set := tax.Normalize(stored)
+	out := make([]api.AssetFacet, 0, len(set))
+	for _, r := range set {
+		out = append(out, api.AssetFacet{Facet: r.Facet, Value: r.Value, Label: tax.Label(r)})
 	}
+	return out
+}
+
+func assetOf(a store.Asset) api.Asset {
 	titleSource := api.TitleSource(a.TitleSource)
 	purpose := api.AssetPurpose(a.Purpose)
 	out := api.Asset{Purpose: &purpose,
 		Id: a.ID.String(), Kind: api.AssetKind(a.Kind), Status: api.AssetStatus(a.Status), Filename: a.Filename,
 		ContentType: a.ContentType, SizeBytes: a.SizeBytes, Sha256: a.Sha256, Title: a.Title, TitleSource: &titleSource,
-		Description: a.Description, Tags: tags, FailureReason: a.FailureReason, IngestProgress: int(a.IngestProgress), IngestStage: a.IngestStage,
+		Description: a.Description, Exercise: a.Exercise, Facets: facetsOf(a.Facets), FailureReason: a.FailureReason, IngestProgress: int(a.IngestProgress), IngestStage: a.IngestStage,
 		TranscriptStatus: api.TranscriptStatus(a.TranscriptStatus), TranscriptFailureReason: a.TranscriptFailureReason, CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt,
 	}
 	if a.QuickLookStatus != nil {
@@ -212,7 +221,9 @@ func (h *Handler) ListAssets(ctx context.Context, req api.ListAssetsRequestObjec
 		if req.Params.Purpose != nil {
 			purpose = string(*req.Params.Purpose)
 		}
-		rows, next, e = h.svc.ListOf(ctx, who, purpose, query, limit, cursor)
+		p := req.Params
+		rows, next, e = h.svc.Find(ctx, who, ListRequest{Purpose: purpose, Query: query, Limit: limit, Cursor: cursor,
+			Facets: facetFilter(p.Type, p.Body, p.Movement, p.Angle, p.Equipment)})
 	}
 	if e != nil {
 		switch e.Status {
@@ -238,6 +249,58 @@ func (h *Handler) ListAssets(ctx context.Context, req api.ListAssetsRequestObjec
 		res.NextCursor = &next
 	}
 	return res, nil
+}
+
+// facetFilter is the label filters of the query string, by facet.
+func facetFilter(typ, body, movement, angle, equipment *string) FacetFilter {
+	f := FacetFilter{}
+	for facet, v := range map[string]*string{"type": typ, "body": body, "movement": movement, "angle": angle, "equipment": equipment} {
+		if v != nil && *v != "" {
+			f[facet] = *v
+		}
+	}
+	return f
+}
+
+// ListAssetFacets is GET /v1/assets/facets.
+func (h *Handler) ListAssetFacets(ctx context.Context, req api.ListAssetFacetsRequestObject) (api.ListAssetFacetsResponseObject, error) {
+	who, e := h.begin(ctx, false)
+	var counts []FacetCounts
+	if e == nil {
+		p := req.Params
+		purpose, query := store.PurposeFootage, ""
+		if p.Purpose != nil {
+			purpose = string(*p.Purpose)
+		}
+		if p.Q != nil {
+			query = *p.Q
+		}
+		counts, e = h.svc.Facets(ctx, who, purpose, query, facetFilter(p.Type, p.Body, p.Movement, p.Angle, p.Equipment))
+	}
+	if e != nil {
+		switch e.Status {
+		case 400:
+			return api.ListAssetFacets400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body(e))}, nil
+		case 401:
+			return api.ListAssetFacets401JSONResponse{UnauthenticatedJSONResponse: api.UnauthenticatedJSONResponse(body(e))}, nil
+		case 403:
+			return api.ListAssetFacets403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(body(e))}, nil
+		case 500:
+			return api.ListAssetFacets500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(body(e))}, nil
+		case 503:
+			return api.ListAssetFacets503JSONResponse{UnavailableJSONResponse: api.UnavailableJSONResponse(body(e))}, nil
+		}
+		return nil, undocumented("listAssetFacets", e)
+	}
+	out := api.ListAssetFacets200JSONResponse{Facets: make([]api.FacetSummary, 0, len(counts))}
+	for _, c := range counts {
+		s := api.FacetSummary{Facet: c.Facet, Label: c.Label, Values: make([]api.FacetCount, 0, len(c.Values))}
+		for _, v := range c.Values {
+			s.Values = append(s.Values, api.FacetCount{Value: v.Value, Label: v.Label, Count: v.Count})
+		}
+		out.Facets = append(out.Facets, s)
+	}
+	return out, nil
 }
 
 // GetAsset is GET /v1/assets/{id}.

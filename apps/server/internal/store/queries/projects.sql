@@ -103,7 +103,7 @@ LIMIT @row_limit;
 -- the probed size and rotation, and whether there is sound. Only ready, not deleted assets with a duration are returned, in
 -- the creator's order: the same set the edit catalog holds.
 -- name: ListProjectFootage :many
-SELECT pa.position, a.id AS asset_id, a.kind, a.title, a.description, a.duration_ms, a.width, a.height, a.rotation, a.has_audio
+SELECT pa.position, a.id AS asset_id, a.kind, a.title, a.description, a.exercise, a.facets, a.duration_ms, a.width, a.height, a.rotation, a.has_audio
 FROM project_assets pa
 JOIN assets a ON a.workspace_id = pa.workspace_id AND a.id = pa.asset_id
 WHERE pa.workspace_id = @workspace_id AND pa.project_id = @project_id
