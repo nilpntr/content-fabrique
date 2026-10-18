@@ -111,18 +111,15 @@ func normLine(s string) string {
 	return b.String()
 }
 
-// patternLines are the lines of a read that are not its title or a numbered chapter title: what a story or a dialogue is told in, one
-// per line (a line held over several shots counts once).
+// patternLines are the lines of the shots that are not a numbered chapter title, one per line (a line held over several shots counts
+// once): what a story or a dialogue is told in. The first line counts too: a creator of story captions opens with one, and the read may
+// call it the title.
 func patternLines(t *TextStyle) []ShotText {
-	title := normLine(t.Text)
 	seen := map[string]bool{}
 	var out []ShotText
 	for _, s := range t.ShotTexts {
 		k := normLine(s.Text)
 		if k == "" || seen[k] || chapterLine.MatchString(s.Text) {
-			continue
-		}
-		if title != "" && (k == title || strings.Contains(title, k) || strings.Contains(k, title)) {
 			continue
 		}
 		seen[k] = true
@@ -131,7 +128,18 @@ func patternLines(t *TextStyle) []ShotText {
 	return out
 }
 
-// ClassifyText is the text pattern of one read: dialogue when two lines or more are dialogue (quoted, or read as a character speaking);
+// spoken says a line reads as speech: in quotes, or flagged as dialogue and a question or an exclamation. The flag alone is not enough:
+// the read flags plain story captions in the first person as dialogue too.
+func spoken(l ShotText) bool {
+	if quotedLine.MatchString(l.Text) {
+		return true
+	}
+	t := strings.TrimSpace(l.Text)
+	return l.Dialogue && (strings.HasSuffix(t, "?") || strings.HasSuffix(t, "!"))
+}
+
+// ClassifyText is the text pattern of one read: dialogue when two lines or more read as speech (spoken: quoted, or a question or an
+// exclamation the read saw as a character speaking);
 // story_captions when a new line comes on half of the shots seen or more (at least two lines, three when more than three shots were
 // seen); single_title when there is a title or a line; none when there is no text at all. A read made before the shots were read
 // (stylevision.v3 and older) is single_title or none.
@@ -142,7 +150,7 @@ func ClassifyText(t *TextStyle) string {
 	lines := patternLines(t)
 	dialogue := 0
 	for _, l := range lines {
-		if l.Dialogue || quotedLine.MatchString(l.Text) {
+		if spoken(l) {
 			dialogue++
 		}
 	}

@@ -81,6 +81,8 @@ var settingValues = map[string][]string{
 	"ending_hold":    {HoldShort, HoldLong},
 	"cut_timing":     {CutsOnFullReps, CutsMidRep},
 	"angle_switches": {LevelOff, LevelOn},
+	"text_pattern":   TextPatterns,
+	"text_position":  {TextTop, TextUpperThird, TextMiddle, TextLowerThird, PositionAuto},
 }
 
 // SettingValues returns the allowed values of a setting (nil for title_colour, a hex code, and for an unknown name).
@@ -107,6 +109,10 @@ type Settings struct {
 	EndingHold    string `json:"ending_hold,omitempty"`
 	CutTiming     string `json:"cut_timing,omitempty"`
 	AngleSwitches string `json:"angle_switches,omitempty"`
+	// TextPattern is how the video's text is told (P6-05d): one title, story captions (a new short line on each shot), dialogue (quoted
+	// lines) or none; TextPosition where the lines of story captions and dialogue sit (top, upper_third, middle, lower_third or auto).
+	TextPattern  string `json:"text_pattern,omitempty"`
+	TextPosition string `json:"text_position,omitempty"`
 }
 
 // fields lists the settings with their JSON names, for validation and resolution.
@@ -121,7 +127,7 @@ func (s *Settings) fields() []struct {
 		{"vibe", &s.Vibe}, {"transitions", &s.Transitions}, {"text_animation", &s.TextAnimation}, {"camera_motion", &s.CameraMotion},
 		{"title_colour", &s.TitleColour}, {"title_position", &s.TitlePosition}, {"title_case", &s.TitleCase}, {"music", &s.Music}, {"pace", &s.Pace},
 		{"chapter_titles", &s.ChapterTitles}, {"title_template", &s.TitleTemplate}, {"ending_hold", &s.EndingHold}, {"cut_timing", &s.CutTiming},
-		{"angle_switches", &s.AngleSwitches},
+		{"angle_switches", &s.AngleSwitches}, {"text_pattern", &s.TextPattern}, {"text_position", &s.TextPosition},
 	}
 }
 
@@ -333,7 +339,39 @@ func Resolve(p *Profile, suggested *Settings, mine Settings, runVibe string) Res
 	choose(&r.EndingHold, &r.Sources.EndingHold, cand{mine.EndingHold, SourceYou}, cand{sug.EndingHold, SourceSuggested}, cand{mHold, SourceMeasured}, cand{HoldLong, SourceDefault})
 	choose(&r.CutTiming, &r.Sources.CutTiming, cand{mine.CutTiming, SourceYou}, cand{sug.CutTiming, SourceSuggested}, cand{mTiming, SourceMeasured}, cand{CutsOnFullReps, SourceDefault})
 	choose(&r.AngleSwitches, &r.Sources.AngleSwitches, cand{mine.AngleSwitches, SourceYou}, cand{sug.AngleSwitches, SourceSuggested}, cand{mAngles, SourceMeasured}, cand{LevelOn, SourceDefault})
+
+	// The text pattern and where its lines sit (P6-05d): measured from the text of every shot.
+	var mPattern, mTextPos string
+	if p != nil && p.Text != nil && p.Text.PatternRead > 0 {
+		mPattern = p.Text.Pattern
+		if l := p.Text.LineLook; l != nil && (mPattern == PatternStoryCaptions || mPattern == PatternDialogue) {
+			mTextPos = l.Position
+		}
+	}
+	choose(&r.TextPattern, &r.Sources.TextPattern, cand{mine.TextPattern, SourceYou}, cand{mPattern, SourceMeasured}, cand{PatternSingleTitle, SourceDefault})
+	choose(&r.TextPosition, &r.Sources.TextPosition, cand{mine.TextPosition, SourceYou}, cand{mTextPos, SourceMeasured}, cand{PositionAuto, SourceDefault})
 	return r
+}
+
+// Lines says the effective style tells its text in lines over the shots: story captions or dialogue.
+func (r Resolved) Lines() bool {
+	return r.TextPattern == PatternStoryCaptions || r.TextPattern == PatternDialogue
+}
+
+// FaceOnly says the lines of this style may stand on the person's body and only keep off the face (a text item's avoid face): the style
+// tells its text in lines, and they sit in the middle of the frame, or the creator's own lines lie over the body (half of them or more).
+// A title, and the text of a creator whose lines sit clear of the body, keeps off the whole body.
+func (s *Style) FaceOnly() bool {
+	if s == nil || !s.Resolved.Lines() {
+		return false
+	}
+	if s.Resolved.TextPosition == TextMiddle {
+		return true
+	}
+	if p := s.Profile; p != nil && p.Text != nil && p.Text.LineLook != nil {
+		return p.Text.LineLook.OverBodyShare >= 0.5
+	}
+	return false
 }
 
 // MeasuredTitleCase is the title_case setting the profile's titles stand for ("" when no case was measured).

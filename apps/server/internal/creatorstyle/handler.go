@@ -94,6 +94,12 @@ func SettingsOf(in api.StyleSettings) styleprofile.Settings {
 	if in.AngleSwitches != nil {
 		s.AngleSwitches = string(*in.AngleSwitches)
 	}
+	if in.TextPattern != nil {
+		s.TextPattern = string(*in.TextPattern)
+	}
+	if in.TextPosition != nil {
+		s.TextPosition = string(*in.TextPosition)
+	}
 	return s
 }
 
@@ -141,6 +147,12 @@ func apiSettings(s styleprofile.Settings) api.StyleSettings {
 	if s.AngleSwitches != "" {
 		out.AngleSwitches = ptr(api.StyleToggle(s.AngleSwitches))
 	}
+	if s.TextPattern != "" {
+		out.TextPattern = ptr(api.StyleTextPattern(s.TextPattern))
+	}
+	if s.TextPosition != "" {
+		out.TextPosition = ptr(api.StyleTextPosition(s.TextPosition))
+	}
 	return out
 }
 
@@ -155,13 +167,14 @@ func StyleOf(v View) api.CreatorStyle {
 		CameraMotion: api.StyleLevel(r.CameraMotion), TitlePosition: api.StyleTitlePosition(r.TitlePosition), TitleCase: api.StyleTitleCase(r.TitleCase),
 		Music: api.StyleMusic(r.Music), Pace: api.StylePace(r.Pace),
 		ChapterTitles: api.StyleToggle(r.ChapterTitles), EndingHold: api.StyleEndingHold(r.EndingHold), CutTiming: api.StyleCutTiming(r.CutTiming),
-		AngleSwitches: api.StyleToggle(r.AngleSwitches),
+		AngleSwitches: api.StyleToggle(r.AngleSwitches), TextPattern: api.StyleTextPattern(r.TextPattern), TextPosition: api.StyleTextPosition(r.TextPosition),
 		Sources: api.StyleSettingSources{
 			Vibe: source(r.Sources.Vibe), Transitions: source(r.Sources.Transitions), TextAnimation: source(r.Sources.TextAnimation),
 			CameraMotion: source(r.Sources.CameraMotion), TitleColour: source(r.Sources.TitleColour), TitlePosition: source(r.Sources.TitlePosition),
 			TitleCase: source(r.Sources.TitleCase), Music: source(r.Sources.Music), Pace: source(r.Sources.Pace),
 			ChapterTitles: source(r.Sources.ChapterTitles), TitleTemplate: source(r.Sources.TitleTemplate), EndingHold: source(r.Sources.EndingHold),
 			CutTiming: source(r.Sources.CutTiming), AngleSwitches: source(r.Sources.AngleSwitches),
+			TextPattern: source(r.Sources.TextPattern), TextPosition: source(r.Sources.TextPosition),
 		},
 	}
 	if r.TitleColour != "" {

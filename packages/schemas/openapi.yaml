@@ -3503,6 +3503,18 @@ components:
       type: string
       description: "`full_reps` (cuts fall at the end of a rep) or `mid_rep` (cuts fall on the beat, also in the middle of a rep)."
       enum: [full_reps, mid_rep]
+    StyleTextPattern:
+      type: string
+      description: |
+        How the video's text is told: `single_title` (one title in the hook, chapter titles besides), `story_captions` (a new short
+        line on each shot that tells a little story), `dialogue` (quoted lines, often two speakers, before a reveal) or `none`.
+      enum: [single_title, story_captions, dialogue, none]
+    StyleTextPosition:
+      type: string
+      description: |
+        Where the lines of story captions and dialogue sit: `top`, `upper_third`, `middle`, `lower_third` or `auto` (the editor picks).
+        Lines in the middle, or a creator's lines that lie over the body, keep off the face only; a title keeps off the whole body.
+      enum: [top, upper_third, middle, lower_third, auto]
     StyleSettingSource:
       type: string
       description: |
@@ -3550,10 +3562,14 @@ components:
           $ref: "#/components/schemas/StyleCutTiming"
         angle_switches:
           $ref: "#/components/schemas/StyleToggle"
+        text_pattern:
+          $ref: "#/components/schemas/StyleTextPattern"
+        text_position:
+          $ref: "#/components/schemas/StyleTextPosition"
 
     StyleSettingSources:
       type: object
-      required: [vibe, transitions, text_animation, camera_motion, title_colour, title_position, title_case, music, pace, chapter_titles, title_template, ending_hold, cut_timing, angle_switches]
+      required: [vibe, transitions, text_animation, camera_motion, title_colour, title_position, title_case, music, pace, chapter_titles, title_template, ending_hold, cut_timing, angle_switches, text_pattern, text_position]
       properties:
         vibe:
           $ref: "#/components/schemas/StyleSettingSource"
@@ -3583,13 +3599,17 @@ components:
           $ref: "#/components/schemas/StyleSettingSource"
         angle_switches:
           $ref: "#/components/schemas/StyleSettingSource"
+        text_pattern:
+          $ref: "#/components/schemas/StyleSettingSource"
+        text_position:
+          $ref: "#/components/schemas/StyleSettingSource"
 
     EffectiveStyleSettings:
       type: object
       description: |
         What the editor follows. `title_colour` is `null` when nothing decides it (the editor then uses the title style's own), and
         `title_template` when no form was learnt or set (the editor picks the words).
-      required: [vibe, transitions, text_animation, camera_motion, title_colour, title_position, title_case, music, pace, chapter_titles, title_template, ending_hold, cut_timing, angle_switches, sources]
+      required: [vibe, transitions, text_animation, camera_motion, title_colour, title_position, title_case, music, pace, chapter_titles, title_template, ending_hold, cut_timing, angle_switches, text_pattern, text_position, sources]
       properties:
         vibe:
           $ref: "#/components/schemas/EditVibe"
@@ -3619,6 +3639,10 @@ components:
           $ref: "#/components/schemas/StyleCutTiming"
         angle_switches:
           $ref: "#/components/schemas/StyleToggle"
+        text_pattern:
+          $ref: "#/components/schemas/StyleTextPattern"
+        text_position:
+          $ref: "#/components/schemas/StyleTextPosition"
         sources:
           $ref: "#/components/schemas/StyleSettingSources"
 

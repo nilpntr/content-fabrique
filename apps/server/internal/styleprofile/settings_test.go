@@ -35,7 +35,8 @@ func still(p *Profile) *Resolved {
 func TestTheDefaultsWithNothingSet(t *testing.T) {
 	r := Resolve(nil, nil, Settings{}, "")
 	want := Settings{Vibe: VibeLively, Transitions: LevelOff, TextAnimation: LevelOn, CameraMotion: LevelSubtle, TitlePosition: PositionAuto,
-		TitleCase: CaseAsTyped, Music: MusicAlways, Pace: PaceLikeMine, ChapterTitles: LevelOn, EndingHold: HoldLong, CutTiming: CutsOnFullReps, AngleSwitches: LevelOn}
+		TitleCase: CaseAsTyped, Music: MusicAlways, Pace: PaceLikeMine, ChapterTitles: LevelOn, EndingHold: HoldLong, CutTiming: CutsOnFullReps, AngleSwitches: LevelOn,
+		TextPattern: PatternSingleTitle, TextPosition: PositionAuto}
 	if r.Settings != want {
 		t.Fatalf("defaults %+v", r.Settings)
 	}
@@ -397,5 +398,44 @@ func TestTransitionsComeFromTheCreatorNotTheVibe(t *testing.T) {
 		if r := Resolve(plain, nil, Settings{Transitions: mine}, VibeHype); r.Transitions != mine || r.Sources.Transitions != SourceYou {
 			t.Errorf("the creator's %s: %s from %s", mine, r.Transitions, r.Sources.Transitions)
 		}
+	}
+}
+
+// The text pattern and where its lines sit come from the text of the shots, and the creator wins; story captions in the middle of the
+// frame (or lines the creator puts over the body) keep off the face only, a title keeps off the whole body.
+func TestTheTextPatternIsMeasuredAndOverridable(t *testing.T) {
+	var refs []Measures
+	for _, r := range []*TextStyle{storyRead(), storyRead(), titleRead()} {
+		refs = append(refs, Measures{DurationS: 20, Text: r})
+	}
+	p := &Profile{Text: aggregateText(refs)}
+	r := Resolve(p, nil, Settings{}, "")
+	if r.TextPattern != PatternStoryCaptions || r.Sources.TextPattern != SourceMeasured || r.TextPosition != TextMiddle || r.Sources.TextPosition != SourceMeasured {
+		t.Fatalf("measured: %+v %+v", r.Settings, r.Sources)
+	}
+	if st := (&Style{Profile: p, Resolved: r}); !st.FaceOnly() {
+		t.Error("story captions in the middle of the frame keep off the whole body")
+	}
+	// The creator moves the lines to the lower third: three of four of their own lines lie over the body, so they still keep off the face
+	// only.
+	low := Resolve(p, nil, Settings{TextPosition: TextLowerThird}, "")
+	if low.TextPosition != TextLowerThird || low.Sources.TextPosition != SourceYou || !(&Style{Profile: p, Resolved: low}).FaceOnly() {
+		t.Errorf("lower third: %+v", low.Settings)
+	}
+	// One title: the whole body, whatever the lines of the references did.
+	title := Resolve(p, nil, Settings{TextPattern: PatternSingleTitle}, "")
+	if title.TextPattern != PatternSingleTitle || title.Sources.TextPattern != SourceYou || (&Style{Profile: p, Resolved: title}).FaceOnly() {
+		t.Errorf("single title: %+v", title.Settings)
+	}
+	// Without a read of the shots: one title, the editor's place, the whole body.
+	none := Resolve(nil, nil, Settings{}, "")
+	if none.TextPattern != PatternSingleTitle || none.Sources.TextPattern != SourceDefault || none.TextPosition != PositionAuto || (&Style{Resolved: none}).FaceOnly() {
+		t.Errorf("no profile: %+v", none.Settings)
+	}
+	if _, err := (Settings{TextPattern: "subtitles"}).Normalize(); err == nil {
+		t.Error("an unknown text pattern was accepted")
+	}
+	if _, err := (Settings{TextPosition: TextMiddle, TextPattern: PatternDialogue}).Normalize(); err != nil {
+		t.Error(err)
 	}
 }

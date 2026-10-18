@@ -60,6 +60,20 @@ func TestTheTextPatternOfARead(t *testing.T) {
 			t.Errorf("%s: %q, want %q", name, got, c.want)
 		}
 	}
+	// The read's dialogue flag alone does not make plain first-person captions a dialogue.
+	flagged := storyRead()
+	for i := range flagged.ShotTexts {
+		flagged.ShotTexts[i].Dialogue = true
+	}
+	if got := ClassifyText(flagged); got != PatternStoryCaptions {
+		t.Errorf("captions flagged as dialogue: %q", got)
+	}
+	// The first caption read as the title still counts as a line of the story.
+	titled := storyRead()
+	titled.TitlePresent, titled.Text = true, titled.ShotTexts[0].Text
+	if got := ClassifyText(titled); got != PatternStoryCaptions {
+		t.Errorf("story captions whose first line is read as the title: %q", got)
+	}
 	// Quotes alone make a line dialogue, whatever the read's flag said.
 	quoted := dialogueRead()
 	for i := range quoted.ShotTexts {

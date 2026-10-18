@@ -1770,6 +1770,18 @@ export interface components {
          */
         StyleCutTiming: "full_reps" | "mid_rep";
         /**
+         * @description How the video's text is told: `single_title` (one title in the hook, chapter titles besides), `story_captions` (a new short
+         *     line on each shot that tells a little story), `dialogue` (quoted lines, often two speakers, before a reveal) or `none`.
+         * @enum {string}
+         */
+        StyleTextPattern: "single_title" | "story_captions" | "dialogue" | "none";
+        /**
+         * @description Where the lines of story captions and dialogue sit: `top`, `upper_third`, `middle`, `lower_third` or `auto` (the editor picks).
+         *     Lines in the middle, or a creator's lines that lie over the body, keep off the face only; a title keeps off the whole body.
+         * @enum {string}
+         */
+        StyleTextPosition: "top" | "upper_third" | "middle" | "lower_third" | "auto";
+        /**
          * @description Where an effective setting came from: `this_video` (the vibe of one edit), `you` (the creator's own setting), `suggested`
          *     (the AI's suggestion from the reference videos), `measured` (measured from them), `vibe` (what the vibe asks for) or `default`.
          * @enum {string}
@@ -1796,6 +1808,8 @@ export interface components {
             ending_hold?: components["schemas"]["StyleEndingHold"];
             cut_timing?: components["schemas"]["StyleCutTiming"];
             angle_switches?: components["schemas"]["StyleToggle"];
+            text_pattern?: components["schemas"]["StyleTextPattern"];
+            text_position?: components["schemas"]["StyleTextPosition"];
         };
         StyleSettingSources: {
             vibe: components["schemas"]["StyleSettingSource"];
@@ -1812,6 +1826,8 @@ export interface components {
             ending_hold: components["schemas"]["StyleSettingSource"];
             cut_timing: components["schemas"]["StyleSettingSource"];
             angle_switches: components["schemas"]["StyleSettingSource"];
+            text_pattern: components["schemas"]["StyleSettingSource"];
+            text_position: components["schemas"]["StyleSettingSource"];
         };
         /**
          * @description What the editor follows. `title_colour` is `null` when nothing decides it (the editor then uses the title style's own), and
@@ -1832,6 +1848,8 @@ export interface components {
             ending_hold: components["schemas"]["StyleEndingHold"];
             cut_timing: components["schemas"]["StyleCutTiming"];
             angle_switches: components["schemas"]["StyleToggle"];
+            text_pattern: components["schemas"]["StyleTextPattern"];
+            text_position: components["schemas"]["StyleTextPosition"];
             sources: components["schemas"]["StyleSettingSources"];
         };
         /**
