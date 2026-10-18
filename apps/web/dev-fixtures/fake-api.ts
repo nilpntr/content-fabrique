@@ -1,4 +1,5 @@
 import type { CreatorStyle, StyleSettings } from "@/lib/api/client";
+import { sampleFacets } from "@/lib/sample-facets";
 import { withMySettings } from "@/lib/style-words";
 import { annotation, apiAsset, assetId, callIdOf, emptyStyle, event, learntStyle, PLAN_FORMAT, project, projectId, projectSummary, readyRender, renderId, run, runId, storyStyle, styleReference, timelineVersion, v2Artifacts, v2Run, v2Spec, versionSummary } from "@/test-fixtures";
 
@@ -48,18 +49,49 @@ function poster(n: number): string {
 }
 
 const CLIPS = [
-  { n: 1, title: "Heaviest lat pulldown", description: "A lifter in a grey tank top pulls a heavy lat pulldown to a hard lockout.", tags: ["lat pulldown", "back day", "lockout"] },
-  { n: 2, title: "Seated cable row", description: "Controlled seated rows with a pause at the squeeze.", tags: ["row", "cable", "back day"] },
-  { n: 3, title: "Back pose, held", description: "A held back double biceps pose in warm gym light.", tags: ["posing", "back"] },
-  { n: 4, title: "Chalking up", description: "Hands in chalk before the last set.", tags: ["chalk", "detail"] },
-  { n: 5, title: "Treadmill warm-up", description: "", tags: [] },
+  { n: 1, title: "Heaviest lat pulldown", description: "A lifter in a grey tank top pulls a heavy lat pulldown to a hard lockout.", exercise: "lat pulldown", labels: ["type:lift", "body:back", "movement:pull", "angle:front", "equipment:cable"] },
+  { n: 2, title: "Seated cable row", description: "Controlled seated rows with a pause at the squeeze.", exercise: "seated cable row", labels: ["type:lift", "body:back", "movement:row", "angle:side", "equipment:cable"] },
+  { n: 3, title: "Back pose, held", description: "A held back double biceps pose in warm gym light.", exercise: "back double biceps", labels: ["type:pose", "body:back", "angle:back"] },
+  { n: 4, title: "Chalking up", description: "Hands in chalk before the last set.", exercise: "", labels: ["type:b_roll", "angle:close_up"] },
+  { n: 5, title: "Treadmill warm-up", description: "", exercise: "", labels: [] },
+  { n: 6, title: "Seated leg press, side view", description: "A seated leg press on a plate-loaded machine, filmed from the side.", exercise: "seated leg press", labels: ["type:lift", "body:legs", "movement:squat", "angle:side", "equipment:machine"] },
+  { n: 7, title: "Incline chest press machine", description: "Incline presses on a machine, filmed from the side.", exercise: "incline chest press", labels: ["type:lift", "body:chest", "movement:press", "angle:side", "equipment:machine"] },
+  { n: 8, title: "Hammer curls in slow motion", description: "Hammer curls with dumbbells, shot in slow motion.", exercise: "hammer curl", labels: ["type:lift", "type:slow_motion", "body:arms", "movement:curl", "angle:front", "equipment:dumbbell"] },
+  { n: 9, title: "Lying leg curl, side view", description: "Lying leg curls on a machine, filmed from the side.", exercise: "lying leg curl", labels: ["type:lift", "body:legs", "movement:curl", "angle:side", "equipment:machine"] },
+  { n: 10, title: "Cable triceps pushdown", description: "Single-arm cable pushdowns, filmed from the side.", exercise: "single-arm cable triceps pushdown", labels: ["type:lift", "body:arms", "movement:extension", "angle:side", "equipment:cable"] },
+  { n: 11, title: "Setting up the machine", description: "Loading plates onto a machine between sets.", exercise: "", labels: ["type:b_roll", "angle:side", "equipment:machine"] },
 ];
+
+const FILTER_KEYS = ["type", "body", "movement", "angle", "equipment"] as const;
+
+/** The clips that have every label the address asks for (`?body=back&angle=side`), except one facet's (for its own counts). */
+function filterClips(search: URLSearchParams, except?: string) {
+  return CLIPS.filter((clip) => FILTER_KEYS.every((key) => key === except || !search.get(key) || clip.labels.includes(`${key}:${search.get(key)}`)));
+}
+
+/** GET /v1/assets/facets, counted as the server does: each facet's own filter left out of its counts. */
+function facetCounts(search: URLSearchParams) {
+  const facets = [] as { facet: string; label: string; values: { value: string; label: string; count: number }[] }[];
+  const names: Record<string, string> = { type: "Type", body: "Body part", movement: "Movement", angle: "Angle", equipment: "Equipment" };
+  for (const key of FILTER_KEYS) {
+    const counts = new Map<string, { value: string; label: string; count: number }>();
+    for (const clip of filterClips(search, key)) {
+      for (const f of sampleFacets(...clip.labels).filter((f) => f.facet === key)) {
+        counts.set(f.value, { value: f.value, label: f.label, count: (counts.get(f.value)?.count ?? 0) + 1 });
+      }
+    }
+    if (counts.size > 0) facets.push({ facet: key, label: names[key] ?? key, values: [...counts.values()] });
+  }
+  return { facets };
+}
 
 const clipAsset = (clip: (typeof CLIPS)[number], posters?: string) =>
   apiAsset(clip.n, {
     title: clip.title,
+    title_source: clip.description ? "quicklook" : "filename",
     description: clip.description,
-    tags: clip.tags,
+    exercise: clip.exercise,
+    facets: sampleFacets(...clip.labels),
     quick_look_status: clip.description ? "succeeded" : "pending",
     derivatives: { poster: { url: posters && clip.n <= 3 ? posters.replace("{n}", String(clip.n)) : poster(clip.n) } } as never,
   });
@@ -165,7 +197,8 @@ export function installFakeApi(scenario: Scenario): void {
     const method = request.method;
     if (method === "GET") {
       if (path === "/v1/me") return json(me);
-      if (path === "/v1/assets") return json({ items: CLIPS.map((clip) => clipAsset(clip, scenario.posters)), next_cursor: null });
+      if (path === "/v1/assets") return json({ items: filterClips(url.searchParams).map((clip) => clipAsset(clip, scenario.posters)), next_cursor: null });
+      if (path === "/v1/assets/facets") return json(facetCounts(url.searchParams));
       if (path === "/v1/projects" && scenario.projects === "none") return json({ items: [], next_cursor: null });
       if (path === "/v1/projects") {
         const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();

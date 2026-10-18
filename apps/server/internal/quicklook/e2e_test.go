@@ -89,7 +89,7 @@ func TestRecordAgainstAFakeTransport(t *testing.T) {
 }
 
 // CI replays. This is the whole path of the criterion: a video is marked ready by the ingest's own transaction, the job it
-// enqueued runs on its queue, the model is replayed from the cassette (no HTTP at all), and the asset has a title and tags and
+// enqueued runs on its queue, the model is replayed from the cassette (no HTTP at all), and the asset has a title and labels and
 // is found by a search for "row".
 func TestReplayEndToEndFromIngestReadyToSearch(t *testing.T) {
 	ctx := context.Background()
@@ -211,8 +211,8 @@ func TestReplayEndToEndFromIngestReadyToSearch(t *testing.T) {
 		t.Fatalf("quick look %s: %s", *got.QuickLookStatus, got.QuickLook)
 	}
 	if got.Title != "Barbell row" || got.TitleSource != store.TitleFromQuickLook || !strings.Contains(got.Description, "barbell rows") ||
-		strings.Join(got.Tags, ",") != "barbell row,back,gym,side view,lats" {
-		t.Fatalf("asset = title %q (%s), description %q, tags %v", got.Title, got.TitleSource, got.Description, got.Tags)
+		got.Exercise != "barbell row" || strings.Join(got.Facets, ",") != "type:lift,body:back,movement:row,angle:side,equipment:barbell" {
+		t.Fatalf("asset = title %q (%s), description %q, exercise %q, facets %v", got.Title, got.TitleSource, got.Description, got.Exercise, got.Facets)
 	}
 
 	// Searching "row" finds it, in its own workspace only.
@@ -222,6 +222,18 @@ func TestReplayEndToEndFromIngestReadyToSearch(t *testing.T) {
 	}
 	if found, _ := st.SearchAssets(ctx, other.ID, store.SearchWords("row"), nil, 10); len(found) != 0 {
 		t.Fatalf("another workspace found the clip: %v", found)
+	}
+	// The labels are searchable by their words ("lifting", "side view") and filter the library.
+	for _, q := range []string{"lifting", "side view", "barbell row"} {
+		if found, err := st.SearchAssets(ctx, ws.ID, store.SearchWords(q), nil, 10); err != nil || len(found) != 1 {
+			t.Errorf("search for %q = %d assets, %v", q, len(found), err)
+		}
+	}
+	if found, err := st.FindAssets(ctx, ws.ID, store.AssetQuery{Facets: []string{"body:back", "angle:side"}, Limit: 10}); err != nil || len(found) != 1 {
+		t.Errorf("filter back + side = %d assets, %v", len(found), err)
+	}
+	if found, _ := st.FindAssets(ctx, ws.ID, store.AssetQuery{Facets: []string{"body:back", "angle:front"}, Limit: 10}); len(found) != 0 {
+		t.Errorf("filter back + front found the side view: %v", found)
 	}
 
 	// CI made no model call, and a replay writes no ledger row (nothing was spent).

@@ -123,7 +123,7 @@ test("footage: shift-click selects the range from the last clicked clip, and shi
   expect(footage.ids()).toEqual([SAMPLE_ASSETS[5]?.id]);
 });
 
-test("footage: select all, clear, search and tag filters", () => {
+test("footage: select all, clear, search and label filters", () => {
   const footage = Footage();
   fireEvent.click(screen.getByRole("button", { name: "Select all" }));
   footage.sync();
@@ -132,10 +132,19 @@ test("footage: select all, clear, search and tag filters", () => {
   footage.sync();
   expect(footage.ids()).toEqual([]);
 
-  fireEvent.click(screen.getByRole("button", { name: "posing" }));
-  expect(screen.getByRole("button", { name: "posing" }).getAttribute("aria-pressed")).toBe("true");
-  expect(screen.getAllByRole("checkbox")).toHaveLength(5);
-  fireEvent.change(screen.getByRole("searchbox", { name: "Search clips" }), { target: { value: "mirror" } });
+  // Three compact filters with the values the clips have and their counts, not a chip per word.
+  const type = screen.getByRole("combobox", { name: "Type" }) as HTMLSelectElement;
+  expect(screen.getByRole("combobox", { name: "Body part" })).toBeTruthy();
+  expect(screen.getByRole("combobox", { name: "Angle" })).toBeTruthy();
+  expect([...type.options].map((o) => o.text)).toEqual(["Type", "Lifting (7)", "Posing (3)", "B-roll (2)", "Before and after (1)", "Product (1)", "Slow motion (1)", "Talking (1)"]);
+  expect(screen.queryAllByRole("button", { name: "posing" })).toHaveLength(0);
+  fireEvent.change(type, { target: { value: "pose" } });
+  expect(screen.getAllByRole("checkbox")).toHaveLength(3);
+  // The other filters count what this one leaves: the poses are two front views and a back view.
+  const angle = screen.getByRole("combobox", { name: "Angle" }) as HTMLSelectElement;
+  expect([...angle.options].map((o) => o.text)).toEqual(["Angle", "Front view (2)", "Back view (1)"]);
+  // The search finds words of the title, the exercise and the labels.
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search clips" }), { target: { value: "front" } });
   expect(screen.getAllByRole("checkbox")).toHaveLength(2);
   // "Select all" only takes what is shown.
   fireEvent.click(screen.getByRole("button", { name: /Select all 2 shown/ }));
@@ -146,6 +155,21 @@ test("footage: select all, clear, search and tag filters", () => {
   expect(screen.getByText(/2 hidden by the filter/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
   expect(screen.getAllByRole("checkbox")).toHaveLength(SAMPLE_ASSETS.length);
+  expect((screen.getByRole("combobox", { name: "Type" }) as HTMLSelectElement).value).toBe("");
+});
+
+test("footage: a card shows the exercise and at most two labels", () => {
+  Footage();
+  // The exercise the quick look named is the heading; the full title stays as the tooltip.
+  const curl = checkbox(/Hammer curl/);
+  const card = curl.closest("li") as HTMLElement;
+  expect(card.textContent).toContain("Hammer curl");
+  expect(card.querySelector("[title='Hammer curls, slow motion']")).toBeTruthy();
+  const badges = [...card.querySelectorAll("[data-slot=facet-badge]")].map((b) => b.textContent);
+  expect(badges).toEqual(["Slow motion", "Arms"]);
+  for (const box of screen.getAllByRole("checkbox")) {
+    expect((box.closest("li") as HTMLElement).querySelectorAll("[data-slot=facet-badge]").length).toBeLessThanOrEqual(2);
+  }
 });
 
 test("formatDuration", () => {
@@ -282,14 +306,14 @@ test("footage: the shift-click anchor is reset by Clear, Select all and by a sel
   fireEvent.click(screen.getByRole("button", { name: "Clear" }));
   rerender(view([]));
   onChange.mockClear();
-  fireEvent.click(checkbox(/Squat, rear view/), { shiftKey: true }); // no anchor: just this clip
+  fireEvent.click(checkbox(/Back squat/), { shiftKey: true }); // no anchor: just this clip
   expect(onChange).toHaveBeenLastCalledWith([ids[7]]);
 
   rerender(view([ids[7] as AssetId]));
   fireEvent.click(checkbox(/Gym walk-in/)); // anchor: clip 5
   rerender(view([ids[7] as AssetId, ids[4] as AssetId]));
   rerender(view([ids[0] as AssetId])); // the parent replaced the selection
-  fireEvent.click(checkbox(/Deadlift lockout/), { shiftKey: true });
+  fireEvent.click(checkbox(/^Deadlift$/), { shiftKey: true });
   expect(onChange).toHaveBeenLastCalledWith([ids[0], ids[6]]);
 });
 

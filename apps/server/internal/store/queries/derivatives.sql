@@ -66,19 +66,20 @@ WHERE workspace_id = @workspace_id AND id = @id AND kind = 'video' AND deleted_a
   AND (quick_look_status IS NULL OR quick_look_status = 'pending')
 RETURNING *;
 
--- The quick look succeeded. The title changes only while it is not the user's; the description and tags are the quick look's.
+-- The quick look succeeded. The title changes only while it is not the user's; the description, the exercise and the facets are the
+-- quick look's (the old free-form tags, legacy_tags, are left as they are).
 -- One statement, so a title edited at the same moment wins: the CASE sees the row as it is when the update applies.
 -- name: ApplyQuickLook :one
 UPDATE assets
 SET title = CASE WHEN title_source = 'user' THEN title ELSE @title::text END,
     title_source = CASE WHEN title_source = 'user' THEN title_source ELSE 'quicklook' END,
-    description = @description::text, tags = @tags::text[],
+    description = @description::text, exercise = @exercise::text, facets = @facets::text[], facet_words = @facet_words::text,
     quick_look_status = 'succeeded', quick_look = @detail::jsonb, quick_look_at = now()
 WHERE workspace_id = @workspace_id AND id = @id AND status = 'ready' AND deleted_at IS NULL
 RETURNING *;
 
 -- A run that only adds to a good quick look (the subject boxes, the frames): only those keys of the detail are written, the title, the
--- description, the tags and the rest of the detail stay as they are, whatever changed while the model call ran.
+-- description, the labels and the rest of the detail stay as they are, whatever changed while the model call ran.
 -- name: MergeQuickLookDetail :one
 UPDATE assets SET quick_look = COALESCE(quick_look, '{}'::jsonb) || @patch::jsonb, quick_look_at = now()
 WHERE workspace_id = @workspace_id AND id = @id AND status = 'ready' AND deleted_at IS NULL AND quick_look_status = 'succeeded'
@@ -113,8 +114,9 @@ ORDER BY id
 LIMIT @row_limit;
 
 -- Where the person is in the sampled frames of several videos (the quick look's "subjects" member), for the editor's checks and the
--- compiler's title placement, with the title and tags (a pose or physique shot is told by them). A video with none is not in the result.
+-- compiler's title placement, with the title and the facets (a pose or physique shot is told by them: "type:pose"). A video with none is
+-- not in the result.
 -- name: ListAssetSubjects :many
-SELECT id AS asset_id, (quick_look -> 'subjects')::jsonb AS subjects, title, tags FROM assets
+SELECT id AS asset_id, (quick_look -> 'subjects')::jsonb AS subjects, title, facets FROM assets
 WHERE workspace_id = @workspace_id AND id = ANY(@asset_ids::uuid[]) AND status = 'ready' AND deleted_at IS NULL
   AND quick_look_status = 'succeeded' AND jsonb_typeof(quick_look -> 'subjects') = 'object';

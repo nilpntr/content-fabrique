@@ -81,9 +81,12 @@ export interface paths {
          * @description Cursor pagination. Deleted assets are not listed. A `ready` asset carries its `media` facts and short-lived
          *     `derivatives` URLs, as in `getAsset`.
          *     With `q` only the assets that match the search are listed (still newest first, same cursor): every word of `q`
-         *     must occur, as the start of a word, in the asset's title, description, tags or file name, with English stemming
-         *     (`row` finds "Barbell rows"). Characters other than letters and digits only separate words; a `q` without any
-         *     word lists everything.
+         *     must occur, as the start of a word, in the asset's title, exercise, labels (`facets`), description or file name, with
+         *     English stemming (`row` finds "Barbell rows", `lifting` finds the clips labelled Lifting). Characters other than letters
+         *     and digits only separate words; a `q` without any word lists everything.
+         *     `body`, `type`, `angle`, `movement` and `equipment` keep only the clips labelled with that value of the facet (all of
+         *     them, when several are given). A value the vocabulary does not have is `400 invalid_request`; `listAssetFacets` lists
+         *     the values the workspace's clips have, with counts.
          *     Only the assets of one `purpose` are listed: the footage by default, the style references with `purpose=style_reference`.
          */
         get: operations["listAssets"];
@@ -105,6 +108,31 @@ export interface paths {
          *     (`409 too_many_references`).
          */
         post: operations["createAsset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/assets/facets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The labels of the workspace's clips, with counts
+         * @description The values of the label facets (the type of clip, the body part, the movement, the angle, the equipment) that the
+         *     workspace's clips have, each with how many clips have it: what the library's filters offer. Only values that at least
+         *     one clip has are listed, in the vocabulary's order, and a facet without any is left out.
+         *     The counts follow the same `q` and facet filters as `listAssets`, except that each facet's own filter is left out of its
+         *     counts (with `body=back`, the `body` counts still list every body part, and the `angle` counts are of the back clips).
+         *     At most the newest 20,000 labelled clips are counted.
+         */
+        get: operations["listAssetFacets"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -990,8 +1018,8 @@ export interface components {
          */
         TitleSource: "filename" | "quicklook" | "user";
         /**
-         * @description `pending` (the clip is ready and its quick look has not finished), `succeeded` (title, description and tags were
-         *     written), `failed` (the clip is usable but has no description or tags; the title is still the file name) or
+         * @description `pending` (the clip is ready and its quick look has not finished), `succeeded` (title, description, exercise and labels were
+         *     written), `failed` (the clip is usable but has no description or labels; the title is still the file name) or
          *     `skipped` (nothing is owed: the asset failed its ingest, or the job could not run for a day).
          * @enum {string}
          */
@@ -1019,9 +1047,11 @@ export interface components {
             title_source?: components["schemas"]["TitleSource"];
             /** @description A one-line description written by the quick look (at most 160 characters). Empty until then. */
             description: string;
-            /** @description At most 8 lowercase tags of one to three words, written by the quick look. Empty until then. */
-            tags: string[];
-            /** @description The state of the quick look (the title, description and tags a video gets right after its ingest). Absent for an asset it does not apply to (audio, images, and videos from before it existed). */
+            /** @description The exercise (or pose) the clip shows, as a coach names it ("seated cable row"), written by the quick look. Empty when it shows none, the quick look was not sure, or has not run. */
+            exercise: string;
+            /** @description The clip's labels from the fixed vocabulary (the type of clip, the body part, the movement, the angle, the equipment), in the vocabulary's order. Written by the quick look; slow motion comes from the file's frame rate. Empty until then. */
+            facets: components["schemas"]["AssetFacet"][];
+            /** @description The state of the quick look (the title, description, exercise and labels a video gets right after its ingest). Absent for an asset it does not apply to (audio, images, and videos from before it existed). */
             quick_look_status?: components["schemas"]["QuickLookStatus"];
             /**
              * @description Why the asset is `failed`, as a code that is safe to show. The upload failed: `upload_expired`, `size_mismatch`,
@@ -1299,6 +1329,31 @@ export interface components {
             items: components["schemas"]["Asset"][];
             /** @description Pass it as `cursor` for the next page. Null on the last page. */
             next_cursor: string | null;
+        };
+        /** @description A facet of the clip labels (`type`, `body`, `movement`, `angle`, `equipment`). */
+        FacetId: string;
+        /** @description A value of a facet (`back`, `side`, `slow_motion`). The vocabulary is versioned on the server; `listAssetFacets` lists the values in use. */
+        FacetValueId: string;
+        AssetFacet: {
+            facet: components["schemas"]["FacetId"];
+            value: components["schemas"]["FacetValueId"];
+            /** @description The value in the creator's words ("Back view"). */
+            label: string;
+        };
+        FacetCount: {
+            value: components["schemas"]["FacetValueId"];
+            label: string;
+            /** @description How many clips have the value. */
+            count: number;
+        };
+        FacetSummary: {
+            facet: components["schemas"]["FacetId"];
+            /** @description The facet in the creator's words ("Body part"). */
+            label: string;
+            values: components["schemas"]["FacetCount"][];
+        };
+        ListAssetFacetsResponse: {
+            facets: components["schemas"]["FacetSummary"][];
         };
         /**
          * @description The output format (D-25). It fixes the size of the rendered video (1080x1920, 1080x1080, 1080x1350, 1920x1080).
@@ -2190,6 +2245,16 @@ export interface components {
         RenderIdPath: components["schemas"]["RenderId"];
         /** @description The run's TypeID. */
         RunIdPath: components["schemas"]["RunId"];
+        /** @description Only the clips labelled with this body part (a value id of the `body` facet, such as `back`). */
+        FacetBody: components["schemas"]["FacetValueId"];
+        /** @description Only the clips of this type (a value id of the `type` facet, such as `lift` or `slow_motion`). */
+        FacetType: components["schemas"]["FacetValueId"];
+        /** @description Only the clips filmed from this angle (a value id of the `angle` facet, such as `side`). */
+        FacetAngle: components["schemas"]["FacetValueId"];
+        /** @description Only the clips of this movement (a value id of the `movement` facet, such as `row`). */
+        FacetMovement: components["schemas"]["FacetValueId"];
+        /** @description Only the clips with this equipment (a value id of the `equipment` facet, such as `cable`). */
+        FacetEquipment: components["schemas"]["FacetValueId"];
     };
     requestBodies: never;
     headers: never;
@@ -2277,6 +2342,16 @@ export interface operations {
                 purpose?: components["schemas"]["AssetPurpose"];
                 /** @description Search words, at most 100 characters. At most the first 8 words are used. */
                 q?: string;
+                /** @description Only the clips labelled with this body part (a value id of the `body` facet, such as `back`). */
+                body?: components["parameters"]["FacetBody"];
+                /** @description Only the clips of this type (a value id of the `type` facet, such as `lift` or `slow_motion`). */
+                type?: components["parameters"]["FacetType"];
+                /** @description Only the clips filmed from this angle (a value id of the `angle` facet, such as `side`). */
+                angle?: components["parameters"]["FacetAngle"];
+                /** @description Only the clips of this movement (a value id of the `movement` facet, such as `row`). */
+                movement?: components["parameters"]["FacetMovement"];
+                /** @description Only the clips with this equipment (a value id of the `equipment` facet, such as `cable`). */
+                equipment?: components["parameters"]["FacetEquipment"];
                 /** @description How many assets to return (default 50). */
                 limit?: number;
                 /** @description The `next_cursor` of the previous page. Opaque. */
@@ -2367,6 +2442,47 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    listAssetFacets: {
+        parameters: {
+            query?: {
+                /** @description Which assets to count (default `footage`, the library). */
+                purpose?: components["schemas"]["AssetPurpose"];
+                /** @description Search words, as in `listAssets`. */
+                q?: string;
+                /** @description Only the clips labelled with this body part (a value id of the `body` facet, such as `back`). */
+                body?: components["parameters"]["FacetBody"];
+                /** @description Only the clips of this type (a value id of the `type` facet, such as `lift` or `slow_motion`). */
+                type?: components["parameters"]["FacetType"];
+                /** @description Only the clips filmed from this angle (a value id of the `angle` facet, such as `side`). */
+                angle?: components["parameters"]["FacetAngle"];
+                /** @description Only the clips of this movement (a value id of the `movement` facet, such as `row`). */
+                movement?: components["parameters"]["FacetMovement"];
+                /** @description Only the clips with this equipment (a value id of the `equipment` facet, such as `cable`). */
+                equipment?: components["parameters"]["FacetEquipment"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The facets and their values. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListAssetFacetsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["Unavailable"];
         };

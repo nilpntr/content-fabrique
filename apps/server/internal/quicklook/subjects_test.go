@@ -8,37 +8,43 @@ import (
 
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/subject"
+	"github.com/nilpntr/content-fabrique/internal/taxonomy"
 )
 
 func answerWith(subjects string) json.RawMessage {
-	return json.RawMessage(`{"title":"Barbell row","description":"A lifter rows.","tags":["gym"],"subjects":` + subjects + `}`)
+	return json.RawMessage(`{"title":"Barbell row","description":"A lifter rows.","exercise":"","type":"lift","subjects":` + subjects + `}`)
+}
+
+// answerWithTax is answerWith and the vocabulary: the two arguments of Validate.
+func answerWithTax(subjects string) (json.RawMessage, *taxonomy.Taxonomy) {
+	return answerWith(subjects), taxonomy.Default()
 }
 
 // The subject boxes are read as numbers and left out when they are not complete; the labels are kept either way.
 func TestValidateReadsSubjectsAndLeavesOutIncompleteOnes(t *testing.T) {
-	out, err := Validate(answerWith(`[{"frame":1,"present":true,"x":0.2,"y":0.2,"w":0.5,"h":0.7,"head_top_y":0.22},{"frame":2,"present":true,"x":0.2}]`))
+	out, err := Validate(answerWithTax(`[{"frame":1,"present":true,"x":0.2,"y":0.2,"w":0.5,"h":0.7,"head_top_y":0.22},{"frame":2,"present":true,"x":0.2}]`))
 	if err != nil || len(out.Subjects) != 1 || out.Subjects[0].Frame != 1 || !out.Subjects[0].Present || out.Subjects[0].HeadTopY != 0.22 {
 		t.Fatalf("%+v %v", out, err)
 	}
 	// quicklook.v3: the head alone and the shoulder line are read when given; an answer without them (v2) reads them as 0.
-	out, err = Validate(answerWith(`[{"frame":1,"present":true,"x":0.1,"y":0.2,"w":0.8,"h":0.8,"head_top_y":0.2,"head_x":0.42,"head_w":0.16,"shoulder_y":0.32}]`))
+	out, err = Validate(answerWithTax(`[{"frame":1,"present":true,"x":0.1,"y":0.2,"w":0.8,"h":0.8,"head_top_y":0.2,"head_x":0.42,"head_w":0.16,"shoulder_y":0.32}]`))
 	if err != nil || len(out.Subjects) != 1 || out.Subjects[0].HeadX != 0.42 || out.Subjects[0].HeadW != 0.16 || out.Subjects[0].ShoulderY != 0.32 {
 		t.Fatalf("v3 head: %+v %v", out, err)
 	}
 	// No subjects member at all (a model that dropped it): the labels stand.
-	out, err = Validate(json.RawMessage(`{"title":"Row","description":"A row.","tags":[]}`))
+	out, err = Validate(json.RawMessage(`{"title":"Row","description":"A row."}`), taxonomy.Default())
 	if err != nil || len(out.Subjects) != 0 {
 		t.Errorf("%+v %v", out, err)
 	}
 	// A subject entry of the wrong shape is an invalid answer (strict parsing), a text in a number field too.
 	for _, bad := range []string{`[{"frame":"one","present":true,"x":0,"y":0,"w":1,"h":1,"head_top_y":0}]`, `[{"frame":1,"present":true,"x":"0.2","y":0,"w":1,"h":1,"head_top_y":0}]`, `[{"frame":1,"extra":1}]`, `{"a":1}`} {
-		if _, err := Validate(answerWith(bad)); err == nil {
+		if _, err := Validate(answerWithTax(bad)); err == nil {
 			t.Errorf("%s was accepted", bad)
 		}
 	}
 	// At most MaxSubjects entries are read.
 	many := strings.Repeat(`{"frame":1,"present":true,"x":0.1,"y":0.1,"w":0.5,"h":0.5,"head_top_y":0.1},`, 40)
-	out, err = Validate(answerWith("[" + strings.TrimSuffix(many, ",") + "]"))
+	out, err = Validate(answerWithTax("[" + strings.TrimSuffix(many, ",") + "]"))
 	if err != nil || len(out.Subjects) != MaxSubjects {
 		t.Errorf("%d subjects, %v", len(out.Subjects), err)
 	}
@@ -96,15 +102,15 @@ func TestTheDetailHoldsTheSubjectsAndKeepLabelsLeavesTheLabels(t *testing.T) {
 	}
 	// A later quick look that would label the clip differently, run with KeepLabels.
 	r.api.reply = func(int) (int, string) {
-		return toolReply(`{"title":"Another title","description":"Something else entirely.","tags":["other"],"subjects":[{"frame":1,"present":true,"x":0.3,"y":0.1,"w":0.4,"h":0.8,"head_top_y":0.12}]}`, 1750, 110)
+		return toolReply(`{"title":"Another title","description":"Something else entirely.","exercise":"lat pulldown","type":"pose","subjects":[{"frame":1,"present":true,"x":0.3,"y":0.1,"w":0.4,"h":0.8,"head_top_y":0.12}]}`, 1750, 110)
 	}
 	res, err := r.svc.Run(context.Background(), r.asset.WorkspaceID, r.asset.ID, Options{Force: true, KeepLabels: true})
 	if err != nil || res.Outcome != OutcomeDone {
 		t.Fatalf("%+v %v", res, err)
 	}
 	b := r.store.snapshot()
-	if b.Title != a.Title || b.Description != a.Description || strings.Join(b.Tags, ",") != strings.Join(a.Tags, ",") {
-		t.Errorf("the labels changed: %q %q %v", b.Title, b.Description, b.Tags)
+	if b.Title != a.Title || b.Description != a.Description || strings.Join(b.Facets, ",") != strings.Join(a.Facets, ",") || b.Exercise != a.Exercise {
+		t.Errorf("the labels changed: %q %q %v %q", b.Title, b.Description, b.Facets, b.Exercise)
 	}
 	tr2, ok := subject.FromDetail(b.QuickLook)
 	if !ok || len(tr2.Samples) != 1 || tr2.Samples[0].HeadTopY != 0.12 {
@@ -125,7 +131,7 @@ func TestAFailedKeepLabelsRunLeavesTheQuickLookAlone(t *testing.T) {
 	mustRun(t, r, Options{})
 	before := r.store.snapshot()
 	r.api.reply = func(int) (int, string) {
-		return toolReply(`{"title":"x","description":"Visit www.example.com now","tags":[],"subjects":[]}`, 1750, 110)
+		return toolReply(`{"title":"x","description":"Visit www.example.com now","subjects":[]}`, 1750, 110)
 	}
 	res, err := r.svc.Run(context.Background(), r.asset.WorkspaceID, r.asset.ID, Options{Force: true, KeepLabels: true})
 	if err != nil || res.Outcome != OutcomeFailed || res.Reason != FailInvalidOutput {
@@ -148,7 +154,7 @@ func TestAFailedKeepLabelsRunLeavesTheQuickLookAlone(t *testing.T) {
 func TestAClipWithNobodyInItIsMarkedAsRead(t *testing.T) {
 	r := newRig(t, rigOptions{})
 	r.api.reply = func(int) (int, string) {
-		return toolReply(`{"title":"Empty gym","description":"An empty gym.","tags":["gym"],"subjects":[{"frame":1,"present":false,"x":0,"y":0,"w":0,"h":0,"head_top_y":0}]}`, 1750, 110)
+		return toolReply(`{"title":"Empty gym","description":"An empty gym.","type":"b_roll","subjects":[{"frame":1,"present":false,"x":0,"y":0,"w":0,"h":0,"head_top_y":0}]}`, 1750, 110)
 	}
 	if res := mustRun(t, r, Options{}); res.Outcome != OutcomeDone || res.Subjects != 0 {
 		t.Fatalf("%+v", res)
@@ -171,11 +177,11 @@ func TestAMergePatchTouchesOnlyItsOwnKeys(t *testing.T) {
 	r := newRig(t, rigOptions{})
 	// A quick look from before the boxes: v1 detail, a model, labels.
 	if _, err := r.store.ApplyQuickLook(context.Background(), r.asset.WorkspaceID, r.asset.ID, store.QuickLookResult{
-		Title: "Barbell row", Description: "A row.", Tags: []string{"row"}, Detail: json.RawMessage(`{"prompt_version":"quicklook.v1","model":"claude-haiku-5-5","profile":"dev-cheap"}`),
+		Title: "Barbell row", Description: "A row.", Facets: []string{"movement:row"}, Detail: json.RawMessage(`{"prompt_version":"quicklook.v1","model":"claude-haiku-5-5","profile":"dev-cheap"}`),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	r.store.edit(func(a *store.Asset) { a.Description, a.Tags = "Edited by a person.", []string{"mine"} })
+	r.store.edit(func(a *store.Asset) { a.Description, a.Facets = "Edited by a person.", []string{"type:pose"} })
 	res, err := r.svc.Run(context.Background(), r.asset.WorkspaceID, r.asset.ID, Options{Force: true, KeepLabels: true})
 	if err != nil || res.Outcome != OutcomeDone {
 		t.Fatalf("%+v %v", res, err)
@@ -193,12 +199,12 @@ func TestAMergePatchTouchesOnlyItsOwnKeys(t *testing.T) {
 			t.Errorf("the patch lacks %s: %s", k, a.QuickLook)
 		}
 	}
-	if a.Description != "Edited by a person." || strings.Join(a.Tags, ",") != "mine" || a.Title != "Barbell row" {
-		t.Errorf("the labels changed: %q %v %q", a.Description, a.Tags, a.Title)
+	if a.Description != "Edited by a person." || strings.Join(a.Facets, ",") != "type:pose" || a.Title != "Barbell row" {
+		t.Errorf("the labels changed: %q %v %q", a.Description, a.Facets, a.Title)
 	}
 	// A later answer with nobody in it clears the boxes (null) and keeps the rest.
 	r.api.reply = func(int) (int, string) {
-		return toolReply(`{"title":"x","description":"x","tags":[],"subjects":[{"frame":1,"present":false,"x":0,"y":0,"w":0,"h":0,"head_top_y":0}]}`, 1750, 110)
+		return toolReply(`{"title":"x","description":"x","subjects":[{"frame":1,"present":false,"x":0,"y":0,"w":0,"h":0,"head_top_y":0}]}`, 1750, 110)
 	}
 	if _, err := r.svc.Run(context.Background(), r.asset.WorkspaceID, r.asset.ID, Options{Force: true, KeepLabels: true}); err != nil {
 		t.Fatal(err)
@@ -219,8 +225,8 @@ func TestAnUnusableAnswerLeavesTheEarlierBoxesAlone(t *testing.T) {
 		t.Fatalf("no boxes to begin with: %s", before.QuickLook)
 	}
 	for name, answer := range map[string]string{
-		"no subjects member": `{"title":"x","description":"x","tags":[]}`,
-		"a box too small":    `{"title":"x","description":"x","tags":[],"subjects":[{"frame":1,"present":true,"x":0.9,"y":0.9,"w":0.001,"h":0.001,"head_top_y":0.9}]}`,
+		"no subjects member": `{"title":"x","description":"x"}`,
+		"a box too small":    `{"title":"x","description":"x","subjects":[{"frame":1,"present":true,"x":0.9,"y":0.9,"w":0.001,"h":0.001,"head_top_y":0.9}]}`,
 	} {
 		r.api.reply = func(int) (int, string) { return toolReply(answer, 1750, 110) }
 		res, err := r.svc.Run(context.Background(), r.asset.WorkspaceID, r.asset.ID, Options{Force: true, KeepLabels: true})

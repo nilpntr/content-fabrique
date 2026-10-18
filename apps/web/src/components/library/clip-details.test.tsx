@@ -1,3 +1,4 @@
+import { sampleFacets } from "@/lib/sample-facets";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
@@ -7,26 +8,27 @@ import { toLibraryAsset } from "./real-library";
 
 afterEach(cleanup);
 
-const asset = (over = {}) => toLibraryAsset(apiAsset(1, { title: "Seated cable row", description: "Controlled rows with a pause at the squeeze.", tags: ["row", "back day"], quick_look_status: "succeeded", ...over }));
+const asset = (over = {}) => toLibraryAsset(apiAsset(1, { title: "Seated cable row", description: "Controlled rows with a pause at the squeeze.", exercise: "seated cable row", facets: sampleFacets("type:lift", "body:back", "angle:side"), quick_look_status: "succeeded", ...over }));
 
 test("an opened clip shows its loop, name, what the quick look wrote and its facts", () => {
   render(<ClipDetails asset={asset()} onClose={() => {}} onRename={async () => {}} />);
   expect(screen.getByRole("heading", { name: "Seated cable row" })).toBeTruthy();
   expect(screen.getByText("Controlled rows with a pause at the squeeze.")).toBeTruthy();
-  expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["row", "back day"]);
+  expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Lifting", "Back", "Side view"]);
+  expect(screen.getByText("Seated cable row", { selector: "span" })).toBeTruthy(); // the exercise
   expect(screen.getByLabelText("Preview loop of the clip").getAttribute("src")).toBe("https://cdn.test/hover-1.mp4");
   expect(screen.getByText("1080×1920")).toBeTruthy();
 });
 
 test("a clip the quick look has not finished says it is coming; one it could not describe says so", () => {
-  const { rerender } = render(<ClipDetails asset={asset({ description: "", tags: [], quick_look_status: "pending" })} onClose={() => {}} onRename={async () => {}} />);
+  const { rerender } = render(<ClipDetails asset={asset({ description: "", quick_look_status: "pending" })} onClose={() => {}} onRename={async () => {}} />);
   expect(screen.getByText(/I'm watching this clip/)).toBeTruthy();
-  rerender(<ClipDetails asset={asset({ description: "", tags: [], quick_look_status: "failed" })} onClose={() => {}} onRename={async () => {}} />);
+  rerender(<ClipDetails asset={asset({ description: "", quick_look_status: "failed" })} onClose={() => {}} onRename={async () => {}} />);
   expect(screen.getByText(/couldn't describe this clip/)).toBeTruthy();
-  rerender(<ClipDetails asset={asset({ description: "", tags: [], status: "processing" })} onClose={() => {}} onRename={async () => {}} />);
+  rerender(<ClipDetails asset={asset({ description: "", status: "processing" })} onClose={() => {}} onRename={async () => {}} />);
   expect(screen.getByText(/as soon as it's ready/)).toBeTruthy();
   // A ready clip that has no quick look status (an older upload) is not promised one.
-  rerender(<ClipDetails asset={toLibraryAsset(apiAsset(1, { description: "", tags: [] }))} onClose={() => {}} onRename={async () => {}} />);
+  rerender(<ClipDetails asset={toLibraryAsset(apiAsset(1, { description: "" }))} onClose={() => {}} onRename={async () => {}} />);
   expect(screen.getByText("No description for this clip.")).toBeTruthy();
 });
 

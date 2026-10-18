@@ -1,0 +1,448 @@
+# The clip labels (package taxonomy): a small fixed vocabulary of facets instead of free-form tags, so a library of a few hundred
+# clips has a few dozen labels and not hundreds of near-duplicates ("back view", "rear view"; "back training", "back workout").
+#
+# facets: what a clip is labelled with, in the order the app and the editor show them. Every facet has at most about ten values.
+#   id      the key in the API (`?body=back`) and in assets.facets ("body:back"). Never renamed: a rename is a new version of this file.
+#   label   the creator's word for it, in the app.
+#   max     how many values of the facet one clip may have.
+#   values  id (lowercase, a-z and _), label, and:
+#           source: probe   set from the file itself (the frame rate), never by the model or a synonym;
+#           implies         what the value says about the facets the clip has no value for yet ("row" works the back and is a lift).
+#
+# synonyms: free words (the quick look's old tags, a model's answer outside the lists, an exercise name) mapped onto facet values,
+#   as "facet:value". A text is read word by word, the longest phrase that is listed first ("seated cable row" finds "cable row"); a
+#   word that is not listed carries nothing. The ids and labels of the values are synonyms too, unless listed here otherwise.
+#   Lowercase; any character that is not a letter or a digit only separates words ("close-up" is "close up").
+#
+# ignore: words known to say nothing worth a label ("gym", "dark background"). They map to nothing, like an unknown word; listing
+#   them says that they were looked at.
+version: 1
+
+facets:
+  - id: type
+    label: Type
+    max: 1
+    values:
+      - { id: lift, label: Lifting }
+      - { id: pose, label: Posing }
+      - { id: talk, label: Talking }
+      - { id: b_roll, label: B-roll }
+      - { id: product, label: Product }
+      - { id: before_after, label: Before and after }
+      - { id: slow_motion, label: Slow motion, source: probe }
+
+  - id: body
+    label: Body part
+    max: 2
+    values:
+      - { id: back, label: Back }
+      - { id: chest, label: Chest }
+      - { id: shoulders, label: Shoulders }
+      - { id: arms, label: Arms }
+      - { id: legs, label: Legs }
+      - { id: glutes, label: Glutes }
+      - { id: core, label: Core }
+      - { id: full_body, label: Full body }
+
+  - id: movement
+    label: Movement
+    max: 1
+    values:
+      - { id: pull, label: Pull, implies: [type:lift, body:back] }
+      - { id: row, label: Row, implies: [type:lift, body:back] }
+      - { id: press, label: Press, implies: [type:lift] }
+      - { id: fly, label: Fly, implies: [type:lift, body:chest] }
+      - { id: squat, label: Squat, implies: [type:lift, body:legs] }
+      - { id: hinge, label: Hinge, implies: [type:lift] }
+      - { id: curl, label: Curl, implies: [type:lift, body:arms] }
+      - { id: extension, label: Extension, implies: [type:lift] }
+      - { id: raise, label: Raise, implies: [type:lift, body:shoulders] }
+      - { id: cardio, label: Cardio }
+      - { id: stretch, label: Stretch }
+
+  - id: angle
+    label: Angle
+    max: 2
+    values:
+      - { id: front, label: Front view }
+      - { id: side, label: Side view }
+      - { id: back, label: Back view }
+      - { id: close_up, label: Close-up }
+      - { id: wide, label: Wide shot }
+
+  - id: equipment
+    label: Equipment
+    max: 2
+    values:
+      - { id: machine, label: Machine }
+      - { id: cable, label: Cable }
+      - { id: dumbbell, label: Dumbbell }
+      - { id: barbell, label: Barbell }
+      - { id: kettlebell, label: Kettlebell }
+      - { id: band, label: Band }
+      - { id: bodyweight, label: Bodyweight }
+
+synonyms:
+  # Type
+  lifting: [type:lift]
+  lift: [type:lift]
+  reps: [type:lift]
+  rep: [type:lift]
+  set: [type:lift]
+  working set: [type:lift]
+  exercise: [type:lift]
+  workout: [type:lift]
+  training: [type:lift]
+  strength training: [type:lift]
+  weight training: [type:lift]
+  resistance training: [type:lift]
+  weightlifting: [type:lift]
+  pose: [type:pose]
+  poses: [type:pose]
+  posing: [type:pose]
+  posing routine: [type:pose]
+  physique: [type:pose]
+  flex: [type:pose]
+  flexing: [type:pose]
+  front double biceps: [type:pose, angle:front, body:arms]
+  back double biceps: [type:pose, angle:back, body:back]
+  double biceps: [type:pose, body:arms]
+  lat spread: [type:pose, body:back]
+  front lat spread: [type:pose, angle:front, body:back]
+  rear lat spread: [type:pose, angle:back, body:back]
+  side chest: [type:pose, angle:side, body:chest]
+  side triceps: [type:pose, angle:side, body:arms]
+  most muscular: [type:pose, angle:front]
+  abs and thigh: [type:pose, angle:front, body:core]
+  vacuum: [type:pose, body:core]
+  stage: [type:pose]
+  competition: [type:pose]
+  talking: [type:talk]
+  talk: [type:talk]
+  talking head: [type:talk, angle:front]
+  talking to camera: [type:talk, angle:front]
+  speaking: [type:talk]
+  vlog: [type:talk]
+  explaining: [type:talk]
+  b roll: [type:b_roll]
+  broll: [type:b_roll]
+  cinematic: [type:b_roll]
+  setting up: [type:b_roll]
+  setup: [type:b_roll]
+  loading plates: [type:b_roll]
+  walking in: [type:b_roll]
+  entrance: [type:b_roll]
+  chalk: [type:b_roll, angle:close_up]
+  product: [type:product]
+  supplement: [type:product]
+  supplements: [type:product]
+  shaker: [type:product]
+  protein: [type:product]
+  pre workout: [type:product]
+  apparel: [type:product]
+  merch: [type:product]
+  before and after: [type:before_after]
+  before after: [type:before_after]
+  transformation: [type:before_after]
+  progress: [type:before_after]
+  comparison: [type:before_after]
+
+  # Body part
+  back: [body:back]
+  lats: [body:back]
+  lat: [body:back]
+  upper back: [body:back]
+  lower back: [body:back]
+  traps: [body:back]
+  rhomboids: [body:back]
+  erectors: [body:back]
+  chest: [body:chest]
+  pecs: [body:chest]
+  pectorals: [body:chest]
+  upper chest: [body:chest]
+  shoulders: [body:shoulders]
+  shoulder: [body:shoulders]
+  delts: [body:shoulders]
+  deltoids: [body:shoulders]
+  side delts: [body:shoulders]
+  rear delts: [body:shoulders]
+  rear delt: [body:shoulders]
+  front delts: [body:shoulders]
+  arms: [body:arms]
+  arm: [body:arms]
+  biceps: [body:arms]
+  bicep: [body:arms]
+  triceps: [body:arms]
+  tricep: [body:arms]
+  forearms: [body:arms]
+  forearm: [body:arms]
+  legs: [body:legs]
+  leg: [body:legs]
+  leg day: [body:legs, type:lift]
+  lower body: [body:legs]
+  quads: [body:legs]
+  quadriceps: [body:legs]
+  hamstrings: [body:legs]
+  hamstring: [body:legs]
+  calves: [body:legs]
+  calf: [body:legs]
+  thighs: [body:legs]
+  glutes: [body:glutes]
+  glute: [body:glutes]
+  core: [body:core]
+  abs: [body:core]
+  abdominals: [body:core]
+  obliques: [body:core]
+  six pack: [body:core]
+  full body: [body:full_body]
+  whole body: [body:full_body]
+  total body: [body:full_body]
+
+  # Movement (exercise names; their "implies" fill in the type and the usual body part)
+  pull: [movement:pull]
+  pulling: [movement:pull]
+  pull up: [movement:pull, equipment:bodyweight]
+  pull ups: [movement:pull, equipment:bodyweight]
+  pullup: [movement:pull, equipment:bodyweight]
+  pullups: [movement:pull, equipment:bodyweight]
+  chin up: [movement:pull, equipment:bodyweight]
+  chin ups: [movement:pull, equipment:bodyweight]
+  pulldown: [movement:pull]
+  pull down: [movement:pull]
+  lat pulldown: [movement:pull, body:back]
+  lat pull down: [movement:pull, body:back]
+  straight arm pulldown: [movement:pull, body:back, equipment:cable]
+  pullover: [movement:pull]
+  face pull: [movement:pull, body:shoulders, equipment:cable]
+  row: [movement:row]
+  rows: [movement:row]
+  rowing: [movement:row]
+  seated row: [movement:row]
+  cable row: [movement:row, equipment:cable]
+  machine row: [movement:row, equipment:machine]
+  barbell row: [movement:row, equipment:barbell]
+  dumbbell row: [movement:row, equipment:dumbbell]
+  t bar row: [movement:row]
+  bent over row: [movement:row]
+  pendlay row: [movement:row, equipment:barbell]
+  chest supported row: [movement:row]
+  upright row: [movement:raise, body:shoulders]
+  press: [movement:press]
+  pressing: [movement:press]
+  bench press: [movement:press, body:chest]
+  chest press: [movement:press, body:chest]
+  incline press: [movement:press, body:chest]
+  decline press: [movement:press, body:chest]
+  shoulder press: [movement:press, body:shoulders]
+  overhead press: [movement:press, body:shoulders]
+  military press: [movement:press, body:shoulders, equipment:barbell]
+  push up: [movement:press, body:chest, equipment:bodyweight]
+  push ups: [movement:press, body:chest, equipment:bodyweight]
+  pushup: [movement:press, body:chest, equipment:bodyweight]
+  pushups: [movement:press, body:chest, equipment:bodyweight]
+  dip: [movement:press, body:chest, equipment:bodyweight]
+  dips: [movement:press, body:chest, equipment:bodyweight]
+  push: [movement:press]
+  pushing: [movement:press]
+  fly: [movement:fly]
+  flye: [movement:fly]
+  flyes: [movement:fly]
+  flies: [movement:fly]
+  chest fly: [movement:fly, body:chest]
+  pec deck: [movement:fly, body:chest, equipment:machine]
+  cable fly: [movement:fly, equipment:cable]
+  cable crossover: [movement:fly, body:chest, equipment:cable]
+  rear delt fly: [movement:fly, body:shoulders]
+  reverse fly: [movement:fly, body:shoulders]
+  squat: [movement:squat]
+  squats: [movement:squat]
+  back squat: [movement:squat, body:legs, equipment:barbell]
+  front squat: [movement:squat, body:legs, equipment:barbell]
+  goblet squat: [movement:squat, body:legs]
+  hack squat: [movement:squat, body:legs, equipment:machine]
+  leg press: [movement:squat, body:legs, equipment:machine]
+  lunge: [movement:squat, body:legs]
+  lunges: [movement:squat, body:legs]
+  split squat: [movement:squat, body:legs]
+  bulgarian split squat: [movement:squat, body:legs]
+  step up: [movement:squat, body:legs]
+  step ups: [movement:squat, body:legs]
+  hinge: [movement:hinge]
+  deadlift: [movement:hinge]
+  deadlifts: [movement:hinge]
+  romanian deadlift: [movement:hinge, body:legs]
+  rdl: [movement:hinge, body:legs]
+  stiff leg deadlift: [movement:hinge, body:legs]
+  good morning: [movement:hinge, body:legs]
+  hip thrust: [movement:hinge, body:glutes]
+  hip thrusts: [movement:hinge, body:glutes]
+  glute bridge: [movement:hinge, body:glutes]
+  back extension: [movement:hinge, body:back]
+  back extensions: [movement:hinge, body:back]
+  hyperextension: [movement:hinge, body:back]
+  hyperextensions: [movement:hinge, body:back]
+  hyper extension: [movement:hinge, body:back]
+  reverse hyper: [movement:hinge, body:glutes]
+  kettlebell swing: [movement:hinge, equipment:kettlebell]
+  curl: [movement:curl]
+  curls: [movement:curl]
+  curling: [movement:curl]
+  bicep curl: [movement:curl, body:arms]
+  biceps curl: [movement:curl, body:arms]
+  hammer curl: [movement:curl, body:arms]
+  hammer curls: [movement:curl, body:arms]
+  preacher curl: [movement:curl, body:arms]
+  leg curl: [movement:curl, body:legs]
+  leg curls: [movement:curl, body:legs]
+  hamstring curl: [movement:curl, body:legs]
+  extension: [movement:extension]
+  extensions: [movement:extension]
+  triceps extension: [movement:extension, body:arms]
+  tricep extension: [movement:extension, body:arms]
+  overhead extension: [movement:extension, body:arms]
+  pushdown: [movement:extension, body:arms]
+  pushdowns: [movement:extension, body:arms]
+  push down: [movement:extension, body:arms]
+  triceps pushdown: [movement:extension, body:arms]
+  tricep pushdown: [movement:extension, body:arms]
+  skull crusher: [movement:extension, body:arms]
+  skull crushers: [movement:extension, body:arms]
+  kickback: [movement:extension, body:arms]
+  leg extension: [movement:extension, body:legs]
+  leg extensions: [movement:extension, body:legs]
+  raise: [movement:raise]
+  raises: [movement:raise]
+  lateral raise: [movement:raise, body:shoulders]
+  lateral raises: [movement:raise, body:shoulders]
+  side raise: [movement:raise, body:shoulders]
+  front raise: [movement:raise, body:shoulders]
+  calf raise: [movement:raise, body:legs]
+  calf raises: [movement:raise, body:legs]
+  leg raise: [movement:raise, body:core]
+  leg raises: [movement:raise, body:core]
+  shrug: [movement:raise, body:back]
+  shrugs: [movement:raise, body:back]
+  crunch: [type:lift, body:core]
+  crunches: [type:lift, body:core]
+  plank: [type:lift, body:core, equipment:bodyweight]
+  cardio: [movement:cardio]
+  treadmill: [movement:cardio]
+  running: [movement:cardio]
+  stairmaster: [movement:cardio]
+  stair climber: [movement:cardio]
+  cycling: [movement:cardio]
+  bike: [movement:cardio]
+  rowing machine: [movement:cardio]
+  rower: [movement:cardio]
+  elliptical: [movement:cardio]
+  jump rope: [movement:cardio]
+  sprint: [movement:cardio]
+  sprints: [movement:cardio]
+  hiit: [movement:cardio]
+  incline walk: [movement:cardio]
+  stretch: [movement:stretch]
+  stretching: [movement:stretch]
+  mobility: [movement:stretch]
+  yoga: [movement:stretch]
+  warm up: [movement:stretch]
+  foam rolling: [movement:stretch]
+
+  # Angle
+  front: [angle:front]
+  front view: [angle:front]
+  frontal: [angle:front]
+  facing camera: [angle:front]
+  from the front: [angle:front]
+  side: [angle:side]
+  side view: [angle:side]
+  side angle: [angle:side]
+  side on: [angle:side]
+  profile: [angle:side]
+  from the side: [angle:side]
+  back view: [angle:back]
+  rear view: [angle:back]
+  rear: [angle:back]
+  from behind: [angle:back]
+  behind: [angle:back]
+  back angle: [angle:back]
+  close up: [angle:close_up]
+  closeup: [angle:close_up]
+  detail shot: [angle:close_up]
+  tight shot: [angle:close_up]
+  macro: [angle:close_up]
+  wide: [angle:wide]
+  wide shot: [angle:wide]
+  wide angle: [angle:wide]
+  full shot: [angle:wide]
+  establishing shot: [angle:wide, type:b_roll]
+
+  # Equipment
+  machine: [equipment:machine]
+  machines: [equipment:machine]
+  smith machine: [equipment:machine]
+  plate loaded: [equipment:machine]
+  plate loaded machine: [equipment:machine]
+  selectorized: [equipment:machine]
+  hammer strength: [equipment:machine]
+  cable: [equipment:cable]
+  cables: [equipment:cable]
+  cable machine: [equipment:cable]
+  cable station: [equipment:cable]
+  pulley: [equipment:cable]
+  dumbbell: [equipment:dumbbell]
+  dumbbells: [equipment:dumbbell]
+  barbell: [equipment:barbell]
+  ez bar: [equipment:barbell]
+  trap bar: [equipment:barbell]
+  kettlebell: [equipment:kettlebell]
+  kettlebells: [equipment:kettlebell]
+  band: [equipment:band]
+  bands: [equipment:band]
+  resistance band: [equipment:band]
+  bodyweight: [equipment:bodyweight]
+  body weight: [equipment:bodyweight]
+  calisthenics: [equipment:bodyweight]
+
+ignore:
+  - gym
+  - gym floor
+  - fitness
+  - bodybuilding
+  - strength
+  - muscle
+  - muscular
+  - athlete
+  - lifter
+  - man
+  - woman
+  - person
+  - dark
+  - dark background
+  - black background
+  - background
+  - lighting
+  - red lighting
+  - moody lighting
+  - low angle
+  - high angle
+  - eye level
+  - indoor
+  - indoors
+  - outdoor
+  - outdoors
+  - mirror
+  - bench
+  - incline
+  - decline
+  - seated
+  - standing
+  - lying
+  - single arm
+  - one arm
+  - tank top
+  - shirtless
+  - tattoo
+  - tattoos
+  - slow motion
+  - slow mo
+  - slowmo

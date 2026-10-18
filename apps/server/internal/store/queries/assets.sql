@@ -35,14 +35,28 @@ SELECT * FROM uploads
 WHERE workspace_id = @workspace_id AND asset_id = @asset_id;
 
 -- The library page: newest first (UUIDv7 ids sort by creation time), after the cursor when there is one. With search words
--- (store.SearchWords) only the assets whose title, description, tags or file name match all of them (cf_search_query). Only the
--- assets of one purpose: the library is footage, and a style reference is never listed with it.
+-- (store.SearchWords) only the assets whose title, exercise, facet labels, description or file name match all of them
+-- (cf_search_query). With facets ("body:back") only the assets that have all of them. Only the assets of one purpose: the library is
+-- footage, and a style reference is never listed with it.
 -- name: ListAssets :many
 SELECT * FROM assets
 WHERE workspace_id = @workspace_id
   AND deleted_at IS NULL
   AND purpose = @purpose
   AND (sqlc.narg('before')::uuid IS NULL OR id < sqlc.narg('before')::uuid)
+  AND (sqlc.narg('words')::text[] IS NULL OR search @@ cf_search_query(sqlc.narg('words')::text[]))
+  AND (sqlc.narg('facets')::text[] IS NULL OR facets @> sqlc.narg('facets')::text[])
+ORDER BY id DESC
+LIMIT @row_limit;
+
+-- The labels of the assets a search finds, for the counts of the library's filters (GET /v1/assets/facets): only the facets column of
+-- the assets that have any, so the counting (which leaves each facet's own filter out) is done by the caller.
+-- name: ListAssetFacets :many
+SELECT facets FROM assets
+WHERE workspace_id = @workspace_id
+  AND deleted_at IS NULL
+  AND purpose = @purpose
+  AND cardinality(facets) > 0
   AND (sqlc.narg('words')::text[] IS NULL OR search @@ cf_search_query(sqlc.narg('words')::text[]))
 ORDER BY id DESC
 LIMIT @row_limit;

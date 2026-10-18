@@ -1,3 +1,4 @@
+import { sampleFacets } from "@/lib/sample-facets";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { createRoot, type Root } from "react-dom/client";
@@ -35,7 +36,7 @@ test("⌘K finds projects and clips by what the library knows of them, next to t
     "GET /v1/me": ME,
     "GET /v1/projects": { items: [projectSummary(1, { title: "Gino's back day", status: "review" }), projectSummary(2, { title: "Legs" })], next_cursor: null },
     "GET /v1/assets": {
-      items: [apiAsset(1, { title: "Seated cable row", tags: ["back day"] }), apiAsset(2, { title: "Squat", description: "A heavy squat, deep", tags: [] })],
+      items: [apiAsset(1, { title: "Seated cable row", facets: sampleFacets("type:lift", "body:back") }), apiAsset(2, { title: "Squat", description: "A heavy squat, deep" })],
       next_cursor: null,
     },
   });
@@ -59,7 +60,7 @@ test("⌘K finds projects and clips by what the library knows of them, next to t
 });
 
 test("choosing a clip opens its sheet in the library", async () => {
-  const clip = apiAsset(1, { title: "Seated cable row", description: "Controlled rows with a pause.", tags: ["row"] });
+  const clip = apiAsset(1, { title: "Seated cable row", description: "Controlled rows with a pause.", facets: sampleFacets("movement:row") });
   installApi({ "GET /v1/me": ME, "GET /v1/projects": { items: [], next_cursor: null }, "GET /v1/assets": { items: [clip], next_cursor: null } });
   const { router, input } = await openPalette();
   fireEvent.change(input, { target: { value: "cable" } });

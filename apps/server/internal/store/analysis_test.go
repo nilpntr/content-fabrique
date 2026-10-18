@@ -156,10 +156,10 @@ func analysisSuite(t *testing.T, st *store.Store, suffix string) {
 	t.Run("the subject boxes of the quick look are read, by workspace, for the assets that have them", func(t *testing.T) {
 		with, without := ready(wa, ua, "subjects-clip"), ready(wa, ua, "no-subjects-clip")
 		detail := []byte(`{"prompt_version":"quicklook.v2","subjects":{"aspect":0.5625,"samples":[{"at_ms":1500,"x":0.2,"y":0.2,"w":0.6,"h":0.7,"head_top_y":0.22}]}}`)
-		if _, err := st.ApplyQuickLook(ctx, wa.ID, with.ID, store.QuickLookResult{Title: "Row", Description: "A row.", Tags: []string{"row"}, Detail: detail}); err != nil {
+		if _, err := st.ApplyQuickLook(ctx, wa.ID, with.ID, store.QuickLookResult{Title: "Row", Description: "A row.", Facets: []string{"movement:row"}, Detail: detail}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := st.ApplyQuickLook(ctx, wa.ID, without.ID, store.QuickLookResult{Title: "Row 2", Description: "A row.", Tags: []string{"row"}, Detail: []byte(`{"prompt_version":"quicklook.v1"}`)}); err != nil {
+		if _, err := st.ApplyQuickLook(ctx, wa.ID, without.ID, store.QuickLookResult{Title: "Row 2", Description: "A row.", Facets: []string{"movement:row"}, Detail: []byte(`{"prompt_version":"quicklook.v1"}`)}); err != nil {
 			t.Fatal(err)
 		}
 		rows, err := st.ListAssetSubjects(ctx, wa.ID, []ids.AssetID{with.ID, without.ID})
@@ -214,30 +214,30 @@ func analysisSuite(t *testing.T, st *store.Store, suffix string) {
 		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, r); err != nil {
 			t.Fatal(err)
 		}
-		// before the quick look the moments have no labels; when it lands they get its tags
+		// before the quick look the moments have no labels; when it lands they get its facets
 		if ms, _ := st.ListAssetMoments(ctx, wa.ID, a.ID); ms[0].Labels == nil || len(ms[0].Labels) != 0 {
 			t.Fatalf("labels before the quick look: %v", ms[0].Labels)
 		}
-		if _, err := st.ApplyQuickLook(ctx, wa.ID, a.ID, store.QuickLookResult{Title: "Row", Description: "A row.", Tags: []string{"row", "back"}, Detail: []byte(`{}`)}); err != nil {
+		if _, err := st.ApplyQuickLook(ctx, wa.ID, a.ID, store.QuickLookResult{Title: "Row", Description: "A row.", Facets: []string{"movement:row", "body:back"}, Detail: []byte(`{}`)}); err != nil {
 			t.Fatal(err)
 		}
 		ms, _ := st.ListAssetMoments(ctx, wa.ID, a.ID)
 		for _, m := range ms {
-			if len(m.Labels) != 2 || m.Labels[0] != "row" {
+			if len(m.Labels) != 2 || m.Labels[0] != "movement:row" {
 				t.Fatalf("a moment was not labelled by the quick look: %+v", m)
 			}
 		}
-		if _, err := st.ApplyQuickLook(ctx, wb.ID, a.ID, store.QuickLookResult{Tags: []string{"stolen"}}); !errors.Is(err, store.ErrNotFound) {
+		if _, err := st.ApplyQuickLook(ctx, wb.ID, a.ID, store.QuickLookResult{Facets: []string{"type:pose"}}); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("workspace B applied a quick look: %v", err)
 		}
-		if ms, _ = st.ListAssetMoments(ctx, wa.ID, a.ID); ms[0].Labels[0] != "row" {
+		if ms, _ = st.ListAssetMoments(ctx, wa.ID, a.ID); ms[0].Labels[0] != "movement:row" {
 			t.Fatalf("labels after B's attempt: %v", ms[0].Labels)
 		}
-		// a later analysis of an asset that has tags labels its moments with them
+		// a later analysis of an asset that has facets labels its moments with them
 		if err := st.SaveAnalysis(ctx, wa.ID, a.ID, r); err != nil {
 			t.Fatal(err)
 		}
-		if ms, _ = st.ListAssetMoments(ctx, wa.ID, a.ID); ms[0].Labels[0] != "row" {
+		if ms, _ = st.ListAssetMoments(ctx, wa.ID, a.ID); ms[0].Labels[0] != "movement:row" {
 			t.Fatalf("a re-run lost the labels: %v", ms[0].Labels)
 		}
 
@@ -336,12 +336,12 @@ func analysisSuite(t *testing.T, st *store.Store, suffix string) {
 		}
 	})
 
-	t.Run("tags are the ones the locked row holds", func(t *testing.T) {
-		a := ready(wa, ua, "tags-clip")
-		if _, err := st.ApplyQuickLook(ctx, wa.ID, a.ID, store.QuickLookResult{Title: "T", Description: "d", Tags: []string{"lat", "pulldown"}, Detail: []byte(`{}`)}); err != nil {
+	t.Run("facets are the ones the locked row holds", func(t *testing.T) {
+		a := ready(wa, ua, "facets-clip")
+		if _, err := st.ApplyQuickLook(ctx, wa.ID, a.ID, store.QuickLookResult{Title: "T", Description: "d", Facets: []string{"body:back", "movement:pull"}, Detail: []byte(`{}`)}); err != nil {
 			t.Fatal(err)
 		}
-		// the caller's copy of the asset predates the quick look; the moments still get the tags of the row
+		// the caller's copy of the asset predates the quick look; the moments still get the facets of the row
 		r := result(a, 1)
 		for i := range r.Moments {
 			r.Moments[i].Labels = nil
@@ -351,7 +351,7 @@ func analysisSuite(t *testing.T, st *store.Store, suffix string) {
 		}
 		ms, _ := st.ListAssetMoments(ctx, wa.ID, a.ID)
 		for _, m := range ms {
-			if len(m.Labels) != 2 || m.Labels[0] != "lat" {
+			if len(m.Labels) != 2 || m.Labels[0] != "body:back" {
 				t.Fatalf("labels %v", m.Labels)
 			}
 		}

@@ -48,6 +48,10 @@ export type LibrarySummary = components["schemas"]["LibrarySummaryResponse"];
 export type ApiAsset = components["schemas"]["Asset"];
 /** GET /v1/assets: a page of assets, newest first. */
 export type AssetsPage = components["schemas"]["ListAssetsResponse"];
+/** GET /v1/assets/facets: the labels the workspace's clips have, with counts. */
+export type AssetFacetsResponse = components["schemas"]["ListAssetFacetsResponse"];
+/** The label filters of GET /v1/assets and GET /v1/assets/facets: a value per facet (`body=back`). */
+export type AssetFilters = Partial<Record<"body" | "type" | "angle" | "movement" | "equipment", string>>;
 
 /** POST /v1/projects: the new-project flow's request. */
 export type CreateProjectRequest = components["schemas"]["CreateProjectRequest"];
@@ -161,9 +165,13 @@ export const fetchWorkspacePlan = async (client: ApiClient, signal?: AbortSignal
 export const fetchLibrarySummary = async (client: ApiClient, signal?: AbortSignal): Promise<LibrarySummary> =>
   unwrap(await client.GET("/v1/library/summary", { signal }));
 
-/** One page of the workspace's assets (newest first). `cursor` is the previous page's `next_cursor`. */
-export const fetchAssets = async (client: ApiClient, cursor?: string, signal?: AbortSignal): Promise<AssetsPage> =>
-  unwrap(await client.GET("/v1/assets", { params: { query: { limit: 100, cursor } }, signal }));
+/** One page of the workspace's assets (newest first). `cursor` is the previous page's `next_cursor`; `filters` keep the clips with those labels. */
+export const fetchAssets = async (client: ApiClient, cursor?: string, signal?: AbortSignal, filters: AssetFilters = {}): Promise<AssetsPage> =>
+  unwrap(await client.GET("/v1/assets", { params: { query: { limit: 100, cursor, ...filters } }, signal }));
+
+/** The labels of the workspace's clips with how many have each, under the filters (each facet's own filter left out of its counts). */
+export const fetchAssetFacets = async (client: ApiClient, filters: AssetFilters = {}, signal?: AbortSignal): Promise<AssetFacetsResponse> =>
+  unwrap(await client.GET("/v1/assets/facets", { params: { query: filters }, signal }));
 
 /** Deletes an asset (aborting its upload if it is still in progress). */
 export const deleteAsset = async (client: ApiClient, id: string): Promise<void> => {

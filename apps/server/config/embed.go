@@ -1,6 +1,7 @@
-// Package configfiles embeds the versioned config of the server (config/routing, config/pricing, config/plans and config/formats), so a
-// process finds it wherever it runs from: the worker's agent runtime reads the routing profiles and the price table from here, the
-// credits code reads the price list and the plans, and package formats the format library.
+// Package configfiles embeds the versioned config of the server (config/routing, config/pricing, config/plans, config/formats and
+// config/tags), so a process finds it wherever it runs from: the worker's agent runtime reads the routing profiles and the price table
+// from here, the credits code reads the price list and the plans, package formats the format library, and package taxonomy the clip
+// labels.
 package configfiles
 
 import (
@@ -8,7 +9,7 @@ import (
 	"io/fs"
 )
 
-//go:embed routing/*.yaml pricing/*.yaml plans/*.yaml formats/*.yaml
+//go:embed routing/*.yaml pricing/*.yaml plans/*.yaml formats/*.yaml tags/*.yaml
 var files embed.FS
 
 // Routing is the directory of the routing profiles and the model catalogue (what llm.NewRouter takes).
@@ -22,6 +23,9 @@ func Plans() fs.FS { return sub("plans") }
 
 // Formats is the directory of the format cards (what formats.Load takes).
 func Formats() fs.FS { return sub("formats") }
+
+// Tags is the directory of the clip label vocabularies (what taxonomy.Load takes).
+func Tags() fs.FS { return sub("tags") }
 
 func sub(dir string) fs.FS {
 	s, err := fs.Sub(files, dir)

@@ -61,7 +61,7 @@ type Sample struct {
 type Track struct {
 	Aspect  float64  `json:"aspect"`
 	Samples []Sample `json:"samples"`
-	// ShowsOff says the clip is a pose or physique shot (its title or tags say so): the body is what it shows, so a title over it is a
+	// ShowsOff says the clip is a pose or physique shot (its title or its labels say so: "type:pose"): the body is what it shows, so a title over it is a
 	// failure and not a note. It is not part of the stored boxes; Load sets it from the asset's labels.
 	ShowsOff bool `json:"-"`
 }
@@ -69,7 +69,7 @@ type Track struct {
 // poseWords are the words of a title or tag that mark a pose or physique shot.
 var poseWords = map[string]bool{"pose": true, "poses": true, "posing": true, "posed": true, "physique": true, "flex": true, "flexing": true, "flexed": true}
 
-// ShowsOffTheBody says whether the labels of a clip (its title and tags) mark it as a pose or physique shot: any whole word of them is
+// ShowsOffTheBody says whether the labels of a clip (its title and its facets or old tags) mark it as a pose or physique shot: any whole word of them is
 // one of poseWords ("back pose", "posing routine"; "hip flexor" is not). The words are only compared, never passed on.
 func ShowsOffTheBody(title string, tags []string) bool {
 	for _, label := range append([]string{title}, tags...) {

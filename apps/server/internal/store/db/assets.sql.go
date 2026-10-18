@@ -48,7 +48,7 @@ func (q *Queries) CountStyleReferenceAssets(ctx context.Context, workspaceID ids
 const createAsset = `-- name: CreateAsset :one
 INSERT INTO assets (id, workspace_id, kind, filename, content_type, size_bytes, sha256, title, r2_key, created_by, purpose)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search
 `
 
 type CreateAssetParams struct {
@@ -91,7 +91,7 @@ func (q *Queries) CreateAsset(ctx context.Context, arg CreateAssetParams) (Asset
 		&i.Sha256,
 		&i.Title,
 		&i.Description,
-		&i.Tags,
+		&i.LegacyTags,
 		&i.R2Key,
 		&i.FailureReason,
 		&i.CreatedBy,
@@ -115,10 +115,13 @@ func (q *Queries) CreateAsset(ctx context.Context, arg CreateAssetParams) (Asset
 		&i.QuickLookStatus,
 		&i.QuickLook,
 		&i.QuickLookAt,
-		&i.Search,
 		&i.TranscriptStatus,
 		&i.TranscriptFailureReason,
 		&i.Purpose,
+		&i.Facets,
+		&i.Exercise,
+		&i.FacetWords,
+		&i.Search,
 	)
 	return i, err
 }
@@ -165,7 +168,7 @@ func (q *Queries) CreateUpload(ctx context.Context, arg CreateUploadParams) (Upl
 }
 
 const getAsset = `-- name: GetAsset :one
-SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose FROM assets
+SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search FROM assets
 WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL
 `
 
@@ -189,7 +192,7 @@ func (q *Queries) GetAsset(ctx context.Context, arg GetAssetParams) (Asset, erro
 		&i.Sha256,
 		&i.Title,
 		&i.Description,
-		&i.Tags,
+		&i.LegacyTags,
 		&i.R2Key,
 		&i.FailureReason,
 		&i.CreatedBy,
@@ -213,16 +216,19 @@ func (q *Queries) GetAsset(ctx context.Context, arg GetAssetParams) (Asset, erro
 		&i.QuickLookStatus,
 		&i.QuickLook,
 		&i.QuickLookAt,
-		&i.Search,
 		&i.TranscriptStatus,
 		&i.TranscriptFailureReason,
 		&i.Purpose,
+		&i.Facets,
+		&i.Exercise,
+		&i.FacetWords,
+		&i.Search,
 	)
 	return i, err
 }
 
 const getAssetAnyState = `-- name: GetAssetAnyState :one
-SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose FROM assets
+SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search FROM assets
 WHERE workspace_id = $1 AND id = $2
 `
 
@@ -247,7 +253,7 @@ func (q *Queries) GetAssetAnyState(ctx context.Context, arg GetAssetAnyStatePara
 		&i.Sha256,
 		&i.Title,
 		&i.Description,
-		&i.Tags,
+		&i.LegacyTags,
 		&i.R2Key,
 		&i.FailureReason,
 		&i.CreatedBy,
@@ -271,16 +277,19 @@ func (q *Queries) GetAssetAnyState(ctx context.Context, arg GetAssetAnyStatePara
 		&i.QuickLookStatus,
 		&i.QuickLook,
 		&i.QuickLookAt,
-		&i.Search,
 		&i.TranscriptStatus,
 		&i.TranscriptFailureReason,
 		&i.Purpose,
+		&i.Facets,
+		&i.Exercise,
+		&i.FacetWords,
+		&i.Search,
 	)
 	return i, err
 }
 
 const getAssetForObjectDeletion = `-- name: GetAssetForObjectDeletion :one
-SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose FROM assets
+SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search FROM assets
 WHERE workspace_id = $1 AND id = $2 AND (deleted_at IS NOT NULL OR status = 'failed')
 `
 
@@ -305,7 +314,7 @@ func (q *Queries) GetAssetForObjectDeletion(ctx context.Context, arg GetAssetFor
 		&i.Sha256,
 		&i.Title,
 		&i.Description,
-		&i.Tags,
+		&i.LegacyTags,
 		&i.R2Key,
 		&i.FailureReason,
 		&i.CreatedBy,
@@ -329,10 +338,13 @@ func (q *Queries) GetAssetForObjectDeletion(ctx context.Context, arg GetAssetFor
 		&i.QuickLookStatus,
 		&i.QuickLook,
 		&i.QuickLookAt,
-		&i.Search,
 		&i.TranscriptStatus,
 		&i.TranscriptFailureReason,
 		&i.Purpose,
+		&i.Facets,
+		&i.Exercise,
+		&i.FacetWords,
+		&i.Search,
 	)
 	return i, err
 }
@@ -366,15 +378,61 @@ func (q *Queries) GetUploadByAsset(ctx context.Context, arg GetUploadByAssetPara
 	return i, err
 }
 
+const listAssetFacets = `-- name: ListAssetFacets :many
+SELECT facets FROM assets
+WHERE workspace_id = $1
+  AND deleted_at IS NULL
+  AND purpose = $2
+  AND cardinality(facets) > 0
+  AND ($3::text[] IS NULL OR search @@ cf_search_query($3::text[]))
+ORDER BY id DESC
+LIMIT $4
+`
+
+type ListAssetFacetsParams struct {
+	WorkspaceID ids.WorkspaceID
+	Purpose     string
+	Words       []string
+	RowLimit    int32
+}
+
+// The labels of the assets a search finds, for the counts of the library's filters (GET /v1/assets/facets): only the facets column of
+// the assets that have any, so the counting (which leaves each facet's own filter out) is done by the caller.
+func (q *Queries) ListAssetFacets(ctx context.Context, arg ListAssetFacetsParams) ([][]string, error) {
+	rows, err := q.db.Query(ctx, listAssetFacets,
+		arg.WorkspaceID,
+		arg.Purpose,
+		arg.Words,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items [][]string
+	for rows.Next() {
+		var facets []string
+		if err := rows.Scan(&facets); err != nil {
+			return nil, err
+		}
+		items = append(items, facets)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAssets = `-- name: ListAssets :many
-SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose FROM assets
+SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search FROM assets
 WHERE workspace_id = $1
   AND deleted_at IS NULL
   AND purpose = $2
   AND ($3::uuid IS NULL OR id < $3::uuid)
   AND ($4::text[] IS NULL OR search @@ cf_search_query($4::text[]))
+  AND ($5::text[] IS NULL OR facets @> $5::text[])
 ORDER BY id DESC
-LIMIT $5
+LIMIT $6
 `
 
 type ListAssetsParams struct {
@@ -382,18 +440,21 @@ type ListAssetsParams struct {
 	Purpose     string
 	Before      pgtype.UUID
 	Words       []string
+	Facets      []string
 	RowLimit    int32
 }
 
 // The library page: newest first (UUIDv7 ids sort by creation time), after the cursor when there is one. With search words
-// (store.SearchWords) only the assets whose title, description, tags or file name match all of them (cf_search_query). Only the
-// assets of one purpose: the library is footage, and a style reference is never listed with it.
+// (store.SearchWords) only the assets whose title, exercise, facet labels, description or file name match all of them
+// (cf_search_query). With facets ("body:back") only the assets that have all of them. Only the assets of one purpose: the library is
+// footage, and a style reference is never listed with it.
 func (q *Queries) ListAssets(ctx context.Context, arg ListAssetsParams) ([]Asset, error) {
 	rows, err := q.db.Query(ctx, listAssets,
 		arg.WorkspaceID,
 		arg.Purpose,
 		arg.Before,
 		arg.Words,
+		arg.Facets,
 		arg.RowLimit,
 	)
 	if err != nil {
@@ -414,7 +475,7 @@ func (q *Queries) ListAssets(ctx context.Context, arg ListAssetsParams) ([]Asset
 			&i.Sha256,
 			&i.Title,
 			&i.Description,
-			&i.Tags,
+			&i.LegacyTags,
 			&i.R2Key,
 			&i.FailureReason,
 			&i.CreatedBy,
@@ -438,10 +499,13 @@ func (q *Queries) ListAssets(ctx context.Context, arg ListAssetsParams) ([]Asset
 			&i.QuickLookStatus,
 			&i.QuickLook,
 			&i.QuickLookAt,
-			&i.Search,
 			&i.TranscriptStatus,
 			&i.TranscriptFailureReason,
 			&i.Purpose,
+			&i.Facets,
+			&i.Exercise,
+			&i.FacetWords,
+			&i.Search,
 		); err != nil {
 			return nil, err
 		}
@@ -528,7 +592,7 @@ SET status = 'failed',
     failure_reason = $1,
     deleted_at = CASE WHEN $2::boolean THEN COALESCE(deleted_at, now()) ELSE deleted_at END
 WHERE workspace_id = $3 AND id = $4 AND status = 'uploading' AND deleted_at IS NULL
-RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search
 `
 
 type MarkAssetFailedParams struct {
@@ -558,7 +622,7 @@ func (q *Queries) MarkAssetFailed(ctx context.Context, arg MarkAssetFailedParams
 		&i.Sha256,
 		&i.Title,
 		&i.Description,
-		&i.Tags,
+		&i.LegacyTags,
 		&i.R2Key,
 		&i.FailureReason,
 		&i.CreatedBy,
@@ -582,10 +646,13 @@ func (q *Queries) MarkAssetFailed(ctx context.Context, arg MarkAssetFailedParams
 		&i.QuickLookStatus,
 		&i.QuickLook,
 		&i.QuickLookAt,
-		&i.Search,
 		&i.TranscriptStatus,
 		&i.TranscriptFailureReason,
 		&i.Purpose,
+		&i.Facets,
+		&i.Exercise,
+		&i.FacetWords,
+		&i.Search,
 	)
 	return i, err
 }
@@ -593,7 +660,7 @@ func (q *Queries) MarkAssetFailed(ctx context.Context, arg MarkAssetFailedParams
 const markAssetUploaded = `-- name: MarkAssetUploaded :one
 UPDATE assets SET status = 'uploaded'
 WHERE workspace_id = $1 AND id = $2 AND status = 'uploading' AND deleted_at IS NULL
-RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search
 `
 
 type MarkAssetUploadedParams struct {
@@ -616,7 +683,7 @@ func (q *Queries) MarkAssetUploaded(ctx context.Context, arg MarkAssetUploadedPa
 		&i.Sha256,
 		&i.Title,
 		&i.Description,
-		&i.Tags,
+		&i.LegacyTags,
 		&i.R2Key,
 		&i.FailureReason,
 		&i.CreatedBy,
@@ -640,10 +707,13 @@ func (q *Queries) MarkAssetUploaded(ctx context.Context, arg MarkAssetUploadedPa
 		&i.QuickLookStatus,
 		&i.QuickLook,
 		&i.QuickLookAt,
-		&i.Search,
 		&i.TranscriptStatus,
 		&i.TranscriptFailureReason,
 		&i.Purpose,
+		&i.Facets,
+		&i.Exercise,
+		&i.FacetWords,
+		&i.Search,
 	)
 	return i, err
 }
@@ -714,7 +784,7 @@ func (q *Queries) MarkUploadCompleted(ctx context.Context, arg MarkUploadComplet
 const softDeleteAsset = `-- name: SoftDeleteAsset :one
 UPDATE assets SET deleted_at = now()
 WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose
+RETURNING id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search
 `
 
 type SoftDeleteAssetParams struct {
@@ -736,7 +806,7 @@ func (q *Queries) SoftDeleteAsset(ctx context.Context, arg SoftDeleteAssetParams
 		&i.Sha256,
 		&i.Title,
 		&i.Description,
-		&i.Tags,
+		&i.LegacyTags,
 		&i.R2Key,
 		&i.FailureReason,
 		&i.CreatedBy,
@@ -760,10 +830,13 @@ func (q *Queries) SoftDeleteAsset(ctx context.Context, arg SoftDeleteAssetParams
 		&i.QuickLookStatus,
 		&i.QuickLook,
 		&i.QuickLookAt,
-		&i.Search,
 		&i.TranscriptStatus,
 		&i.TranscriptFailureReason,
 		&i.Purpose,
+		&i.Facets,
+		&i.Exercise,
+		&i.FacetWords,
+		&i.Search,
 	)
 	return i, err
 }

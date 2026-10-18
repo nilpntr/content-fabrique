@@ -1,4 +1,5 @@
 /** Mirrors the future library API (P1-01 / P0-08). Until it lands the components run on `sample-data.ts`. */
+import type { Facet } from "@/lib/facets";
 
 /** A TypeID: the `ast_` prefix plus a base32 UUIDv7 (D-24). */
 export type AssetId = `ast_${string}`;
@@ -27,8 +28,13 @@ export interface Asset {
   id: AssetId;
   title: string;
   description?: string;
-  tags: string[];
-  /** Whether the quick look (the title, description and tags a video gets after its ingest) is done. Absent when it does not apply. */
+  /** The exercise the quick look named ("seated cable row"); the card's heading unless the creator named the clip. */
+  exercise?: string;
+  /** `user` when the creator named the clip. */
+  titleSource?: string;
+  /** The clip's labels (the type, the body part, the angle...): at most two show on the card. */
+  facets: Facet[];
+  /** Whether the quick look (the title, description and labels a video gets after its ingest) is done. Absent when it does not apply. */
   quickLook?: "pending" | "succeeded" | "failed" | "skipped";
   status: AssetStatus;
   /** 0 to 100, while `uploading` or `processing`. Left out when unknown, which shows an indeterminate bar. */

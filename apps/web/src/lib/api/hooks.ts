@@ -1,7 +1,7 @@
 import { useAuth } from "@clerk/tanstack-react-start";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
-import { type ApiAsset, type ApiClient, ApiError, deleteAsset, fetchAssets, fetchLibrarySummary, fetchMe, fetchWorkspacePlan, updateAsset } from "@/lib/api/client";
+import { type ApiAsset, type ApiClient, ApiError, type AssetFilters, deleteAsset, fetchAssetFacets, fetchAssets, fetchLibrarySummary, fetchMe, fetchWorkspacePlan, updateAsset } from "@/lib/api/client";
 import { useApiClient } from "@/lib/api/provider";
 import { ASSETS_QUERY_KEY, LIBRARY_SUMMARY_QUERY_KEY, ME_QUERY_KEY, PLAN_QUERY_KEY } from "@/lib/query-client";
 
@@ -69,17 +69,17 @@ export function pollDelay(unchanged: number): number {
 /**
  * The workspace's assets from GET /v1/assets, newest first, all pages fetched on demand (`fetchNextPage`). Each page's
  * `items` is read defensively: an answer that is not a page counts as no assets. A clip that is being processed turns
- * `ready` without a reload (see {@link pollDelay}).
+ * `ready` without a reload (see {@link pollDelay}). `filters` keep the clips with those labels (the library's filters).
  */
-export function useAssets({ enabled = true, isOwned = () => false }: { enabled?: boolean; isOwned?: (id: string) => boolean } = {}) {
+export function useAssets({ enabled = true, isOwned = () => false, filters = {} }: { enabled?: boolean; isOwned?: (id: string) => boolean; filters?: AssetFilters } = {}) {
   const { isLoaded, isSignedIn, userId, orgId } = useAuth();
   const getClient = useApiClient();
   const owned = useRef(isOwned);
   owned.current = isOwned;
   const polls = useRef({ signature: "", unchanged: 0 });
   return useInfiniteQuery({
-    queryKey: [ASSETS_QUERY_KEY, userId, orgId],
-    queryFn: ({ pageParam, signal }) => fetchAssets(getClient(), pageParam, signal),
+    queryKey: [ASSETS_QUERY_KEY, userId, orgId, filters],
+    queryFn: ({ pageParam, signal }) => fetchAssets(getClient(), pageParam, signal, filters),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (page) => (typeof page.next_cursor === "string" ? page.next_cursor : undefined),
     select: (data): ApiAsset[] => data.pages.flatMap((page) => (Array.isArray(page.items) ? page.items : [])),
@@ -95,6 +95,22 @@ export function useAssets({ enabled = true, isOwned = () => false }: { enabled?:
       polls.current = { signature, unchanged: signature === polls.current.signature ? polls.current.unchanged + 1 : 0 };
       return pollDelay(polls.current.unchanged);
     },
+  });
+}
+
+/**
+ * What the library's filters offer: the labels of the workspace's clips with counts, from GET /v1/assets/facets. Under the assets'
+ * key, so whatever fetches the list again (an upload, a rename, a delete) fetches the counts again too. Kept while the filters change.
+ */
+export function useAssetFacets({ enabled = true, filters = {} }: { enabled?: boolean; filters?: AssetFilters } = {}) {
+  const { isLoaded, isSignedIn, userId, orgId } = useAuth();
+  const getClient = useApiClient();
+  return useQuery({
+    queryKey: [ASSETS_QUERY_KEY, "facets", userId, orgId, filters],
+    queryFn: ({ signal }) => fetchAssetFacets(getClient(), filters, signal),
+    enabled: enabled && isLoaded && Boolean(isSignedIn) && Boolean(orgId),
+    retry: retryUnlessClientError,
+    placeholderData: (previous) => previous,
   });
 }
 

@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "quicklook",
-  "key": "c0d0f5ecdf32a104d853bf1b0f25f42906ec0702efd3ce7e3ee224177afa3717",
-  "recorded_at": "2026-10-18T05:35:01Z",
+  "key": "17fed010e07e9da9fe9240eab63a2581a2a96d2e33ac4231483e67241d166063",
+  "recorded_at": "2026-10-18T10:50:38Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 700,
@@ -62,12 +62,17 @@
         "input": {
           "title": "Barbell row",
           "description": "A lifter does bent-over barbell rows in a gym, filmed from the side.",
-          "tags": [
-            "barbell row",
-            "back",
-            "gym",
-            "side view",
-            "lats"
+          "exercise": "barbell row",
+          "type": "lift",
+          "body": [
+            "back"
+          ],
+          "movement": "row",
+          "angle": [
+            "side"
+          ],
+          "equipment": [
+            "barbell"
           ],
           "subjects": [
             {

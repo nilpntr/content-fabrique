@@ -1,10 +1,11 @@
 import { Check, Clock, Search } from "lucide-react";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
+import { FacetFilters } from "@/components/facet-filters";
 import { Input } from "@/components/ui/input";
 import { usePrefersReducedMotion } from "@/hooks/use-prefers-reduced-motion";
+import { type FacetSelection, cardBadges, clipHeading, countFacets, matchesFacets } from "@/lib/facets";
 import { cn } from "@/lib/utils";
-import { Chip } from "./chip";
 import { formatDuration } from "./duration";
 import type { Asset, AssetId } from "./types";
 
@@ -17,6 +18,14 @@ export function totalDurationMs(assets: readonly Asset[], ids: readonly AssetId[
 export function validPicks(assets: readonly Asset[], ids: readonly AssetId[]): AssetId[] {
   const known = new Set(assets.map((asset) => asset.id));
   return [...new Set(ids)].filter((id) => known.has(id));
+}
+
+/** Whether a clip matches what was typed: every word somewhere in its title, its exercise or its labels. */
+export function matchesSearch(asset: Asset, query: string): boolean {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return true;
+  const haystack = [asset.title, asset.exercise ?? "", ...asset.facets.map((f) => f.label)].join(" ").toLowerCase();
+  return words.every((word) => haystack.includes(word));
 }
 
 /**
@@ -37,21 +46,16 @@ export function FootageStep({
   onMediaError?: () => void;
 }) {
   const [query, setQuery] = React.useState("");
-  const [activeTags, setActiveTags] = React.useState<string[]>([]);
+  const [selection, setSelection] = React.useState<FacetSelection>({});
   const anchor = React.useRef<AssetId | null>(null);
   // The selection this component last reported. A different one came from outside, which invalidates the anchor.
   const emitted = React.useRef<string | null>(null);
 
   const byId = React.useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
-  const tags = React.useMemo(() => [...new Set(assets.flatMap((asset) => asset.tags))].sort(), [assets]);
-  const visible = React.useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return assets.filter(
-      (asset) =>
-        (needle === "" || asset.title.toLowerCase().includes(needle) || asset.tags.some((tag) => tag.toLowerCase().includes(needle))) &&
-        (activeTags.length === 0 || asset.tags.some((tag) => activeTags.includes(tag))),
-    );
-  }, [assets, query, activeTags]);
+  // The filters count the clips the search finds, so a count is what picking it shows.
+  const searched = React.useMemo(() => assets.filter((asset) => matchesSearch(asset, query)), [assets, query]);
+  const options = React.useMemo(() => countFacets(searched, selection), [searched, selection]);
+  const visible = React.useMemo(() => searched.filter((asset) => matchesFacets(asset.facets, selection)), [searched, selection]);
   const visibleIds = React.useMemo(() => new Set(visible.map((asset) => asset.id)), [visible]);
   const picks = React.useMemo(() => validPicks(assets, selectedIds), [assets, selectedIds]);
   const selected = React.useMemo(() => new Set<AssetId>(picks), [picks]);
@@ -93,7 +97,7 @@ export function FootageStep({
 
   function resetFilters() {
     setQuery("");
-    setActiveTags([]);
+    setSelection({});
   }
 
   const count = picks.length;
@@ -101,30 +105,19 @@ export function FootageStep({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
         <div className="relative w-full sm:max-w-xs">
           <Search aria-hidden="true" className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-subtle-foreground" />
           <Input
             type="search"
             aria-label="Search clips"
-            placeholder="Search by title or tag"
+            placeholder="Search clips, like “row”"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             className="pl-9"
           />
         </div>
-        <fieldset className="flex min-w-0 flex-wrap gap-1.5">
-          <legend className="sr-only">Filter by tag</legend>
-          {tags.map((tag) => (
-            <Chip
-              key={tag}
-              pressed={activeTags.includes(tag)}
-              onClick={() => setActiveTags((current) => (current.includes(tag) ? current.filter((t) => t !== tag) : [...current, tag]))}
-            >
-              {tag}
-            </Chip>
-          ))}
-        </fieldset>
+        <FacetFilters options={options} selection={selection} onChange={setSelection} />
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -150,7 +143,7 @@ export function FootageStep({
       {visible.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-2xl bg-well py-12 text-center shadow-well">
           <p className="font-medium">No clips match</p>
-          <p className="text-muted-foreground">Try another word or remove a tag.</p>
+          <p className="text-muted-foreground">Try another word or another filter.</p>
           <Button variant="secondary" size="sm" onClick={resetFilters}>
             Reset filters
           </Button>
@@ -180,6 +173,8 @@ function ClipCard({
   const titleId = React.useId();
   const metaId = React.useId();
   const reducedMotion = usePrefersReducedMotion();
+  const heading = clipHeading(asset);
+  const badges = cardBadges(asset.facets);
   // The loop is only fetched once the pointer rests on the card, and never for someone who asked for less motion.
   const [hovering, setHovering] = React.useState(false);
   return (
@@ -228,12 +223,16 @@ function ClipCard({
           </span>
         </div>
         <div className="space-y-1 p-2.5">
-          <p id={titleId} className={cn("truncate text-[13.5px]", selected ? "font-semibold" : "font-medium")}>
-            {asset.title}
+          <p id={titleId} title={asset.title} className={cn("truncate text-[13.5px]", selected ? "font-semibold" : "font-medium")}>
+            {heading}
           </p>
-          <p id={metaId} className="truncate text-[12.5px] text-muted-foreground">
-            <span className="sr-only">{formatDuration(asset.durationMs)}, </span>
-            {asset.tags.join(" · ")}
+          <p id={metaId} className="flex min-h-5 min-w-0 items-center gap-1 overflow-hidden text-[11.5px] leading-5 text-muted-foreground">
+            <span className="sr-only">{formatDuration(asset.durationMs)}{badges.length > 0 ? ", " : ""}</span>
+            {badges.map((badge) => (
+              <span key={`${badge.facet}:${badge.value}`} data-slot="facet-badge" className="truncate rounded-full bg-wash px-2">
+                {badge.label}
+              </span>
+            ))}
           </p>
         </div>
       </div>

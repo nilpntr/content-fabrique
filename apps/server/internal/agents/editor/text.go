@@ -14,6 +14,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/music"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/subject"
+	"github.com/nilpntr/content-fabrique/internal/taxonomy"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 	"github.com/nilpntr/content-fabrique/internal/timeline/ops"
 )
@@ -121,6 +122,12 @@ func footageText(rows []store.ProjectFootageRow, o footageOpts) string {
 			}
 			fmt.Fprintf(&b, "  description: %s\n", runtime.Untrusted("clip_description", d))
 		}
+		if line := labelLine(r.Facets); line != "" {
+			fmt.Fprintf(&b, "  labels: %s\n", line)
+		}
+		if ex := strings.TrimSpace(r.Exercise); ex != "" && o.Full {
+			fmt.Fprintf(&b, "  exercise: %s\n", runtime.Untrusted("clip_exercise", ex))
+		}
 	}
 	if anySong {
 		b.WriteString("\nA song line means the clip's sound is music the edit can be cut to (D-34): put it on the timeline with set_sound kind creator_audio and its asset_id (the export then has the song and no gym sound), end the hook on its drop and cut on its beats (get_music lists them).\n")
@@ -137,6 +144,14 @@ func footageText(rows []store.ProjectFootageRow, o footageOpts) string {
 		b.WriteString("\nTitles and descriptions are shortened or left out here to keep this overview small; list_footage has them whole.")
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// labelLine is a clip's labels from the fixed vocabulary (package taxonomy), in its words: "Lifting, Back, Row, Side view, Cable".
+// The labels are the vocabulary's own words, not the model's, so they are printed as they are (the exercise name is not: it is model
+// text). "" for a clip without labels.
+func labelLine(stored []string) string {
+	tax := taxonomy.Default()
+	return strings.Join(tax.Labels(tax.Normalize(stored)), ", ")
 }
 
 // subjectLine says where the person is in a clip, in numbers: the top of the head as a percentage of the frame height at each sampled

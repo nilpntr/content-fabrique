@@ -12,6 +12,7 @@ import (
 
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
+	"github.com/nilpntr/content-fabrique/internal/taxonomy"
 )
 
 // assetsSuite is part of repositorySuite, which TestRepository runs as the superuser and TestRoleSplit runs again as the
@@ -61,7 +62,7 @@ func assetsSuite(t *testing.T, st *store.Store, suffix string) {
 		if a.WorkspaceID != wa.ID || u.WorkspaceID != wa.ID || u.AssetID != a.ID {
 			t.Fatalf("rows are not tied to the workspace: %+v %+v", a, u)
 		}
-		if a.Status != store.AssetUploading || a.Title != "clip" || a.Sha256 != nil || a.FailureReason != nil || a.DeletedAt != nil || len(a.Tags) != 0 {
+		if a.Status != store.AssetUploading || a.Title != "clip" || a.Sha256 != nil || a.FailureReason != nil || a.DeletedAt != nil || len(a.Facets) != 0 || len(a.LegacyTags) != 0 || a.Exercise != "" {
 			t.Fatalf("defaults: %+v", a)
 		}
 		if u.CompletedAt != nil || u.AbortedAt != nil || u.PartCount != 3 {
@@ -625,7 +626,7 @@ func assetsSuite(t *testing.T, st *store.Store, suffix string) {
 		st.SetQuickLookHook(nil)
 
 		// Tenancy: workspace B can neither apply, fail nor retitle workspace A's asset.
-		res := store.QuickLookResult{Title: "Barbell row", Description: "Bent-over barbell row in a gym.", Tags: []string{"barbell row", "back"}, Detail: []byte(`{"model":"claude-haiku-5-5"}`)}
+		res := store.QuickLookResult{Title: "Barbell row", Description: "Bent-over barbell row in a gym.", Exercise: "barbell row", Facets: []string{"type:lift", "body:back"}, FacetWords: "Lifting lift Back back", Detail: []byte(`{"model":"claude-haiku-5-5"}`)}
 		if _, err := st.ApplyQuickLook(ctx, wb.ID, a.ID, res); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("workspace B applied A's quick look: %v", err)
 		}
@@ -638,7 +639,7 @@ func assetsSuite(t *testing.T, st *store.Store, suffix string) {
 
 		applied, err := st.ApplyQuickLook(ctx, wa.ID, a.ID, res)
 		if err != nil || applied.Title != "Barbell row" || applied.TitleSource != store.TitleFromQuickLook || applied.Description != res.Description ||
-			len(applied.Tags) != 2 || *applied.QuickLookStatus != store.QuickLookSucceeded || applied.QuickLookAt == nil || string(applied.QuickLook) != `{"model": "claude-haiku-5-5"}` {
+			len(applied.Facets) != 2 || applied.Exercise != "barbell row" || *applied.QuickLookStatus != store.QuickLookSucceeded || applied.QuickLookAt == nil || string(applied.QuickLook) != `{"model": "claude-haiku-5-5"}` {
 			t.Fatalf("apply = %+v %v", applied, err)
 		}
 
@@ -673,8 +674,8 @@ func assetsSuite(t *testing.T, st *store.Store, suffix string) {
 		if err != nil || edited.Title != "Rows with Gino" || edited.TitleSource != store.TitleFromUser {
 			t.Fatalf("edit = %+v %v", edited, err)
 		}
-		again, err := st.ApplyQuickLook(ctx, wa.ID, a.ID, store.QuickLookResult{Title: "Overhead press", Description: "Standing press.", Tags: []string{"shoulders"}})
-		if err != nil || again.Title != "Rows with Gino" || again.TitleSource != store.TitleFromUser || again.Description != "Standing press." || len(again.Tags) != 1 {
+		again, err := st.ApplyQuickLook(ctx, wa.ID, a.ID, store.QuickLookResult{Title: "Overhead press", Description: "Standing press.", Facets: []string{"body:shoulders"}})
+		if err != nil || again.Title != "Rows with Gino" || again.TitleSource != store.TitleFromUser || again.Description != "Standing press." || len(again.Facets) != 1 {
 			t.Fatalf("a quick look over a user title = %+v %v", again, err)
 		}
 		if rows := search(wa, "gino"); len(rows) != 1 {
@@ -694,10 +695,10 @@ func assetsSuite(t *testing.T, st *store.Store, suffix string) {
 			t.Fatalf("a re-ingest after a quick look: hook ran %d times, status %v", len(due), got.QuickLookStatus)
 		}
 
-		// Failing: the title and tags stay, the status says so.
+		// Failing: the title and labels stay, the status says so.
 		c := ready(wa, ua, "failing-clip", store.AssetKindVideo)
 		failed, err := st.FailQuickLook(ctx, wa.ID, c.ID, []byte(`{"error":"invalid_output"}`))
-		if err != nil || *failed.QuickLookStatus != store.QuickLookFailed || failed.Title != "failing-clip" || failed.TitleSource != store.TitleFromFilename || len(failed.Tags) != 0 {
+		if err != nil || *failed.QuickLookStatus != store.QuickLookFailed || failed.Title != "failing-clip" || failed.TitleSource != store.TitleFromFilename || len(failed.Facets) != 0 {
 			t.Fatalf("fail = %+v %v", failed, err)
 		}
 
@@ -1044,7 +1045,7 @@ func assetsSuite(t *testing.T, st *store.Store, suffix string) {
 
 	t.Run("search: stop words, half-typed words, accents", func(t *testing.T) {
 		w, u := newWorkspace("search")
-		mk := func(filename, title, desc string, tags ...string) store.Asset {
+		mk := func(filename, title, desc string, facets ...string) store.Asset {
 			t.Helper()
 			a, _ := newAsset(w, u, strings.TrimSuffix(filename, ".mp4"), future)
 			if err := st.InTx(ctx, func(tx *store.Store) error { _, err := tx.CompleteUpload(ctx, w.ID, a.ID); return err }); err != nil {
@@ -1056,14 +1057,14 @@ func assetsSuite(t *testing.T, st *store.Store, suffix string) {
 			if _, err := st.FinishAssetIngest(ctx, w.ID, a.ID, store.IngestResult{DurationMs: 1000, Width: 2, Height: 2}); err != nil {
 				t.Fatal(err)
 			}
-			a, err := st.ApplyQuickLook(ctx, w.ID, a.ID, store.QuickLookResult{Title: title, Description: desc, Tags: tags})
+			a, err := st.ApplyQuickLook(ctx, w.ID, a.ID, store.QuickLookResult{Title: title, Description: desc, Facets: facets, FacetWords: taxonomy.Default().SearchText(taxonomy.Default().Normalize(facets))})
 			if err != nil {
 				t.Fatal(err)
 			}
 			return a
 		}
-		press := mk("a1.mp4", "The overhead press", "Standing overhead pressing in a gym.", "shoulders")
-		cafe := mk("a2.mp4", "Caf\u00e9 stop", "A coffee break between sets.", "rest")
+		press := mk("a1.mp4", "The overhead press", "Standing overhead pressing in a gym.", "body:shoulders")
+		cafe := mk("a2.mp4", "Caf\u00e9 stop", "A coffee break between sets.")
 		found := func(q string) []string {
 			t.Helper()
 			rows, err := st.SearchAssets(ctx, w.ID, store.SearchWords(q), nil, 50)

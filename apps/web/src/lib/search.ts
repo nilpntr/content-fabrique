@@ -3,7 +3,7 @@ import type { ApiAsset, ProjectSummary } from "@/lib/api/client";
 /**
  * The search of the ⌘K palette, over the lists the app already has (the first pages of projects and clips). There is no
  * `GET /v1/search` yet (P2-12), so this finds what the palette can see: a project by its title, a clip by its title, the
- * description and tags the quick look wrote (P1-04b) and its file name. Every word of the query has to be in the text.
+ * description, exercise and labels the quick look wrote (P1-04b) and its file name. Every word of the query has to be in the text.
  */
 
 const words = (query: string): string[] => query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -26,5 +26,5 @@ export function searchProjects(projects: readonly ProjectSummary[], query: strin
 
 /** Ready and unfinished clips alike; the library says which is which. Images are not clips, and are left out. */
 export function searchClips(assets: readonly ApiAsset[], query: string, limit = 6): ApiAsset[] {
-  return assets.filter((asset) => asset.kind === "video" && matchesQuery(query, asset.title, asset.description, asset.tags, asset.filename)).slice(0, limit);
+  return assets.filter((asset) => asset.kind === "video" && matchesQuery(query, asset.title, asset.description, asset.exercise, (asset.facets ?? []).map((f) => f.label), asset.filename)).slice(0, limit);
 }

@@ -1,3 +1,4 @@
+import { sampleFacets } from "@/lib/sample-facets";
 import type { Asset, AssetId, AssetStatus, SpriteGrid } from "./types";
 
 /**
@@ -51,7 +52,7 @@ const BASE = Date.UTC(2026, 9, 12, 9, 0, 0);
 interface Spec {
   title: string;
   seconds: number;
-  tags: string[];
+  labels: string[];
   hue: number;
   status?: AssetStatus;
   progress?: number;
@@ -80,7 +81,7 @@ function clip(n: number, spec: Spec): Asset {
     id: assetId(n),
     title: spec.title,
     description: spec.description,
-    tags: spec.tags,
+    facets: sampleFacets(...spec.labels),
     status,
     progress: spec.progress,
     durationMs,
@@ -93,16 +94,16 @@ function clip(n: number, spec: Spec): Asset {
 }
 
 export const SAMPLE_ASSETS: Asset[] = [
-  clip(1, { title: "Back double biceps pose", seconds: 8, tags: ["posing", "back"], hue: 262 }),
-  clip(2, { title: "Lat pulldown, slow reps", seconds: 34, tags: ["exercise", "back", "cable"], hue: 205, size: "tall" }),
-  clip(3, { title: "Barbell row, side angle", seconds: 27, tags: ["exercise", "back"], hue: 228, size: "landscape" }),
-  clip(4, { title: "Gym walk-in, wide shot", seconds: 12, tags: ["b-roll", "gym"], hue: 150, size: "landscape" }),
-  clip(5, { title: "Chalk up and grip", seconds: 5, tags: ["b-roll"], hue: 40, size: "square" }),
-  clip(6, { title: "Posing routine, full run through with music and the crowd cheering", seconds: 192, tags: ["posing", "routine", "stage", "crowd"], hue: 330 }),
-  clip(7, { title: "Cable fly, front angle", seconds: 21, tags: [], hue: 18, status: "processing", progress: 42, size: "tall" }),
-  clip(8, { title: "Warm-up mobility", seconds: 64, tags: [], hue: 185, status: "processing", size: "landscape" }),
-  clip(9, { title: "Deadlift, heavy single", seconds: 15, tags: [], hue: 100, status: "uploading", progress: 68 }),
-  clip(10, { title: "Morning check-in", seconds: 47, tags: [], hue: 290, status: "uploaded" }),
-  clip(11, { title: "Corrupt export from phone", seconds: 3, tags: [], hue: 0, status: "failed", poster: false }),
-  clip(12, { title: "Leg day finisher", seconds: 9, tags: ["exercise", "legs"], hue: 75, sprite: false }),
+  clip(1, { title: "Back double biceps pose", seconds: 8, labels: ["type:pose", "body:back", "angle:back"], hue: 262 }),
+  clip(2, { title: "Lat pulldown, slow reps", seconds: 34, labels: ["type:lift", "body:back", "movement:pull", "angle:front", "equipment:cable"], hue: 205, size: "tall" }),
+  clip(3, { title: "Barbell row, side angle", seconds: 27, labels: ["type:lift", "body:back", "movement:row", "angle:side", "equipment:barbell"], hue: 228, size: "landscape" }),
+  clip(4, { title: "Gym walk-in, wide shot", seconds: 12, labels: ["type:b_roll", "angle:wide"], hue: 150, size: "landscape" }),
+  clip(5, { title: "Chalk up and grip", seconds: 5, labels: ["type:b_roll", "angle:close_up"], hue: 40, size: "square" }),
+  clip(6, { title: "Posing routine, full run through with music and the crowd cheering", seconds: 192, labels: ["type:pose", "body:full_body", "angle:front"], hue: 330 }),
+  clip(7, { title: "Cable fly, front angle", seconds: 21, labels: [], hue: 18, status: "processing", progress: 42, size: "tall" }),
+  clip(8, { title: "Warm-up mobility", seconds: 64, labels: [], hue: 185, status: "processing", size: "landscape" }),
+  clip(9, { title: "Deadlift, heavy single", seconds: 15, labels: [], hue: 100, status: "uploading", progress: 68 }),
+  clip(10, { title: "Morning check-in", seconds: 47, labels: [], hue: 290, status: "uploaded" }),
+  clip(11, { title: "Corrupt export from phone", seconds: 3, labels: [], hue: 0, status: "failed", poster: false }),
+  clip(12, { title: "Leg day finisher", seconds: 9, labels: ["type:lift", "type:slow_motion", "body:legs", "angle:side"], hue: 75, sprite: false }),
 ];

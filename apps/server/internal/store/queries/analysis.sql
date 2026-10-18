@@ -62,7 +62,7 @@ SELECT asset_id, version, source_ingested_at, duration_ms FROM asset_signals WHE
 -- name: GetAssetSignals :one
 SELECT * FROM asset_signals WHERE workspace_id = @workspace_id AND asset_id = @asset_id;
 
--- The quick look landed (or ran again): its tags label the asset's analysis moments.
+-- The quick look landed (or ran again): its facets label the asset's analysis moments.
 -- name: RelabelAssetMoments :exec
 UPDATE moments SET labels = @labels::text[]
 WHERE workspace_id = @workspace_id AND asset_id = @asset_id AND source = 'analysis';

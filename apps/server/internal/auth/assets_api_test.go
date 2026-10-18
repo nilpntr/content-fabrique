@@ -323,7 +323,7 @@ func TestAssetsUploadFlow(t *testing.T) {
 		t.Fatalf("ids: %+v", c)
 	}
 	if c.Asset.Status != api.AssetStatusUploading || c.Asset.Filename != "My Clip.MP4" || c.Asset.Title != "My Clip" || c.Asset.Kind != api.AssetKindVideo ||
-		c.Asset.ContentType != "video/mp4" || c.Asset.SizeBytes != size || c.Asset.Sha256 != nil || c.Asset.FailureReason != nil || len(c.Asset.Tags) != 0 {
+		c.Asset.ContentType != "video/mp4" || c.Asset.SizeBytes != size || c.Asset.Sha256 != nil || c.Asset.FailureReason != nil || len(c.Asset.Facets) != 0 || c.Asset.Exercise != "" {
 		t.Fatalf("asset: %+v", c.Asset)
 	}
 	if c.Upload.PartSize != 16*mib || c.Upload.PartCount != 3 || c.Upload.Status != api.UploadStatusActive || !c.Upload.ExpiresAt.After(time.Now().Add(23*time.Hour)) {

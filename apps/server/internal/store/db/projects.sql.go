@@ -303,7 +303,7 @@ func (q *Queries) InsertTimelineVersion(ctx context.Context, arg InsertTimelineV
 }
 
 const listAssetsForProject = `-- name: ListAssetsForProject :many
-SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose FROM assets
+SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search FROM assets
 WHERE workspace_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL
 `
 
@@ -334,7 +334,7 @@ func (q *Queries) ListAssetsForProject(ctx context.Context, arg ListAssetsForPro
 			&i.Sha256,
 			&i.Title,
 			&i.Description,
-			&i.Tags,
+			&i.LegacyTags,
 			&i.R2Key,
 			&i.FailureReason,
 			&i.CreatedBy,
@@ -358,10 +358,13 @@ func (q *Queries) ListAssetsForProject(ctx context.Context, arg ListAssetsForPro
 			&i.QuickLookStatus,
 			&i.QuickLook,
 			&i.QuickLookAt,
-			&i.Search,
 			&i.TranscriptStatus,
 			&i.TranscriptFailureReason,
 			&i.Purpose,
+			&i.Facets,
+			&i.Exercise,
+			&i.FacetWords,
+			&i.Search,
 		); err != nil {
 			return nil, err
 		}
@@ -473,7 +476,7 @@ func (q *Queries) ListProjectCatalogAssets(ctx context.Context, arg ListProjectC
 }
 
 const listProjectFootage = `-- name: ListProjectFootage :many
-SELECT pa.position, a.id AS asset_id, a.kind, a.title, a.description, a.duration_ms, a.width, a.height, a.rotation, a.has_audio
+SELECT pa.position, a.id AS asset_id, a.kind, a.title, a.description, a.exercise, a.facets, a.duration_ms, a.width, a.height, a.rotation, a.has_audio
 FROM project_assets pa
 JOIN assets a ON a.workspace_id = pa.workspace_id AND a.id = pa.asset_id
 WHERE pa.workspace_id = $1 AND pa.project_id = $2
@@ -492,6 +495,8 @@ type ListProjectFootageRow struct {
 	Kind        string
 	Title       string
 	Description string
+	Exercise    string
+	Facets      []string
 	DurationMs  *int64
 	Width       *int32
 	Height      *int32
@@ -517,6 +522,8 @@ func (q *Queries) ListProjectFootage(ctx context.Context, arg ListProjectFootage
 			&i.Kind,
 			&i.Title,
 			&i.Description,
+			&i.Exercise,
+			&i.Facets,
 			&i.DurationMs,
 			&i.Width,
 			&i.Height,
@@ -667,7 +674,7 @@ func (q *Queries) ListTimelineVersions(ctx context.Context, arg ListTimelineVers
 }
 
 const lockReadyAssetsForProject = `-- name: LockReadyAssetsForProject :many
-SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, search, transcript_status, transcript_failure_reason, purpose FROM assets
+SELECT id, workspace_id, kind, status, filename, content_type, size_bytes, sha256, title, description, legacy_tags, r2_key, failure_reason, created_by, created_at, updated_at, deleted_at, duration_ms, width, height, fps, rotation, video_codec, audio_codec, has_audio, hdr, probe, ingest_progress, ingest_stage, ingested_at, title_source, quick_look_status, quick_look, quick_look_at, transcript_status, transcript_failure_reason, purpose, facets, exercise, facet_words, search FROM assets
 WHERE workspace_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL AND status = 'ready'
 FOR SHARE
 `
@@ -700,7 +707,7 @@ func (q *Queries) LockReadyAssetsForProject(ctx context.Context, arg LockReadyAs
 			&i.Sha256,
 			&i.Title,
 			&i.Description,
-			&i.Tags,
+			&i.LegacyTags,
 			&i.R2Key,
 			&i.FailureReason,
 			&i.CreatedBy,
@@ -724,10 +731,13 @@ func (q *Queries) LockReadyAssetsForProject(ctx context.Context, arg LockReadyAs
 			&i.QuickLookStatus,
 			&i.QuickLook,
 			&i.QuickLookAt,
-			&i.Search,
 			&i.TranscriptStatus,
 			&i.TranscriptFailureReason,
 			&i.Purpose,
+			&i.Facets,
+			&i.Exercise,
+			&i.FacetWords,
+			&i.Search,
 		); err != nil {
 			return nil, err
 		}

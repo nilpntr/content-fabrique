@@ -5,6 +5,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { formatDuration } from "@/components/new-project/duration";
+import { cardBadges, clipHeading } from "@/lib/facets";
 import { tileBackground } from "./scrub";
 import type { Asset, AssetStatus } from "./types";
 import { useClipPreview } from "./use-clip-preview";
@@ -145,6 +146,7 @@ export function ClipCard({ asset, onOpen, onDelete, onRetry, onMediaError, class
   const ready = asset.status === "ready";
   const busy = BUSY.has(asset.status);
   const title = asset.title.trim() || "Untitled clip";
+  const heading = clipHeading({ ...asset, title });
   const [confirming, setConfirming] = React.useState(false);
   // The URL that failed, so a new preview URL (a reprocessed clip) gets its chance again.
   const [failedUrl, setFailedUrl] = React.useState<string | undefined>();
@@ -162,8 +164,7 @@ export function ClipCard({ asset, onOpen, onDelete, onRetry, onMediaError, class
   const showVideo = preview.showVideo && asset.hoverPreviewUrl !== undefined && failedUrl !== asset.hoverPreviewUrl;
 
   const portrait = asset.width / asset.height <= CARD_RATIO;
-  const tags = asset.tags.slice(0, 1);
-  const moreTags = asset.tags.length - tags.length;
+  const badges = cardBadges(asset.facets);
 
   return (
     <div data-slot="clip-card-root" className={cn("group/clip relative", className)}>
@@ -265,18 +266,17 @@ export function ClipCard({ asset, onOpen, onDelete, onRetry, onMediaError, class
 
         <div className="space-y-1.5 p-2.5 pr-3">
           <h3 className="truncate text-[13.5px] font-medium tracking-[-0.005em]" title={title}>
-            {title}
+            {heading}
           </h3>
           <div className="flex min-w-0 items-center gap-1.5">
             <StatusChip asset={asset} />
             {ready
-              ? tags.map((tag) => (
-                  <span key={tag} className="truncate rounded-full bg-wash px-2 text-[11.5px] leading-5 text-muted-foreground">
-                    {tag}
+              ? badges.map((badge) => (
+                  <span key={`${badge.facet}:${badge.value}`} data-slot="facet-badge" className="truncate rounded-full bg-wash px-2 text-[11.5px] leading-5 text-muted-foreground">
+                    {badge.label}
                   </span>
                 ))
               : null}
-            {ready && moreTags > 0 ? <span className="shrink-0 text-[11.5px] leading-5 text-subtle-foreground tabular-nums" title={asset.tags.join(", ")}>+{moreTags}</span> : null}
           </div>
           {asset.status === "failed" && asset.failureMessage ? <p className="text-[12px] leading-snug text-destructive text-pretty">{asset.failureMessage}</p> : null}
           {asset.status === "failed" && onRetry && asset.retryable !== false ? (

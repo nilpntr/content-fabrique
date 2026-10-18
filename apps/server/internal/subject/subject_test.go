@@ -488,6 +488,8 @@ func TestShowsOffTheBody(t *testing.T) {
 		{"Lat spread flex", nil, true},
 		{"Hip flexor stretch", []string{"mobility"}, false},
 		{"Seated row", []string{"back", "machine"}, false},
+		{"Back view", []string{"type:pose", "body:back"}, true}, // the stored facets
+		{"Back view", []string{"type:lift", "angle:back"}, false},
 		{"Purpose", []string{"composed"}, false}, // "pose" inside a word is not the word
 		{"", nil, false},
 	} {
@@ -503,8 +505,8 @@ func TestLoadMarksPoseClips(t *testing.T) {
 	a.UUID[0], b.UUID[0] = 1, 2
 	good := []byte(`{"aspect":0.5625,"samples":[{"at_ms":0,"x":0.1,"y":0.1,"w":0.5,"h":0.5,"head_top_y":0.12}]}`)
 	rd := fakeReader{rows: []store.AssetSubjectsRow{
-		{AssetID: a, Subjects: good, Title: "Back pose", Tags: []string{"back"}},
-		{AssetID: b, Subjects: good, Title: "Seated row", Tags: []string{"row"}},
+		{AssetID: a, Subjects: good, Title: "Back view", Facets: []string{"type:pose", "body:back"}},
+		{AssetID: b, Subjects: good, Title: "Seated row", Facets: []string{"type:lift", "movement:row"}},
 	}}
 	ix, err := Load(context.Background(), rd, ids.WorkspaceID{}, []ids.AssetID{a, b})
 	if err != nil || len(ix) != 2 {

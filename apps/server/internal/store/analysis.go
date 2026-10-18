@@ -151,7 +151,7 @@ func (s *Store) SaveAnalysis(ctx context.Context, ws ids.WorkspaceID, id ids.Ass
 		for _, m := range r.Moments {
 			labels := m.Labels
 			if labels == nil {
-				labels = a.Tags // what the quick look has said so far; ApplyQuickLook labels them again when it lands
+				labels = a.Facets // what the quick look has said so far; ApplyQuickLook labels them again when it lands
 			}
 			if labels == nil {
 				labels = []string{}
