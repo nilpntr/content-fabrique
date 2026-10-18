@@ -78,6 +78,22 @@ cases:
       - id: novelty
         text: "Novelty against the creator's usual formats: a different concept from their go-to formats and from the project's first version, still in their style, and done well."
         weight: 1
+  # A second footage set, never shown to the improvement loop: another training day (chest and leg machines, a triceps pushdown, a
+  # 120 fps slow-motion curl), another song (130 BPM, 15 s). It checks that a change helps edits in general, not only the back day.
+  - id: mixed-day-held-out
+    title: "Mixed upper and leg day, another song (held out)"
+    footage: [ast_PLACEHOLDER_slowmo_curl, ast_PLACEHOLDER_leg_press, ast_PLACEHOLDER_incline_press, ast_PLACEHOLDER_plate_machine, ast_PLACEHOLDER_leg_curl, ast_PLACEHOLDER_pushdown, ast_PLACEHOLDER_chest_press]
+    song: ast_PLACEHOLDER_song_130
+    brief: "A training-day short for a fitness creator: the cleanest reps from these machines, varied angles, the slow-motion curl as a highlight, 15 seconds to fit the song, a punchy title."
+    vibe: lively
+    held_out: true
+    expectations:
+      - id: slowmo-highlight
+        text: "The slow-motion curl is used as a highlight (at its own slow speed), not sped back up to real time."
+        weight: 1
+      - id: clean-reps
+        text: "Every rep shown is a whole rep: no shot starts or ends in the middle of the movement."
+        weight: 1
   # The calibration set: the founder called v4 of this project "sick", except its transitions.
   - id: calibration-founder-v4
     title: "Founder's verdict: v4 'sick' except the transitions"
