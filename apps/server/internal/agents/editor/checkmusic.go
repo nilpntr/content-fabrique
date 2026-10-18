@@ -69,6 +69,12 @@ func (c *checker) hookMissesDrop() Check {
 		return c.skip(CheckHookMissesDrop, "there are no cuts")
 	}
 	first := c.items[1].AtMs
+	if it := c.items[1]; isTransition(it) {
+		// A transition switches the picture at its middle: the hook ends there when that is nearer the drop.
+		if mid := it.AtMs + it.TransitionIn.DurationMs/2; absI(mid-m.DropMs) < absI(first-m.DropMs) {
+			first = mid
+		}
+	}
 	d := first - m.DropMs
 	if absI(d) <= offBeatToleranceMs {
 		return c.pass(CheckHookMissesDrop, "the hook ends at %d ms, on the drop at %d ms", first, m.DropMs)

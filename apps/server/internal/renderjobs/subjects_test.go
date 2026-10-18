@@ -2,6 +2,7 @@ package renderjobs
 
 import (
 	"context"
+	"math"
 	"errors"
 	"regexp"
 	"strconv"
@@ -55,8 +56,8 @@ func TestTheRenderKeepsTheTitleOffTheHeadAndRetriesWhenTheBoxesCannotBeRead(t *t
 	}
 	yPlain := titleY(t, plain.joined())
 
-	// With the head at the top of the frame (a quick look's subject boxes) it is moved.
-	detail := []byte(`{"prompt_version":"quicklook.v2","subjects":{"aspect":0.5625,"samples":[{"at_ms":500,"x":0.2,"y":0.1,"w":0.6,"h":0.85,"head_top_y":0.12}]}}`)
+	// With the head under it (a quick look's subject boxes, the head at 22 % of the frame) it is moved off the person.
+	detail := []byte(`{"prompt_version":"quicklook.v2","subjects":{"aspect":0.5625,"samples":[{"at_ms":500,"x":0.2,"y":0.2,"w":0.6,"h":0.75,"head_top_y":0.22}]}}`)
 	if _, err := e.st.ApplyQuickLook(ctx, w.ID, a.ID, store.QuickLookResult{Title: "Row", Description: "A row.", Tags: []string{"row"}, Detail: detail}); err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +66,7 @@ func TestTheRenderKeepsTheTitleOffTheHeadAndRetriesWhenTheBoxesCannotBeRead(t *t
 	if out, err := e.newPipeline(t, e.objs, moved).Run(ctx, w.ID, r2.ID); err != nil || out.Status != store.RenderReady {
 		t.Fatalf("render with boxes: %+v %v", out, err)
 	}
-	if yMoved := titleY(t, moved.joined()); yMoved <= yPlain+50 {
+	if yMoved := titleY(t, moved.joined()); math.Abs(yMoved-yPlain) < 20 {
 		t.Errorf("the title was not moved off the head: y %v with the boxes, %v without", yMoved, yPlain)
 	}
 	if !strings.Contains(moved.joined(), "AAA") {
