@@ -59,6 +59,7 @@ func Run(opts Options) error {
 		LogOutput:    os.Stdout,
 		LogLevel:     slog.LevelInfo,
 		LogText:      cfg.IsLocal(),
+		TraceContent: cfg.TraceContent,
 	})
 	if err != nil {
 		return fmt.Errorf("telemetry: %w", err)

@@ -80,6 +80,34 @@ services:
           echo "bucket $$BUCKET created"
         fi
 
+  # Step-by-step traces of the agents, local only (D-36, docs/design/observability-v1.md): Arize Phoenix, under the `obs` profile so
+  # `task up` and `task dev` never start it. `task dev:obs` does, and runs the stack with OTEL_EXPORTER_OTLP_ENDPOINT pointing here.
+  # One port serves the UI (http://localhost:6006) and the OTLP/HTTP ingest (/v1/traces); gRPC is not used. No login: it listens on
+  # loopback only. The traces, datasets and experiments live in the phoenix-data volume (`task obs:down` keeps them). Phoenix is under the
+  # Elastic License 2.0: fine to run for our own development, never to offer as a service. The nonroot image of 20.23.0, pinned by the
+  # digest `version-20.23.0-nonroot` had on 2026-10-18.
+  phoenix:
+    profiles: ["obs"]
+    image: arizephoenix/phoenix:version-20.23.0-nonroot@sha256:ea0d33a28258db5e3fe46ea097d1441d0774e8b27557878296f809ccbffa7093
+    environment:
+      # The image runs as nonroot (uid 65532), whose home is the one directory it may write to: the volume is mounted there, so Docker
+      # gives it that owner when it creates it, and Phoenix keeps its SQLite database in .phoenix under it.
+      PHOENIX_WORKING_DIR: /home/nonroot/.phoenix
+      # Phoenix's own usage telemetry to Arize: off.
+      PHOENIX_TELEMETRY_ENABLED: "false"
+    ports:
+      - "127.0.0.1:6006:6006"
+    volumes:
+      - phoenix-data:/home/nonroot
+    # The image has no curl or wget: the probe is Python, which it runs on.
+    healthcheck:
+      test: ["CMD", "/usr/bin/python3.13", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:6006/healthz', timeout=3).status == 200 else 1)"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 5s
+
 volumes:
   postgres18-data:
   minio-data:
+  phoenix-data:

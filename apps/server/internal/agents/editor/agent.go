@@ -52,7 +52,8 @@ func NewAgent(d Deps) (runtime.Agent, error) {
 			d.previews.forget(run) // what the run kept in memory
 			d.endRun(run)          // and its comments, now that its result is stored
 		},
-		Budgets: DefaultBudgets,
+		Budgets:    DefaultBudgets,
+		TraceAttrs: traceAttrs,
 	}, nil
 }
 

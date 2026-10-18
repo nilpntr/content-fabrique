@@ -830,6 +830,26 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 
 **Revisit** when the security review asks for Chrome's own sandbox (user namespaces under gVisor), when the licence answer prefers a Debian-built Chromium, or when overlay time matters (parallel tabs would cut it about in four).
 
+## D-36 Local traces and evals in Arize Phoenix
+
+> Status: **Proposed** by engineering (2026-10-18), on the founder's request for "an MLflow-like tool in the local Docker stack to follow each step". Reversible: the spans are plain OpenTelemetry with the OpenInference conventions, so any other OTLP viewer reads them; Phoenix is a compose profile that nothing else depends on.
+
+**Context.** The editor's output is only as good as what it was given and what it did with it, and the only way to see that was `cfctl agent show`: one line per event, no images, no way to compare runs. The services already set up OpenTelemetry (Axiom in staging) but the agents had no spans of their own.
+
+**Decision.**
+- **Spans for every step** of an agent run, with the OpenInference conventions: the run (AGENT), the run context (CHAIN), every model call (LLM, in the metered client, so every stage has them), every tool call (TOOL) with its artifacts and the checks of `check_edit` as events, and every render (CHAIN, in the run's trace). The run's UUID is its trace id. Details in [observability v1](design/observability-v1.md).
+- **Content only locally.** Prompts, answers, tool arguments and results and frame thumbnails go on spans only with `OTEL_TRACE_CONTENT=1` and `CF_ENV=local`; staging and production refuse to start with it and keep exporting metadata only. Every text is redacted of presigned query strings, bearer tokens and key shapes, and capped.
+- **Arize Phoenix** (ELv2, one container, profile `obs`, pinned by digest, loopback only) is the local viewer: `task dev:obs`. `cfctl trace export` replays stored runs into it, with no model calls.
+
+**Alternatives.** MLflow (heavier, its tracing UI is secondary to the experiment tracker); Langfuse (MIT core, but self-hosting is Postgres, ClickHouse, Redis and blob storage); Axiom alone (no LLM-aware view of messages and images, and content must not go there); the events table alone (`cfctl agent show`, kept: it is the record, the spans are a view of it).
+
+**Consequences.**
+- Staging and production export more spans (metadata only); Axiom's ingest grows by a few dozen spans per editor run.
+- The local stack can show exactly what the model saw, frame by frame, and what each check said; the eval suite and the improvement loop (parts 2 and 3 of the design note) log there too.
+- Phoenix's licence forbids offering it as a service: it stays a development tool.
+
+**Revisit** when traces are wanted in staging with content (that needs a store we control and the creators' consent), or when a hosted eval platform is chosen.
+
 ## Template for new decisions
 
 ```

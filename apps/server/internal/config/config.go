@@ -43,6 +43,10 @@ type Config struct {
 	// OTLPEndpoint is OTEL_EXPORTER_OTLP_ENDPOINT. Empty disables trace export. The OpenTelemetry SDK
 	// reads this and OTEL_EXPORTER_OTLP_HEADERS itself, so the value is only used to decide whether to export.
 	OTLPEndpoint string
+	// TraceContent is OTEL_TRACE_CONTENT=1 in the local environment: the agent spans then carry prompts, answers, tool arguments and
+	// results and thumbnails of the frames (docs/design/observability-v1.md). Anywhere else the spans carry metadata only: ci and bench
+	// ignore the variable, and staging and production refuse to start with it.
+	TraceContent bool
 	// AppBaseURL is the public base URL of the web app (APP_BASE_URL), as given.
 	AppBaseURL string
 	// AppOrigin is AppBaseURL reduced to its origin (scheme://host[:port], no path or trailing slash). It is the one
@@ -234,6 +238,15 @@ func Load(getenv Getenv) (Config, error) {
 		if u, err := url.Parse(c.OTLPEndpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			errs = append(errs, errors.New("OTEL_EXPORTER_OTLP_ENDPOINT: must be an absolute http(s) URL"))
 		}
+	}
+	switch tc := strings.TrimSpace(getenv("OTEL_TRACE_CONTENT")); {
+	case tc != "" && tc != "0" && tc != "1":
+		errs = append(errs, errors.New("OTEL_TRACE_CONTENT: must be empty, 0 or 1"))
+	case tc == "1" && (c.Env == EnvStaging || c.Env == EnvProduction):
+		// Prompts, the creator's text and frames of the footage must never reach the hosted trace store.
+		errs = append(errs, fmt.Errorf("OTEL_TRACE_CONTENT: content capture is for the local environment only; remove it from %s", c.Env))
+	default:
+		c.TraceContent = tc == "1" && c.Env == EnvLocal
 	}
 
 	// The messages never repeat the value: it holds a password.

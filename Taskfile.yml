@@ -20,6 +20,30 @@ tasks:
       # Loads .env, builds the api and worker, runs the three processes and stops them together (see the script).
       - ./scripts/dev.sh
 
+  # The same as dev, plus Phoenix (compose profile obs) and the stack's processes exporting their spans to it, with content (D-36).
+  dev:obs:
+    desc: "task dev with traces: also starts Phoenix (http://localhost:6006) and sends it every agent run, model call, tool call, check and render, with the prompts and thumbnails (local only)"
+    env:
+      DEV_OBS: "1"
+    cmds:
+      - task: install
+      - task: env:sync
+      - task: media:image
+      - task: up
+      - task: obs:up
+      - task: migrate:dev
+      - ./scripts/dev.sh
+
+  obs:up:
+    desc: "Start Phoenix, the local trace viewer (http://localhost:6006; OTLP/HTTP on the same port), and wait until it is healthy"
+    cmds:
+      - docker compose --profile obs up -d --wait phoenix
+
+  obs:down:
+    desc: Stop Phoenix (its traces, datasets and experiments stay in the phoenix-data volume)
+    cmds:
+      - docker compose --profile obs stop phoenix
+
   media:build:
     desc: Build the local media-tools image (media-tools:dev, ffmpeg + fonts) that the worker runs ingests, previews and renders in
     cmds:

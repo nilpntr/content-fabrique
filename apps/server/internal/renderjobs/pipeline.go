@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
@@ -210,7 +211,7 @@ func heartbeat(ctx context.Context, dir string) {
 }
 
 // Run renders. See the package comment for what its results and errors mean.
-func (p *Pipeline) Run(ctx context.Context, ws ids.WorkspaceID, id ids.RenderID) (jobs.RenderOutcome, error) {
+func (p *Pipeline) Run(ctx context.Context, ws ids.WorkspaceID, id ids.RenderID) (out jobs.RenderOutcome, retErr error) {
 	rr, err := p.cfg.Store.ClaimRender(ctx, ws, id)
 	if errors.Is(err, store.ErrNotFound) {
 		// Finished, failed, not in this workspace, or its project was deleted. A render that is still waiting on a deleted
@@ -224,6 +225,20 @@ func (p *Pipeline) Run(ctx context.Context, ws ids.WorkspaceID, id ids.RenderID)
 		return jobs.RenderOutcome{}, fmt.Errorf("claim render: %w", err)
 	}
 	log := p.cfg.Logger.With("workspace_id", ws.String(), "render_id", id.String(), "project_id", rr.ProjectID.String(), "profile", rr.Profile, "version", rr.TimelineVersion)
+	ctx, span := startRenderSpan(ctx, rr)
+	var (
+		traced  finished
+		tracedR *run
+	)
+	began := time.Now()
+	defer func() {
+		var sandbox time.Duration
+		var cpu int64
+		if tracedR != nil {
+			sandbox, cpu = tracedR.sandbox, tracedR.cpuMs()
+		}
+		endRenderSpan(span, out, retErr, traced, time.Since(began), sandbox, cpu)
+	}()
 
 	dir, err := os.MkdirTemp(p.cfg.TempDir, jobDirPrefix)
 	if err != nil {
@@ -241,8 +256,10 @@ func (p *Pipeline) Run(ctx context.Context, ws ids.WorkspaceID, id ids.RenderID)
 		runner = lr.WithLabels(map[string]string{"cf.job": "render", "cf.workspace": ws.String(), "cf.render": id.String()})
 	}
 	r := &run{p: p, ws: ws, render: rr, dir: dir, runner: runner, log: log, began: time.Now()}
+	tracedR = r
 
 	done, err := r.execute(ctx)
+	traced = done
 	wall := time.Since(r.began)
 	// Whatever the attempt came to (ready, failed, or an error that sends the job to a retry), its CPU was spent: meter it once per
 	// job attempt.
@@ -441,8 +458,10 @@ func (r *run) execute(ctx context.Context) (finished, error) {
 		return finished{}, err
 	}
 	t0 := time.Now()
-	sheet, layout, err := r.makeSheet(ctx, plan, mp4)
+	sheetCtx, sheetSpan := stageSpan(ctx, "render.contact_sheet")
+	sheet, layout, err := r.makeSheet(sheetCtx, plan, mp4)
 	r.sandbox += time.Since(t0)
+	sheetSpan.End()
 	if err != nil {
 		return finished{}, err
 	}
@@ -538,11 +557,17 @@ func (r *run) renderVideo(ctx context.Context, plan render.Plan) (string, error)
 		}
 	}
 	t0 := time.Now()
+	execCtx, encode := stageSpan(execCtx, "render.ffmpeg")
 	err := render.Execute(execCtx, plan, r.runner, render.ExecuteOptions{
 		Output: out, WorkDir: filepath.Join(r.dir, "work"), Progress: onProgress,
 		StemOutput: filepath.Join(r.dir, "out", storage.RenderAudioStemName),
 	})
 	r.sandbox += time.Since(t0)
+	encode.SetAttributes(attribute.Bool("cf.two_pass", twoPass), attribute.Int64("cf.planned_duration_ms", plan.DurationMs))
+	if err != nil {
+		encode.RecordError(err)
+	}
+	encode.End()
 	if err != nil {
 		if cause := context.Cause(execCtx); errors.Is(cause, jobs.ErrRenderGone) {
 			return "", jobs.ErrRenderGone

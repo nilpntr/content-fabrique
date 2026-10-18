@@ -40,6 +40,17 @@ load_env() {
 
 load_env "$ENV_FILE"
 
+# `task dev:obs` (D-36): the three processes send their spans to the local Phoenix, with content (prompts, tool results, thumbnails). This
+# wins over the env file, so a hosted endpoint in .env never receives content from here; the headers (a hosted token) are dropped.
+if [ "${DEV_OBS:-}" = "1" ]; then
+	if [ "${CF_ENV:-local}" != "local" ]; then
+		echo "dev: task dev:obs is for CF_ENV=local only (CF_ENV is ${CF_ENV})" >&2
+		exit 1
+	fi
+	export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:6006" OTEL_TRACE_CONTENT=1 OTEL_EXPORTER_OTLP_HEADERS=""
+	echo "dev: traces go to Phoenix at http://localhost:6006 (with content)"
+fi
+
 mkdir -p "$BIN_DIR"
 # Built binaries, not `go run`: stopping a `go run` can leave its child process behind.
 (cd apps/server && go build -o "../../$BIN_DIR/" ./cmd/api ./cmd/worker)

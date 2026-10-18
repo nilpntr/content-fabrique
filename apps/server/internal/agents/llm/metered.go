@@ -100,6 +100,16 @@ func (r *reservation) ledgerKey() string { return "llm:" + r.key }
 
 // Messages implements Client.
 func (m *metered) Messages(ctx context.Context, req Request) (Response, error) {
+	ctx, span := m.startSpan(ctx, req)
+	defer span.End()
+	ct := &callTrace{asked: req.MaxTokens, version: UnpricedVersion}
+	resp, err := m.messages(ctx, req, ct)
+	m.endSpan(span, ct, resp, err)
+	return resp, err
+}
+
+// messages is Messages without the span; ct collects what the span reports.
+func (m *metered) messages(ctx context.Context, req Request, ct *callTrace) (Response, error) {
 	req, err := m.resolve(ctx, req)
 	if err != nil {
 		return Response{}, err
@@ -116,6 +126,7 @@ func (m *metered) Messages(ctx context.Context, req Request) (Response, error) {
 	} else if rsv, err = m.reserveCaps(ctx, &req, rsv); err != nil {
 		return Response{}, err
 	}
+	ct.req, ct.sent, ct.reserved, ct.budgetEst, ct.shortened = req, true, rsv.est, rsv.budgetEst, rsv.shortened
 	shortened := rsv.shortened
 	// Whatever happens, a reservation that was not settled is given back (the budget with 0, the hold released), unless the ledger
 	// row could not be written.
@@ -130,6 +141,7 @@ func (m *metered) Messages(ctx context.Context, req Request) (Response, error) {
 		// worst case, so caps and budgets stay conservative, and say so in the ledger.
 		if priced && callErr != nil && errors.Is(callErr, ErrOutcomeUnknown) {
 			rsv.settle(rsv.est)
+			ct.cost, ct.version, ct.estimated = rsv.est, m.prices.Version, true
 			if m.mode != ModeReplay {
 				row := m.row(req, rsv, rsv.est, m.prices.Version, true, Usage{InputTokens: rsv.tokens, OutputTokens: int64(req.MaxTokens)}, "")
 				if lerr := m.writeLedger(ctx, rsv, row); lerr != nil {
@@ -164,6 +176,7 @@ func (m *metered) Messages(ctx context.Context, req Request) (Response, error) {
 		m.cache.remember(req, started, resp.Usage)
 	}
 	rsv.settle(cost)
+	ct.cost, ct.version = cost, version
 	if m.mode == ModeReplay {
 		return resp, callErr
 	}
