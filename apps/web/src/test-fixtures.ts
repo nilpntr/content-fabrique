@@ -484,6 +484,8 @@ export function emptyStyle(over: Partial<CreatorStyle> = {}): CreatorStyle {
       ending_hold: "long",
       cut_timing: "full_reps",
       angle_switches: "on",
+      text_pattern: "single_title",
+      text_position: "auto",
       sources: {
         vibe: "default",
         transitions: "default",
@@ -499,6 +501,8 @@ export function emptyStyle(over: Partial<CreatorStyle> = {}): CreatorStyle {
         ending_hold: "default",
         cut_timing: "default",
         angle_switches: "default",
+        text_pattern: "default",
+        text_position: "default",
       },
     },
     references: [],
@@ -551,6 +555,7 @@ export function learntStyle(over: Partial<CreatorStyle> = {}): CreatorStyle {
       title_case: "upper",
       title_template: "<TOPIC> 7",
       cut_timing: "mid_rep",
+      text_pattern: "single_title",
       sources: {
         ...base.effective.sources,
         vibe: "suggested",
@@ -565,10 +570,44 @@ export function learntStyle(over: Partial<CreatorStyle> = {}): CreatorStyle {
         ending_hold: "measured",
         cut_timing: "measured",
         angle_switches: "measured",
+        text_pattern: "measured",
       },
     },
     references: [1, 2, 3, 4, 5].map((n) => styleReference(n)),
     learned_at: NOW,
+    ...over,
+  };
+}
+
+/** A style told in story captions: a short sentence-case line on each shot, white, mid-frame over the chest, in Dutch (synthetic). */
+export function storyStyle(over: Partial<CreatorStyle> = {}): CreatorStyle {
+  const learnt = learntStyle();
+  return {
+    ...learnt,
+    summary: {
+      ...(learnt.summary as NonNullable<CreatorStyle["summary"]>),
+      text: "Steady gym shots with a short white line on every shot that tells the story, music on every video, a reveal at the end.",
+      prompt_version: "stylesummary.v4",
+    },
+    measures: {
+      ...(learnt.measures as NonNullable<CreatorStyle["measures"]>),
+      lines: [
+        { id: "references", label: "Learnt from", value: "5 videos" },
+        { id: "shots", label: "Shots", value: "A mix of long takes and quick cuts: 2 to 7 cuts a video" },
+        { id: "transitions", label: "Transitions", value: "Plain cuts only" },
+        { id: "text_pattern", label: "Text on screen", value: "Story captions: a new short line on each shot, in the middle, written like a sentence, often over the body (in Dutch)" },
+        { id: "music", label: "Music", value: "Music on every video, quiet for about 3.6 s, then it lifts" },
+      ],
+    },
+    settings: {},
+    effective: {
+      ...learnt.effective,
+      transitions: "off",
+      title_template: null,
+      text_pattern: "story_captions",
+      text_position: "middle",
+      sources: { ...learnt.effective.sources, transitions: "default", title_template: "default", text_pattern: "measured", text_position: "measured" },
+    },
     ...over,
   };
 }

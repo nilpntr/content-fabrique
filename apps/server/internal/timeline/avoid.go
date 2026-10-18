@@ -25,6 +25,19 @@ type Subject struct {
 	ShowsOff          bool
 }
 
+// avoided are the subjects as the item must keep off them: all of them (the head and the torso), or for an item that avoids the face
+// only, the head and shoulders alone (Body and Torso are the head, so the room above, beside and below the head is free, the chest too).
+func (t TextItem) avoided(subs []Subject) []Subject {
+	if !t.AvoidsFaceOnly() || len(subs) == 0 {
+		return subs
+	}
+	out := make([]Subject, len(subs))
+	for i, s := range subs {
+		out[i] = Subject{Head: s.Head, Body: s.Head, Torso: s.Head, ShowsOff: s.ShowsOff}
+	}
+	return out
+}
+
 // torso is the part of the person a text must not cover besides the head: Torso, or the whole Body when it has none.
 func (s Subject) torso() style.Rect {
 	if s.Torso.Width() <= 0 || s.Torso.Height() <= 0 {
@@ -195,6 +208,7 @@ func wholeWords(lay style.Layout, text string) bool {
 // the room that was found (Tried): it must not be drawn at this time (FitText in package subject moves it in time or leaves it out). An
 // item that does not avoid the subject (avoid_subject false), or a call with no subjects, is PlaceText's result untouched and Cleared.
 func PlaceTextAvoiding(out Output, it TextItem, subs []Subject) (TextPlacement, Avoidance, error) {
+	subs = it.avoided(subs)
 	pl, err := PlaceText(out, it)
 	if err != nil {
 		return pl, Avoidance{}, err
@@ -376,6 +390,7 @@ type Cover struct {
 // TextCovers says what the item covers of the subjects, placed where its anchor or position puts it (and clamped into the zone): whatever
 // the item's own avoid_subject says. Body is true when the head or the torso is covered.
 func TextCovers(out Output, it TextItem, subs []Subject) (Cover, error) {
+	subs = it.avoided(subs)
 	pl, err := PlaceText(out, it)
 	if err != nil {
 		return Cover{}, err

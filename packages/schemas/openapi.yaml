@@ -1353,14 +1353,49 @@ paths:
       tags: [style]
       summary: Set the creator's settings
       description: |
-        Replaces the creator's settings with `settings`: a setting that is absent is not set (the suggestion and the measures decide
-        it). Learning the style again never changes them. Only owners and editors may change them.
+        Replaces the creator's settings with `settings`: **all of them**. A setting that is absent is not set (the suggestion and the
+        measures decide it), so a client sends the complete set it wants (the web app does). To change one setting and keep the others,
+        use `PATCH /v1/style`. Learning the style again never changes them. Only owners and editors may change them.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/UpdateStyleRequest"
+      responses:
+        "200":
+          description: The style as it is now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatorStyle"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    patch:
+      operationId: patchStyle
+      tags: [style]
+      summary: Change some of the creator's settings
+      description: |
+        Changes only the settings given in `settings` and gives the ones named in `clear` back to the suggestion, the measures or the
+        default; every other setting of the creator's stays as it is. A name that is not a setting, or one that is both given and
+        cleared, is `400`. The read and the write are one transaction, so two changes at once both land. Only owners and editors may
+        change them.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchStyleRequest"
       responses:
         "200":
           description: The style as it is now.
@@ -3503,6 +3538,18 @@ components:
       type: string
       description: "`full_reps` (cuts fall at the end of a rep) or `mid_rep` (cuts fall on the beat, also in the middle of a rep)."
       enum: [full_reps, mid_rep]
+    StyleTextPattern:
+      type: string
+      description: |
+        How the video's text is told: `single_title` (one title in the hook, chapter titles besides), `story_captions` (a new short
+        line on each shot that tells a little story), `dialogue` (quoted lines, often two speakers, before a reveal) or `none`.
+      enum: [single_title, story_captions, dialogue, none]
+    StyleTextPosition:
+      type: string
+      description: |
+        Where the lines of story captions and dialogue sit: `top`, `upper_third`, `middle`, `lower_third` or `auto` (the editor picks).
+        Lines in the middle, or a creator's lines that lie over the body, keep off the face only; a title keeps off the whole body.
+      enum: [top, upper_third, middle, lower_third, auto]
     StyleSettingSource:
       type: string
       description: |
@@ -3550,10 +3597,14 @@ components:
           $ref: "#/components/schemas/StyleCutTiming"
         angle_switches:
           $ref: "#/components/schemas/StyleToggle"
+        text_pattern:
+          $ref: "#/components/schemas/StyleTextPattern"
+        text_position:
+          $ref: "#/components/schemas/StyleTextPosition"
 
     StyleSettingSources:
       type: object
-      required: [vibe, transitions, text_animation, camera_motion, title_colour, title_position, title_case, music, pace, chapter_titles, title_template, ending_hold, cut_timing, angle_switches]
+      required: [vibe, transitions, text_animation, camera_motion, title_colour, title_position, title_case, music, pace, chapter_titles, title_template, ending_hold, cut_timing, angle_switches, text_pattern, text_position]
       properties:
         vibe:
           $ref: "#/components/schemas/StyleSettingSource"
@@ -3583,13 +3634,17 @@ components:
           $ref: "#/components/schemas/StyleSettingSource"
         angle_switches:
           $ref: "#/components/schemas/StyleSettingSource"
+        text_pattern:
+          $ref: "#/components/schemas/StyleSettingSource"
+        text_position:
+          $ref: "#/components/schemas/StyleSettingSource"
 
     EffectiveStyleSettings:
       type: object
       description: |
         What the editor follows. `title_colour` is `null` when nothing decides it (the editor then uses the title style's own), and
         `title_template` when no form was learnt or set (the editor picks the words).
-      required: [vibe, transitions, text_animation, camera_motion, title_colour, title_position, title_case, music, pace, chapter_titles, title_template, ending_hold, cut_timing, angle_switches, sources]
+      required: [vibe, transitions, text_animation, camera_motion, title_colour, title_position, title_case, music, pace, chapter_titles, title_template, ending_hold, cut_timing, angle_switches, text_pattern, text_position, sources]
       properties:
         vibe:
           $ref: "#/components/schemas/EditVibe"
@@ -3619,6 +3674,10 @@ components:
           $ref: "#/components/schemas/StyleCutTiming"
         angle_switches:
           $ref: "#/components/schemas/StyleToggle"
+        text_pattern:
+          $ref: "#/components/schemas/StyleTextPattern"
+        text_position:
+          $ref: "#/components/schemas/StyleTextPosition"
         sources:
           $ref: "#/components/schemas/StyleSettingSources"
 
@@ -3776,6 +3835,20 @@ components:
           type: string
           format: date-time
           description: When the `poster_url`s stop working. Present when one is.
+
+    PatchStyleRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        settings:
+          $ref: "#/components/schemas/StyleSettings"
+        clear:
+          type: array
+          maxItems: 20
+          description: The settings to give back to the suggestion, the measures or the default, by their names (such as `title_case`).
+          items:
+            type: string
+            maxLength: 40
 
     UpdateStyleRequest:
       type: object

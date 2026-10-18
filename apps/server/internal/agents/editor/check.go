@@ -367,6 +367,9 @@ func RunChecks(in CheckInput) Report {
 	if lim.effectsLots {
 		lim.effectsMax = max(lim.effectsMax, effectsMaxLots)
 	}
+	// Lines that keep off the face only (P6-05d) are the style's whatever the strength of the profile: the creator set them, or the lines
+	// of their videos lie over the body.
+	faceOnly := in.Settings != nil && (&styleprofile.Style{Profile: in.Style, Resolved: *in.Settings}).FaceOnly()
 	weakStyle := ""
 	if in.Style != nil && !in.Style.Firm() {
 		weakStyle = fmt.Sprintf("the creator style profile rests on %d reference videos; it sets thresholds from %d", in.Style.References, styleprofile.MinReferences)
@@ -375,7 +378,7 @@ func RunChecks(in CheckInput) Report {
 	if in.Plan != nil && in.Plan.TempoBPM == 0 {
 		lim.beatGrid = false // the plan has no beat grid (a vlog or a general video that follows speech, say): the cuts are not judged against one
 	}
-	c := &checker{in: in, items: items, lim: lim, typ: typ, m: &r.Metrics, dist: &r.Style, weakStyle: weakStyle}
+	c := &checker{in: in, items: items, lim: lim, typ: typ, m: &r.Metrics, dist: &r.Style, weakStyle: weakStyle, faceOnly: faceOnly}
 	c.pace = Pace(in.Style, typ, vibe, in.PaceSetting)
 	if c.pace.Applies {
 		r.Metrics.PaceMedianMs, r.Metrics.PaceMaxShotMs = c.pace.MedianMs, c.pace.MaxShotMs
@@ -398,6 +401,9 @@ func RunChecks(in CheckInput) Report {
 		c.hookLength(), c.hookTitle(), c.shotPacing(), c.longShot(), c.heldEnding(), c.shotVariety(), c.paceBuilds(), c.repBoundaries(), c.deadTime(),
 		c.effectDensity(), c.textSafe(), c.textOverSubject(), c.duration(targetS), c.brightness(), c.crushed(), c.beatSync(), c.styleMatch(), c.titleCopied(),
 		c.offBeatCut(), c.hookMissesDrop(), c.staticShot(), c.transitionsMatch(), c.transitionVariety(), c.textWithoutEntrance(), c.chapterTitles(),
+	}
+	if c.linesOn() { // the text-pattern checks (checktext.go), only for a style told in lines
+		r.Checks = append(r.Checks, c.storyCaptions(), c.captionReadable(), c.textOverFace())
 	}
 	if len(graphicsOf(in.Spec)) > 0 { // the motion-graphics checks (check_graphics.go), only for an edit that has some
 		r.Checks = append(r.Checks, c.overlayReadable(), c.overlayOverSubject(), c.overlayLegibility(), c.graphicsOverlap())
@@ -427,6 +433,8 @@ type checker struct {
 	weakStyle string
 	// pace are the shot-length targets (pace.go).
 	pace PaceTargets
+	// faceOnly says the style's lines may stand on the body and keep off the face only (styleprofile.Style.FaceOnly).
+	faceOnly bool
 	// laidOut is the graphics as the renderer lays them out (check_graphics.go), computed once.
 	laidOut []motion.Laid
 }

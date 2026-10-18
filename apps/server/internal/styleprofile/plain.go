@@ -155,6 +155,8 @@ func (p *Profile) PlainLines() []PlainLine {
 	case tp.Measured == 0:
 	case tp.Used == TransitionsCutOnly:
 		add("transitions", "Transitions", "Plain cuts only")
+	case tp.Used == TransitionsSome && !tp.Evident():
+		add("transitions", "Transitions", "Plain cuts (a stray effect or two)")
 	case tp.Used == TransitionsSome:
 		var kinds []string
 		for _, k := range tp.Kinds {
@@ -181,6 +183,29 @@ func (p *Profile) PlainLines() []PlainLine {
 		add("cuts", "Cuts and reps", v)
 	}
 	if t := p.Text; t != nil {
+		if t.Pattern != "" {
+			v := map[string]string{
+				PatternSingleTitle:   "One title",
+				PatternStoryCaptions: "Story captions: a new short line on each shot",
+				PatternDialogue:      "Dialogue: quoted lines before a reveal",
+				PatternNone:          "No text",
+			}[t.Pattern]
+			if l := t.LineLook; l != nil && (t.Pattern == PatternStoryCaptions || t.Pattern == PatternDialogue) {
+				if l.Position != "" {
+					v += ", " + map[string]string{TextTop: "at the top", TextUpperThird: "high in the frame", TextMiddle: "in the middle", TextLowerThird: "low in the frame"}[l.Position]
+				}
+				if l.Case == "sentence" {
+					v += ", written like a sentence"
+				}
+				if l.OverBodyShare >= 0.5 {
+					v += ", often over the body"
+				}
+			}
+			if t.Language != "" && t.Language != "en" {
+				v += " (in " + LanguageName(t.Language) + ")"
+			}
+			add("text_pattern", "Text on screen", v)
+		}
 		if t.Entrance != "" {
 			add("title_entrance", "Title entrance", map[string]string{"none": "The title is just there", "pop": "The title pops in", "slide": "The title slides in", "fade": "The title fades in", "typewriter": "The title types itself"}[t.Entrance])
 		}

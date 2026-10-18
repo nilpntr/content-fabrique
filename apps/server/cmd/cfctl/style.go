@@ -34,16 +34,20 @@ const styleUsage = `Usage:
                       [--camera-motion off|subtle|lots] [--title-colour '#RRGGBB'] [--title-position top|upper_third|auto]
                       [--title-case upper|lower|as_typed] [--music always|when_added|never] [--pace slower|like_mine|faster]
                       [--chapter-titles off|on] [--title-template '<TOPIC> <N>'] [--ending-hold short|long] [--cut-timing full_reps|mid_rep]
-                      [--angle-switches off|on] [flags]
+                      [--angle-switches off|on] [--text-pattern single_title|story_captions|dialogue|none]
+                      [--text-position top|upper_third|middle|lower_third|auto] [--clear title_case,transitions,...] [flags]
   cfctl style clear   --workspace <wks_... or org_...> [flags]
+
+set changes only the settings it is given; the creator's other settings stay. A setting given as "suggested" (--transitions suggested),
+or named in --unset, goes back to the suggestion, the measures or the default.
 
 DEVELOPMENT ONLY, like cfctl project show (refused unless CF_ENV is local, ci or bench). The creator style profile (P6-05,
 docs/design/style-profile-v1.md) is what a creator's finished videos look and sound like: cuts and shot lengths, effects, the light, the
 title text, the music. analyze measures the reference videos you name (local files; they are only ever an input of the sandbox, and
-nothing of them is kept but numbers and the title text), reads the title style from three frames of each hook with one Haiku call
+nothing of them is kept but numbers and the title text), reads the text (the hook and a frame of each shot) with one Haiku call
 (at most $0.01 a reference, metered like every model call), aggregates the measures into the workspace's profile and prints it.
 show prints the stored profile in plain language with the summary and the effective settings, with --json as the stored document.
-set replaces the creator's settings (a flag left out is not set). clear forgets the whole style, as DELETE /v1/style does. Every
+set changes the settings it is given and keeps the others (as PATCH /v1/style does). clear forgets the whole style, as DELETE /v1/style does. Every
 command goes through the code the app uses (package creatorstyle): the files are stored as references measured from files (no asset),
 and the profile and its summary are made from them and the app's references together (P6-05b, docs/design/style-profile-v1.md
 section 11).
@@ -53,7 +57,9 @@ section 11).
   --append      add the files to the references measured from files before (at most 10 are used, the newest) instead of replacing them
   --no-vision   do not read the title text and write no summary (no model call, no cost)
   --no-summary  do not write the summary (one call of at most $0.03)
-  --no-store    measure and print only: nothing is written and no database is needed (the title text is not read either)
+  --lines       print the text read in each shot (the creator's words: for a local check, never for a log)
+  --no-store    measure and print only: no reference or profile is written; with --workspace the text is still read, metered to
+                its ledger (without one no database is needed and the text is not read)
   --provider    the sandbox: docker (default), hardened or local (ffmpeg on this machine, development only)
   --image       the media-tools image for docker and hardened (default media-tools:dev)
   --json        print the profile as JSON
@@ -97,6 +103,7 @@ func cmdStyleAnalyze(args []string, stdout, stderr io.Writer, lookup lookupEnv, 
 	provider := flags.String("provider", "docker", "sandbox provider")
 	image := flags.String("image", "media-tools:dev", "media-tools image")
 	asJSON := flags.Bool("json", false, "print JSON")
+	showLines := flags.Bool("lines", false, "print the text read in each shot")
 	envFileArg := flags.String("env-file", "", "env file")
 	yes := flags.Bool("yes", false, "confirm outside plain local development")
 	if err := flags.Parse(args); err != nil {
@@ -150,7 +157,9 @@ func cmdStyleAnalyze(args []string, stdout, stderr io.Writer, lookup lookupEnv, 
 	if tmp, err := filepath.EvalSymlinks(os.TempDir()); err == nil {
 		roots = append(roots, tmp)
 	}
-	env, code := guardDevCommand(name, *envFileArg, !*noStore, *yes, stdout, stderr, lookup)
+	// --no-store with a workspace still reads the text: the reads are metered to that workspace's ledger, and nothing else is written.
+	needDB := !*noStore || (*workspaceArg != "" && !*noVision)
+	env, code := guardDevCommand(name, *envFileArg, needDB, *yes, stdout, stderr, lookup)
 	if code != 0 {
 		return code
 	}
@@ -165,7 +174,7 @@ func cmdStyleAnalyze(args []string, stdout, stderr io.Writer, lookup lookupEnv, 
 
 	var st *store.Store
 	ws := ids.WorkspaceID{UUID: uuid.New()}
-	if !*noStore {
+	if needDB {
 		if st, code = env.openDB(ctx, name, deps); code != 0 {
 			return code
 		}
@@ -178,7 +187,7 @@ func cmdStyleAnalyze(args []string, stdout, stderr io.Writer, lookup lookupEnv, 
 	}
 	an := &styleprofile.Analyzer{Runner: runner}
 	var writer *styleprofile.Writer
-	if !*noVision && !*noStore {
+	if !*noVision && st != nil {
 		reader, rcode := styleReader(env, runner, st, deps, errOut)
 		if rcode != 0 {
 			return rcode
@@ -188,7 +197,7 @@ func cmdStyleAnalyze(args []string, stdout, stderr io.Writer, lookup lookupEnv, 
 			writer = &styleprofile.Writer{Models: reader.Models, Router: reader.Router}
 		}
 	} else if !*noVision {
-		_, _ = fmt.Fprintln(out, "note: --no-store skips the title text read (it needs the ledger); add the workspace and drop --no-store to read it")
+		_, _ = fmt.Fprintln(out, "note: --no-store without --workspace skips the text read (it needs a ledger); name a workspace to read it")
 	}
 
 	var costBefore int64
@@ -207,7 +216,10 @@ func cmdStyleAnalyze(args []string, stdout, stderr io.Writer, lookup lookupEnv, 
 		if res.Vision != nil {
 			switch {
 			case res.Vision.Text != nil:
-				line += ", title read"
+				line += ", text read: " + styleprofile.ClassifyText(res.Vision.Text)
+				if l := res.Vision.Text.Language; l != "" {
+					line += " (" + l + ")"
+				}
 			case res.VisionErr != nil:
 				line += ", title not read: " + res.VisionErr.Error()
 			default:
@@ -215,6 +227,11 @@ func cmdStyleAnalyze(args []string, stdout, stderr io.Writer, lookup lookupEnv, 
 			}
 		}
 		_, _ = fmt.Fprintln(out, line)
+		if *showLines && res.Vision != nil && res.Vision.Text != nil {
+			for _, l := range res.Vision.Text.ShotTexts {
+				_, _ = fmt.Fprintf(out, "    %5.1f s  %-11s %4.1f %%  %-7s over body %-5v dialogue %-5v %q\n", l.AtS, l.Position, l.HeightPct, l.Colour, l.OverBody, l.Dialogue, l.Text)
+			}
+		}
 		// The same file analysed again replaces its earlier measures instead of counting twice.
 		measures = slices.DeleteFunc(measures, func(m styleprofile.Measures) bool {
 			return m.Name == res.Measures.Name && m.DurationS == res.Measures.DurationS
@@ -223,6 +240,11 @@ func cmdStyleAnalyze(args []string, stdout, stderr io.Writer, lookup lookupEnv, 
 	}
 	if *noStore {
 		printProfile(out, styleprofile.Aggregate(measures), *asJSON, false)
+		if st != nil {
+			if after, cerr := styleCost(ctx, st, ws); cerr == nil && after > costBefore {
+				_, _ = fmt.Fprintf(out, "model cost of the text reads (the growth of this workspace's ledger during the command): %s\n", usd(after-costBefore))
+			}
+		}
 		return 0
 	}
 	if err := storeFileReferences(ctx, st, ws, measures, *appendRefs); err != nil {
@@ -367,6 +389,7 @@ func printStyle(out io.Writer, st *styleprofile.Style, asJSON, stored bool) {
 		{"title position", r.TitlePosition, r.Sources.TitlePosition}, {"title case", r.TitleCase, r.Sources.TitleCase}, {"music", r.Music, r.Sources.Music},
 		{"pace", r.Pace, r.Sources.Pace}, {"chapter titles", r.ChapterTitles, r.Sources.ChapterTitles}, {"title form", cmp.Or(r.TitleTemplate, "-"), r.Sources.TitleTemplate},
 		{"ending hold", r.EndingHold, r.Sources.EndingHold}, {"cut timing", r.CutTiming, r.Sources.CutTiming}, {"angle switches", r.AngleSwitches, r.Sources.AngleSwitches},
+		{"text pattern", r.TextPattern, r.Sources.TextPattern}, {"text position", r.TextPosition, r.Sources.TextPosition},
 	} {
 		_, _ = fmt.Fprintf(out, "  %-15s %-12s %s\n", l.name, l.value, cmp.Or(l.source, "default"))
 	}
@@ -504,13 +527,24 @@ func cmdStyleSet(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 	flags.StringVar(&in.EndingHold, "ending-hold", "", "short or long")
 	flags.StringVar(&in.CutTiming, "cut-timing", "", "full_reps or mid_rep")
 	flags.StringVar(&in.AngleSwitches, "angle-switches", "", "off or on")
+	flags.StringVar(&in.TextPattern, "text-pattern", "", "single_title, story_captions, dialogue or none")
+	flags.StringVar(&in.TextPosition, "text-position", "", "top, upper_third, middle, lower_third or auto")
+	clearArg := flags.String("clear", "", "settings to give back to the suggestion, the measures or the default, comma separated (title_case,transitions)")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		return 2
 	}
-	if _, err := in.Normalize(); err != nil {
+	// Only the settings given change (the creator's others stay); a setting given as "suggested" is cleared, like --clear.
+	var unset []string
+	for _, name := range strings.Split(*clearArg, ",") {
+		if name = strings.TrimSpace(strings.ReplaceAll(name, "-", "_")); name != "" {
+			unset = append(unset, name)
+		}
+	}
+	unset = append(unset, in.TakeCleared("suggested")...)
+	if _, err := (styleprofile.Settings{}).Merge(in, unset); err != nil {
 		_, _ = fmt.Fprintf(stderr, "cfctl %s: %v\n", name, err)
 		return 2
 	}
@@ -538,12 +572,12 @@ func cmdStyleSet(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 		_, _ = fmt.Fprintf(env.err, "cfctl %s: %v\n", name, err)
 		return 1
 	}
-	v, e := svc.PutSettings(ctx, creatorstyle.Actor{Workspace: ws.ID}, in)
+	v, e := svc.PatchSettings(ctx, creatorstyle.Actor{Workspace: ws.ID}, in, unset)
 	if e != nil {
 		_, _ = fmt.Fprintf(env.err, "cfctl %s: %s\n", name, e.Message)
 		return 1
 	}
-	_, _ = fmt.Fprintln(env.out, "stored the creator's settings")
+	_, _ = fmt.Fprintln(env.out, "changed the creator's settings (the others stay)")
 	printStyle(env.out, v.Style, false, false)
 	return 0
 }

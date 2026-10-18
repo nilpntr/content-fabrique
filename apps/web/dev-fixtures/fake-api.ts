@@ -1,8 +1,8 @@
 import type { CreatorStyle, StyleSettings } from "@/lib/api/client";
 import { withMySettings } from "@/lib/style-words";
-import { annotation, apiAsset, assetId, callIdOf, emptyStyle, event, learntStyle, project, projectId, projectSummary, readyRender, renderId, run, runId, styleReference, timelineVersion, v2Artifacts, v2Run, v2Spec, versionSummary } from "@/test-fixtures";
+import { annotation, apiAsset, assetId, callIdOf, emptyStyle, event, learntStyle, project, projectId, projectSummary, readyRender, renderId, run, runId, storyStyle, styleReference, timelineVersion, v2Artifacts, v2Run, v2Spec, versionSummary } from "@/test-fixtures";
 
-/** The scenario of a page, from its address: `?credits=ok|low|empty|none&run=done|working|failed|question&runcredits=charged|revision|refunded|none&artifacts=api|none&video=<url>&posters=<url with {n}>&projects=some|none&style=ready|learning|empty`. */
+/** The scenario of a page, from its address: `?credits=ok|low|empty|none&run=done|working|failed|question&runcredits=charged|revision|refunded|none&artifacts=api|none&video=<url>&posters=<url with {n}>&projects=some|none&style=ready|learning|empty|story`. */
 export interface Scenario {
   credits: "none" | "ok" | "low" | "empty";
   run: "done" | "working" | "failed" | "question";
@@ -17,7 +17,7 @@ export interface Scenario {
   /** `none`: a brand-new workspace with no projects yet. */
   projects: "some" | "none";
   /** The creator's style: learnt from five videos, being learnt, or nothing yet. */
-  style: "ready" | "learning" | "empty";
+  style: "ready" | "learning" | "empty" | "story";
 }
 
 export function scenarioOf(search: URLSearchParams): Scenario {
@@ -33,7 +33,7 @@ export function scenarioOf(search: URLSearchParams): Scenario {
     video: search.get("video") ?? undefined,
     posters: search.get("posters") ?? undefined,
     projects: pick("projects", ["some", "none"], "some"),
-    style: pick("style", ["ready", "learning", "empty"], "ready"),
+    style: pick("style", ["ready", "learning", "empty", "story"], "ready"),
   };
 }
 
@@ -113,6 +113,7 @@ function styleFor(kind: Scenario["style"]): CreatorStyle {
   const learnt = learntStyle();
   const refs = learnt.references.map((ref, i) => ({ ...ref, poster_url: poster(i + 7) }));
   if (kind === "ready") return { ...learnt, references: refs };
+  if (kind === "story") return { ...storyStyle(), references: refs };
   return {
     ...emptyStyle(),
     status: "learning",

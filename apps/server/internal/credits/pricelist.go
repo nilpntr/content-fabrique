@@ -282,7 +282,7 @@ func LoadPriceList(fsys fs.FS, name string) (*PriceList, error) {
 			Name: p, PriceEURCents: pf.PriceEURCents, BillingMode: BillingMode(pf.BillingMode), AllowanceCredits: pf.AllowanceCredits,
 			Refill: pf.Refill, StorageGB: pf.StorageGB, ConcurrentRuns: pf.ConcurrentRuns, UnchargedRunsPerDay: pf.UnchargedRunsPerDay, TranscribedMinutesPerDay: pf.TranscribedMinutesDay,
 			StyleRelearnsPerDay: pf.StyleRelearnsPerDay,
-			COGSBudgetMicros: map[Action]int64{}, NonLLMCOGSBudgetMicros: map[Action]int64{},
+			COGSBudgetMicros:    map[Action]int64{}, NonLLMCOGSBudgetMicros: map[Action]int64{},
 		}
 		switch {
 		case pl.BillingMode != Managed && pl.BillingMode != BYOK:

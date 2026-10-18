@@ -94,6 +94,12 @@ func SettingsOf(in api.StyleSettings) styleprofile.Settings {
 	if in.AngleSwitches != nil {
 		s.AngleSwitches = string(*in.AngleSwitches)
 	}
+	if in.TextPattern != nil {
+		s.TextPattern = string(*in.TextPattern)
+	}
+	if in.TextPosition != nil {
+		s.TextPosition = string(*in.TextPosition)
+	}
 	return s
 }
 
@@ -141,6 +147,12 @@ func apiSettings(s styleprofile.Settings) api.StyleSettings {
 	if s.AngleSwitches != "" {
 		out.AngleSwitches = ptr(api.StyleToggle(s.AngleSwitches))
 	}
+	if s.TextPattern != "" {
+		out.TextPattern = ptr(api.StyleTextPattern(s.TextPattern))
+	}
+	if s.TextPosition != "" {
+		out.TextPosition = ptr(api.StyleTextPosition(s.TextPosition))
+	}
 	return out
 }
 
@@ -155,13 +167,14 @@ func StyleOf(v View) api.CreatorStyle {
 		CameraMotion: api.StyleLevel(r.CameraMotion), TitlePosition: api.StyleTitlePosition(r.TitlePosition), TitleCase: api.StyleTitleCase(r.TitleCase),
 		Music: api.StyleMusic(r.Music), Pace: api.StylePace(r.Pace),
 		ChapterTitles: api.StyleToggle(r.ChapterTitles), EndingHold: api.StyleEndingHold(r.EndingHold), CutTiming: api.StyleCutTiming(r.CutTiming),
-		AngleSwitches: api.StyleToggle(r.AngleSwitches),
+		AngleSwitches: api.StyleToggle(r.AngleSwitches), TextPattern: api.StyleTextPattern(r.TextPattern), TextPosition: api.StyleTextPosition(r.TextPosition),
 		Sources: api.StyleSettingSources{
 			Vibe: source(r.Sources.Vibe), Transitions: source(r.Sources.Transitions), TextAnimation: source(r.Sources.TextAnimation),
 			CameraMotion: source(r.Sources.CameraMotion), TitleColour: source(r.Sources.TitleColour), TitlePosition: source(r.Sources.TitlePosition),
 			TitleCase: source(r.Sources.TitleCase), Music: source(r.Sources.Music), Pace: source(r.Sources.Pace),
 			ChapterTitles: source(r.Sources.ChapterTitles), TitleTemplate: source(r.Sources.TitleTemplate), EndingHold: source(r.Sources.EndingHold),
 			CutTiming: source(r.Sources.CutTiming), AngleSwitches: source(r.Sources.AngleSwitches),
+			TextPattern: source(r.Sources.TextPattern), TextPosition: source(r.Sources.TextPosition),
 		},
 	}
 	if r.TitleColour != "" {
@@ -267,6 +280,42 @@ func (h *Handler) UpdateStyle(ctx context.Context, req api.UpdateStyleRequestObj
 		return nil, undocumented("updateStyle", e)
 	}
 	return api.UpdateStyle200JSONResponse(StyleOf(v)), nil
+}
+
+// PatchStyle is PATCH /v1/style: only the settings given change, the ones named in clear go back to the layers below.
+func (h *Handler) PatchStyle(ctx context.Context, req api.PatchStyleRequestObject) (api.PatchStyleResponseObject, error) {
+	who, e := h.begin(ctx, true)
+	if e == nil && req.Body == nil {
+		e = invalid("a request body is required")
+	}
+	var v View
+	if e == nil {
+		var change styleprofile.Settings
+		if req.Body.Settings != nil {
+			change = SettingsOf(*req.Body.Settings)
+		}
+		var unset []string
+		if req.Body.Clear != nil {
+			unset = *req.Body.Clear
+		}
+		v, e = h.svc.PatchSettings(ctx, who, change, unset)
+	}
+	if e != nil {
+		switch e.Status {
+		case 400:
+			return api.PatchStyle400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body(e))}, nil
+		case 401:
+			return api.PatchStyle401JSONResponse{UnauthenticatedJSONResponse: api.UnauthenticatedJSONResponse(body(e))}, nil
+		case 403:
+			return api.PatchStyle403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(body(e))}, nil
+		case 500:
+			return api.PatchStyle500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(body(e))}, nil
+		case 503:
+			return api.PatchStyle503JSONResponse{UnavailableJSONResponse: api.UnavailableJSONResponse(body(e))}, nil
+		}
+		return nil, undocumented("patchStyle", e)
+	}
+	return api.PatchStyle200JSONResponse(StyleOf(v)), nil
 }
 
 // ResetStyle is DELETE /v1/style.
