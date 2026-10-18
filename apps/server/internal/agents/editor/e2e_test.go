@@ -78,7 +78,13 @@ func (f *fakeAnthropic) RoundTrip(r *http.Request) (*http.Response, error) {
 	f.mu.Lock()
 	switch {
 	case strings.HasSuffix(r.URL.Path, "/count_tokens"):
-		body = `{"input_tokens": 9000}`
+		// What the next turn will really report as its prompt (input, cache write and cache read): a count that is lower than the usage
+		// would hide the cost of a run from its reservation.
+		u := turnUsage[min(f.messages+1, len(turnUsage))-1]
+		if f.scale > 1 {
+			u[1], u[2] = u[1]*f.scale, u[2]*f.scale
+		}
+		body = fmt.Sprintf(`{"input_tokens": %d}`, u[0]+u[1]+u[2])
 	case strings.HasSuffix(r.URL.Path, "/v1/messages"):
 		f.messages++
 		var req map[string]any
