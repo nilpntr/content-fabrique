@@ -99,8 +99,12 @@ export class FakeServer implements UploadApi {
     this.validUrls.clear();
   }
 
+  /** The bodies of the create calls. */
+  createRequests: CreateAssetRequest[] = [];
+
   async create(request: CreateAssetRequest): Promise<CreateAssetResponse> {
     this.calls.push("create");
+    this.createRequests.push(request);
     this.onCreate?.(++this.createAttempts);
     this.take("create");
     const active = [...this.assets.values()].filter((a) => a.status === "active").length;

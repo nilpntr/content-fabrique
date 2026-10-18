@@ -27,4 +27,6 @@ export interface NewProjectInput {
   quality?: "max";
   /** The trimmed project name. Left out when the creator gave none (the server names the project). */
   title?: string;
+  /** The vibe picked for this video; left out when the creator kept their style's own. */
+  vibe?: "calm" | "lively" | "hype";
 }
