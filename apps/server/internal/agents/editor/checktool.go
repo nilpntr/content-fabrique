@@ -170,6 +170,30 @@ func CheckVersion(ctx context.Context, projects Projects, src AnalysisSource, ws
 			slog.WarnContext(ctx, "editor: the preview render could not be measured; the rendered-brightness checks do not apply", "project_id", pid.String(), "version", version, "error", err)
 		}
 	}
+	// The motion graphics (D-35): the picture behind each overlay, measured on the preview where the overlay is not drawn.
+	if graphics := graphicsOf(spec); len(graphics) > 0 {
+		ovs, ok := sampler.(OverlaySampler)
+		probes := overlayProbes(spec, in.Subjects)
+		switch {
+		case !ok || sampler == nil:
+			in.OverlaySkip = "the preview render cannot be measured here"
+		case len(probes) == 0:
+			in.OverlaySkip = "every motion graphic fills its shot, so the picture behind it cannot be measured without it"
+		default:
+			switch got, err := ovs.RenderedRegions(ctx, ws, pid, version, probes); {
+			case err == nil:
+				in.Overlay = map[string]RegionLuma{}
+				for _, g := range got {
+					in.Overlay[g.Probe.ItemID] = g
+				}
+			case errors.Is(err, ErrNoPreview):
+				in.OverlaySkip = "there is no preview render of this version"
+			default:
+				in.OverlaySkip = "the preview could not be measured behind the graphics"
+				slog.WarnContext(ctx, "editor: the preview could not be measured behind the graphics; overlay_legibility does not apply", "project_id", pid.String(), "version", version, "error", err)
+			}
+		}
+	}
 	// The ears: the same preview, listened to (its audio stem when it has a beat guide). It is a separate, small step; when it cannot
 	// run the audio checks do not apply, and the picture checks are unaffected.
 	if as, ok := sampler.(AudioSampler); ok && sampler != nil {

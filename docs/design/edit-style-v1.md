@@ -222,7 +222,7 @@ Sections 2 and 3 are the generic craft of a genre. A creator who shows us their 
 
 **Text.** Every text item has an entrance (`animation`: the new `pop`, which scales to 112 % and settles, `slide_up` or `fade`) and an exit (the new `exit`: `pop_out`, `slide_down` or `fade`). A listicle gets a numbered chapter title per exercise (`plan_edit` takes `chapter` on a shot). No text ever covers the head or the torso: [style profile v1](style-profile-v1.md#8c-never-over-the-body-p6-06).
 
-**Text rendering, and the seam for an overlay layer.** Texts, captions and the watermark are drawn by one stage: the `ass` filter that the compiler adds after the join (`[vj]` to `[vout]`, `Subtitles.filter()`), from a script built by `render/ass.go`. A motion-graphics overlay layer (rendered elsewhere, for word-by-word reveals, glow and animated cards) composites at the same point: an `overlay` of its frames onto `[vj]` before or instead of the `ass` stage, placed by the same `timeline.PlaceTextAvoiding` and `subject.FitText` so it obeys the same safe zone and the never-on-the-body rule. Nothing else in the video graph needs to know about it.
+**Text rendering, and the seam for an overlay layer.** Texts, captions and the watermark are drawn by one stage: the `ass` filter that the compiler adds after the join (`[vj]` to `[vout]`, `Subtitles.filter()`), from a script built by `render/ass.go`. A motion-graphics overlay layer (rendered elsewhere, for word-by-word reveals, glow and animated cards) composites at the same point: an `overlay` of its frames onto `[vj]` before or instead of the `ass` stage, placed by the same `timeline.PlaceTextAvoiding` and `subject.FitText` so it obeys the same safe zone and the never-on-the-body rule. Nothing else in the video graph needs to know about it. (Built in P6-07, D-35: [motion-graphics-v1](motion-graphics-v1.md); the overlays go before the `ass` stage.)
 
 **Angles.** A long set is not one 10 s tripod take: with two angles of an exercise the editor switches between them every 2 to 5 s at rep boundaries; with one angle it runs with the living camera and a punch-in.
 
@@ -238,6 +238,14 @@ Sections 2 and 3 are the generic craft of a genre. A creator who shows us their 
 | `text_without_entrance` | at lively or hype a text has no entrance or no exit |
 | `chapter_titles` | the plan has two or more chapters and the edit fewer numbered titles |
 | `text_over_subject` | (stricter) any text covers the torso, a hook or chapter title has to be moved to another time or left out |
+
+**The motion-graphics checks** (P6-07, `editor.v2.8`; a graphics item is a title for `hook_title` and, as a `chapter_card` or a numbered title, for `chapter_titles`):
+
+| Check | Fails when |
+|---|---|
+| `overlay_readable` | a graphic is fully on screen for less than 1.2 s before its exit starts (the template's own timing, `motion.Schedule`); the fix names the duration |
+| `overlay_over_subject` | a graphic the renderer leaves out (no time clear of the body), a hook or chapter graphic it moves to another time, or one set not to avoid the subject that covers it (`subject.FitText`, as for text) |
+| `overlay_legibility` | the letters' contrast with the picture behind their box, measured on the preview just before or after the graphic, is under 3:1 (2:1 with a shadow; a plate or an outline passes) |
 
 `hook_length` lets a hook run until the song's drop (at most 5 s), `beat_sync` counts a transition at its middle, and `effect_density` allows 0.6 effects a cut at lively and 1.0 at hype (0.5 at calm, as before).
 

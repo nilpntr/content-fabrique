@@ -184,6 +184,30 @@
       }
     },
     {
+      "name": "list_motion_templates",
+      "description": "List the motion-graphics templates you can put on the timeline with the add_graphic op: animated titles, chapter cards, a word marker, a counter, a label and a loop card, each with what it looks like, when to use it, its params, what its accents_ms land on and an example. Give template to also see a still of that template fully on screen (one picture). Use a template where the motion is the point (a hook title, a chapter per exercise, a rep count); plain text items stay right for quiet, static text. Call it once per run before you add graphics.",
+      "strict": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "template": {
+            "type": "string",
+            "enum": [
+              "title_pop",
+              "blur_in",
+              "chapter_card",
+              "highlight_word",
+              "counter",
+              "lower_label",
+              "outro_card"
+            ],
+            "description": "Optional. The template to see a still of. Leave it out to list them all without pictures."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "get_timeline",
       "description": "Get the current timeline: its version number (version 0 means there is no timeline yet), the full spec, what the last edit changed, its length, and the validation issues (errors block an edit, warnings do not). Use it to see where you stand and to check your work after an edit. It takes no arguments.",
       "strict": true,

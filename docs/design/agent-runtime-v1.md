@@ -114,6 +114,7 @@ This is enough for a first edit of a few short clips. It is not the product's fi
 | `list_footage()` | The project's clips: id, title, description, duration, orientation, has_audio |
 | `view_clip(asset_id, at_ms[≤8])` | Those frames as images (384 px), with timestamps |
 | `plan_edit(content_type, story, hook, arc, ending, playbook, target_length_s, tempo_bpm, pace, shots[])` | The creative plan (editor v2): validated, recorded as a `creative_plan` artifact for the run feed, and answered with the genre playbook, the beat length and the shot list in milliseconds. The first `edit_timeline` of a run is refused without one ([edit-style-v1](edit-style-v1.md) section 6) |
+| `list_motion_templates(template?)` | The motion-graphics library (D-35, [motion-graphics-v1](motion-graphics-v1.md)): each template's name, description, when to use it, params, what its accents do and an example op; with `template`, also that template's still preview as an image. Read-only |
 | `get_timeline()` | The current spec and its validation warnings |
 | `get_comments()` | The creator's open comments (P1-08): kind, version and range, pin, text (untrusted data) and the timeline items that played there, resolved through the `time_map` of the render they were made on and marked as still in the current timeline or not. The run context carries the first few. `finish` marks the requests the run was handed as applied by it |
 | `edit_timeline(ops[])` | Applies the P3-02 ops atomically → the new version number, a summary and the issues |

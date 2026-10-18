@@ -1,0 +1,17 @@
+{
+  "op": "add_graphic",
+  "id": "g7",
+  "template": "chapter_card",
+  "at_ms": 3871,
+  "duration_ms": 2600,
+  "position": {
+    "x": 0.5,
+    "y": 0.2
+  },
+  "avoid_subject": true,
+  "params": {
+    "text": "SEATED ROW",
+    "number": 1,
+    "layout": "two_line"
+  }
+}

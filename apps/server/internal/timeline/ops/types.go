@@ -49,6 +49,7 @@ var Names = []string{
 	NameAddClip, NameRemoveItem, NameMoveItem, NameTrimItem, NameReplaceSource, NameSetSpeed, NameSetReframe,
 	NameAddText, NameUpdateText, NameRemoveText, NameSetTransition, NameSetSound, NameRemoveSound,
 	NameSnapCutsToBeats, NameSetLook, NameSetCaptions, NameSetClipAudio, NameSetMotion, NameSetSpeedRamp, NameAddSFX,
+	NameAddGraphic, NameUpdateGraphic, NameRemoveGraphic,
 }
 
 // MaxBatchOps is the most ops in one batch.
@@ -497,6 +498,12 @@ func newOp(name string) Op {
 		return &SetMotion{}
 	case NameSetSpeedRamp:
 		return &SetSpeedRamp{}
+	case NameAddGraphic:
+		return &AddGraphic{}
+	case NameUpdateGraphic:
+		return &UpdateGraphic{}
+	case NameRemoveGraphic:
+		return &RemoveGraphic{}
 	case NameAddSFX:
 		return &AddSFX{}
 	}

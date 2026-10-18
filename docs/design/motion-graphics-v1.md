@@ -138,12 +138,13 @@ Per frame: 4 to 6 ms for a title-sized clip, about 9 ms for a clip spanning most
 
 Not done, because it was not needed: parallel tabs (Chrome renders one frame at a time; four tabs would cut the overlay time about in four on a 4-CPU job), and skipping identical hold frames.
 
-## 9. The editor (second PR)
+## 9. The editor (second PR, `editor.v2.8`, `workout.v5`)
 
-- `list_motion_templates`: the library (name, description, when to use, params, what the accents do, an example) and, on request, a template's still preview (`internal/motion/previews/*.png`, rendered by the integration test).
-- Ops `add_graphic`, `update_graphic` (and `move_item`, `remove_item` on graphics items).
-- The prompt and the playbooks: at a lively or hype vibe, the hook title is a `title_pop` with its words on the first beats and the exercises get `chapter_card`s that pop on the cut's beat; calm edits keep `blur_in` or plain text; the creator's title style is the template's `style`.
-- `check_edit`: `overlay_legibility` (the contrast of the letters against the picture behind them), `overlay_readable` (at least 1.2 s fully on screen after the entrance, from `motion.Schedule`) and the torso rule for overlays (never over the body).
+- `list_motion_templates`: the library (name, description, when to use, params, what the accents do, an example op) and, with `template`, that template's still preview (`internal/motion/previews/*.png`, rendered by the integration test, served as a built-in image so it never touches the object store).
+- Ops `add_graphic`, `update_graphic` and `remove_graphic` (ids `g1`, `g2`, ...). A graphic keeps its absolute time while clips ripple, like a text, and `update_graphic` moving `at_ms` moves its accents with it.
+- The prompt ("Motion graphics (lively and hype)", behind `op:add_graphic`) and the workout playbook: at lively or hype the hook title is a `title_pop` with its words on the first beats and each chapter a `chapter_card` whose number pops on its cut and whose line sweeps in on the next beat; calm keeps `blur_in` or plain text; the creator's title recipe goes into the params. A graphic enters and leaves by itself, so `text_without_entrance` does not apply to it.
+- `check_edit`: `overlay_readable` (at least 1.2 s fully on screen before the exit, from `motion.Schedule`), `overlay_over_subject` (the renderer's `subject.FitText`: a graphic left out, a hook or chapter graphic moved to another time, or one pinned on the person fails) and `overlay_legibility` (the contrast of the letters against the picture behind their box, measured on the preview on a frame of the same shot just before or after the graphic, where it is not drawn; `media.RegionStatsArgs` measures up to 32 boxes in one sandboxed ffmpeg run). `hook_title` and `chapter_titles` count graphics.
+- Not run live: the cassettes were re-recorded against the fake API (no paid calls). A live run is the founder's call.
 
 ## 10. The demo and its validation
 
