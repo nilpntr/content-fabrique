@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -58,7 +59,7 @@ func TestRepoSuiteLoads(t *testing.T) {
 			held++
 		}
 	}
-	if calibration != 1 || held != 1 {
+	if calibration != 1 || held < 1 {
 		t.Errorf("calibration cases %d, held out %d", calibration, held)
 	}
 	for _, f := range s.Feedback {
@@ -338,6 +339,137 @@ func TestJudgeScoresCachesAndStaysInBudget(t *testing.T) {
 	in2.Render = &Picture{Label: "sheet", JPEG: testJPEG(t, 99)}
 	if in2.Key("m") == in.Key("m") || in.Key("m") == in.Key("other-model") {
 		t.Error("the cache key ignores the picture or the model")
+	}
+	// The format: without one the judge is told so; with one it reads the card, and the key changes.
+	if !strings.Contains(all, "the plan names no format") || !strings.Contains(judgeSystem, "Novelty compares the format") {
+		t.Errorf("the judge is not told about formats:\n%s", all)
+	}
+	in3 := in
+	in3.Format = formatWords(&editor.PlanFormat{ID: "transformation", Mix: "loop_ending", NewToCreator: true, NewIdea: true})
+	if in3.Key("m") == in.Key("m") {
+		t.Error("the cache key ignores the format")
+	}
+	var parts []string
+	for _, b := range BuildJudgeRequest(in3).Messages[0].Content {
+		parts = append(parts, b.Text)
+	}
+	got := strings.Join(parts, "\n")
+	for _, want := range []string{"format: the format the editor chose", "Transformation reveal (transformation)", "- payoff (", "mixed in: Seamless loop", "new to this creator", "asked for a new idea"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the request lacks %q:\n%s", want, got)
+		}
+	}
+}
+
+// The baseline hash covers the format library and how a live new idea is made: each hashed path exists in the repository, and a change
+// to a format card, to the suite's rubric or to a new-idea case is a new hash.
+func TestTheCodeHashCoversFormats(t *testing.T) {
+	repo := "../../../.."
+	for _, p := range HashedPaths {
+		if _, err := os.Stat(filepath.Join(repo, p)); err != nil {
+			t.Errorf("hashed path %s: %v", p, err)
+		}
+	}
+	for _, want := range []string{"apps/server/internal/formats", "apps/server/config/formats", "apps/server/cmd/cfctl/eval_suite.go"} {
+		if !slices.Contains(HashedPaths, want) {
+			t.Errorf("%s is not hashed", want)
+		}
+	}
+	root := t.TempDir()
+	for _, p := range HashedPaths {
+		dir, name := filepath.Join(root, p), "a.yaml"
+		if strings.HasSuffix(p, ".go") {
+			dir, name = filepath.Join(root, filepath.Dir(p)), filepath.Base(p)
+		}
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		write(t, dir, name, "x: 1\n")
+	}
+	write(t, root, "fb.yaml", "feedback: []\n")
+	suite := "suite: s\nfeedback: fb.yaml\nrubric:\n  - id: clear-concept\n    text: a concept\n    weight: 1\ncases:\n  - id: idea\n    new_idea: true\n    idea_from: 1\n    stored: {project: prj_x, version: 2}\n"
+	path := write(t, root, "s.yaml", suite)
+	hash := func() string {
+		t.Helper()
+		s, err := LoadSuite(path, os.DevNull)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h, err := CodeHash(root, s, RunKey{Live: true, Repeat: 3, Judge: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+	h0 := hash()
+	write(t, filepath.Join(root, "apps/server/config/formats"), "a.yaml", "x: 2\n")
+	h1 := hash()
+	if h1 == h0 {
+		t.Error("a format card change kept the hash")
+	}
+	write(t, filepath.Join(root, "apps/server/cmd/cfctl"), "eval_suite.go", "package main\n// changed\n")
+	h2 := hash()
+	if h2 == h1 {
+		t.Error("a change to how live cases are made kept the hash")
+	}
+	write(t, root, "s.yaml", strings.Replace(suite, "idea_from: 1", "idea_from: 2", 1))
+	if h3 := hash(); h3 == h2 {
+		t.Error("a new-idea case change kept the hash")
+	}
+	write(t, root, "s.yaml", strings.Replace(suite, "a concept", "another concept", 1))
+	if h4 := hash(); h4 == h2 {
+		t.Error("a suite rubric change kept the hash")
+	}
+}
+
+// The suite's rubric reaches every case but the calibration ones, under the case's own items.
+func TestSuiteRubricAndNewIdeaCases(t *testing.T) {
+	s, err := LoadSuite("../../../../suites/back-day.yaml", os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Rubric) == 0 || s.Rubric[0].ID != "clear-concept" {
+		t.Fatalf("suite rubric %+v", s.Rubric)
+	}
+	var idea *Case
+	for _, raw := range s.Cases {
+		c := s.Resolved(raw)
+		has := slices.ContainsFunc(c.Expectations, func(e Expectation) bool { return e.ID == "clear-concept" })
+		if has == (c.Calibration != nil) {
+			t.Errorf("case %s: clear-concept %v, calibration %v", c.ID, has, c.Calibration != nil)
+		}
+		if c.NewIdea {
+			idea = &c
+		}
+	}
+	if idea == nil || !slices.ContainsFunc(idea.Expectations, func(e Expectation) bool { return e.ID == "novelty" }) {
+		t.Fatalf("no new-idea case with a novelty item: %+v", idea)
+	}
+	// A new idea runs live on its stored project, so it needs that, not footage.
+	if m := idea.Missing(true); strings.Join(m, ",") != "workspace,stored.project" {
+		t.Errorf("a new idea's live needs: %v", m)
+	}
+	c := *idea
+	c.Stored = nil
+	if m := c.Missing(true); strings.Join(m, ",") != "workspace,stored" {
+		t.Errorf("a new idea without stored: %v", m)
+	}
+	// The version a live new idea rethinks: idea_from, else the stored version; the same for every --repeat sample.
+	if idea.IdeaBase() != 1 {
+		t.Errorf("idea base %d, want the suite's idea_from 1", idea.IdeaBase())
+	}
+	if b := (Case{Stored: &Stored{Version: 3}}).IdeaBase(); b != 3 {
+		t.Errorf("idea base without idea_from: %d", b)
+	}
+	// A case's own item of the same id wins over the suite's.
+	c = Case{ID: "x", Expectations: []Expectation{{ID: "clear-concept", Text: "mine", Weight: 2}}}
+	if got := s.Resolved(c).Expectations; len(got) != 1 || got[0].Text != "mine" {
+		t.Errorf("expectations %+v", got)
+	}
+	dir := t.TempDir()
+	bad := write(t, dir, "bad.yaml", "suite: bad\nrubric:\n  - id: Not An Id\n    text: x\ncases:\n  - id: a\n")
+	if _, err := LoadSuite(bad, os.DevNull); err == nil || !strings.Contains(err.Error(), "suite rubric") {
+		t.Errorf("a bad rubric item: %v", err)
 	}
 }
 

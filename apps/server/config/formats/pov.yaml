@@ -1,0 +1,48 @@
+# A format card of the format library (docs/design/formats-v1.md). Our words only.
+id: pov
+version: 1
+kind: format
+name: '"POV: ..."'
+plural: POV videos
+pitch: 'A "POV: ..." line puts the viewer in a relatable situation, and the footage plays it out.'
+fits:
+  content_types: [workout, vlog, general, talking]
+  needs: [clips_2]
+  helps: [lifestyle, reps]
+  when:
+    - The footage shows a moment many viewers know (the first set after a break, an empty gym, a long day before training).
+not_when:
+  - The footage cannot be read as a situation (a clean tutorial of one exercise).
+beats:
+  - name: hook
+    roles: [hook]
+    timing: the first shot
+    what: 'The "POV: ..." line on screen at once over the shot that sets the scene.'
+  - name: middle
+    roles: [build, broll, step]
+    timing: on the beats
+    what: The situation plays out in a few shots, no more text or one short line.
+  - name: payoff
+    roles: [payoff, peak, ending]
+    timing: the drop or the end
+    what: The punchline of the situation (the effort, the pump, the relief), held to the end.
+text:
+  pattern: single_title
+  title_forms: ["POV: <SITUATION>"]
+  notes: 'The line starts with "POV:" and names the situation in a few words, in the creator''s language; it stays up long enough to read (2 s or more).'
+music: The line sits on the intro; the punchline on the drop.
+length_s: {min: 7, max: 25}
+pace: steady
+pace_hint: Few shots; the line is the joke, the footage carries it.
+vibes: {calm: good, lively: great, hype: good}
+how_it_plays:
+  - '"POV: your first leg day in a month" over the walk to the rack, the squat on the drop, a slow walk out at the end.'
+  - '"POV: 5 am and the gym is yours" over an empty gym, the first set on the drop.'
+detect:
+  keywords: [pov]
+  rules:
+    - all: [keyword_hook]
+      score: 0.9
+check:
+  payoff: end
+  min_shots: 2

@@ -1,0 +1,54 @@
+# A format card of the format library (docs/design/formats-v1.md). Our words only: never a creator's title or line. The fields are
+# checked by package formats (formats.Load) and its tests; the vocabularies (signals, cues, roles, patterns) are listed there.
+id: tutorial_101
+version: 1
+kind: format
+name: Tutorial 101
+plural: 101 tutorials
+pitch: One movement or muscle, taught in a few clean shots under a "<TOPIC> 101" series title.
+fits:
+  content_types: [workout, tutorial]
+  needs: [reps]
+  helps: [pose, two_exercises, long_clip]
+  when:
+    - There is at least one clean set of one exercise, ideally from two angles.
+    - A pose or a close detail of the muscle can open or close it.
+not_when:
+  - The footage is lifestyle or product shots with no training in it.
+  - The clips are many different exercises with a rep or two each (that is a listicle).
+beats:
+  - name: hook
+    roles: [hook]
+    timing: from 0 to the drop (about 2 to 4 s)
+    what: The best frame of the muscle or the set, with the series title on screen by half a second.
+  - name: middle
+    roles: [build, step, detail]
+    timing: from the drop, one or two angles of the movement
+    what: Whole reps of the exercise, cut at the turning points, switching angle when there is a second one.
+  - name: payoff
+    roles: [peak, payoff, ending]
+    timing: the last phrase of the music
+    what: The cleanest rep held, or the pose, held a little longer so the video loops.
+text:
+  pattern: single_title
+  title_forms: ["<TOPIC> 101", "<TOPIC> 101 <GOAL>"]
+  notes: The topic is the muscle or the exercise the footage shows, in two or three words. The title leaves before or on the drop.
+music: The intro under the hook, the first cut on the drop; a steady or building track, cuts loosely on the strong beats.
+length_s: {min: 12, max: 35}
+pace: steady
+pace_hint: Few cuts; let a clean rep run, switch angle on a turning point rather than cutting short.
+vibes: {calm: great, lively: great, hype: good}
+how_it_plays:
+  - A tight shot of a back opens with the series title above the head; on the drop it cuts to a seated row from behind, then from the side, and ends on the pose again.
+  - A slow single set of curls from the front, one angle switch at the turning point of the third rep, the title gone by the drop.
+detect:
+  keywords: [how to, tutorial, guide, technique]
+  rules:
+    - all: [title_series]
+      score: 0.9
+    - all: [keyword_hook]
+      none: [pattern_dialogue, pattern_story_captions]
+      score: 0.75
+check:
+  payoff: end
+  min_shots: 2

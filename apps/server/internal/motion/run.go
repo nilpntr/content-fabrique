@@ -111,6 +111,8 @@ type Options struct {
 	FontsDir string
 	// Timeout bounds the run; zero is the runner's own limit.
 	Timeout time.Duration
+	// runnerArgs are more arguments for cf-motion, for the sandbox tests only (a frame timeout, an injected hang).
+	runnerArgs []string
 }
 
 // Report is what a run did, from the runner's manifest.
@@ -121,6 +123,9 @@ type Report struct {
 	Frames   int64
 	Timing   ManifestTiming
 	Duration time.Duration
+	// Recovery is how many frames the runner drew again after a hang, and how often it restarted Chrome for one (frames.go of
+	// cf-motion); zero in a normal run.
+	Recovery ManifestRecovery
 }
 
 // Manifest is the runner's manifest.json.
@@ -130,6 +135,13 @@ type Manifest struct {
 	Arch     string            `json:"arch"`
 	Segments []ManifestSegment `json:"segments"`
 	Timing   ManifestTiming    `json:"timing"`
+	Recovery ManifestRecovery  `json:"recovery"`
+}
+
+// ManifestRecovery is what the runner needed to draw every frame: retries on the same page and restarts of Chrome.
+type ManifestRecovery struct {
+	Retries  int `json:"retries"`
+	Restarts int `json:"restarts"`
 }
 
 // ManifestSegment is one segment's frames.
@@ -203,6 +215,7 @@ func render(ctx context.Context, runner media.Runner, job Job, work, bundleDir s
 		"--out", sandbox.WorkDir,
 		"--tmp", "/tmp",
 	}
+	args = append(args, o.runnerArgs...)
 	lim := DefaultLimits()
 	res, err := runner.Run(ctx, media.Invocation{Args: args, Inputs: []media.Input{{Host: bundleDir, Container: media.InputPath(0)}}, OutputDir: out,
 		Limits: &lim, Timeout: o.Timeout})
@@ -216,7 +229,7 @@ func render(ctx context.Context, runner media.Runner, job Job, work, bundleDir s
 	if err != nil {
 		return Report{}, err
 	}
-	return Report{Chrome: m.Chrome, Arch: m.Arch, Frames: job.TotalFrames(), Timing: m.Timing, Duration: time.Since(start)}, nil
+	return Report{Chrome: m.Chrome, Arch: m.Arch, Frames: job.TotalFrames(), Timing: m.Timing, Duration: time.Since(start), Recovery: m.Recovery}, nil
 }
 
 // ReadManifest reads the runner's manifest from out and checks it against the job: one segment per job segment with the same

@@ -8,10 +8,10 @@ import { reviewSummary } from "@/components/project/plain-words";
 import { PlainStatusPill, usePosters } from "@/components/project/project-card";
 import { ProjectReview } from "@/components/project/project-review";
 import { relativeTime } from "@/components/project/relative-time";
-import { DownloadButton, FeedbackBox, SelfReviewLine, WhatIMade } from "@/components/project/review-aside";
+import { DownloadButton, FeedbackBox, SelfReviewLine, VersionIdea, WhatIMade } from "@/components/project/review-aside";
 import { hasArtifactEvents, runArtifacts } from "@/components/project/run-artifacts";
 import { RunPanel } from "@/components/project/run-panel";
-import { storyboard } from "@/components/project/storyboard";
+import { storyboard, versionLabel } from "@/components/project/storyboard";
 import { StoryboardView } from "@/components/project/storyboard-view";
 import { buttonVariants } from "@/components/ui/button";
 import { Disclosure } from "@/components/ui/disclosure";
@@ -170,8 +170,14 @@ export function ProjectPage({
           aside={({ version, openComments }) => {
             // The editor's note belongs to the version its run ended on; another version says what changed in it.
             const note = run.data?.status === "succeeded" && run.data.summary && run.data.timeline_version === version.version ? run.data.summary : undefined;
+            // "Version 3 · new idea: transformation reveal" on the version a new idea made.
+            const ideaLabel =
+              run.data?.new_idea && run.data.timeline_version === version.version && artifacts.plan?.idea
+                ? versionLabel(versionName(version.version), artifacts.plan, true)
+                : undefined;
             return (
               <>
+                {ideaLabel ? <VersionIdea label={ideaLabel} /> : null}
                 {note ? <WhatIMade text={note} /> : null}
                 {note && review ? <SelfReviewLine summary={review} /> : null}
                 {version.loading ? null : <DownloadButton projectId={projectId} version={version.version} versionLabel={version.version === latest ? "video" : versionName(version.version)} />}

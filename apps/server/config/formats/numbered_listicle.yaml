@@ -1,0 +1,54 @@
+# A format card of the format library (docs/design/formats-v1.md). Our words only.
+id: numbered_listicle
+version: 1
+kind: format
+name: Numbered list
+plural: numbered lists
+pitch: '"<N> essentials" or "<N> mistakes": a promise of a count, then one numbered chapter card per item.'
+fits:
+  content_types: [workout, tutorial, vlog]
+  needs: [two_exercises]
+  helps: [three_exercises, pose]
+  when:
+    - There are two to five different exercises, moves or items, each with a usable set or moment.
+not_when:
+  - All the clips are one exercise (a 101 tutorial or a one-take set fits better).
+  - Fewer than two items can be shown with a clean moment each.
+beats:
+  - name: hook
+    roles: [hook]
+    timing: from 0 to the drop
+    what: The strongest frame with the count promise as the title ("<N> ..."), on screen by half a second.
+  - name: middle
+    roles: [step, build, detail]
+    timing: one chapter per item, each starting on a strong beat
+    what: For each item a numbered chapter card ("1. <ITEM>") on its first shot, then its best reps, two to five seconds of it.
+  - name: payoff
+    roles: [peak, payoff, ending]
+    timing: the last chapter and the end
+    what: The last item is the best one (the count builds to it), ending on a held rep or the pose.
+text:
+  pattern: chapter_cards
+  title_forms: ["<N> <TOPIC>", "<N> <TOPIC> FOR <GOAL>", "<N> MISTAKES <TOPIC>"]
+  notes: The number in the title is the number of chapters. Chapter cards are numbered in order and leave before the next chapter.
+music: Each chapter starts on a phrase or a strong beat; the first chapter on the drop.
+length_s: {min: 15, max: 45}
+pace: building
+pace_hint: Equal-ish chapters, the last a little longer; a new chapter on a phrase start.
+vibes: {calm: good, lively: great, hype: great}
+how_it_plays:
+  - The pose with "3 moves for a wider back" opens; on the drop a "1." card and pull-ups, then "2." and rows, then "3." and pulldowns, ending on the pose.
+  - A count of common mistakes, each chapter card naming the fix while the clean rep plays.
+detect:
+  keywords: [essentials, mistakes, tips, exercises, moves, things, rules, reasons, ways, steps]
+  rules:
+    - all: [chapters]
+      score: 0.9
+    - all: [title_numbered]
+      score: 0.85
+    - all: [keyword_hook, many_cuts]
+      none: [pattern_dialogue, pattern_story_captions]
+      score: 0.6
+check:
+  payoff: end
+  min_shots: 3

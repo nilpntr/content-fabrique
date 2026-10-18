@@ -521,20 +521,36 @@ func editLive(ctx context.Context, st *store.Store, svc *projects.Service, rt *a
 	if code != 0 {
 		return evals.Target{}, errors.New("the workspace has no owner to make the project as")
 	}
-	assetIDs := make([]api.AssetId, 0, len(c.Footage)+1)
-	for _, a := range append(append([]string{}, c.Footage...), c.Song) {
-		if a != "" {
-			assetIDs = append(assetIDs, api.AssetId(a))
+	var pid ids.ProjectID
+	opts := editor.EditOptions{Vibe: c.Vibe}
+	if c.NewIdea {
+		// "Try another idea" on the stored project: a new version in a format none of its versions used.
+		if c.Stored == nil {
+			return evals.Target{}, errors.New("a new-idea case needs stored: the project to make a new idea of")
 		}
+		if pid, err = ids.ParseProjectID(c.Stored.Project); err != nil {
+			return evals.Target{}, fmt.Errorf("stored.project: %w", err)
+		}
+		if opts.AvoidFormats, err = editor.ProjectFormatsUpTo(ctx, st, w.ID, pid, c.IdeaBase()); err != nil {
+			return evals.Target{}, fmt.Errorf("the formats of the project: %w", err)
+		}
+		opts.NewIdea = true
+	} else {
+		assetIDs := make([]api.AssetId, 0, len(c.Footage)+1)
+		for _, a := range append(append([]string{}, c.Footage...), c.Song) {
+			if a != "" {
+				assetIDs = append(assetIDs, api.AssetId(a))
+			}
+		}
+		title := fmt.Sprintf("eval %s/%s", suite, c.ID)
+		brief := c.Brief
+		det, perr := svc.Create(ctx, who, api.CreateProjectRequest{AssetIds: assetIDs, Brief: &brief, Format: api.ProjectFormat(store.Format9x16), Title: &title})
+		if perr != nil {
+			return evals.Target{}, fmt.Errorf("make the project: %s: %s", perr.Code, perr.Message)
+		}
+		pid = det.Project.ID
 	}
-	title := fmt.Sprintf("eval %s/%s", suite, c.ID)
-	brief := c.Brief
-	det, perr := svc.Create(ctx, who, api.CreateProjectRequest{AssetIds: assetIDs, Brief: &brief, Format: api.ProjectFormat(store.Format9x16), Title: &title})
-	if perr != nil {
-		return evals.Target{}, fmt.Errorf("make the project: %s: %s", perr.Code, perr.Message)
-	}
-	pid := det.Project.ID
-	input, err := editor.NewEditInput("", c.Vibe)
+	input, err := editor.NewEditInputWith(opts)
 	if err != nil {
 		return evals.Target{}, err
 	}

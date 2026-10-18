@@ -1,0 +1,53 @@
+# A format card of the format library (docs/design/formats-v1.md). Our words only.
+id: quote_reveal
+version: 1
+kind: format
+name: Quote, then the reveal
+plural: quote reveals
+pitch: A line that sets a mood or a promise over a quiet intro, then the physique or the big moment revealed on the drop.
+fits:
+  content_types: [workout, general]
+  needs: [pose]
+  helps: [song, reps, long_clip]
+  when:
+    - There is a pose or physique clip worth revealing, and a calmer clip (walking in, a close detail, the back to camera) to hold before it.
+    - The song has a clear drop.
+not_when:
+  - There is nothing to reveal (no pose, no strong moment).
+  - The creator tells their videos in story captions or dialogue (use those formats).
+beats:
+  - name: hook
+    roles: [hook, build]
+    timing: from 0 to the drop, the quiet part of the song
+    what: A held, calm shot with one short line (a mindset, a promise, a question) on screen, the face or body not yet shown in full.
+  - name: middle
+    roles: [reveal]
+    timing: on the drop
+    what: A hard cut on the drop to the pose or the heaviest moment, the line gone.
+  - name: payoff
+    roles: [peak, payoff, ending]
+    timing: after the drop to the end
+    what: The pose or the set held and moving with the living camera, a punch-in on a strong beat, ending where it can loop.
+text:
+  pattern: single_title
+  title_forms: ["<LINE>"]
+  notes: One short line of our own (a few words, the creator's language and case), never a famous quote word for word; it leaves on the drop.
+music: Everything hangs on the drop. The hook is the intro; the reveal cut lands on the drop within a frame or two.
+length_s: {min: 8, max: 25}
+pace: steady
+pace_hint: Two to four shots. The hook is long on purpose; after the drop a few cuts at most.
+vibes: {calm: great, lively: good, hype: good}
+how_it_plays:
+  - A slow walk to the mirror under a short line about discipline; on the drop it cuts to a front double biceps and the line is gone.
+  - A back to camera with a question as the line, the lat spread revealed on the drop and held with a punch-in on the next downbeat.
+detect:
+  rules:
+    - all: [hook_quote, cut_at_drop]
+      none: [pattern_dialogue, pattern_story_captions, chapters]
+      score: 0.85
+    - all: [hook_quote, few_cuts]
+      none: [pattern_dialogue, pattern_story_captions, chapters, title_series, title_numbered]
+      score: 0.7
+check:
+  payoff: drop
+  min_shots: 2

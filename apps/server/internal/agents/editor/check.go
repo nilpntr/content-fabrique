@@ -357,6 +357,8 @@ func RunChecks(in CheckInput) Report {
 	if in.Vibe == "" && in.Plan != nil {
 		in.Vibe = in.Plan.Vibe
 	}
+	// The plan's format decides the text pattern the text checks follow, over a measured or suggested one (never over the creator's own).
+	in.Settings = formatSettings(in.Plan, in.Settings)
 	lim := applyStyle(typeLimits[typ], in.Style, in.Settings)
 	// A busier edit is allowed more effects a cut at lively and hype, and when the creator's settings ask for lots.
 	vibe := VibeOr(in.Vibe)
@@ -401,6 +403,7 @@ func RunChecks(in CheckInput) Report {
 		c.hookLength(), c.hookTitle(), c.shotPacing(), c.longShot(), c.heldEnding(), c.shotVariety(), c.paceBuilds(), c.repBoundaries(), c.deadTime(),
 		c.effectDensity(), c.textSafe(), c.textOverSubject(), c.duration(targetS), c.brightness(), c.crushed(), c.beatSync(), c.styleMatch(), c.titleCopied(),
 		c.offBeatCut(), c.hookMissesDrop(), c.staticShot(), c.transitionsMatch(), c.transitionVariety(), c.textWithoutEntrance(), c.chapterTitles(),
+		c.formatFollowed(),
 	}
 	if c.linesOn() { // the text-pattern checks (checktext.go), only for a style told in lines
 		r.Checks = append(r.Checks, c.storyCaptions(), c.captionReadable(), c.textOverFace())

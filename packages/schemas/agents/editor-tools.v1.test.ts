@@ -39,6 +39,7 @@ describe("editor tools contract", () => {
       "view_clip",
       "find_moments",
       "get_music",
+      "list_formats",
       "plan_edit",
       "list_motion_templates",
       "get_timeline",
@@ -140,6 +141,8 @@ describe("tool arguments", () => {
   it("plan_edit takes the creative plan, with closed enums", () => {
     const plan = {
       content_type: "workout",
+      format: "tutorial_101",
+      format_why: "One exercise from two angles and a pose to open on.",
       story: "A heavy back day.",
       hook: "The heaviest rep.",
       arc: "Hook, build, payoff.",
@@ -166,6 +169,23 @@ describe("tool arguments", () => {
     expect(check("plan_edit", { ...plan, extra: 1 })).toBe(false);
     const { story: _story, ...without } = plan;
     expect(check("plan_edit", without)).toBe(false);
+    // The format: one of the library's, required with its reason; the mix is optional, a card or none.
+    expect(check("plan_edit", { ...plan, format_mix: "loop_ending" })).toBe(true);
+    expect(check("plan_edit", { ...plan, format_mix: "none" })).toBe(true);
+    expect(check("plan_edit", { ...plan, format: "loop_ending" })).toBe(false);
+    expect(check("plan_edit", { ...plan, format: "listicle" })).toBe(false);
+    expect(check("plan_edit", { ...plan, format_mix: "vlog" })).toBe(false);
+    const { format: _format, ...noFormat } = plan;
+    expect(check("plan_edit", noFormat)).toBe(false);
+    const { format_why: _why, ...noWhy } = plan;
+    expect(check("plan_edit", noWhy)).toBe(false);
+  });
+
+  it("list_formats takes an optional all", () => {
+    expect(check("list_formats", {})).toBe(true);
+    expect(check("list_formats", { all: true })).toBe(true);
+    expect(check("list_formats", { all: "yes" })).toBe(false);
+    expect(check("list_formats", { format: "pov" })).toBe(false);
   });
 
   it("finish takes a summary", () => {

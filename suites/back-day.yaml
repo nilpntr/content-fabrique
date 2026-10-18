@@ -23,6 +23,11 @@ defaults:
   vibe: lively
   budget_usd: 1.00
   references_dir: PLACEHOLDER_references_dir
+# Rubric items of every case but the calibration ones (judge_edit.v5 is shown the format the plan chose and the creator's usual formats).
+rubric:
+  - id: clear-concept
+    text: "A clear concept: a viewer could say in a few words what the video is (a 101 tutorial, a numbered list, a reveal on the drop, ...); its hook sets the format up, the middle delivers it and the payoff lands."
+    weight: 1
 cases:
   - id: back-day-lively
     title: "Back day, lively, the creator's song"
@@ -60,6 +65,35 @@ cases:
     vibe: hype
     held_out: true
     stored: {project: prj_PLACEHOLDER_hype, version: 1}
+  # "Try another idea" on a finished back-day project. Without --live the stored new-idea version is judged. With --live each sample
+  # makes a new version on the stored project (the project gains versions) in a format none of the versions up to idea_from used, so
+  # the --repeat samples avoid the same formats and stay comparable.
+  - id: back-day-new-idea
+    title: "Back day, try another idea"
+    vibe: lively
+    new_idea: true
+    idea_from: 1
+    stored: {project: prj_PLACEHOLDER_new_idea, version: 2}
+    expectations:
+      - id: novelty
+        text: "Novelty against the creator's usual formats: a different concept from their go-to formats and from the project's first version, still in their style, and done well."
+        weight: 1
+  # A second footage set, never shown to the improvement loop: another training day (chest and leg machines, a triceps pushdown, a
+  # 120 fps slow-motion curl), another song (130 BPM, 15 s). It checks that a change helps edits in general, not only the back day.
+  - id: mixed-day-held-out
+    title: "Mixed upper and leg day, another song (held out)"
+    footage: [ast_PLACEHOLDER_slowmo_curl, ast_PLACEHOLDER_leg_press, ast_PLACEHOLDER_incline_press, ast_PLACEHOLDER_plate_machine, ast_PLACEHOLDER_leg_curl, ast_PLACEHOLDER_pushdown, ast_PLACEHOLDER_chest_press]
+    song: ast_PLACEHOLDER_song_130
+    brief: "A training-day short for a fitness creator: the cleanest reps from these machines, varied angles, the slow-motion curl as a highlight, 15 seconds to fit the song, a punchy title."
+    vibe: lively
+    held_out: true
+    expectations:
+      - id: slowmo-highlight
+        text: "The slow-motion curl is used as a highlight (at its own slow speed), not sped back up to real time."
+        weight: 1
+      - id: clean-reps
+        text: "Every rep shown is a whole rep: no shot starts or ends in the middle of the movement."
+        weight: 1
   # The calibration set: the founder called v4 of this project "sick", except its transitions.
   - id: calibration-founder-v4
     title: "Founder's verdict: v4 'sick' except the transitions"

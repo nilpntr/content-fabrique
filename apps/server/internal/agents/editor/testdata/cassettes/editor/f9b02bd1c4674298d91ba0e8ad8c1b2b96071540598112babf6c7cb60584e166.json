@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "3bc506f012785a9b2ae4216cf8911d904e88b7ce69f69c6bece2a9294bb01300",
-  "recorded_at": "2026-10-18T07:52:58Z",
+  "key": "f9b02bd1c4674298d91ba0e8ad8c1b2b96071540598112babf6c7cb60584e166",
+  "recorded_at": "2026-10-18T09:37:19Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,
@@ -95,30 +95,6 @@
         "blocks": [
           "tool_result"
         ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
       }
     ],
     "tools": [
@@ -127,6 +103,7 @@
       "view_clip",
       "find_moments",
       "get_music",
+      "list_formats",
       "plan_edit",
       "list_motion_templates",
       "get_timeline",
@@ -172,11 +149,6 @@
         "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
         "media_type": "image/jpeg",
         "bytes": 9284
-      },
-      {
-        "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
-        "media_type": "image/jpeg",
-        "bytes": 9284
       }
     ]
   },
@@ -187,18 +159,38 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_9",
-        "name": "check_edit",
-        "input": {}
+        "id": "toolu_ed_7",
+        "name": "edit_timeline",
+        "input": {
+          "base_version": 1,
+          "ops": [
+            {
+              "op": "trim_item",
+              "id": "c4",
+              "out_ms": 4500
+            },
+            {
+              "op": "snap_cuts_to_beats",
+              "grid": {
+                "bpm": 124,
+                "first_beat_ms": 0
+              },
+              "options": {
+                "write_markers": true,
+                "max_shift_ms": 60
+              }
+            }
+          ]
+        }
       }
     ],
     "usage": {
-      "input_tokens": 420,
-      "cache_write_tokens": 700,
+      "input_tokens": 440,
+      "cache_write_tokens": 800,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 15600,
-      "output_tokens": 38
+      "cache_read_tokens": 14200,
+      "output_tokens": 120
     }
   },
-  "count_tokens": 16720
+  "count_tokens": 15440
 }

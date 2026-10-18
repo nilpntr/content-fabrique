@@ -482,6 +482,10 @@ export interface paths {
          *     The run's spend cap is set by the server from the workspace's plan and the kind of edit; the request cannot change it. It is
          *     enforced before every model call. `budget_usd` is accepted for compatibility (and still has to be a positive number) but is
          *     ignored.
+         *
+         *     **A new idea.** `new_idea: true` ("Try another idea" in the app) starts a run that makes a new version in a different format
+         *     from the project's earlier versions (the formats their runs' plans chose); it is priced like any other edit of the project (a
+         *     revision once the project has a charged edit) and needs a version to start from (`409 no_video_yet`).
          */
         post: operations["startEdit"];
         delete?: never;
@@ -840,7 +844,7 @@ export interface components {
          *     code as a generic failure of its HTTP status.
          * @enum {string}
          */
-        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "credits_exhausted" | "quality_not_in_plan" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured" | "assets_not_usable" | "version_conflict" | "invalid_ops" | "no_change" | "timeline_invalid" | "too_many_renders" | "run_in_progress" | "run_not_waiting" | "model_not_configured" | "edit_not_charged" | "too_many_uncharged_runs" | "byok_key_required" | "version_not_charged" | "too_many_references" | "style_learning_in_progress" | "too_many_relearns" | "style_reference";
+        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "credits_exhausted" | "quality_not_in_plan" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured" | "assets_not_usable" | "version_conflict" | "invalid_ops" | "no_change" | "timeline_invalid" | "too_many_renders" | "run_in_progress" | "run_not_waiting" | "model_not_configured" | "edit_not_charged" | "too_many_uncharged_runs" | "byok_key_required" | "version_not_charged" | "too_many_references" | "style_learning_in_progress" | "too_many_relearns" | "style_reference" | "no_video_yet";
         ErrorDetail: {
             code: components["schemas"]["ErrorCode"];
             /** @description For people. It may change; do not branch on it. */
@@ -1515,6 +1519,12 @@ export interface components {
             profile?: components["schemas"]["RunProfile"];
             vibe?: components["schemas"]["EditVibe"];
             quality?: components["schemas"]["EditQuality"];
+            /**
+             * @description "Try another idea": a new version with a different concept, not a revision of the current one. The editor chooses a format
+             *     (docs/design/formats-v1.md) that none of the project's earlier versions used, and keeps the creator's style. Priced as a
+             *     revision. The project needs a version already (`409 no_video_yet`). `instructions` may still say what the creator wants.
+             */
+            new_idea?: boolean;
             /** @description Ignored. The run's spend cap is set by the server from the plan (it used to be the caller's, up to $5). */
             budget_usd?: number;
         };
@@ -1639,6 +1649,8 @@ export interface components {
             summary?: string | null;
             /** @description The timeline version the run finished on, for a run that finished the edit. */
             timeline_version?: number | null;
+            /** @description The run was started as a new idea (`startEdit` with `new_idea`); its plan's `format` is the idea. Absent otherwise. */
+            new_idea?: boolean;
             routing_profile: string;
             model: string;
             effort: string;
@@ -3056,7 +3068,7 @@ export interface operations {
             402: components["responses"]["PlanRequired"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `run_in_progress`: the project's editor run has not finished. */
+            /** @description `run_in_progress`: the project's editor run has not finished. `no_video_yet`: a new idea needs a version of the project to start from. */
             409: {
                 headers: {
                     [name: string]: unknown;

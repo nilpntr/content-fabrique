@@ -265,6 +265,8 @@ type Profile struct {
 	// Transitions and Movement (P6-05c): what happens at the cuts, and where they sit against the movement.
 	Transitions TransitionsProfile `json:"transitions"`
 	Movement    MovementProfile    `json:"movement"`
+	// Formats are the formats of the library the creator's videos are in, with their shares (docs/design/formats-v1.md).
+	Formats *FormatsProfile `json:"formats,omitempty"`
 
 	// Evidence is one line per reference with its main numbers, for the creator to read and correct.
 	Evidence []string `json:"evidence,omitempty"`
@@ -652,6 +654,7 @@ func Aggregate(refs []Measures) *Profile {
 	p.Audio = aggregateAudio(refs)
 	p.Transitions = aggregateTransitions(refs)
 	p.Movement = aggregateMovement(refs)
+	p.Formats = AggregateFormats(refs)
 
 	// Confidence: 0.9 x 0.2 a reference (five give 0.9), 1 for ten or more, 0.2 for one.
 	conf := math.Min(1, 0.2*float64(n)) * 0.9
@@ -1126,6 +1129,9 @@ func (p *Profile) CompactBlock() string {
 		}
 	} else if t != nil {
 		b.WriteString("title: none\n")
+	}
+	if l := p.formatsLine(); l != "" {
+		b.WriteString(l + "\n")
 	}
 	fmt.Fprintf(&b, "sound: %s\n", p.Audio.Describe())
 	fmt.Fprintf(&b, "sound numbers: intro %s s, lift %s LU, first cut at the lift in %.0f %% of the videos; cuts within 100 ms of an onset %.0f %%, beat-locked %v; sound effects %v",

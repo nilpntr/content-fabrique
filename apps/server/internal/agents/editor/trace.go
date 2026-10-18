@@ -28,11 +28,16 @@ func traceAttrs(raw json.RawMessage) []attribute.KeyValue {
 
 // tracePlan names the plan's choices on the run's span.
 func tracePlan(ctx context.Context, p Plan) {
-	runtime.TraceRun(ctx,
+	attrs := []attribute.KeyValue{
 		attribute.String("cf.playbook", p.Playbook), attribute.String("cf.playbook_version", p.PlaybookVersion),
 		attribute.String("cf.content_type", p.ContentType), attribute.Int("cf.target_length_s", p.TargetLengthS),
 		attribute.Int("cf.tempo_bpm", p.TempoBPM), attribute.String("cf.pace", p.Pace), attribute.Int("cf.planned_shots", len(p.Shots)),
-	)
+	}
+	if f := p.Format; f != nil {
+		attrs = append(attrs, attribute.String("cf.format", f.ID), attribute.String("cf.format_mix", f.Mix),
+			attribute.Bool("cf.format_new_to_creator", f.NewToCreator), attribute.Bool("cf.new_idea", f.NewIdea))
+	}
+	runtime.TraceRun(ctx, attrs...)
 }
 
 // traceChecks adds the checks of a check_edit to its tool span: one event per check with its status, and its one-line reason when

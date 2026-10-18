@@ -27,6 +27,12 @@ var HashedPaths = []string{
 	"apps/server/internal/styleprofile",
 	"apps/server/internal/evals",
 	"apps/server/config/routing",
+	// The format library (docs/design/formats-v1.md): its cards decide what list_formats offers, what format_followed checks and how a
+	// creator's references are tagged.
+	"apps/server/internal/formats",
+	"apps/server/config/formats",
+	// How a live case is made: a first edit of new footage, or a new idea on a stored project.
+	"apps/server/cmd/cfctl/eval_suite.go",
 }
 
 // RunKey is what besides the code makes two suite runs comparable.

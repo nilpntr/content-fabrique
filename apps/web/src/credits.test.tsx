@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test } from "vitest";
 import { CreditsChip, creditsSummary } from "@/components/credits";
 import { startEditMessage } from "@/components/project/errors";
+import { ideaHint } from "@/components/project/review-aside";
 import { ApiError } from "@/lib/api/client";
 import { announceCreditsExhausted, creditsOf, dismissCreditsExhausted, formatDay, isCreditsExhausted, useCreditsExhausted } from "@/lib/credits";
 import { createQueryClient } from "@/lib/query-client";
@@ -158,6 +159,12 @@ test("the out-of-credits dialog says what happened, what is left and when it ren
 test("starting an edit with no credits says so, and a missing plan still says that", () => {
   expect(startEditMessage(new ApiError(402, "credits_exhausted", ""))).toBe("You've used up your videos for now. See your plan in Settings.");
   expect(startEditMessage(new ApiError(402, "plan_required", ""))).toBe("You need an active plan to edit videos. Choose one in Settings.");
+});
+
+test("another idea costs what a change costs, in the API's numbers, and says nothing of a price it does not know", () => {
+  expect(ideaHint(EDIT_COSTS.standard.revision)).toBe("Another idea makes a new version with a different concept, in your style. This one stays. Costs the same as a change (2 credits).");
+  expect(ideaHint(1)).toContain("(1 credit)");
+  expect(ideaHint(undefined)).toBe("Another idea makes a new version with a different concept, in your style. This one stays.");
 });
 
 test("the dialog works without a balance too", async () => {

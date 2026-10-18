@@ -1,0 +1,48 @@
+# A format card of the format library (docs/design/formats-v1.md). Our words only.
+id: form_check
+version: 1
+kind: format
+name: Do this, not that
+plural: form checks
+pitch: One cue that fixes a movement, shown as the wrong way and the right way.
+fits:
+  content_types: [workout, tutorial]
+  needs: [reps]
+  helps: [two_exercises, talking]
+  when:
+    - The footage has the movement done well, and ideally a rep done badly (or a moment that shows the common mistake).
+not_when:
+  - There is no clip of the movement done well.
+beats:
+  - name: hook
+    roles: [hook]
+    timing: from 0
+    what: The mistake (or the question), marked "not this" or with a cross, a second or two.
+  - name: middle
+    roles: [step, reveal]
+    timing: on the drop or a strong beat
+    what: The right way, marked "do this", with one cue in a few words.
+  - name: payoff
+    roles: [payoff, peak, ending]
+    timing: to the end
+    what: Clean reps of the right way, held; the cue may come back.
+text:
+  pattern: single_title
+  title_forms: ["DO THIS", "NOT THIS", "<CUE>"]
+  notes: '"not this" and "do this" (or a cross and a tick), and one cue; never show a rep as wrong that is not.'
+music: The switch to the right way on the drop.
+length_s: {min: 8, max: 25}
+pace: steady
+pace_hint: Two halves; the right way gets the longer half.
+vibes: {calm: good, lively: great, hype: good}
+how_it_plays:
+  - A rushed row marked "not this", then on the drop a slow row with the elbows tucked marked "do this" and the cue "pull to the hip".
+detect:
+  keywords: [do this, not this, dont, don't, instead, wrong, right way, fix, cue]
+  rules:
+    - all: [keyword]
+      none: [pattern_dialogue, pattern_story_captions]
+      score: 0.7
+check:
+  payoff: end
+  min_shots: 2

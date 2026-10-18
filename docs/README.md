@@ -42,7 +42,7 @@
 | 04 | [Implementation plan](04-implementation-plan.md) | Phases P0–P7 with PR-sized tasks and acceptance criteria, cross-cutting practices, definition of done, open questions |
 | 05 | [Decision log](05-decisions.md) | Lightweight ADRs (D-01 … D-30) with context, alternatives and when to revisit |
 | 06 | [Setup and credentials](06-setup-and-credentials.md) | Every account, key and `.env` variable, who creates it and when; the scopes to grant each token; the hostnames on `contentfabrique.app`; `cfctl doctor` and bootstrap tooling; a prompt for the implementing agent |
-| — | [Design notes](design/) | Short notes written before a hard part is built: [timeline v1, edit ops and renderer](design/timeline-v1.md), [model access, agent runtime and the first editor slice](design/agent-runtime-v1.md), [edit style v1: from correct to viral](design/edit-style-v1.md), [audio v1: sound design and ears for the edit](design/audio-v1.md), [observability v1: traces, evals and the improvement loop](design/observability-v1.md) |
+| — | [Design notes](design/) | Short notes written before a hard part is built: [timeline v1, edit ops and renderer](design/timeline-v1.md), [model access, agent runtime and the first editor slice](design/agent-runtime-v1.md), [edit style v1: from correct to viral](design/edit-style-v1.md), [audio v1: sound design and ears for the edit](design/audio-v1.md), [observability v1: traces, evals and the improvement loop](design/observability-v1.md), [formats v1: the format library and "Try another idea"](design/formats-v1.md) |
 
 Suggested reading order: TL;DR → 01 → 03 → 04, with 02 and 05 as reference, and 06 before you start building.
 

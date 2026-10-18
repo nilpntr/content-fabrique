@@ -1,7 +1,7 @@
-import { Clapperboard, Film } from "lucide-react";
+import { Clapperboard, Film, Lightbulb } from "lucide-react";
 import * as React from "react";
 import { cn } from "@/lib/utils";
-import type { Storyboard } from "./storyboard";
+import type { StoryIdea, Storyboard } from "./storyboard";
 
 /** A frame for a moment: the poster of its clip, or a quiet stand-in. */
 function Frame({ src }: { src?: string }) {
@@ -19,6 +19,22 @@ function Frame({ src }: { src?: string }) {
   );
 }
 
+/** The idea of the video in plain words: "The idea: Transformation reveal", why it fits, and whether it is new for the creator. */
+function IdeaLine({ idea }: { idea: StoryIdea }) {
+  return (
+    <div data-testid="storyboard-idea" className="space-y-1">
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px]">
+        <Lightbulb aria-hidden className="size-4 shrink-0 text-brand" />
+        <span className="text-muted-foreground">The idea:</span>
+        <span className="font-semibold">{idea.name}</span>
+        {idea.mix ? <span className="text-muted-foreground">{idea.mix}</span> : null}
+        {idea.isNew ? <span className="rounded-full bg-add-wash px-2 py-0.5 text-[11.5px] font-medium text-good">New for you</span> : null}
+      </p>
+      {idea.why ? <p className="max-w-prose pl-6 text-[13px] text-pretty text-muted-foreground">{idea.why}</p> : null}
+    </div>
+  );
+}
+
 /** The plan as a storyboard: how the video opens, what happens, how it ends, each with a frame from its clip. */
 export function StoryboardView({ board, posters, title = "The plan", className }: { board: Storyboard; posters: ReadonlyMap<string, string>; title?: string; className?: string }) {
   const titleId = React.useId();
@@ -31,6 +47,7 @@ export function StoryboardView({ board, posters, title = "The plan", className }
         </h2>
         {board.length ? <p className="text-[13px] text-muted-foreground">{board.length}</p> : null}
       </div>
+      {board.idea ? <IdeaLine idea={board.idea} /> : null}
       {board.intro ? <p className="max-w-prose text-[14px] text-pretty text-muted-foreground">{board.intro}</p> : null}
       <ol className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
         {board.cards.map((card, index) => (

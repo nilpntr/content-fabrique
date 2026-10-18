@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/nilpntr/content-fabrique/internal/agents/editor"
 	"github.com/nilpntr/content-fabrique/internal/api"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
@@ -64,7 +65,7 @@ func TestRunsStartEdit(t *testing.T) {
 	if err := e.pool.QueryRow(context.Background(), `SELECT input::text, workspace_id, project_id FROM agent_runs WHERE id = $1`, runID).Scan(&input, &ws, &project); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(input, "Open on the heaviest set.") || !strings.Contains(input, `"editor.v2.10"`) || ws != e.ws["ada"].UUID || project.String() == "" {
+	if !strings.Contains(input, "Open on the heaviest set.") || !strings.Contains(input, `"editor.v2.11"`) || ws != e.ws["ada"].UUID || project.String() == "" {
 		t.Errorf("input %s, workspace %s", input, ws)
 	}
 
@@ -160,6 +161,66 @@ func TestRunsNeedAVideoClip(t *testing.T) {
 }
 
 func randomProjectID() string { return ids.Encode(ids.PrefixProject, uuid.Must(uuid.NewV7())) }
+
+// "Try another idea": a run that avoids the formats of the project's earlier versions, which needs a version to start from.
+func TestRunsStartANewIdea(t *testing.T) {
+	e := newAssetsEnv(t, func(o *assetsEnvOptions) { o.runs = true })
+	p := e.newProject("ada", "9:16", e.readyAsset("ada", "lat.mp4"))
+	e.fail(http.MethodPost, editPath(p), "ada", map[string]any{"new_idea": true}, http.StatusConflict, api.ErrorCodeNoVideoYet)
+
+	// A first run plans a 101 tutorial and makes version 1.
+	first := e.startEdit("ada", p, nil)
+	if first.NewIdea != nil {
+		t.Errorf("a plain run is a new idea: %v", *first.NewIdea)
+	}
+	e.appendEvent("ada", first, store.EventArtifact, `{"kind":"creative_plan","tool_use_id":"toolu_1","data":{"version":1,"content_type":"workout","format":{"id":"tutorial_101","name":"Tutorial 101","why":"x","new_to_creator":false,"library":"x"},"shots":[]}}`)
+	pid, err := ids.ParseProjectID(p.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.AddTimelineVersion(context.Background(), e.ws["ada"], pid, store.NewTimelineVersion{
+		Version: 1, Spec: json.RawMessage(`{"schema":"x"}`), AuthorKind: store.AuthorAgent, AuthorID: first.Id,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.call(http.MethodPost, runPath(first, "/cancel"), "ada", nil, http.StatusOK, nil)
+
+	idea := e.startEdit("ada", p, map[string]any{"new_idea": true, "instructions": "something punchier"})
+	if idea.NewIdea == nil || !*idea.NewIdea {
+		t.Fatalf("the run is not a new idea: %+v", idea)
+	}
+	runID, _ := ids.Decode(ids.PrefixRun, idea.Id)
+	var input string
+	if err := e.pool.QueryRow(context.Background(), `SELECT input::text FROM agent_runs WHERE id = $1`, runID).Scan(&input); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"new_idea": true`, `"avoid_formats": ["tutorial_101"]`, "something punchier"} {
+		if !strings.Contains(input, want) {
+			t.Errorf("input %s lacks %s", input, want)
+		}
+	}
+	var got api.Run
+	e.call(http.MethodGet, runPath(idea, ""), "ada", nil, http.StatusOK, &got)
+	if got.NewIdea == nil || !*got.NewIdea {
+		t.Errorf("GET does not say it is a new idea: %+v", got.NewIdea)
+	}
+	// Another workspace cannot start one on this project.
+	e.fail(http.MethodPost, editPath(p), "bob", map[string]any{"new_idea": true}, http.StatusNotFound, api.ErrorCodeNotFound)
+
+	// The idea makes version 2 as a POV: a later idea avoids both, newest first; an eval's samples rethinking version 1 avoid only its.
+	e.appendEvent("ada", idea, store.EventArtifact, `{"kind":"creative_plan","tool_use_id":"toolu_2","data":{"version":1,"content_type":"workout","format":{"id":"pov","name":"POV","why":"x","new_to_creator":true,"library":"x"},"shots":[]}}`)
+	if _, err := e.st.AddTimelineVersion(context.Background(), e.ws["ada"], pid, store.NewTimelineVersion{
+		Version: 2, Parent: 1, Spec: json.RawMessage(`{"schema":"x"}`), AuthorKind: store.AuthorAgent, AuthorID: idea.Id,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := editor.ProjectFormats(context.Background(), e.st, e.ws["ada"], pid); err != nil || strings.Join(got, ",") != "pov,tutorial_101" {
+		t.Errorf("the project's formats: %v %v", got, err)
+	}
+	if got, err := editor.ProjectFormatsUpTo(context.Background(), e.st, e.ws["ada"], pid, 1); err != nil || strings.Join(got, ",") != "tutorial_101" {
+		t.Errorf("the formats up to version 1: %v %v", got, err)
+	}
+}
 
 // Two requests at once make one run.
 func TestRunsStartEditRaces(t *testing.T) {

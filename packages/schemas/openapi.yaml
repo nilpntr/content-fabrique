@@ -970,6 +970,10 @@ paths:
         The run's spend cap is set by the server from the workspace's plan and the kind of edit; the request cannot change it. It is
         enforced before every model call. `budget_usd` is accepted for compatibility (and still has to be a positive number) but is
         ignored.
+
+        **A new idea.** `new_idea: true` ("Try another idea" in the app) starts a run that makes a new version in a different format
+        from the project's earlier versions (the formats their runs' plans chose); it is priced like any other edit of the project (a
+        revision once the project has a charged edit) and needs a version to start from (`409 no_video_yet`).
       requestBody:
         required: false
         content:
@@ -994,7 +998,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: "`run_in_progress`: the project's editor run has not finished."
+          description: "`run_in_progress`: the project's editor run has not finished. `no_video_yet`: a new idea needs a version of the project to start from."
           content:
             application/json:
               schema:
@@ -2010,6 +2014,7 @@ components:
         - style_learning_in_progress # 409: the style is being learnt already (learn again when it is done)
         - too_many_relearns # 429: the workspace has learnt its style again as often as its plan allows today
         - style_reference # 409: the asset is a style reference; remove it with DELETE /v1/style/references/{id}
+        - no_video_yet # 409: a new idea (startEdit new_idea) needs a finished video of the project to start from
 
     ErrorDetail:
       type: object
@@ -3228,6 +3233,12 @@ components:
           $ref: "#/components/schemas/EditVibe"
         quality:
           $ref: "#/components/schemas/EditQuality"
+        new_idea:
+          type: boolean
+          description: |
+            "Try another idea": a new version with a different concept, not a revision of the current one. The editor chooses a format
+            (docs/design/formats-v1.md) that none of the project's earlier versions used, and keeps the creator's style. Priced as a
+            revision. The project needs a version already (`409 no_video_yet`). `instructions` may still say what the creator wants.
         budget_usd:
           type: number
           exclusiveMinimum: 0
@@ -3414,6 +3425,9 @@ components:
         timeline_version:
           type: [integer, "null"]
           description: The timeline version the run finished on, for a run that finished the edit.
+        new_idea:
+          type: boolean
+          description: The run was started as a new idea (`startEdit` with `new_idea`); its plan's `format` is the idea. Absent otherwise.
         routing_profile:
           type: string
         model:

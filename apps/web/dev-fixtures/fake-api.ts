@@ -1,9 +1,9 @@
 import type { CreatorStyle, StyleSettings } from "@/lib/api/client";
 import { sampleFacets } from "@/lib/sample-facets";
 import { withMySettings } from "@/lib/style-words";
-import { annotation, apiAsset, assetId, callIdOf, emptyStyle, event, learntStyle, project, projectId, projectSummary, readyRender, renderId, run, runId, storyStyle, styleReference, timelineVersion, v2Artifacts, v2Run, v2Spec, versionSummary } from "@/test-fixtures";
+import { annotation, apiAsset, assetId, callIdOf, emptyStyle, event, learntStyle, PLAN_FORMAT, project, projectId, projectSummary, readyRender, renderId, run, runId, storyStyle, styleReference, timelineVersion, v2Artifacts, v2Run, v2Spec, versionSummary } from "@/test-fixtures";
 
-/** The scenario of a page, from its address: `?credits=ok|low|empty|none&run=done|working|failed|question&runcredits=charged|revision|refunded|none&artifacts=api|none&video=<url>&posters=<url with {n}>&projects=some|none&style=ready|learning|empty|story`. */
+/** The scenario of a page, from its address: `?credits=ok|low|empty|none&run=done|working|failed|question&runcredits=charged|revision|refunded|none&artifacts=api|none&video=<url>&posters=<url with {n}>&projects=some|none&style=ready|learning|empty|story&idea=none|plain|new`. */
 export interface Scenario {
   credits: "none" | "ok" | "low" | "empty";
   run: "done" | "working" | "failed" | "question";
@@ -19,6 +19,8 @@ export interface Scenario {
   projects: "some" | "none";
   /** The creator's style: learnt from five videos, being learnt, or nothing yet. */
   style: "ready" | "learning" | "empty" | "story";
+  /** The plan's format: none (a plan from before formats), plain (a format the creator uses), new (a "Try another idea" run). */
+  idea: "none" | "plain" | "new";
 }
 
 export function scenarioOf(search: URLSearchParams): Scenario {
@@ -35,6 +37,7 @@ export function scenarioOf(search: URLSearchParams): Scenario {
     posters: search.get("posters") ?? undefined,
     projects: pick("projects", ["some", "none"], "some"),
     style: pick("style", ["ready", "learning", "empty", "story"], "ready"),
+    idea: pick("idea", ["none", "plain", "new"], "none"),
   };
 }
 
@@ -122,10 +125,18 @@ function creditsFor(kind: Scenario["credits"]) {
 /** The events of the run in a scenario, up to the one it has reached. */
 const LAST_SEQ: Record<Scenario["run"], number> = { done: 99, working: 26, question: 16, failed: 23 };
 
-function runFor(kind: Scenario["run"], runCredits: Scenario["runCredits"]) {
+/** The plan's format of a scenario (formats-v1). */
+function formatFor(idea: Scenario["idea"]): object | undefined {
+  if (idea === "none") return undefined;
+  if (idea === "new") return PLAN_FORMAT;
+  return { id: "tutorial_101", name: "Tutorial 101", why: "One exercise from two angles, with the pose to open on.", new_to_creator: false, new_idea: false, library: "formats@fixture" };
+}
+
+function runFor(kind: Scenario["run"], runCredits: Scenario["runCredits"], idea: Scenario["idea"] = "none") {
   if (kind === "done") {
     const credits = runCredits === "none" ? null : runCredits === "revision" ? { state: "charged" as const, action: "edit.revision" as const, credits: 2 } : runCredits === "refunded" ? { state: "refunded" as const, action: "edit.first" as const, credits: 6 } : undefined;
-    return runCredits === "charged" ? v2Run() : v2Run({ credits });
+    const newIdea = idea === "new" ? { new_idea: true, credits: { state: "charged" as const, action: "edit.revision" as const, credits: 2 } } : {};
+    return runCredits === "charged" ? v2Run(newIdea) : v2Run({ credits, ...newIdea });
   }
   const finished = v2Run().events;
   if (kind === "working") {
@@ -213,11 +224,11 @@ export function installFakeApi(scenario: Scenario): void {
       const finalId = finals.find((candidate) => path === `/v1/renders/${candidate.id}`);
       if (finalId) return json(finalId);
       if (path === `/v1/renders/${renderId(1)}`) return json(render);
-      if (path === `/v1/runs/${runId(1)}`) return json(runFor(scenario.run, scenario.runCredits));
+      if (path === `/v1/runs/${runId(1)}`) return json(runFor(scenario.run, scenario.runCredits, scenario.idea));
       if (path === `/v1/runs/${runId(1)}/artifacts`) {
         if (scenario.artifacts === "none") return notFound();
         const after = Number(url.searchParams.get("after_seq") ?? 0);
-        return json({ artifacts: v2Artifacts().artifacts.filter((artifact) => artifact.seq > after && artifact.seq <= LAST_SEQ[scenario.run]), next_after_seq: null });
+        return json({ artifacts: v2Artifacts({ format: formatFor(scenario.idea) }).artifacts.filter((artifact) => artifact.seq > after && artifact.seq <= LAST_SEQ[scenario.run]), next_after_seq: null });
       }
       if (path === "/v1/annotations") return json({ items: [annotation(1, { timeline_version: 2, start_ms: 2900, end_ms: 4400, body: "The ramp on the cable row is great. Hold the slow part a beat longer." }), annotation(2, { timeline_version: 2, start_ms: 6200, end_ms: 6200, body: "Title here, please." })], next_cursor: null });
       if (path === "/v1/library/summary") return json({ total: CLIPS.length });

@@ -19,6 +19,7 @@ import (
 
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/creatorstyle"
+	"github.com/nilpntr/content-fabrique/internal/formats"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
 	"github.com/nilpntr/content-fabrique/internal/media"
@@ -37,6 +38,10 @@ const styleUsage = `Usage:
                       [--angle-switches off|on] [--text-pattern single_title|story_captions|dialogue|none]
                       [--text-position top|upper_third|middle|lower_third|auto] [--clear title_case,transitions,...] [flags]
   cfctl style clear   --workspace <wks_... or org_...> [flags]
+  cfctl style formats --measures <measures.json>
+
+formats tags the reference videos of a measures file (written by analyze --measures-out) with the formats of the library
+(config/formats), with no model call and no database: to see how a change to the library tags videos that were read before.
 
 set changes only the settings it is given; the creator's other settings stay. A setting given as "suggested" (--transitions suggested),
 or named in --unset, goes back to the suggestion, the measures or the default.
@@ -58,6 +63,8 @@ section 11).
   --no-vision   do not read the title text and write no summary (no model call, no cost)
   --no-summary  do not write the summary (one call of at most $0.03)
   --lines       print the text read in each shot (the creator's words: for a local check, never for a log)
+  --measures-out  write the measures of every reference as JSON to this file (the creator's words are in it: local checks only, never
+                committed); cfctl style formats reads it
   --no-store    measure and print only: no reference or profile is written; with --workspace the text is still read, metered to
                 its ledger (without one no database is needed and the text is not read)
   --provider    the sandbox: docker (default), hardened or local (ffmpeg on this machine, development only)
@@ -84,6 +91,8 @@ func cmdStyle(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps ag
 		return cmdStyleShow(args[1:], stdout, stderr, lookup, deps, true)
 	case "set":
 		return cmdStyleSet(args[1:], stdout, stderr, lookup, deps)
+	case "formats":
+		return cmdStyleFormats(args[1:], stdout, stderr)
 	}
 	_, _ = fmt.Fprintf(stderr, "cfctl style: unknown command %q\n\n%s", args[0], styleUsage)
 	return 2
@@ -104,6 +113,7 @@ func cmdStyleAnalyze(args []string, stdout, stderr io.Writer, lookup lookupEnv, 
 	image := flags.String("image", "media-tools:dev", "media-tools image")
 	asJSON := flags.Bool("json", false, "print JSON")
 	showLines := flags.Bool("lines", false, "print the text read in each shot")
+	measuresOut := flags.String("measures-out", "", "write the measures as JSON")
 	envFileArg := flags.String("env-file", "", "env file")
 	yes := flags.Bool("yes", false, "confirm outside plain local development")
 	if err := flags.Parse(args); err != nil {
@@ -200,10 +210,7 @@ func cmdStyleAnalyze(args []string, stdout, stderr io.Writer, lookup lookupEnv, 
 		_, _ = fmt.Fprintln(out, "note: --no-store without --workspace skips the text read (it needs a ledger); name a workspace to read it")
 	}
 
-	var costBefore int64
-	if st != nil {
-		costBefore, _ = styleCost(ctx, st, ws)
-	}
+	started := time.Now().Add(-time.Second)
 	var measures []styleprofile.Measures
 	for _, f := range files {
 		start := time.Now()
@@ -226,6 +233,7 @@ func cmdStyleAnalyze(args []string, stdout, stderr io.Writer, lookup lookupEnv, 
 				line += ", title not read (" + res.Vision.Reason + ")"
 			}
 		}
+		line += ", formats: " + formatTagsWords(styleprofile.FormatTags(res.Measures))
 		_, _ = fmt.Fprintln(out, line)
 		if *showLines && res.Vision != nil && res.Vision.Text != nil {
 			for _, l := range res.Vision.Text.ShotTexts {
@@ -238,11 +246,25 @@ func cmdStyleAnalyze(args []string, stdout, stderr io.Writer, lookup lookupEnv, 
 		})
 		measures = append(measures, res.Measures)
 	}
+	if *measuresOut != "" {
+		raw, err := json.MarshalIndent(measures, "", "  ")
+		if err == nil {
+			err = os.WriteFile(*measuresOut, raw, 0o600)
+		}
+		if err != nil {
+			_, _ = fmt.Fprintf(errOut, "cfctl %s: write the measures: %v\n", name, err)
+			return 1
+		}
+	}
 	if *noStore {
 		printProfile(out, styleprofile.Aggregate(measures), *asJSON, false)
 		if st != nil {
-			if after, cerr := styleCost(ctx, st, ws); cerr == nil && after > costBefore {
-				_, _ = fmt.Fprintf(out, "model cost of the text reads (the growth of this workspace's ledger during the command): %s\n", usd(after-costBefore))
+			if cost, cerr := styleCost(ctx, st, ws, started); cerr == nil && cost > 0 {
+				_, _ = fmt.Fprintf(out, "model cost of the text reads (this command's rows of the workspace's ledger): %s\n", usd(cost))
+				now := time.Now().UTC()
+				if day, derr := styleCost(ctx, st, ws, time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)); derr == nil {
+					_, _ = fmt.Fprintf(out, "text reads and summaries of this workspace today (UTC): %s\n", usd(day))
+				}
 			}
 		}
 		return 0
@@ -257,8 +279,8 @@ func cmdStyleAnalyze(args []string, stdout, stderr io.Writer, lookup lookupEnv, 
 		_, _ = fmt.Fprintf(errOut, "cfctl %s: %v\n", name, err)
 		return 1
 	}
-	if after, cerr := styleCost(ctx, st, ws); cerr == nil && after > costBefore {
-		_, _ = fmt.Fprintf(out, "model cost of the title reads and the summary (the growth of this workspace's ledger during the command): %s\n", usd(after-costBefore))
+	if cost, cerr := styleCost(ctx, st, ws, started); cerr == nil && cost > 0 {
+		_, _ = fmt.Fprintf(out, "model cost of the text reads and the summary (this command's rows of the workspace's ledger): %s\n", usd(cost))
 	}
 	style, err := styleprofile.LoadStyle(ctx, st, ws)
 	if err != nil || style.Profile == nil {
@@ -358,11 +380,21 @@ func styleReader(env *agentEnv, runner media.Runner, st *store.Store, deps agent
 	return &styleprofile.Reader{Models: factory, Router: router, Runner: runner}, 0
 }
 
-// styleCost is what the workspace's ledger holds for today (the title reads are the only model calls of this command).
-func styleCost(ctx context.Context, st *store.Store, ws ids.WorkspaceID) (int64, error) {
-	now := time.Now().UTC()
-	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	return st.UsageCostMicros(ctx, ws, day, day.Add(24*time.Hour))
+// styleCost is what this command's own model calls cost: the workspace's ledger rows of the text read and the summary since the
+// command started. The workspace's whole ledger is no measure of it: other runs of the workspace (an editor run, an eval) may be
+// spending at the same time.
+func styleCost(ctx context.Context, st *store.Store, ws ids.WorkspaceID, since time.Time) (int64, error) {
+	rows, err := st.RecentUsage(ctx, ws, 1000)
+	if err != nil {
+		return 0, err
+	}
+	var sum int64
+	for _, r := range rows {
+		if !r.CreatedAt.Before(since) && (r.Stage == styleprofile.VisionStage || r.Stage == styleprofile.SummaryStage) {
+			sum += r.ListCostMicros
+		}
+	}
+	return sum, nil
 }
 
 // printStyle prints the profile, the summary and the effective settings.
@@ -398,6 +430,61 @@ func printStyle(out io.Writer, st *styleprofile.Style, asJSON, stored bool) {
 	}
 }
 
+// cmdStyleFormats tags the references of a measures file with the library's formats and prints them with the creator's shares.
+func cmdStyleFormats(args []string, stdout, stderr io.Writer) int {
+	const name = "style formats"
+	flags := flag.NewFlagSet(name, flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	flags.Usage = func() { _, _ = fmt.Fprint(stderr, styleUsage) }
+	file := flags.String("measures", "", "the measures file")
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if *file == "" {
+		_, _ = fmt.Fprintf(stderr, "cfctl %s: name the measures file with --measures\n", name)
+		return 2
+	}
+	raw, err := os.ReadFile(*file) // #nosec G304 -- a file the developer names
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "cfctl %s: %v\n", name, err)
+		return 1
+	}
+	var ms []styleprofile.Measures
+	if err := json.Unmarshal(raw, &ms); err != nil {
+		_, _ = fmt.Fprintf(stderr, "cfctl %s: %s is not a measures file: %v\n", name, *file, err)
+		return 1
+	}
+	_, _ = fmt.Fprintf(stdout, "library %s\n", formats.Default().Version)
+	for _, m := range ms {
+		ref := styleprofile.FormatReference(m)
+		_, _ = fmt.Fprintf(stdout, "%s: %s (text %s, cues %s)\n", m.Name, formatTagsWords(styleprofile.FormatTags(m)),
+			map[bool]string{true: "read: " + ref.Pattern, false: "not read"}[ref.TextRead], strings.Join(formats.CuesOf(ref), " "))
+	}
+	if p := styleprofile.Aggregate(ms); p != nil {
+		for _, l := range p.PlainLines() {
+			if l.ID == "formats" {
+				_, _ = fmt.Fprintf(stdout, "%s: %s.\n", l.Label, l.Value)
+			}
+		}
+	}
+	return 0
+}
+
+// formatTagsWords are a reference's formats as "tutorial_101 (0.90), one_take (0.60)", or "none found".
+func formatTagsWords(tags []formats.Tag) string {
+	if len(tags) == 0 {
+		return "none found"
+	}
+	parts := make([]string, len(tags))
+	for i, t := range tags {
+		parts[i] = fmt.Sprintf("%s (%.2f)", t.ID, t.Score)
+	}
+	return strings.Join(parts, ", ")
+}
+
 func printProfile(out io.Writer, p *styleprofile.Profile, asJSON, stored bool) {
 	if asJSON {
 		enc := json.NewEncoder(out)
@@ -407,6 +494,11 @@ func printProfile(out io.Writer, p *styleprofile.Profile, asJSON, stored bool) {
 	}
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, p.Describe())
+	for _, l := range p.PlainLines() {
+		if l.ID == "formats" {
+			_, _ = fmt.Fprintf(out, "%s: %s.\n", l.Label, l.Value)
+		}
+	}
 	if len(p.Evidence) > 0 {
 		_, _ = fmt.Fprintln(out, "\nEvidence:")
 		for _, e := range p.Evidence {

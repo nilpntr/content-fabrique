@@ -3,6 +3,7 @@ package render
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -76,6 +77,10 @@ func runMotion(ctx context.Context, plan Plan, runner media.Runner, work string,
 	rep, err := motion.Render(ctx, runner, plan.Motion.Job, work, bundle, o)
 	if err != nil {
 		return fmt.Errorf("render: %w", err)
+	}
+	if rc := rep.Recovery; rc.Retries > 0 {
+		// A frame hung and was drawn again (the frames are the same); worth knowing if it happens often.
+		slog.WarnContext(ctx, "render: the motion runner drew a frame again after a hang", "retries", rc.Retries, "chrome_restarts", rc.Restarts)
 	}
 	if opts.Motion.Report != nil {
 		opts.Motion.Report(rep)

@@ -22,6 +22,23 @@ Rules for changing it:
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
 
+## editor.v2.11, workout.v8 and the other playbooks v4 (2026-10-18)
+
+Formats: pick the idea first, then edit (docs/design/formats-v1.md). The founder asked for an editor that also comes up with new ideas;
+the style profile teaches how a creator edits, the new format library (`config/formats`, package `formats`) gives it concepts. The
+file is `editor.v2.11.md`, a patch of v2.10:
+
+- **New section "Pick a format first"**: fit first (never a format the footage cannot carry), the creator's own formats rank higher,
+  at most one format new to the creator per edit unless they asked for something new, a new idea ("Try another idea") avoids the
+  formats of the earlier versions, format_mix borrows a device, and the format sets the structure while the creator's style and
+  settings set the look (the creator's own text-pattern setting wins over the format's).
+- **How you work**, step 3: call `list_formats`, then `plan_edit` with `format` and `format_why` (required; the strict schema has
+  the library's ids as an enum).
+- **The text of the video**: the format may ask for another text pattern than the measured one; the creator's own setting wins.
+- **Checks**: `format_followed` (the hook's text, the text pattern, the payoff on the drop for a reveal, a loop, the shots); the text
+  checks follow the format's pattern over a measured one.
+- All six playbooks get a paragraph "The format" (the format sets the structure, the playbook the craft) and a new version.
+
 ## editor.v2.10 and workout.v7 (2026-10-18)
 
 The text of the video as the creator tells it (P6-05d). A second creator tells his videos in short sentence-case story captions, a new
