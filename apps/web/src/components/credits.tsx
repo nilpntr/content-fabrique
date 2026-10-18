@@ -5,6 +5,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { useMe } from "@/lib/api/hooks";
 import { type Credits, creditsLabel, creditsOf, dismissCreditsExhausted, formatDay, useCreditsExhausted } from "@/lib/credits";
 import { cn } from "@/lib/utils";
+import { CREDITS_PER_VIDEO, videosLeftText, videosShort } from "@/lib/words";
 
 /** The share of the allowance that is left, as a ring: full when nothing is used. */
 function Ring({ credits, className }: { credits: Credits; className?: string }) {
@@ -19,17 +20,17 @@ function Ring({ credits, className }: { credits: Credits; className?: string }) 
   );
 }
 
-/** What the balance says in a sentence, for the label and the tooltip. */
+/** What the balance says in a sentence, for the label and the tooltip: in videos first, the exact credits after. */
 export function creditsSummary(credits: Credits): string {
-  const parts = [`${creditsLabel(credits.available)} left`];
-  if (credits.allowance > 0) parts.push(`${credits.allowance} in this period's allowance`);
-  if (credits.period_end) parts.push(`renews ${formatDay(credits.period_end)}`);
+  const parts = [`${videosLeftText(credits)} (${creditsLabel(credits.available)})`];
+  if (credits.period_end && credits.allowance > 0) parts.push(`renews ${formatDay(credits.period_end)}`);
   return parts.join(", ");
 }
 
 /**
- * The balance in the header: a ring and the number of credits left, amber when the allowance is nearly used, red at zero. It is a
- * link to Settings, where the balance is spelled out. Nothing renders when the API has no credits for the workspace.
+ * The balance in the header, counted in videos (a creator thinks in videos, not credits): a ring and the videos left, amber when
+ * the allowance is nearly used, red at zero. It is a link to Settings, where the balance is spelled out. Nothing renders when the
+ * API has no credits for the workspace.
  */
 export function CreditsChip({ credits, className }: { credits: Credits | undefined; className?: string }) {
   if (!credits) return null;
@@ -48,8 +49,7 @@ export function CreditsChip({ credits, className }: { credits: Credits | undefin
       )}
     >
       <Ring credits={credits} className={empty ? "text-destructive" : credits.low ? "text-warning" : "text-brand"} />
-      <span>{credits.available}</span>
-      <span className="hidden text-subtle-foreground md:inline">{credits.available === 1 ? "credit" : "credits"}</span>
+      <span>{videosShort(credits)}</span>
     </Link>
   );
 }
@@ -74,21 +74,21 @@ export function CreditsExhaustedDialog() {
         <div className="mb-3 flex size-9 items-center justify-center rounded-xl bg-del-wash text-destructive">
           <Coins aria-hidden className="size-4.5" />
         </div>
-        <DialogTitle>You're out of credits</DialogTitle>
+        <DialogTitle>You've used up your videos for now</DialogTitle>
         <DialogDescription>
-          An edit uses credits, and this workspace doesn't have enough left to start one.
-          {credits?.period_end ? ` Your allowance renews on ${formatDay(credits.period_end)}.` : ""} Nothing was charged and your project is untouched.
+          Making a video or changing one uses credits, and there aren't enough left for this.
+          {credits?.period_end && credits.allowance > 0 ? ` You get new ones on ${formatDay(credits.period_end)}.` : ""} Nothing was charged and your video is untouched.
         </DialogDescription>
         {credits ? (
           <p className="mt-3 rounded-lg bg-well px-3 py-2 text-[13px] tabular-nums shadow-well">
-            <span className="font-medium">{creditsLabel(credits.available)}</span> left
-            {credits.allowance > 0 ? <span className="text-muted-foreground"> of {credits.allowance} this period</span> : null}
+            <span className="font-medium">{videosLeftText(credits)}</span>
+            <span className="text-muted-foreground"> · {creditsLabel(credits.available)} left</span>
           </p>
         ) : null}
         <DialogFooter>
           <DialogClose className={buttonVariants({ variant: "ghost", size: "md" })}>Close</DialogClose>
           <Link to="/settings" onClick={dismissCreditsExhausted} className={buttonVariants({ size: "md" })}>
-            View credits
+            See your plan
           </Link>
         </DialogFooter>
       </DialogContent>
@@ -96,7 +96,7 @@ export function CreditsExhaustedDialog() {
   );
 }
 
-/** The Settings card: the balance spelled out. Nothing renders when the API has no credits for the workspace. */
+/** The Settings card: the balance spelled out, in videos first. Nothing renders when the API has no credits for the workspace. */
 export function CreditsCard({ credits, className }: { credits: Credits | undefined; className?: string }) {
   if (!credits) return null;
   const used = credits.allowance > 0 ? Math.max(credits.allowance - credits.available, 0) : 0;
@@ -104,8 +104,7 @@ export function CreditsCard({ credits, className }: { credits: Credits | undefin
   return (
     <section aria-label="Credits" data-testid="credits-card" className={cn("space-y-3", className)}>
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <p className="text-[1.75rem] leading-none font-semibold tracking-[-0.03em] tabular-nums">{credits.available}</p>
-        <p className="text-muted-foreground">{credits.available === 1 ? "credit" : "credits"} left</p>
+        <p className="text-[1.75rem] leading-none font-semibold tracking-[-0.03em] tabular-nums">{videosLeftText(credits)}</p>
         {credits.low && credits.available > 0 ? <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[11.5px] font-medium">Running low</span> : null}
         {credits.available === 0 ? <span className="rounded-full bg-del-wash px-2 py-0.5 text-[11.5px] font-medium text-destructive">None left</span> : null}
       </div>
@@ -115,16 +114,21 @@ export function CreditsCard({ credits, className }: { credits: Credits | undefin
             <div className={cn("h-full rounded-full transition-[width] duration-(--dur-slow)", credits.low ? "bg-warning" : "bg-brand")} style={{ width: `${share * 100}%` }} />
           </div>
           <p className="text-[13px] text-muted-foreground">
-            {used} of {credits.allowance} used this period{credits.period_end ? `, renews ${formatDay(credits.period_end)}` : ""}.
+            {creditsLabel(credits.available)} left of {credits.allowance} this month{credits.period_end ? `, renews ${formatDay(credits.period_end)}` : ""}.
           </p>
         </div>
-      ) : null}
+      ) : (
+        <p className="text-[13px] text-muted-foreground tabular-nums">{creditsLabel(credits.available)} left.</p>
+      )}
+      <p className="max-w-prose text-[13px] text-muted-foreground text-pretty">
+        One video is {CREDITS_PER_VIDEO} credits: the first edit and two rounds of changes. Exporting is free.
+      </p>
       {credits.top_ups.length > 0 ? (
         <ul aria-label="Top-ups" className="space-y-1 text-[13px]">
           {credits.top_ups.map((topUp) => (
             <li key={`${topUp.expires_at}-${topUp.credits}`} className="flex gap-2">
               <span className="font-medium tabular-nums">{creditsLabel(topUp.credits)}</span>
-              <span className="text-muted-foreground">added, valid until {formatDay(topUp.expires_at)}</span>
+              <span className="text-muted-foreground">extra, valid until {formatDay(topUp.expires_at)}</span>
             </li>
           ))}
         </ul>
