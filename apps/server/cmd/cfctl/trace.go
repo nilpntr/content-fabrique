@@ -217,7 +217,11 @@ func cfctlResource() *resource.Resource {
 // the env file or the environment, with content when OTEL_TRACE_CONTENT=1 and CF_ENV=local. The returned function flushes the spans; it
 // is a no-op when nothing is exported.
 func setupCfctlTracing(env *agentEnv) func() {
-	endpoint := env.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+	return setupCfctlTracingTo(env, env.get("OTEL_EXPORTER_OTLP_ENDPOINT"))
+}
+
+// setupCfctlTracingTo is setupCfctlTracing to a given endpoint (eval suite sends its spans to the Phoenix it logs the experiment to).
+func setupCfctlTracingTo(env *agentEnv, endpoint string) func() {
 	if endpoint == "" {
 		return func() {}
 	}

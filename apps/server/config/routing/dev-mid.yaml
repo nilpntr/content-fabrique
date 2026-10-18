@@ -34,3 +34,9 @@ quicklook: { model: claude-haiku-5-5, max_tokens: 700 }
 stylevision: { model: claude-haiku-5-5, max_tokens: 600 }
 tagging:  { model: claude-sonnet-5-5, batch: true }
 judge:    { model: claude-sonnet-5-5, effort: high, batch: true }
+# The eval suite's judge of a finished edit (D-36, observability v1 section 7): one call per case with the render's contact sheet,
+# strips around the cuts and the creator's reference sheets, a forced strict tool, a hard budget of $0.10 (evals.MaxJudgeMicros).
+# Sonnet 5.5, resolved from v1-start whatever ROUTING_PROFILE says (evals.DefaultJudgeProfile), so a score does not move with the editor's profile: about 12,000 input tokens of pictures and text
+# and up to 3,000 of output is about $0.05 worst case, inside the budget; Opus 5.5 is twice the price and its worst case with the
+# pictures would not fit the $0.10. Calibrated against the founder's verdicts (suites/back-day.yaml).
+judge_edit: { model: claude-sonnet-5-5, max_tokens: 3000 }

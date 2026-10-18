@@ -34,3 +34,7 @@ quicklook: { model: claude-haiku-5-5, max_tokens: 700 }
 stylevision: { model: claude-haiku-5-5, max_tokens: 600 }
 tagging:  { model: claude-haiku-5-5, batch: true }
 judge:    { model: claude-haiku-5-5, effort: high, batch: true }
+# The eval suite's judge of a finished edit (D-36, observability v1 section 7). The suite resolves the judge from v1-start (Sonnet 5.5)
+# whatever ROUTING_PROFILE says, so that scores stay comparable; this Haiku entry only exists so dev-cheap stays Haiku-only and is used
+# when a run asks for --judge-profile dev-cheap (a smoke test of the plumbing, not a score to compare).
+judge_edit: { model: claude-haiku-5-5, max_tokens: 3000 }

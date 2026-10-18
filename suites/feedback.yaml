@@ -1,0 +1,29 @@
+# Recorded human feedback on the editor's edits (D-36, docs/design/observability-v1.md section 7). Every item is shown to the AI judge
+# as a rule that outweighs its own taste, and an item with a `detector` is also measured from the timeline and the checks, without a
+# model: that measurement is the item's score, with its weight (default 3, three judge dimensions). Add what the founder or a creator
+# says about an edit here, with where and when it was said; a new detector is a function in apps/server/internal/evals/feedback.go.
+feedback:
+  - id: no-effect-transitions
+    text: "Transitions (punch, zoom, whip, flash) read as an automatic AI edit; real creators of this kind do not use them. Cut hard."
+    detector: transitions_ai
+    weight: 3
+    source: founder, review of the back-day edits
+    date: 2026-10-17
+  - id: text-off-the-body
+    text: "Text must not cover the body (or the face) for title-style creators: the physique is the content."
+    detector: text_on_body
+    weight: 3
+    source: founder, review of the back-day edits
+    date: 2026-10-17
+  - id: no-dead-static-takes
+    text: "Static long takes feel dead: a shot held for seconds with a still camera and nothing moving needs to be shorter or to move."
+    detector: static_long_takes
+    weight: 3
+    source: founder, edit feel feedback
+    date: 2026-10-17
+  - id: music-only
+    text: "Music only, no gym sound: the clips' own sound stays muted under the creator's song."
+    detector: music_only
+    weight: 3
+    source: founder, edit feel feedback
+    date: 2026-10-17
