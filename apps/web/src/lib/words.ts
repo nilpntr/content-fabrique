@@ -8,11 +8,11 @@ import type { Credits } from "@/lib/credits";
 
 // ---- Credits as videos -------------------------------------------------------------------------------------------------------
 
-/** The price list's unit (docs/design/spend-control-v1.md section 3): 1 video = 10 credits = a first edit and two rounds of changes. */
-export const CREDITS_PER_VIDEO = 10;
-
-/** Whole videos the credits pay for. */
-export const videosIn = (credits: number): number => Math.floor(Math.max(credits, 0) / CREDITS_PER_VIDEO);
+/**
+ * Whole videos the credits pay for. A video is a first edit and two rounds of changes; what that is in credits is the price list's
+ * (docs/design/spend-control-v1.md section 3) and comes from the API as `credits_per_video`, never from a number in the app.
+ */
+export const videosIn = (credits: number, creditsPerVideo: number): number => Math.floor(Math.max(credits, 0) / creditsPerVideo);
 
 export const videoCount = (n: number): string => `${n} ${n === 1 ? "video" : "videos"}`;
 
@@ -24,7 +24,7 @@ const renews = (credits: Credits): boolean => credits.allowance > 0 && credits.p
  * new video) or "No videos left". The number is approximate on purpose: changes cost less than a new video.
  */
 export function videosLeftText(credits: Credits): string {
-  const videos = videosIn(credits.available);
+  const videos = videosIn(credits.available, credits.credits_per_video);
   if (credits.available === 0) return "No videos left";
   if (videos === 0) return "Enough for a few changes";
   return `≈ ${videoCount(videos)} left${renews(credits) ? " this month" : ""}`;
@@ -32,7 +32,7 @@ export function videosLeftText(credits: Credits): string {
 
 /** The short form for the header: "4 videos", "<1 video", "0 videos". */
 export function videosShort(credits: Credits): string {
-  const videos = videosIn(credits.available);
+  const videos = videosIn(credits.available, credits.credits_per_video);
   if (videos === 0 && credits.available > 0) return "<1 video";
   return videoCount(videos);
 }

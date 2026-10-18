@@ -13,6 +13,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/api"
 	"github.com/nilpntr/content-fabrique/internal/assets"
 	"github.com/nilpntr/content-fabrique/internal/creatorstyle"
+	"github.com/nilpntr/content-fabrique/internal/credits"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
 	"github.com/nilpntr/content-fabrique/internal/projects"
 	"github.com/nilpntr/content-fabrique/internal/renderjobs"
@@ -35,7 +36,9 @@ type apiServer struct {
 	ents EntitlementReader
 	// credits reads the credit balance for GET /v1/me; nil leaves it out.
 	credits CreditReader
-	logger  *slog.Logger
+	// list is the price list that the credits and the plan's videos are shown from: the embedded one unless Mount is given another.
+	list   *credits.PriceList
+	logger *slog.Logger
 }
 
 var _ api.StrictServerInterface = (*apiServer)(nil)
@@ -44,11 +47,15 @@ func newAPIServer(ents EntitlementReader, logger *slog.Logger) *apiServer {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	list, err := credits.LoadDefault()
+	if err != nil {
+		panic(err) // the price list is embedded and tested
+	}
 	// Without a configured object store the assets operations answer 503 storage_not_configured (Mount replaces this
 	// handler when it is given a service).
 	srv := &apiServer{Handler: assets.NewHandler(nil, callerOf, logger), API: projects.NewAPI(nil, callerOf, logger),
 		Runs: runapi.New(nil, callerOf, logger), RenderAPI: renderjobs.NewAPI(nil, callerOf, logger), CommentAPI: annotations.NewAPI(nil, callerOf, logger),
-		styleAPI: &styleAPI{creatorstyle.NewHandler(nil, callerOf, logger)}, ents: ents, logger: logger}
+		styleAPI: &styleAPI{creatorstyle.NewHandler(nil, callerOf, logger)}, ents: ents, list: list, logger: logger}
 	if cr, ok := ents.(CreditReader); ok {
 		srv.credits = cr
 	}

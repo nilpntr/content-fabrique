@@ -20,23 +20,63 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
-// ListFile is the price list the code loads from config/plans. A change is a new file and a new version: ledger rows name the version
-// that priced them.
-const ListFile = "2026-10.yaml"
+// ListFile is the price list the code loads from config/plans: the NEWEST file, which prices every new charge. A change is a new file and a
+// new version, never an edit: ledger rows (and holds) name the version that priced them, and older files stay in the directory so that
+// they still load and still pass the profit invariant. TestTheDefaultPriceListIsTheNewestFile fails when a newer file is added without
+// this constant moving to it.
+const ListFile = "2026-10c.yaml"
 
 // Action is something the customer pays credits for.
 type Action string
 
-// The actions of the price list. A file that lacks one of them, or has another, does not load.
+// The actions of the price list. A file that lacks one of the four required ones, or has another than these six, does not load. The two
+// ".max" actions are the extra-careful edits (quality: max, decision D-31): a list either has both or neither (2026-10 has neither, so
+// it offers no extra-careful edit), and a plan that is not to use them says so (`quality_max: false`) and gives them a budget of 0.
 const (
-	EditFirst    Action = "edit.first"
-	EditRevision Action = "edit.revision"
-	ExportFinal  Action = "export.final"
-	IdeationRun  Action = "ideation.run"
+	EditFirst       Action = "edit.first"
+	EditRevision    Action = "edit.revision"
+	EditFirstMax    Action = "edit.first.max"
+	EditRevisionMax Action = "edit.revision.max"
+	ExportFinal     Action = "export.final"
+	IdeationRun     Action = "ideation.run"
 )
 
 // Actions lists every action, in the order of the price list.
-var Actions = []Action{EditFirst, EditRevision, ExportFinal, IdeationRun}
+var Actions = []Action{EditFirst, EditRevision, EditFirstMax, EditRevisionMax, ExportFinal, IdeationRun}
+
+// requiredActions are the actions every list must price.
+var requiredActions = []Action{EditFirst, EditRevision, ExportFinal, IdeationRun}
+
+// Quality is how carefully the editor works on one edit, chosen by the creator per edit (first edit or revision): standard is the default,
+// max thinks longer about every cut at effort max and costs more credits.
+type Quality string
+
+// The qualities.
+const (
+	Standard Quality = "standard"
+	Max      Quality = "max"
+)
+
+// Valid reports whether q is a quality.
+func (q Quality) Valid() bool { return q == Standard || q == Max }
+
+// ActionFor is the action of an edit: a first edit or a revision, at the quality.
+func ActionFor(first bool, q Quality) Action {
+	switch {
+	case first && q == Max:
+		return EditFirstMax
+	case first:
+		return EditFirst
+	case q == Max:
+		return EditRevisionMax
+	}
+	return EditRevision
+}
+
+// IsEdit reports whether a is one of the four edit actions.
+func (a Action) IsEdit() bool {
+	return a == EditFirst || a == EditRevision || a == EditFirstMax || a == EditRevisionMax
+}
 
 // Valid reports whether a is one of the actions.
 func (a Action) Valid() bool { return slices.Contains(Actions, a) }
@@ -85,6 +125,9 @@ type Plan struct {
 	StyleRelearnsPerDay int
 	// COGSBudgetMicros is the hard budget_micros of the run that performs an action. On a BYOK plan it protects the creator's own key.
 	COGSBudgetMicros map[Action]int64
+	// QualityMax says the plan may use the extra-careful edits (quality: max). False on a plan of a list that has none, and on the trial,
+	// whose budgets for them are 0.
+	QualityMax bool
 	// NonLLMCOGSBudgetMicros is, on a BYOK plan, what an action may cost US in compute, storage and transcription. The invariant
 	// checks it; the compute is metered, not refused. Empty on a managed plan, whose run budget covers everything.
 	NonLLMCOGSBudgetMicros map[Action]int64
@@ -137,6 +180,7 @@ func (d *decimal) UnmarshalYAML(n *yaml.Node) error {
 
 type planFile struct {
 	PriceEURCents          int64            `yaml:"price_eur_cents"`
+	QualityMax             *bool            `yaml:"quality_max"`
 	BillingMode            string           `yaml:"billing_mode"`
 	AllowanceCredits       int              `yaml:"allowance_credits"`
 	Refill                 bool             `yaml:"refill"`
@@ -216,10 +260,18 @@ func LoadPriceList(fsys fs.FS, name string) (*PriceList, error) {
 		}
 		l.Credits[a] = c
 	}
-	for _, a := range Actions {
+	for _, a := range requiredActions {
 		if _, ok := l.Credits[a]; !ok {
 			return fail("action %s has no price (a free action is 0)", a)
 		}
+	}
+	_, hasFirstMax := l.Credits[EditFirstMax]
+	_, hasRevisionMax := l.Credits[EditRevisionMax]
+	if hasFirstMax != hasRevisionMax {
+		return fail("%s and %s come together: a list prices both extra-careful edits or neither", EditFirstMax, EditRevisionMax)
+	}
+	if hasFirstMax && (l.Credits[EditFirstMax] <= l.Credits[EditFirst] || l.Credits[EditRevisionMax] <= l.Credits[EditRevision]) {
+		return fail("an extra-careful edit must cost more credits than the standard one")
 	}
 	for k, pf := range f.Plans {
 		p := plans.Plan(k)
@@ -252,13 +304,38 @@ func LoadPriceList(fsys fs.FS, name string) (*PriceList, error) {
 			}
 			pl.NonLLMCOGSBudgetMicros[Action(ak)] = v
 		}
+		switch {
+		case pf.QualityMax != nil:
+			if !l.Offers(Max) {
+				return fail("plan %s: quality_max in a list with no %s", k, EditFirstMax)
+			}
+			pl.QualityMax = *pf.QualityMax
+		case l.Offers(Max):
+			return fail("plan %s: quality_max must say true or false in a list that prices the extra-careful edits", k)
+		}
 		for _, a := range Actions {
+			if _, listed := l.Credits[a]; !listed {
+				if _, ok := pl.COGSBudgetMicros[a]; ok {
+					return fail("plan %s: cogs_budget_micros for %s, which the list does not price", k, a)
+				}
+				continue
+			}
 			if _, ok := pl.COGSBudgetMicros[a]; !ok {
 				return fail("plan %s: no cogs_budget_micros for %s (an action that costs nothing is 0)", k, a)
 			}
 			if pl.BillingMode == BYOK {
 				if _, ok := pl.NonLLMCOGSBudgetMicros[a]; !ok {
 					return fail("plan %s: a BYOK plan needs non_llm_cogs_budget_micros for %s", k, a)
+				}
+			}
+		}
+		if l.Offers(Max) {
+			for _, a := range []Action{EditFirstMax, EditRevisionMax} {
+				if !pl.QualityMax && pl.COGSBudgetMicros[a] != 0 {
+					return fail("plan %s: quality_max is false, so its budget for %s must be 0", k, a)
+				}
+				if pl.QualityMax && pl.COGSBudgetMicros[a] == 0 {
+					return fail("plan %s: quality_max is true, so it needs a budget for %s", k, a)
 				}
 			}
 		}
@@ -291,6 +368,47 @@ func (l *PriceList) Price(a Action) (credits int, ok bool) {
 	return c, ok
 }
 
+// VideoRevisions is how many revisions make up a video next to its first edit: "1 video = a first edit plus two revisions" (product plan
+// section 10). It is the only place that says so.
+const VideoRevisions = 2
+
+// Offers reports whether the list prices the extra-careful edits of quality q (always true for standard).
+func (l *PriceList) Offers(q Quality) bool {
+	if q != Max {
+		return q == Standard
+	}
+	_, ok := l.Credits[EditFirstMax]
+	return ok
+}
+
+// EditCredits is what a first edit and a revision cost in credits at the quality. ok is false for quality max when the list has none or the
+// plan does not include it (the trial); standard is always priced.
+func (l *PriceList) EditCredits(p plans.Plan, q Quality) (first, revision int, ok bool) {
+	if q == Max {
+		if pl, has := l.Plans[p]; !l.Offers(Max) || !has || !pl.QualityMax {
+			return 0, 0, false
+		}
+	}
+	return l.Credits[ActionFor(true, q)], l.Credits[ActionFor(false, q)], true
+}
+
+// CreditsPerVideo is what a standard video costs in credits on this list: one first edit and VideoRevisions revisions. Everything that shows credits
+// as videos (the API, the CLI, a plan's videos per period) derives from it, so no code hardcodes "1 video = 10 credits".
+func (l *PriceList) CreditsPerVideo() int {
+	return l.Credits[EditFirst] + VideoRevisions*l.Credits[EditRevision]
+}
+
+// VideosPerPeriod is how many whole videos the plan's allowance pays for in a period (a trial's allowance is once, in total). 0 for a plan
+// the list does not have, and for a list that makes videos free.
+func (l *PriceList) VideosPerPeriod(p plans.Plan) int {
+	pl, ok := l.Plans[p]
+	per := l.CreditsPerVideo()
+	if !ok || per <= 0 {
+		return 0
+	}
+	return pl.AllowanceCredits / per
+}
+
 // Plan returns what the plan includes. ok is false for none and for a plan the list does not have.
 func (l *PriceList) Plan(p plans.Plan) (Plan, bool) {
 	pl, ok := l.Plans[p]
@@ -311,7 +429,7 @@ func (l *PriceList) Budget(p plans.Plan, a Action) (int64, bool) {
 func (l *PriceList) AllowanceSpecs() map[plans.Plan]store.AllowanceSpec {
 	out := make(map[plans.Plan]store.AllowanceSpec, len(l.Plans))
 	for p, pl := range l.Plans {
-		out[p] = store.AllowanceSpec{Plan: p, Credits: pl.AllowanceCredits, Refill: pl.Refill, ListVersion: l.Version}
+		out[p] = store.AllowanceSpec{Plan: p, Credits: pl.AllowanceCredits, Refill: pl.Refill, ListVersion: l.Version, TopUpExpiryMonths: l.TopUpExpiryMonths}
 	}
 	return out
 }

@@ -1834,6 +1834,7 @@ components:
         - invalid_token # 401: the token failed verification (signature, expiry, issuer, azp)
         - plan_required # 402: the workspace has no active plan
         - credits_exhausted # 402: the workspace does not have enough credits for the action (a new edit run); GET /v1/me has the balance
+        - quality_not_in_plan # 402: the edit asked for quality `max` and the workspace's plan does not include it (the trial); GET /v1/me says whether it does
         - no_active_workspace # 403: signed in, but no organization is active
         - user_deleted # 403
         - workspace_deleted # 403
@@ -2009,7 +2010,9 @@ components:
         exports:
           type: integer
           minimum: 0
-          description: Exported videos per month (the trial's two are in total, not per month).
+          description: |
+            Whole videos the plan's credit allowance pays for per period (a video is a first edit plus two revisions; what it costs in credits is
+            `credits_per_video` of `GET /v1/me`, from the price list). A trial's allowance is once, in total, not per period.
         storage_gb:
           type: integer
           minimum: 0
@@ -2051,6 +2054,35 @@ components:
         credits:
           $ref: "#/components/schemas/Credits"
 
+    EditCost:
+      type: object
+      description: What an edit costs in credits.
+      required: [first_edit, revision]
+      properties:
+        first_edit:
+          type: integer
+          minimum: 0
+          description: A project's first edit.
+        revision:
+          type: integer
+          minimum: 0
+          description: Any later edit of the project.
+
+    EditCosts:
+      type: object
+      description: |
+        What an edit costs in credits at each quality, on the price list that prices new charges. The web app shows these ("uses 16
+        credits instead of 6"); it never carries the numbers.
+      required: [standard, max]
+      properties:
+        standard:
+          $ref: "#/components/schemas/EditCost"
+        max:
+          description: "The extra-careful edit (`quality: max`); `null` when the workspace's plan does not include it (the trial, or no plan)."
+          oneOf:
+            - $ref: "#/components/schemas/EditCost"
+            - type: "null"
+
     CreditTopUp:
       type: object
       description: Credits that are not the period's allowance (bought or given) and when they expire.
@@ -2067,11 +2099,19 @@ components:
     Credits:
       type: object
       description: |
-        The workspace's credits (1 video = 10 credits). Credits in use by a run that has not finished are already taken out of
+        The workspace's credits (`credits_per_video` credits make a video). Credits in use by a run that has not finished are already taken out of
         `available`. Allowance that is not used by the end of its period expires; top-ups last 12 months. The allowance is used first,
         then the top-ups, earliest expiry first.
-      required: [available, allowance, period_end, low, top_ups]
+      required: [credits_per_video, edit_costs, available, allowance, period_end, low, top_ups]
       properties:
+        credits_per_video:
+          type: integer
+          minimum: 1
+          description: |
+            What a standard video costs in credits: a first edit plus two revisions, on the price list that prices new charges. Show
+            credits as videos by dividing by it; do not hardcode a number.
+        edit_costs:
+          $ref: "#/components/schemas/EditCosts"
         available:
           type: integer
           minimum: 0
@@ -2989,10 +3029,22 @@ components:
           $ref: "#/components/schemas/RunProfile"
         vibe:
           $ref: "#/components/schemas/EditVibe"
+        quality:
+          $ref: "#/components/schemas/EditQuality"
         budget_usd:
           type: number
           exclusiveMinimum: 0
           description: Ignored. The run's spend cap is set by the server from the plan (it used to be the caller's, up to $5).
+
+    EditQuality:
+      type: string
+      enum: [standard, max]
+      default: standard
+      description: |
+        How carefully the editor works on this one edit (a first edit or a revision; chosen per edit). `standard` is the default.
+        `max` is "extra careful": the editor thinks longer about every cut, which costs more credits (`credits.edit_costs` of `GET /v1/me`
+        has both prices) and gets a larger spend cap. The plan must include it (the trial does not): otherwise `402 quality_not_in_plan`.
+        The credits held and charged are those of the quality chosen.
 
     EditVibe:
       type: string
@@ -3108,7 +3160,8 @@ components:
           description: "`held`: set aside while the run works. `charged`: taken. `refunded`: taken, then given back."
         action:
           type: string
-          enum: [edit.first, edit.revision]
+          enum: [edit.first, edit.revision, edit.first.max, edit.revision.max]
+          description: "The `.max` actions are the extra-careful edits (`quality: max`)."
         credits:
           type: integer
           minimum: 0

@@ -34,6 +34,10 @@ var _ llm.ImageResolver = ImageResolver{}
 
 // ResolveImage implements llm.ImageResolver.
 func (r ImageResolver) ResolveImage(ctx context.Context, ref string) (string, []byte, error) {
+	// The stills of the motion-graphics templates are in the binary: an exact reference of the library, never a path.
+	if data, ok := builtinImage(ref); ok {
+		return "image/png", data, nil
+	}
 	ws, ok := llm.WorkspaceFromContext(ctx)
 	if !ok {
 		return "", nil, errors.New("editor: no workspace in the context of an image reference")

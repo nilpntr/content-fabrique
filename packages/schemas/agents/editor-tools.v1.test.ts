@@ -40,6 +40,7 @@ describe("editor tools contract", () => {
       "find_moments",
       "get_music",
       "plan_edit",
+      "list_motion_templates",
       "get_timeline",
       "get_comments",
       "edit_timeline",

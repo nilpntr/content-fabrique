@@ -60,9 +60,9 @@ func pick[T any](g *generator, s []T) T { return s[g.r.IntN(len(s))] }
 
 // known is what the generator may point an op at: the ids in the spec and the ids it gave to new items in this batch.
 type known struct {
-	clips, texts, sounds []string
-	total                int64
-	fps                  int
+	clips, texts, sounds, graphics []string
+	total                          int64
+	fps                            int
 }
 
 func scan(spec timeline.Spec) known {
@@ -76,6 +76,10 @@ func scan(spec timeline.Spec) known {
 		case *timeline.TextTrack:
 			for _, it := range tr.Items {
 				k.texts = append(k.texts, it.ID)
+			}
+		case *timeline.GraphicsTrack:
+			for _, it := range tr.Items {
+				k.graphics = append(k.graphics, it.ID)
 			}
 		case *timeline.AudioTrack:
 			for _, it := range tr.Items {
@@ -226,6 +230,9 @@ func (g *generator) op(k *known) Op {
 			return o
 		}},
 		{5, func() Op { return g.setSpeedRamp(k) }},
+		{8, func() Op { return g.addGraphic(k) }},
+		{9, func() Op { return g.updateGraphic(k) }},
+		{5, func() Op { return &RemoveGraphic{ID: g.id(k.graphics)} }},
 		{4, func() Op {
 			o := &SetClipAudio{ID: g.id(k.clips)}
 			if g.chance(60) {
@@ -535,6 +542,10 @@ func ids(spec timeline.Spec) []string {
 			for _, it := range tr.Items {
 				out = append(out, it.ID)
 			}
+		case *timeline.GraphicsTrack:
+			for _, it := range tr.Items {
+				out = append(out, it.ID)
+			}
 		case *timeline.AudioTrack:
 			for _, it := range tr.Items {
 				out = append(out, it.Common().ID)
@@ -554,6 +565,10 @@ func targets(op Op) []string {
 	case *SetSound:
 		return []string{o.ID}
 	case *AddText:
+		return []string{o.ID}
+	case *UpdateGraphic:
+		return []string{o.ID}
+	case *AddGraphic:
 		return []string{o.ID}
 	}
 	return nil

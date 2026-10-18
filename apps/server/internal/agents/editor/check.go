@@ -164,6 +164,10 @@ type CheckInput struct {
 	Music *TimelineMusic
 	// Vibe is the energy of the edit (calm, lively or hype; P6-06); empty takes the plan's, else the default (lively).
 	Vibe string
+	// Overlay is the luma of the preview behind each motion-graphics overlay, by item id (D-35), nil when it was not measured; then
+	// OverlaySkip says why and overlay_legibility does not apply.
+	Overlay     map[string]RegionLuma
+	OverlaySkip string
 	// PaceSetting is the creator's own pace setting (PaceSettings: "slower", "like_mine", "faster"; "" takes the Settings' pace), which
 	// scales the pace targets after the vibe.
 	PaceSetting string
@@ -394,6 +398,9 @@ func RunChecks(in CheckInput) Report {
 		c.effectDensity(), c.textSafe(), c.textOverSubject(), c.duration(targetS), c.brightness(), c.crushed(), c.beatSync(), c.styleMatch(), c.titleCopied(),
 		c.offBeatCut(), c.hookMissesDrop(), c.staticShot(), c.transitionsMatch(), c.transitionVariety(), c.textWithoutEntrance(), c.chapterTitles(),
 	}
+	if len(graphicsOf(in.Spec)) > 0 { // the motion-graphics checks (check_graphics.go), only for an edit that has some
+		r.Checks = append(r.Checks, c.overlayReadable(), c.overlayOverSubject(), c.overlayLegibility())
+	}
 	if a := in.Audio; a != nil {
 		r.Checks = append(r.Checks, audioChecks(*a)...)
 		r.Metrics.AudioProfile, r.Metrics.AudioLUFS, r.Metrics.AudioSource, r.Metrics.AudioMs = a.Report.Profile, a.Report.Loudness.IntegratedLUFS, a.Source, a.Elapsed.Milliseconds()
@@ -459,6 +466,12 @@ func (c *checker) hookTitle() Check {
 				return c.pass(CheckHookTitle, "captions are on, so there is text from the first word")
 			}
 		case *timeline.TextTrack:
+			for _, it := range t.Items {
+				if first < 0 || it.AtMs < first {
+					first = it.AtMs
+				}
+			}
+		case *timeline.GraphicsTrack: // a motion-graphics title (D-35) is a title
 			for _, it := range t.Items {
 				if first < 0 || it.AtMs < first {
 					first = it.AtMs

@@ -25,10 +25,10 @@ func TestGrantable(t *testing.T) {
 // The numbers are the product plan's (docs/01 section 10): a change here is a pricing decision.
 func TestLimitsFollowTheProductPlan(t *testing.T) {
 	for p, want := range map[plans.Plan]plans.Limits{
-		plans.Trial:   {Exports: 2, StorageGB: 2, AIBilling: plans.BilledByUs},
-		plans.Studio:  {Exports: 60, StorageGB: 100, AIBilling: plans.BilledByCreator},
-		plans.Creator: {Exports: 15, StorageGB: 50, AIBilling: plans.BilledByUs},
-		plans.Pro:     {Exports: 40, StorageGB: 200, AIBilling: plans.BilledByUs},
+		plans.Trial:   {StorageGB: 2, AIBilling: plans.BilledByUs},
+		plans.Studio:  {StorageGB: 100, AIBilling: plans.BilledByCreator},
+		plans.Creator: {StorageGB: 50, AIBilling: plans.BilledByUs},
+		plans.Pro:     {StorageGB: 200, AIBilling: plans.BilledByUs},
 		plans.None:    {},
 		"unknown":     {},
 	} {

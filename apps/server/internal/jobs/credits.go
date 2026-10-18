@@ -56,11 +56,12 @@ type CreditsPeriodsWorker struct {
 
 // CreditsPeriodsOutput is what a finished run records.
 type CreditsPeriodsOutput struct {
-	Workspaces     int `json:"workspaces"`
-	Granted        int `json:"granted_credits"`
-	Replaced       int `json:"replaced_credits"`
-	ExpiredSources int `json:"expired_sources"`
-	ExpiredCredits int `json:"expired_credits"`
+	Workspaces       int `json:"workspaces"`
+	Granted          int `json:"granted_credits"`
+	Replaced         int `json:"replaced_credits"`
+	ListSwitchTopUps int `json:"list_switch_credits"`
+	ExpiredSources   int `json:"expired_sources"`
+	ExpiredCredits   int `json:"expired_credits"`
 }
 
 func (d Deps) priceList() (*credits.PriceList, error) {
@@ -106,6 +107,32 @@ func (w *CreditsPeriodsWorker) Work(ctx context.Context, _ *river.Job[CreditsPer
 			}
 		}
 		if len(todo) < creditsBatch {
+			break
+		}
+	}
+	// A price list that gives a plan a larger allowance than the one its workspaces were granted (a trial's, once; a period's, until the
+	// next refill) tops those allowances up, once.
+	after = ids.WorkspaceID{}
+	specs := list.AllowanceSpecs()
+	for page := 0; page < creditsMaxPages; page++ {
+		behind, err := w.deps.Store.WorkspacesBehindTheList(ctx, specs, now, after, creditsBatch)
+		if err != nil {
+			return fmt.Errorf("credits periods: list workspaces behind the price list: %w", err)
+		}
+		for _, ws := range behind {
+			after = ws
+			added, err := svc.SyncListSwitch(ctx, ws)
+			if err != nil {
+				failed++
+				log.ErrorContext(ctx, "credits: topping up the allowance to the price list failed", "workspace_id", ws.String(), "error", err)
+				continue
+			}
+			out.ListSwitchTopUps += added
+			if added > 0 {
+				log.InfoContext(ctx, "credits: allowance topped up to the price list", "workspace_id", ws.String(), "list", list.Version, "credits", added)
+			}
+		}
+		if len(behind) < creditsBatch {
 			break
 		}
 	}

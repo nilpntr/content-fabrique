@@ -39,14 +39,17 @@ export interface NewProjectFlowProps {
   costNote?: string;
   /** Words for a failed `onCreate`, from the error it threw. Without it, or for an error it returns nothing for, a general line is shown. */
   describeError?: (error: unknown) => string | undefined;
+  /** What an extra careful first edit costs against a standard one, in credits. The option shows only when this is given (the plan includes it). */
+  extraCareful?: { extra: number; standard: number };
 }
 
 /** The new-project flow: format, footage, instructions, then a review. All state lives here until `onCreate`. */
-export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:16", onMediaError, costNote, describeError }: NewProjectFlowProps) {
+export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:16", onMediaError, costNote, describeError, extraCareful }: NewProjectFlowProps) {
   const [stepIndex, setStepIndex] = React.useState(0);
   const [format, setFormat] = React.useState<Format>(initialFormat);
   const [pickedIds, setAssetIds] = React.useState<AssetId[]>([]);
   const [brief, setBrief] = React.useState("");
+  const [careful, setCareful] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   const [title, setTitle] = React.useState("");
   const [failed, setFailed] = React.useState<string | false>(false);
@@ -86,7 +89,7 @@ export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:
     setCreating(true);
     setFailed(false);
     try {
-      await onCreate({ format, assetIds: [...assetIds], brief: brief.trim(), ...(title.trim() === "" ? {} : { title: title.trim() }) });
+      await onCreate({ format, assetIds: [...assetIds], brief: brief.trim(), ...(title.trim() === "" ? {} : { title: title.trim() }), ...(extraCareful && careful ? { quality: "max" as const } : {}) });
     } catch (error) {
       setFailed(describeError?.(error) ?? "Your video could not be started. Try again.");
       // The button stayed focusable while pending; make sure the focus is on it for the retry.
@@ -152,11 +155,11 @@ export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:
         <fieldset disabled={creating} className="m-0 min-w-0 border-0 p-0">
           {step.id === "format" ? <FormatStep value={format} onChange={setFormat} /> : null}
           {step.id === "footage" ? <FootageStep assets={assets} selectedIds={assetIds} onChange={setAssetIds} onMediaError={onMediaError} /> : null}
-          {step.id === "brief" ? <BriefStep value={brief} onChange={setBrief} title={title} onTitleChange={setTitle} /> : null}
+          {step.id === "brief" ? <BriefStep value={brief} onChange={setBrief} title={title} onTitleChange={setTitle} extraCareful={extraCareful} careful={careful} onCarefulChange={setCareful} /> : null}
           {step.id === "review" ? (
             <ReviewStep assets={assets} format={format} assetIds={assetIds} brief={brief} onEdit={(target) => go(STEPS.findIndex((s) => s.id === target))}
               disabled={creating}
-              costNote={costNote}
+              costNote={extraCareful && careful ? `Extra careful: the first edit uses ${extraCareful.extra} credits instead of ${extraCareful.standard}.` : costNote}
               title={title}
               onMediaError={onMediaError}
             />

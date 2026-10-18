@@ -39,8 +39,9 @@
 | D-32 | Audio: effects are synthesised in ffmpeg and edits are checked with ffmpeg measurements; no audio models, nothing ported from earshot but its numbers and ideas | Accepted (founder decision, 2026-10-17) |
 | D-33 | Exports are sound-ready: no music and no trend sound, the clips' own sound as a low bed, effects on top, speech as the programme; amends D-03 | Proposed (director, 2026-10-17; the founder confirms); superseded by D-34 for an edit with a song |
 | D-34 | Music from the creator: a song the creator uploads (or the sound of one of their videos) is analysed once and is the export's only sound, -14 LUFS; the creator answers for its rights; supersedes D-33 for an edit with a song | Proposed (director, 2026-10-18; the founder confirms) |
-| D-35 | The creator's style is three layers (measured, the AI's suggestion, the creator's settings), the creator always wins; reference videos are assets with purpose style_reference | Proposed (director, 2026-10-18; the founder confirms) |
-| D-36 | Plain cuts on the beat by default: no vibe asks for transitions; they come from the creator's setting or their own videos | Proposed (director, from a creator's verdict, 2026-10-18; the founder confirms) |
+| D-35 | Motion graphics are versioned HTML templates (Web Animations API) the editor picks by name and params, rendered frame by frame by chrome-headless-shell on a virtual clock inside the media sandbox and composited by ffmpeg; ASS text stays as the fallback; amends D-26's render column for graphic templates | Proposed (engineering, 2026-10-18; security review by the director, licence question for P0-12) |
+| D-36 | The creator's style is three layers (measured, the AI's suggestion, the creator's settings), the creator always wins; reference videos are assets with purpose style_reference | Proposed (director, 2026-10-18; the founder confirms) |
+| D-37 | Plain cuts on the beat by default: no vibe asks for transitions; they come from the creator's setting or their own videos | Proposed (director, from a creator's verdict, 2026-10-18; the founder confirms) |
 
 ---
 
@@ -585,6 +586,8 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 - Every preset gets golden tests in every format ([D-25](#d-25-output-formats-916-11-45-and-169-per-project)).
 - The style registry also covers templates.
 
+**Amended by [D-35](#d-35-motion-graphics-are-html-templates-rendered-by-headless-chrome-in-the-media-sandbox) (2026-10-18):** graphic templates render with chrome-headless-shell and our own runtime in the media sandbox (not HyperFrames), on a `graphics` track whose items name a template; the first templates are animated titles (title_pop, blur_in, chapter_card, highlight_word, counter, lower_label, outro_card), and the five above can follow on the same engine.
+
 **Revisit** when creators ask for presets we don't have, or when a template marketplace becomes worth integrating.
 
 ## D-27 Transcription: whisper.cpp locally, Workers AI Whisper when hosted
@@ -706,7 +709,7 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 
 **Decision** (details in [spend control v1](design/spend-control-v1.md)):
 - **Credits** are the customer's currency.
-  - **Prices are per action**, from a versioned price list in `config/plans`: a first edit is 6, a revision 2, an export 0. 10 credits make a "video".
+  - **Prices are per action**, from a versioned price list in `config/plans`: a first edit is 6, a revision 2, an export 0. 10 credits make a "video". (2026-10c keeps these and adds the extra careful actions below; a video's cost in credits is always derived from the list.)
   - Each plan's allowance expires at the end of its period. Top-ups last 12 months.
   - A credit **hold** is taken before an action starts, so the last credits can be raced safely.
   - Credits are charged only on success. Failed runs are refunded and recorded as unbilled COGS.
@@ -719,6 +722,10 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
   - The founder gets `cfctl spend report` (margin per workspace, plan and action, plus unbilled COGS), typed `spend.alert` events, and a daily reconciliation against the provider's usage report.
 - **Ledgers are append-only** for the app role. Money is stored as integers.
 - **Built in P7-01a** ([spend control v1, "As built (P7-01a)"](design/spend-control-v1.md#as-built-p7-01a)): the price list and plans in `config/plans`, the profit-invariant test, the credit ledger with consumption tracked per grant, the hold-settle-release on editor runs, the allowance periods, `402 credits_exhausted`, `cfctl credits`. Its deviations from the text above are listed there.
+- **Update, 2026-10-18: max effort is an option per edit, not for everyone. PENDING FOUNDER CONFIRMATION.** The founder: "Online I always see Opus 5.5 at max effort is needed for the best results; $2 for an edit is not a problem and maybe needed", then: do not switch everyone to max effort.
+  - **Quality per edit.** `quality: standard | max` on the start-edit request (a first edit or a revision), default `standard`. **Standard is exactly what it was**: effort medium, 24,000 / 12,000 tokens, the 2026-10 credits (6 / 2) and budgets ($0.96 / $0.32 on creator), so nobody's videos per month change. **Max** ("extra careful") runs on new routing entries `editor_max` / `revision_max` (Opus 5.5, effort `max`, 32,000 / 16,000 tokens; a live max-effort edit cost $1.01) with a run budget of $2.00 for a first edit and $0.80 for a revision, priced as their own actions `edit.first.max` (16 credits) and `edit.revision.max` (7), derived so that the profit invariant holds for every plan (`max_cogs_share` stays 0.40). The hold and the charge use the chosen action's credits and the list version.
+  - **Who.** The trial cannot use it (`402 quality_not_in_plan`); studio (BYOK) can on its own key; creator and pro can. The new price list is `config/plans/2026-10c.yaml` (not deployed yet, so editable until confirmed; the old file is never edited; `credits.ListFile` is the newest file, a test keeps it so). `GET /v1/me` carries `credits.edit_costs` and `credits_per_video` so the web app shows "Extra careful: uses 16 credits instead of 6" without carrying a number.
+  - **General fixes kept:** a video's credits derived from the list (no "1 video = 10 credits" in code), `max_tokens` fitted to the lesser of the run's budget and the per-call cap, the cache-aware reservation, `escalate` validation, a one-off allowance top-up when a list grows an allowance (adds nothing for 2026-10c). Details in [spend control v1, section 3a](design/spend-control-v1.md#3a-update-2026-10c-the-extra-careful-edit-opt-in-per-edit-d-31-pending-founder-confirmation).
 
 **Alternatives.**
 - Pass-through token pricing to customers: unpredictable for creators, and it exposes our margin.
@@ -802,7 +809,30 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 
 **Revisit** when the founder has listened to edits with real songs, or when uploads get an explicit consent step.
 
-## D-35 The creator's style is three layers, and the creator always wins
+## D-35 Motion graphics are HTML templates rendered by headless Chrome in the media sandbox
+
+> Status: **Proposed** by engineering (2026-10-18). The director reviews the security model ([motion graphics v1](design/motion-graphics-v1.md) section 5) before it ships; the licence of Chrome for Testing's headless shell joins the P0-12 legal questions. Reversible: `MOTION_GRAPHICS=off` draws every graphics item as ASS text in the same box.
+
+**Context.** The founder: the edits feel static, with no visual effect on the text entering the screen. Titles are ASS subtitles with a fade, a pop, a slide or a typewriter. The references (herk-edit-kit's motion philosophy, open-edit's HTML renderer) show what is wanted: type that moves as a character (word-by-word scale and blur, masked wipes, a marker, a counting number), landing on the beat. D-26 planned graphic templates as HTML rendered to frames (P4-11) but not how, and the render sandbox has no browser.
+
+**Decision.**
+- **Templates, not model-written code.** A versioned library of HTML/CSS/JS templates animated with the Web Animations API lives in the repo (`apps/server/internal/motion/bundle`): `title_pop`, `blur_in`, `chapter_card`, `highlight_word`, `counter`, `lower_label`, `outro_card`, each with an entrance and an exit. The timeline gets a `graphics` track whose items name a template and give it params (text, the creator's text style, colours, size, alignment, energy, beat-anchored accents), validated by the timeline schema. The editor picks templates; it never writes HTML.
+- **The box is a text item's box.** An item is laid out as its text in its style, so the text placement solver (safe zone, subject avoidance, caption band) and the validator place and check overlays exactly like text items.
+- **Rendered by chrome-headless-shell in the media sandbox.** Chrome for Testing 155, pinned by version and by the SHA-256 of each architecture's archive, and cf-motion, a standard-library Go runner, are added to the media-tools image. The runner drives Chrome over a DevTools pipe on a virtual clock (time, timers, animation frames and randomness only move when it seeks), renders only the frames where an overlay is on screen, clipped to the overlays' boxes, at the output's own size, as transparent PNGs; ffmpeg composites them before the ASS script (scaled down for the preview). Same spec, same bytes, tested by hashing per platform.
+- **Locked down.** No network (the sandbox, a dead proxy and resolver, and a request allowlist that admits only files of the read-only bundle), a CSP of `default-src 'self'` and nothing else, text only through `textContent`, fonts as bytes, all outputs read as untrusted, the job's resource limits. Chrome's own sandbox is off (it cannot start without capabilities); the container and gVisor confine it.
+- **Fail loudly, fall back by choice.** A page error, a refused request, a blank or spilling frame fails the render. The ASS text stays: text items and captions are unchanged and drawn on top, and `MOTION_GRAPHICS=off` compiles graphics items to text with each template's fallback animation.
+
+**Alternatives.** Model-written HTML per edit (unvalidated, untestable, the attack surface this avoids); more ASS (no animated masks or plates, no counting, limited easing; kept as the fallback); GSAP (custom licence with a competition clause, not needed over WAAPI); Remotion (company licence, Node in the image); HyperFrames' runtime (more than we need; we keep its template idea); Puppeteer or Playwright (Node and npm in the image); a DevTools port (addressable); ProRes 4444 or VP9 alpha intermediates (an extra encode, lossy, or a library our ffmpeg does not build); a preview at a device scale factor of 0.5 (measured not deterministic). Details in [motion graphics v1](design/motion-graphics-v1.md) section 11.
+
+**Consequences.**
+- The media-tools image grows from 75 MB to 310 MB and gains a browser to keep current: a Chrome bump is a PR with new golden hashes.
+- A 30 s edit with 20 s of overlays spends about 3 to 4 s rendering them; a preview grows from about 3 s to about 7 s on a developer Mac, inside the 10 s budget.
+- D-26's graphic templates (checklist, chart grow, cover story, ...) can be built on the same engine as more templates.
+- The editor gets a tool to list the templates and checks for overlay legibility, readable time and the torso rule (design note section 9).
+
+**Revisit** when the security review asks for Chrome's own sandbox (user namespaces under gVisor), when the licence answer prefers a Debian-built Chromium, or when overlay time matters (parallel tabs would cut it about in four).
+
+## D-36 The creator's style is three layers, and the creator always wins
 
 **Context.** The style profile (P6-05) existed only through `cfctl style analyze`, with no API and no UI, so no creator could set,
 see or change it. It also acted as a hidden rule: it measured "no effects" in the founder's reference videos and the editor obeyed,
@@ -826,7 +856,7 @@ every request, or several per analysis: the summary is for the creator to read a
 **Consequences.** The checks take the settings: `effect_density` fails what the settings turn off and allows more at "lots",
 `style_match` has `transitions`, `camera_motion` and `text_animation` (hard when the creator chose them, advice otherwise) in place of
 the measured `effects`. Existing workspaces with a profile and no settings get the lively defaults: their edits now move. Prompt
-`editor.v2.8`; migration `00023_style_references`.
+`editor.v2.9`; migration `00024_style_references`.
 
 **Revisit** when the founder has watched edits made with the settings, or when a creator asks for a setting that is not here.
 
@@ -841,7 +871,7 @@ the measured `effects`. Existing workspaces with a profile and no settings get t
 **Revisit** when …
 ```
 
-## D-36 Plain cuts on the beat by default: no vibe asks for transitions
+## D-37 Plain cuts on the beat by default: no vibe asks for transitions
 
 **Context.** P6-06 made the lively and hype vibes put effect transitions (punch, zoom_through, whip, flash) on the strong beats
 and the drop, and a check failed a lively edit with only hard cuts. On a live edit the creator said: "the transitions really look AI,
@@ -853,7 +883,7 @@ the movement) was praised.
 creator sets Transitions to subtle or lots in "Your style". The energy of lively and hype comes from the cuts on the beat, the pace,
 the living camera with its punch-ins and the text that enters and leaves. check_edit's `no_transitions_at_lively` is replaced by
 `transitions_match_style` (a transition fails where the effective style has them off; none fails where it asks for lots), and the
-prompt (`editor.v2.8`), the playbooks and the summary prompt (`stylesummary.v3`) say plain cuts on the beat are the default, and why.
+prompt (`editor.v2.9`), the playbooks and the summary prompt (`stylesummary.v3`) say plain cuts on the beat are the default, and why.
 
 **Alternatives.** Keep transitions at hype only: the verdict was about the kind of effect, not the amount. A softer set of transitions
 (crossfades): a crossfade says time has passed, it is not energy, and it is still a choice the creator's own videos should make.

@@ -15,3 +15,16 @@ func TestImageHasFonts(t *testing.T) {
 		}
 	}
 }
+
+func TestImageHasMotion(t *testing.T) {
+	for out, want := range map[string]bool{
+		"sha256:0123abcd 1 1\n":          true,
+		"sha256:0123abcd 1 <no value>\n": false, // an image built before the motion-graphics renderer was added
+		"sha256:0123abcd 1\n":            false,
+		"":                               false,
+	} {
+		if got := imageHasMotion(out); got != want {
+			t.Errorf("imageHasMotion(%q) = %v, want %v", out, got, want)
+		}
+	}
+}

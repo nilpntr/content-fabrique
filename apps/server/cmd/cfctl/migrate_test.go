@@ -85,11 +85,14 @@ func TestMigrateCLI(t *testing.T) {
 		t.Fatal("up after up --to 2 must migrate River")
 	}
 	// A down that does not reach 0 keeps River; the one that does removes it after the app schema.
-	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || countRiverTables(t, url) == 0 || strings.Contains(out, "river/") || !strings.Contains(out, "00023_style_references.sql") {
+	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || countRiverTables(t, url) == 0 || strings.Contains(out, "river/") || !strings.Contains(out, "00024_style_references.sql") {
 		t.Fatalf("down one removed River too: %d %s", code, out)
 	}
+	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00023_credit_actions_max.sql") {
+		t.Fatalf("down one (00023) = %d %s", code, out)
+	}
 	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00022_asset_music.sql") {
-		t.Fatalf("down one removed River too: %d %s", code, out)
+		t.Fatalf("down one (00022) = %d %s", code, out)
 	}
 	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00021_creator_style.sql") {
 		t.Fatalf("down one (00021) = %d %s", code, out)
@@ -154,7 +157,7 @@ func TestMigrateCLI(t *testing.T) {
 	if code, _, _ := migrateCLI(t, url, "up"); code != 0 {
 		t.Fatal("up")
 	}
-	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00023_style_references.sql") {
+	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00024_style_references.sql") {
 		t.Fatalf("down one = %d %s", code, out)
 	}
 }

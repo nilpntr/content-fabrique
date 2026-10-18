@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/rand/v2"
 	"time"
 
@@ -45,6 +46,9 @@ type metered struct {
 
 	now func() time.Time
 	log *slog.Logger
+
+	// cache remembers what the previous call of each run left in the prompt cache (cachememo.go).
+	cache cacheMemo
 }
 
 // CountTokens implements Client.
@@ -61,9 +65,13 @@ func (m *metered) CountTokens(ctx context.Context, req Request) (int64, error) {
 type reservation struct {
 	// key identifies the call in the ledger ("llm:<key>"); the hold's key is derived from it.
 	key string
-	// est is the worst-case cost; tokens the input tokens it was worked out from (counted, or an upper bound).
-	est    int64
-	tokens int64
+	// est is the worst-case cost with every input token priced as the dearest way it could be billed: what the platform's caps hold and
+	// what an outcome that is not known is charged. budgetEst is what the run's budget sets aside: the same, with the prefix that the
+	// previous call of the run cached priced as a cache read (cachememo.go); never more than est. tokens are the input tokens both were
+	// worked out from (counted, or an upper bound).
+	est       int64
+	budgetEst int64
+	tokens    int64
 	// shortened says the request's max_tokens was reduced to fit the run's budget.
 	shortened bool
 
@@ -114,6 +122,7 @@ func (m *metered) Messages(ctx context.Context, req Request) (Response, error) {
 	defer m.done(rsv)
 
 	marks := cacheMarks(req)
+	started := m.now()
 	resp, callErr := m.inner.Messages(ctx, req)
 	resp.Shortened = shortened
 	if resp.Usage.IsZero() {
@@ -142,6 +151,17 @@ func (m *metered) Messages(ctx context.Context, req Request) (Response, error) {
 			return resp, errors.Join(callErr, err) // unreachable while priced; fail closed if it ever is not
 		}
 		version = m.prices.Version
+	}
+	if cost > rsv.budgetEst && rsv.budgetEst < rsv.est {
+		// The reservation counted on a cached prefix and the call was billed more: the entry was gone (evicted early) and the call wrote
+		// the prefix again. The run's budget is over by at most the difference (the next call then finds it used), and the prefix is
+		// cached again by this very call, so it is remembered below like any other.
+		m.log.Warn("llm: a call cost more than the run's reservation, which counted on a cached prompt prefix: the cache entry was gone",
+			"run_id", req.Run.ID.String(), "stage", m.stage, "reserved_micros", rsv.budgetEst, "cost_micros", cost, "worst_case_micros", rsv.est,
+			"cache_read_tokens", resp.Usage.CacheReadTokens, "cache_write_tokens", resp.Usage.CacheWriteTokens)
+	}
+	if callErr == nil {
+		m.cache.remember(req, started, resp.Usage)
 	}
 	rsv.settle(cost)
 	if m.mode == ModeReplay {
@@ -247,11 +267,17 @@ func upperBoundTokens(req Request) (int64, error) {
 // It tries a cheap upper bound of the input tokens first and asks count_tokens only when that does not clear the
 // per-request cap, or when the run budget or the database caps cannot cover the (inflated) bound.
 //
-// When the worst case of the call, at the max_tokens asked for, does not fit what the run's budget has left, max_tokens is cut to the
-// most that does fit (the input's worst case is paid first, the rest buys output), as long as that is at least MinOutputTokens. The
+// When the worst case of the call, at the max_tokens asked for, does not fit what the run's budget has left or the per-request cap
+// (whichever is less), max_tokens is cut to the most that does fit (the input's worst case is paid first, the rest buys output), as long
+// as that is at least MinOutputTokens. The
 // budget stays a hard cap: the reservation is of the cut worst case, so the call can never cost more than the run has left. Below
 // the minimum the call is refused with the run-budget error, as before, which the runtime takes as the budget limit. req is changed to
 // what will be sent.
+//
+// Two worst cases are worked out. The strict one prices every input token as the dearest way it could be billed (a cache write): it is
+// what the per-request cap, the workspace's daily cap and the platform breaker hold, and what an unknown outcome is charged. The run's
+// budget sets aside a smaller one when the previous call of the run cached a prefix that this request still starts with and the entry is
+// fresh (cachememo.go): that prefix at the cache-read rate, the rest at the dearest. Without such a memory the two are the same.
 func (m *metered) reserveCaps(ctx context.Context, reqp *Request, rsv *reservation) (*reservation, error) {
 	req := *reqp
 	marks := cacheMarks(req)
@@ -266,6 +292,7 @@ func (m *metered) reserveCaps(ctx context.Context, reqp *Request, rsv *reservati
 	}
 	maxTokens := asked
 	counted := false
+	cachedBefore := m.cache.claim(req, m.now())
 	count := func() error {
 		n, err := m.inner.CountTokens(ctx, req)
 		if err != nil {
@@ -274,34 +301,67 @@ func (m *metered) reserveCaps(ctx context.Context, reqp *Request, rsv *reservati
 		tokens, counted = n, true
 		return nil
 	}
-	estimate := func() (int64, error) {
+	// budgetMarks is the marks with the claimed prefix as cache reads: the budget's worst case (the strict one is priced with marks).
+	budgetMarks := func() CacheMarks {
+		bm := marks
+		if marks.Any {
+			bm.ReadTokens = min(cachedBefore, tokens)
+		}
+		return bm
+	}
+	estimate := func() (strict, budget int64, err error) {
 		maxTokens = asked
 		if rb, ok := req.Run.Budget.(RemainingBudget); ok {
-			full, err := m.prices.EstimateMax(req.Model, tokens, asked, marks)
-			if err != nil {
-				return 0, err
+			// Two rooms. The run's budget has what it has left, and the worst case against it counts the claimed cached prefix as reads.
+			// One call may cost no more than LLM_MAX_REQUEST_MICROS, and the worst case against that is the strict one. Fitting to the
+			// budget alone would send a long-input call at a max_tokens whose strict worst case the per-call cap then refuses
+			// (request_cap), which fails a run that a smaller answer could have served: fit to both.
+			roomBudget := max(rb.Remaining(), 0)
+			roomCap := int64(math.MaxInt64)
+			if m.maxRequest > 0 {
+				roomCap = m.maxRequest
 			}
-			room := max(rb.Remaining(), 0)
-			if full > room && !counted {
+			over := func() (bool, error) {
+				b, err := m.prices.EstimateMax(req.Model, tokens, asked, budgetMarks())
+				if err != nil {
+					return false, err
+				}
+				st, err := m.prices.EstimateMax(req.Model, tokens, asked, marks)
+				return b > roomBudget || st > roomCap, err
+			}
+			tooBig, err := over()
+			if err != nil {
+				return 0, 0, err
+			}
+			if tooBig && !counted {
 				// The local bound of the input leans very high; do not give up output room for it. Count the input exactly first.
 				if err := count(); err != nil {
-					return 0, err
+					return 0, 0, err
 				}
-				if full, err = m.prices.EstimateMax(req.Model, tokens, asked, marks); err != nil {
-					return 0, err
+				if tooBig, err = over(); err != nil {
+					return 0, 0, err
 				}
 			}
-			if full > room {
-				fit, err := m.prices.FitOutputTokens(req.Model, tokens, asked, marks, room)
+			if tooBig {
+				fitBudget, err := m.prices.FitOutputTokens(req.Model, tokens, asked, budgetMarks(), roomBudget)
 				if err != nil {
-					return 0, err
+					return 0, 0, err
 				}
+				fitCap, err := m.prices.FitOutputTokens(req.Model, tokens, asked, marks, roomCap)
+				if err != nil {
+					return 0, 0, err
+				}
+				fit := min(fitBudget, fitCap)
 				if fit = fit - fit%16; fit >= minOut && thinkingFits(req.Thinking, fit) { // whole sixteens: tidier requests, never more than fit
 					maxTokens = fit
 				}
 			}
 		}
-		return m.prices.EstimateMax(req.Model, tokens, maxTokens, marks)
+		if strict, err = m.prices.EstimateMax(req.Model, tokens, maxTokens, marks); err != nil {
+			return 0, 0, err
+		}
+		budget, err = m.prices.EstimateMax(req.Model, tokens, maxTokens, budgetMarks())
+		return strict, min(budget, strict), err
 	}
 
 	// The local bound is for text. What an image costs depends on its size (up to about 4,800 tokens at the largest
@@ -311,7 +371,7 @@ func (m *metered) reserveCaps(ctx context.Context, reqp *Request, rsv *reservati
 			return nil, err
 		}
 	}
-	est, err := estimate()
+	est, budgetEst, err := estimate()
 	if err != nil {
 		return nil, err
 	}
@@ -319,7 +379,7 @@ func (m *metered) reserveCaps(ctx context.Context, reqp *Request, rsv *reservati
 		if err := count(); err != nil {
 			return nil, err
 		}
-		if est, err = estimate(); err != nil {
+		if est, budgetEst, err = estimate(); err != nil {
 			return nil, err
 		}
 	}
@@ -328,7 +388,7 @@ func (m *metered) reserveCaps(ctx context.Context, reqp *Request, rsv *reservati
 		if est > m.maxRequest {
 			return nil, &CapError{Kind: CapRequest, EstimateMicros: est, LimitMicros: m.maxRequest}
 		}
-		got, err := m.take(ctx, req, rsv, est, tokens)
+		got, err := m.take(ctx, req, rsv, est, budgetEst, tokens)
 		if err == nil {
 			if maxTokens < asked {
 				reqp.MaxTokens, got.shortened = int(maxTokens), true
@@ -345,7 +405,7 @@ func (m *metered) reserveCaps(ctx context.Context, reqp *Request, rsv *reservati
 			if err := count(); err != nil {
 				return nil, err
 			}
-			if est, err = estimate(); err != nil {
+			if est, budgetEst, err = estimate(); err != nil {
 				return nil, err
 			}
 			continue
@@ -373,17 +433,17 @@ var busyBackoff = func(attempt int) time.Duration {
 
 // take reserves est against the run's budget and, in the database, the workspace's daily cap and the platform breaker, or returns
 // the error of the cap that refused. Nothing stays reserved on an error.
-func (m *metered) take(ctx context.Context, req Request, rsv *reservation, est, tokens int64) (*reservation, error) {
-	rsv.est, rsv.tokens = est, tokens
+func (m *metered) take(ctx context.Context, req Request, rsv *reservation, est, budgetEst, tokens int64) (*reservation, error) {
+	rsv.est, rsv.budgetEst, rsv.tokens = est, budgetEst, tokens
 	var release func(actual int64)
 	if b := req.Run.Budget; b != nil {
 		var err error
-		if release, err = b.Reserve(est); err != nil {
+		if release, err = b.Reserve(budgetEst); err != nil {
 			var ce *CapError
 			if errors.As(err, &ce) {
 				return nil, err
 			}
-			return nil, &CapError{Kind: CapRun, EstimateMicros: est, Cause: err}
+			return nil, &CapError{Kind: CapRun, EstimateMicros: budgetEst, Cause: err}
 		}
 	}
 	if m.mode == ModeReplay {

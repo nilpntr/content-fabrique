@@ -32,6 +32,9 @@ const OPS = [
   "set_motion",
   "set_speed_ramp",
   "add_sfx",
+  "add_graphic",
+  "update_graphic",
+  "remove_graphic",
 ];
 
 type Json = Record<string, any>;
@@ -117,6 +120,11 @@ describe("op schema", () => {
     expect(schema.$defs.textAnchor).toEqual(text.anchor);
     expect(schema.$defs.textPosition).toEqual(text.position);
     expect(schema.$defs.textAnimation).toEqual(text.animation);
+    // The graphics track (D-35): the template list, the params of every template and the item's duration.
+    for (const name of Object.keys(timelineSchema.$defs).filter((k) => k.startsWith("graphicsParam") || k === "graphicsTemplate")) {
+      expect(schema.$defs[name], name).toEqual(timelineSchema.$defs[name]);
+    }
+    expect(schema.$defs.graphicsDuration).toEqual(timelineSchema.$defs.graphicsItem.properties.duration_ms);
   });
 
   it("is closed: no op takes a property it does not list", () => {

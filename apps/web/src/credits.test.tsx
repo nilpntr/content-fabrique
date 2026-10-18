@@ -20,7 +20,8 @@ afterEach(() => {
   cleanup();
 });
 
-const CREDITS = { available: 42, allowance: 60, period_end: "2099-11-14T00:00:00Z", low: false, top_ups: [{ credits: 20, expires_at: "2099-12-01T00:00:00Z" }] };
+const EDIT_COSTS = { standard: { first_edit: 6, revision: 2 }, max: { first_edit: 16, revision: 7 } };
+const CREDITS = { credits_per_video: 10, edit_costs: EDIT_COSTS, available: 42, allowance: 60, period_end: "2099-11-14T00:00:00Z", low: false, top_ups: [{ credits: 20, expires_at: "2099-12-01T00:00:00Z" }] };
 
 function renderAt(path: string) {
   const router = getRouter(createMemoryHistory({ initialEntries: [path] }));
@@ -36,9 +37,14 @@ test("the balance is read from /v1/me only when it is there and well formed", ()
   expect(creditsOf(undefined)).toBeUndefined();
   expect(creditsOf({ credits: "lots" })).toBeUndefined();
   expect(creditsOf({ credits: { available: -1 } })).toBeUndefined();
+  // The edit costs and the credits per video are part of the contract: credits without them are not shown, and a plan without extra careful says max: null.
+  expect(creditsOf({ credits: { ...CREDITS, edit_costs: undefined } })).toBeUndefined();
+  expect(creditsOf({ credits: { ...CREDITS, edit_costs: { standard: { first_edit: 6 }, max: null } } })).toBeUndefined();
+  expect(creditsOf({ credits: { ...CREDITS, edit_costs: { standard: { first_edit: 6, revision: 2 }, max: { first_edit: 16 } } } })).toBeUndefined();
+  expect(creditsOf({ credits: { ...CREDITS, edit_costs: { standard: { first_edit: 6, revision: 2 }, max: null } } })?.edit_costs.max).toBeNull();
   expect(creditsOf({ ...ME, credits: CREDITS })).toEqual(CREDITS);
   // Left out by the API when it cannot read the balance: the screens stay quiet.
-  expect(creditsOf({ ...ME, credits: { available: 3 } })).toEqual({ available: 3, allowance: 0, period_end: null, low: false, top_ups: [] });
+  expect(creditsOf({ ...ME, credits: { credits_per_video: 10, edit_costs: EDIT_COSTS, available: 3 } })).toEqual({ credits_per_video: 10, edit_costs: EDIT_COSTS, available: 3, allowance: 0, period_end: null, low: false, top_ups: [] });
   expect(creditsOf({ credits: { ...CREDITS, top_ups: [null, { credits: 5 }, { credits: 5, expires_at: "2099-01-01T00:00:00Z" }] } })?.top_ups).toEqual([{ credits: 5, expires_at: "2099-01-01T00:00:00Z" }]);
 });
 
@@ -86,7 +92,7 @@ test("a nearly used allowance and an empty one change the chip", async () => {
 });
 
 test("the summary names what is left in videos, the exact credits and the renewal", () => {
-  expect(creditsSummary({ available: 1, allowance: 0, period_end: null, low: false, top_ups: [] })).toBe("Enough for a few changes (1 credit)");
+  expect(creditsSummary({ credits_per_video: 10, edit_costs: EDIT_COSTS, available: 1, allowance: 0, period_end: null, low: false, top_ups: [] })).toBe("Enough for a few changes (1 credit)");
   expect(creditsSummary({ ...CREDITS, period_end: "2099-11-14T00:00:00Z" })).toBe("≈ 4 videos left this month (42 credits), renews 14 Nov 2099");
 });
 

@@ -1,0 +1,10 @@
+{
+  "op": "add_graphic",
+  "template": "spin",
+  "at_ms": 0,
+  "duration_ms": 2000,
+  "anchor": "center",
+  "params": {
+    "text": "HI"
+  }
+}

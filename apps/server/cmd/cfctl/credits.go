@@ -20,8 +20,8 @@ const balanceUsage = `Usage:
   cfctl credits grant  --workspace <wks_... or org_...> --credits N --reason <text> [--expires DATE] [flags]
   cfctl credits adjust --workspace <wks_... or org_...> --credits <+N or -N> --reason <text> [--expires DATE] [flags]
 
-The credits of a workspace (spend control v1, D-31), until checkout exists (P7-01c). They are the customer's currency: 1 video = 10
-credits. show prints the plan, the balance and the newest ledger rows. grant adds a top-up. adjust is an operator's correction: a positive
+The credits of a workspace (spend control v1, D-31), until checkout exists (P7-01c). They are the customer's currency: a video is a first edit plus two
+revisions, and the price list says how many credits that is (show prints the balance in videos from it). show prints the plan, the balance and the newest ledger rows. grant adds a top-up. adjust is an operator's correction: a positive
 number adds credits, a negative one takes them away (and fails when the workspace has fewer). Every grant and adjustment writes a ledger row
 with who ran it (cfctl:<OS user>) and the reason, and nothing is ever edited or deleted. It reads DATABASE_URL (the app's own role) and never
 prints a secret.
@@ -229,12 +229,12 @@ func cmdCreditsWith(args []string, stdout, stderr io.Writer, lookup lookupEnv, d
 		}
 		_, _ = fmt.Fprintf(out, "  adjusted    %+d credits\n", moved)
 	}
-	return printCredits(ctx, out, errOut, st, ws, now, *limit)
+	return printCredits(ctx, out, errOut, st, list, ws, now, *limit)
 }
 
 // printCredits prints the plan, the balance and the newest ledger rows of a workspace. Free text from the ledger (a reason) is quoted
 // with %q, so it cannot forge lines or move the cursor.
-func printCredits(ctx context.Context, out, errOut io.Writer, st *store.Store, ws store.Workspace, now time.Time, limit int) int {
+func printCredits(ctx context.Context, out, errOut io.Writer, st *store.Store, list *credits.PriceList, ws store.Workspace, now time.Time, limit int) int {
 	ent, err := st.GetEntitlements(ctx, ws.ID)
 	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "cfctl credits: reading the plan failed: %v\n", err)
@@ -246,7 +246,7 @@ func printCredits(ctx context.Context, out, errOut io.Writer, st *store.Store, w
 		return 1
 	}
 	_, _ = fmt.Fprintf(out, "  workspace   %q (%s)\n  plan        %s (%s)\n", ws.Name, ws.ID, ent.Plan, ent.Status)
-	_, _ = fmt.Fprintf(out, "  available   %d credits (%.1f videos), %d held by runs in progress\n", bal.Available, float64(bal.Available)/10, bal.Held)
+	_, _ = fmt.Fprintf(out, "  available   %d credits (%.1f videos), %d held by runs in progress\n", bal.Available, float64(bal.Available)/float64(list.CreditsPerVideo()), bal.Held)
 	if bal.Allowance > 0 {
 		end := "does not expire"
 		if bal.PeriodEnd != nil {

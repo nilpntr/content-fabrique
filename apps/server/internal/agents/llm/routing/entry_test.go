@@ -23,6 +23,10 @@ func TestEntry(t *testing.T) {
 		want  Entry
 	}{
 		{v1, "editor", Entry{Model: "claude-opus-5-5", Effort: "medium", MaxTokens: 24000}},
+		{v1, "revision", Entry{Model: "claude-opus-5-5", Effort: "medium", MaxTokens: 12000}},
+		// Extra careful (D-31): the editor_max and revision_max entries think at max effort; the standard entries above are unchanged.
+		{v1, "editor_max", Entry{Model: "claude-opus-5-5", Effort: "max", MaxTokens: 32000}},
+		{v1, "revision_max", Entry{Model: "claude-opus-5-5", Effort: "max", MaxTokens: 16000}},
 		{cheap, "editor", Entry{Model: "claude-haiku-5-5", Effort: "medium", MaxTokens: 24000}},
 		{v1, "research.lead", Entry{Model: "claude-opus-5-5", Effort: "medium"}},
 		{v1, "research.workers", Entry{Model: "claude-haiku-5-5"}},

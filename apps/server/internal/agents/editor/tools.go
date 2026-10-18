@@ -58,8 +58,10 @@ type Store interface {
 	ListAssetExposureSeries(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.ExposureSeriesRow, error)
 	// GetCreatorStyle reads the workspace's creator style profile (P6-05); ErrNotFound when it has none.
 	GetCreatorStyle(ctx context.Context, ws ids.WorkspaceID) (store.CreatorStyle, error)
-	// GetAgentRun reads the run's row (its model and max_tokens, for the worst-case cost of a call).
+	// GetAgentRun reads the run's row (what it has spent and how many calls it has made).
 	GetAgentRun(ctx context.Context, ws ids.WorkspaceID, id uuid.UUID) (store.AgentRun, error)
+	// UsageForRun reads the run's usage ledger, oldest first: what each model call cost, for the "low on dollars" warning.
+	UsageForRun(ctx context.Context, ws ids.WorkspaceID, run uuid.UUID) ([]store.UsageRow, error)
 	// AgentArtifactEvents reads a run's artifact events of one kind: the plan and the checks of a run that resumed in another worker
 	// are found there.
 	AgentArtifactEvents(ctx context.Context, ws ids.WorkspaceID, run uuid.UUID, kind string) ([]store.AgentEvent, error)
@@ -143,6 +145,7 @@ func Tools(d Deps) ([]runtime.Tool, error) {
 		{ToolFindMoments, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.findMoments) }},
 		{ToolGetMusic, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getMusic) }},
 		{ToolPlanEdit, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.planEdit) }},
+		{ToolListMotionTemplates, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.listMotionTemplates) }},
 		{ToolGetTimeline, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getTimeline) }},
 		{ToolGetComments, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getComments) }},
 		{ToolEditTimeline, true, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.editTimeline) }},

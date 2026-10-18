@@ -229,10 +229,10 @@ spaces.
 ## 11. The style in the app (P6-05b)
 
 The founder's request: "let AI set the style for Gino based on the example folder, or add an option in the profile to tweak a person's
-settings, or still upload videos as a reference for styling". Built as one feature ([D-35](../05-decisions.md#d-35-the-creators-style-is-three-layers-and-the-creator-always-wins)):
+settings, or still upload videos as a reference for styling". Built as one feature ([D-36](../05-decisions.md#d-36-the-creators-style-is-three-layers-and-the-creator-always-wins)):
 
 **Reference uploads.** A creator uploads 3 to 10 of their own finished videos through the normal upload path (`POST /v1/assets` with
-`purpose: style_reference`). The asset is a video like any other (`assets.purpose`, migration `00023_style_references`), but it is never
+`purpose: style_reference`). The asset is a video like any other (`assets.purpose`, migration `00024_style_references`), but it is never
 footage: the library does not list it (`GET /v1/assets?purpose=style_reference` does), a project refuses it (`422 assets_not_usable`),
 and its ingest runs no quick look, transcript or clip analysis. Limits: 10 that are not failed per workspace (`409 too_many_references`,
 counted under the workspace's upload lock), 1 GiB (`413`), a video (`415`), 3 minutes (a longer one ends `failed`, `too_long`). The plan's
@@ -269,7 +269,7 @@ characters, a link, a handle or words aimed at a reader make it `invalid_output`
 
 **Three layers** (`styleprofile.Resolve`): the vibe is this edit's, else the creator's, else the suggestion's, else lively.
 Transitions are the creator's; else, when their videos measurably use transitions (`Transitions.Used` some), the suggestion (when it
-is not off) or the measured level (subtle, lots from half the cuts); else off, at every vibe (D-36: no vibe asks for transitions).
+is not off) or the measured level (subtle, lots from half the cuts); else off, at every vibe (D-37: no vibe asks for transitions).
 Text animation and camera motion are the creator's, else (when a person chose the vibe) the vibe's, else the suggestion's (except an
 "off" at a lively or hype vibe), else the vibe's. The title's colour, place and case are the creator's, else the suggestion's, else
 measured. Music is the creator's, else the suggestion's, else "always" when the videos have music. Pace is the creator's, else the
@@ -277,7 +277,7 @@ suggestion's, else "like my videos". Every value carries its source (`you`, `sug
 which the API returns and the app shows. `Style.Applied()` puts the creator's title colour and case on a copy of the profile, so the
 title recipe and the checks follow them.
 
-**The editor** (prompt `editor.v2.8`): the run context lists the effective settings in our words after the `creator_style` block (enums
+**The editor** (prompt `editor.v2.9`): the run context lists the effective settings in our words after the `creator_style` block (enums
 and a hex colour, so outside the untrusted block), with where each came from; the block's effects line now reads "applied punch-ins,
 flashes and speed ramps measured in the picture". `plan_edit` points out a plan's transitions or motions when the settings turn them
 off. `check_edit`: `effect_density` fails a transition when transitions are off and a motion or ramp when camera motion is off, and
@@ -330,7 +330,7 @@ default): `chapter_titles` (on, off), `title_template` (a form the creator types
 and `angle_switches` (on, off). The summary call (`stylesummary.v2`, now `v3`, which proposes transitions only when the measures show them) suggests the four enums too and is asked to mention what stands
 out ("long holds at the end", "numbered chapter titles", "cuts mid-rep"); it sees that the titles follow a form but not the form's words.
 
-**The editor** (`editor.v2.8`): the creator_style block lists the title forms ("fill the slots from the footage; never copy a title of
+**The editor** (`editor.v2.9`): the creator_style block lists the title forms ("fill the slots from the footage; never copy a title of
 theirs") and the chapter forms, never the creator's titles (P6-06b's `title_copied` fails a copy); the settings say each choice in our words;
 `style_match` adds `ending_hold` and `title_form` (hard when the creator chose them); `rep_boundaries` does not apply when the cuts are
 mid-rep and `chapter_titles` not when chapter titles are off. The prompt's examples that were one creator's are now slots.
