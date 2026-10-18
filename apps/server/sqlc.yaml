@@ -36,6 +36,9 @@ sql:
             go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "UserID" }
           - column: "assets.id"
             go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "AssetID" }
+          # A file reference measured by cfctl has no asset: the column is nullable, so it stays pgtype.UUID (ids.ID would write the nil UUID).
+          - column: "style_references.asset_id"
+            go_type: { import: "github.com/jackc/pgx/v5/pgtype", type: "UUID" }
           - column: "*.asset_id"
             go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "AssetID" }
           - column: "projects.id"

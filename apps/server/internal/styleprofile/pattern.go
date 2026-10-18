@@ -8,13 +8,13 @@ import (
 	"unicode/utf8"
 )
 
-// Title templates: a creator's titles follow a few forms ("<MUSCLE OR EXERCISE> 101" in capitals, a lowercase witty line), and a title
+// Title kinds: a creator's titles follow a few forms ("<TOPIC> <N>" in capitals, a lowercase witty line), and a title
 // that follows one reads as theirs. The forms are found from the titles the vision read gave (untrusted text, bounded by the read's
 // validator), classified by shape, never by meaning.
 
 // The kinds of title.
 const (
-	// KindSeries is "<TOPIC> <number>": a series title such as "BUILDING LATS 101".
+	// KindSeries is "<TOPIC> <number>": a series title such as "LEG DAY 7".
 	KindSeries = "series"
 	// KindLowercase is a lowercase line of three words or more: a witty sentence.
 	KindLowercase = "lowercase_line"
@@ -28,7 +28,7 @@ const (
 
 var seriesRe = regexp.MustCompile(`^(.*\S)\s+(\d{1,3})$`)
 
-// TitleKind classifies a title by its shape. For a series it also returns the number it ends in ("101").
+// TitleKind classifies a title by its shape. For a series it also returns the number it ends in.
 func TitleKind(text string) (kind, number string) {
 	t := strings.Join(strings.Fields(text), " ")
 	if t == "" {
@@ -57,7 +57,7 @@ type TitlePattern struct {
 	Kind     string   `json:"kind"`
 	Share    float64  `json:"share"`
 	Examples []string `json:"examples,omitempty"`
-	// Number is, for a series, the number the series ends in when all its titles share one ("101").
+	// Number is, for a series, the number the series ends in when all its titles share one.
 	Number string `json:"number,omitempty"`
 }
 

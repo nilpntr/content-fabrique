@@ -20,7 +20,7 @@ tasks:
       # Loads .env, builds the api and worker, runs the three processes and stops them together (see the script).
       - ./scripts/dev.sh
 
-  # The same as dev, plus Phoenix (compose profile obs) and the stack's processes exporting their spans to it, with content (D-36).
+  # The same as dev, plus Phoenix (compose profile obs) and the stack's processes exporting their spans to it, with content (D-38).
   dev:obs:
     desc: "task dev with traces: also starts Phoenix (http://localhost:6006) and sends it every agent run, model call, tool call, check and render, with the prompts and thumbnails (local only)"
     env:

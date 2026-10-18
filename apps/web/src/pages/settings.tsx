@@ -1,10 +1,14 @@
+import { Link } from "@tanstack/react-router";
+import { ChevronRight, Palette } from "lucide-react";
 import { CreditsCard } from "@/components/credits";
 import { cardClassName, PageHeader } from "@/components/page";
 import { Disclosure } from "@/components/ui/disclosure";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError } from "@/lib/api";
 import { useMe } from "@/lib/api/hooks";
+import { useStyle } from "@/lib/api/style-hooks";
 import { creditsOf } from "@/lib/credits";
+import { vibeLabel } from "@/lib/style-words";
 
 const capitalise = (word: string): string => word.replace(/^./, (c) => c.toUpperCase());
 
@@ -15,7 +19,9 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Settings" description="Your plan, your account and your team's workspace." />
+      <PageHeader title="Settings" description="Your plan, your style, your account and your team's workspace." />
+
+      <StyleCard />
 
       {/* The balance, once the API reports one. */}
       {credits ? (
@@ -62,6 +68,39 @@ export function SettingsPage() {
         </section>
       )}
     </div>
+  );
+}
+
+/** "Your style": the AI's sentence (or what to do to get one) and a way in. */
+function StyleCard() {
+  const style = useStyle();
+  const data = style.data;
+  const line = !data
+    ? "How your videos look, and the settings the editor follows."
+    : data.summary
+      ? data.summary.text
+      : data.status === "learning"
+        ? "Learning your style from your videos…"
+        : data.references.length === 0
+          ? `Vibe: ${vibeLabel(data.effective.vibe)}. Add a few of your own videos so the editor matches how you edit.`
+          : "Your style is learnt.";
+  return (
+    <Link
+      to="/settings/style"
+      aria-labelledby="style-card-title"
+      className={`${cardClassName} group/style flex max-w-xl items-center gap-3 transition-shadow hover:shadow-pop [animation-delay:30ms]`}
+    >
+      <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-wash text-brand">
+        <Palette className="size-4.5" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span id="style-card-title" className="block text-[15px] font-semibold tracking-[-0.01em]">
+          Your style
+        </span>
+        <span className="line-clamp-2 block text-[13px] text-muted-foreground">{line}</span>
+      </span>
+      <ChevronRight aria-hidden className="size-4 shrink-0 text-subtle-foreground transition-transform group-hover/style:translate-x-0.5" />
+    </Link>
   );
 }
 

@@ -51,8 +51,11 @@ ideation: { model: claude-sonnet-5-5, effort: medium }
 # The quick look (P1-04b): a title, description and tags for each new clip from four small frames. Haiku 5.5 in every
 # profile: the call has a budget of $0.003, so no profile routes it higher.
 quicklook: { model: claude-haiku-5-5, max_tokens: 700 }
-# The creator style profile's text read (P6-05): how the title of a reference video looks, from three frames of the hook. Haiku 5.5 in
+# The creator style profile's text read (P6-05, stylevision.v3): the title, how it comes on and the chapter titles, from up to 8 frames. Haiku 5.5 in
 # every profile; each call has a budget of $0.01 (styleprofile.MaxVisionMicros).
-stylevision: { model: claude-haiku-5-5, max_tokens: 600 }
+stylevision: { model: claude-haiku-5-5, max_tokens: 800 }
+# The style summary (P6-05b): one call per (re)analysis that describes the creator's style in plain words and suggests the default
+# settings, from the measures and up to three frames. Sonnet 5.5 here, for the words the creator reads; each call has a budget of $0.03 (styleprofile.MaxSummaryMicros).
+stylesummary: { model: claude-sonnet-5-5, max_tokens: 800 }
 tagging:  { model: claude-haiku-5-5, batch: true }    # Batch API for backfills: 50 % off
 judge:    { model: claude-opus-5-5, effort: high, batch: true }

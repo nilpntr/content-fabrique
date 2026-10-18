@@ -1,6 +1,9 @@
 import { ArrowLeft, ArrowRight, Check } from "lucide-react";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
+import { VibePicker } from "@/components/style/vibe-picker";
+import type { EditVibe } from "@/lib/api/client";
+import { vibeLabel } from "@/lib/style-words";
 import { cn } from "@/lib/utils";
 import { BriefStep } from "./brief-step";
 import { formatDuration } from "./duration";
@@ -39,12 +42,27 @@ export interface NewProjectFlowProps {
   costNote?: string;
   /** Words for a failed `onCreate`, from the error it threw. Without it, or for an error it returns nothing for, a general line is shown. */
   describeError?: (error: unknown) => string | undefined;
+  /** The vibe the picker starts on: the creator's style's (lively when there is none). */
+  defaultVibe?: EditVibe;
+  /** Where the default vibe comes from, under the picker ("From your style"). */
+  vibeNote?: string;
   /** What an extra careful first edit costs against a standard one, in credits. The option shows only when this is given (the plan includes it). */
   extraCareful?: { extra: number; standard: number };
 }
 
 /** The new-project flow: format, footage, instructions, then a review. All state lives here until `onCreate`. */
-export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:16", onMediaError, costNote, describeError, extraCareful }: NewProjectFlowProps) {
+export function NewProjectFlow({
+  assets,
+  onCreate,
+  onCancel,
+  initialFormat = "9:16",
+  onMediaError,
+  costNote,
+  describeError,
+  defaultVibe = "lively",
+  vibeNote,
+  extraCareful,
+}: NewProjectFlowProps) {
   const [stepIndex, setStepIndex] = React.useState(0);
   const [format, setFormat] = React.useState<Format>(initialFormat);
   const [pickedIds, setAssetIds] = React.useState<AssetId[]>([]);
@@ -52,6 +70,9 @@ export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:
   const [careful, setCareful] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   const [title, setTitle] = React.useState("");
+  // The vibe of this video: the style's until the creator picks another (only a picked one is sent).
+  const [pickedVibe, setPickedVibe] = React.useState<EditVibe | null>(null);
+  const vibe = pickedVibe ?? defaultVibe;
   const [failed, setFailed] = React.useState<string | false>(false);
   const headingRef = React.useRef<HTMLHeadingElement>(null);
   const createRef = React.useRef<HTMLButtonElement>(null);
@@ -89,7 +110,14 @@ export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:
     setCreating(true);
     setFailed(false);
     try {
-      await onCreate({ format, assetIds: [...assetIds], brief: brief.trim(), ...(title.trim() === "" ? {} : { title: title.trim() }), ...(extraCareful && careful ? { quality: "max" as const } : {}) });
+      await onCreate({
+        format,
+        assetIds: [...assetIds],
+        brief: brief.trim(),
+        ...(title.trim() === "" ? {} : { title: title.trim() }),
+        ...(pickedVibe && pickedVibe !== defaultVibe ? { vibe: pickedVibe } : {}),
+        ...(extraCareful && careful ? { quality: "max" as const } : {}),
+      });
     } catch (error) {
       setFailed(describeError?.(error) ?? "Your video could not be started. Try again.");
       // The button stayed focusable while pending; make sure the focus is on it for the retry.
@@ -155,12 +183,21 @@ export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:
         <fieldset disabled={creating} className="m-0 min-w-0 border-0 p-0">
           {step.id === "format" ? <FormatStep value={format} onChange={setFormat} /> : null}
           {step.id === "footage" ? <FootageStep assets={assets} selectedIds={assetIds} onChange={setAssetIds} onMediaError={onMediaError} /> : null}
-          {step.id === "brief" ? <BriefStep value={brief} onChange={setBrief} title={title} onTitleChange={setTitle} extraCareful={extraCareful} careful={careful} onCarefulChange={setCareful} /> : null}
+          {step.id === "brief" ? (
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <h3 className="font-medium">Vibe</h3>
+                <VibePicker value={vibe} legend="Vibe of this video" onChange={setPickedVibe} note={pickedVibe && pickedVibe !== defaultVibe ? "Just for this video." : vibeNote} />
+              </div>
+              <BriefStep value={brief} onChange={setBrief} title={title} onTitleChange={setTitle} extraCareful={extraCareful} careful={careful} onCarefulChange={setCareful} />
+            </div>
+          ) : null}
           {step.id === "review" ? (
             <ReviewStep assets={assets} format={format} assetIds={assetIds} brief={brief} onEdit={(target) => go(STEPS.findIndex((s) => s.id === target))}
               disabled={creating}
               costNote={extraCareful && careful ? `Extra careful: the first edit uses ${extraCareful.extra} credits instead of ${extraCareful.standard}.` : costNote}
               title={title}
+              vibe={vibeLabel(vibe)}
               onMediaError={onMediaError}
             />
           ) : null}

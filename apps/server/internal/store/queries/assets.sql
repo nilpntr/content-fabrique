@@ -10,8 +10,8 @@
 SELECT pg_advisory_xact_lock(hashtextextended('asset-uploads:' || @workspace_id::text, 0));
 
 -- name: CreateAsset :one
-INSERT INTO assets (id, workspace_id, kind, filename, content_type, size_bytes, sha256, title, r2_key, created_by)
-VALUES (@id, @workspace_id, @kind, @filename, @content_type, @size_bytes, @sha256, @title, @r2_key, @created_by)
+INSERT INTO assets (id, workspace_id, kind, filename, content_type, size_bytes, sha256, title, r2_key, created_by, purpose)
+VALUES (@id, @workspace_id, @kind, @filename, @content_type, @size_bytes, @sha256, @title, @r2_key, @created_by, @purpose)
 RETURNING *;
 
 -- name: CreateUpload :one
@@ -35,11 +35,13 @@ SELECT * FROM uploads
 WHERE workspace_id = @workspace_id AND asset_id = @asset_id;
 
 -- The library page: newest first (UUIDv7 ids sort by creation time), after the cursor when there is one. With search words
--- (store.SearchWords) only the assets whose title, description, tags or file name match all of them (cf_search_query).
+-- (store.SearchWords) only the assets whose title, description, tags or file name match all of them (cf_search_query). Only the
+-- assets of one purpose: the library is footage, and a style reference is never listed with it.
 -- name: ListAssets :many
 SELECT * FROM assets
 WHERE workspace_id = @workspace_id
   AND deleted_at IS NULL
+  AND purpose = @purpose
   AND (sqlc.narg('before')::uuid IS NULL OR id < sqlc.narg('before')::uuid)
   AND (sqlc.narg('words')::text[] IS NULL OR search @@ cf_search_query(sqlc.narg('words')::text[]))
 ORDER BY id DESC
@@ -104,3 +106,9 @@ WHERE u.completed_at IS NULL AND u.aborted_at IS NULL
   AND u.id > @after
 ORDER BY u.id
 LIMIT @row_limit;
+
+-- The style references of a workspace that count against its limit: not deleted and not failed (a failed upload or ingest can be
+-- removed and does not hold a place).
+-- name: CountStyleReferenceAssets :one
+SELECT count(*) FROM assets
+WHERE workspace_id = @workspace_id AND purpose = 'style_reference' AND deleted_at IS NULL AND status <> 'failed';

@@ -1,6 +1,6 @@
 # Design note: following the agents step by step (observability v1)
 
-> Status: **proposed** · 2026-10-18 · Applies [D-36](../05-decisions.md#d-36-local-traces-and-evals-in-arize-phoenix). Extends [architecture §7 and §12](../03-architecture.md) and the runtime of [agent-runtime-v1](agent-runtime-v1.md). The founder's request: "an MLflow-like tool in the local Docker stack, so you can follow each step and check what is going wrong, because the output is only as good as the input; and a self-improvement loop to tweak."
+> Status: **proposed** · 2026-10-18 · Applies [D-38](../05-decisions.md#d-38-local-traces-and-evals-in-arize-phoenix). Extends [architecture §7 and §12](../03-architecture.md) and the runtime of [agent-runtime-v1](agent-runtime-v1.md). The founder's request: "an MLflow-like tool in the local Docker stack, so you can follow each step and check what is going wrong, because the output is only as good as the input; and a self-improvement loop to tweak."
 
 ## 1. What it is
 

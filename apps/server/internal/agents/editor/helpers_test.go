@@ -29,6 +29,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/storage/storagetest"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/store/storetest"
+	"github.com/nilpntr/content-fabrique/internal/styleprofile"
 )
 
 func TestMain(m *testing.M) {
@@ -453,4 +454,16 @@ func (e *env) runUUIDOf(typeID string) string {
 		e.t.Fatal(err)
 	}
 	return u.String()
+}
+
+// styleOf is the style of a profile alone, with the default settings.
+func styleOf(p *styleprofile.Profile) *styleprofile.Style {
+	return (&styleprofile.Style{Profile: p}).ForEdit("")
+}
+
+// stillSettings are the creator's settings that keep the edit still: transitions, camera motion and text animation off, as a creator of
+// long takes with no effects might choose them.
+func stillSettings(p *styleprofile.Profile) *styleprofile.Resolved {
+	r := styleprofile.Resolve(p, nil, styleprofile.Settings{Vibe: styleprofile.VibeCalm, Transitions: styleprofile.LevelOff, CameraMotion: styleprofile.LevelOff, TextAnimation: styleprofile.LevelOff}, "")
+	return &r
 }

@@ -10,6 +10,7 @@ export type PresignPartsResponse = S["PresignPartsResponse"];
 export type UploadStateResponse = S["UploadStateResponse"];
 export type CompletedPartRef = S["CompletedPartRef"];
 export type UploadInfo = S["UploadInfo"];
+export type AssetPurpose = S["AssetPurpose"];
 
 /** The calls of the assets API that an upload makes. The manager only knows this interface. */
 export interface UploadApi {
@@ -19,8 +20,8 @@ export interface UploadApi {
   complete(assetId: string, parts: CompletedPartRef[], signal?: AbortSignal): Promise<ApiAsset>;
   abort(assetId: string): Promise<void>;
   asset(assetId: string, signal?: AbortSignal): Promise<ApiAsset>;
-  /** The newest assets (to find the one that a create call made without our hearing back). */
-  recent(limit: number, signal?: AbortSignal): Promise<ApiAsset[]>;
+  /** The newest assets of a purpose (to find the one that a create call made without our hearing back). */
+  recent(limit: number, signal?: AbortSignal, purpose?: AssetPurpose): Promise<ApiAsset[]>;
 }
 
 /** The upload calls over the typed client (which adds the Clerk token to each). */
@@ -47,8 +48,8 @@ export function createUploadApi(getClient: () => ApiClient): UploadApi {
     async asset(assetId, signal) {
       return unwrap(await getClient().GET("/v1/assets/{id}", { params: { path: { id: id(assetId) } }, signal }));
     },
-    async recent(limit, signal) {
-      return unwrap(await getClient().GET("/v1/assets", { params: { query: { limit } }, signal })).items;
+    async recent(limit, signal, purpose) {
+      return unwrap(await getClient().GET("/v1/assets", { params: { query: { limit, ...(purpose ? { purpose } : {}) } }, signal })).items;
     },
   };
 }

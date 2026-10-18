@@ -87,9 +87,14 @@ func run(args []string) error {
 			var (
 				runner      *runtime.Runner
 				quickLooker jobs.QuickLooker
+				styleLearn  jobs.StyleLearner
 			)
 			if rt := newAgentRuntime(cfg, st, storageC, logger); rt != nil {
 				runner, quickLooker = rt.Runner, newQuickLook(rt, st, storageC, logger)
+				var err error
+				if styleLearn, err = newStyleLearner(cfg, st, storageC, rt, logger); err != nil {
+					return nil, err
+				}
 			}
 			queues := jobs.DefaultConfig()
 			for i := range queues.Queues {
@@ -114,6 +119,7 @@ func run(args []string) error {
 				Analysis:   analyzer,
 				Register:   runtime.Register(runner),
 				QuickLook:  quickLooker,
+				Style:      styleLearn,
 				Logger:     logger,
 				UIAddr:     *riverUIAddr,
 				UIPassword: cfg.RiverUIPassword,

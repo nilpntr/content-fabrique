@@ -1,6 +1,6 @@
 import { useUser } from "@clerk/tanstack-react-start";
 import { Link } from "@tanstack/react-router";
-import { ArrowRight, CloudUpload, Film, PlusIcon, Sparkles, ThumbsUp } from "lucide-react";
+import { ArrowRight, CloudUpload, Film, Palette, PlusIcon, Sparkles, ThumbsUp } from "lucide-react";
 import * as React from "react";
 import { PageHeader } from "@/components/page";
 import { PROJECT_GRID, ProjectCard, usePosters } from "@/components/project/project-card";
@@ -164,6 +164,21 @@ function FirstVideo() {
           I already have clips
         </Link>
       </div>
+      <Link
+        to="/welcome/style"
+        className="group/style flex items-center gap-3 rounded-xl bg-well px-3.5 py-3 shadow-well transition-colors hover:bg-wash"
+      >
+        <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-surface-raised text-brand shadow-raised">
+          <Palette className="size-4.5" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block font-medium">
+            Show me your style <span className="font-normal text-subtle-foreground">(optional)</span>
+          </span>
+          <span className="block text-[13px] text-muted-foreground text-pretty">Upload a few videos you already posted, or pick a vibe. I'll edit the way you do.</span>
+        </span>
+        <ArrowRight aria-hidden className="size-4 shrink-0 text-subtle-foreground transition-transform group-hover/style:translate-x-0.5" />
+      </Link>
     </section>
   );
 }

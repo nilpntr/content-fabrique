@@ -32,6 +32,16 @@ const (
 	AssetFailed     = "failed"
 )
 
+// The purposes of an asset (assets.purpose): footage the editor may cut, or one of the creator's own finished videos uploaded as a
+// style reference (P6-05b), which is never footage.
+const (
+	PurposeFootage        = "footage"
+	PurposeStyleReference = "style_reference"
+)
+
+// ErrTooManyReferences is returned by CreateAssetWithUpload for a style reference when the workspace has its most references already.
+var ErrTooManyReferences = errors.New("store: too many style references")
+
 // The reasons an asset fails before it has been ingested (assets.failure_reason).
 const (
 	FailureUploadExpired = "upload_expired"
@@ -68,6 +78,10 @@ type NewAsset struct {
 	Title       string
 	R2Key       string
 	CreatedBy   ids.UserID
+	// Purpose is PurposeFootage (the default when empty) or PurposeStyleReference. MaxReferences, for a style reference, is how many
+	// the workspace may have (not deleted, not failed); it is counted under the same lock as the uploads in progress.
+	Purpose       string
+	MaxReferences int
 
 	R2UploadID string
 	PartSize   int64
@@ -96,6 +110,24 @@ func (s *Store) CreateAssetWithUpload(ctx context.Context, ws ids.WorkspaceID, i
 				return ErrTooManyUploads
 			}
 		}
+		purpose := in.Purpose
+		if purpose == "" {
+			purpose = PurposeFootage
+		}
+		if purpose == PurposeStyleReference && in.MaxReferences > 0 {
+			if maxActive <= 0 { // the count is exact under the workspace's upload lock
+				if err := tx.q.LockWorkspaceUploads(ctx, ws.UUID.String()); err != nil {
+					return mapErr(err)
+				}
+			}
+			n, err := tx.q.CountStyleReferenceAssets(ctx, ws)
+			if err != nil {
+				return mapErr(err)
+			}
+			if int(n) >= in.MaxReferences {
+				return ErrTooManyReferences
+			}
+		}
 		var sha *string
 		if in.SHA256 != "" {
 			sha = &in.SHA256
@@ -103,7 +135,7 @@ func (s *Store) CreateAssetWithUpload(ctx context.Context, ws ids.WorkspaceID, i
 		var err error
 		a, err = tx.q.CreateAsset(ctx, db.CreateAssetParams{
 			ID: in.ID, WorkspaceID: ws, Kind: in.Kind, Filename: in.Filename, ContentType: in.ContentType,
-			SizeBytes: in.SizeBytes, Sha256: sha, Title: in.Title, R2Key: in.R2Key, CreatedBy: in.CreatedBy,
+			SizeBytes: in.SizeBytes, Sha256: sha, Title: in.Title, R2Key: in.R2Key, CreatedBy: in.CreatedBy, Purpose: purpose,
 		})
 		if err != nil {
 			return mapErr(err)
@@ -159,8 +191,13 @@ func (s *Store) ListAssets(ctx context.Context, ws ids.WorkspaceID, before *ids.
 }
 
 // SearchAssets is ListAssets limited to the assets that match all the search words (SearchWords makes them from what a person
-// typed). No words list everything.
+// typed). No words list everything. It lists footage only: SearchAssetsOf lists the assets of another purpose.
 func (s *Store) SearchAssets(ctx context.Context, ws ids.WorkspaceID, words []string, before *ids.AssetID, limit int) ([]Asset, error) {
+	return s.SearchAssetsOf(ctx, ws, PurposeFootage, words, before, limit)
+}
+
+// SearchAssetsOf is SearchAssets for the assets of one purpose.
+func (s *Store) SearchAssetsOf(ctx context.Context, ws ids.WorkspaceID, purpose string, words []string, before *ids.AssetID, limit int) ([]Asset, error) {
 	if limit < 1 {
 		return nil, fmt.Errorf("%w: limit %d", ErrInvalid, limit)
 	}
@@ -171,7 +208,7 @@ func (s *Store) SearchAssets(ctx context.Context, ws ids.WorkspaceID, words []st
 	if len(words) == 0 {
 		words = nil // NULL: no filter
 	}
-	rows, err := s.q.ListAssets(ctx, db.ListAssetsParams{WorkspaceID: ws, Before: cursor, Words: words, RowLimit: int32(min(limit, 1000))}) //nolint:gosec // capped
+	rows, err := s.q.ListAssets(ctx, db.ListAssetsParams{WorkspaceID: ws, Before: cursor, Words: words, Purpose: purpose, RowLimit: int32(min(limit, 1000))}) //nolint:gosec // capped
 	return rows, mapErr(err)
 }
 

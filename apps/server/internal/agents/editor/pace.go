@@ -28,8 +28,16 @@ var (
 	vibePace = map[string]float64{VibeCalm: 1.3, VibeLively: 1.0, VibeHype: 0.7}
 	// PaceSettings are the creator's own pace overrides ("Your style": slower, like my videos, faster): a quarter longer or a fifth
 	// shorter, the same step as the vibes and never as far as a vibe apart. "" is no setting.
-	PaceSettings = map[string]float64{"": 1, "like_my_videos": 1, "slower": 1.25, "faster": 0.8}
+	PaceSettings = map[string]float64{"": 1, styleprofile.PaceLikeMine: 1, styleprofile.PaceSlower: 1.25, styleprofile.PaceFaster: 0.8}
 )
+
+// paceSetting is the pace setting of the effective style ("" without a style). "like_mine", the default, is a factor of 1.
+func paceSetting(set *styleprofile.Resolved) string {
+	if set == nil {
+		return ""
+	}
+	return set.Pace
+}
 
 // The bounds of the targets.
 const (
@@ -125,7 +133,7 @@ func (t PaceTargets) source() string {
 		from = "the creator's measured shot lengths"
 	}
 	s := fmt.Sprintf("%s at the %s vibe (x%.2g)", from, t.Vibe, vibePace[t.Vibe])
-	if t.Setting != "" && t.Setting != "like_my_videos" {
+	if t.Setting != "" && t.Setting != styleprofile.PaceLikeMine {
 		s += fmt.Sprintf(", and the creator's pace setting %q (x%.2g)", t.Setting, PaceSettings[t.Setting])
 	}
 	return s

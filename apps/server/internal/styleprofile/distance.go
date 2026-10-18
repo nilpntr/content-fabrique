@@ -20,8 +20,12 @@ type EditStats struct {
 	ShotsS []float64
 	// FirstCutS is the time of the first cut, -1 when there is none.
 	FirstCutS float64
-	// Effects counts the motion presets, the transitions that are not cuts and the speed ramps.
-	Effects int
+	// Effects counts the motion presets, the transitions that are not cuts and the speed ramps; Transitions, Motions and Ramps count each
+	// kind (P6-05b: the creator's settings decide each on its own).
+	Effects                     int
+	Transitions, Motions, Ramps int
+	// Texts counts the texts and Animated those that enter with an animation.
+	Texts, Animated int
 	// Titles counts the texts that are titles and Labels the small labels (every text beyond the first title, and the label styles).
 	Titles, Labels int
 	// TitleFill is the first title's fill as "#RRGGBB", TitleLines its number of lines, TitleHeightPct the height of its capitals as a
@@ -39,6 +43,8 @@ type EditStats struct {
 	TitleBreak    bool
 	TitleFitScale float64
 	TitleKind     string
+	// TitleText is the first title's text (the editor's words, compared with the creator's title form).
+	TitleText string
 	// TitleCase is "upper", "lower" or "mixed" for the first title ("" when there is none); TitleAtS is when it starts.
 	TitleCase string
 	TitleAtS  float64
@@ -127,8 +133,18 @@ func (d Distance) Borderline() []Dimension {
 
 func inRange(v, lo, hi float64) bool { return v >= lo && v <= hi }
 
-// Compare measures how far the edit is from the profile.
-func (p *Profile) Compare(e EditStats) Distance {
+// Compare measures how far the edit is from the profile, with the default settings (a lively vibe).
+func (p *Profile) Compare(e EditStats) Distance { return p.CompareWith(e, nil) }
+
+// CompareWith measures how far the edit is from the profile and the creator's effective settings (nil: the defaults). The measured
+// effects are a fact about the creator's videos, not a rule: what the edit may move is the settings' (transitions, camera motion, text
+// animation), and a setting the creator chose is held hard while one that came from the vibe, the suggestion or the default only
+// advises. A pace other than "like my videos" turns the pacing dimensions into advice.
+func (p *Profile) CompareWith(e EditStats, set *Resolved) Distance {
+	r := Resolve(p, nil, Settings{}, "")
+	if set != nil {
+		r = *set
+	}
 	var dims []Dimension
 	add := func(id, value, expected string, ok bool, fix string) {
 		if ok {
@@ -186,18 +202,9 @@ func (p *Profile) Compare(e EditStats) Distance {
 			fmt.Sprintf("make the opening shot about %s s long, the creator's first cut", p.Hook.FirstCutS))
 	}
 
-	// Effects.
-	perMinFx := 0.0
-	if e.DurationS > 0 {
-		perMinFx = float64(e.Effects) / e.DurationS * 60
-	}
-	if p.Effects.Verdict == EffectsNone {
-		add("effects", fmt.Sprintf("%d effects", e.Effects), "none (the creator uses no effects)", e.Effects == 0,
-			"take the motion presets, transitions and speed ramps out: the creator's videos have none")
-	} else {
-		fhi := th.FxPerMinHi
-		add("effects", fmt.Sprintf("%.1f a minute", perMinFx), fmt.Sprintf("up to %.1f a minute", fhi), perMinFx <= fhi, "use fewer effects")
-	}
+	// What moves, from the settings (P6-05b). A measured "no effects" sets nothing here.
+	p.compareMotion(e, r, add, addSoft)
+	compareStructure(e, r, add, addSoft)
 
 	// Text: one title, no labels; the case of it.
 	if p.Text != nil {
@@ -232,6 +239,14 @@ func (p *Profile) Compare(e EditStats) Distance {
 		add("duration", fmt.Sprintf("%.1f s", e.DurationS), fmt.Sprintf("%.0f to %.0f s", dlo, dhi), inRange(e.DurationS, dlo, dhi), "bring the length into the creator's range")
 	}
 
+	if r.Pace != PaceLikeMine && r.Pace != "" {
+		for i := range dims {
+			switch dims[i].ID {
+			case "cuts", "long_takes", "shot_length", "first_cut", "duration":
+				dims[i].Soft = true // the creator asked for another pace than their videos'
+			}
+		}
+	}
 	ok, hard := 0, 0
 	for _, d := range dims {
 		if d.Soft {
@@ -399,4 +414,79 @@ func (d Distance) Text() string {
 		b.WriteByte('\n')
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// compareMotion adds the dimensions of what moves: transitions, camera motion (motion presets and speed ramps) and text animation, from
+// the effective settings. A setting the creator chose themselves is a hard dimension; one from the vibe, the suggestion or the default
+// is advice, except transitions off, which is always a rule (the default of every vibe: plain cuts on the beat).
+func (p *Profile) compareMotion(e EditStats, r Resolved, add, addSoft func(id, value, expected string, ok bool, fix string)) {
+	cuts := max(len(e.ShotsS)-1, 0)
+	shots := len(e.ShotsS)
+	pick := func(source string) func(id, value, expected string, ok bool, fix string) {
+		if source == SourceYou {
+			return add
+		}
+		return addSoft
+	}
+	switch r.Transitions {
+	case LevelOff: // the default of every vibe too: always a rule (transitions read as an automatic edit)
+		pick(SourceYou)("transitions", fmt.Sprintf("%d transitions", e.Transitions), "none (plain cuts on the beat)", e.Transitions == 0,
+			"make every cut a plain cut on the beat: this style has no transitions")
+	case LevelLots:
+		need := (cuts + 1) / 2
+		pick(r.Sources.Transitions)("transitions", fmt.Sprintf("%d transitions in %d cuts", e.Transitions, cuts), fmt.Sprintf("at least %d (lots: on most strong beats)", need),
+			cuts == 0 || e.Transitions >= need, "put a transition (a whip, a zoom-through, a flash) on the strong beats and the drop")
+	default: // subtle
+		hi := max(1, (cuts+1)/2)
+		pick(r.Sources.Transitions)("transitions", fmt.Sprintf("%d transitions in %d cuts", e.Transitions, cuts), fmt.Sprintf("a few, at most %d (subtle: on the strongest moments)", hi),
+			e.Transitions <= hi && (cuts < 3 || e.Transitions >= 1), "use a transition on the drop or the biggest moment, and hard cuts elsewhere")
+	}
+	moving := e.Motions + e.Ramps
+	switch r.CameraMotion {
+	case LevelOff:
+		pick(SourceYou)("camera_motion", fmt.Sprintf("%d motion presets and speed ramps", moving), "none (camera motion is off)", moving == 0,
+			"take the motion presets and speed ramps out: camera motion is turned off")
+	case LevelLots:
+		need := (shots + 1) / 2
+		pick(r.Sources.CameraMotion)("camera_motion", fmt.Sprintf("%d of %d shots move", moving, shots), fmt.Sprintf("at least %d (lots)", need),
+			shots == 0 || moving >= need, "give more shots a push-in or a punch-in on the beat")
+	}
+	if e.Texts > 0 {
+		switch r.TextAnimation {
+		case LevelOn:
+			pick(r.Sources.TextAnimation)("text_animation", fmt.Sprintf("%d of %d texts animated", e.Animated, e.Texts), "every text enters with an animation", e.Animated == e.Texts,
+				"give every text an animation (pop_in, slide_up or fade)")
+		case LevelOff:
+			pick(r.Sources.TextAnimation)("text_animation", fmt.Sprintf("%d of %d texts animated", e.Animated, e.Texts), "no animation (text animation is off)", e.Animated == 0,
+				"set every text's animation to none")
+		}
+	}
+}
+
+// compareStructure adds the dimensions of P6-05c: the hold of the last shot and the title's form, from the effective settings (hard when
+// the creator chose them, advice otherwise).
+func compareStructure(e EditStats, r Resolved, add, addSoft func(id, value, expected string, ok bool, fix string)) {
+	pick := func(source string) func(id, value, expected string, ok bool, fix string) {
+		if source == SourceYou {
+			return add
+		}
+		return addSoft
+	}
+	if n := len(e.ShotsS); n >= 3 && r.EndingHold != "" {
+		others := slices.Clone(e.ShotsS[:n-1])
+		slices.Sort(others)
+		long := math.Max(2.5, 1.5*others[len(others)/2])
+		last := e.ShotsS[n-1]
+		if r.EndingHold == HoldLong {
+			pick(r.Sources.EndingHold)("ending_hold", fmt.Sprintf("last shot %.1f s", last), fmt.Sprintf("a hold of %.1f s or more", long), last >= long,
+				fmt.Sprintf("hold the last shot for %.1f s or more", long))
+		} else {
+			pick(r.Sources.EndingHold)("ending_hold", fmt.Sprintf("last shot %.1f s", last), fmt.Sprintf("under %.1f s, like the other shots", long), last < long,
+				"end on a shot as short as the others")
+		}
+	}
+	if r.TitleTemplate != "" && e.TitleText != "" {
+		pick(r.Sources.TitleTemplate)("title_form", fmt.Sprintf("%d characters", len([]rune(e.TitleText))), "the form "+r.TitleTemplate, TemplateMatches(r.TitleTemplate, e.TitleText),
+			"write the title in the form "+r.TitleTemplate+", the slots filled from the footage")
+	}
 }
