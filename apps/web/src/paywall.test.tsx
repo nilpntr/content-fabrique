@@ -33,20 +33,20 @@ const NO_PLAN = { plan: "none", status: "none", active: false, current_period_en
 
 test("a workspace with an active plan gets the app, not the paywall", async () => {
   stubPlan({ active: true });
-  renderAt("/reports");
-  expect(await screen.findByRole("heading", { name: "Reports" })).toBeTruthy();
+  renderAt("/library");
+  expect(await screen.findByRole("heading", { name: "Library" })).toBeTruthy();
   expect(screen.queryByTestId("paywall")).toBeNull();
 });
 
 test("a workspace without a plan gets the paywall on every app route, inside the shell", async () => {
   stubPlan(NO_PLAN);
-  for (const path of ["/", "/reports", "/projects/new", "/not-a-page"]) {
+  for (const path of ["/", "/library", "/projects/new", "/not-a-page"]) {
     renderAt(path);
     const paywall = await screen.findByTestId("paywall");
     // The page itself is not rendered behind it.
     expect(within(paywall).getByRole("heading", { level: 1, name: "Choose a plan to start" })).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "Reports" })).toBeNull();
-    expect(screen.queryByRole("heading", { name: "Overview" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Library" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: /^Good (morning|afternoon|evening)/ })).toBeNull();
     // The sidebar is still there, with the switchers, so the user can change workspace or account.
     expect(screen.getByRole("navigation", { name: "Main" })).toBeTruthy();
     expect(screen.getByTestId("clerk-organization-switcher")).toBeTruthy();
@@ -103,26 +103,26 @@ test("a response without entitlements is the paywall, never the app", async () =
   stubPlan(null);
   renderAt("/");
   expect(await screen.findByTestId("paywall")).toBeTruthy();
-  expect(screen.queryByRole("heading", { name: "Overview" })).toBeNull();
+  expect(screen.queryByRole("heading", { name: /^Good (morning|afternoon|evening)/ })).toBeNull();
 });
 
 test("an unreachable API is an error with a retry, not a paywall and not the app", async () => {
   vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
-  renderAt("/reports");
+  renderAt("/library");
   const alert = await screen.findByRole("alert", {}, { timeout: 4000 });
   expect(within(alert).getByText("We couldn't check your plan")).toBeTruthy();
   expect(screen.queryByTestId("paywall")).toBeNull();
-  expect(screen.queryByRole("heading", { name: "Reports" })).toBeNull();
+  expect(screen.queryByRole("heading", { name: "Library" })).toBeNull();
 });
 
 test("a plan the API could not read is an error with a retry, not the paywall", async () => {
   stubPlan({ plan: "none", status: "unknown", active: false });
-  renderAt("/reports");
+  renderAt("/library");
   const alert = await screen.findByRole("alert");
   expect(within(alert).getByText("We couldn't check your plan")).toBeTruthy();
   expect(within(alert).getByRole("button", { name: "Retry" })).toBeTruthy();
   expect(screen.queryByTestId("paywall")).toBeNull();
-  expect(screen.queryByRole("heading", { name: "Reports" })).toBeNull();
+  expect(screen.queryByRole("heading", { name: "Library" })).toBeNull();
 });
 
 test("a canceled or past-due plan says it has ended, a revoked one does not name a plan", async () => {
@@ -143,13 +143,13 @@ test("a canceled or past-due plan says it has ended, a revoked one does not name
 
 test("a grant shows up on the next load: the same page, a different answer", async () => {
   stubPlan(NO_PLAN);
-  renderAt("/reports");
+  renderAt("/library");
   expect(await screen.findByTestId("paywall")).toBeTruthy();
   act(() => root?.unmount());
   root = undefined;
 
   stubPlan({ active: true }); // `cfctl plan grant`, then a reload
-  renderAt("/reports");
-  expect(await screen.findByRole("heading", { name: "Reports" })).toBeTruthy();
+  renderAt("/library");
+  expect(await screen.findByRole("heading", { name: "Library" })).toBeTruthy();
   expect(screen.queryByTestId("paywall")).toBeNull();
 });

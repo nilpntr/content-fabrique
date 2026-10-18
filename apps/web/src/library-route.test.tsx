@@ -21,15 +21,17 @@ function renderAt(path: string) {
   return router;
 }
 
-test("/library shows the sample library with a notice while the workspace has no clips, and Library sits above Reports in the nav", async () => {
+test("/library with no clips says how to add the first ones, never shows made-up clips, and Library sits above Settings in the nav", async () => {
+  installApi({ "GET /v1/me": ME, "GET /v1/assets": { items: [], next_cursor: null } });
   renderAt("/library");
   expect(await screen.findByRole("heading", { name: "Library" })).toBeTruthy();
-  expect((await screen.findByRole("note")).textContent).toBe("Sample clips until you upload your own");
-  expect(await screen.findByText("Back double biceps pose")).toBeTruthy();
+  expect(await screen.findByText("Upload your first clips")).toBeTruthy();
+  expect(screen.queryByText("Back double biceps pose")).toBeNull();
+  expect(screen.queryByText(/Sample clips/)).toBeNull();
   const nav = within(document.querySelector('[data-slot="sidebar"]') as HTMLElement);
   const links = nav.getAllByRole("link").map((link) => link.textContent);
   expect(links.indexOf("Library")).toBeGreaterThan(-1);
-  expect(links.indexOf("Library")).toBeLessThan(links.indexOf("Reports"));
+  expect(links.indexOf("Library")).toBeLessThan(links.indexOf("Settings"));
   expect(nav.getByRole("link", { name: "Library" }).hasAttribute("data-active")).toBe(true);
 });
 
@@ -69,6 +71,9 @@ test("?state=loading shows the skeletons, and an unknown state is ignored", asyn
   renderAt("/library?state=loading");
   expect(await screen.findByText("Loading your clips")).toBeTruthy();
   act(() => root?.unmount());
+  installApi({ "GET /v1/me": ME, "GET /v1/assets": { items: [], next_cursor: null } });
   renderAt("/library?state=bogus");
-  expect(await screen.findByText("Back double biceps pose")).toBeTruthy();
+  // An unknown state is the real library (empty here), not the samples.
+  expect(await screen.findByText("Upload your first clips")).toBeTruthy();
+  expect(screen.queryByText("Back double biceps pose")).toBeNull();
 });

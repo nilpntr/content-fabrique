@@ -89,7 +89,7 @@ test("dragging across 0:02 to 0:05 creates a range comment in the side panel, an
   expect(item).toBeTruthy();
   expect(within(panel()).getByText("00:02.0–00:05.0")).toBeTruthy();
   expect(within(item as HTMLElement).getByText("Open")).toBeTruthy();
-  expect(within(panel()).getByText("made on v1")).toBeTruthy();
+  expect(within(panel()).getByText("on Version 1")).toBeTruthy();
 
   // Move the playhead away, then click the comment in the panel.
   scrubTo(8000);
@@ -256,9 +256,9 @@ test("earlier comments stay in the panel: mapped onto the current version, or ma
   // On v3, c2 is gone. The text comment from v1 sits on c3, which moved and got faster.
   expect(pulldown().getAttribute("data-status")).toBe("unmapped");
   expect(within(pulldown()).getByText("No longer mapped")).toBeTruthy();
-  expect(within(pulldown()).getByText("made on v1")).toBeTruthy();
+  expect(within(pulldown()).getByText("on Version 1")).toBeTruthy();
   expect(within(text).getByText("00:04.3–00:05.9")).toBeTruthy();
-  expect(within(text).getByText("Addressed in v2")).toBeTruthy();
+  expect(within(text).getByText("Addressed in Version 2")).toBeTruthy();
   expect(within(text).getByText(/Was/).textContent).toContain("00:09.0–00:11.0");
 
   // An unmapped comment is not drawn on the timeline; a mapped one is.
@@ -266,7 +266,7 @@ test("earlier comments stay in the panel: mapped onto the current version, or ma
   expect(document.querySelector('[data-region-id="ann_text"]')).toBeTruthy();
 
   // Back on v1 the pulldown comment maps again.
-  fireEvent.click(screen.getByRole("button", { name: /^v1/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Version 1" }));
   expect(pulldown().getAttribute("data-status")).toBe("addressed");
   expect(within(pulldown()).getByText("00:04.5–00:06.5")).toBeTruthy();
   expect(document.querySelector('[data-region-id="ann_pulldown"]')).toBeTruthy();
@@ -340,10 +340,10 @@ test("resolved and applied comments are not open: own label, no count, not in th
 
 test("on an older version, a comment from a newer one says it was made later, not that it no longer maps", () => {
   sampleScreen();
-  fireEvent.click(screen.getByRole("button", { name: /^v1/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Version 1" }));
   const logo = itemOf("Put the logo here.");
   expect(logo.getAttribute("data-status")).toBe("newer");
-  expect(within(logo).getByText("Made on v3 (newer)")).toBeTruthy();
+  expect(within(logo).getByText("Made on Version 3 (newer)")).toBeTruthy();
   expect(within(panel()).queryAllByText("No longer mapped")).toHaveLength(0);
   expect(document.querySelector('[data-region-id="ann_logo"]')).toBeNull();
 });
@@ -352,9 +352,9 @@ test("Open vN switches to that version and seeks to the comment's start there", 
   const onSeek = vi.fn();
   sampleScreen({ onSeek });
   const pulldown = itemOf("This pulldown clip drags. Cut it.");
-  fireEvent.click(within(pulldown).getByRole("button", { name: "Open v1" }));
+  fireEvent.click(within(pulldown).getByRole("button", { name: "Open Version 1" }));
 
-  expect(screen.getByRole("button", { name: /^v1/ }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByRole("button", { name: "Version 1" }).getAttribute("aria-pressed")).toBe("true");
   expect(onSeek).toHaveBeenLastCalledWith(4500);
   expect(screen.getByRole("status", { name: "Playhead" }).textContent).toContain("00:04.5");
   expect(itemOf("This pulldown clip drags. Cut it.").getAttribute("data-selected")).toBe("true");
@@ -400,8 +400,8 @@ test("with typed text, picking another comment or version leaves the draft where
   fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "typed" } });
   const range = within(screen.getByRole("dialog")).getByText(/^\d\d:\d\d\.\d$/).textContent;
 
-  fireEvent.click(screen.getByRole("button", { name: /^v1/ }));
-  expect(screen.getByRole("button", { name: /^v3/ }).getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(screen.getByRole("button", { name: "Version 1" }));
+  expect(screen.getByRole("button", { name: "Version 3" }).getAttribute("aria-pressed")).toBe("true");
   expect(within(screen.getByRole("dialog")).getByRole("status").textContent).toContain("Save or cancel");
 
   fireEvent.click(within(panel()).getByText(/b-roll cuts in too early/));
@@ -412,15 +412,15 @@ test("with typed text, picking another comment or version leaves the draft where
 
 test("with no versions the screen shows an empty state instead of crashing", () => {
   render(<ReviewScreen versions={[]} comments={[]} />);
-  expect(screen.getByText("No versions to review yet")).toBeTruthy();
+  expect(screen.getByText("No video yet")).toBeTruthy();
 });
 
 test("an initial version that does not exist falls back to the latest", () => {
   sampleScreen({ initialVersion: 9 });
-  expect(screen.getByRole("button", { name: /^v3/ }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByRole("button", { name: "Version 3" }).getAttribute("aria-pressed")).toBe("true");
   cleanup();
   sampleScreen({ initialVersion: 2 });
-  expect(screen.getByRole("button", { name: /^v2/ }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByRole("button", { name: "Version 2" }).getAttribute("aria-pressed")).toBe("true");
 });
 
 test("zooming keeps the middle of the view, and the playhead follow does not undo it", () => {

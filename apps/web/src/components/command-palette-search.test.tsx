@@ -20,12 +20,12 @@ afterEach(() => {
 });
 
 async function openPalette() {
-  const router = getRouter(createMemoryHistory({ initialEntries: ["/reports"] }));
+  const router = getRouter(createMemoryHistory({ initialEntries: ["/settings"] }));
   root = createRoot(document);
   act(() => root?.render(<RouterProvider router={router} />));
-  await screen.findByRole("heading", { name: "Reports" });
+  await screen.findByRole("heading", { name: "Settings" });
   fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-  return { router, input: (await screen.findByPlaceholderText("Search projects, clips and pages…")) as HTMLInputElement };
+  return { router, input: (await screen.findByPlaceholderText("Search your videos, clips and pages…")) as HTMLInputElement };
 }
 
 const options = () => screen.queryAllByRole("option").map((option) => option.textContent);
@@ -47,7 +47,7 @@ test("⌘K finds projects and clips by what the library knows of them, next to t
   fireEvent.change(input, { target: { value: "back" } });
   await waitFor(() => expect(options()).toHaveLength(2));
   expect(options()[0]).toContain("Gino's back day");
-  expect(options()[0]).toContain("9:16 · In review");
+  expect(options()[0]).toContain("Ready to watch");
   expect(options()[1]).toContain("Seated cable row");
   expect(screen.getByText("Projects", { selector: "div[aria-hidden]" })).toBeTruthy();
   expect(screen.getByText("Clips", { selector: "div[aria-hidden]" })).toBeTruthy();
@@ -111,7 +111,7 @@ test("choosing a project opens it, and a query that matches nothing says so", as
   await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/projects\/prj_/));
 
   fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-  const again = (await screen.findByPlaceholderText("Search projects, clips and pages…")) as HTMLInputElement;
+  const again = (await screen.findByPlaceholderText("Search your videos, clips and pages…")) as HTMLInputElement;
   fireEvent.change(again, { target: { value: "zzzz" } });
   await screen.findByText("No results for “zzzz”.");
 });

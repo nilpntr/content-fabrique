@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { useHotkey } from "@/hooks/use-hotkey";
 import { cn } from "@/lib/utils";
+import { versionName } from "@/lib/words";
 import { CommentPanel } from "./comment-panel";
 import { type ResolvedComment, resolveComments } from "./lib/comments";
 import { markIn, markOut } from "./lib/selection";
@@ -60,6 +61,15 @@ export interface ReviewScreenProps {
   commentsNote?: string;
   /** Called when the creator moves the playhead: scrubbing, stepping, clicking a comment. Not on playback progress. */
   onSeek?: (ms: number) => void;
+  /**
+   * Whether the editing details show: the effect badges, transitions, sound lane and beat grid on the timeline, frame stepping and
+   * the keyboard legend. Default true. Without them the player is a big phone-shaped video and the timeline is for commenting.
+   */
+  detailed?: boolean;
+  /** Shown next to the video (beside it on a wide screen, under it on a phone): e.g. what the editor made, and what to change. */
+  aside?: (context: ReviewContext) => React.ReactNode;
+  /** The line under the version switch for a version: what changed in it. */
+  describeVersion?: (version: ReviewVersion) => string;
   className?: string;
 }
 
@@ -85,10 +95,8 @@ function NoVersions({ className }: { className?: string }) {
     >
       <div className="max-w-sm space-y-2">
         <Film className="mx-auto size-6 text-muted-foreground" aria-hidden />
-        <h2 className="text-[15px] font-semibold tracking-[-0.01em]">No versions to review yet</h2>
-        <p className="text-[13px] text-muted-foreground text-pretty">
-          Once the editor agent has rendered a preview, it shows up here and you can comment on it.
-        </p>
+        <h2 className="text-[15px] font-semibold tracking-[-0.01em]">No video yet</h2>
+        <p className="text-[13px] text-muted-foreground text-pretty">Your video shows up here once the first cut is made, and you can comment on any moment of it.</p>
       </div>
     </section>
   );
@@ -119,6 +127,9 @@ function ReviewWorkspace({
   onVersionChange,
   onVideoError,
   commentsNote,
+  detailed = true,
+  aside,
+  describeVersion,
 }: ReviewScreenProps) {
   const latest = React.useMemo(() => Math.max(...versions.map((candidate) => candidate.version)), [versions]);
   const [versionNumber, setVersionNumber] = React.useState(() =>
@@ -395,11 +406,28 @@ function ReviewWorkspace({
     if (file) setLocalSrc({ url: URL.createObjectURL(file), name: file.name });
   };
 
+  const context: ReviewContext = { version, latest, selectVersion };
+  const playerView = (
+    <PreviewPlayer
+      player={player}
+      version={version}
+      src={videoSrc}
+      placeholderLabel={placeholderLabel}
+      onVideoError={onVideoError}
+      assetNames={assetNames}
+      pinMode={pinMode}
+      onPinModeChange={setPinMode}
+      onPlacePin={placePin}
+      pins={pins}
+      simple={!detailed}
+    />
+  );
+
   return (
     <section aria-label="Review" className={cn("grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start", className)}>
       <div className="min-w-0 space-y-3">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <VersionSelector versions={versions} latest={latest} selected={version.version} onSelect={selectVersion} className="min-w-0 flex-1" />
+          <VersionSelector versions={versions} latest={latest} selected={version.version} onSelect={selectVersion} describe={describeVersion} className="min-w-0 flex-1" />
           {localVideo && (
             <div className="flex items-center gap-1">
               <Button
@@ -423,24 +451,22 @@ function ReviewWorkspace({
 
         {version.version !== latest && (
           <p className="rounded-[10px] bg-wash px-3 py-2 text-[12.5px] text-muted-foreground">
-            You are looking at v{version.version}, not the latest version. Comments made on newer versions are not on it yet.
+            You're watching {versionName(version.version)}, not the latest. Comments made on newer versions aren't on it.
           </p>
         )}
 
-        {aboveVideo?.({ version, latest, selectVersion })}
+        {aboveVideo?.(context)}
 
-        <PreviewPlayer
-          player={player}
-          version={version}
-          src={videoSrc}
-          placeholderLabel={placeholderLabel}
-          onVideoError={onVideoError}
-          assetNames={assetNames}
-          pinMode={pinMode}
-          onPinModeChange={setPinMode}
-          onPlacePin={placePin}
-          pins={pins}
-        />
+        {aside ? (
+          <div className="grid gap-5 md:grid-cols-[auto_minmax(0,1fr)] md:items-start">
+            {playerView}
+            <div className="min-w-0 space-y-4" data-testid="review-aside">
+              {aside(context)}
+            </div>
+          </div>
+        ) : (
+          playerView
+        )}
 
         <ReviewTimeline
           version={version}
@@ -459,11 +485,12 @@ function ReviewWorkspace({
           onCancelDraft={clearDraft}
           onSelectRegion={selectRegion}
           onHoverRegion={setHoveredId}
+          detailed={detailed}
         />
 
-        <ShortcutLegend />
+        {detailed ? <ShortcutLegend /> : null}
 
-        {belowTimeline?.({ version, latest, selectVersion })}
+        {belowTimeline?.(context)}
       </div>
 
       <CommentPanel

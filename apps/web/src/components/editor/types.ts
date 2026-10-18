@@ -104,6 +104,8 @@ export interface ReviewVersion {
   sfx?: SfxItem[];
   /** The beat grid and the other markers of the version. */
   markers?: BeatMarker[];
+  /** The texts on screen (titles, captions), in time order. */
+  texts?: { at_ms: number; text: string }[];
   time_map: TimeMapEntry[];
   /** The preview render. Without one the screen plays a generated placeholder. */
   preview_url?: string;

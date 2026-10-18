@@ -39,8 +39,8 @@ async function pickTwoAndReview(brief = "Open on the pose", name = "") {
   fireEvent.click(await screen.findByRole("checkbox", { name: /Back pose/ }));
   fireEvent.click(screen.getByRole("checkbox", { name: /Barbell row/ }));
   fireEvent.click(screen.getByRole("button", { name: /^Next/ }));
-  if (name) fireEvent.change(screen.getByRole("textbox", { name: /Project name/ }), { target: { value: name } });
-  if (brief) fireEvent.change(screen.getByRole("textbox", { name: /Instructions/ }), { target: { value: brief } });
+  if (name) fireEvent.change(screen.getByRole("textbox", { name: /^Name/ }), { target: { value: name } });
+  if (brief) fireEvent.change(screen.getByRole("textbox", { name: /^What you want/ }), { target: { value: brief } });
   fireEvent.click(screen.getAllByRole("button", { name: /^Review/ }).at(-1) as HTMLElement);
 }
 
@@ -78,10 +78,11 @@ test("creating makes the project, starts the editor with the instructions and op
   renderApp(<NewProjectPage onOpenProject={onOpen} />);
   await pickTwoAndReview("Open on the pose", "Gym day");
 
-  // The cap is shown, read-only.
-  expect(screen.getByText("Spending cap")).toBeTruthy();
-  expect(screen.getByText("$5.00")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  // What it uses is said in videos, never in dollars.
+  expect(screen.getByText("Uses")).toBeTruthy();
+  expect(screen.getByText(/About one video from your plan/)).toBeTruthy();
+  expect(screen.queryByText(/\$\d/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Make my video" }));
 
   await waitFor(() => expect(onOpen).toHaveBeenCalledWith(projectId(1), runId(7)));
   expect(api.callsTo("POST /v1/projects")[0]?.body).toEqual({ format: "9:16", asset_ids: [assetId(1), assetId(2)], title: "Gym day", brief: "Open on the pose" });
@@ -100,29 +101,29 @@ test("without instructions the editor starts with an empty request and no brief 
   const onOpen = vi.fn();
   renderApp(<NewProjectPage onOpenProject={onOpen} />);
   await pickTwoAndReview("");
-  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  fireEvent.click(screen.getByRole("button", { name: "Make my video" }));
   await waitFor(() => expect(onOpen).toHaveBeenCalled());
   expect(api.callsTo("POST /v1/projects")[0]?.body).toEqual({ format: "9:16", asset_ids: [assetId(1), assetId(2)] });
   expect(api.callsTo("POST /v1/projects/{id}/edit")[0]?.body).toEqual({});
 });
 
 test.each([
-  ["422 assets_not_usable", apiError(422, "assets_not_usable", "Clip 3 is still processing."), /can't be used yet.*Clip 3 is still processing/],
-  ["404 not_found", apiError(404, "not_found"), /gone from the library/],
-  ["402 plan_required", apiError(402, "plan_required"), /needs an active plan/],
-  ["403 insufficient_role", apiError(403, "insufficient_role"), /can't create projects/],
-  ["500", apiError(500, "internal_error"), /could not be created/],
+  ["422 assets_not_usable", apiError(422, "assets_not_usable", "Clip 3 is still processing."), /aren't ready yet.*Clip 3 is still processing/],
+  ["404 not_found", apiError(404, "not_found"), /has been deleted/],
+  ["402 plan_required", apiError(402, "plan_required"), /need an active plan/],
+  ["403 insufficient_role", apiError(403, "insufficient_role"), /can't start new videos/],
+  ["500", apiError(500, "internal_error"), /could not be started/],
 ])("a refused project (%s) says why, stays on the flow and starts no editor", async (_name, reply, message) => {
   const api = installApi({ "GET /v1/assets": LIBRARY, "POST /v1/projects": reply });
   const onOpen = vi.fn();
   renderApp(<NewProjectPage onOpenProject={onOpen} />);
   await pickTwoAndReview();
-  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  fireEvent.click(screen.getByRole("button", { name: "Make my video" }));
   expect((await screen.findByRole("alert")).textContent).toMatch(message);
   expect(onOpen).not.toHaveBeenCalled();
   expect(api.callsTo("POST /v1/projects/{id}/edit")).toHaveLength(0);
   // The button is back for another try.
-  await waitFor(() => expect(screen.getByRole("button", { name: "Create project" }).hasAttribute("disabled")).toBe(false));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Make my video" }).hasAttribute("disabled")).toBe(false));
 });
 
 test("a project that was made but whose editor did not start opens without a run, and a toast says why", async () => {
@@ -134,9 +135,9 @@ test("a project that was made but whose editor did not start opens without a run
   const onOpen = vi.fn();
   renderApp(<NewProjectPage onOpenProject={onOpen} />);
   await pickTwoAndReview();
-  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  fireEvent.click(screen.getByRole("button", { name: "Make my video" }));
   await waitFor(() => expect(onOpen).toHaveBeenCalledWith(projectId(1)));
-  expect(notify).toHaveBeenCalledWith("The project was created, but the editor did not start", expect.objectContaining({ type: "error", description: expect.stringMatching(/no ready video clip/) }));
+  expect(notify).toHaveBeenCalledWith("Your project is saved, but I couldn't start editing", expect.objectContaining({ type: "error", description: expect.stringMatching(/clips can be used/) }));
 });
 
 test("a run already in progress is explained", async () => {
@@ -147,7 +148,7 @@ test("a run already in progress is explained", async () => {
   });
   renderApp(<NewProjectPage onOpenProject={vi.fn()} />);
   await pickTwoAndReview();
-  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  fireEvent.click(screen.getByRole("button", { name: "Make my video" }));
   await waitFor(() => expect(notify).toHaveBeenCalled());
   expect(notify).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ description: expect.stringMatching(/still working/) }));
 });
@@ -156,12 +157,12 @@ test("a library with no ready video points to the library, and says when clips a
   installApi({ "GET /v1/assets": { items: [apiAsset(4, { kind: "image" })], next_cursor: null } });
   renderApp(<NewProjectPage onOpenProject={vi.fn()} />);
   expect(await screen.findByRole("heading", { name: "Upload some clips first" })).toBeTruthy();
-  expect(screen.getByRole("link", { name: "Go to the library" }).getAttribute("href")).toBe("/library");
+  expect(screen.getByRole("link", { name: "Upload clips" }).getAttribute("href")).toBe("/library");
   cleanup();
 
   installApi({ "GET /v1/assets": { items: [apiAsset(3, { status: "processing" })], next_cursor: null } });
   renderApp(<NewProjectPage onOpenProject={vi.fn()} />);
-  expect(await screen.findByRole("heading", { name: "Your clips are still processing" })).toBeTruthy();
+  expect(await screen.findByRole("heading", { name: "Your clips are almost ready" })).toBeTruthy();
 });
 
 test("a library that cannot be loaded offers another try", async () => {

@@ -20,14 +20,14 @@ test("an opened clip shows its loop, name, what the quick look wrote and its fac
 
 test("a clip the quick look has not finished says it is coming; one it could not describe says so", () => {
   const { rerender } = render(<ClipDetails asset={asset({ description: "", tags: [], quick_look_status: "pending" })} onClose={() => {}} onRename={async () => {}} />);
-  expect(screen.getByText(/The quick look is reading this clip/)).toBeTruthy();
+  expect(screen.getByText(/I'm watching this clip/)).toBeTruthy();
   rerender(<ClipDetails asset={asset({ description: "", tags: [], quick_look_status: "failed" })} onClose={() => {}} onRename={async () => {}} />);
-  expect(screen.getByText(/could not describe this clip/)).toBeTruthy();
+  expect(screen.getByText(/couldn't describe this clip/)).toBeTruthy();
   rerender(<ClipDetails asset={asset({ description: "", tags: [], status: "processing" })} onClose={() => {}} onRename={async () => {}} />);
-  expect(screen.getByText(/starts once the clip has been processed/)).toBeTruthy();
+  expect(screen.getByText(/as soon as it's ready/)).toBeTruthy();
   // A ready clip that has no quick look status (an older upload) is not promised one.
   rerender(<ClipDetails asset={toLibraryAsset(apiAsset(1, { description: "", tags: [] }))} onClose={() => {}} onRename={async () => {}} />);
-  expect(screen.getByText("This clip has no quick look.")).toBeTruthy();
+  expect(screen.getByText("No description for this clip.")).toBeTruthy();
 });
 
 test("the name can be changed: the new name is sent trimmed, and the field closes", async () => {

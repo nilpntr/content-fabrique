@@ -4,7 +4,6 @@ import { FilmIcon } from "lucide-react";
 import * as React from "react";
 import { NewProjectFlow } from "@/components/new-project/new-project-flow";
 import type { Asset, AssetId, NewProjectInput } from "@/components/new-project/types";
-import { DEFAULT_BUDGET_USD } from "@/components/project/edit-again";
 import { createProjectMessage, startEditMessage } from "@/components/project/errors";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -66,7 +65,7 @@ export function NewProjectPage({ onOpenProject }: { onOpenProject: (projectId: s
       onOpenProject(project.id, run.id);
     } catch (error) {
       // The project exists; only the editor did not start. Its page offers "Start the editor".
-      notify("The project was created, but the editor did not start", { description: startEditMessage(error), type: "error" });
+      notify("Your project is saved, but I couldn't start editing", { description: startEditMessage(error), type: "error" });
       onOpenProject(project.id);
     }
   }
@@ -106,14 +105,14 @@ export function NewProjectPage({ onOpenProject }: { onOpenProject: (projectId: s
     return (
       <div className="mx-auto flex max-w-xl flex-col items-center gap-3 rounded-2xl bg-well py-16 text-center shadow-well">
         <FilmIcon aria-hidden className="size-6 text-muted-foreground" />
-        <h1 className="text-lg font-semibold tracking-[-0.02em]">{processing ? "Your clips are still processing" : "Upload some clips first"}</h1>
+        <h1 className="text-lg font-semibold tracking-[-0.02em]">{processing ? "Your clips are almost ready" : "Upload some clips first"}</h1>
         <p className="max-w-sm text-muted-foreground text-pretty">
           {processing
-            ? "A project can use a clip once it has been processed. They show up here by themselves."
-            : "A project is made from your own footage. Add a few videos to the library, then come back."}
+            ? "I'm still getting your clips ready. They show up here by themselves in a minute or two."
+            : "Your video is made from your own footage. Add a few clips to your library, then come back."}
         </p>
         <Link to="/library" search={{ state: undefined, samples: undefined }} className={buttonVariants({ size: "md" })}>
-          Go to the library
+          Upload clips
         </Link>
       </div>
     );
@@ -129,7 +128,7 @@ export function NewProjectPage({ onOpenProject }: { onOpenProject: (projectId: s
           </Button>
         </div>
       ) : null}
-      <NewProjectFlow assets={clips} onCreate={onCreate} onMediaError={refresh} budgetUsd={DEFAULT_BUDGET_USD} describeError={describeError} />
+      <NewProjectFlow assets={clips} onCreate={onCreate} onMediaError={refresh} costNote="About one video from your plan, with room for two rounds of changes." describeError={describeError} />
     </div>
   );
 }

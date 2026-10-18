@@ -51,7 +51,7 @@ function CommentPanelView({ items, selectedId, hoveredId, onSelect, onHover, onO
       <div className="flex items-center gap-2 border-b border-hairline px-3 py-2.5">
         <MessageSquare className="size-4 text-muted-foreground" aria-hidden />
         <h2 className="text-[13px] font-semibold tracking-[-0.01em]">Comments</h2>
-        <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
+        <span className="text-[12px] tabular-nums text-muted-foreground">
           {open} open · {total} total
         </span>
         <fieldset className="ml-auto flex rounded-[8px] bg-wash p-0.5">
@@ -183,7 +183,7 @@ const CommentItem = React.memo(function CommentItem({
           <span className="font-medium">{comment.author.name}</span>
           {isAgent && <span className="rounded-[4px] bg-wash px-1 py-px text-[10.5px] font-medium">Agent reply</span>}
           <span aria-hidden>·</span>
-          <span>made on v{comment.version}</span>
+          <span>on Version {comment.version}</span>
         </span>
       </button>
 
@@ -203,13 +203,13 @@ const CommentItem = React.memo(function CommentItem({
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2.5 pb-2 text-[11.5px] text-muted-foreground">
           {(moved || status.kind === "unmapped") && (
             <span>
-              Was <span className="font-mono tabular-nums">{formatRange(comment.start_ms, comment.end_ms)}</span> on v{comment.version}
+              Was <span className="font-mono tabular-nums">{formatRange(comment.start_ms, comment.end_ms)}</span> on Version {comment.version}
             </span>
           )}
-          {item.addressedIn !== undefined && <span>Addressed in v{item.addressedIn}</span>}
+          {item.addressedIn !== undefined && <span>Changed in Version {item.addressedIn}</span>}
           {(status.kind === "unmapped" || status.kind === "newer") && (
             <Button variant="link" size="sm" className="h-auto p-0 text-[11.5px]" onClick={() => onOpenVersion(comment.version, comment.id)}>
-              Open v{comment.version}
+              Open Version {comment.version}
             </Button>
           )}
         </div>
