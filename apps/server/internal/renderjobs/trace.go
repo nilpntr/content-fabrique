@@ -20,7 +20,9 @@ import (
 // asked for is put in the run's trace (the trace id is the run's UUID), next to the tool call that waited for it.
 
 // tracer is the global provider's tracer, looked up on every use so a test can install its own provider.
-func tracer() trace.Tracer { return otel.Tracer("github.com/nilpntr/content-fabrique/internal/renderjobs") }
+func tracer() trace.Tracer {
+	return otel.Tracer("github.com/nilpntr/content-fabrique/internal/renderjobs")
+}
 
 func startRenderSpan(ctx context.Context, rr store.Render) (context.Context, trace.Span) {
 	if rr.RequestedByKind == "agent" {

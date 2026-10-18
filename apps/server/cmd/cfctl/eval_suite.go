@@ -60,8 +60,8 @@ editor runs and judge calls together. --max-usd 0 (the default) spends nothing: 
 // suiteFlags are the flags of eval suite, also used by eval improve.
 type suiteFlags struct {
 	suite, local, cases, out, phoenix, label, judgeProfile, envFile string
-	live, noJudge, noPhoenix, asJSON, yes                          bool
-	maxUSD                                                         float64
+	live, noJudge, noPhoenix, asJSON, yes                           bool
+	maxUSD                                                          float64
 }
 
 func (f *suiteFlags) register(fs *flag.FlagSet) {
