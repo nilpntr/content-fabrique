@@ -120,7 +120,8 @@ func TestAllowedURLs(t *testing.T) {
 func TestChromeFlagsIsolate(t *testing.T) {
 	flags := strings.Join(chromeFlags("/tmp/p", 1080, 1920), " ")
 	for _, want := range []string{"--remote-debugging-pipe", "--proxy-server=socks5://127.0.0.1:9", "--host-resolver-rules=MAP * ~NOTFOUND",
-		"--disable-extensions", "--disable-background-networking", "--disable-component-update", "--disable-gpu", "--force-color-profile=srgb"} {
+		"--disable-extensions", "--disable-background-networking", "--disable-component-update", "--disable-gpu", "--force-color-profile=srgb",
+		"--jitless", "--no-expose-wasm", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"} {
 		if !strings.Contains(flags, want) {
 			t.Errorf("chrome flags lack %s", want)
 		}
