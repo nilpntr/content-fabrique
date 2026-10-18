@@ -154,4 +154,3 @@ func Schedule(it timeline.GraphicsItem, lines int) Timing {
 	}
 	return t
 }
-

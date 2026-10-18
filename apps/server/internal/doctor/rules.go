@@ -23,6 +23,8 @@ var allowedEmpty = map[string]bool{
 	"MEDIA_TEMP_DIR":         true,
 	"TRANSCRIBE_LANGUAGE":    true,
 	"WHISPER_MODELS_DIR":     true,
+	// Only the local provider reads it (a chrome-headless-shell on the host for the motion graphics, D-35).
+	"CF_MOTION_CHROME": true,
 }
 
 const (
@@ -69,6 +71,7 @@ var enums = map[string][]string{
 	"R2_JURISDICTION":        {"", "eu"},
 	"TRANSCRIBE_PROVIDER":    {"whispercpp", "workersai"},
 	"TRANSCRIBE_MODEL":       {"large-v3-turbo-q5_0", "tiny.en"},
+	"MOTION_GRAPHICS":        {"on", "off"},
 }
 
 // A validator returns "" when the value is well formed, else a short reason. Reasons never contain the value.

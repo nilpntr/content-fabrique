@@ -43,14 +43,14 @@ const (
 
 // Limits of a graphics item.
 const (
-	MinGraphicsMs       int64 = 500
-	MaxGraphicsChars          = 60
-	MaxGraphicsLines          = 2
-	MaxGraphicsAccents        = 16
-	MaxHighlightWord          = 12
-	MaxCounterAbs             = 999999.0
-	DefaultAccentColour       = "#FFD60A"
-	DefaultGraphicsEnergy     = EnergyLively
+	MinGraphicsMs         int64 = 500
+	MaxGraphicsChars            = 60
+	MaxGraphicsLines            = 2
+	MaxGraphicsAccents          = 16
+	MaxHighlightWord            = 12
+	MaxCounterAbs               = 999999.0
+	DefaultAccentColour         = "#FFD60A"
+	DefaultGraphicsEnergy       = EnergyLively
 )
 
 // GraphicsTrack holds the motion-graphics overlays.
