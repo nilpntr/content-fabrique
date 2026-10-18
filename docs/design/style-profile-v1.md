@@ -335,6 +335,12 @@ theirs") and the chapter forms, never the creator's titles (P6-06b's `title_copi
 `style_match` adds `ending_hold` and `title_form` (hard when the creator chose them); `rep_boundaries` does not apply when the cuts are
 mid-rep and `chapter_titles` not when chapter titles are off. The prompt's examples that were one creator's are now slots.
 
+**Chapter titles are not titles** (P6-07 follow-up). A numbered chapter title (a `chapter_card`, or a text or graphic whose words are
+"1. ...") counts in `EditStats.Chapters`, never as the title or a label: the `title` dimension counts the one title (a title text item,
+a `title_pop` or a `blur_in`), and a `chapter_titles` dimension follows the effective chapter-titles setting (on: the cards are expected,
+the editor check `chapter_titles` counts them against the plan's chapters; off: there are none). It is hard when the creator chose the
+setting. A live v2.9 run with a `title_pop` and two chapter cards failed "3 titles, expected one title" before this.
+
 **The text read** shows the model up to 8 frames (5 of the hook, 3 after later cuts) with `max_tokens` 800; the worst case on Haiku 5.5
 is about $0.002, under its $0.01 budget.
 
