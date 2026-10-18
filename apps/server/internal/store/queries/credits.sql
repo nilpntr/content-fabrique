@@ -82,7 +82,7 @@ ORDER BY id;
 SELECT EXISTS (
     SELECT 1 FROM credit_ledger c
     WHERE c.workspace_id = @workspace_id AND c.project_id = @project_id AND c.kind = 'charge'
-      AND c.action IN ('edit.first', 'edit.revision')
+      AND c.action IN ('edit.first', 'edit.revision', 'edit.first.max', 'edit.revision.max')
       AND NOT EXISTS (SELECT 1 FROM credit_ledger r WHERE r.workspace_id = c.workspace_id AND r.kind = 'refund' AND r.action_id = c.action_id)
 ) AS charged;
 
@@ -235,6 +235,38 @@ WHERE wp.plan <> 'none' AND wp.status = 'active' AND (wp.current_period_end IS N
   AND wp.workspace_id > @after
 ORDER BY wp.workspace_id
 LIMIT @row_limit;
+
+-- Workspaces whose current allowance was granted under a smaller allowance than the price list now has for their plan (@plans and
+-- @allowances are the list's, side by side): the list changed under them, and TopUpAllowanceToList adds the difference once. A top-up
+-- of an earlier switch counts as part of the allowance, so the list that comes after this one adds only what is still missing. The job
+-- re-checks each one under the account lock; this only narrows the list.
+-- name: ListWorkspacesBehindTheList :many
+SELECT wp.workspace_id
+FROM workspace_plans wp
+JOIN workspaces w ON w.id = wp.workspace_id AND w.deleted_at IS NULL
+WHERE wp.plan = ANY(@plans::text[]) AND wp.status = 'active' AND (wp.current_period_end IS NULL OR wp.current_period_end > @now)
+  AND wp.workspace_id > @after
+  AND EXISTS (
+      SELECT 1 FROM credit_ledger g
+      WHERE g.workspace_id = wp.workspace_id AND g.kind = 'grant_allowance' AND g.plan = wp.plan
+        AND (g.expires_at IS NULL OR g.expires_at > @now)
+        AND NOT EXISTS (SELECT 1 FROM credit_ledger e WHERE e.grant_id = g.id AND e.kind = 'expire')
+        AND g.credits + COALESCE((SELECT SUM(a.credits) FROM credit_ledger a
+                                  WHERE a.workspace_id = g.workspace_id AND a.kind = 'adjust' AND a.idempotency_key LIKE 'listswitch:' || g.id || ':%'), 0) < (@allowances::integer[])[array_position(@plans::text[], wp.plan)])
+ORDER BY wp.workspace_id
+LIMIT @row_limit;
+
+-- The newest allowance of the plan that has not expired, and the credits that list switches have added to it.
+-- name: GetCurrentAllowanceGrant :one
+SELECT g.id, g.credits, g.expires_at,
+       COALESCE((SELECT SUM(a.credits) FROM credit_ledger a
+                 WHERE a.workspace_id = g.workspace_id AND a.kind = 'adjust' AND a.idempotency_key LIKE 'listswitch:' || g.id || ':%'), 0)::integer AS added
+FROM credit_ledger g
+WHERE g.workspace_id = @workspace_id AND g.kind = 'grant_allowance' AND g.plan = @plan
+  AND (g.expires_at IS NULL OR g.expires_at > @now)
+  AND NOT EXISTS (SELECT 1 FROM credit_ledger e WHERE e.grant_id = g.id AND e.kind = 'expire')
+ORDER BY g.created_at DESC, g.id DESC
+LIMIT 1;
 
 -- The ledger of a workspace, newest first (cfctl credits show).
 -- name: ListCreditLedger :many

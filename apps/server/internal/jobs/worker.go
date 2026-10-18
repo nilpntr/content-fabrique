@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 
+	"github.com/nilpntr/content-fabrique/internal/credits"
 	"github.com/nilpntr/content-fabrique/internal/spend"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
@@ -49,6 +50,8 @@ type WorkerOptions struct {
 	Render Renderer
 	// Meter writes the ledger rows of the media jobs' compute. Nil records nothing.
 	Meter *spend.ComputeMeter
+	// Credits is the price list the credits jobs grant allowances from; nil means the embedded one (tests set another).
+	Credits *credits.PriceList
 	// UIAddr is the listen address of River UI, such as "127.0.0.1:8082". Empty turns River UI off.
 	UIAddr string
 	// UIPassword is RIVER_UI_PASSWORD. River UI refuses to start without it.
@@ -113,7 +116,7 @@ func StartWorker(ctx context.Context, opts WorkerOptions) (*Worker, error) {
 		}
 	}
 
-	client, err := NewWorkerClient(pool, cfg, Deps{Store: opts.Store, Logger: logger, Objects: opts.Objects, Ingest: opts.Ingest, QuickLook: opts.QuickLook, Transcribe: opts.Transcribe, Analysis: opts.Analysis, Style: opts.Style, Render: opts.Render, Meter: opts.Meter, Register: opts.Register})
+	client, err := NewWorkerClient(pool, cfg, Deps{Store: opts.Store, Logger: logger, Objects: opts.Objects, Ingest: opts.Ingest, QuickLook: opts.QuickLook, Transcribe: opts.Transcribe, Analysis: opts.Analysis, Style: opts.Style, Render: opts.Render, Meter: opts.Meter, Credits: opts.Credits, Register: opts.Register})
 	if err != nil {
 		pool.Close()
 		return nil, err

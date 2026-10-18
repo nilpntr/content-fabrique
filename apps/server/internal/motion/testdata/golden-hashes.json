@@ -1,0 +1,65 @@
+{
+  "bundle": "cf538c8f6006b056131bc36bbb8956f5f0540cc64f8679ac85be60a7a240dfbb",
+  "platforms": {
+    "amd64/HeadlessChrome/155.0.8059.84": {
+      "blur_in@1080": {
+        "frames": 54,
+        "sha256": "509877d11a7647b635cb5c595242b1a6dec94befc70941b3a5cbb2f078e626e3"
+      },
+      "chapter_card@1080": {
+        "frames": 66,
+        "sha256": "259ba9a2bf1ecb3cd9c65ffee1583eb97f37c2095a15aac56e7235a0829259db"
+      },
+      "counter@1080": {
+        "frames": 54,
+        "sha256": "767728f78c1f7ce38344eb2a3b3593b1747c86f35f8cbb26df3768c6f43c4f3c"
+      },
+      "highlight_word@1080": {
+        "frames": 60,
+        "sha256": "f2e1208b0cdd93d1208cc010d2e70eadd778b953642ca38647bdd2f9d0d697cf"
+      },
+      "lower_label@1080": {
+        "frames": 48,
+        "sha256": "09794a8c396c334cf27ce50b8ddcb62ddbf99d2bb4abde628e374239aa23636a"
+      },
+      "outro_card@1080": {
+        "frames": 60,
+        "sha256": "019058ace93c43c289de23a7d69ce6a15e5017a81dfb1a89dba4d7e9ea818bef"
+      },
+      "title_pop@1080": {
+        "frames": 72,
+        "sha256": "12e1adcc4e02d6ae5af427140efdbd167fa6d1fcbb61670c7e946f7989046ba4"
+      }
+    },
+    "arm64/HeadlessChrome/155.0.8059.84": {
+      "blur_in@1080": {
+        "frames": 54,
+        "sha256": "509877d11a7647b635cb5c595242b1a6dec94befc70941b3a5cbb2f078e626e3"
+      },
+      "chapter_card@1080": {
+        "frames": 66,
+        "sha256": "0fd75db015b210e14887cc25556013ac81cb66e3bb1e7b38964928da5b5f3713"
+      },
+      "counter@1080": {
+        "frames": 54,
+        "sha256": "767728f78c1f7ce38344eb2a3b3593b1747c86f35f8cbb26df3768c6f43c4f3c"
+      },
+      "highlight_word@1080": {
+        "frames": 60,
+        "sha256": "4d4d3a14cdde1cbfef0a4f9c6f4e589bfceda7126e5fec2c0ab0adb4104c6101"
+      },
+      "lower_label@1080": {
+        "frames": 48,
+        "sha256": "d06cd7f7018bc60a0d70e8ee771864b0f36baa1cda588a2a2f3ab879675f7ad0"
+      },
+      "outro_card@1080": {
+        "frames": 60,
+        "sha256": "c450ce18bcd37679381a039dc9c289119868a963156925327674b3211fe1be55"
+      },
+      "title_pop@1080": {
+        "frames": 72,
+        "sha256": "12e1adcc4e02d6ae5af427140efdbd167fa6d1fcbb61670c7e946f7989046ba4"
+      }
+    }
+  }
+}

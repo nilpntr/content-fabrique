@@ -76,12 +76,15 @@ function fixtureProject(n = 1) {
   } as never);
 }
 
+/** What a video and an edit cost, as the API says (credits_per_video, edit_costs): the viewer uses the live price list's numbers. */
+const PRICES = { credits_per_video: 10, edit_costs: { standard: { first_edit: 6, revision: 2 }, max: { first_edit: 16, revision: 7 } } };
+
 function creditsFor(kind: Scenario["credits"]) {
   if (kind === "none") return undefined;
   const periodEnd = new Date(Date.now() + 14 * 86_400_000).toISOString();
-  if (kind === "ok") return { available: 42, allowance: 60, period_end: periodEnd, low: false, top_ups: [{ credits: 20, expires_at: new Date(Date.now() + 200 * 86_400_000).toISOString() }] };
-  if (kind === "low") return { available: 6, allowance: 60, period_end: periodEnd, low: true, top_ups: [] };
-  return { available: 0, allowance: 60, period_end: periodEnd, low: true, top_ups: [] };
+  if (kind === "ok") return { ...PRICES, available: 42, allowance: 60, period_end: periodEnd, low: false, top_ups: [{ credits: 20, expires_at: new Date(Date.now() + 200 * 86_400_000).toISOString() }] };
+  if (kind === "low") return { ...PRICES, available: 6, allowance: 60, period_end: periodEnd, low: true, top_ups: [] };
+  return { ...PRICES, available: 0, allowance: 60, period_end: periodEnd, low: true, top_ups: [] };
 }
 
 /** The events of the run in a scenario, up to the one it has reached. */

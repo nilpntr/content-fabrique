@@ -57,16 +57,16 @@ export type FrameRate = 24 | 25 | 30 | 60;
  */
 export type Background = string;
 /**
- * Exactly one video track (its id is "main"), at most one text track, at most one captions track and at most one audio track, in any order.
+ * Exactly one video track (its id is "main"), at most one text track, at most one captions track, at most one audio track and at most one graphics track, in any order.
  */
 export type Tracks = Track[];
 /**
- * A track, told apart by its "type": video, text, captions or audio.
+ * A track, told apart by its "type": video, text, captions, audio or graphics.
  *
  * This interface was referenced by `Timeline`'s JSON-Schema
  * via the `definition` "track".
  */
-export type Track = VideoTrack | TextTrack | CaptionsTrack | AudioTrack;
+export type Track = VideoTrack | TextTrack | CaptionsTrack | AudioTrack | GraphicsTrack;
 /**
  * Always "main" for the video track.
  */
@@ -1048,9 +1048,67 @@ export type ExportPolicy3 = "licensed";
  */
 export type AudioItems = AudioItem[];
 /**
- * Where the marker is in the output, in ms. It must be inside the total duration (checked by the Go layer).
+ * A lowercase id of 1 to 32 characters: a letter, then letters, digits or underscores, such as "c1" or "t3". Ids are unique across the whole spec. The edit ops name items by these ids.
  */
-export type Time = number;
+export type ItemId4 = string;
+/**
+ * "graphics".
+ */
+export type TrackType4 = "graphics";
+/**
+ * A motion-graphics overlay: a template from the library with its params, rendered as animated frames over the video (an animated title, a chapter card, a counter, a label). Give it exactly one of anchor or position. Its box is laid out like a text item's and kept inside the safe zone and off the subject.
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "graphicsItem".
+ */
+export type GraphicsItem = GraphicsItem1 & GraphicsItem2;
+export type GraphicsItem1 =
+  | {
+      anchor: unknown;
+    }
+  | {
+      position: unknown;
+    };
+/**
+ * The motion-graphics template the item uses (docs/design/motion-graphics-v1.md). title_pop: word by word: each word scales up with a blur and an overshoot, landing on its accent (a beat); for a hook title; blur_in: the title sharpens out of a blur while it drifts into place; a quieter title; chapter_card: a numbered chapter title: the number pops first in the accent colour, then the line sweeps in after it; one or two lines; highlight_word: a line where one word gets a marker swiped in behind it in the accent colour; counter: a number that counts from one value to another and lands with a pop, followed by its label (12 REPS, 100 KG); lower_label: a small label on a plate with an accent stripe that slides in; for a name, an exercise or a tag; outro_card: the loop card at the end: letters drop in, an accent line grows under them, and it pushes out on the last frame.
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "graphicsTemplate".
+ */
+export type Template =
+  "title_pop" | "blur_in" | "chapter_card" | "highlight_word" | "counter" | "lower_label" | "outro_card";
+/**
+ * When the overlay starts to enter, in ms. It keeps its absolute time when clips move.
+ */
+export type Start5 = number;
+/**
+ * How long the overlay is on screen, entrance and exit included, in ms. At least 500; give it room to be read (about 1.2 s after its entrance).
+ */
+export type Duration3 = number;
+/**
+ * A safe place for the text: upper_third, center or lower_third. Set this or position, not both.
+ */
+export type Anchor1 = "upper_third" | "center" | "lower_third";
+/**
+ * 0 is the left edge of the frame, 1 the right edge.
+ */
+export type PositionX1 = number;
+/**
+ * 0 is the top edge of the frame, 1 the bottom edge.
+ */
+export type PositionY1 = number;
+/**
+ * Whether the renderer keeps this text off the head of the person in the footage: when it would cover the head it is moved above or below it inside the safe zone, or shrunk within the allowed scale. true by default; set false to place the text exactly where its anchor or position puts it.
+ */
+export type AvoidTheSubject1 = boolean;
+/**
+ * The overlays. They may overlap each other and sit anywhere inside the total duration.
+ */
+export type GraphicsItems = GraphicsItem[];
+/**
+ * A time or duration as a whole number of milliseconds, from 0 to 86 400 000 (24 hours). No floats.
+ */
+export type Milliseconds = number;
 /**
  * beat is a beat of the bar, downbeat the first beat of a bar, drop the big moment of the track and section the start of a part.
  */
@@ -1083,7 +1141,7 @@ export type ConceptId = string;
  * This interface was referenced by `Timeline`'s JSON-Schema
  * via the `definition` "ms".
  */
-export type Milliseconds = number;
+export type Milliseconds1 = number;
 /**
  * A number from 0 to 1.
  *
@@ -1092,19 +1150,271 @@ export type Milliseconds = number;
  */
 export type UnitInterval = number;
 /**
- * Length of the fade in at the start, in ms. Without it, there is no fade. fade_in_ms + fade_out_ms must not exceed the sound's duration (checked by the Go layer).
+ * The words: 1 to 60 characters, at most 2 lines (separated by \n). For counter it is the label after the number (REPS, KG); for chapter_card the chapter's title without its number. Set as plain text, never markup.
+ *
+ * This interface was referenced by `GraphicsParams`'s JSON-Schema
+ * via the `definition` "text".
+ */
+export type Text1 = string;
+/**
+ * The id of a text style from the style registry, such as "title_bold". The spec can't name a font directly.
+ *
+ * This interface was referenced by `GraphicsParams`'s JSON-Schema
+ * via the `definition` "style".
+ */
+export type StyleId1 = string;
+/**
+ * The colour of the letters as #RRGGBB. Without it the style's own colour is used.
+ *
+ * This interface was referenced by `GraphicsParams`'s JSON-Schema
+ * via the `definition` "fill".
+ */
+export type FillColour1 = string;
+/**
+ * The accent colour as #RRGGBB: the chapter number, the marker, the label stripe, the outro line. Default #FFD60A.
+ *
+ * This interface was referenced by `GraphicsParams`'s JSON-Schema
+ * via the `definition` "accent".
+ */
+export type AccentColour = string;
+/**
+ * The size relative to the style's, 0.6 to 1.4. Default 1.
+ *
+ * This interface was referenced by `GraphicsParams`'s JSON-Schema
+ * via the `definition` "scale".
+ */
+export type SizeScale1 = number;
+/**
+ * How the lines sit against each other in the box. Default center.
+ *
+ * This interface was referenced by `GraphicsParams`'s JSON-Schema
+ * via the `definition` "align".
+ */
+export type Alignment1 = "left" | "center" | "right";
+/**
+ * The drop shadow of the letters. Without it the style's own.
+ *
+ * This interface was referenced by `GraphicsParams`'s JSON-Schema
+ * via the `definition` "shadow".
+ */
+export type Shadow1 = "none" | "soft" | "strong";
+/**
+ * plate puts a translucent dark plate behind the text, for legibility over a busy or bright picture. Default none.
+ *
+ * This interface was referenced by `GraphicsParams`'s JSON-Schema
+ * via the `definition` "backing".
+ */
+export type Backing = "none" | "plate";
+/**
+ * How hard the motion hits: calm (slow, soft, no overshoot to speak of), lively (the default) or hype (fast stagger, a bigger overshoot and blur). Match the vibe of the edit.
+ *
+ * This interface was referenced by `GraphicsParams`'s JSON-Schema
+ * via the `definition` "energy".
+ */
+export type Energy = "calm" | "lively" | "hype";
+/**
+ * Timeline times (ms, like markers) the motion lands on, strictly increasing and inside the item: usually beats. title_pop lands word i on accent i and pulses on the rest; chapter_card pops the number on the first and sweeps the line on the second; highlight_word swipes the marker on the first; counter lands the count on the first; lower_label and outro_card enter on the first. Without accents the template uses its own stagger.
+ *
+ * @maxItems 16
+ *
+ * This interface was referenced by `GraphicsParams`'s JSON-Schema
+ * via the `definition` "accents_ms".
+ */
+export type Accents =
+  | []
+  | [Milliseconds1]
+  | [Milliseconds1, Milliseconds1]
+  | [Milliseconds1, Milliseconds1, Milliseconds1]
+  | [Milliseconds1, Milliseconds1, Milliseconds1, Milliseconds1]
+  | [Milliseconds1, Milliseconds1, Milliseconds1, Milliseconds1, Milliseconds1]
+  | [Milliseconds1, Milliseconds1, Milliseconds1, Milliseconds1, Milliseconds1, Milliseconds1]
+  | [Milliseconds1, Milliseconds1, Milliseconds1, Milliseconds1, Milliseconds1, Milliseconds1, Milliseconds1]
+  | [
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1
+    ]
+  | [
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1
+    ]
+  | [
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1
+    ]
+  | [
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1
+    ]
+  | [
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1
+    ]
+  | [
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1
+    ]
+  | [
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1
+    ]
+  | [
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1
+    ]
+  | [
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1,
+      Milliseconds1
+    ];
+/**
+ * The chapter's number, written as "1." before the title.
+ *
+ * This interface was referenced by `GraphicsParams`'s JSON-Schema
+ * via the `definition` "number".
+ */
+export type ChapterNumber = number;
+/**
+ * one_line puts the number before the title; two_line puts it on a line of its own above.
+ *
+ * This interface was referenced by `GraphicsParams`'s JSON-Schema
+ * via the `definition` "layout".
+ */
+export type Layout = "one_line" | "two_line";
+/**
+ * Which word gets the marker, counting from 1 across the lines.
+ *
+ * This interface was referenced by `GraphicsParams`'s JSON-Schema
+ * via the `definition` "word".
+ */
+export type HighlightedWord = number;
+/**
+ * The value the counter starts at.
+ *
+ * This interface was referenced by `GraphicsParams`'s JSON-Schema
+ * via the `definition` "from".
+ */
+export type From = number;
+/**
+ * The value the counter lands on.
+ *
+ * This interface was referenced by `GraphicsParams`'s JSON-Schema
+ * via the `definition` "to".
+ */
+export type To = number;
+/**
+ * Digits after the decimal point, 0 to 2. Default 0.
+ *
+ * This interface was referenced by `GraphicsParams`'s JSON-Schema
+ * via the `definition` "decimals".
+ */
+export type Decimals = number;
+/**
+ * The text style from the style registry: it picks the font, size, colour and shadow (the creator's title style, such as title_series). Default: title_bold, or label_box for lower_label and stat_big for counter.
+ */
+export type StyleId2 = string;
+/**
+ * A time or duration as a whole number of milliseconds, from 0 to 86 400 000 (24 hours). No floats.
  *
  * This interface was referenced by `Timeline`'s JSON-Schema
  * via the `definition` "fadeIn".
  */
-export type FadeIn1 = number;
+export type Milliseconds2 = number;
 /**
- * Length of the fade out at the end, in ms. Without it, there is no fade. fade_in_ms + fade_out_ms must not exceed the sound's duration (checked by the Go layer).
+ * A time or duration as a whole number of milliseconds, from 0 to 86 400 000 (24 hours). No floats.
  *
  * This interface was referenced by `Timeline`'s JSON-Schema
  * via the `definition` "fadeOut".
  */
-export type FadeOut1 = number;
+export type Milliseconds3 = number;
 
 /**
  * A Content Fabrique edit: the declarative timeline (an EDL in JSON) that agents and users change through edit ops and that the Go compiler turns into one ffmpeg invocation. Every time is an integer number of milliseconds.
@@ -1338,13 +1648,45 @@ export interface SfxSound {
   gain_db?: GainInDB;
 }
 /**
+ * Motion-graphics overlays (templates with params), drawn over the video under the text and captions. At most one graphics track.
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "graphicsTrack".
+ */
+export interface GraphicsTrack {
+  id: ItemId4;
+  type: TrackType4;
+  items: GraphicsItems;
+}
+export interface GraphicsItem2 {
+  id: ItemId;
+  template: Template;
+  at_ms: Start5;
+  duration_ms: Duration3;
+  anchor?: Anchor1;
+  position?: Position1;
+  avoid_subject?: AvoidTheSubject1;
+  params: Params;
+}
+/**
+ * A free place for the text's centre as fractions of the frame. The text must stay inside the format's safe zone (checked by the Go layer). Set this or anchor, not both.
+ */
+export interface Position1 {
+  x: PositionX1;
+  y: PositionY1;
+}
+/**
+ * The template's params; which fields are allowed depends on the template.
+ */
+export interface Params {}
+/**
  * A point on the beat grid or a section boundary, in output time.
  *
  * This interface was referenced by `Timeline`'s JSON-Schema
  * via the `definition` "marker".
  */
 export interface Marker {
-  at_ms: Time;
+  at_ms: Milliseconds;
   kind: Kind4;
   strength?: Strength1;
 }
@@ -1357,4 +1699,143 @@ export interface Marker {
 export interface Meta {
   idea_id?: IdeaId;
   concept_id?: ConceptId;
+}
+/**
+ * The params a graphics template may take. Each template's own definition lists which of them it allows.
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "graphicsParam".
+ */
+export interface GraphicsParams {
+  [k: string]: unknown;
+}
+/**
+ * The params of a title_pop item: word by word: each word scales up with a blur and an overshoot, landing on its accent (a beat); for a hook title.
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "graphicsParamsTitlePop".
+ */
+export interface TitlePopParams {
+  text: Text1;
+  style?: StyleId2;
+  fill?: FillColour1;
+  accent?: AccentColour;
+  scale?: SizeScale1;
+  align?: Alignment1;
+  shadow?: Shadow1;
+  backing?: Backing;
+  energy?: Energy;
+  accents_ms?: Accents;
+}
+/**
+ * The params of a blur_in item: the title sharpens out of a blur while it drifts into place; a quieter title.
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "graphicsParamsBlurIn".
+ */
+export interface BlurInParams {
+  text: Text1;
+  style?: StyleId2;
+  fill?: FillColour1;
+  accent?: AccentColour;
+  scale?: SizeScale1;
+  align?: Alignment1;
+  shadow?: Shadow1;
+  backing?: Backing;
+  energy?: Energy;
+  accents_ms?: Accents;
+}
+/**
+ * The params of a chapter_card item: a numbered chapter title: the number pops first in the accent colour, then the line sweeps in after it; one or two lines.
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "graphicsParamsChapterCard".
+ */
+export interface ChapterCardParams {
+  text: Text1;
+  style?: StyleId2;
+  fill?: FillColour1;
+  accent?: AccentColour;
+  scale?: SizeScale1;
+  align?: Alignment1;
+  shadow?: Shadow1;
+  backing?: Backing;
+  energy?: Energy;
+  accents_ms?: Accents;
+  number: ChapterNumber;
+  layout?: Layout;
+}
+/**
+ * The params of a highlight_word item: a line where one word gets a marker swiped in behind it in the accent colour.
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "graphicsParamsHighlightWord".
+ */
+export interface HighlightWordParams {
+  text: Text1;
+  style?: StyleId2;
+  fill?: FillColour1;
+  accent?: AccentColour;
+  scale?: SizeScale1;
+  align?: Alignment1;
+  shadow?: Shadow1;
+  backing?: Backing;
+  energy?: Energy;
+  accents_ms?: Accents;
+  word: HighlightedWord;
+}
+/**
+ * The params of a counter item: a number that counts from one value to another and lands with a pop, followed by its label (12 REPS, 100 KG).
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "graphicsParamsCounter".
+ */
+export interface CounterParams {
+  text: Text1;
+  style?: StyleId2;
+  fill?: FillColour1;
+  accent?: AccentColour;
+  scale?: SizeScale1;
+  align?: Alignment1;
+  shadow?: Shadow1;
+  backing?: Backing;
+  energy?: Energy;
+  accents_ms?: Accents;
+  from: From;
+  to: To;
+  decimals?: Decimals;
+}
+/**
+ * The params of a lower_label item: a small label on a plate with an accent stripe that slides in; for a name, an exercise or a tag.
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "graphicsParamsLowerLabel".
+ */
+export interface LowerLabelParams {
+  text: Text1;
+  style?: StyleId2;
+  fill?: FillColour1;
+  accent?: AccentColour;
+  scale?: SizeScale1;
+  align?: Alignment1;
+  energy?: Energy;
+  accents_ms?: Accents;
+}
+/**
+ * The params of a outro_card item: the loop card at the end: letters drop in, an accent line grows under them, and it pushes out on the last frame.
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "graphicsParamsOutroCard".
+ */
+export interface OutroCardParams {
+  text: Text1;
+  style?: StyleId2;
+  fill?: FillColour1;
+  accent?: AccentColour;
+  scale?: SizeScale1;
+  align?: Alignment1;
+  shadow?: Shadow1;
+  backing?: Backing;
+  energy?: Energy;
+  accents_ms?: Accents;
 }

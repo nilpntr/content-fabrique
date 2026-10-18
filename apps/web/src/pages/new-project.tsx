@@ -4,13 +4,15 @@ import { FilmIcon } from "lucide-react";
 import * as React from "react";
 import { NewProjectFlow } from "@/components/new-project/new-project-flow";
 import type { Asset, AssetId, NewProjectInput } from "@/components/new-project/types";
+import { extraCarefulCosts } from "@/components/extra-careful";
 import { createProjectMessage, startEditMessage } from "@/components/project/errors";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { notify } from "@/components/ui/toast";
 import type { ApiAsset } from "@/lib/api/client";
-import { useAssets } from "@/lib/api/hooks";
+import { useAssets, useMe } from "@/lib/api/hooks";
 import { useCreateProject, useStartEdit } from "@/lib/api/project-hooks";
+import { creditsOf } from "@/lib/credits";
 import { useStyle } from "@/lib/api/style-hooks";
 import { ASSETS_QUERY_KEY } from "@/lib/query-client";
 import { useRefreshThrottle } from "@/lib/refresh-throttle";
@@ -40,6 +42,8 @@ export function NewProjectPage({ onOpenProject }: { onOpenProject: (projectId: s
   const { hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage } = assets;
   const createProject = useCreateProject();
   const startEdit = useStartEdit();
+  const me = useMe();
+  const extraCareful = extraCarefulCosts(creditsOf(me.data)?.edit_costs, "first_edit");
   const queryClient = useQueryClient();
   // The vibe picker starts on the creator's style's vibe (a style that cannot be loaded leaves it on lively).
   const style = useStyle();
@@ -68,8 +72,14 @@ export function NewProjectPage({ onOpenProject }: { onOpenProject: (projectId: s
       ...(input.brief ? { brief: input.brief } : {}),
     });
     try {
-      const body = { ...(input.brief ? { instructions: input.brief } : {}), ...(input.vibe ? { vibe: input.vibe } : {}) };
-      const run = await startEdit.mutateAsync({ projectId: project.id, body });
+      const run = await startEdit.mutateAsync({
+        projectId: project.id,
+        body: {
+          ...(input.brief ? { instructions: input.brief } : {}),
+          ...(input.vibe ? { vibe: input.vibe } : {}),
+          ...(input.quality ? { quality: input.quality } : {}),
+        },
+      });
       onOpenProject(project.id, run.id);
     } catch (error) {
       // The project exists; only the editor did not start. Its page offers "Start the editor".
@@ -144,6 +154,7 @@ export function NewProjectPage({ onOpenProject }: { onOpenProject: (projectId: s
         describeError={describeError}
         defaultVibe={styleVibe}
         vibeNote={vibeNote}
+        extraCareful={extraCareful}
       />
     </div>
   );

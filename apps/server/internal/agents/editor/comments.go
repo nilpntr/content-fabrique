@@ -56,6 +56,10 @@ func itemIDs(spec *timeline.Spec) map[string]bool {
 			for _, it := range t.Items {
 				out[it.ID] = true
 			}
+		case *timeline.GraphicsTrack:
+			for _, it := range t.Items {
+				out[it.ID] = true
+			}
 		case *timeline.AudioTrack:
 			for _, it := range t.Items {
 				out[it.Common().ID] = true

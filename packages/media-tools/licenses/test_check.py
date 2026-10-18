@@ -164,6 +164,26 @@ class CheckTest(unittest.TestCase):
             fails, _ = check.check(pol, comps, conf)
             self.assertTrue(any("changed since the last review" in f for f in fails), fails)
 
+    def test_binary_component_pinned_per_architecture(self):
+        # A prebuilt binary (chrome-headless-shell, D-35) is an inventory row of kind 'binary' whose archive checksum is one of the
+        # reviewed ones (one per architecture); any other archive fails.
+        text = "Copyright 2015 The Chromium Authors\nBSD-style licence text\n"
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "doc" / "chrome-x").mkdir(parents=True)
+            (root / "doc" / "chrome-x" / "copyright").write_text(text)
+            (root / "media-tools").mkdir()
+            (root / "media-tools" / "inventory.tsv").write_text(
+                "kind\tname\tversion\tsource\tsha256\nbinary\tchrome-x\t1.0\turl\taaaa\n")
+            (root / "media-tools" / "ffmpeg-configuration.txt").write_text(CONF)
+            comps, conf = check.load_components(root)
+            pol = policy_for({"chrome-x": text}, **{"chrome-x": {"binaryLicence": "BSD-3-clause", "sourceSha256": ["bbbb", "aaaa"]}})
+            fails, _ = check.check(pol, comps, conf)
+            self.assertEqual(fails, [])
+            pol["components"]["chrome-x"]["sourceSha256"] = ["bbbb"]
+            fails, _ = check.check(pol, comps, conf)
+            self.assertTrue(any("source checksum" in f for f in fails), fails)
+
     def test_tokens(self):
         t = "License: GPL-2+ with GCC exception or MIT\n\nLicense: BSD-3-clause\n Free text\n and more\n"
         self.assertEqual(check.tokens_of(t), ["BSD-3-clause", "GCC exception", "GPL-2+", "MIT"])

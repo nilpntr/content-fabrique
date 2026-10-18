@@ -17,7 +17,23 @@ export interface CreditTopUp {
   expires_at: string;
 }
 
+/** What one edit costs in credits: the project's first edit, and a later change. */
+export interface EditCost {
+  first_edit: number;
+  revision: number;
+}
+
+/** What an edit costs at each quality, from the price list. `max` (the "extra careful" edit) is null when the plan does not include it. */
+export interface EditCosts {
+  standard: EditCost;
+  max: EditCost | null;
+}
+
 export interface Credits {
+  /** What the edits cost at each quality (`GET /v1/me`): the only place the app learns the price of "extra careful". */
+  edit_costs: EditCosts;
+  /** What a video costs in credits (a first edit and two rounds of changes), from the price list: the only place the app learns it. */
+  credits_per_video: number;
   /** What a new action can use now, allowance and top-ups together. Credits held by a running edit are already out of it. */
   available: number;
   /** The size of the current period's allowance; 0 when there is none. */
@@ -32,14 +48,33 @@ export interface Credits {
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const count = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
 
+function editCostOf(raw: unknown): EditCost | undefined {
+  return isRecord(raw) && count(raw.first_edit) && count(raw.revision) ? { first_edit: raw.first_edit, revision: raw.revision } : undefined;
+}
+
+/** The edit costs of a `credits` object, or undefined when they are missing or malformed (the API promises them). */
+function editCostsOf(raw: unknown): EditCosts | undefined {
+  if (!isRecord(raw)) return undefined;
+  const standard = editCostOf(raw.standard);
+  if (!standard) return undefined;
+  if (raw.max === null) return { standard, max: null };
+  const max = editCostOf(raw.max);
+  return max ? { standard, max } : undefined;
+}
+
 /** The workspace's credits from a `/v1/me` answer, or undefined when the answer has none (the API does not offer them yet, or could not read the balance). */
 export function creditsOf(me: unknown): Credits | undefined {
   const raw = isRecord(me) ? me.credits : undefined;
-  if (!isRecord(raw) || !count(raw.available)) return undefined;
+  // `credits_per_video` is part of the contract (GET /v1/me); credits without it cannot be shown as videos, so they are not shown.
+  if (!isRecord(raw) || !count(raw.available) || !Number.isInteger(raw.credits_per_video) || (raw.credits_per_video as number) < 1) return undefined;
   const topUps = Array.isArray(raw.top_ups)
     ? raw.top_ups.flatMap((entry): CreditTopUp[] => (isRecord(entry) && count(entry.credits) && typeof entry.expires_at === "string" ? [{ credits: entry.credits, expires_at: entry.expires_at }] : []))
     : [];
+  const edit_costs = editCostsOf(raw.edit_costs);
+  if (!edit_costs) return undefined;
   return {
+    edit_costs,
+    credits_per_video: raw.credits_per_video as number,
     available: raw.available,
     allowance: count(raw.allowance) ? raw.allowance : 0,
     period_end: typeof raw.period_end === "string" ? raw.period_end : null,

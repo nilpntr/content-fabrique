@@ -78,7 +78,13 @@ func (f *fakeAnthropic) RoundTrip(r *http.Request) (*http.Response, error) {
 	f.mu.Lock()
 	switch {
 	case strings.HasSuffix(r.URL.Path, "/count_tokens"):
-		body = `{"input_tokens": 9000}`
+		// What the next turn will really report as its prompt (input, cache write and cache read): a count that is lower than the usage
+		// would hide the cost of a run from its reservation.
+		u := turnUsage[min(f.messages+1, len(turnUsage))-1]
+		if f.scale > 1 {
+			u[1], u[2] = u[1]*f.scale, u[2]*f.scale
+		}
+		body = fmt.Sprintf(`{"input_tokens": %d}`, u[0]+u[1]+u[2])
 	case strings.HasSuffix(r.URL.Path, "/v1/messages"):
 		f.messages++
 		var req map[string]any
@@ -211,6 +217,8 @@ type e2eConfig struct {
 	planBudgets bool
 	// charged gives the project an edit that was charged first, so that the run is a revision.
 	charged bool
+	// quality is the quality of the run (credits.Standard when empty).
+	quality credits.Quality
 }
 
 // newE2E seeds the project and builds the runtime over the real llm layer in the mode the variables name.
@@ -310,7 +318,7 @@ func newE2E(t *testing.T, vars map[string]string, api *fakeAnthropic, options ..
 	if err != nil {
 		t.Fatal(err)
 	}
-	if x.run, err = svc.Create(context.Background(), e.st, runtime.StartParams{Agent: Name, WorkspaceID: e.wsA.ID, ProjectID: x.prj.UUID, Input: input, Profile: cfg.profile}); err != nil {
+	if x.run, err = svc.Create(context.Background(), e.st, runtime.StartParams{Agent: Name, WorkspaceID: e.wsA.ID, ProjectID: x.prj.UUID, Input: input, Profile: cfg.profile, Quality: cfg.quality}); err != nil {
 		t.Fatal(err)
 	}
 	return x
@@ -415,7 +423,7 @@ func TestEditorRecordedRequests(t *testing.T) {
 		}
 	}
 	first := api.requests[0]
-	if tools, _ := first["tools"].([]any); len(tools) != 13 {
+	if tools, _ := first["tools"].([]any); len(tools) != 14 {
 		t.Errorf("%d tools sent", len(tools))
 	} else {
 		var names []string
@@ -424,10 +432,10 @@ func TestEditorRecordedRequests(t *testing.T) {
 			name, _ := m["name"].(string)
 			names = append(names, name)
 		}
-		if strings.Join(names, ",") != "get_brief,list_footage,view_clip,find_moments,get_music,plan_edit,get_timeline,get_comments,edit_timeline,match_exposure,render_preview,check_edit,finish" {
+		if strings.Join(names, ",") != "get_brief,list_footage,view_clip,find_moments,get_music,plan_edit,list_motion_templates,get_timeline,get_comments,edit_timeline,match_exposure,render_preview,check_edit,finish" {
 			t.Errorf("tools: %v", names)
 		}
-		editTool, _ := tools[8].(map[string]any)
+		editTool, _ := tools[9].(map[string]any)
 		viewTool, _ := tools[2].(map[string]any)
 		if editTool["strict"] == true || viewTool["strict"] != true {
 			t.Errorf("strict flags: edit_timeline %v, view_clip %v", editTool["strict"], viewTool["strict"])

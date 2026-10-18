@@ -68,6 +68,8 @@ type ExecuteOptions struct {
 	// local provider): in the media-tools image (docker, hardened) the render reads the image's own fonts, ImageFontsDir, and
 	// nothing is staged. A plan without text, captions or watermark needs no fonts.
 	FontsDir string
+	// Motion configures the motion-graphics overlays of a plan that has them (Plan.Motion).
+	Motion MotionOptions
 }
 
 const (
@@ -106,6 +108,10 @@ func Execute(ctx context.Context, plan Plan, runner media.Runner, opts ExecuteOp
 	_ = os.RemoveAll(filepath.Join(work, fontsDirName))
 	inImage := runsInImage(runner)
 	if err := stageSubtitles(plan, work, opts.FontsDir, inImage); err != nil {
+		return err
+	}
+	// The motion-graphics overlays are rendered first: the graph reads their frames from the work directory (graphics.go).
+	if err := runMotion(ctx, plan, runner, work, opts, inImage); err != nil {
 		return err
 	}
 

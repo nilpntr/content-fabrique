@@ -49,6 +49,9 @@ type StartParams struct {
 	// NoCredits starts an editor run that costs no credits (cfctl agent run --no-credits, development and ci only; the callers refuse it
 	// elsewhere). The run still gets a hold, of zero credits, and its budget is the caller's.
 	NoCredits bool
+	// Quality is how carefully an editor run works (credits.Standard, the default when empty, or credits.Max, the creator's choice for one
+	// edit): it picks the price, the budget and the routing entry (`editor_max`, `revision_max`).
+	Quality credits.Quality
 	// StartedBy is the member who started the run, for the usage ledger's member_user_id; the zero value when nobody did (cfctl).
 	StartedBy ids.UserID
 }
@@ -71,6 +74,9 @@ var (
 
 // RevisionStage is the routing stage that a revision of an editor run resolves its model and limits from (config/routing).
 const RevisionStage = "revision"
+
+// MaxSuffix is added to the routing stage of an edit of quality max: `editor_max`, `revision_max`.
+const MaxSuffix = "_max"
 
 // MaxReplyBytes is the longest reply to an ask_user.
 const MaxReplyBytes = 16 * 1024
@@ -96,7 +102,7 @@ func (s *Service) Create(ctx context.Context, tx *store.Store, p StartParams) (s
 		if p.ProjectID == uuid.Nil {
 			return store.AgentRun{}, fmt.Errorf("%w: an editor run needs a project", ErrInvalidInput)
 		}
-		q, err := s.Credits.QuoteEdit(ctx, tx, p.WorkspaceID, ids.ProjectID{UUID: p.ProjectID}, p.NoCredits)
+		q, err := s.Credits.QuoteEdit(ctx, tx, p.WorkspaceID, ids.ProjectID{UUID: p.ProjectID}, p.NoCredits, p.Quality)
 		if err != nil {
 			return store.AgentRun{}, err
 		}
@@ -109,15 +115,21 @@ func (s *Service) Create(ctx context.Context, tx *store.Store, p StartParams) (s
 	if err := budgets.validate(); err != nil {
 		return store.AgentRun{}, fmt.Errorf("%w: %w", ErrInvalidInput, err)
 	}
-	route, err := s.Router.Resolve(p.Profile, agent.Stage)
+	// An extra-careful edit (quality max) is routed on the stage's `_max` entry; a profile without it refuses the edit loudly rather than
+	// running it as a standard one the creator paid more credits for.
+	suffix := ""
+	if quote != nil && quote.Quality == credits.Max {
+		suffix = MaxSuffix
+	}
+	route, err := s.Router.Resolve(p.Profile, agent.Stage+suffix)
 	if err != nil {
 		return store.AgentRun{}, err
 	}
 	// A revision is cheaper than a first edit, so it runs on the profile's `revision` entry (a smaller max_tokens: its budget is a third of
 	// a first edit's). The run keeps the agent's stage for the ledger and the cassettes; only the model, effort and limits come from the
 	// revision entry. A profile without one keeps the editor's.
-	if quote != nil && quote.Action == credits.EditRevision {
-		rev, err := s.Router.Resolve(p.Profile, RevisionStage)
+	if quote != nil && (quote.Action == credits.EditRevision || quote.Action == credits.EditRevisionMax) {
+		rev, err := s.Router.Resolve(p.Profile, RevisionStage+suffix)
 		var noStage *routing.NoStageError
 		switch {
 		case err == nil:

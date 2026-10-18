@@ -136,6 +136,10 @@ func (a *applier) scanIDs() {
 			for i := range t.Items {
 				a.register(t.Items[i].ID, kindText)
 			}
+		case *timeline.GraphicsTrack:
+			for i := range t.Items {
+				a.register(t.Items[i].ID, kindGraphic)
+			}
 		case *timeline.AudioTrack:
 			for _, it := range t.Items {
 				a.register(it.Common().ID, kindSound)
@@ -185,7 +189,7 @@ func (a *applier) newID(prefix string) string {
 // claimID checks an id the op gave for a new item (or hands out a fresh one when it gave none) and registers it. The
 // prefix says the kind: "c" for a clip, "t" for text, "s" for a sound.
 func (a *applier) claimID(given, prefix string) (string, bool) {
-	kind := map[string]string{"c": kindClip, "t": kindText, "s": kindSound}[prefix]
+	kind := map[string]string{"c": kindClip, "t": kindText, "s": kindSound, "g": kindGraphic}[prefix]
 	id := given
 	if id == "" {
 		id = a.newID(prefix)
@@ -272,6 +276,12 @@ func (a *applier) dispatch(op Op) bool {
 		return a.setMotion(o)
 	case *SetSpeedRamp:
 		return a.setSpeedRamp(o)
+	case *AddGraphic:
+		return a.addGraphic(o)
+	case *UpdateGraphic:
+		return a.updateGraphic(o)
+	case *RemoveGraphic:
+		return a.removeGraphic(o)
 	case *AddSFX:
 		return a.addSFX(o)
 	}
@@ -384,6 +394,12 @@ func (a *applier) ids(kind string) string {
 				ids = append(ids, it.Common().ID)
 			}
 		}
+	case kindGraphic:
+		if t := a.graphicsTrack(); t != nil {
+			for _, it := range t.Items {
+				ids = append(ids, it.ID)
+			}
+		}
 	}
 	if len(ids) == 0 {
 		return "there are none"
@@ -398,8 +414,11 @@ func (a *applier) ids(kind string) string {
 // kindSound).
 func (a *applier) wrongKind(id, want string) bool {
 	noun := want
-	if want == kindText {
+	switch want {
+	case kindText:
 		noun = "text item"
+	case kindGraphic:
+		noun = "graphics item"
 	}
 	switch got := a.kindOf(id); got {
 	case "":
@@ -415,6 +434,8 @@ func (a *applier) hintFor(got, want string) string {
 		return "use update_text, remove_text, move_item (at_ms) or trim_item (duration_ms) for text"
 	case "sound":
 		return "use set_sound, remove_sound, move_item (at_ms) or trim_item (duration_ms) for sounds"
+	case kindGraphic:
+		return "use update_graphic (at_ms, duration_ms, place, template and params) or remove_graphic for graphics items"
 	case "clip":
 		return "clips are on the main track and have ops of their own (trim_item, set_speed, ...)"
 	}
@@ -520,6 +541,10 @@ func (a *applier) attribute(spec *timeline.Spec, path string) int {
 				id = t.Items[ii].ID
 			}
 		case *timeline.TextTrack:
+			if ii < len(t.Items) {
+				id = t.Items[ii].ID
+			}
+		case *timeline.GraphicsTrack:
 			if ii < len(t.Items) {
 				id = t.Items[ii].ID
 			}

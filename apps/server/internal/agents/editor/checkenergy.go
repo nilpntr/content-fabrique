@@ -212,9 +212,16 @@ func (c *checker) chapterTitles() Check {
 	}
 	var numbered []string
 	for _, t := range c.in.Spec.Tracks {
-		if tt, ok := t.(*timeline.TextTrack); ok {
+		switch tt := t.(type) {
+		case *timeline.TextTrack:
 			for _, it := range tt.Items {
 				if IsChapterTitle(it.Text) {
+					numbered = append(numbered, it.ID)
+				}
+			}
+		case *timeline.GraphicsTrack: // a chapter_card, or a graphic whose words are a numbered title (D-35)
+			for _, it := range tt.Items {
+				if it.Template == timeline.TemplateChapterCard || IsChapterTitle(it.DisplayText()) {
 					numbered = append(numbered, it.ID)
 				}
 			}

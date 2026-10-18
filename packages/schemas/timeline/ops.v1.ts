@@ -27,7 +27,10 @@ export type EditOp =
   | SetClipAudio
   | SetMotion
   | SetSpeedRamp
-  | AddSfx;
+  | AddSfx
+  | AddGraphic
+  | UpdateGraphic
+  | RemoveGraphic;
 /**
  * "add_clip".
  */
@@ -1327,6 +1330,84 @@ export type Start6 = number;
  * Volume change in decibels, from -30 to +6. 0 leaves the level as it is.
  */
 export type GainInDB2 = number;
+/**
+ * Add a motion-graphics overlay: a template from the library (list_motion_templates) with its params. It is laid out like a text item in its style (kept in the safe zone and off the subject), keeps its absolute time when clips move, and must end inside the timeline. Give exactly one of anchor and position. Without id it gets the next free id such as "g2"; the result reports it. The graphics track is created when there is none.
+ */
+export type AddGraphic = AddGraphic1 & AddGraphic2;
+export type AddGraphic1 =
+  | {
+      anchor: unknown;
+    }
+  | {
+      position: unknown;
+    };
+/**
+ * "add_graphic".
+ */
+export type Op22 = "add_graphic";
+/**
+ * Optional id for the new item. Without it the next free "g<n>" is used.
+ */
+export type GraphicId = string;
+/**
+ * The motion-graphics template the item uses (docs/design/motion-graphics-v1.md). title_pop: word by word: each word scales up with a blur and an overshoot, landing on its accent (a beat); for a hook title; blur_in: the title sharpens out of a blur while it drifts into place; a quieter title; chapter_card: a numbered chapter title: the number pops first in the accent colour, then the line sweeps in after it; one or two lines; highlight_word: a line where one word gets a marker swiped in behind it in the accent colour; counter: a number that counts from one value to another and lands with a pop, followed by its label (12 REPS, 100 KG); lower_label: a small label on a plate with an accent stripe that slides in; for a name, an exercise or a tag; outro_card: the loop card at the end: letters drop in, an accent line grows under them, and it pushes out on the last frame.
+ */
+export type Template =
+  "title_pop" | "blur_in" | "chapter_card" | "highlight_word" | "counter" | "lower_label" | "outro_card";
+/**
+ * When the overlay starts to enter, in ms.
+ */
+export type Start7 = number;
+/**
+ * How long the overlay is on screen, entrance and exit included, in ms. At least 500; give it room to be read (about 1.2 s after its entrance).
+ */
+export type Duration5 = number;
+/**
+ * Change a graphics item: its time, length, place, subject avoidance, or its template and params. params replaces all of the item's params, so give template with it (the same one to keep it) and restate every param to keep. Moving the item with at_ms moves its accents_ms with it, unless the op gives params. Give at least one field to change, and not both anchor and position.
+ */
+export type UpdateGraphic = UpdateGraphic1 & UpdateGraphic2;
+export type UpdateGraphic1 =
+  | {
+      template: unknown;
+    }
+  | {
+      at_ms: unknown;
+    }
+  | {
+      duration_ms: unknown;
+    }
+  | {
+      anchor: unknown;
+    }
+  | {
+      position: unknown;
+    }
+  | {
+      avoid_subject: unknown;
+    }
+  | {
+      params: unknown;
+    };
+/**
+ * "update_graphic".
+ */
+export type Op23 = "update_graphic";
+/**
+ * The id of the graphics item to change.
+ */
+export type GraphicId1 = string;
+/**
+ * A time or duration as a whole number of milliseconds, from 0 to 86 400 000 (24 hours). No floats.
+ */
+export type Milliseconds = number;
+/**
+ * "remove_graphic".
+ */
+export type Op24 = "remove_graphic";
+/**
+ * The id of the graphics item to remove.
+ */
+export type GraphicId2 = string;
 
 /**
  * Add a clip from a source asset to the main track. Give the part of the asset to use as source.in_ms and source.out_ms (in the asset's own time; in_ms below out_ms, out_ms within the asset's duration). Say where it goes with index (the position it will have, 0 is the start) or after_id (right after that clip); without either it goes at the end. The clips after it move later (ripple) and their at_ms is recomputed. Without id, the clip gets the next free id such as "c7"; the result reports it. speed (or speed_ramp), reframe, motion, look, transition_in and audio are optional and default as in the timeline spec. A transition_in on a clip that ends up first is an error.
@@ -1642,4 +1723,41 @@ export interface AddSfx1 {
   variant?: Variant;
   at_ms: Start6;
   gain_db?: GainInDB2;
+}
+export interface AddGraphic2 {
+  op: Op22;
+  id?: GraphicId;
+  template: Template;
+  at_ms: Start7;
+  duration_ms: Duration5;
+  anchor?: Anchor;
+  position?: Position;
+  avoid_subject?: AvoidTheSubject;
+  params: Params;
+}
+/**
+ * The template's params (which fields are allowed depends on the template; list_motion_templates says).
+ */
+export interface Params {}
+export interface UpdateGraphic2 {
+  op: Op23;
+  id: GraphicId1;
+  template?: Template;
+  at_ms?: Milliseconds;
+  duration_ms?: Duration5;
+  anchor?: Anchor;
+  position?: Position;
+  avoid_subject?: AvoidTheSubject;
+  params?: Params1;
+}
+/**
+ * The new params, replacing all of the old ones; give template with them.
+ */
+export interface Params1 {}
+/**
+ * Remove a graphics item.
+ */
+export interface RemoveGraphic {
+  op: Op24;
+  id: GraphicId2;
 }

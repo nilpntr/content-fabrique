@@ -1,0 +1,7 @@
+{
+  "op": "update_graphic",
+  "id": "g1",
+  "params": {
+    "text": "HI"
+  }
+}

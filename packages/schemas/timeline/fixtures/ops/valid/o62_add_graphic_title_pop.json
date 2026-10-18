@@ -1,0 +1,17 @@
+{
+  "op": "add_graphic",
+  "template": "title_pop",
+  "at_ms": 0,
+  "duration_ms": 2400,
+  "anchor": "upper_third",
+  "params": {
+    "text": "BACK DAY 101",
+    "style": "title_series",
+    "energy": "hype",
+    "accents_ms": [
+      484,
+      968,
+      1452
+    ]
+  }
+}

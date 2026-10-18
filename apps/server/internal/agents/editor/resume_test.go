@@ -244,23 +244,55 @@ func TestBudgetLowCountsTheDollars(t *testing.T) {
 	}
 }
 
-// What a call costs is what the run has spent per call so far, raised by half for the longer conversation later calls read, and never
-// under the floor that holds before the run has shown anything.
-func TestCallCostFollowsWhatTheRunSpent(t *testing.T) {
+// What a call costs is what the run's recent calls cost (not the first, which writes the whole prompt to the cache), raised by half for the
+// longer conversation later calls read, and never under the floor that holds before the run has shown anything. Without ledger rows the
+// run's cost over its tool calls stands in.
+func TestCallCostFollowsWhatTheRecentCallsCost(t *testing.T) {
 	for _, c := range []struct {
+		name  string
+		calls []int64
 		cost  int64
-		calls int
+		tools int
 		want  int64
 	}{
-		{0, 0, minCallMicros},      // before the first call: the floor
-		{0, 1, minCallMicros},      // nothing spent yet
-		{30_000, 1, minCallMicros}, // a cheap first call: the floor
-		{200_000, 2, 150_000},      // $0.10 a call, plus half
-		{1_010_000, 10, 151_500},   // the live max-effort edit: $0.101 a call
+		{"before the first call", nil, 0, 0, minCallMicros},
+		{"nothing spent yet", nil, 0, 1, minCallMicros},
+		{"a cheap first call", []int64{30_000}, 30_000, 1, minCallMicros},
+		{"no ledger rows: the run's cost per tool call", nil, 200_000, 2, 150_000},
+		{"one big first call is left out of the mean", []int64{233_000, 33_000}, 266_000, 2, minCallMicros},
+		{"the last three calls count", []int64{233_000, 900_000, 100_000, 100_000, 100_000}, 1_433_000, 5, 150_000},
+		{"two calls after the first", []int64{233_000, 100_000, 200_000}, 533_000, 3, 225_000},
 	} {
-		if got := callCostMicros(c.cost, c.calls); got != c.want {
-			t.Errorf("callCostMicros(%d, %d) = %d, want %d", c.cost, c.calls, got, c.want)
+		if got := callCostMicros(c.calls, c.cost, c.tools); got != c.want {
+			t.Errorf("%s: callCostMicros = %d, want %d", c.name, got, c.want)
 		}
+	}
+}
+
+// The shape of a live run that was told it was low on money and then ended "out of budget" at $0.57 of $0.96 after seven model calls: the
+// first wrote 45,000 tokens to the cache ($0.23), the others cost between $0.025 and $0.106. Judged on the mean of all its calls ($0.08, so
+// $0.12 for the next) the $0.39 left was "less than a revision pass" and the check told the editor not to revise; judged on its recent
+// calls ($0.048) a revision pass of four calls is $0.19 and it is not low.
+func TestARunWithAFatFirstCallAndMoneyLeftIsNotLow(t *testing.T) {
+	calls := []int64{232_996, 33_229, 103_771, 106_430, 46_291, 24_977, 24_662}
+	var total int64
+	for _, c := range calls {
+		total += c
+	}
+	perCall := callCostMicros(calls, total, len(calls))
+	left := runtime.BudgetLeft{Known: true, ToolCalls: 53, Wall: 13 * time.Minute, Micros: 960_000 - total}
+	if left.Micros < 380_000 || left.Micros > 390_000 {
+		t.Fatalf("the test's own arithmetic: %d left", left.Micros)
+	}
+	if budgetLow(left, perCall) {
+		t.Errorf("$0.39 left, recent calls at about $0.03 (per call %d): the run is told it is low", perCall)
+	}
+	if note := budgetNote(left, perCall); strings.Contains(note, "finish soon") {
+		t.Errorf("a run with $0.39 left is told to finish: %q", note)
+	}
+	// The old figure, all calls and the run's cost per tool call, said low: the bug this test keeps out.
+	if old := total / int64(len(calls)); !budgetLow(left, old+old/2) {
+		t.Logf("(the mean of all calls, %d, would not have said low here)", old)
 	}
 }
 
@@ -268,7 +300,7 @@ func TestCallCostFollowsWhatTheRunSpent(t *testing.T) {
 // worst case it was "low" from the first call on, and the editor was told not to revise. Judged on what the run spent it is not low
 // until the money is nearly gone: after one call of $0.06 a fresh first edit has plenty, and with $0.10 left it is low.
 func TestAFreshFirstEditIsNotLowAndOneWithTenCentsIs(t *testing.T) {
-	perCall := callCostMicros(60_000, 1) // one call of $0.06 so far
+	perCall := callCostMicros([]int64{60_000}, 60_000, 1) // one call of $0.06 so far
 	fresh := runtime.BudgetLeft{Known: true, ToolCalls: 55, Wall: 14 * time.Minute, Micros: 900_000}
 	if budgetLow(fresh, perCall) {
 		t.Errorf("a fresh first edit ($0.90 left of $0.96, after one call of $0.06) is low; per call %d", perCall)

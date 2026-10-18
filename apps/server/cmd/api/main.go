@@ -90,7 +90,7 @@ func main() {
 				return err
 			}
 			styleSvc.Plans = priceList
-			_, err = auth.Mount(mux, auth.Deps{Config: cfg, Store: st, Logger: logger, Assets: assetsSvc, Runs: runs, Renders: rendersSvc, Style: styleSvc})
+			_, err = auth.Mount(mux, auth.Deps{Config: cfg, Store: st, Logger: logger, Assets: assetsSvc, Runs: runs, Renders: rendersSvc, Style: styleSvc, PriceList: priceList})
 			return err
 		},
 		// The CORS allowlist is the web app's origin, APP_BASE_URL, and nothing else.

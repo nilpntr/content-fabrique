@@ -301,5 +301,37 @@
     "code": "schema",
     "path": "/tracks/1/items/0/avoid_subject",
     "keyword": "type"
+  },
+  "i77_schema_graphics_unknown_template.json": {
+    "code": "schema",
+    "path": "/tracks/1/items/0/template",
+    "keyword": "enum"
+  },
+  "i78_schema_graphics_param_of_other_template.json": {
+    "code": "schema",
+    "path": "/tracks/1/items/0/params",
+    "keyword": "additionalProperties"
+  },
+  "i79_schema_graphics_counter_without_to.json": {
+    "code": "schema",
+    "path": "/tracks/1/items/0/params",
+    "keyword": "required"
+  },
+  "i80_graphics_accent_outside_item.json": {
+    "code": "invalid_graphic"
+  },
+  "i81_graphics_highlight_word_out_of_range.json": {
+    "code": "invalid_graphic"
+  },
+  "i82_graphics_unsafe_box.json": {
+    "code": "unsafe_text"
+  },
+  "i83_graphics_outside_timeline.json": {
+    "code": "outside_timeline"
+  },
+  "i84_schema_two_graphics_tracks.json": {
+    "code": "schema",
+    "path": "/tracks",
+    "keyword": "contains"
   }
 }

@@ -141,13 +141,18 @@ func (s *apiServer) GetWorkspacePlan(ctx context.Context, _ api.GetWorkspacePlan
 		limits = plans.LimitsOf(e.Plan)
 	}
 	en := entitlementsOf(e)
+	// The videos a plan pays for follow from its credit allowance and what a video costs on the price list; nothing else says it.
+	exports := 0
+	if e.Active {
+		exports = s.list.VideosPerPeriod(e.Plan)
+	}
 	return api.GetWorkspacePlan200JSONResponse{
 		Plan:             en.Plan,
 		Status:           en.Status,
 		Active:           en.Active,
 		CurrentPeriodEnd: en.CurrentPeriodEnd,
 		Source:           api.PlanSource(e.Source),
-		Limits:           api.PlanLimits{Exports: limits.Exports, StorageGb: limits.StorageGB, AiBilling: api.AiBilling(limits.AIBilling)},
+		Limits:           api.PlanLimits{Exports: exports, StorageGb: limits.StorageGB, AiBilling: api.AiBilling(limits.AIBilling)},
 	}, nil
 }
 

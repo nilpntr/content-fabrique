@@ -256,7 +256,13 @@ func (t *PriceTable) Cost(model string, u Usage) (int64, error) {
 }
 
 // CacheMarks says which prompt-cache lifetimes a request asks for, for the worst-case estimate.
-type CacheMarks struct{ Any, OneHour bool }
+type CacheMarks struct {
+	Any, OneHour bool
+	// ReadTokens is how many tokens at the front of the input are expected to be cache reads, because the previous call of the run
+	// cached exactly that prefix a moment ago (cacheMemo.claim); 0 prices every input token as the dearest way it could be billed. Only
+	// meaningful with Any. The estimate is an upper bound for any call whose cache read is at least this many tokens.
+	ReadTokens int64
+}
 
 // EstimateMax is the worst-case cost of a request before it is sent: its counted input tokens, each priced as the
 // dearest way they could be billed (a cache write of the requested lifetime when the request has cache breakpoints,
@@ -265,6 +271,10 @@ type CacheMarks struct{ Any, OneHour bool }
 // A model with a long-prompt tier (Haiku 5.5) is priced at the dearer tier whenever input plus max_tokens could cross
 // the threshold. The count is an estimate of what will be billed, and the margin of max_tokens covers its error, so a
 // request near the threshold is never under-estimated.
+//
+// With marks.ReadTokens set, that many input tokens are priced at the cache-read rate and only the rest as above. That holds as an upper
+// bound while the prefix really is read from the cache (the memo that sets it only does when the entry is fresh and unchanged); a call
+// that read less than that was billed more, as a cache write, up to the full estimate.
 func (t *PriceTable) EstimateMax(model string, inputTokens int64, maxTokens int64, marks CacheMarks) (int64, error) {
 	m, ok := t.models[model]
 	if !ok {
@@ -278,7 +288,11 @@ func (t *PriceTable) EstimateMax(model string, inputTokens int64, maxTokens int6
 	case marks.Any:
 		rate = max(rate, p.CacheWrite5m)
 	}
-	return ceilDiv(inputTokens*rate+maxTokens*p.Output, 1_000_000), nil
+	read := int64(0)
+	if marks.Any {
+		read = min(max(marks.ReadTokens, 0), inputTokens)
+	}
+	return ceilDiv(read*p.CacheRead+(inputTokens-read)*rate+maxTokens*p.Output, 1_000_000), nil
 }
 
 // FitOutputTokens returns the largest max_tokens, at most want, for which the worst case of a call with inputTokens of input (EstimateMax)

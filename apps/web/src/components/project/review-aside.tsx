@@ -1,9 +1,12 @@
 import { Check, CircleAlert, Download, Loader2, Sparkles, Wand2, Wrench } from "lucide-react";
 import * as React from "react";
+import { ExtraCarefulOption, extraCarefulCosts } from "@/components/extra-careful";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Disclosure } from "@/components/ui/disclosure";
 import { Textarea } from "@/components/ui/textarea";
+import { useMe } from "@/lib/api/hooks";
 import { useFinalRender, useStartEdit } from "@/lib/api/project-hooks";
+import { creditsOf } from "@/lib/credits";
 import { cn } from "@/lib/utils";
 import { renderFailureMessage, renderMessage, startEditMessage } from "./errors";
 import type { ReviewSummary } from "./plain-words";
@@ -140,7 +143,10 @@ export function FeedbackBox({
   className?: string;
 }) {
   const [text, setText] = React.useState("");
+  const [careful, setCareful] = React.useState(false);
   const start = useStartEdit();
+  const me = useMe();
+  const extraCareful = extraCarefulCosts(creditsOf(me.data)?.edit_costs, firstCut ? "first_edit" : "revision");
   const id = React.useId();
   const hintId = React.useId();
 
@@ -149,10 +155,11 @@ export function FeedbackBox({
     if (start.isPending || busy) return;
     const instructions = text.trim();
     start.mutate(
-      { projectId, body: instructions === "" ? {} : { instructions } },
+      { projectId, body: { ...(instructions === "" ? {} : { instructions }), ...(extraCareful && careful ? { quality: "max" as const } : {}) } },
       {
         onSuccess: (run) => {
           setText("");
+          setCareful(false);
           onStarted(run.id);
         },
       },
@@ -184,6 +191,7 @@ export function FeedbackBox({
             ? "I'll pick the best moments from your clips and cut them to the music."
             : `I'll make a new version and keep this one.${openComments > 0 ? ` I'll also go through your ${openComments === 1 ? "comment" : `${openComments} comments`} on the video.` : ""}`}
       </p>
+      <ExtraCarefulOption price={extraCareful} checked={careful} onChange={setCareful} disabled={start.isPending || busy} />
       {start.isError ? (
         <p role="alert" className="rounded-xl bg-del-wash px-3 py-2 text-[13px] text-destructive">
           {startEditMessage(start.error)}

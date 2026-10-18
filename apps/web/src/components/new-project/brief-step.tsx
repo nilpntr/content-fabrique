@@ -1,5 +1,6 @@
 import { Lightbulb, Music } from "lucide-react";
 import * as React from "react";
+import { ExtraCarefulOption } from "@/components/extra-careful";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -27,12 +28,19 @@ export function BriefStep({
   onChange,
   title = "",
   onTitleChange,
+  extraCareful,
+  careful = false,
+  onCarefulChange,
 }: {
   value: string;
   onChange: (brief: string) => void;
   /** The project name; the field shows when `onTitleChange` is given. */
   title?: string;
   onTitleChange?: (title: string) => void;
+  /** What an extra careful first edit costs against a standard one; the option shows when it is given (the plan includes it). */
+  extraCareful?: { extra: number; standard: number };
+  careful?: boolean;
+  onCarefulChange?: (careful: boolean) => void;
 }) {
   const titleId = React.useId();
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -89,6 +97,8 @@ export function BriefStep({
           Leave it empty and the editor picks a cut from your clips.
         </p>
       </div>
+
+      {extraCareful && onCarefulChange ? <ExtraCarefulOption price={extraCareful} checked={careful} onChange={onCarefulChange} /> : null}
 
       <div className="space-y-2">
         <h3 className="font-medium">Examples</h3>

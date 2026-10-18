@@ -430,6 +430,14 @@ editor:
 revision:
   model: claude-opus-5-5
   effort: medium
+editor_max:                      # the creator's choice for one edit, "extra careful" (D-31, pending confirmation)
+  model: claude-opus-5-5
+  effort: max
+  max_tokens: 32000
+revision_max:
+  model: claude-opus-5-5
+  effort: max
+  max_tokens: 16000
 research:
   lead:    { model: claude-opus-5-5, effort: medium }
   workers: { model: claude-haiku-5-5, max_parallel: 6, budget_micros: 150000 }

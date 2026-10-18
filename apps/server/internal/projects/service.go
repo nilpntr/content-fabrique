@@ -545,6 +545,8 @@ func tooBig(spec timeline.Spec) *ops.Issue {
 			n = len(t.Items)
 		case *timeline.TextTrack:
 			n = len(t.Items)
+		case *timeline.GraphicsTrack:
+			n = len(t.Items)
 		case *timeline.AudioTrack:
 			n = len(t.Items)
 		}

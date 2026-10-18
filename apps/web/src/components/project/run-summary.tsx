@@ -92,7 +92,7 @@ export function runCreditsOf(run: Pick<Run, "credits">): RunCredits | undefined 
 
 const creditCount = (credits: number): string => `${credits} ${credits === 1 ? "credit" : "credits"}`;
 
-/** "6 credits", "2 credits · revision", "Refunded" or "Holding 6 credits…". */
+/** "6 credits", "2 credits · revision", "16 credits · extra careful", "Refunded" or "Holding 6 credits…". */
 export function creditsText(credits: RunCredits): string {
   switch (credits.state) {
     case "held":
@@ -100,7 +100,7 @@ export function creditsText(credits: RunCredits): string {
     case "refunded":
       return "Refunded";
     default:
-      return `${creditCount(credits.credits)}${credits.action === "edit.revision" ? " · revision" : ""}`;
+      return `${creditCount(credits.credits)}${credits.action === "edit.revision" || credits.action === "edit.revision.max" ? " · revision" : ""}${credits.action.endsWith(".max") ? " · extra careful" : ""}`;
   }
 }
 

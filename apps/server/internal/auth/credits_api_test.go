@@ -166,7 +166,7 @@ func TestStartEditChargesFirstThenRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	pid, _ := ids.ParseProjectID(p.Id)
-	if holdCredits != 6 || holdAction != "edit.first" || holdProject == nil || *holdProject != pid.UUID.String() || holdMember == nil || holdPlan != "creator" || holdVersion != "2026-10" {
+	if holdCredits != 6 || holdAction != "edit.first" || holdProject == nil || *holdProject != pid.UUID.String() || holdMember == nil || holdPlan != "creator" || holdVersion != "2026-10c" {
 		t.Fatalf("hold = %d %s project %v member %v plan %s list %s", holdCredits, holdAction, holdProject, holdMember, holdPlan, holdVersion)
 	}
 	e.endRun("ada", first, store.AgentFailed)

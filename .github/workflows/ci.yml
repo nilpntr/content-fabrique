@@ -54,6 +54,8 @@ jobs:
               # The timeline schema is embedded in the Go package (apps/server/internal/timeline), and its fixtures
               # are read by the Go tests.
               - 'packages/schemas/**'
+              # cf-motion, the motion-graphics runner (D-35), is a Go module of its own in the media-tools image.
+              - 'packages/media-tools/motion-runner/**'
               - '.env.example'
               - 'go.work'
               - 'go.work.sum'
@@ -86,6 +88,8 @@ jobs:
               - 'apps/server/internal/ingest/**'
               - 'apps/server/internal/renderjobs/**'
               - 'apps/server/internal/transcribe/**'
+              - 'apps/server/internal/motion/**'
+              - 'apps/server/internal/render/graphics*.go'
               - 'apps/server/cmd/cfctl/media*.go'
               - 'apps/server/cmd/cfctl/transcribe*.go'
               - '.github/workflows/ci.yml'
@@ -94,6 +98,7 @@ jobs:
             # module files (a dependency bump can change what the tests build).
             render:
               - 'apps/server/internal/render/**'
+              - 'apps/server/internal/motion/**'
               # The sound check (P3-11) measures with ffmpeg and its tests generate their fixtures with it.
               - 'apps/server/internal/audiocheck/**'
               - 'apps/server/cmd/cfctl/**'
@@ -140,6 +145,8 @@ jobs:
               - 'apps/server/internal/ingest/**'
               - 'apps/server/internal/renderjobs/**'
               - 'apps/server/internal/transcribe/**'
+              - 'apps/server/internal/motion/**'
+              - 'apps/server/internal/render/graphics*.go'
               - 'apps/server/cmd/cfctl/media*.go'
               - 'apps/server/cmd/cfctl/transcribe*.go'
               - '.github/workflows/ci.yml'
@@ -169,6 +176,16 @@ jobs:
           # renovate: datasource=github-releases depName=golangci/golangci-lint
           version: v2.15.0
           working-directory: apps/server
+      # cf-motion (D-35), its own module, linted with the server's configuration.
+      - name: go vet (motion runner)
+        working-directory: packages/media-tools/motion-runner
+        run: go vet ./...
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          # renovate: datasource=github-releases depName=golangci/golangci-lint
+          version: v2.15.0
+          working-directory: packages/media-tools/motion-runner
+          args: --config ../../../apps/server/.golangci.yml
 
   # go test -race over every package. Docker is on the runner, so tests that start containers (testcontainers) run.
   go-test:
@@ -188,6 +205,11 @@ jobs:
           go-version-file: apps/server/go.mod
           cache-dependency-path: apps/server/go.sum
       - run: go test -race ./...
+      # cf-motion (D-35): the job parser, the request allowlist, the DevTools pipe and the frame checks. It reads the job the server
+      # writes (testdata/job.json, kept equal by internal/motion's TestJobMatchesRunnerContract).
+      - name: Motion runner tests
+        working-directory: packages/media-tools/motion-runner
+        run: go test -race ./...
       # internal/timeline embeds a copy of packages/schemas/timeline/v1.schema.json, and internal/timeline/ops one of
       # ops.v1.schema.json; `task gen` refreshes them. A diff means a copy is stale.
       - name: Timeline schema copy drift check
@@ -571,6 +593,19 @@ jobs:
         working-directory: apps/server
         run: go test ./internal/render -run Integration -docker-image media-tools:ci -v
 
+      # Motion graphics (D-35): chrome-headless-shell and cf-motion in the image. Every template renders twice to the same bytes and
+      # to the golden hashes of this platform (CF_MOTION_REQUIRE_GOLDEN turns missing ones into a failure), with ink only inside its
+      # box; hostile pages (network requests, reads outside the bundle, a WebSocket to the DevTools port) fail loudly.
+      - name: Motion graphics against the image
+        working-directory: apps/server
+        env:
+          CF_MOTION_REQUIRE_GOLDEN: '1'
+        run: |
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 12345:12345 media-tools:ci cf-motion -version
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 12345:12345 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m media-tools:ci /opt/chrome/chrome-headless-shell --version
+          go test ./internal/motion -run Integration -docker-image media-tools:ci -count=1 -v
+
       # P1-04: the ingest pipeline end to end with its tools running in the image. The test clips (portrait and rotated, HDR
       # PQ and HLG, a second audio track with the 'apac' tag) are generated with the runner's own ffmpeg; the image does all
       # the work under test.
@@ -656,6 +691,13 @@ jobs:
       - name: Sandbox integration tests under runsc
         working-directory: apps/server
         run: go test ./internal/sandbox ./internal/media -run Integration -docker-image media-tools:ci -docker-runtime runsc -v
+
+      # Motion graphics (D-35) under gVisor, as production runs them: Chrome in the hardened sandbox, the hostile pages included.
+      - name: Motion graphics under runsc
+        working-directory: apps/server
+        run: |
+          go test ./internal/motion -run Integration -docker-image media-tools:ci -docker-runtime runsc -count=1 -v
+          go test ./internal/render -run IntegrationGraphics -docker-image media-tools:ci -docker-runtime runsc -count=1 -v
 
       # Two CPU limits: 2 CPUs throttles the transcode through the CFS quota (both providers become quota-bound), 4 CPUs is every
       # vCPU of the runner, so the encode is not throttled and the provider's own cost shows.

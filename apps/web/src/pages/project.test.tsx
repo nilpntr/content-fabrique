@@ -744,3 +744,50 @@ test("a download of work that was never paid for says what to do, without the co
   expect(alert.textContent).toMatch(/can't be downloaded yet.*Ask me for a change/);
   expect(alert.textContent).not.toContain("version_not_charged");
 });
+
+// "Extra careful" on a change (D-31): off by default, priced from /v1/me, sent as quality max only when checked, not offered to the trial.
+const WITH_CREDITS = (max: { first_edit: number; revision: number } | null) => ({
+  ...ME,
+  credits: { credits_per_video: 10, edit_costs: { standard: { first_edit: 6, revision: 2 }, max }, available: 42, allowance: 60, period_end: "2099-11-14T00:00:00Z", low: false, top_ups: [] },
+});
+
+test("'Extra careful' is off by default, says what it costs from the API, and a checked one is sent as quality max", async () => {
+  const fake = api({ ...noRenders, "GET /v1/me": WITH_CREDITS({ first_edit: 16, revision: 7 }), "POST /v1/projects/{id}/edit": json(202, run({ id: runId(9), status: "queued" })) });
+  const onRunStarted = vi.fn();
+  page({ onRunStarted });
+  await reviewUp();
+  const form = screen.getByRole("form", { name: "Tell me what to change" });
+  const box = (await within(form).findByRole("checkbox", { name: "Extra careful" })) as HTMLInputElement;
+  expect(box.checked).toBe(false);
+  expect(within(form).getByText("Thinks longer about every cut. Uses 7 credits instead of 2.")).toBeTruthy();
+
+  fireEvent.change(screen.getByRole("textbox", { name: /Tell me what to change/ }), { target: { value: "Shorter" } });
+  fireEvent.click(within(form).getByRole("button", { name: "Make the changes" }));
+  await waitFor(() => expect(onRunStarted).toHaveBeenCalledWith(runId(9)));
+  expect(fake.callsTo("POST /v1/projects/{id}/edit")[0]?.body).toEqual({ instructions: "Shorter" });
+
+  fireEvent.click(box);
+  fireEvent.click(within(form).getByRole("button", { name: "Make the changes" }));
+  await waitFor(() => expect(fake.callsTo("POST /v1/projects/{id}/edit")).toHaveLength(2));
+  expect(fake.callsTo("POST /v1/projects/{id}/edit")[1]?.body).toEqual({ quality: "max" });
+});
+
+test("'Extra careful' is not offered on a plan without it, and a refusal of it is said in plain words", async () => {
+  api({ ...noRenders, "GET /v1/me": WITH_CREDITS(null) });
+  page();
+  await reviewUp();
+  // Credits have loaded (the form is there) and there is no option.
+  expect(screen.getByRole("form", { name: "Tell me what to change" })).toBeTruthy();
+  await waitFor(() => expect(screen.queryByRole("checkbox", { name: "Extra careful" })).toBeNull());
+  cleanup();
+
+  api({ ...noRenders, "GET /v1/me": WITH_CREDITS({ first_edit: 16, revision: 7 }), "POST /v1/projects/{id}/edit": apiError(402, "quality_not_in_plan") });
+  page();
+  await reviewUp();
+  const form = screen.getByRole("form", { name: "Tell me what to change" });
+  fireEvent.click(await within(form).findByRole("checkbox", { name: "Extra careful" }));
+  fireEvent.click(within(form).getByRole("button", { name: "Make the changes" }));
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toMatch(/Extra careful edits aren't part of your plan/);
+  expect(alert.textContent).not.toContain("quality_not_in_plan");
+});
