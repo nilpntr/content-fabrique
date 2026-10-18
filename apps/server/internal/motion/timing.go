@@ -45,10 +45,14 @@ type Timing struct {
 	// SwipeMs is when highlight_word's marker starts; LandMs is when counter's count lands.
 	SwipeMs int64 `json:"swipe_ms,omitempty"`
 	LandMs  int64 `json:"land_ms,omitempty"`
+	// LegibleMs is when the last of the text has landed and LeavingMs when the exit has visibly begun (readable.go): between the two
+	// the item can be read.
+	LegibleMs int64 `json:"legible_ms"`
+	LeavingMs int64 `json:"leaving_ms"`
 }
 
-// ReadableMs is how long the item is fully on screen before it starts to leave.
-func (t Timing) ReadableMs() int64 { return max(0, t.ExitMs-t.FullyInMs) }
+// ReadableMs is how long the item can be read: from when its text has landed until its exit has visibly begun.
+func (t Timing) ReadableMs() int64 { return max(0, t.LeavingMs-t.LegibleMs) }
 
 // Schedule computes an item's timing. lines is the number of lines its text takes once laid out (blur_in and highlight_word enter
 // line by line); the accents are the item's accents_ms. An entrance that an accent would put before the item's start starts at 0.
@@ -152,5 +156,6 @@ func Schedule(it timeline.GraphicsItem, lines int) Timing {
 		t.FullyInMs = s + letters*per + f.DurMs
 		t.HitsMs = rest(1)
 	}
+	t.readableWindow(it, f, lines)
 	return t
 }
