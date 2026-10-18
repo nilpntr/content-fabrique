@@ -38,3 +38,7 @@ judge:    { model: claude-haiku-5-5, effort: high, batch: true }
 # whatever ROUTING_PROFILE says, so that scores stay comparable; this Haiku entry only exists so dev-cheap stays Haiku-only and is used
 # when a run asks for --judge-profile dev-cheap (a smoke test of the plumbing, not a score to compare).
 judge_edit: { model: claude-haiku-5-5, max_tokens: 3000 }
+# The improvement loop's improver (cfctl eval improve, observability v1 section 8): one call per iteration that proposes one change
+# to the prompt, a playbook, a check threshold, a renderer default or a style rule, with its own budget (--improver-usd, default
+# $0.50). The loop resolves it from v1-start (Opus 5.5) whatever ROUTING_PROFILE says; the cheaper entries are for plumbing tests.
+improve_edit: { model: claude-haiku-5-5, max_tokens: 6000 }
