@@ -68,7 +68,7 @@ func TestThePriceListHasTheDesignNotesValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for a, want := range map[credits.Action]int{credits.EditFirst: 24, credits.EditRevision: 8, credits.ExportFinal: 0, credits.IdeationRun: 1} {
+	for a, want := range map[credits.Action]int{credits.EditFirst: 16, credits.EditRevision: 7, credits.ExportFinal: 0, credits.IdeationRun: 1} {
 		if got, ok := l.Price(a); !ok || got != want {
 			t.Errorf("%s costs %d, want %d", a, got, want)
 		}
@@ -81,8 +81,8 @@ func TestThePriceListHasTheDesignNotesValues(t *testing.T) {
 		price                           int64
 	}
 	for p, want := range map[plans.Plan]row{
-		plans.Trial:   {credits.Managed, 40, false, 2, 1, 30, 0},
-		plans.Studio:  {credits.BYOK, 2400, true, 100, 3, 240, 2500},
+		plans.Trial:   {credits.Managed, 30, false, 2, 1, 30, 0},
+		plans.Studio:  {credits.BYOK, 1800, true, 100, 3, 240, 2500},
 		plans.Creator: {credits.Managed, 150, true, 50, 2, 120, 5900},
 		plans.Pro:     {credits.Managed, 400, true, 200, 4, 360, 12900},
 	} {
@@ -114,8 +114,8 @@ func TestThePriceListHasTheDesignNotesValues(t *testing.T) {
 	}
 }
 
-// The worked example of the design note: the creator plan earns about $0.40 per credit, so 24 credits allow a first edit of up to $3.84 and
-// 8 credits a revision of up to $1.28; the list gives the editor's max-effort runs $3.00 and $1.00 (D-31).
+// The worked example of the design note: the creator plan earns about $0.40 per credit, so 16 credits allow a first edit of up to $2.56 and
+// 7 credits a revision of up to $1.12; the list gives the editor's max-effort runs $2.00 and $0.80 (D-31).
 func TestWorkedExampleCreator(t *testing.T) {
 	l, _ := credits.LoadDefault()
 	creator, _ := l.Plan(plans.Creator)
@@ -125,26 +125,28 @@ func TestWorkedExampleCreator(t *testing.T) {
 	}
 	first, _ := l.Budget(plans.Creator, credits.EditFirst)
 	revision, _ := l.Budget(plans.Creator, credits.EditRevision)
-	if first != 3_000_000 || revision != 1_000_000 {
-		t.Fatalf("budgets %d and %d, want 3,000,000 and 1,000,000", first, revision)
+	if first != 2_000_000 || revision != 800_000 {
+		t.Fatalf("budgets %d and %d, want 2,000,000 and 800,000", first, revision)
 	}
-	// What the rule allows is above them (24 x 0.4 x 400,176 = 3.84 million), so the list is not on the edge for creator.
+	// What the rule allows is above them (16 x 0.4 x 400,176 = 2.56 million), so the list is not on the edge for creator.
 	limit := func(credits int64) int64 {
 		r := l.NetRevenuePerCreditMicros(creator)
 		r.Mul(r, l.MaxCOGSShare)
 		f, _ := r.Mul(r, new(big.Rat).SetInt64(credits)).Float64()
 		return int64(f)
 	}
-	if got := limit(24); got < 3_840_000 || got > 3_842_000 {
-		t.Fatalf("the rule allows %d for 24 credits, want about 3,841,000", got)
+	if got := limit(16); got < 2_560_000 || got > 2_562_000 {
+		t.Fatalf("the rule allows %d for 16 credits, want about 2,561,000", got)
 	}
 }
 
-// D-31 (pending founder confirmation): the editor thinks at max effort, so every managed plan gives a first edit a hard run budget of
-// $3.00 and a revision $1.00; the BYOK plan's cap on the creator's own key is at least that. The profit invariant is NOT loosened to get
-// there: the prices, the merchant fee, the exchange rate and the 40 % share are those of 2026-10, and so are the allowances of the managed
-// plans that pay (the credits per action went up instead).
-func TestMaxEffortBudgetsFitWithoutLoosenTheInvariant(t *testing.T) {
+// D-31 (pending founder confirmation): the editor thinks at max effort, so a first edit and a revision get larger hard run budgets than
+// 2026-10 gave them. The profit invariant is NOT loosened to get there: the prices, the merchant fee, the exchange rate and the 40 %
+// share are those of 2026-10, and so are the allowances of the managed plans that pay (the credits per action went up instead). The list
+// passes the invariant, and it passes it with the fewest credits: one credit less on an edit would break it for some plan, so the
+// customer is not charged more credits than the budgets need. No dollar figure is pinned here: the budgets are the list's to choose, the
+// invariant's to bound.
+func TestMaxEffortBudgetsFitTheInvariantWithTheFewestCredits(t *testing.T) {
 	cur, err := credits.LoadDefault()
 	if err != nil {
 		t.Fatal(err)
@@ -153,12 +155,10 @@ func TestMaxEffortBudgetsFitWithoutLoosenTheInvariant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if vs := cur.Check(); len(vs) != 0 {
+		t.Fatalf("the current list breaks the invariant: %v", vs)
+	}
 	for _, p := range plans.Granted {
-		first, _ := cur.Budget(p, credits.EditFirst)
-		revision, _ := cur.Budget(p, credits.EditRevision)
-		if first < 3_000_000 || revision < 1_000_000 {
-			t.Errorf("%s: budgets %d and %d are below $3.00 and $1.00", p, first, revision)
-		}
 		cp, op := cur.Plans[p], old.Plans[p]
 		if cp.PriceEURCents != op.PriceEURCents || cp.BillingMode != op.BillingMode {
 			t.Errorf("%s: price or billing mode changed (%d %s, was %d %s)", p, cp.PriceEURCents, cp.BillingMode, op.PriceEURCents, op.BillingMode)
@@ -168,29 +168,43 @@ func TestMaxEffortBudgetsFitWithoutLoosenTheInvariant(t *testing.T) {
 				t.Errorf("%s: allowance changed to %d (was %d)", p, cp.AllowanceCredits, op.AllowanceCredits)
 			}
 		}
+		// A max-effort edit needs more than the old budgets gave it, on every managed plan (the point of the new list).
+		if p != plans.Studio {
+			for _, a := range []credits.Action{credits.EditFirst, credits.EditRevision} {
+				if cur.Plans[p].COGSBudgetMicros[a] <= old.Plans[p].COGSBudgetMicros[a] {
+					t.Errorf("%s %s: budget %d is not above the old %d", p, a, cur.Plans[p].COGSBudgetMicros[a], old.Plans[p].COGSBudgetMicros[a])
+				}
+			}
+		}
 	}
 	if cur.MaxCOGSShare.Cmp(old.MaxCOGSShare) != 0 || cur.MoRFeePct.Cmp(old.MoRFeePct) != 0 || cur.MoRFeeFixedEURCent != old.MoRFeeFixedEURCent || cur.USDPerEUR.Cmp(old.USDPerEUR) != 0 {
 		t.Errorf("share, fee or exchange rate changed: %v %v %d %v", cur.MaxCOGSShare, cur.MoRFeePct, cur.MoRFeeFixedEURCent, cur.USDPerEUR)
 	}
-	if vs := cur.Check(); len(vs) != 0 {
-		t.Errorf("the current list breaks the invariant: %v", vs)
+	// The fewest credits: take one off an edit and the invariant must fail for at least one plan.
+	for _, a := range []credits.Action{credits.EditFirst, credits.EditRevision} {
+		cheaper, _ := credits.LoadDefault()
+		cheaper.Credits[a]--
+		if len(cheaper.Check()) == 0 {
+			t.Errorf("%s costs %d credits, but %d would hold the invariant too: the customer pays more credits than the budgets need", a, cur.Credits[a], cheaper.Credits[a])
+		}
 	}
-	// The one trial: a first edit and two revisions fit its credits, and its fixed COGS allowance is what $3 + 2 x $1 needs.
+	// The one trial: a first edit and two revisions fit its credits, and its fixed COGS allowance is what the budgets of one video need
+	// (the invariant above is what ties the allowance to the budgets).
 	trial := cur.Plans[plans.Trial]
-	if trial.AllowanceCredits < cur.CreditsPerVideo() || cur.TrialCOGSAllowanceMicros != 5_000_000 {
-		t.Errorf("trial: %d credits for a %d-credit video, COGS allowance %d", trial.AllowanceCredits, cur.CreditsPerVideo(), cur.TrialCOGSAllowanceMicros)
+	if trial.AllowanceCredits < cur.CreditsPerVideo() {
+		t.Errorf("trial: %d credits for a %d-credit video", trial.AllowanceCredits, cur.CreditsPerVideo())
 	}
 }
 
 // A video is a first edit plus two revisions, so what it costs in credits comes from the list (the API and the CLI derive from it; no
-// code says "1 video = 10 credits"). The old list still says 10, and its plans paid for 2, 60, 15 and 40 videos; the current one says 40.
+// code says "1 video = 10 credits"). The old list still says 10, and its plans paid for 2, 60, 15 and 40 videos; the current one says 30.
 func TestCreditsPerVideoFollowsTheList(t *testing.T) {
 	cur, _ := credits.LoadDefault()
 	old, err := credits.LoadPriceList(configfiles.Plans(), "2026-10.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cur.CreditsPerVideo() != 24+2*8 || old.CreditsPerVideo() != 6+2*2 {
+	if cur.CreditsPerVideo() != 16+2*7 || old.CreditsPerVideo() != 6+2*2 {
 		t.Fatalf("credits per video: current %d, 2026-10 %d", cur.CreditsPerVideo(), old.CreditsPerVideo())
 	}
 	for _, tc := range []struct {
@@ -198,7 +212,7 @@ func TestCreditsPerVideoFollowsTheList(t *testing.T) {
 		want map[plans.Plan]int
 	}{
 		{old, map[plans.Plan]int{plans.Trial: 2, plans.Studio: 60, plans.Creator: 15, plans.Pro: 40}},
-		{cur, map[plans.Plan]int{plans.Trial: 1, plans.Studio: 60, plans.Creator: 3, plans.Pro: 10}},
+		{cur, map[plans.Plan]int{plans.Trial: 1, plans.Studio: 60, plans.Creator: 5, plans.Pro: 13}},
 	} {
 		for p, want := range tc.want {
 			if got := tc.list.VideosPerPeriod(p); got != want {

@@ -47,7 +47,7 @@ func TestRunsStartEdit(t *testing.T) {
 	e := newAssetsEnv(t, func(o *assetsEnvOptions) { o.runs = true })
 	p := e.newProject("ada", "9:16", e.readyAsset("ada", "lat.mp4"))
 
-	// The budget is the creator plan's for a first edit ($3.00 for a max-effort edit, spend control v1 section 4, D-31), whatever the request says.
+	// The budget is the creator plan's for a first edit ($2.00 for a max-effort edit, spend control v1 section 4, D-31), whatever the request says.
 	run := e.startEdit("ada", p, map[string]any{"instructions": "Open on the heaviest set.", "profile": "v1-start", "budget_usd": 3})
 	if !strings.HasPrefix(run.Id, "run_") || run.Agent != "editor" || run.Status != api.RunStatusQueued || run.ProjectId == nil || *run.ProjectId != p.Id ||
 		run.RoutingProfile != "v1-start" || !strings.HasPrefix(run.Model, "claude-opus") || run.BudgetMicros != creatorFirstEditBudget || run.BudgetToolCalls != 60 ||
@@ -89,7 +89,7 @@ func TestRunsStartEdit(t *testing.T) {
 }
 
 // creatorFirstEditBudget is config/plans/2026-10c.yaml: the creator plan's COGS budget for edit.first.
-const creatorFirstEditBudget = 3_000_000
+const creatorFirstEditBudget = 2_000_000
 
 func TestRunsStartEditRefusals(t *testing.T) {
 	e := newAssetsEnv(t, func(o *assetsEnvOptions) { o.runs = true })

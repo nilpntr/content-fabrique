@@ -56,7 +56,7 @@ func TestCheckedInProfilesResolveAndV1StartThinksAtMax(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for stage, tokens := range map[string]int{"editor": 64000, "revision": 32000} {
+	for stage, tokens := range map[string]int{"editor": 32000, "revision": 16000} {
 		if e, err := v1.Entry(stage); err != nil || e.Effort != "max" || e.MaxTokens != tokens {
 			t.Fatalf("v1-start %s = %+v, %v; want effort max and %d tokens", stage, e, err, tokens)
 		}

@@ -247,8 +247,9 @@ func upperBoundTokens(req Request) (int64, error) {
 // It tries a cheap upper bound of the input tokens first and asks count_tokens only when that does not clear the
 // per-request cap, or when the run budget or the database caps cannot cover the (inflated) bound.
 //
-// When the worst case of the call, at the max_tokens asked for, does not fit what the run's budget has left, max_tokens is cut to the
-// most that does fit (the input's worst case is paid first, the rest buys output), as long as that is at least MinOutputTokens. The
+// When the worst case of the call, at the max_tokens asked for, does not fit what the run's budget has left or the per-request cap
+// (whichever is less), max_tokens is cut to the most that does fit (the input's worst case is paid first, the rest buys output), as long
+// as that is at least MinOutputTokens. The
 // budget stays a hard cap: the reservation is of the cut worst case, so the call can never cost more than the run has left. Below
 // the minimum the call is refused with the run-budget error, as before, which the runtime takes as the budget limit. req is changed to
 // what will be sent.
@@ -281,7 +282,13 @@ func (m *metered) reserveCaps(ctx context.Context, reqp *Request, rsv *reservati
 			if err != nil {
 				return 0, err
 			}
+			// The room is what the run's budget has left, and no more than one call may cost (LLM_MAX_REQUEST_MICROS): fitting to the
+			// budget alone would send a long-input call at a max_tokens whose worst case the per-call cap then refuses (request_cap),
+			// which fails a run that a smaller answer could have served.
 			room := max(rb.Remaining(), 0)
+			if m.maxRequest > 0 {
+				room = min(room, m.maxRequest)
+			}
 			if full > room && !counted {
 				// The local bound of the input leans very high; do not give up output room for it. Count the input exactly first.
 				if err := count(); err != nil {

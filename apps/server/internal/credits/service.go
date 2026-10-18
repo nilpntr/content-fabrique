@@ -222,6 +222,12 @@ func (s *Service) SyncAllowance(ctx context.Context, ws ids.WorkspaceID) (store.
 	return s.Store.SyncAllowance(ctx, ws, s.List.AllowanceSpecs(), s.now())
 }
 
+// SyncListSwitch is the one-off step after the price list changed under a workspace that already has its allowance (see
+// store.TopUpAllowanceToList): the credits the new list adds to the allowance it was granted. Idempotent. It returns the credits added.
+func (s *Service) SyncListSwitch(ctx context.Context, ws ids.WorkspaceID) (int, error) {
+	return s.Store.TopUpAllowanceToList(ctx, ws, s.List.AllowanceSpecs(), s.now())
+}
+
 // TopUpExpiry is when a top-up granted at t expires.
 func (s *Service) TopUpExpiry(t time.Time) time.Time {
 	return store.AddMonths(t, s.List.TopUpExpiryMonths)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -974,7 +975,12 @@ type AllowanceSpec struct {
 	// Refill is true for a plan that gets its allowance again every period; a trial gets it once.
 	Refill      bool
 	ListVersion string
+	// TopUpExpiryMonths is how long the credits that a list switch adds to a trial's allowance (which never expires) last.
+	TopUpExpiryMonths int
 }
+
+// ListSwitchActor is the actor of the ledger rows that TopUpAllowanceToList writes.
+const ListSwitchActor = "system:price-list-switch"
 
 // AllowanceResult says what SyncAllowance did.
 type AllowanceResult struct {
@@ -1299,6 +1305,102 @@ func (s *Store) ExpireDueCredits(ctx context.Context, now time.Time, limit int) 
 		credits += left
 	}
 	return sources, credits, nil
+}
+
+// WorkspacesBehindTheList lists up to limit workspaces whose current allowance is smaller than the allowance the specs give their plan
+// (the price list changed under them), with an id above after; TopUpAllowanceToList decides for each.
+func (s *Store) WorkspacesBehindTheList(ctx context.Context, specs map[plans.Plan]AllowanceSpec, now time.Time, after ids.WorkspaceID, limit int) ([]ids.WorkspaceID, error) {
+	if limit < 1 {
+		return nil, fmt.Errorf("%w: limit %d", ErrInvalid, limit)
+	}
+	var names []string
+	for p := range specs {
+		names = append(names, string(p))
+	}
+	slices.Sort(names)
+	allowances := make([]int32, len(names))
+	for i, n := range names {
+		allowances[i] = int32(specs[plans.Plan(n)].Credits) //nolint:gosec // a price list value
+	}
+	now = now.UTC()
+	rows, err := s.q.ListWorkspacesBehindTheList(ctx, db.ListWorkspacesBehindTheListParams{Plans: names, Allowances: allowances, Now: &now, After: after, RowLimit: int32(limit)}) //nolint:gosec // checked above
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	return rows, nil
+}
+
+// TopUpAllowanceToList is the one-off step when the price list changes under a workspace that already has its allowance: the allowance it
+// was granted (a trial's, once; a refilling plan's for the period it is in) came from an older list and is smaller than the allowance the
+// new list gives the plan, so the credits would buy less than the plan now promises, and a trial, whose key blocks a second grant, could
+// be left with fewer credits than one edit costs. The difference is added as an adjustment, with an actor and a reason, once: its key
+// names the allowance it tops up and the list version, and what earlier switches added counts as part of the allowance, so a later list
+// adds only what is still missing. It lasts as long as the allowance does (a trial's lasts the list's top-up expiry). A list that gives
+// the plan the same or a smaller allowance changes nothing, and neither does a workspace with no active plan or no allowance. It returns
+// the credits added.
+func (s *Store) TopUpAllowanceToList(ctx context.Context, ws ids.WorkspaceID, specs map[plans.Plan]AllowanceSpec, now time.Time) (int, error) {
+	if ws.IsZero() || now.IsZero() {
+		return 0, fmt.Errorf("%w: a top-up needs a workspace and a time", ErrInvalid)
+	}
+	now = now.UTC()
+	var added int
+	err := s.inTx(ctx, func(tx *Store) error {
+		added = 0
+		if _, err := tx.lockCreditAccount(ctx, ws); err != nil {
+			return err
+		}
+		wp, err := tx.q.GetWorkspacePlan(ctx, ws)
+		if err != nil {
+			return err
+		}
+		plan := plans.Plan(wp.Plan)
+		if !plan.Grantable() || wp.Status != string(StatusActive) || (wp.CurrentPeriodEnd != nil && !wp.CurrentPeriodEnd.After(now)) {
+			return nil
+		}
+		spec, ok := specs[plan]
+		if !ok {
+			return fmt.Errorf("store: the price list has no allowance for plan %q", plan)
+		}
+		p := string(plan)
+		g, err := tx.q.GetCurrentAllowanceGrant(ctx, db.GetCurrentAllowanceGrantParams{WorkspaceID: ws, Plan: &p, Now: &now})
+		if errors.Is(err, errNoRows) {
+			return nil // no allowance to top up
+		}
+		if err != nil {
+			return err
+		}
+		missing := spec.Credits - int(g.Credits) - int(g.Added)
+		if missing <= 0 {
+			return nil
+		}
+		var expires time.Time
+		if g.ExpiresAt != nil {
+			expires = g.ExpiresAt.UTC()
+		} else {
+			expires = AddMonths(now, max(spec.TopUpExpiryMonths, 1))
+		}
+		actor := ListSwitchActor
+		reason := fmt.Sprintf("price list %s: the %s allowance is %d credits and this one was granted as %d; the missing %d are added once", spec.ListVersion, plan, spec.Credits, int(g.Credits)+int(g.Added), missing)
+		version := spec.ListVersion
+		_, err = tx.q.InsertCreditLedger(ctx, db.InsertCreditLedgerParams{
+			WorkspaceID: ws, Kind: CreditAdjust, Credits: int32(missing), //nolint:gosec // a price list value
+			Plan: &p, PlanListVersion: &version, ExpiresAt: &expires, Actor: &actor, Reason: &reason,
+			IdempotencyKey: fmt.Sprintf("listswitch:%s:%s", g.ID, spec.ListVersion), CreatedAt: now,
+		})
+		switch {
+		case err == nil:
+			added = missing
+			return nil
+		case errors.Is(err, errNoRows): // this list's top-up was written already
+			return nil
+		default:
+			return err
+		}
+	})
+	if err != nil {
+		return 0, mapErr(err)
+	}
+	return added, nil
 }
 
 // WorkspacesNeedingAllowance lists up to limit workspaces whose allowance may need granting at now, with an id above after (the zero ID

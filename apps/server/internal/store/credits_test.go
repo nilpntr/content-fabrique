@@ -596,7 +596,7 @@ func TestCreditsTrialIsGrantedOnceAndNeverRefilled(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err := rig.a.SyncAllowance(ctx, ws.ID, specs, creditDay)
-	if err != nil || res.Granted != 40 {
+	if err != nil || res.Granted != 30 {
 		t.Fatalf("trial = %+v, %v", res, err)
 	}
 	// Use all of it, then wait for months: nothing is granted again, by the sync or by the job's list.
@@ -615,17 +615,17 @@ func TestCreditsTrialIsGrantedOnceAndNeverRefilled(t *testing.T) {
 		if due, err := rig.a.WorkspacesNeedingAllowance(ctx, at, ids.WorkspaceID{}, 10); err != nil || len(due) != 0 {
 			t.Fatalf("after %d months the job would look at %v (%v)", months, due, err)
 		}
-		if got := available(t, rig.a, ws, at); got != 34 {
-			t.Fatalf("after %d months %d credits, want the 34 that were left", months, got)
+		if got := available(t, rig.a, ws, at); got != 24 {
+			t.Fatalf("after %d months %d credits, want the 24 that were left", months, got)
 		}
 	}
-	// Going to a paid plan replaces the trial's leftover, and going back to the trial does not give another 40.
+	// Going to a paid plan replaces the trial's leftover, and going back to the trial does not give another 30.
 	if _, err := rig.a.GrantPlan(ctx, store.GrantInput{WorkspaceID: ws.ID, Plan: plans.Creator, GrantedBy: "test"}); err != nil {
 		t.Fatal(err)
 	}
 	at := store.AddMonths(creditDay, 8)
 	res, err = rig.a.SyncAllowance(ctx, ws.ID, specs, at)
-	if err != nil || res.Granted != 150 || res.Replaced != 34 {
+	if err != nil || res.Granted != 150 || res.Replaced != 24 {
 		t.Fatalf("trial to creator = %+v, %v", res, err)
 	}
 	if _, err := rig.a.GrantPlan(ctx, store.GrantInput{WorkspaceID: ws.ID, Plan: plans.Trial, GrantedBy: "test"}); err != nil {

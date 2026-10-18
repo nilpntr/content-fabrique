@@ -317,7 +317,7 @@ func (l *PriceList) Budget(p plans.Plan, a Action) (int64, bool) {
 func (l *PriceList) AllowanceSpecs() map[plans.Plan]store.AllowanceSpec {
 	out := make(map[plans.Plan]store.AllowanceSpec, len(l.Plans))
 	for p, pl := range l.Plans {
-		out[p] = store.AllowanceSpec{Plan: p, Credits: pl.AllowanceCredits, Refill: pl.Refill, ListVersion: l.Version}
+		out[p] = store.AllowanceSpec{Plan: p, Credits: pl.AllowanceCredits, Refill: pl.Refill, ListVersion: l.Version, TopUpExpiryMonths: l.TopUpExpiryMonths}
 	}
 	return out
 }

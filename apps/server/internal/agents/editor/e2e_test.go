@@ -513,13 +513,13 @@ func TestEditorRunInReplayMode(t *testing.T) {
 	if r.CostMicros <= 0 || r.CostMicros >= r.BudgetMicros {
 		t.Fatalf("cost %d of budget %d", r.CostMicros, r.BudgetMicros)
 	}
-	// The run was a first edit on a creator plan: its budget is the plan's, and its 24 credits were charged when it succeeded.
+	// The run was a first edit on a creator plan: its budget is the plan's, and its 16 credits were charged when it succeeded.
 	if r.BudgetMicros != cassetteRunBudget {
 		t.Fatalf("the run's budget is %d, want the creator plan's budget for a first edit, %d", r.BudgetMicros, cassetteRunBudget)
 	}
 	bal, err := x.st.CreditBalance(context.Background(), x.wsA.ID, time.Now())
-	if err != nil || bal.Available != 26 || bal.Held != 0 {
-		t.Fatalf("credits after the run = %+v, %v; want 26 left of 50 and nothing held", bal, err)
+	if err != nil || bal.Available != 34 || bal.Held != 0 {
+		t.Fatalf("credits after the run = %+v, %v; want 34 left of 50 and nothing held", bal, err)
 	}
 	if charged, err := x.st.ProjectHasChargedEdit(context.Background(), x.wsA.ID, x.prj); err != nil || !charged {
 		t.Fatalf("the project's edit was not charged: %v %v", charged, err)

@@ -1,15 +1,16 @@
-# The price list and the plans, version 2026-10c (decision D-31, "the editor thinks at max effort"; docs/design/spend-control-v1.md sections 3 and 4).
+# The price list and the plans, version 2026-10c (decision D-31, "the editor thinks at max effort"; docs/design/spend-control-v1.md section 3a).
 #
-# Why a new version: the editor now runs Opus 5.5 at effort `max` (config/routing/v1-start.yaml) and a max-effort edit needs a much larger hard run
-# budget than 2026-10 gave it ($0.96 for a creator's first edit). This file gives a first edit $3.00 and a revision $1.00 on every managed plan. The
-# plan prices, the allowances of the managed plans and max_cogs_share (0.40) are UNCHANGED: the profit invariant is not loosened, so what a plan's
-# credits earn now pays for fewer videos. 2026-10.yaml stays as it was (every ledger row names the version that priced it) and is only read by
-# the tests; the code runs on the newest file (credits.ListFile).
+# Why a new version: the editor now runs Opus 5.5 at effort `max` (config/routing/v1-start.yaml) and a max-effort edit needs a larger hard run
+# budget than 2026-10 gave it ($0.96 for a creator's first edit). This file gives a first edit $2.00 and a revision $0.80 on every managed plan
+# (a live max-effort edit cost $1.01; its largest call wrote 13,203 output tokens). The plan prices, the allowances of creator and pro, and
+# max_cogs_share (0.40) are UNCHANGED: the profit invariant is not loosened, so what a plan's credits earn now pays for fewer videos.
+# 2026-10.yaml stays as it was (every ledger row names the version that priced it) and is only read by the tests; the code runs on the newest
+# file (credits.ListFile). Not deployed yet, so this file may still be edited until the founder confirms the numbers.
 #
 # The numbers are pending founder confirmation.
 #
-# A change is a NEW FILE with a new version, never an edit of an old one: every credit ledger row names the version that priced it.
-# The profit-invariant test (internal/credits) runs over every file in this directory and fails the build when a plan could lose money:
+# A change is a NEW FILE with a new version, never an edit of an old one once it is deployed: every credit ledger row names the version that
+# priced it. The profit-invariant test (internal/credits) runs over every file in this directory and fails the build when a plan could lose money:
 #
 #   cogs_budget(action, plan) <= max_cogs_share x net_revenue_per_credit(plan) x credits(action)
 #   net_revenue_per_credit(plan) = (price x (1 - mor_fee_pct) - mor_fee_fixed) x usd_per_eur / allowance_credits(plan)
@@ -17,26 +18,27 @@
 # Money is integers: prices in euro cents, budgets in micro-dollars (millionths of a US dollar). The few decimals below (the fee
 # percentage, the exchange rate, the share) are parsed exactly (no binary floats) and are used by the test only; nothing stores them.
 #
-# How the credits per action were derived. A credit's price is the same for every action, and an action's credits are one number for all
-# plans, so they must be enough for the plan that earns least per credit of the allowance, which is pro (400 credits for 129 euro; creator
-# is 150 credits for 59 euro). Pro earns $0.3296 net per credit, so 40 % of it is $0.13185 per credit, and:
-#   edit.first    $3.00 / $0.13185 = 22.8 credits  -> 24
-#   edit.revision $1.00 / $0.13185 =  7.6 credits  ->  8
-# (24 and 8, not 23 and 8, so that 1 video = 24 + 2 x 8 = 40 credits is a round number and pro gets exactly 10 videos a month). Creator,
-# which earns $0.4002 per credit, then has room to spare: its limit is $3.84 and $1.28. ideation.run stays at 1 credit.
+# How the credits per action were derived. An action's credits are one number for all plans, so they must be enough for the plan that earns
+# least per credit of its allowance, which is pro (400 credits for 129 euro; creator is 150 credits for 59 euro). Pro earns $0.3296 net per
+# credit, so 40 % of it is $0.131846 per credit, and:
+#   edit.first    $2.00 / $0.131846 = 15.2 credits  -> 16
+#   edit.revision $0.80 / $0.131846 =  6.1 credits  ->  7
+# so 1 video = 16 + 2 x 7 = 30 credits. TestMaxEffortBudgetsFitTheInvariantWithTheFewestCredits checks that one credit less would break the
+# invariant for some plan. Creator, which earns $0.4002 per credit, then has room to spare: its limit is $2.56 and $1.12. ideation.run stays
+# at 1 credit.
 version: "2026-10c"
-source: docs/design/spend-control-v1.md sections 3 and 4, decision D-31
+source: docs/design/spend-control-v1.md section 3a, decision D-31
 notes:
-  - Credits are the customer's currency; a video is a first edit plus two revisions, so 1 video = 24 + 2 x 8 = 40 credits (credits.PriceList.CreditsPerVideo derives it, nothing else may hardcode it). The UI shows credits as videos by asking the API.
-  - The editor thinks at max effort, so a first edit may cost up to $3.00 and a revision up to $1.00 (the hard budget of the run). A real edit costs a fraction of that; the budget is the backstop.
+  - Credits are the customer's currency; a video is a first edit plus two revisions, so 1 video = 16 + 2 x 7 = 30 credits (credits.PriceList.CreditsPerVideo derives it, nothing else may hardcode it). The UI shows credits as videos by asking the API.
+  - The editor thinks at max effort, so a first edit may cost up to $2.00 and a revision up to $0.80 (the hard budget of the run). A real edit costs a fraction of that; the budget is the backstop.
   - The numbers are the launch hypotheses of the product plan (section 10), to be validated in the beta, and pending founder confirmation (D-31).
   - A plan's budget for an action is the hard `budget_micros` of the agent run that performs it. The runtime stops the run at its budget.
 
 # What each billable action costs, in credits. Ingest, quick look, analysis, transcription and previews cost nothing: the plan covers
 # them and quotas cap them. export.final is free but needs an edit that was charged (the final render of a paid-for edit).
 actions:
-  edit.first: 24
-  edit.revision: 8
+  edit.first: 16
+  edit.revision: 7
   export.final: 0
   ideation.run: 1
 
@@ -58,80 +60,79 @@ max_cogs_share: 0.40
 topup_expiry_months: 12
 
 # A trial earns nothing, so its budgets come from a fixed COGS allowance per trial, spread over the trial's credits. The trial gets the
-# same per-edit budgets as a paying plan ($3.00 and $1.00: the first impression should be the best result), so one video (40 credits: a
-# first edit and two revisions) needs 40 credits and a COGS allowance of 40 credits x $0.125 = $5.00 (it was $2.50 for 20 credits, and a
-# trial could not afford a 24-credit first edit with 20). This is the one place where this file spends more of our money than 2026-10:
-# worst case $5.00 per trial instead of $2.50, for one video instead of two.
-trial_cogs_allowance_micros: 5000000
+# same per-edit budgets as a paying plan ($2.00 and $0.80: the first impression should be the best result), so one video (30 credits: a
+# first edit and two revisions) needs 30 credits and a COGS allowance of 30 credits x $0.125 = $3.75 (it was $2.50 for 20 credits). This is
+# the one place where this file spends more of our money per customer than 2026-10: worst case $3.75 per trial instead of $2.50, for one
+# video instead of two.
+trial_cogs_allowance_micros: 3750000
 
 plans:
   trial:
     price_eur_cents: 0
     billing_mode: managed
-    allowance_credits: 40
-    refill: false # 40 credits once, never refilled: one video
+    allowance_credits: 30
+    refill: false # 30 credits once, never refilled: one video
     storage_gb: 2
     concurrent_runs: 1
     uncharged_runs_per_day: 5 # editor runs per UTC day that ended with nothing to charge (released after they spent money); more are refused
     transcribed_minutes_per_day: 30
-    cogs_budget_micros: # 5.0 USD / 40 credits = 125,000 per credit
-      edit.first: 3000000
-      edit.revision: 1000000
+    cogs_budget_micros: # 3.75 USD / 30 credits = 125,000 per credit
+      edit.first: 2000000
+      edit.revision: 800000
       export.final: 0
       ideation.run: 125000
 
   studio:
     price_eur_cents: 2500
     billing_mode: byok # tokens are billed to the creator's own key
-    allowance_credits: 2400 # 60 videos at 40 credits: the same 60 videos a month as before (it was 600 credits at 10 per video); our cost is only the non-LLM budgets below
+    allowance_credits: 1800 # 60 videos at 30 credits: the same 60 videos a month as before (it was 600 credits at 10 per video); our cost is only the non-LLM budgets below
     refill: true
     storage_gb: 100
     concurrent_runs: 3
     uncharged_runs_per_day: 5 # editor runs per UTC day that ended with nothing to charge (released after they spent money); more are refused
     transcribed_minutes_per_day: 240
-    # The run's cap on the creator's own key (their money, not ours): $3 for a first edit so that a max-effort edit can finish (it was the
-    # $2 default of spend control section 4); the revision keeps $2, which is already above the $1 a managed revision gets.
+    # The run's cap on the creator's own key (their money, not ours): the $2 default of spend control section 4, enough for a max-effort edit.
     cogs_budget_micros:
-      edit.first: 3000000
+      edit.first: 2000000
       edit.revision: 2000000
       export.final: 0
       ideation.run: 500000
     # What an action may cost US on a BYOK plan: compute, storage and transcription (the invariant checks these, not the run's cap).
-    # 0.40 x $0.010476 net per credit = $0.004190 per credit, so 24 credits allow $0.1006 and 8 credits $0.0335. The first two are the numbers
-    # of 2026-10 unchanged; an idea run (1 credit) allows $0.0042, so its budget is $0.004 (it was $0.016 at 600 credits). An idea run has no
-    # compute of its own: it is model tokens, which are the creator's.
+    # 0.40 x $0.013968 net per credit = $0.005587 per credit, so 16 credits allow $0.0894 and 7 credits $0.0391. A first edit is therefore
+    # budgeted $0.089 (it was $0.100 at 600 credits), a revision $0.033 as before, and an idea run (1 credit) $0.005 (it was $0.016). An idea
+    # run has no compute of its own: it is model tokens, which are the creator's.
     non_llm_cogs_budget_micros:
-      edit.first: 100000
+      edit.first: 89000
       edit.revision: 33000
       export.final: 0
-      ideation.run: 4000
+      ideation.run: 5000
 
   creator:
     price_eur_cents: 5900
     billing_mode: managed
-    allowance_credits: 150 # 3.75 videos at 40 credits (it was 15 at 10 per video). The limit of the invariant is 192 credits (4.8 videos), see the PR
+    allowance_credits: 150 # 5 videos at 30 credits (it was 15 at 10 per video). The limit of the invariant is 192 credits (6.4 videos), see the PR
     refill: true
     storage_gb: 50
     concurrent_runs: 2
     uncharged_runs_per_day: 5 # editor runs per UTC day that ended with nothing to charge (released after they spent money); more are refused
     transcribed_minutes_per_day: 120
-    cogs_budget_micros: # 0.40 x $0.4002 net per credit = $0.1601 per credit: 24 credits allow $3.84, 8 allow $1.28, 1 allows $0.16
-      edit.first: 3000000
-      edit.revision: 1000000
+    cogs_budget_micros: # 0.40 x $0.4002 net per credit = $0.1601 per credit: 16 credits allow $2.56, 7 allow $1.12, 1 allows $0.16
+      edit.first: 2000000
+      edit.revision: 800000
       export.final: 0
       ideation.run: 160000
 
   pro:
     price_eur_cents: 12900
     billing_mode: managed
-    allowance_credits: 400 # 10 videos at 40 credits (it was 40 at 10 per video)
+    allowance_credits: 400 # 13 videos (13.3) at 30 credits (it was 40 at 10 per video)
     refill: true
     storage_gb: 200
     concurrent_runs: 4
     uncharged_runs_per_day: 5 # editor runs per UTC day that ended with nothing to charge (released after they spent money); more are refused
     transcribed_minutes_per_day: 360
-    cogs_budget_micros: # 0.40 x $0.3296 net per credit = $0.1318 per credit: 24 credits allow $3.16, 8 allow $1.05, 1 allows $0.13
-      edit.first: 3000000
-      edit.revision: 1000000
+    cogs_budget_micros: # 0.40 x $0.3296 net per credit = $0.1318 per credit: 16 credits allow $2.11, 7 allow $0.92, 1 allows $0.13
+      edit.first: 2000000
+      edit.revision: 800000
       export.final: 0
       ideation.run: 130000

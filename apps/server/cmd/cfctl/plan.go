@@ -28,7 +28,7 @@ const planUsage = `Usage:
 
 Sets, removes or shows the plan of a person's workspace, until billing exists (P7-01). Without a plan the workspace sees
 the paywall and the API answers 402 plan_required to its paid endpoints. grant also grants the plan's allowance of credits
-for the current period at once (150 credits for creator, 400 for pro, 600 for studio; a trial gets 20, once). The worker grants the
+for the current period at once (the size is the price list's, config/plans, and is printed; a trial gets its allowance once). The worker grants the
 next periods, monthly from the day of the grant. Use cfctl credits to see or change the balance. The person must have signed in once, because that
 is what creates their workspace. It reads DATABASE_URL (the app's own role: it needs DML only) and prints the workspace
 name, its id, the plan, status and end of the period. Never prints the URL or a secret.

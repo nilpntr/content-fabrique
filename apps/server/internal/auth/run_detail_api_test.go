@@ -171,18 +171,18 @@ func TestRunsCredits(t *testing.T) {
 	if first.Credits != nil {
 		t.Errorf("the answer of start carries credits: %+v", first.Credits)
 	}
-	if c := get(first).Credits; c == nil || c.State != api.RunCreditsStateHeld || c.Action != api.RunCreditsActionEditFirst || c.Credits != 24 {
+	if c := get(first).Credits; c == nil || c.State != api.RunCreditsStateHeld || c.Action != api.RunCreditsActionEditFirst || c.Credits != 16 {
 		t.Fatalf("while it works: %+v", c)
 	}
 
 	e.endRun("ada", first, store.AgentSucceeded)
-	if c := get(first).Credits; c == nil || c.State != api.RunCreditsStateCharged || c.Action != api.RunCreditsActionEditFirst || c.Credits != 24 {
+	if c := get(first).Credits; c == nil || c.State != api.RunCreditsStateCharged || c.Action != api.RunCreditsActionEditFirst || c.Credits != 16 {
 		t.Fatalf("after success: %+v", c)
 	}
 
 	// The next run on the project is a revision, and one that fails is released: no credits object.
 	rev := e.startEdit("ada", p, nil)
-	if c := get(rev).Credits; c == nil || c.State != api.RunCreditsStateHeld || c.Action != api.RunCreditsActionEditRevision || c.Credits != 8 {
+	if c := get(rev).Credits; c == nil || c.State != api.RunCreditsStateHeld || c.Action != api.RunCreditsActionEditRevision || c.Credits != 7 {
 		t.Fatalf("revision held: %+v", c)
 	}
 	e.endRun("ada", rev, store.AgentFailed)
@@ -197,7 +197,7 @@ func TestRunsCredits(t *testing.T) {
 	if _, _, err := e.st.RefundAction(ctx, e.ws["ada"], id, "test", "test", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if c := get(first).Credits; c == nil || c.State != api.RunCreditsStateRefunded || c.Credits != 24 {
+	if c := get(first).Credits; c == nil || c.State != api.RunCreditsStateRefunded || c.Credits != 16 {
 		t.Fatalf("after a refund: %+v", c)
 	}
 

@@ -23,8 +23,8 @@ func TestEntry(t *testing.T) {
 		want  Entry
 	}{
 		// D-31: the editor and the revision think at max effort, with output room sized for it.
-		{v1, "editor", Entry{Model: "claude-opus-5-5", Effort: "max", MaxTokens: 64000}},
-		{v1, "revision", Entry{Model: "claude-opus-5-5", Effort: "max", MaxTokens: 32000}},
+		{v1, "editor", Entry{Model: "claude-opus-5-5", Effort: "max", MaxTokens: 32000}},
+		{v1, "revision", Entry{Model: "claude-opus-5-5", Effort: "max", MaxTokens: 16000}},
 		{cheap, "editor", Entry{Model: "claude-haiku-5-5", Effort: "medium", MaxTokens: 24000}},
 		{v1, "research.lead", Entry{Model: "claude-opus-5-5", Effort: "medium"}},
 		{v1, "research.workers", Entry{Model: "claude-haiku-5-5"}},

@@ -51,12 +51,12 @@ func outputOf(t *testing.T, r store.AgentRun) map[string]any {
 	return m
 }
 
-// A $3.00 first edit on Opus whose turns are long (each costs what an Opus turn does): the calls shrink as the money runs low, the run's
+// A $2.00 first edit on Opus whose turns are long (each costs what an Opus turn does): the calls shrink as the money runs low, the run's
 // cost never passes the budget, and the run ends succeeded, on its newest previewed version, not failed at the budget.
 func TestFirstEditOnOpusShrinksCallsAndFinishesAtTheBudget(t *testing.T) {
 	x, api := budgetRun(t, false, 165)
 	r := x.get()
-	if r.BudgetMicros != 3_000_000 || r.MaxTokens != 64_000 || r.Model != "claude-opus-5-5" {
+	if r.BudgetMicros != 2_000_000 || r.MaxTokens != 32_000 || r.Model != "claude-opus-5-5" {
 		t.Fatalf("run: budget %d, max_tokens %d, model %s", r.BudgetMicros, r.MaxTokens, r.Model)
 	}
 	if r.Status != store.AgentSucceeded {
@@ -66,12 +66,12 @@ func TestFirstEditOnOpusShrinksCallsAndFinishesAtTheBudget(t *testing.T) {
 		t.Fatalf("cost %d against a budget of %d", r.CostMicros, r.BudgetMicros)
 	}
 	sent := maxTokensOf(api)
-	if sent[0] != 64_000 {
+	if sent[0] != 32_000 {
 		t.Errorf("the first call was cut to %d although the whole budget was there", sent[0])
 	}
 	var shortened int
 	for i, mt := range sent {
-		if mt < 64_000 {
+		if mt < 32_000 {
 			shortened++
 			if mt < 2048 {
 				t.Errorf("call %d was cut to %d, under the minimum", i+1, mt)
@@ -92,12 +92,12 @@ func TestFirstEditOnOpusShrinksCallsAndFinishesAtTheBudget(t *testing.T) {
 	t.Logf("max_tokens sent: %v; cost %d of %d; %d calls", sent, r.CostMicros, r.BudgetMicros, len(sent))
 }
 
-// A $1.00 revision on Opus (the `revision` entry: 32,000 tokens, half of what the editor entry reserves): it makes the plan,
+// A $0.80 revision on Opus (the `revision` entry: 16,000 tokens, half of what the editor entry reserves): it makes the plan,
 // the edit and a check, the calls are cut to fit, and the cap holds.
 func TestRevisionOnOpusCompletesAPlanAnEditAndACheck(t *testing.T) {
-	x, api := budgetRun(t, true, 50)
+	x, api := budgetRun(t, true, 25)
 	r := x.get()
-	if r.BudgetMicros != 1_000_000 || r.MaxTokens != 32_000 || r.Model != "claude-opus-5-5" || r.Stage != "editor" {
+	if r.BudgetMicros != 800_000 || r.MaxTokens != 16_000 || r.Model != "claude-opus-5-5" || r.Stage != "editor" {
 		t.Fatalf("run: budget %d, max_tokens %d, model %s, stage %s; want the revision entry under the editor stage", r.BudgetMicros, r.MaxTokens, r.Model, r.Stage)
 	}
 	if r.Status != store.AgentSucceeded {
@@ -107,12 +107,12 @@ func TestRevisionOnOpusCompletesAPlanAnEditAndACheck(t *testing.T) {
 		t.Fatalf("cost %d against a budget of %d", r.CostMicros, r.BudgetMicros)
 	}
 	sent := maxTokensOf(api)
-	if sent[0] > 32_000 {
-		t.Errorf("the first call asked for %d tokens, over the revision entry's 32,000", sent[0])
+	if sent[0] > 16_000 {
+		t.Errorf("the first call asked for %d tokens, over the revision entry's 16,000", sent[0])
 	}
 	shortened := false
 	for _, mt := range sent {
-		shortened = shortened || mt < 32_000
+		shortened = shortened || mt < 16_000
 	}
 	if !shortened {
 		t.Errorf("no call was shortened: %v", sent)

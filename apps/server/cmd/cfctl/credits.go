@@ -20,8 +20,8 @@ const balanceUsage = `Usage:
   cfctl credits grant  --workspace <wks_... or org_...> --credits N --reason <text> [--expires DATE] [flags]
   cfctl credits adjust --workspace <wks_... or org_...> --credits <+N or -N> --reason <text> [--expires DATE] [flags]
 
-The credits of a workspace (spend control v1, D-31), until checkout exists (P7-01c). They are the customer's currency: 1 video = 10
-credits. show prints the plan, the balance and the newest ledger rows. grant adds a top-up. adjust is an operator's correction: a positive
+The credits of a workspace (spend control v1, D-31), until checkout exists (P7-01c). They are the customer's currency: a video is a first edit plus two
+revisions, and the price list says how many credits that is (show prints the balance in videos from it). show prints the plan, the balance and the newest ledger rows. grant adds a top-up. adjust is an operator's correction: a positive
 number adds credits, a negative one takes them away (and fails when the workspace has fewer). Every grant and adjustment writes a ledger row
 with who ran it (cfctl:<OS user>) and the reason, and nothing is ever edited or deleted. It reads DATABASE_URL (the app's own role) and never
 prints a secret.
