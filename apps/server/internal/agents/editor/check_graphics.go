@@ -15,8 +15,9 @@ import (
 
 // The checks of the motion-graphics overlays (D-35, docs/design/motion-graphics-v1.md section 9):
 //
-//   - overlay_readable: every overlay is fully on screen for at least minReadableMs before its exit starts (the times are the
-//     template's own, motion.Schedule, so the check says what the render does);
+//   - overlay_readable: every overlay can be read for at least minReadableMs: from when its text has landed (its last element 95 %
+//     of the way in) until its exit has visibly begun (10 % of the way out). The times are the templates' own curves (motion.Schedule,
+//     Timing.ReadableMs), held to the rendered frames by a docker test, so the check says what the render shows;
 //   - overlay_over_subject: the torso rule. An overlay is never drawn on the person's body: the renderer fits it like a text item
 //     (subject.FitText, the same function: at its own time, else in the part of it that has room, at the nearest time that has, or not
 //     at all), so the check fails what the editor did not mean: a graphic left out, a hook or chapter title shown at another time, and
@@ -156,8 +157,18 @@ func (c *checker) overlayReadable() Check {
 		read := t.ReadableMs()
 		shortest = min(shortest, read)
 		if read < minReadableMs {
-			bad = append(bad, fmt.Sprintf("%s (%s) is fully on screen for %.1f s before it leaves (in at %.2f s, out from %.2f s): make duration_ms at least %d, or start it earlier, or give it fewer words or accents that come sooner",
-				g.ID, g.Template, float64(read)/1000, float64(t.FullyInMs)/1000, float64(t.ExitMs)/1000, t.FullyInMs+minReadableMs+motion.FeelOf(g).ExitMs))
+			// The shortest duration that reads long enough (a longer item leaves later; a short one's exit is a quarter of it).
+			need := g.DurationMs + minReadableMs - read
+			for d := g.DurationMs; d <= g.DurationMs+4*minReadableMs; d += 10 {
+				longer := g
+				longer.DurationMs = d
+				if motion.Schedule(longer, lines).ReadableMs() >= minReadableMs {
+					need = d
+					break
+				}
+			}
+			bad = append(bad, fmt.Sprintf("%s (%s) can be read for %.1f s (its text has landed at %.2f s and starts to leave at %.2f s): make duration_ms at least %d, or start it earlier, or give it fewer words or accents that come sooner",
+				g.ID, g.Template, float64(read)/1000, float64(t.LegibleMs)/1000, float64(t.LeavingMs)/1000, need))
 		}
 	}
 	if len(bad) > 0 {

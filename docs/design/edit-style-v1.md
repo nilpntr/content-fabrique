@@ -243,7 +243,7 @@ Sections 2 and 3 are the generic craft of a genre. A creator who shows us their 
 
 | Check | Fails when |
 |---|---|
-| `overlay_readable` | a graphic is fully on screen for less than 1.2 s before its exit starts (the template's own timing, `motion.Schedule`); the fix names the duration |
+| `overlay_readable` | a graphic can be read for less than 1.2 s: from when its text has landed (the last element 95 % of the way in) until its exit has visibly begun (10 % of the way out), from the templates' own curves (`motion.Schedule`, held to the rendered frames by a docker test); the fix names the shortest duration that reads long enough |
 | `overlay_over_subject` | a graphic the renderer leaves out (no time clear of the body), a hook or chapter graphic it moves to another time, or one set not to avoid the subject that covers it (`subject.FitText`, as for text) |
 | `graphics_overlap` | a graphic the renderer leaves out because it would be drawn over another graphic or a text on screen at the same time (no room below or above it, no free time next to it), or a hook or chapter graphic moved to another time for it; the fix names the times that fit (`motion.Layout`) |
 | `overlay_legibility` | the letters' contrast with the picture behind their box, measured on the preview just before or after the graphic, is under 3:1 (2:1 with a shadow; a plate or an outline passes) |
