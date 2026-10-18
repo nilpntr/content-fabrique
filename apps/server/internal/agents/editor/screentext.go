@@ -14,8 +14,21 @@ type screenText struct {
 	Graphic *timeline.GraphicsItem
 }
 
-// IsTitle says whether the text is a title: a text item in a title_ style, or a title graphic (title_pop, blur_in, chapter_card).
+// IsChapter says whether the text is a numbered chapter title: a chapter_card, or a text (or another graphic) whose words are "1. ...".
+// A chapter title is neither the video's title nor a label: the creator's chapter-titles setting governs it (chapter_titles).
+func (t screenText) IsChapter() bool {
+	if t.Graphic != nil && t.Graphic.Template == timeline.TemplateChapterCard {
+		return true
+	}
+	return IsChapterTitle(t.Text)
+}
+
+// IsTitle says whether the text is the video's title (the hook or series title): a text item in a title_ style or a title_pop or blur_in
+// graphic, that is not a chapter title.
 func (t screenText) IsTitle() bool {
+	if t.IsChapter() {
+		return false
+	}
 	if t.Graphic != nil {
 		return t.Graphic.IsTitle()
 	}

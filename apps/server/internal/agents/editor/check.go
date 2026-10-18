@@ -1092,6 +1092,10 @@ func (c *checker) editStats() styleprofile.EditStats {
 		if it.Graphic != nil || it.AnimationOrDefault() != timeline.AnimationNone { // a graphic enters by its template
 			e.Animated++
 		}
+		if it.IsChapter() { // a chapter card or "1. ..." text: the chapter-titles setting's, not the title's or a label
+			e.Chapters++
+			continue
+		}
 		if !it.IsTitle() {
 			e.Labels++
 			continue
