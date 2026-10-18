@@ -106,7 +106,7 @@ func TestMotionPresetsInTheGraph(t *testing.T) {
 		}
 		// A head at 4 % of the frame: the push is held under what would crop it, and the punch-in goes.
 		high := subject.Track{Aspect: 0.5625, Samples: []subject.Sample{{AtMs: 500, X: 0.3, Y: 0.04, W: 0.4, H: 0.9, HeadTopY: 0.04}}}
-		res := ResolverFunc(func(id string, v Variant) (ResolvedAsset, error) {
+		res := ResolverFunc(func(id string, _ Variant) (ResolvedAsset, error) {
 			return ResolvedAsset{Location: "/a/" + id, HasAudio: true, Subject: &high}, nil
 		})
 		spec := specOf(30, []timeline.VideoItem{clipAt("c1", assetA, 0, 2000, 0, withMotion(timeline.Motion{Preset: timeline.MotionHandheld, AtMs: ptr(int64(1000))}))})

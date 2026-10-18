@@ -30,7 +30,8 @@ const Version = 1
 const (
 	// MinBPM and MaxBPM are the tempo range a beat grid is written in: a reading under MinBPM is taken at double time and one over
 	// MaxBPM at half time (every tempo estimate is ambiguous by a factor of two, and cuts want a beat of 0.35 to 0.7 s).
-	MinBPM, MaxBPM = 85.0, 175.0
+	MinBPM = 85.0
+	MaxBPM = 175.0
 	// strongOnsetDB is the rise of an onset that counts as a strong one, a hit worth cutting on.
 	strongOnsetDB = 6.0
 	// maxOnsets is the most strong onsets kept (the loudest first, then in time order).

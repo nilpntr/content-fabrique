@@ -133,7 +133,7 @@ func cmdMusicSandbox(sub string, args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "cfctl %s: %v\n", name, err)
 		return 1
 	}
-	if err := os.WriteFile(*outArg, data, 0o600); err != nil {
+	if err := os.WriteFile(*outArg, data, 0o600); err != nil { // #nosec G703 -- the operator names the output file of a development command
 		_, _ = fmt.Fprintf(stderr, "cfctl %s: %v\n", name, err)
 		return 1
 	}

@@ -46,7 +46,7 @@ func TestTheLivelyEditPassesTheEnergyChecks(t *testing.T) {
 		{asset: assetB, in: 0, out: 3000, motion: timeline.MotionHandheld},
 		{asset: assetB, in: 4000, out: 7000, motion: timeline.MotionHandheld, trans: timeline.TransitionWhipLeft},
 	}, title(0), nil)
-	tt := spec.Tracks[1].(*timeline.TextTrack)
+	tt, _ := spec.Tracks[1].(*timeline.TextTrack)
 	tt.Items[0].Animation, tt.Items[0].Exit = "pop", "pop_out"
 	r := RunChecks(CheckInput{Spec: spec, Plan: workoutPlan(), Vibe: VibeLively})
 	for _, id := range []string{CheckStaticShot, CheckNoTransitions, CheckTextWithoutEntrance} {
@@ -95,7 +95,7 @@ func TestChapterTitles(t *testing.T) {
 	if !strings.Contains(c.Detail, "2 chapters and the edit 0 numbered chapter titles") {
 		t.Errorf("%s", c.Detail)
 	}
-	tt := spec.Tracks[1].(*timeline.TextTrack)
+	tt, _ := spec.Tracks[1].(*timeline.TextTrack)
 	tt.Items = append(tt.Items, timeline.TextItem{ID: "t2", AtMs: 2000, DurationMs: 1200, Text: "1. SHRUGS", Style: "title_series", Anchor: "upper_third"},
 		timeline.TextItem{ID: "t3", AtMs: 5000, DurationMs: 1200, Text: "2) LIFTING STRAPS", Style: "title_series", Anchor: "upper_third"})
 	wantStatus(t, RunChecks(CheckInput{Spec: spec, Plan: plan}), CheckChapterTitles, CheckPass)

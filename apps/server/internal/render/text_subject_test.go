@@ -144,7 +144,7 @@ func TestATitleWithNoRoomIsShownWhereItFits(t *testing.T) {
 	})
 	spec := func(text timeline.TextItem) *timeline.Spec {
 		s := overridesSpec(text)
-		main := s.Tracks[0].(*timeline.VideoTrack)
+		main, _ := s.Tracks[0].(*timeline.VideoTrack)
 		first := main.Items[0]
 		first.AssetID, first.Source = fxClose, timeline.Source{InMs: 0, OutMs: 2000}
 		second := first
