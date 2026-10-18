@@ -73,6 +73,8 @@ const (
 	DefaultPushInStrength   = 0.10
 	DefaultPullBackStrength = 0.15
 	DefaultShakeStrength    = 0.08
+	// DefaultHandheldStrength is the push of the living camera over a shot: 100 % to about 108 % (P6-06).
+	DefaultHandheldStrength = 0.08
 )
 
 // Format is an output format (D-25).
@@ -128,6 +130,9 @@ const (
 	MotionPushIn   = "push_in"
 	MotionPullBack = "pull_back"
 	MotionShake    = "shake"
+	// MotionHandheld is the living camera of a tripod shot (P6-06): a slow push, a gentle drift that alternates direction from shot to
+	// shot and a slow sway, with an optional punch-in at at_ms (the drop or a strong beat). It is camera motion, not an effect.
+	MotionHandheld = "handheld"
 
 	AnchorUpperThird = "upper_third"
 	AnchorCenter     = "center"
@@ -366,6 +371,8 @@ func (m Motion) StrengthOrDefault() float64 {
 		return DefaultPullBackStrength
 	case MotionShake:
 		return DefaultShakeStrength
+	case MotionHandheld:
+		return DefaultHandheldStrength
 	}
 	return 0
 }

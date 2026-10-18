@@ -33,6 +33,7 @@ type fakeStore struct {
 	saved   []store.AnalysisResult
 	saveErr error
 	missing bool
+	music   []json.RawMessage
 }
 
 func (f *fakeStore) GetAsset(_ context.Context, ws ids.WorkspaceID, id ids.AssetID) (store.Asset, error) {
@@ -58,6 +59,17 @@ func (f *fakeStore) SaveAnalysis(_ context.Context, _ ids.WorkspaceID, _ ids.Ass
 	f.saved = append(f.saved, r)
 	f.signals = &store.SignalsMeta{Version: int32(r.Version), SourceIngestedAt: r.SourceIngestedAt}
 	return nil
+}
+
+func (f *fakeStore) SaveAssetMusic(_ context.Context, _ ids.WorkspaceID, _ ids.AssetID, _ int, _ *time.Time, doc json.RawMessage) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.music = append(f.music, doc)
+	return nil
+}
+
+func (f *fakeStore) GetAssetMusicMeta(context.Context, ids.WorkspaceID, ids.AssetID) (store.AssetMusicMeta, error) {
+	return store.AssetMusicMeta{}, store.ErrNotFound
 }
 
 func (f *fakeStore) GetAssetSignalsMeta(context.Context, ids.WorkspaceID, ids.AssetID) (store.SignalsMeta, error) {
@@ -202,9 +214,9 @@ func TestRunOutcomes(t *testing.T) {
 			t.Fatalf("%+v %v", res, err)
 		}
 	})
-	t.Run("not a video", func(t *testing.T) {
+	t.Run("an image (an audio asset is a song: its music is analysed)", func(t *testing.T) {
 		svc, st, _ := fixture(t)
-		st.asset.Kind = store.AssetKindAudio
+		st.asset.Kind = store.AssetKindImage
 		if res, err := svc.Run(ctx, st.asset.WorkspaceID, st.asset.ID, Options{}); err != nil || res.Outcome != OutcomeGone {
 			t.Fatalf("%+v %v", res, err)
 		}

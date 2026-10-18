@@ -15,6 +15,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
 	"github.com/nilpntr/content-fabrique/internal/media"
+	"github.com/nilpntr/content-fabrique/internal/music"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
@@ -34,6 +35,9 @@ type Store interface {
 	ListAssetDerivatives(ctx context.Context, ws ids.WorkspaceID, assetIDs []ids.AssetID) ([]store.Derivative, error)
 	SaveAnalysis(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, r store.AnalysisResult) error
 	GetAssetSignalsMeta(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (store.SignalsMeta, error)
+	// The music analysis of a song (an audio asset) or of a clip whose sound is music (P6-06).
+	SaveAssetMusic(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, version int, sourceIngestedAt *time.Time, analysis json.RawMessage) error
+	GetAssetMusicMeta(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (store.AssetMusicMeta, error)
 }
 
 // Objects is the object storage the proxy is read from. *storage.Client is the real one.
@@ -135,10 +139,13 @@ func (s *Service) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, o
 	}
 	log := s.cfg.Logger.With("workspace_id", ws.String(), "asset_id", id.String())
 	switch {
-	case a.Status == store.AssetFailed || a.Kind != store.AssetKindVideo:
+	case a.Status == store.AssetFailed || (a.Kind != store.AssetKindVideo && a.Kind != store.AssetKindAudio):
 		return Result{Outcome: OutcomeGone}, nil
 	case a.Status != store.AssetReady:
 		return Result{}, fmt.Errorf("%w (status %s)", ErrNotReady, a.Status)
+	}
+	if a.Kind == store.AssetKindAudio {
+		return s.runMusic(ctx, a, opts, log)
 	}
 	if !opts.Force {
 		// Up to date means: made by this version of the analysis from the proxy this ingest made. An asset that was ingested again
@@ -163,7 +170,10 @@ func (s *Service) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, o
 	if a.DurationMs != nil {
 		dur = *a.DurationMs
 	}
-	raw, err := s.signals(ctx, proxyKey, dur, log)
+	// The clip's own sound may be a song (a reference video the creator wants the sound of): its music analysis is made from the same
+	// download, and never fails the clip's analysis.
+	wantMusic := a.HasAudio != nil && *a.HasAudio && (opts.Force || !s.musicUpToDate(ctx, a))
+	raw, mus, err := s.signals(ctx, proxyKey, dur, log, wantMusic)
 	if err != nil {
 		return Result{}, err
 	}
@@ -186,7 +196,67 @@ func (s *Service) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID, o
 		return Result{}, fmt.Errorf("store the analysis: %w", err)
 	}
 	log.InfoContext(ctx, "analysis done", "shots", len(an.Shots), "moments", len(an.Moments), "reps", an.Summary.Reps, "dead_ms", an.Summary.DeadMs)
+	if mus != nil && mus.Music {
+		if err := s.saveMusic(ctx, a, *mus); err != nil {
+			log.WarnContext(ctx, "the music analysis of the clip's sound was not stored", "error", err)
+		}
+	}
 	return Result{Outcome: OutcomeDone, Summary: &an.Summary, Line: an.Summary.Line()}, nil
+}
+
+// MusicResult is the outcome of the music analysis of an audio asset.
+type MusicResult struct {
+	Outcome Outcome `json:"outcome"`
+	Line    string  `json:"line,omitempty"`
+}
+
+// runMusic analyses an audio asset (a creator's song, P6-06): the original file is downloaded and measured in the sandbox, and the music
+// analysis is stored.
+func (s *Service) runMusic(ctx context.Context, a store.Asset, opts Options, log *slog.Logger) (Result, error) {
+	if !opts.Force && s.musicUpToDate(ctx, a) {
+		return Result{Outcome: OutcomeSkipped}, nil
+	}
+	dir, err := os.MkdirTemp(s.cfg.TempDir, "music-")
+	if err != nil {
+		return Result{}, fmt.Errorf("temp dir: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	if err := os.Mkdir(filepath.Join(dir, "in"), 0o755); err != nil { // #nosec G301 -- the container user may be another uid
+		return Result{}, err
+	}
+	local := filepath.Join(dir, "in", "track")
+	if err := s.download(ctx, a.R2Key, local); err != nil {
+		return Result{}, err
+	}
+	m, err := music.Measure(ctx, s.cfg.Runner, local, dir)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := s.saveMusic(ctx, a, m); err != nil {
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			return Result{Outcome: OutcomeGone}, nil
+		case errors.Is(err, store.ErrStaleAnalysis):
+			return Result{Outcome: OutcomeStale}, nil
+		}
+		return Result{}, err
+	}
+	log.InfoContext(ctx, "music analysis done", "tempo_bpm", m.TempoBPM, "beats", len(m.BeatsMs), "drop_ms", m.DropMs, "lufs", m.LUFS)
+	return Result{Outcome: OutcomeDone, Line: m.Line()}, nil
+}
+
+// musicUpToDate says whether the asset has a music analysis of this version made from its current ingest.
+func (s *Service) musicUpToDate(ctx context.Context, a store.Asset) bool {
+	meta, err := s.cfg.Store.GetAssetMusicMeta(ctx, a.WorkspaceID, a.ID)
+	return err == nil && meta.Version >= music.Version && sameTime(meta.SourceIngestedAt, a.IngestedAt)
+}
+
+func (s *Service) saveMusic(ctx context.Context, a store.Asset, m music.Analysis) error {
+	doc, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	return s.cfg.Store.SaveAssetMusic(ctx, a.WorkspaceID, a.ID, music.Version, a.IngestedAt, doc)
 }
 
 var _ jobs.Analyzer = (*Service)(nil)
@@ -261,21 +331,31 @@ func (s *Service) proxyKey(ctx context.Context, a store.Asset) (string, error) {
 	return "", errNoProxy
 }
 
-// signals downloads the proxy, runs the ffmpeg pass in the sandbox and reads its output.
-func (s *Service) signals(ctx context.Context, proxyKey string, durationMs int64, log *slog.Logger) (Raw, error) {
+// signals downloads the proxy, runs the ffmpeg pass in the sandbox and reads its output. With withMusic it also measures the music of
+// the proxy's sound (nil when that fails: logged, never an error of the clip's analysis).
+func (s *Service) signals(ctx context.Context, proxyKey string, durationMs int64, log *slog.Logger, withMusic bool) (Raw, *music.Analysis, error) {
 	dir, err := os.MkdirTemp(s.cfg.TempDir, "analysis-")
 	if err != nil {
-		return Raw{}, fmt.Errorf("temp dir: %w", err)
+		return Raw{}, nil, fmt.Errorf("temp dir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 	if err := os.Mkdir(filepath.Join(dir, "in"), 0o755); err != nil { // #nosec G301 -- the container user may be another uid
-		return Raw{}, err
+		return Raw{}, nil, err
 	}
 	local := filepath.Join(dir, "in", "proxy")
 	if err := s.download(ctx, proxyKey, local); err != nil {
-		return Raw{}, err
+		return Raw{}, nil, err
 	}
-	return runPass(ctx, s.cfg.Runner, dir, local, durationMs, log)
+	raw, err := runPass(ctx, s.cfg.Runner, dir, local, durationMs, log)
+	if err != nil || !withMusic {
+		return raw, nil, err
+	}
+	m, merr := music.Measure(ctx, s.cfg.Runner, local, dir)
+	if merr != nil {
+		log.WarnContext(ctx, "the music analysis of the clip's sound failed", "error", merr)
+		return raw, nil, nil
+	}
+	return raw, &m, nil
 }
 
 // AnalyzeFile runs the analysis on a proxy file on this machine, without a database or object storage: cfctl's development

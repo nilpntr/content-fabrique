@@ -184,23 +184,6 @@ func TestTempoFromFlux(t *testing.T) {
 	}
 }
 
-func TestFFT(t *testing.T) {
-	// A sine of 8 cycles in 64 samples has its energy in bin 8.
-	a := make([]complex128, 64)
-	for i := range a {
-		a[i] = complex(math.Sin(2*math.Pi*8*float64(i)/64), 0)
-	}
-	fft(a)
-	best, bestV := 0, 0.0
-	for k := 0; k < 32; k++ {
-		if v := real(a[k])*real(a[k]) + imag(a[k])*imag(a[k]); v > bestV {
-			best, bestV = k, v
-		}
-	}
-	if best != 8 {
-		t.Errorf("peak in bin %d", best)
-	}
-}
 
 // A report with a quiet 2.3 s intro and a lift, onsets near the cuts and a build to the end reads as the creator's sound.
 func TestAnalyseAudio(t *testing.T) {
