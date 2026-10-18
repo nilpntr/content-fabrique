@@ -64,6 +64,15 @@
     },
     {
       "$ref": "#/$defs/add_sfx"
+    },
+    {
+      "$ref": "#/$defs/add_graphic"
+    },
+    {
+      "$ref": "#/$defs/update_graphic"
+    },
+    {
+      "$ref": "#/$defs/remove_graphic"
     }
   ],
   "$defs": {
@@ -2211,6 +2220,941 @@
           }
         }
       ]
+    },
+    "graphicsTemplate": {
+      "enum": [
+        "title_pop",
+        "blur_in",
+        "chapter_card",
+        "highlight_word",
+        "counter",
+        "lower_label",
+        "outro_card"
+      ],
+      "title": "Template",
+      "description": "The motion-graphics template the item uses (docs/design/motion-graphics-v1.md). title_pop: word by word: each word scales up with a blur and an overshoot, landing on its accent (a beat); for a hook title; blur_in: the title sharpens out of a blur while it drifts into place; a quieter title; chapter_card: a numbered chapter title: the number pops first in the accent colour, then the line sweeps in after it; one or two lines; highlight_word: a line where one word gets a marker swiped in behind it in the accent colour; counter: a number that counts from one value to another and lands with a pop, followed by its label (12 REPS, 100 KG); lower_label: a small label on a plate with an accent stripe that slides in; for a name, an exercise or a tag; outro_card: the loop card at the end: letters drop in, an accent line grows under them, and it pushes out on the last frame."
+    },
+    "graphicsParam": {
+      "title": "Graphics params",
+      "description": "The params a graphics template may take. Each template's own definition lists which of them it allows.",
+      "$defs": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "pattern": "^[^\\p{Cc}\\p{Zl}\\p{Zp}]*(\\n[^\\p{Cc}\\p{Zl}\\p{Zp}]*)?$",
+          "title": "Text",
+          "description": "The words: 1 to 60 characters, at most 2 lines (separated by \\n). For counter it is the label after the number (REPS, KG); for chapter_card the chapter's title without its number. Set as plain text, never markup."
+        },
+        "style": {
+          "$ref": "#/$defs/styleId",
+          "description": "The text style from the style registry: it picks the font, size, colour and shadow (the creator's title style, such as title_series). Default: title_bold, or label_box for lower_label and stat_big for counter."
+        },
+        "fill": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "title": "Fill colour",
+          "description": "The colour of the letters as #RRGGBB. Without it the style's own colour is used."
+        },
+        "accent": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "title": "Accent colour",
+          "description": "The accent colour as #RRGGBB: the chapter number, the marker, the label stripe, the outro line. Default #FFD60A."
+        },
+        "scale": {
+          "type": "number",
+          "minimum": 0.6,
+          "maximum": 1.4,
+          "title": "Size scale",
+          "description": "The size relative to the style's, 0.6 to 1.4. Default 1."
+        },
+        "align": {
+          "enum": [
+            "left",
+            "center",
+            "right"
+          ],
+          "default": "center",
+          "title": "Alignment",
+          "description": "How the lines sit against each other in the box. Default center."
+        },
+        "shadow": {
+          "enum": [
+            "none",
+            "soft",
+            "strong"
+          ],
+          "title": "Shadow",
+          "description": "The drop shadow of the letters. Without it the style's own."
+        },
+        "backing": {
+          "enum": [
+            "none",
+            "plate"
+          ],
+          "default": "none",
+          "title": "Backing",
+          "description": "plate puts a translucent dark plate behind the text, for legibility over a busy or bright picture. Default none."
+        },
+        "energy": {
+          "enum": [
+            "calm",
+            "lively",
+            "hype"
+          ],
+          "default": "lively",
+          "title": "Energy",
+          "description": "How hard the motion hits: calm (slow, soft, no overshoot to speak of), lively (the default) or hype (fast stagger, a bigger overshoot and blur). Match the vibe of the edit."
+        },
+        "accents_ms": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/ms"
+          },
+          "title": "Accents",
+          "description": "Timeline times (ms, like markers) the motion lands on, strictly increasing and inside the item: usually beats. title_pop lands word i on accent i and pulses on the rest; chapter_card pops the number on the first and sweeps the line on the second; highlight_word swipes the marker on the first; counter lands the count on the first; lower_label and outro_card enter on the first. Without accents the template uses its own stagger."
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 99,
+          "title": "Chapter number",
+          "description": "The chapter's number, written as \"1.\" before the title."
+        },
+        "layout": {
+          "enum": [
+            "one_line",
+            "two_line"
+          ],
+          "default": "one_line",
+          "title": "Layout",
+          "description": "one_line puts the number before the title; two_line puts it on a line of its own above."
+        },
+        "word": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12,
+          "title": "Highlighted word",
+          "description": "Which word gets the marker, counting from 1 across the lines."
+        },
+        "from": {
+          "type": "number",
+          "minimum": -999999,
+          "maximum": 999999,
+          "title": "From",
+          "description": "The value the counter starts at."
+        },
+        "to": {
+          "type": "number",
+          "minimum": -999999,
+          "maximum": 999999,
+          "title": "To",
+          "description": "The value the counter lands on."
+        },
+        "decimals": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2,
+          "default": 0,
+          "title": "Decimals",
+          "description": "Digits after the decimal point, 0 to 2. Default 0."
+        }
+      }
+    },
+    "graphicsParamsTitlePop": {
+      "type": "object",
+      "title": "title_pop params",
+      "description": "The params of a title_pop item: word by word: each word scales up with a blur and an overshoot, landing on its accent (a beat); for a hook title.",
+      "additionalProperties": false,
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "text": {
+          "$ref": "#/$defs/graphicsParam/$defs/text"
+        },
+        "style": {
+          "$ref": "#/$defs/graphicsParam/$defs/style"
+        },
+        "fill": {
+          "$ref": "#/$defs/graphicsParam/$defs/fill"
+        },
+        "accent": {
+          "$ref": "#/$defs/graphicsParam/$defs/accent"
+        },
+        "scale": {
+          "$ref": "#/$defs/graphicsParam/$defs/scale"
+        },
+        "align": {
+          "$ref": "#/$defs/graphicsParam/$defs/align"
+        },
+        "shadow": {
+          "$ref": "#/$defs/graphicsParam/$defs/shadow"
+        },
+        "backing": {
+          "$ref": "#/$defs/graphicsParam/$defs/backing"
+        },
+        "energy": {
+          "$ref": "#/$defs/graphicsParam/$defs/energy"
+        },
+        "accents_ms": {
+          "$ref": "#/$defs/graphicsParam/$defs/accents_ms"
+        }
+      }
+    },
+    "graphicsParamsBlurIn": {
+      "type": "object",
+      "title": "blur_in params",
+      "description": "The params of a blur_in item: the title sharpens out of a blur while it drifts into place; a quieter title.",
+      "additionalProperties": false,
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "text": {
+          "$ref": "#/$defs/graphicsParam/$defs/text"
+        },
+        "style": {
+          "$ref": "#/$defs/graphicsParam/$defs/style"
+        },
+        "fill": {
+          "$ref": "#/$defs/graphicsParam/$defs/fill"
+        },
+        "accent": {
+          "$ref": "#/$defs/graphicsParam/$defs/accent"
+        },
+        "scale": {
+          "$ref": "#/$defs/graphicsParam/$defs/scale"
+        },
+        "align": {
+          "$ref": "#/$defs/graphicsParam/$defs/align"
+        },
+        "shadow": {
+          "$ref": "#/$defs/graphicsParam/$defs/shadow"
+        },
+        "backing": {
+          "$ref": "#/$defs/graphicsParam/$defs/backing"
+        },
+        "energy": {
+          "$ref": "#/$defs/graphicsParam/$defs/energy"
+        },
+        "accents_ms": {
+          "$ref": "#/$defs/graphicsParam/$defs/accents_ms"
+        }
+      }
+    },
+    "graphicsParamsChapterCard": {
+      "type": "object",
+      "title": "chapter_card params",
+      "description": "The params of a chapter_card item: a numbered chapter title: the number pops first in the accent colour, then the line sweeps in after it; one or two lines.",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "number"
+      ],
+      "properties": {
+        "text": {
+          "$ref": "#/$defs/graphicsParam/$defs/text"
+        },
+        "style": {
+          "$ref": "#/$defs/graphicsParam/$defs/style"
+        },
+        "fill": {
+          "$ref": "#/$defs/graphicsParam/$defs/fill"
+        },
+        "accent": {
+          "$ref": "#/$defs/graphicsParam/$defs/accent"
+        },
+        "scale": {
+          "$ref": "#/$defs/graphicsParam/$defs/scale"
+        },
+        "align": {
+          "$ref": "#/$defs/graphicsParam/$defs/align"
+        },
+        "shadow": {
+          "$ref": "#/$defs/graphicsParam/$defs/shadow"
+        },
+        "backing": {
+          "$ref": "#/$defs/graphicsParam/$defs/backing"
+        },
+        "energy": {
+          "$ref": "#/$defs/graphicsParam/$defs/energy"
+        },
+        "accents_ms": {
+          "$ref": "#/$defs/graphicsParam/$defs/accents_ms"
+        },
+        "number": {
+          "$ref": "#/$defs/graphicsParam/$defs/number"
+        },
+        "layout": {
+          "$ref": "#/$defs/graphicsParam/$defs/layout"
+        }
+      }
+    },
+    "graphicsParamsHighlightWord": {
+      "type": "object",
+      "title": "highlight_word params",
+      "description": "The params of a highlight_word item: a line where one word gets a marker swiped in behind it in the accent colour.",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "word"
+      ],
+      "properties": {
+        "text": {
+          "$ref": "#/$defs/graphicsParam/$defs/text"
+        },
+        "style": {
+          "$ref": "#/$defs/graphicsParam/$defs/style"
+        },
+        "fill": {
+          "$ref": "#/$defs/graphicsParam/$defs/fill"
+        },
+        "accent": {
+          "$ref": "#/$defs/graphicsParam/$defs/accent"
+        },
+        "scale": {
+          "$ref": "#/$defs/graphicsParam/$defs/scale"
+        },
+        "align": {
+          "$ref": "#/$defs/graphicsParam/$defs/align"
+        },
+        "shadow": {
+          "$ref": "#/$defs/graphicsParam/$defs/shadow"
+        },
+        "backing": {
+          "$ref": "#/$defs/graphicsParam/$defs/backing"
+        },
+        "energy": {
+          "$ref": "#/$defs/graphicsParam/$defs/energy"
+        },
+        "accents_ms": {
+          "$ref": "#/$defs/graphicsParam/$defs/accents_ms"
+        },
+        "word": {
+          "$ref": "#/$defs/graphicsParam/$defs/word"
+        }
+      }
+    },
+    "graphicsParamsCounter": {
+      "type": "object",
+      "title": "counter params",
+      "description": "The params of a counter item: a number that counts from one value to another and lands with a pop, followed by its label (12 REPS, 100 KG).",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "text": {
+          "$ref": "#/$defs/graphicsParam/$defs/text"
+        },
+        "style": {
+          "$ref": "#/$defs/graphicsParam/$defs/style"
+        },
+        "fill": {
+          "$ref": "#/$defs/graphicsParam/$defs/fill"
+        },
+        "accent": {
+          "$ref": "#/$defs/graphicsParam/$defs/accent"
+        },
+        "scale": {
+          "$ref": "#/$defs/graphicsParam/$defs/scale"
+        },
+        "align": {
+          "$ref": "#/$defs/graphicsParam/$defs/align"
+        },
+        "shadow": {
+          "$ref": "#/$defs/graphicsParam/$defs/shadow"
+        },
+        "backing": {
+          "$ref": "#/$defs/graphicsParam/$defs/backing"
+        },
+        "energy": {
+          "$ref": "#/$defs/graphicsParam/$defs/energy"
+        },
+        "accents_ms": {
+          "$ref": "#/$defs/graphicsParam/$defs/accents_ms"
+        },
+        "from": {
+          "$ref": "#/$defs/graphicsParam/$defs/from"
+        },
+        "to": {
+          "$ref": "#/$defs/graphicsParam/$defs/to"
+        },
+        "decimals": {
+          "$ref": "#/$defs/graphicsParam/$defs/decimals"
+        }
+      }
+    },
+    "graphicsParamsLowerLabel": {
+      "type": "object",
+      "title": "lower_label params",
+      "description": "The params of a lower_label item: a small label on a plate with an accent stripe that slides in; for a name, an exercise or a tag.",
+      "additionalProperties": false,
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "text": {
+          "$ref": "#/$defs/graphicsParam/$defs/text"
+        },
+        "style": {
+          "$ref": "#/$defs/graphicsParam/$defs/style"
+        },
+        "fill": {
+          "$ref": "#/$defs/graphicsParam/$defs/fill"
+        },
+        "accent": {
+          "$ref": "#/$defs/graphicsParam/$defs/accent"
+        },
+        "scale": {
+          "$ref": "#/$defs/graphicsParam/$defs/scale"
+        },
+        "align": {
+          "$ref": "#/$defs/graphicsParam/$defs/align"
+        },
+        "energy": {
+          "$ref": "#/$defs/graphicsParam/$defs/energy"
+        },
+        "accents_ms": {
+          "$ref": "#/$defs/graphicsParam/$defs/accents_ms"
+        }
+      }
+    },
+    "graphicsParamsOutroCard": {
+      "type": "object",
+      "title": "outro_card params",
+      "description": "The params of a outro_card item: the loop card at the end: letters drop in, an accent line grows under them, and it pushes out on the last frame.",
+      "additionalProperties": false,
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "text": {
+          "$ref": "#/$defs/graphicsParam/$defs/text"
+        },
+        "style": {
+          "$ref": "#/$defs/graphicsParam/$defs/style"
+        },
+        "fill": {
+          "$ref": "#/$defs/graphicsParam/$defs/fill"
+        },
+        "accent": {
+          "$ref": "#/$defs/graphicsParam/$defs/accent"
+        },
+        "scale": {
+          "$ref": "#/$defs/graphicsParam/$defs/scale"
+        },
+        "align": {
+          "$ref": "#/$defs/graphicsParam/$defs/align"
+        },
+        "shadow": {
+          "$ref": "#/$defs/graphicsParam/$defs/shadow"
+        },
+        "backing": {
+          "$ref": "#/$defs/graphicsParam/$defs/backing"
+        },
+        "energy": {
+          "$ref": "#/$defs/graphicsParam/$defs/energy"
+        },
+        "accents_ms": {
+          "$ref": "#/$defs/graphicsParam/$defs/accents_ms"
+        }
+      }
+    },
+    "graphicsDuration": {
+      "type": "integer",
+      "minimum": 500,
+      "maximum": 86400000,
+      "title": "Duration",
+      "description": "How long the overlay is on screen, entrance and exit included, in ms. At least 500; give it room to be read (about 1.2 s after its entrance)."
+    },
+    "add_graphic": {
+      "type": "object",
+      "title": "add_graphic",
+      "description": "Add a motion-graphics overlay: a template from the library (list_motion_templates) with its params. It is laid out like a text item in its style (kept in the safe zone and off the subject), keeps its absolute time when clips move, and must end inside the timeline. Give exactly one of anchor and position. Without id it gets the next free id such as \"g2\"; the result reports it. The graphics track is created when there is none.",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "template",
+        "at_ms",
+        "duration_ms",
+        "params"
+      ],
+      "properties": {
+        "op": {
+          "const": "add_graphic",
+          "title": "Op",
+          "description": "\"add_graphic\"."
+        },
+        "id": {
+          "$ref": "#/$defs/itemId",
+          "title": "Graphic id",
+          "description": "Optional id for the new item. Without it the next free \"g<n>\" is used."
+        },
+        "template": {
+          "$ref": "#/$defs/graphicsTemplate"
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms",
+          "title": "Start",
+          "description": "When the overlay starts to enter, in ms."
+        },
+        "duration_ms": {
+          "$ref": "#/$defs/graphicsDuration"
+        },
+        "anchor": {
+          "$ref": "#/$defs/textAnchor"
+        },
+        "position": {
+          "$ref": "#/$defs/textPosition"
+        },
+        "avoid_subject": {
+          "$ref": "#/$defs/textAvoidSubject"
+        },
+        "params": {
+          "type": "object",
+          "title": "Params",
+          "description": "The template's params (which fields are allowed depends on the template; list_motion_templates says)."
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "anchor"
+          ],
+          "properties": {
+            "anchor": {}
+          }
+        },
+        {
+          "required": [
+            "position"
+          ],
+          "properties": {
+            "position": {}
+          }
+        }
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "template": {
+                "const": "title_pop"
+              }
+            },
+            "required": [
+              "template"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/graphicsParamsTitlePop"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "template": {
+                "const": "blur_in"
+              }
+            },
+            "required": [
+              "template"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/graphicsParamsBlurIn"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "template": {
+                "const": "chapter_card"
+              }
+            },
+            "required": [
+              "template"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/graphicsParamsChapterCard"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "template": {
+                "const": "highlight_word"
+              }
+            },
+            "required": [
+              "template"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/graphicsParamsHighlightWord"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "template": {
+                "const": "counter"
+              }
+            },
+            "required": [
+              "template"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/graphicsParamsCounter"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "template": {
+                "const": "lower_label"
+              }
+            },
+            "required": [
+              "template"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/graphicsParamsLowerLabel"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "template": {
+                "const": "outro_card"
+              }
+            },
+            "required": [
+              "template"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/graphicsParamsOutroCard"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "update_graphic": {
+      "type": "object",
+      "title": "update_graphic",
+      "description": "Change a graphics item: its time, length, place, subject avoidance, or its template and params. params replaces all of the item's params, so give template with it (the same one to keep it) and restate every param to keep. Moving the item with at_ms moves its accents_ms with it, unless the op gives params. Give at least one field to change, and not both anchor and position.",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "id"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "template"
+          ],
+          "properties": {
+            "template": {}
+          }
+        },
+        {
+          "required": [
+            "at_ms"
+          ],
+          "properties": {
+            "at_ms": {}
+          }
+        },
+        {
+          "required": [
+            "duration_ms"
+          ],
+          "properties": {
+            "duration_ms": {}
+          }
+        },
+        {
+          "required": [
+            "anchor"
+          ],
+          "properties": {
+            "anchor": {}
+          }
+        },
+        {
+          "required": [
+            "position"
+          ],
+          "properties": {
+            "position": {}
+          }
+        },
+        {
+          "required": [
+            "avoid_subject"
+          ],
+          "properties": {
+            "avoid_subject": {}
+          }
+        },
+        {
+          "required": [
+            "params"
+          ],
+          "properties": {
+            "params": {}
+          }
+        }
+      ],
+      "properties": {
+        "op": {
+          "const": "update_graphic",
+          "title": "Op",
+          "description": "\"update_graphic\"."
+        },
+        "id": {
+          "$ref": "#/$defs/itemId",
+          "title": "Graphic id",
+          "description": "The id of the graphics item to change."
+        },
+        "template": {
+          "$ref": "#/$defs/graphicsTemplate"
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms",
+          "title": "Start",
+          "description": "The new start, in ms."
+        },
+        "duration_ms": {
+          "$ref": "#/$defs/graphicsDuration"
+        },
+        "anchor": {
+          "$ref": "#/$defs/textAnchor"
+        },
+        "position": {
+          "$ref": "#/$defs/textPosition"
+        },
+        "avoid_subject": {
+          "$ref": "#/$defs/textAvoidSubject"
+        },
+        "params": {
+          "type": "object",
+          "title": "Params",
+          "description": "The new params, replacing all of the old ones; give template with them."
+        }
+      },
+      "dependentRequired": {
+        "params": [
+          "template"
+        ],
+        "template": [
+          "params"
+        ]
+      },
+      "not": {
+        "required": [
+          "anchor",
+          "position"
+        ],
+        "properties": {
+          "anchor": {},
+          "position": {}
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "template": {
+                "const": "title_pop"
+              }
+            },
+            "required": [
+              "template"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/graphicsParamsTitlePop"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "template": {
+                "const": "blur_in"
+              }
+            },
+            "required": [
+              "template"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/graphicsParamsBlurIn"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "template": {
+                "const": "chapter_card"
+              }
+            },
+            "required": [
+              "template"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/graphicsParamsChapterCard"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "template": {
+                "const": "highlight_word"
+              }
+            },
+            "required": [
+              "template"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/graphicsParamsHighlightWord"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "template": {
+                "const": "counter"
+              }
+            },
+            "required": [
+              "template"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/graphicsParamsCounter"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "template": {
+                "const": "lower_label"
+              }
+            },
+            "required": [
+              "template"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/graphicsParamsLowerLabel"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "template": {
+                "const": "outro_card"
+              }
+            },
+            "required": [
+              "template"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/graphicsParamsOutroCard"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "remove_graphic": {
+      "type": "object",
+      "title": "remove_graphic",
+      "description": "Remove a graphics item.",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "id"
+      ],
+      "properties": {
+        "op": {
+          "const": "remove_graphic",
+          "title": "Op",
+          "description": "\"remove_graphic\"."
+        },
+        "id": {
+          "$ref": "#/$defs/itemId",
+          "title": "Graphic id",
+          "description": "The id of the graphics item to remove."
+        }
+      }
     }
   }
 }

@@ -1,0 +1,10 @@
+{
+  "op": "update_graphic",
+  "id": "g1",
+  "template": "counter",
+  "params": {
+    "text": "REPS",
+    "from": 0,
+    "to": 12
+  }
+}
