@@ -42,3 +42,8 @@ packages/*/node_modules
 
 # Media the render golden tests generate (apps/server/internal/render)
 apps/server/internal/render/testdata/.cache/
+
+# Eval results and the local ids of the eval suites (D-39): a creator's ids, renders and scores stay on this machine
+/eval-results/
+/apps/server/eval-results/
+suites/*.local.yaml

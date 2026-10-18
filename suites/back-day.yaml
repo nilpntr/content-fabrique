@@ -1,0 +1,73 @@
+# The back-day suite (D-39, docs/design/observability-v1.md section 7): `cfctl eval suite --suite ../../suites/back-day.yaml` from
+# apps/server. The ids here are placeholders: a creator's footage, references and renders are never committed. Put the real ones in
+# suites/back-day.local.yaml (gitignored), which uses the same shape and overrides by case id, for example:
+#
+#   defaults:
+#     workspace: wks_...
+#     references_dir: ~/Downloads/gino_tiktok
+#   cases:
+#     - id: back-day-lively
+#       footage: [ast_..., ast_...]
+#       song: ast_...
+#       stored: {project: prj_..., version: 4}
+#
+# A case with `stored` is scored on that version without an editor run (free, except a judge call that is not cached); with --live and
+# --max-usd the cases with footage are edited again first. A calibration case is a version whose human verdict is known: the judge's
+# scores are checked against it, and it does not count in the suite's mean. A held-out case is never shown to the improvement loop.
+suite: back-day
+description: "Gino's back day: posing hook, seated rows and lat pulldowns, his song, his cream 101 titles and long takes."
+feedback: feedback.yaml
+defaults:
+  workspace: wks_PLACEHOLDER
+  profile: v1-start
+  vibe: lively
+  budget_usd: 1.00
+  references_dir: PLACEHOLDER_references_dir
+cases:
+  - id: back-day-lively
+    title: "Back day, lively, the creator's song"
+    footage: [ast_PLACEHOLDER_back_pose, ast_PLACEHOLDER_back_extension, ast_PLACEHOLDER_cable_row_rear, ast_PLACEHOLDER_machine_row_side, ast_PLACEHOLDER_cable_row_back]
+    song: ast_PLACEHOLDER_song
+    brief: "Back-day short for a fitness creator: hook with the posing flex in the first 2 seconds, then the cleanest reps from seated rows and lat pulldowns, varied angles, 15-25 seconds, a punchy title."
+    vibe: lively
+    stored: {project: prj_PLACEHOLDER_lively, version: 1}
+    expectations:
+      - id: posing-hook
+        text: "The video opens on the back pose (the flex), and the title is on screen within the first half second."
+        weight: 2
+      - id: clean-reps
+        text: "Every rep shown is a whole rep: no shot starts or ends in the middle of the movement."
+        weight: 1
+      - id: creator-title-look
+        text: "The title looks like the creator's own: cream, upper case, '... 101' form, placed off the body."
+        weight: 1
+  - id: back-day-calm
+    title: "Back day, calm"
+    footage: [ast_PLACEHOLDER_back_pose, ast_PLACEHOLDER_cable_row_rear, ast_PLACEHOLDER_machine_row_side]
+    song: ast_PLACEHOLDER_song
+    brief: "A calm back-day video: the pose, then a few long clean reps, 20-30 seconds."
+    vibe: calm
+    stored: {project: prj_PLACEHOLDER_calm, version: 1}
+    expectations:
+      - id: breathing-room
+        text: "The pace is calm but never dead: shots breathe, and something moves in every shot."
+        weight: 1
+  - id: back-day-held-out
+    title: "Back day, hype (held out)"
+    footage: [ast_PLACEHOLDER_back_pose, ast_PLACEHOLDER_cable_row_back, ast_PLACEHOLDER_back_extension]
+    song: ast_PLACEHOLDER_song
+    brief: "Hype back-day short, fast cuts on the beat, 15 seconds."
+    vibe: hype
+    held_out: true
+    stored: {project: prj_PLACEHOLDER_hype, version: 1}
+  # The calibration set: the founder called v4 of this project "sick", except its transitions.
+  - id: calibration-founder-v4
+    title: "Founder's verdict: v4 'sick' except the transitions"
+    stored: {project: prj_PLACEHOLDER_calibration, version: 4}
+    calibration:
+      note: "The founder: 'sick', except its transitions (they read as AI)."
+      expect:
+        hook: [4, 5]
+        energy_pace: [4, 5]
+        story_arc: [3, 5]
+        ai_look: [3, 5]

@@ -24,6 +24,7 @@ import (
 
 const evalUsage = `Usage:
   cfctl eval editor --workspace <wks_... or org_...> --project <prj_...> [--version N] [--json] [flags]
+  cfctl eval suite  [--suite <file.yaml>] [--live --max-usd N] [flags]     (cfctl eval suite --help)
 
 DEVELOPMENT ONLY, like cfctl project show. eval editor prints the check_edit metrics of one stored timeline version of a project:
 the hook, the shot lengths, the cuts against the reps and the beat grid, dead time, effect density, text in the safe zones, the
@@ -50,6 +51,8 @@ func cmdEval(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps age
 		return 0
 	case "editor":
 		return cmdEvalEditor(args[1:], stdout, stderr, lookup, deps)
+	case "suite":
+		return cmdEvalSuite(args[1:], stdout, stderr, lookup, deps)
 	}
 	_, _ = fmt.Fprintf(stderr, "cfctl eval: unknown command %q\n\n%s", args[0], evalUsage)
 	return 2
