@@ -14,6 +14,8 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/media"
@@ -86,6 +88,19 @@ func stage(bundle fs.FS, dir string) error {
 	})
 }
 
+// writeNew writes a file that must not exist yet, and does not follow a symlink in its place.
+func writeNew(name string, data []byte) error {
+	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644) //nolint:gosec // read by the sandbox user
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
+}
+
 // Options configure a run.
 type Options struct {
 	// InImage says the runner executes in the media-tools image (the docker and hardened providers); the local provider runs the
@@ -141,9 +156,10 @@ func FramePattern(k int) string { return path.Join(OutDir, "s"+strconv.Itoa(k), 
 // an output that is not what the job asked for.
 var ErrRun = errors.New("motion: the overlay render failed")
 
-// Render runs job through runner with work as the job's work directory (its one writable mount), and checks what comes back. The
-// frames are left in work/motion for the render's ffmpeg. bundleDir is a directory the bundle is staged into (inside the provider's
-// allowed roots; the render stages it inside work).
+// Render runs job through runner and checks what comes back. The run's one writable mount is its own fresh directory, work/motion
+// (OutDir), which gets the job file and the frames (left there for the render's ffmpeg); nothing else of work is mounted. bundleDir is
+// a directory the bundle is staged into, inside the provider's allowed roots and outside work/motion (the render stages it in
+// work/motion-bundle), so inside the sandbox the bundle is only reachable through its read-only mount.
 func Render(ctx context.Context, runner media.Runner, job Job, work, bundleDir string, o Options) (Report, error) {
 	return render(ctx, runner, job, work, bundleDir, o, Bundle())
 }
@@ -151,7 +167,17 @@ func Render(ctx context.Context, runner media.Runner, job Job, work, bundleDir s
 // render is Render with the bundle to stage: the sandbox tests run hostile pages through the same path.
 func render(ctx context.Context, runner media.Runner, job Job, work, bundleDir string, o Options, bundle fs.FS) (Report, error) {
 	start := time.Now()
-	_ = os.RemoveAll(filepath.Join(work, OutDir))
+	out := filepath.Join(work, OutDir)
+	if rel, err := filepath.Rel(out, bundleDir); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return Report{}, fmt.Errorf("%w: the bundle directory %s is inside the run's writable directory %s", ErrRun, bundleDir, out)
+	}
+	// A fresh output directory for every run: nothing an earlier run (or anything else) left there is read or written through.
+	if err := os.RemoveAll(out); err != nil {
+		return Report{}, fmt.Errorf("motion: clear the output directory: %w", err)
+	}
+	if err := os.Mkdir(out, 0o755); err != nil { //nolint:gosec // written by the sandbox user, which may be another uid
+		return Report{}, fmt.Errorf("motion: the output directory: %w", err)
+	}
 	if err := stage(bundle, bundleDir); err != nil {
 		return Report{}, fmt.Errorf("motion: stage the bundle: %w", err)
 	}
@@ -159,7 +185,7 @@ func render(ctx context.Context, runner media.Runner, job Job, work, bundleDir s
 	if err != nil {
 		return Report{}, err
 	}
-	if err := os.WriteFile(filepath.Join(work, jobFile), data, 0o644); err != nil { //nolint:gosec // read by the sandbox user
+	if err := writeNew(filepath.Join(out, jobFile), data); err != nil {
 		return Report{}, fmt.Errorf("motion: write the job: %w", err)
 	}
 	chrome, fonts := ImageChrome, ImageFontsDir
@@ -174,17 +200,19 @@ func render(ctx context.Context, runner media.Runner, job Job, work, bundleDir s
 		"--bundle", media.InputPath(0),
 		"--fonts", fonts,
 		"--job", media.OutputPath(jobFile),
-		"--out", media.OutputPath(OutDir),
+		"--out", sandbox.WorkDir,
 		"--tmp", "/tmp",
 	}
-	res, err := runner.Run(ctx, media.Invocation{Args: args, Inputs: []media.Input{{Host: bundleDir, Container: media.InputPath(0)}}, OutputDir: work, Timeout: o.Timeout})
+	lim := DefaultLimits()
+	res, err := runner.Run(ctx, media.Invocation{Args: args, Inputs: []media.Input{{Host: bundleDir, Container: media.InputPath(0)}}, OutputDir: out,
+		Limits: &lim, Timeout: o.Timeout})
 	if err != nil {
 		return Report{}, fmt.Errorf("%w: %w", ErrRun, err)
 	}
 	if res.ExitCode != 0 {
 		return Report{}, fmt.Errorf("%w: %w", ErrRun, &media.ToolError{Tool: Program, ExitCode: res.ExitCode, Stderr: tail(string(res.Stderr), 4000)})
 	}
-	m, err := ReadManifest(filepath.Join(work, OutDir), job)
+	m, err := ReadManifest(out, job)
 	if err != nil {
 		return Report{}, err
 	}

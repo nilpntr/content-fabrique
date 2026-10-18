@@ -101,6 +101,9 @@ func covers(box style.Rect, subs []Subject) (head, body bool) {
 	return head, body
 }
 
+// BoxCovers says what a box covers of the subjects: the head, and the head or the torso (body). A box clear of both may stand there.
+func BoxCovers(box style.Rect, subs []Subject) (head, body bool) { return covers(box, subs) }
+
 // FitScales are the scales the avoidance tries for an item, largest first: its own, the shrinks of avoidFactors down to style.MinScale,
 // then steps of fitStep down to the legibility floor of its style on this output (style.FitFloor: capitals of at least 2.2 % of the
 // height, and never under style.MinFitScale). An item whose own scale is at or under the floor is only tried at its own.

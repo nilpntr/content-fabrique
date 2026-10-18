@@ -245,6 +245,7 @@ Sections 2 and 3 are the generic craft of a genre. A creator who shows us their 
 |---|---|
 | `overlay_readable` | a graphic is fully on screen for less than 1.2 s before its exit starts (the template's own timing, `motion.Schedule`); the fix names the duration |
 | `overlay_over_subject` | a graphic the renderer leaves out (no time clear of the body), a hook or chapter graphic it moves to another time, or one set not to avoid the subject that covers it (`subject.FitText`, as for text) |
+| `graphics_overlap` | a graphic the renderer leaves out because it would be drawn over another graphic or a text on screen at the same time (no room below or above it, no free time next to it), or a hook or chapter graphic moved to another time for it; the fix names the times that fit (`motion.Layout`) |
 | `overlay_legibility` | the letters' contrast with the picture behind their box, measured on the preview just before or after the graphic, is under 3:1 (2:1 with a shadow; a plate or an outline passes) |
 
 `hook_length` lets a hook run until the song's drop (at most 5 s), `beat_sync` counts a transition at its middle, and `effect_density` allows 0.6 effects a cut at lively and 1.0 at hype (0.5 at calm, as before).

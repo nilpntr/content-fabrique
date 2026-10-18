@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/nilpntr/content-fabrique/internal/analysis"
+	"github.com/nilpntr/content-fabrique/internal/motion"
 	"github.com/nilpntr/content-fabrique/internal/music"
 	"github.com/nilpntr/content-fabrique/internal/styleprofile"
 	"github.com/nilpntr/content-fabrique/internal/subject"
@@ -370,7 +371,7 @@ func RunChecks(in CheckInput) Report {
 		c.offBeatCut(), c.hookMissesDrop(), c.staticShot(), c.noTransitions(), c.transitionVariety(), c.textWithoutEntrance(), c.chapterTitles(),
 	}
 	if len(graphicsOf(in.Spec)) > 0 { // the motion-graphics checks (check_graphics.go), only for an edit that has some
-		r.Checks = append(r.Checks, c.overlayReadable(), c.overlayOverSubject(), c.overlayLegibility())
+		r.Checks = append(r.Checks, c.overlayReadable(), c.overlayOverSubject(), c.overlayLegibility(), c.graphicsOverlap())
 	}
 	if a := in.Audio; a != nil {
 		r.Checks = append(r.Checks, audioChecks(*a)...)
@@ -397,6 +398,8 @@ type checker struct {
 	weakStyle string
 	// pace are the shot-length targets (pace.go).
 	pace PaceTargets
+	// laidOut is the graphics as the renderer lays them out (check_graphics.go), computed once.
+	laidOut []motion.Laid
 }
 
 func (c *checker) pass(id, format string, a ...any) Check {
@@ -813,12 +816,7 @@ func (c *checker) effectDensity() Check {
 }
 
 func (c *checker) textSafe() Check {
-	texts := 0
-	for _, t := range c.in.Spec.Tracks {
-		if t, ok := t.(*timeline.TextTrack); ok {
-			texts += len(t.Items)
-		}
-	}
+	texts := len(screenTexts(c.in.Spec)) // a graphic's box is checked like a text's (timeline.checkGraphics)
 	var bad []string
 	for _, is := range c.in.Issues {
 		if is.Code == timeline.CodeUnsafeText || is.Code == timeline.CodeTextOverlapsCaptions {
@@ -1029,24 +1027,24 @@ func (c *checker) editStats() styleprofile.EditStats {
 		}
 	}
 	firstTitleAt := int64(math.MaxInt64)
+	// The titles and labels: the text items and the motion graphics (a title_pop hook is the title), as the renderer draws them.
+	for _, it := range screenTexts(c.in.Spec) {
+		if !it.IsTitle() {
+			e.Labels++
+			continue
+		}
+		e.Titles++
+		if it.AtMs < firstTitleAt { // the case judged is the earliest title's, whatever track it is on
+			firstTitleAt = it.AtMs
+			e.TitleCase, e.TitleAtS = styleprofile.CaseOf(it.Text), float64(it.AtMs)/1000
+			e.TitleFill, e.TitleLines, e.TitleHeightPct, e.TitleShadow = "", 0, 0, "" // not the look of a later title
+			c.titleLook(&e, it.TextItem)
+		}
+	}
 	for _, t := range c.in.Spec.Tracks {
 		switch t := t.(type) {
 		case *timeline.CaptionsTrack:
 			e.Captions = e.Captions || t.Enabled
-		case *timeline.TextTrack:
-			for _, it := range t.Items {
-				if !strings.HasPrefix(it.Style, "title_") {
-					e.Labels++
-					continue
-				}
-				e.Titles++
-				if it.AtMs < firstTitleAt { // the case judged is the earliest title's, whatever track it is on
-					firstTitleAt = it.AtMs
-					e.TitleCase, e.TitleAtS = styleprofile.CaseOf(it.Text), float64(it.AtMs)/1000
-					e.TitleFill, e.TitleLines, e.TitleHeightPct, e.TitleShadow = "", 0, 0, "" // not the look of a later title
-					c.titleLook(&e, it)
-				}
-			}
 		case *timeline.AudioTrack:
 			for _, a := range t.Items {
 				if _, ok := a.(*timeline.SFX); ok {
@@ -1141,16 +1139,10 @@ func (c *checker) titleCopied() Check {
 	}
 	var copied []string
 	texts := 0
-	for _, t := range c.in.Spec.Tracks {
-		tt, ok := t.(*timeline.TextTrack)
-		if !ok {
-			continue
-		}
-		for _, it := range tt.Items {
-			texts++
-			if p.CopiesReferenceTitle(it.Text) {
-				copied = append(copied, it.ID)
-			}
+	for _, it := range screenTexts(c.in.Spec) { // a graphic's words too
+		texts++
+		if p.CopiesReferenceTitle(it.Text) {
+			copied = append(copied, it.ID)
 		}
 	}
 	if len(copied) > 0 {

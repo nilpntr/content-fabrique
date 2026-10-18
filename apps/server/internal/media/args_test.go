@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/sandbox"
 )
@@ -216,5 +217,13 @@ func TestSandboxRunnerBuildsJob(t *testing.T) {
 	}
 	if _, err := (&SandboxRunner{}).Run(context.Background(), Invocation{}); err == nil {
 		t.Error("no provider")
+	}
+	// An invocation's own limits replace the runner's (a motion run), and its timeout still wins.
+	own := sandbox.Limits{CPU: 4, MemoryMB: 3072, Timeout: time.Minute, PIDs: 1024}
+	if _, err := r.Run(context.Background(), Invocation{Args: []string{"cf-motion"}, Limits: &own, Timeout: 2 * time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+	if l := fp.job.Limits; l.MemoryMB != 3072 || l.PIDs != 1024 || l.CPU != 4 || l.Timeout != 2*time.Minute {
+		t.Errorf("limits %+v", l)
 	}
 }

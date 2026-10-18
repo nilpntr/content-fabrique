@@ -558,7 +558,8 @@
         "items": {
           "type": "array",
           "title": "Graphics items",
-          "description": "The overlays. They may overlap each other and sit anywhere inside the total duration.",
+          "description": "The overlays, at most 64. They may overlap each other in time and sit anywhere inside the total duration; the renderer keeps two on screen at once apart in the frame.",
+          "maxItems": 64,
           "items": { "$ref": "#/$defs/graphicsItem" }
         }
       }

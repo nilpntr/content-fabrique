@@ -249,9 +249,29 @@ func checkInkInBox(t *testing.T, work string, job Job) {
 	}
 }
 
+// hostileRefusals is the reason each hostile scene must fail with: which guard caught it. The runner's request allowlist (every
+// request a clean file: path inside the bundle) is the real guard for file: URLs: on a page opened from a file: URL the CSP's 'self'
+// matches every file: URL, so the csp_file_* scenes (with the scene's own CSP) get past the CSP and the allowlist refuses them. A
+// data: URL never reaches the allowlist (it is not a request); the CSP alone blocks it. fetch() of a file: URL is refused by Chrome
+// itself, and a WebSocket dies on the dead proxy.
+var hostileRefusals = map[string]string{
+	"file_fetch":          `URL scheme "file" is not supported`,
+	"file_iframe":         "file:///etc/passwd, which is outside the template bundle: refused",
+	"file_script":         "file:///etc/hostname, which is outside the template bundle: refused",
+	"file_xhr":            "file:///etc/passwd, which is outside the template bundle: refused",
+	"net_fetch":           "http://example.com/, which is outside the template bundle: refused",
+	"net_image":           "https://93.184.216.34/x.png, which is outside the template bundle: refused",
+	"net_websocket":       "ERR_PROXY_CONNECTION_FAILED",
+	"csp_file_image":      "file:///etc/passwd, which is outside the template bundle: refused",
+	"csp_file_stylesheet": "file:///etc/hostname, which is outside the template bundle: refused",
+	"csp_file_font":       "file:///etc/passwd, which is outside the template bundle: refused",
+	"csp_data_image":      `violates the following Content Security Policy directive: "img-src 'self'"`,
+}
+
 // The sandbox and the runner contain a page that misbehaves: a request to the network, a read of a file outside the bundle, a
-// WebSocket to the DevTools port. Each hostile scene has no CSP, so the browser's own refusal and the runner's request allowlist are
-// what is tested; each run must fail, with the refusal in the error, and draw nothing from outside the bundle.
+// WebSocket to the DevTools port. The scenes without a CSP test the browser's own refusal and the runner's request allowlist; the
+// csp_* scenes carry the scene's CSP and test which of the two guards holds (hostileRefusals). Each run must fail with that reason
+// in the error, and draw nothing from outside the bundle.
 func TestIntegrationHostilePagesInDocker(t *testing.T) {
 	runner, root := dockerRunner(t)
 	cases, err := os.ReadDir("testdata/hostile")
@@ -285,6 +305,13 @@ func TestIntegrationHostilePagesInDocker(t *testing.T) {
 			}
 			if !strings.Contains(msg, "the page failed") && !strings.Contains(msg, "mount:") {
 				t.Errorf("the failure does not name the page: %s", msg)
+			}
+			want, ok := hostileRefusals[c.Name()]
+			if !ok {
+				t.Fatalf("no expected refusal for %s: add it to hostileRefusals", c.Name())
+			}
+			if !strings.Contains(msg, want) {
+				t.Errorf("refused, but not for the expected reason %q: %s", want, msg)
 			}
 		})
 	}

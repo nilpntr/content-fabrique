@@ -165,7 +165,7 @@ func unanalysed(rows []store.ProjectFootageRow, got map[ids.AssetID]analysis.Sum
 	return n
 }
 
-// specStats are the numbers of a spec the model needs at a glance.
+// specStats are the numbers of a spec the model needs at a glance (texts counts the motion graphics too).
 func specStats(spec *timeline.Spec) (total int64, clips, texts, sounds int) {
 	total = timeline.TotalDuration(spec)
 	for _, t := range spec.Tracks {
@@ -173,6 +173,8 @@ func specStats(spec *timeline.Spec) (total int64, clips, texts, sounds int) {
 		case *timeline.VideoTrack:
 			clips += len(t.Items)
 		case *timeline.TextTrack:
+			texts += len(t.Items)
+		case *timeline.GraphicsTrack:
 			texts += len(t.Items)
 		case *timeline.AudioTrack:
 			sounds += len(t.Items)

@@ -529,7 +529,7 @@ type Sandbox interface {
 - **Bytes flow R2 ↔ sandbox directly through short-lived presigned URLs.** The Go worker only passes URLs, so it never proxies gigabytes.
 - **Implementations** ([D-08](05-decisions.md#d-08-sandbox-pluggable-interface-default-provider)):
   - `docker`: local development.
-  - `hardened`: gVisor (`runsc`) containers on our worker hosts, for **all deterministic media jobs**.
+  - `hardened`: gVisor (`runsc`) containers on our worker hosts, for **all deterministic media jobs**. Register runsc with `--oci-seccomp` (`runsc install -- --oci-seccomp`) so the container's seccomp profile is enforced inside gVisor as well.
   - `cloudflare`: the Cloudflare Sandbox SDK via the `sandbox-gateway` Worker, the **default for the agent escape hatch**. Internet is disabled, and the job's R2 prefix is mounted with the Worker signing requests, so **no credentials inside**.
   - Alternatives behind the same interface: E2B (Firecracker), and **Claude Managed Agents** for free-form sessions where Anthropic runs the loop. Tools then run in Anthropic's cloud container or on our `hardened` hosts via the Go environment worker.
 - **As built in P1-03** (`apps/server/internal/sandbox`): the interface above is the target; v0 ships the smaller one-shot form every media job needs, `Provider.Run(ctx, Job{Image, Args, Mounts, Limits, Network: none}) (Result{ExitCode, Stdout, Stderr, Duration})`, with the `local` (development only, no isolation), `docker` and `hardened` providers. Inputs are read-only mounts under `/in`, the one writable mount is `/work`, and a job without limits is refused. `Create`/`Exec`/`Download`/`Upload` arrive with the `cloudflare` provider.
