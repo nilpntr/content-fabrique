@@ -11,6 +11,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/media"
 	"github.com/nilpntr/content-fabrique/internal/motion"
 	"github.com/nilpntr/content-fabrique/internal/sandbox"
+	"github.com/nilpntr/content-fabrique/internal/subject"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
@@ -117,6 +118,42 @@ func findGraphic(t *testing.T, spec *timeline.Spec, id string) timeline.Graphics
 	}
 	t.Fatalf("no graphics item %s", id)
 	return timeline.GraphicsItem{}
+}
+
+// Never over the body (P6-06's rule for text holds for overlays): with the person filling the frame for the whole video there is no
+// time an overlay that avoids them fits, so each is left out with a warning; one set not to avoid the subject is still drawn.
+func TestGraphicsNeverOverTheBody(t *testing.T) {
+	spec := loadFixture(t, "v50_graphics_9x16", testAssets(t))
+	full := &subject.Track{Aspect: 0.5625, Samples: []subject.Sample{
+		{AtMs: 0, X: 0.02, Y: 0.04, W: 0.96, H: 0.96, HeadTopY: 0.05},
+		{AtMs: 60000, X: 0.02, Y: 0.04, W: 0.96, H: 0.96, HeadTopY: 0.05},
+	}}
+	res := ResolverFunc(func(id string, _ Variant) (ResolvedAsset, error) {
+		return ResolvedAsset{Location: "/assets/" + id + ".mp4", HasAudio: true, Subject: full}, nil
+	})
+	plan, err := Compile(spec, Preview, res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var drawn []string
+	if plan.Motion != nil {
+		for _, it := range plan.Motion.Job.Items {
+			drawn = append(drawn, it.ID)
+		}
+	}
+	// g7 is avoid_subject false in the fixture: it stays where it was put.
+	if len(drawn) != 1 || drawn[0] != "g7" {
+		t.Fatalf("drawn %v, want only g7", drawn)
+	}
+	dropped := 0
+	for _, w := range plan.Warnings {
+		if w.Code == "text_over_subject" && strings.Contains(w.Message, "is left out") {
+			dropped++
+		}
+	}
+	if dropped != 7 {
+		t.Fatalf("%d items left out with a warning, want 7: %+v", dropped, plan.Warnings)
+	}
 }
 
 func TestGraphicsRefuseAStalePlan(t *testing.T) {
