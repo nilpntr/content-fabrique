@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/agents/agentset"
 	"github.com/nilpntr/content-fabrique/internal/agents/editor"
@@ -53,6 +54,8 @@ editor runs and judge calls together. --max-usd 0 (the default) spends nothing: 
   --phoenix       Phoenix's address; default OTEL_EXPORTER_OTLP_ENDPOINT, else http://localhost:6006 (used when it answers)
   --no-phoenix    do not log to Phoenix
   --label         a name for this run in Phoenix
+  --repeat        how many times each live case is run; its score is the mean ± sd of its samples, and a failed run scores 0.
+                  Default 2 with --live (a live edit is not deterministic), 1 otherwise; a stored case is always scored once
   --json          print the summary as JSON
   --env-file, --yes  as for cfctl agent run (--yes is needed with --live outside plain local development)
 `
@@ -62,6 +65,22 @@ type suiteFlags struct {
 	suite, local, cases, out, phoenix, label, judgeProfile, envFile string
 	live, noJudge, noPhoenix, asJSON, yes                           bool
 	maxUSD                                                          float64
+	repeat                                                          int
+}
+
+// DefaultLiveRepeat is how many times a live case runs when --repeat is not given: one live run says little (the same code and case
+// scored 91.0, 85.0 and 83.7).
+const DefaultLiveRepeat = 2
+
+// repeats is --repeat, or its default.
+func (f suiteFlags) repeats() int {
+	switch {
+	case f.repeat > 0:
+		return f.repeat
+	case f.live:
+		return DefaultLiveRepeat
+	}
+	return 1
 }
 
 func (f *suiteFlags) register(fs *flag.FlagSet) {
@@ -79,6 +98,7 @@ func (f *suiteFlags) register(fs *flag.FlagSet) {
 	fs.BoolVar(&f.asJSON, "json", false, "JSON summary")
 	fs.StringVar(&f.envFile, "env-file", "", "env file")
 	fs.BoolVar(&f.yes, "yes", false, "confirm outside plain local development")
+	fs.IntVar(&f.repeat, "repeat", 0, "samples of each live case")
 }
 
 func cmdEvalSuite(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps agentDeps) int {
@@ -96,6 +116,10 @@ func cmdEvalSuite(args []string, stdout, stderr io.Writer, lookup lookupEnv, dep
 	}
 	if fs.NArg() > 0 {
 		_, _ = fmt.Fprintf(stderr, "cfctl %s: unexpected argument %q\n", name, fs.Arg(0))
+		return 2
+	}
+	if f.repeat < 0 || f.repeat > 10 {
+		_, _ = fmt.Fprintf(stderr, "cfctl %s: --repeat is 1 to 10\n", name)
 		return 2
 	}
 	if f.maxUSD < 0 || (f.live && f.maxUSD <= 0) {
@@ -133,9 +157,20 @@ func runSuite(name string, f suiteFlags, stdout, stderr io.Writer, lookup lookup
 	if f.live {
 		mode = "live"
 	}
-	_, _ = fmt.Fprintf(out, "suite %s (%s): %d cases, %s, judge %s, budget $%.2f\n", se.suite.Name, displayPath(se.env.root, se.suite.Path), len(se.suite.Cases), mode,
-		map[bool]string{true: "off", false: "on"}[f.noJudge], f.maxUSD)
+	_, _ = fmt.Fprintf(out, "suite %s (%s): %d cases, %s, %d sample(s) a live case, judge %s, budget $%.2f\n", se.suite.Name, displayPath(se.env.root, se.suite.Path),
+		len(se.suite.Cases), mode, se.opts.Repeat, map[bool]string{true: "off", false: "on"}[f.noJudge], f.maxUSD)
+	if f.maxUSD > 0 {
+		est := evals.EstimateRun(se.suite, se.opts, se.deps.Edit != nil, evals.RecentRuns(se.opts.OutDir, se.suite.Name, 10))
+		if !guardCost(out, se.env.err, name, est.Micros, f.maxUSD, est.Lines) {
+			return nil, se.suite, 2
+		}
+	}
 	res, err := evals.Run(ctx, se.suite, se.deps, se.opts)
+	if err == nil && res != nil && complete(res) {
+		if rerr := evals.RecordBaseline(se.opts.OutDir, res, time.Now()); rerr != nil {
+			_, _ = fmt.Fprintf(se.env.err, "cfctl %s: remembering the run: %v\n", name, rerr)
+		}
+	}
 	if err != nil {
 		_, _ = fmt.Fprintf(se.env.err, "cfctl %s: %v\n", name, err)
 		if res == nil {
@@ -144,6 +179,30 @@ func runSuite(name string, f suiteFlags, stdout, stderr io.Writer, lookup lookup
 	}
 	printSuite(out, res, f.asJSON)
 	return res, se.suite, 0
+}
+
+// guardCost prints a run's estimated cost and refuses it (false) when it is over the budget.
+func guardCost(out, errOut io.Writer, name string, micros int64, maxUSD float64, lines []string) bool {
+	_, _ = fmt.Fprintf(out, "estimated cost $%.2f of $%.2f:\n", float64(micros)/1e6, maxUSD)
+	for _, l := range lines {
+		_, _ = fmt.Fprintf(out, "  %s\n", l)
+	}
+	if float64(micros) > maxUSD*1e6 {
+		_, _ = fmt.Fprintf(errOut, "cfctl %s: the estimated cost $%.2f is over --max-usd $%.2f: raise it, lower --repeat, or pick --cases\n", name, float64(micros)/1e6, maxUSD)
+		return false
+	}
+	return true
+}
+
+// complete says a run scored every case it was asked to as fully as it could: none was cut short, and no judge call was left out, by the
+// budget. Only such a run can stand as a baseline (a baseline without the judge's parts is on another scale).
+func complete(r *evals.RunResult) bool {
+	for _, c := range r.Cases {
+		if strings.Contains(c.Skipped, "--max-usd") || strings.Contains(c.Skipped, "samples ran") || strings.Contains(c.JudgeNote, "--max-usd") {
+			return false
+		}
+	}
+	return true
 }
 
 func printSuite(out io.Writer, res *evals.RunResult, asJSON bool) {
@@ -155,16 +214,15 @@ func printSuite(out io.Writer, res *evals.RunResult, asJSON bool) {
 	}
 	_, _ = fmt.Fprintln(out)
 	for _, c := range res.Cases {
-		score := "  -  "
-		if c.Score != nil {
-			score = fmt.Sprintf("%5.1f", *c.Score)
-		}
 		flags := ""
 		if c.HeldOut {
 			flags += " (held out)"
 		}
-		_, _ = fmt.Fprintf(out, "%s  %s%s  [%s v%d]\n", score, c.Case, flags, c.Project, c.Version)
-		if c.Skipped != "" || c.Error != "" {
+		_, _ = fmt.Fprintf(out, "%s  %s%s  [%s v%d]\n", evals.ScoreText(c), c.Case, flags, c.Project, c.Version)
+		for _, f := range c.Failures {
+			_, _ = fmt.Fprintf(out, "       FAILED %s (scored 0)\n", f)
+		}
+		if c.Score == nil && (c.Skipped != "" || c.Error != "") {
 			_, _ = fmt.Fprintf(out, "       %s%s\n", c.Skipped, c.Error)
 			continue
 		}
@@ -203,15 +261,16 @@ func printSuite(out io.Writer, res *evals.RunResult, asJSON bool) {
 			_, _ = fmt.Fprintf(out, "       calibration: agrees %v %s\n", c.Calibration.Agrees, strings.Join(c.Calibration.Off, "; "))
 		}
 	}
-	mean := "-"
-	if res.Mean != nil {
-		mean = fmt.Sprintf("%.1f", *res.Mean)
-	}
 	held := ""
 	if res.HeldOut != nil {
-		held = fmt.Sprintf(", held out %.1f", *res.HeldOut)
+		held = ", held out " + evals.MeanText(res.HeldOut, res.HeldOutSE)
 	}
-	_, _ = fmt.Fprintf(out, "\nmean %s%s, spent $%.3f\n", mean, held, float64(res.SpentMicro)/1e6)
+	cal := ""
+	if res.CalibrationError != nil {
+		cal = fmt.Sprintf(", judge calibration error %.2f", *res.CalibrationError)
+	}
+	_, _ = fmt.Fprintf(out, "\nmean %s%s, failure rate %.0f %% (%d of %d samples)%s, spent $%.3f\n", evals.MeanText(res.Mean, res.MeanSE), held,
+		100*res.FailureRate, res.Failures, res.Samples, cal, float64(res.SpentMicro)/1e6)
 	if res.JSONL != "" {
 		_, _ = fmt.Fprintf(out, "results  %s\n", res.JSONL)
 	}
@@ -314,7 +373,11 @@ func openSuite(name string, f suiteFlags, stdout, stderr io.Writer, lookup looku
 			only = append(only, id)
 		}
 	}
-	se.opts = evals.Options{Live: f.live, MaxMicros: int64(f.maxUSD * 1e6), NoJudge: f.noJudge, Only: only, OutDir: outDir, Label: f.label}
+	se.opts = evals.Options{Live: f.live, MaxMicros: int64(f.maxUSD * 1e6), NoJudge: f.noJudge, Only: only, OutDir: outDir, Label: f.label, Repeat: f.repeats()}
+	key := evals.RunKey{Live: f.live, Repeat: f.repeats(), Judge: !f.noJudge, JudgeProfile: f.judgeProfile, Only: only}
+	if se.opts.CodeHash, err = evals.CodeHash(env.root, suite, key); err != nil {
+		_, _ = fmt.Fprintf(env.err, "cfctl %s: hashing the code: %v\n", name, err)
+	}
 	pics := &evals.Pictures{Renders: st, Objects: objects, Runner: runner, TempDir: tempDir}
 	var sampler editor.RenderSampler
 	if objects != nil {
@@ -368,6 +431,33 @@ func openSuite(name string, f suiteFlags, stdout, stderr io.Writer, lookup looku
 			return pics.References(ctx, c.ReferencesDir, m.StyleNames)
 		},
 		Phoenix: phx,
+		// The calibration cases' contact sheets with their human verdicts, shown to the judge as anchors of its scale.
+		Anchors: func(ctx context.Context) ([]evals.Anchor, error) {
+			if objects == nil {
+				return nil, errors.New("no object storage (R2_*) to read the renders from")
+			}
+			var out []evals.Anchor
+			for _, raw := range suite.Cases {
+				c := suite.Resolved(raw)
+				if c.Calibration == nil || len(c.Missing(false)) > 0 {
+					continue
+				}
+				w, err := workspace(ctx, c.Workspace)
+				if err != nil {
+					return out, err
+				}
+				pid, err := ids.ParseProjectID(c.Stored.Project)
+				if err != nil {
+					return out, err
+				}
+				sheet, err := pics.Sheet(ctx, evals.Target{Workspace: w.ID, Project: pid, Version: c.Stored.Version})
+				if err != nil {
+					return out, fmt.Errorf("calibration case %s: %w", c.ID, err)
+				}
+				out = append(out, evals.Anchor{CaseID: c.ID, Sheet: *sheet, Note: c.Calibration.Note, Expect: c.Calibration.Expect})
+			}
+			return out, nil
+		},
 	}
 	if !f.noJudge {
 		se.deps.Judge = &evals.Judge{Models: rt.Factory, Router: rt.Router, CacheDir: filepath.Join(outDir, ".judge-cache"), Profile: f.judgeProfile}
@@ -486,9 +576,17 @@ func editLive(ctx context.Context, st *store.Store, svc *projects.Service, rt *a
 		return t, err
 	}
 	t.EditMicros = final.CostMicros
+	// A run that did not succeed is a failed sample, whatever versions it saved on the way (the creator would see a failed edit).
+	if final.Status != store.AgentSucceeded {
+		reason := final.Status
+		if final.FailureReason != nil {
+			reason += ": " + *final.FailureReason
+		}
+		return t, fmt.Errorf("the editor run %s %s", ids.Encode(ids.PrefixRun, run.ID), reason)
+	}
 	v, err := st.GetTimelineVersionByAuthor(ctx, w.ID, pid, "agent", ids.Encode(ids.PrefixRun, run.ID))
 	if err != nil {
-		return t, fmt.Errorf("the editor run %s (%s) made no version", ids.Encode(ids.PrefixRun, run.ID), final.Status)
+		return t, fmt.Errorf("the editor run %s succeeded but made no version", ids.Encode(ids.PrefixRun, run.ID))
 	}
 	t.Version = int(v.Version)
 	return t, nil

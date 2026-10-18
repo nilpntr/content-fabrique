@@ -143,19 +143,19 @@ type Experiment struct {
 }
 
 // CreateExperiment starts an experiment over the dataset.
-func (p *Phoenix) CreateExperiment(ctx context.Context, datasetID, name, description string, metadata map[string]any) (Experiment, error) {
+func (p *Phoenix) CreateExperiment(ctx context.Context, datasetID, name, description string, metadata map[string]any, repetitions int) (Experiment, error) {
 	var out struct {
 		Data Experiment `json:"data"`
 	}
 	_, err := p.do(ctx, http.MethodPost, "/v1/datasets/"+url.PathEscape(datasetID)+"/experiments",
-		map[string]any{"name": name, "description": description, "metadata": nonNil(metadata)}, &out)
+		map[string]any{"name": name, "description": description, "metadata": nonNil(metadata), "repetitions": max(repetitions, 1)}, &out)
 	return out.Data, err
 }
 
 // AddRun records one case's result; traceID links it to the case's trace (empty for none). It returns the run's id.
-func (p *Phoenix) AddRun(ctx context.Context, experimentID, exampleNodeID string, output any, start, end time.Time, traceID, runErr string) (string, error) {
+func (p *Phoenix) AddRun(ctx context.Context, experimentID, exampleNodeID string, output any, start, end time.Time, traceID, runErr string, repetition int) (string, error) {
 	body := map[string]any{
-		"dataset_example_id": exampleNodeID, "output": output, "repetition_number": 1,
+		"dataset_example_id": exampleNodeID, "output": output, "repetition_number": max(repetition, 1),
 		"start_time": start.UTC().Format(time.RFC3339Nano), "end_time": end.UTC().Format(time.RFC3339Nano),
 	}
 	if traceID != "" {

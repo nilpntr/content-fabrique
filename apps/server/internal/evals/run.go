@@ -68,6 +68,8 @@ type Deps struct {
 	Visuals    func(ctx context.Context, t Target, m Measurement) (*Picture, []Picture, error)
 	References func(ctx context.Context, c Case, m Measurement) ([]Picture, error)
 	Judge      JudgeScorer
+	// Anchors, when set, gives the judge's anchors: the calibration cases' renders with their human verdicts (judge.go). Read once a run.
+	Anchors func(ctx context.Context) ([]Anchor, error)
 	// Phoenix, when set, receives the suite as a dataset and the run as an experiment.
 	Phoenix *Phoenix
 	// Log receives progress lines.
@@ -89,7 +91,12 @@ type Options struct {
 	OutDir string
 	// Label names the run in Phoenix (the improvement loop says "baseline" or the change).
 	Label string
-	Now   func() time.Time
+	// Repeat is how many times each live case is run (its samples); 0 or 1 is once. A stored case is scored once: its score is the same
+	// every time.
+	Repeat int
+	// CodeHash names the code the run scored (baseline.go); it is written with the results.
+	CodeHash string
+	Now      func() time.Time
 }
 
 // CaseResult is one line of the results.
@@ -119,24 +126,46 @@ type CaseResult struct {
 	JudgeNote  string           `json:"judge_note,omitempty"`
 	MusicSync  *Score           `json:"music_sync,omitempty"`
 	Parts      []Part           `json:"parts,omitempty"`
-	Score      *float64         `json:"score,omitempty"`
-	CostMicros int64            `json:"cost_micros"`
-	TraceID    string           `json:"trace_id,omitempty"`
-	Started    time.Time        `json:"started"`
-	Ended      time.Time        `json:"ended"`
+	// Score is the mean of the case's samples (a failed sample counts 0), SD their standard deviation (two or more), N how many counted.
+	Score       *float64       `json:"score,omitempty"`
+	SD          *float64       `json:"sd,omitempty"`
+	N           int            `json:"n"`
+	Samples     []SampleResult `json:"samples,omitempty"`
+	Failures    []string       `json:"failures,omitempty"`
+	FailureRate float64        `json:"failure_rate"`
+	CostMicros  int64          `json:"cost_micros"`
+	TraceID     string         `json:"trace_id,omitempty"`
+	Started     time.Time      `json:"started"`
+	Ended       time.Time      `json:"ended"`
+
+	// Of one sample, while it runs.
+	failed                  bool
+	reason                  string
+	editMicros, judgeMicros int64
+	judgeWanted             bool
 }
 
 // RunResult is a whole suite run.
 type RunResult struct {
-	Suite      string       `json:"suite"`
-	RunID      string       `json:"suite_run"`
-	Label      string       `json:"label,omitempty"`
-	Cases      []CaseResult `json:"-"`
-	Mean       *float64     `json:"mean"`
-	HeldOut    *float64     `json:"held_out_mean,omitempty"`
-	SpentMicro int64        `json:"spent_micros"`
-	JSONL      string       `json:"jsonl,omitempty"`
-	Experiment string       `json:"experiment_url,omitempty"`
+	Suite     string       `json:"suite"`
+	RunID     string       `json:"suite_run"`
+	Label     string       `json:"label,omitempty"`
+	Cases     []CaseResult `json:"-"`
+	Mean      *float64     `json:"mean"`
+	MeanSE    *float64     `json:"mean_se,omitempty"`
+	HeldOut   *float64     `json:"held_out_mean,omitempty"`
+	HeldOutSE *float64     `json:"held_out_se,omitempty"`
+	Repeat    int          `json:"repeat"`
+	Samples   int          `json:"samples"`
+	Failures  int          `json:"failures"`
+	// FailureRate is failed samples over samples.
+	FailureRate float64 `json:"failure_rate"`
+	// CalibrationError is the mean distance of the judge's scores from the human ranges on the calibration cases (0: it agrees).
+	CalibrationError *float64 `json:"calibration_error,omitempty"`
+	CodeHash         string   `json:"code_hash,omitempty"`
+	SpentMicro       int64    `json:"spent_micros"`
+	JSONL            string   `json:"jsonl,omitempty"`
+	Experiment       string   `json:"experiment_url,omitempty"`
 }
 
 // ByCase returns the result of a case.
@@ -168,7 +197,15 @@ func Run(ctx context.Context, s *Suite, d Deps, o Options) (*RunResult, error) {
 		}
 	}
 	runID := o.Now().UTC().Format("20060102-150405") + "-" + uuid.NewString()[:8]
-	res := &RunResult{Suite: s.Name, RunID: runID, Label: o.Label}
+	res := &RunResult{Suite: s.Name, RunID: runID, Label: o.Label, Repeat: max(o.Repeat, 1), CodeHash: o.CodeHash}
+	rs := &runState{runID: runID}
+	if !o.NoJudge && d.Judge != nil && d.Anchors != nil {
+		anchors, err := d.Anchors(ctx)
+		if err != nil {
+			logf("judge anchors: none (%v)", err)
+		}
+		rs.anchors = anchors
+	}
 	var out *os.File
 	if o.OutDir != "" {
 		dir := filepath.Join(o.OutDir, s.Name)
@@ -195,15 +232,18 @@ func Run(ctx context.Context, s *Suite, d Deps, o Options) (*RunResult, error) {
 			return res, err
 		}
 		c := s.Resolved(raw)
-		cr := runCase(ctx, s, c, d, o, runID, res.SpentMicro)
+		cr := runCase(ctx, s, c, d, o, rs, res.SpentMicro)
 		res.SpentMicro += cr.CostMicros
 		res.Cases = append(res.Cases, cr)
 		line := "skipped: " + cr.Skipped
 		switch {
+		case cr.Score != nil:
+			line = fmt.Sprintf("score %s (checks %d/%d, cost $%.3f)", ScoreText(cr), cr.Checks.Passed, cr.Checks.Passed+cr.Checks.Failed, float64(cr.CostMicros)/1e6)
+			for _, f := range cr.Failures {
+				line += "\n" + strings.Repeat(" ", 31) + "failed " + f
+			}
 		case cr.Error != "":
 			line = "error: " + cr.Error
-		case cr.Score != nil:
-			line = fmt.Sprintf("score %.1f (checks %d/%d, cost $%.3f)", *cr.Score, cr.Checks.Passed, cr.Checks.Passed+cr.Checks.Failed, float64(cr.CostMicros)/1e6)
 		}
 		logf("  %-28s %s", c.ID, line)
 		if out != nil {
@@ -212,7 +252,7 @@ func Run(ctx context.Context, s *Suite, d Deps, o Options) (*RunResult, error) {
 			}
 		}
 	}
-	res.Mean, res.HeldOut = means(res.Cases)
+	summarise(res)
 	if d.Phoenix != nil {
 		if url, err := logExperiment(ctx, d.Phoenix, s, res); err != nil {
 			logf("phoenix: the experiment was not logged: %v", err)
@@ -269,37 +309,68 @@ func writeLine(w io.Writer, v any) error {
 	return err
 }
 
-// means are the mean score of the cases that count (scored, not calibration, not held out) and of the held-out ones.
-func means(cases []CaseResult) (*float64, *float64) {
-	var sum, n, hsum, hn float64
-	for _, c := range cases {
-		if c.Score == nil || c.Calibration != nil {
-			continue
-		}
-		if c.HeldOut {
-			hsum, hn = hsum+*c.Score, hn+1
-			continue
-		}
-		sum, n = sum+*c.Score, n+1
-	}
-	var m, h *float64
-	if n > 0 {
-		v := math.Round(10*sum/n) / 10
-		m = &v
-	}
-	if hn > 0 {
-		v := math.Round(10*hsum/hn) / 10
-		h = &v
-	}
-	return m, h
+// runState is what the cases of one run share.
+type runState struct {
+	runID   string
+	anchors []Anchor
 }
 
-func runCase(ctx context.Context, s *Suite, c Case, d Deps, o Options, runID string, spent int64) (cr CaseResult) {
+// liveCase says the case is edited live in this run.
+func liveCase(c Case, d Deps, o Options) bool {
+	return o.Live && d.Edit != nil && c.Calibration == nil && len(c.Missing(true)) == 0
+}
+
+// runCase runs a case's samples (Repeat for a live case, one otherwise) and sets its mean, spread and failures. The case's details
+// (checks, feedback, judge, parts) are those of its last scored sample; every sample is in Samples.
+func runCase(ctx context.Context, s *Suite, c Case, d Deps, o Options, rs *runState, spent int64) CaseResult {
+	n := 1
+	if liveCase(c, d, o) {
+		n = max(o.Repeat, 1)
+	}
+	var detail CaseResult
+	var samples []SampleResult
+	var cost int64
+	var started time.Time
+	for k := 1; k <= n; k++ {
+		sr := runSample(ctx, s, c, d, o, rs, spent+cost, k)
+		if k == 1 {
+			started = sr.Started
+		}
+		cost += sr.CostMicros
+		if sr.Skipped != "" {
+			if k == 1 {
+				return sr // nothing ran
+			}
+			detail.Skipped = fmt.Sprintf("only %d of %d samples ran: %s", k-1, n, sr.Skipped)
+			break
+		}
+		smp := SampleResult{N: k, Score: sr.Score, Failed: sr.failed, Reason: sr.reason, EditorRun: sr.EditorRun, Project: sr.Project,
+			Version: sr.Version, EditMicros: sr.editMicros, JudgeMicros: sr.judgeMicros, TraceID: sr.TraceID}
+		smp.Unjudged = sr.judgeWanted && sr.Judge == nil && !sr.failed && sr.Score != nil
+		if smp.Failed {
+			smp.Score = nil
+		}
+		samples = append(samples, smp)
+		if detail.Case == "" || (sr.Score != nil && !sr.failed) {
+			skipped := detail.Skipped
+			detail = sr
+			detail.Skipped = skipped
+		}
+	}
+	detail.Samples, detail.CostMicros, detail.Started, detail.Ended = samples, cost, started, o.Now()
+	aggregate(&detail)
+	return detail
+}
+
+// runSample runs and scores a case once.
+func runSample(ctx context.Context, s *Suite, c Case, d Deps, o Options, rs *runState, spent int64, sample int) (cr CaseResult) {
+	runID := rs.runID
 	cr = CaseResult{Suite: s.Name, RunID: runID, Case: c.ID, Title: c.Title, HeldOut: c.HeldOut, Started: o.Now()}
-	ctx = telemetry.WithTraceID(ctx, telemetry.DerivedTraceID("eval/"+runID+"/"+c.ID))
-	ctx, span := tracer().Start(ctx, "eval.case "+c.ID, trace.WithNewRoot(), trace.WithAttributes(
+	ctx = telemetry.WithTraceID(ctx, telemetry.DerivedTraceID(fmt.Sprintf("eval/%s/%s/%d", runID, c.ID, sample)))
+	ctx, span := tracer().Start(ctx, fmt.Sprintf("eval.case %s #%d", c.ID, sample), trace.WithNewRoot(), trace.WithAttributes(
 		telemetry.Kind(telemetry.KindChain), attribute.String("cf.suite", s.Name), attribute.String("cf.suite_run", runID),
-		attribute.String("cf.case", c.ID), attribute.Bool("cf.held_out", c.HeldOut), attribute.Bool("cf.calibration", c.Calibration != nil)))
+		attribute.String("cf.case", c.ID), attribute.Int("cf.sample", sample), attribute.Bool("cf.held_out", c.HeldOut),
+		attribute.Bool("cf.calibration", c.Calibration != nil)))
 	if sc := span.SpanContext(); sc.IsValid() {
 		cr.TraceID = sc.TraceID().String()
 	}
@@ -315,6 +386,9 @@ func runCase(ctx context.Context, s *Suite, c Case, d Deps, o Options, runID str
 		if raw, err := json.Marshal(cr); err == nil {
 			span.SetAttributes(telemetry.JSONValue(telemetry.OutputValue, json.RawMessage(raw))...)
 		}
+		if cr.failed {
+			span.SetAttributes(attribute.Bool("cf.failed", true), attribute.String("cf.failure", cr.reason))
+		}
 		if cr.Error != "" {
 			span.SetStatus(codes.Error, telemetry.Cap(cr.Error, 200))
 		}
@@ -322,10 +396,11 @@ func runCase(ctx context.Context, s *Suite, c Case, d Deps, o Options, runID str
 	}()
 	left := func() int64 { return o.MaxMicros - spent - cr.CostMicros }
 	judgeOn := !o.NoJudge && d.Judge != nil && d.Visuals != nil
+	cr.judgeWanted = judgeOn
 
 	// The version: made now (live), or the stored one.
 	var t Target
-	live := o.Live && d.Edit != nil && c.Calibration == nil && len(c.Missing(true)) == 0
+	live := liveCase(c, d, o)
 	switch {
 	case live:
 		budget := min(int64(c.BudgetUSD*1e6), left())
@@ -339,8 +414,14 @@ func runCase(ctx context.Context, s *Suite, c Case, d Deps, o Options, runID str
 		var err error
 		t, err = d.Edit(ctx, c, budget)
 		cr.CostMicros += t.EditMicros
+		cr.editMicros = t.EditMicros
+		if t.RunID != uuid.Nil {
+			cr.EditorRun = ids.Encode(ids.PrefixRun, t.RunID)
+		}
 		if err != nil {
-			cr.Mode, cr.Error = "live", err.Error()
+			// A run that failed (its budget, an answer cut off at max_tokens, an error) is a bad outcome of this code, not a missing sample:
+			// it scores 0 and is listed.
+			cr.Mode, cr.Error, cr.failed, cr.reason = "live", err.Error(), true, err.Error()
 			return cr
 		}
 		cr.Mode, cr.EditorRun = "live", ids.Encode(ids.PrefixRun, t.RunID)
@@ -367,6 +448,9 @@ func runCase(ctx context.Context, s *Suite, c Case, d Deps, o Options, runID str
 	m, err := d.Measure(ctx, t)
 	if err != nil {
 		cr.Error = "measure: " + err.Error()
+		if live {
+			cr.failed, cr.reason = true, cr.Error
+		}
 		return cr
 	}
 	pass, fail, skip := m.Report.Counts()
@@ -382,7 +466,7 @@ func runCase(ctx context.Context, s *Suite, c Case, d Deps, o Options, runID str
 
 	// The judge.
 	if judgeOn {
-		in, err := judgeInput(ctx, c, t, m, s, d)
+		in, err := judgeInput(ctx, c, t, m, s, d, rs.anchors)
 		switch {
 		case err != nil:
 			cr.JudgeNote = "no judge: " + err.Error()
@@ -401,6 +485,7 @@ func runCase(ctx context.Context, s *Suite, c Case, d Deps, o Options, runID str
 		default:
 			v, err := d.Judge.Score(ctx, t.Workspace, uuid.New(), in, min(MaxJudgeMicros, left()))
 			cr.CostMicros += v.CostMicros
+			cr.judgeMicros = v.CostMicros
 			switch {
 			case err != nil:
 				cr.JudgeNote = "judge failed: " + err.Error()
@@ -426,13 +511,19 @@ func runCase(ctx context.Context, s *Suite, c Case, d Deps, o Options, runID str
 	return cr
 }
 
-func judgeInput(ctx context.Context, c Case, t Target, m Measurement, s *Suite, d Deps) (JudgeInput, error) {
+func judgeInput(ctx context.Context, c Case, t Target, m Measurement, s *Suite, d Deps, anchors []Anchor) (JudgeInput, error) {
 	render, strips, err := d.Visuals(ctx, t, m)
 	if err != nil {
 		return JudgeInput{}, err
 	}
 	in := JudgeInput{CaseID: c.ID, Render: render, Strips: strips, Brief: m.Brief, Expectations: c.Expectations, Feedback: s.Feedback,
 		StyleEvidence: m.StyleEvidence, Timeline: describeTimeline(m.Spec)}
+	// The calibration anchors, but never a case's own (a calibration case shown itself would agree by construction).
+	for _, a := range anchors {
+		if a.CaseID != c.ID {
+			in.Anchors = append(in.Anchors, a)
+		}
+	}
 	if m.Plan != nil {
 		plan := map[string]any{"content_type": m.Plan.ContentType, "story": m.Plan.Story, "hook": m.Plan.Hook, "arc": m.Plan.Arc,
 			"ending": m.Plan.Ending, "playbook": m.Plan.PlaybookVersion, "target_length_s": m.Plan.TargetLengthS, "tempo_bpm": m.Plan.TempoBPM, "pace": m.Plan.Pace}
@@ -562,7 +653,9 @@ func logExperiment(ctx context.Context, p *Phoenix, s *Suite, res *RunResult) (s
 	if res.Label != "" {
 		name = res.Label + " " + res.RunID
 	}
-	exp, err := p.CreateExperiment(ctx, datasetID, name, "cfctl eval suite "+s.Name, map[string]any{"suite_run": res.RunID, "label": res.Label, "mean": res.Mean, "spent_micros": res.SpentMicro})
+	exp, err := p.CreateExperiment(ctx, datasetID, name, "cfctl eval suite "+s.Name, map[string]any{"suite_run": res.RunID, "label": res.Label,
+		"mean": res.Mean, "mean_se": res.MeanSE, "held_out": res.HeldOut, "failure_rate": res.FailureRate, "repeat": res.Repeat,
+		"calibration_error": res.CalibrationError, "code_hash": res.CodeHash, "spent_micros": res.SpentMicro}, res.Repeat)
 	if err != nil {
 		return "", err
 	}
@@ -571,19 +664,35 @@ func logExperiment(ctx context.Context, p *Phoenix, s *Suite, res *RunResult) (s
 		if node == "" {
 			continue
 		}
-		out := map[string]any{"score": c.Score, "mode": c.Mode, "version": c.Version, "project": c.Project, "editor_run": c.EditorRun,
-			"checks_failing": c.Checks.Failing, "judge_note": c.JudgeNote, "trace": p.TraceURL(ctx, telemetry.PhoenixProject, c.TraceID)}
-		errText := c.Error
-		if c.Skipped != "" {
-			errText = "skipped: " + c.Skipped
+		samples := c.Samples
+		if len(samples) == 0 { // skipped: one run that says why
+			samples = []SampleResult{{N: 1, TraceID: c.TraceID}}
 		}
-		rid, err := p.AddRun(ctx, exp.ID, node, out, c.Started, c.Ended, c.TraceID, errText)
-		if err != nil {
-			return "", err
-		}
-		for _, e := range evaluations(c) {
-			if err := p.AddEvaluation(ctx, rid, e, c.Started, c.Ended); err != nil {
+		for i, smp := range samples {
+			out := map[string]any{"score": smp.Score, "failed": smp.Failed, "case_mean": c.Score, "case_sd": c.SD, "case_n": c.N,
+				"failure_rate": c.FailureRate, "mode": c.Mode, "version": smp.Version, "project": smp.Project, "editor_run": smp.EditorRun,
+				"checks_failing": c.Checks.Failing, "judge_note": c.JudgeNote, "trace": p.TraceURL(ctx, telemetry.PhoenixProject, smp.TraceID)}
+			errText := c.Error
+			switch {
+			case c.Skipped != "" && len(c.Samples) == 0:
+				errText = "skipped: " + c.Skipped
+			case smp.Failed:
+				errText = "failed (scored 0): " + smp.Reason
+			case len(c.Samples) > 0:
+				errText = ""
+			}
+			rid, err := p.AddRun(ctx, exp.ID, node, out, c.Started, c.Ended, smp.TraceID, errText, i+1)
+			if err != nil {
 				return "", err
+			}
+			evs := []Evaluation{{Name: "sample_score", Kind: AnnotatorCode, Score: sampleValue(smp) / 100, Label: sampleLabel(smp)}}
+			if i == len(samples)-1 {
+				evs = append(evs, evaluations(c)...) // the case's mean and details once, on its last sample
+			}
+			for _, e := range evs {
+				if err := p.AddEvaluation(ctx, rid, e, c.Started, c.Ended); err != nil {
+					return "", err
+				}
 			}
 		}
 	}
@@ -595,7 +704,10 @@ func logExperiment(ctx context.Context, p *Phoenix, s *Suite, res *RunResult) (s
 func evaluations(c CaseResult) []Evaluation {
 	var out []Evaluation
 	if c.Score != nil {
-		out = append(out, Evaluation{Name: "score", Kind: AnnotatorCode, Score: *c.Score / 100, Label: fmt.Sprintf("%.1f", *c.Score)})
+		out = append(out, Evaluation{Name: "score", Kind: AnnotatorCode, Score: *c.Score / 100, Label: ScoreText(c), Explanation: strings.Join(c.Failures, "; ")})
+	}
+	if len(c.Samples) > 0 {
+		out = append(out, Evaluation{Name: "failure_rate", Kind: AnnotatorCode, Score: c.FailureRate, Label: fmt.Sprintf("%d/%d", len(c.Failures), len(c.Samples))})
 	}
 	if n := c.Checks.Passed + c.Checks.Failed; n > 0 {
 		out = append(out, Evaluation{Name: "checks", Kind: AnnotatorCode, Score: float64(c.Checks.Passed) / float64(n),
@@ -635,4 +747,23 @@ func evaluations(c CaseResult) []Evaluation {
 		out = append(out, Evaluation{Name: "calibration", Kind: AnnotatorHuman, Score: v, Label: fmt.Sprint(c.Calibration.Agrees), Explanation: c.Calibration.Note + " " + strings.Join(c.Calibration.Off, "; ")})
 	}
 	return out
+}
+
+func sampleValue(s SampleResult) float64 {
+	if v, ok := s.counted(false); ok {
+		return v
+	}
+	return 0
+}
+
+func sampleLabel(s SampleResult) string {
+	switch {
+	case s.Failed:
+		return "failed: 0"
+	case s.Unjudged:
+		return "unjudged"
+	case s.Score == nil:
+		return "-"
+	}
+	return fmt.Sprintf("%.1f", *s.Score)
 }
