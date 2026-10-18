@@ -18,6 +18,8 @@ export interface CreditTopUp {
 }
 
 export interface Credits {
+  /** What a video costs in credits (a first edit and two rounds of changes), from the price list: the only place the app learns it. */
+  credits_per_video: number;
   /** What a new action can use now, allowance and top-ups together. Credits held by a running edit are already out of it. */
   available: number;
   /** The size of the current period's allowance; 0 when there is none. */
@@ -35,11 +37,13 @@ const count = (value: unknown): value is number => typeof value === "number" && 
 /** The workspace's credits from a `/v1/me` answer, or undefined when the answer has none (the API does not offer them yet, or could not read the balance). */
 export function creditsOf(me: unknown): Credits | undefined {
   const raw = isRecord(me) ? me.credits : undefined;
-  if (!isRecord(raw) || !count(raw.available)) return undefined;
+  // `credits_per_video` is part of the contract (GET /v1/me); credits without it cannot be shown as videos, so they are not shown.
+  if (!isRecord(raw) || !count(raw.available) || !Number.isInteger(raw.credits_per_video) || (raw.credits_per_video as number) < 1) return undefined;
   const topUps = Array.isArray(raw.top_ups)
     ? raw.top_ups.flatMap((entry): CreditTopUp[] => (isRecord(entry) && count(entry.credits) && typeof entry.expires_at === "string" ? [{ credits: entry.credits, expires_at: entry.expires_at }] : []))
     : [];
   return {
+    credits_per_video: raw.credits_per_video as number,
     available: raw.available,
     allowance: count(raw.allowance) ? raw.allowance : 0,
     period_end: typeof raw.period_end === "string" ? raw.period_end : null,

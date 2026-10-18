@@ -424,13 +424,13 @@ profile: v1-start
 editor:
   model: claude-opus-5-5
   effort: max                    # the founder's choice (D-31, pending confirmation); was medium (D-17). Nothing above max, so no escalate
-  max_tokens: 64000
+  max_tokens: 32000
   subagents:
     inspector: { enabled: false, model: claude-haiku-5-5 }   # benchmark variant only
 revision:
   model: claude-opus-5-5
   effort: max
-  max_tokens: 32000
+  max_tokens: 16000
 research:
   lead:    { model: claude-opus-5-5, effort: medium }
   workers: { model: claude-haiku-5-5, max_parallel: 6, budget_micros: 150000 }

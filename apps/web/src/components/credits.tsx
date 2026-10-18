@@ -5,7 +5,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { useMe } from "@/lib/api/hooks";
 import { type Credits, creditsLabel, creditsOf, dismissCreditsExhausted, formatDay, useCreditsExhausted } from "@/lib/credits";
 import { cn } from "@/lib/utils";
-import { CREDITS_PER_VIDEO, videosLeftText, videosShort } from "@/lib/words";
+import { videosLeftText, videosShort } from "@/lib/words";
 
 /** The share of the allowance that is left, as a ring: full when nothing is used. */
 function Ring({ credits, className }: { credits: Credits; className?: string }) {
@@ -121,7 +121,7 @@ export function CreditsCard({ credits, className }: { credits: Credits | undefin
         <p className="text-[13px] text-muted-foreground tabular-nums">{creditsLabel(credits.available)} left.</p>
       )}
       <p className="max-w-prose text-[13px] text-muted-foreground text-pretty">
-        One video is {CREDITS_PER_VIDEO} credits: the first edit and two rounds of changes. Exporting is free.
+        One video is {credits.credits_per_video} credits: the first edit and two rounds of changes. Exporting is free.
       </p>
       {credits.top_ups.length > 0 ? (
         <ul aria-label="Top-ups" className="space-y-1 text-[13px]">

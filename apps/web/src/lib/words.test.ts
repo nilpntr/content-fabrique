@@ -1,22 +1,29 @@
 import { expect, test } from "vitest";
 import { greeting, projectStatusWords, videosIn, videosLeftText, videosShort, versionName } from "./words";
 
-const credits = (available: number, over: Partial<{ allowance: number; period_end: string | null }> = {}) => ({ available, allowance: 150, period_end: "2099-11-14T00:00:00Z", low: false, top_ups: [], ...over });
+const credits = (available: number, over: Partial<{ allowance: number; period_end: string | null; credits_per_video: number }> = {}) => ({ credits_per_video: 30, available, allowance: 150, period_end: "2099-11-14T00:00:00Z", low: false, top_ups: [], ...over });
 
-test("credits are shown as videos: 10 credits make one", () => {
-  expect(videosIn(0)).toBe(0);
-  expect(videosIn(9)).toBe(0);
-  expect(videosIn(10)).toBe(1);
-  expect(videosIn(127)).toBe(12);
-  expect(videosLeftText(credits(127))).toBe("≈ 12 videos left this month");
-  expect(videosLeftText(credits(10))).toBe("≈ 1 video left this month");
+test("credits are shown as videos, by the price list's credits per video", () => {
+  expect(videosIn(0, 30)).toBe(0);
+  expect(videosIn(29, 30)).toBe(0);
+  expect(videosIn(30, 30)).toBe(1);
+  expect(videosIn(127, 30)).toBe(4);
+  expect(videosLeftText(credits(127))).toBe("≈ 4 videos left this month");
+  expect(videosLeftText(credits(30))).toBe("≈ 1 video left this month");
   // Without a monthly allowance (a trial, top-ups only) there is no "this month".
-  expect(videosLeftText(credits(20, { allowance: 0, period_end: null }))).toBe("≈ 2 videos left");
+  expect(videosLeftText(credits(60, { allowance: 0, period_end: null }))).toBe("≈ 2 videos left");
   expect(videosLeftText(credits(6))).toBe("Enough for a few changes");
   expect(videosLeftText(credits(0))).toBe("No videos left");
-  expect(videosShort(credits(42))).toBe("4 videos");
+  expect(videosShort(credits(95))).toBe("3 videos");
   expect(videosShort(credits(6))).toBe("<1 video");
   expect(videosShort(credits(0))).toBe("0 videos");
+});
+
+test("the number of credits in a video is the API's, not the app's", () => {
+  // The same balance is a different number of videos when the price list says a video costs another number of credits.
+  expect(videosLeftText(credits(100, { credits_per_video: 10 }))).toBe("≈ 10 videos left this month");
+  expect(videosLeftText(credits(100, { credits_per_video: 40 }))).toBe("≈ 2 videos left this month");
+  expect(videosShort(credits(100, { credits_per_video: 25 }))).toBe("4 videos");
 });
 
 test("a project's status is said in plain words", () => {
