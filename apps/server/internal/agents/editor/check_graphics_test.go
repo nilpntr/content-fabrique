@@ -88,8 +88,29 @@ func subjects(headTop, top float64) subject.Index {
 func TestOverlayNeverOverTheBody(t *testing.T) {
 	spec := graphicsSpec(t, `{"id":"g1","template":"chapter_card","at_ms":0,"duration_ms":3000,"anchor":"upper_third","params":{"text":"SEATED ROW","number":1}}`)
 	high := runGraphicsChecks(t, CheckInput{Spec: spec, Subjects: subjects(0.06, 0.05)})[CheckOverlayOverSubject]
-	if high.Status != CheckFail || !strings.Contains(high.Detail, "never over the body") {
+	if high.Status != CheckFail || !strings.Contains(high.Detail, "never over the body") || !strings.Contains(high.Detail, "leaves it out") {
 		t.Fatalf("a person filling the frame: %+v", high)
+	}
+	// The person fills the frame in the first shot (source 0-4 s) and stands low in the second (source 10-14 s): the renderer moves a
+	// graphic of the first shot to the second (subject.FitText). A label may move (a note); a chapter card must be where it was put.
+	shots := subject.Index{graphicsAsset: {Aspect: 0.5625, Samples: []subject.Sample{
+		{AtMs: 0, X: 0.02, Y: 0.05, W: 0.96, H: 0.95, HeadTopY: 0.06},
+		{AtMs: 4000, X: 0.02, Y: 0.05, W: 0.96, H: 0.95, HeadTopY: 0.06},
+		{AtMs: 10000, X: 0.1, Y: 0.44, W: 0.8, H: 0.56, HeadTopY: 0.45},
+		{AtMs: 14000, X: 0.1, Y: 0.44, W: 0.8, H: 0.56, HeadTopY: 0.45},
+	}}}
+	label := graphicsSpec(t, `{"id":"g1","template":"lower_label","at_ms":1000,"duration_ms":2000,"anchor":"upper_third","params":{"text":"TEMPO 3-1-1"}}`)
+	if c := runGraphicsChecks(t, CheckInput{Spec: label, Subjects: shots})[CheckOverlayOverSubject]; c.Status != CheckPass || !strings.Contains(c.Detail, "the renderer shows it at") {
+		t.Fatalf("a label moved to the next shot: %+v", c)
+	}
+	card := graphicsSpec(t, `{"id":"g1","template":"chapter_card","at_ms":1000,"duration_ms":2500,"anchor":"upper_third","params":{"text":"SEATED ROW","number":1}}`)
+	if c := runGraphicsChecks(t, CheckInput{Spec: card, Subjects: shots})[CheckOverlayOverSubject]; c.Status != CheckFail || !strings.Contains(c.Detail, "the renderer shows it at") {
+		t.Fatalf("a chapter card moved to the next shot: %+v", c)
+	}
+	// One set not to avoid the subject stays where it is, so on the person it fails.
+	pinned := graphicsSpec(t, `{"id":"g1","template":"lower_label","at_ms":1000,"duration_ms":2000,"anchor":"center","avoid_subject":false,"params":{"text":"TEMPO 3-1-1"}}`)
+	if c := runGraphicsChecks(t, CheckInput{Spec: pinned, Subjects: shots})[CheckOverlayOverSubject]; c.Status != CheckFail || !strings.Contains(c.Detail, "avoid_subject false") {
+		t.Fatalf("a graphic set not to avoid the person: %+v", c)
 	}
 	low := runGraphicsChecks(t, CheckInput{Spec: spec, Subjects: subjects(0.45, 0.44)})[CheckOverlayOverSubject]
 	if low.Status != CheckPass {

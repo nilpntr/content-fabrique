@@ -1,6 +1,6 @@
 # Editor system prompt: changelog
 
-The editor agent's system prompt is `editor.v2.7.md`, embedded in the Go binary, and the genre playbooks are the files in
+The editor agent's system prompt is `editor.v2.8.md`, embedded in the Go binary, and the genre playbooks are the files in
 `playbooks/`, embedded too. The text the model receives is the runtime's preamble (`runtime.SystemPreamble`, the untrusted-data
 rule) followed by this file. The prompt version (`PromptVersion` in `prompt.go`) is stored in every run's input, so a run can
 always be tied to the text it was given; a playbook has its own version (`workout.v2`, in `playbooks.go`) that the run's plan
@@ -21,6 +21,22 @@ Rules for changing it:
 - The cache hit rate of a run is visible: `cfctl agent show <run>` prints the cache write and read tokens of every model call and
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
+
+## editor.v2.8 and workout.v5 (2026-10-18)
+
+Motion graphics (D-35, `docs/design/motion-graphics-v1.md`). The founder found the edits static: titles were text that appeared. The
+build has a `graphics` track of animated templates (`title_pop`, `blur_in`, `chapter_card`, `highlight_word`, `counter`,
+`lower_label`, `outro_card`) drawn by headless Chrome in the sandbox, the ops `add_graphic`, `update_graphic` and `remove_graphic`, and
+the tool `list_motion_templates` (the library, and a still of one template on request). The prompt gains "Motion graphics (lively and
+hype)" behind `op:add_graphic`, in the vibe section: at lively or hype the hook title is a `title_pop` whose words land on the first
+beats and each chapter a `chapter_card` whose number pops on its cut and whose line sweeps in on the next beat; calm keeps `blur_in` or
+plain text. A graphic carries the creator's title recipe in its params, enters and leaves by itself, is fully on screen for at least
+1.2 s, sits where a text item would (the top band, or beside a high head in the hook, v2.7) and is never over the body (the renderer
+shortens, moves or leaves it out with `subject.FitText`, as for text). The ops order puts graphics with the texts, after the snap.
+`check_edit` gains `overlay_readable`, `overlay_over_subject` and `overlay_legibility` (the contrast of the letters with the picture
+behind them, measured on the preview just before or after the overlay, where it is not drawn); the hook-title and chapter-title checks count graphics. The workout
+playbook (`workout.v5`) makes the hook a `title_pop` and the chapter titles `chapter_card`s at lively or hype. Not run live: the
+cassettes were re-recorded against the fake API.
 
 ## editor.v2.7 (2026-10-18)
 

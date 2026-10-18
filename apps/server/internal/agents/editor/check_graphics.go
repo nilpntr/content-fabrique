@@ -17,8 +17,10 @@ import (
 //
 //   - overlay_readable: every overlay is fully on screen for at least minReadableMs before its exit starts (the times are the
 //     template's own, motion.Schedule, so the check says what the render does);
-//   - overlay_over_subject: the torso rule. An overlay never sits on the person: off the head and off the body, wherever the renderer's
-//     placement (the text items' own, timeline.PlaceTextAvoiding) ends up putting it. Unlike a text item's note, the body is a failure;
+//   - overlay_over_subject: the torso rule. An overlay is never drawn on the person's body: the renderer fits it like a text item
+//     (subject.FitText, the same function: at its own time, else in the part of it that has room, at the nearest time that has, or not
+//     at all), so the check fails what the editor did not mean: a graphic left out, a hook or chapter title shown at another time, and
+//     one set not to avoid the subject that covers it;
 //   - overlay_legibility: the letters stand out from the picture behind them. The picture is measured on the preview render, in the
 //     overlay's box, on a frame of the same shot just before the overlay enters (or just after it leaves), where it is not drawn.
 
@@ -68,9 +70,37 @@ func graphicsOf(spec *timeline.Spec) []timeline.GraphicsItem {
 	return nil
 }
 
+// fitGraphic is where and when the renderer draws a graphics item: subject.FitText on its text, the item given the fitted time (a moved
+// one keeps its accents where they were in it), and its box from motion.Resolve with the subjects at that time.
+func fitGraphic(spec *timeline.Spec, subjects subject.Index, g timeline.GraphicsItem, totalMs int64) (timeline.GraphicsItem, subject.Fit, motion.Resolved, error) {
+	var lookup subject.Lookup
+	if len(subjects) > 0 {
+		lookup = subjects.Lookup
+	}
+	fit, err := subject.FitText(spec, lookup, g.AsText(), totalMs)
+	if err != nil || fit.How == subject.FitDropped {
+		return g, fit, motion.Resolved{}, err
+	}
+	if fit.How == subject.FitTrimmed || fit.How == subject.FitMoved {
+		shift := int64(0)
+		if fit.How == subject.FitMoved {
+			shift = fit.AtMs - g.AtMs
+		}
+		var acc []int64
+		for _, a := range g.Params.AccentsMs {
+			if a += shift; a >= fit.AtMs && a < fit.AtMs+fit.DurationMs {
+				acc = append(acc, a)
+			}
+		}
+		g.AtMs, g.DurationMs, g.Params.AccentsMs = fit.AtMs, fit.DurationMs, acc
+	}
+	r, err := motion.Resolve(spec.Output, g, fit.Regions)
+	return g, fit, r, err
+}
+
 // overlayProbes picks, for every overlay, a frame of the same shot where it is not drawn: the frame before it enters, else the one
 // after it leaves; an overlay that fills its shot (it starts and ends on cuts, or at the ends of the video) has none and is not probed.
-// The box is the one the renderer draws in (the subject avoidance included).
+// The box and the time are the ones the renderer draws at (fitGraphic); a graphic the renderer leaves out is not probed.
 func overlayProbes(spec *timeline.Spec, subjects subject.Index) []RegionProbe {
 	out := spec.Output
 	fps := out.FPS
@@ -86,16 +116,12 @@ func overlayProbes(spec *timeline.Spec, subjects subject.Index) []RegionProbe {
 		return id
 	}
 	var probes []RegionProbe
-	for _, g := range graphicsOf(spec) {
+	for _, item := range graphicsOf(spec) {
 		if len(probes) >= media.MaxRegions {
 			break
 		}
-		var regions []timeline.Subject
-		if g.AvoidsSubject() && len(subjects) > 0 {
-			regions = subject.Regions(spec, subjects.Lookup, g.AtMs, g.EndMs())
-		}
-		r, err := motion.Resolve(out, g, regions)
-		if err != nil {
+		g, fit, r, err := fitGraphic(spec, subjects, item, total)
+		if err != nil || fit.How == subject.FitDropped {
 			continue
 		}
 		frameMs := int64(1000 / max(fps, 1))
@@ -151,7 +177,7 @@ func (c *checker) overlayOverSubject() Check {
 		return c.skip(CheckOverlayOverSubject, "the clips have no subject boxes (the quick look reads them: run cfctl assets quicklook --subjects for older clips)")
 	}
 	out := c.in.Spec.Output
-	var bad []string
+	var bad, notes []string
 	checked := 0
 	for _, g := range items {
 		regions := subject.Regions(c.in.Spec, c.in.Subjects.Lookup, g.AtMs, g.EndMs())
@@ -160,20 +186,36 @@ func (c *checker) overlayOverSubject() Check {
 		}
 		checked++
 		txt := g.AsText()
-		fix := "use one line, a lower scale (0.6 at the least) or a shorter text so it fits above the head; or put it on a shot where the person is lower or smaller in the frame"
+		where := c.headBand(regions)
 		if !g.AvoidsSubject() {
 			if cover, err := timeline.TextCovers(out, txt, regions); err == nil && cover.Body {
-				bad = append(bad, fmt.Sprintf("%s (%s) is on the person and set not to avoid them: remove avoid_subject false, or %s", g.ID, g.Template, fix))
+				bad = append(bad, fmt.Sprintf("%s (%s) covers the person and is set not to avoid them (%s): remove avoid_subject false", g.ID, g.Template, where))
 			}
 			continue
 		}
-		_, av, err := timeline.PlaceTextAvoiding(out, txt, regions)
-		switch {
-		case err != nil:
-		case av.OverHead:
-			bad = append(bad, fmt.Sprintf("%s (%s) covers the head and cannot be moved off it inside the safe zone: %s", g.ID, g.Template, fix))
-		case av.OverBody:
-			bad = append(bad, fmt.Sprintf("%s (%s) ends up over the body (it does not fit above the head or below the person): %s", g.ID, g.Template, fix))
+		_, fit, _, err := fitGraphic(c.in.Spec, c.in.Subjects, g, c.total)
+		if err != nil {
+			continue
+		}
+		// The hook title and the chapter titles must be where the editor put them; another graphic may move.
+		essential := g.AtMs <= hookTitleByMs || g.Template == timeline.TemplateChapterCard || IsChapterTitle(g.DisplayText())
+		switch fit.How {
+		case subject.FitDropped:
+			bad = append(bad, fmt.Sprintf("%s (%s) would cover the person's body at every time of the video, so the renderer leaves it out (%s): %s", g.ID, g.Template, where, c.titleFix(txt, fit)))
+		case subject.FitMoved:
+			msg := fmt.Sprintf("%s (%s) has no room clear of the person's body at %d-%d ms (%s), so the renderer shows it at %d-%d ms", g.ID, g.Template, g.AtMs, g.EndMs(), where, fit.AtMs, fit.AtMs+fit.DurationMs)
+			if essential {
+				bad = append(bad, msg+": "+c.titleFix(txt, fit))
+			} else {
+				notes = append(notes, msg+"; set at_ms there yourself, or use fewer words or a lower scale")
+			}
+		case subject.FitTrimmed:
+			notes = append(notes, fmt.Sprintf("%s (%s) fits clear of the person's body only at %d-%d ms of its %d-%d ms (%s), so the renderer shows it then (shorter, its accents after the cut dropped); set those times yourself, or use fewer words or a lower scale",
+				g.ID, g.Template, fit.AtMs, fit.AtMs+fit.DurationMs, g.AtMs, g.EndMs(), where))
+		default:
+			if av := fit.Avoidance; av.Overlapped {
+				notes = append(notes, fmt.Sprintf("%s (%s) is placed %s the person (%s)", g.ID, g.Template, av.Where, where))
+			}
 		}
 	}
 	switch {
@@ -181,6 +223,8 @@ func (c *checker) overlayOverSubject() Check {
 		return c.fail(CheckOverlayOverSubject, "never over the body: %s", strings.Join(bad[:min(3, len(bad))], "; "))
 	case checked == 0:
 		return c.skip(CheckOverlayOverSubject, "no motion graphic is on top of a clip with a subject box")
+	case len(notes) > 0:
+		return c.pass(CheckOverlayOverSubject, "%s", strings.Join(notes[:min(3, len(notes))], "; "))
 	}
 	return c.pass(CheckOverlayOverSubject, "%d motion graphics on clips with a person, none on the person", checked)
 }

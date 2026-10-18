@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "29dec1e0506464e9ead3bd71bef3903eb737ae84b72febff2c6790e6872afead",
-  "recorded_at": "2026-10-18T05:51:43Z",
+  "key": "a629166ebc67626e96b73773f092f3122fa3d99e66657997a8298da6a36cbf66",
+  "recorded_at": "2026-10-18T06:21:36Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,
@@ -107,18 +107,6 @@
         "blocks": [
           "tool_result"
         ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
       }
     ],
     "tools": [
@@ -128,6 +116,7 @@
       "find_moments",
       "get_music",
       "plan_edit",
+      "list_motion_templates",
       "get_timeline",
       "get_comments",
       "edit_timeline",
@@ -171,11 +160,6 @@
         "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
         "media_type": "image/jpeg",
         "bytes": 9284
-      },
-      {
-        "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
-        "media_type": "image/jpeg",
-        "bytes": 9284
       }
     ]
   },
@@ -186,17 +170,17 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_9",
-        "name": "check_edit",
+        "id": "toolu_ed_8",
+        "name": "render_preview",
         "input": {}
       }
     ],
     "usage": {
-      "input_tokens": 420,
-      "cache_write_tokens": 700,
+      "input_tokens": 400,
+      "cache_write_tokens": 600,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 15600,
-      "output_tokens": 38
+      "cache_read_tokens": 15000,
+      "output_tokens": 40
     }
   },
   "count_tokens": 9000
