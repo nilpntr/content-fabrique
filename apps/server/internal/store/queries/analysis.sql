@@ -46,9 +46,12 @@ SELECT asset_id, step_ms, luma, high FROM asset_signals
 WHERE workspace_id = @workspace_id AND asset_id = ANY(@asset_ids::uuid[])
 ORDER BY asset_id;
 
--- The reps, holds and dead moments of several assets in one read (every source), for the editor's check_edit.
+-- The reps, holds and dead moments of several assets in one read (every source), for the editor's check_edit. turn_ms is a rep's measured
+-- turning point (the analysis stores it as peak_ms in attrs), 0 when it has none.
 -- name: ListAssetSpans :many
-SELECT asset_id, kind, start_ms, end_ms FROM moments
+SELECT asset_id, kind, start_ms, end_ms,
+  COALESCE(CASE WHEN jsonb_typeof(attrs->'peak_ms') = 'number' THEN round((attrs->>'peak_ms')::numeric) END, 0)::int AS turn_ms
+FROM moments
 WHERE workspace_id = @workspace_id AND asset_id = ANY(@asset_ids::uuid[]) AND kind IN ('rep', 'hold', 'dead')
 ORDER BY asset_id, start_ms;
 

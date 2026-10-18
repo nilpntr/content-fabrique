@@ -27,7 +27,7 @@ func TestBuildPlanComputesTheBeatArithmetic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.BeatMs != 484 || p.PlaybookVersion != "workout.v3" || p.Version != PlanVersion || p.PromptVersion != PromptVersion {
+	if p.BeatMs != 484 || p.PlaybookVersion != "workout.v4" || p.Version != PlanVersion || p.PromptVersion != PromptVersion {
 		t.Errorf("plan: %+v", p)
 	}
 	if p.Shots[0].LengthMs != 3*484 || p.EstimatedLengthMs != 13*484 || p.Shots[1].Effect != "none" {
@@ -132,7 +132,7 @@ func TestPlanEditTool(t *testing.T) {
 	})
 	res := e.ok(rc, ToolPlanEdit, planCall(validPlanArgs(a.String())))
 	text := textOf(res)
-	for _, want := range []string{"Plan saved", "workout.v3", "one beat is 484 ms", `{"bpm":124,"first_beat_ms":0}`, "1. hook: 3 beats = 1.45 s, punch_in", "# Playbook: workout and fitness", "a handheld punch-in at_ms there"} {
+	for _, want := range []string{"Plan saved", "workout.v4", "one beat is 484 ms", `{"bpm":124,"first_beat_ms":0}`, "1. hook: 3 beats = 1.45 s, punch_in", "# Playbook: workout and fitness", "a handheld punch-in at_ms there"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the answer lacks %q:\n%s", want, text)
 		}

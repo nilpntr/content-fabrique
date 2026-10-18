@@ -178,8 +178,11 @@ type detail struct {
 	Subjects *subject.Track `json:"subjects,omitempty"`
 	// SubjectsRead says the model was asked for the subject boxes (a v2 answer), whether or not anybody was in the frames: a clip with
 	// nobody in it has no boxes and must not be asked again.
-	SubjectsRead bool   `json:"subjects_read,omitempty"`
-	Error        string `json:"error,omitempty"`
+	SubjectsRead bool `json:"subjects_read,omitempty"`
+	// SubjectsPrompt is the prompt version that read the subject boxes (a subjects-only run keeps the labels' own prompt_version): from
+	// quicklook.v3 the boxes hold the head alone and the shoulder line, so older boxes are read again by cfctl assets quicklook --subjects.
+	SubjectsPrompt string `json:"subjects_prompt,omitempty"`
+	Error          string `json:"error,omitempty"`
 }
 
 // SubjectsRead says the quick look detail records that the subject boxes were asked for (with an answer or none).
@@ -188,6 +191,20 @@ func SubjectsRead(detail json.RawMessage) bool {
 		Read bool `json:"subjects_read"`
 	}
 	return json.Unmarshal(detail, &d) == nil && d.Read
+}
+
+// SubjectsCurrent says the subject boxes of the detail were read (with an answer or none) by this prompt version, which reads the head
+// alone and the shoulder line; boxes of an older version leave the head as the middle of the box, and a title has less room beside it.
+func SubjectsCurrent(detail json.RawMessage) bool {
+	var d struct {
+		PromptVersion  string `json:"prompt_version"`
+		SubjectsRead   bool   `json:"subjects_read"`
+		SubjectsPrompt string `json:"subjects_prompt"`
+	}
+	if json.Unmarshal(detail, &d) != nil || !d.SubjectsRead {
+		return false
+	}
+	return d.SubjectsPrompt == PromptVersion || (d.SubjectsPrompt == "" && d.PromptVersion == PromptVersion)
 }
 
 func (d detail) json() json.RawMessage {
@@ -396,6 +413,9 @@ func (s *Service) ask(ctx context.Context, a store.Asset, fr frameSet, d *detail
 	// The boxes count as asked for when the answer had usable ones, or said for the frames it spoke of that nobody is there; an answer that
 	// had none, or only boxes that did not hold up, leaves the clip to be asked again.
 	d.SubjectsRead = d.Subjects != nil || nobodyThere(out.Subjects)
+	if d.SubjectsRead {
+		d.SubjectsPrompt = PromptVersion
+	}
 	if d.Subjects != nil {
 		res.Subjects = len(d.Subjects.Samples)
 	}
@@ -406,7 +426,7 @@ func (s *Service) ask(ctx context.Context, a store.Asset, fr frameSet, d *detail
 // the answer said nobody is there, which replaces earlier ones) and the marker that they were asked for. It is built key by key so that nothing
 // else is written: the prompt version, the model and the rest of the detail stay as the quick look that made the labels left them.
 func subjectsPatch(d detail) (json.RawMessage, error) {
-	patch := map[string]any{"subjects_read": d.SubjectsRead, "subjects": nil}
+	patch := map[string]any{"subjects_read": d.SubjectsRead, "subjects": nil, "subjects_prompt": d.SubjectsPrompt}
 	if d.Frames != nil {
 		patch["frames"] = d.Frames
 	}
@@ -448,7 +468,8 @@ func subjectTrack(reads []SubjectRead, fr frameSet) *subject.Track {
 			continue
 		}
 		seen[r.Frame] = true
-		t.Samples = append(t.Samples, subject.Sample{AtMs: fr.at[r.Frame-1], X: r.X, Y: r.Y, W: r.W, H: r.H, HeadTopY: r.HeadTopY})
+		t.Samples = append(t.Samples, subject.Sample{AtMs: fr.at[r.Frame-1], X: r.X, Y: r.Y, W: r.W, H: r.H, HeadTopY: r.HeadTopY,
+			HeadX: r.HeadX, HeadW: r.HeadW, ShoulderY: r.ShoulderY})
 	}
 	clean, ok := subject.Clean(t)
 	if !ok {

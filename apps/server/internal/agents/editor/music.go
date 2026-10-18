@@ -98,15 +98,61 @@ func (m *TimelineMusic) hits() []int64 {
 	return slices.Compact(out)
 }
 
-// musicOf reads the music analyses of the project's clips, for the footage list.
-func (d Deps) musicOf(ctx context.Context, ws ids.WorkspaceID, rows []store.ProjectFootageRow) map[string]music.Analysis {
+// isSong says whether a clip of the project is a song the editor may cut to: an audio file the creator gave (asset kind audio), or a video
+// whose sound the creator chose for this edit (chosen: the assets of the creator_audio items on the project's timeline). A footage clip's
+// own sound is never a song, even when the analysis heard music in it: a gym plays music, and the camera picks it up under the clatter.
+func isSong(r store.ProjectFootageRow, chosen map[string]bool) bool {
+	if r.HasAudio == nil || !*r.HasAudio {
+		return false
+	}
+	return r.Kind == store.AssetKindAudio || chosen[r.AssetID.String()]
+}
+
+// chosenSounds are the assets of the creator_audio items on a timeline: a sound already chosen for the edit (by the creator, or kept from
+// an earlier version), so a video named there is a song.
+func chosenSounds(spec *timeline.Spec) map[string]bool {
+	out := map[string]bool{}
+	if spec == nil {
+		return out
+	}
+	for _, it := range timeline.MusicItems(spec) {
+		if ref, ok := it.AssetRef(); ok {
+			out[ref] = true
+		}
+	}
+	return out
+}
+
+// chosenSoundsOf reads the project's current timeline for chosenSounds; a project without one, or a read that fails, has none.
+func (d Deps) chosenSoundsOf(ctx context.Context, ws ids.WorkspaceID, pid ids.ProjectID) map[string]bool {
+	if d.Projects == nil {
+		return nil
+	}
+	det, perr := d.Projects.Get(ctx, actor(ws), pid)
+	if perr != nil || det.Project.CurrentTimelineVersion == nil {
+		return nil
+	}
+	vd, perr := d.Projects.Version(ctx, actor(ws), pid, int(*det.Project.CurrentTimelineVersion))
+	if perr != nil {
+		return nil
+	}
+	spec, err := timeline.Parse(vd.Version.Spec)
+	if err != nil {
+		return nil
+	}
+	return chosenSounds(spec)
+}
+
+// musicOf reads the music analyses of the project's songs (isSong), for the footage list and get_music. The analysis of a footage clip's
+// own sound is not read: it is not a song.
+func (d Deps) musicOf(ctx context.Context, ws ids.WorkspaceID, rows []store.ProjectFootageRow, chosen map[string]bool) map[string]music.Analysis {
 	mr, ok := d.Store.(MusicReader)
 	if !ok {
 		return nil
 	}
 	var assets []ids.AssetID
 	for _, r := range rows {
-		if r.HasAudio != nil && *r.HasAudio {
+		if isSong(r, chosen) {
 			assets = append(assets, r.AssetID)
 		}
 	}
@@ -142,7 +188,11 @@ func (d Deps) getMusic(ctx context.Context, rc runtime.RunContext, in getMusicAr
 	if i < 0 {
 		return runtime.Result{}, runtime.UserErrorf("%q is not a clip of this project; use an id from list_footage", in.AssetID)
 	}
-	an := d.musicOf(ctx, ws, rows[i:i+1])
+	chosen := d.chosenSoundsOf(ctx, ws, pid)
+	if !isSong(rows[i], chosen) && rows[i].Kind != store.AssetKindAudio {
+		return runtime.Result{}, runtime.UserErrorf("clip %s is footage: its sound is what the camera heard (the gym's own music, the room), not a song the creator gave. A song is an audio file of the project (a clip with a song line in list_footage), or the sound of a video the creator chose for this edit. Without a song the edit stays sound-ready", in.AssetID)
+	}
+	an := d.musicOf(ctx, ws, rows[i:i+1], chosen)
 	a, ok := an[in.AssetID]
 	if !ok {
 		return runtime.Result{}, runtime.UserErrorf("clip %s has no music analysis: it has no sound, its sound is not music, or it was not analysed yet. Without a song the edit stays sound-ready (the creator adds a sound in TikTok)", in.AssetID)
