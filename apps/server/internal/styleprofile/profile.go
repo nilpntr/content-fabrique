@@ -339,13 +339,28 @@ type TransitionsProfile struct {
 	Used     string   `json:"used,omitempty"`
 	Kinds    []string `json:"kinds,omitempty"`
 	Share    float64  `json:"share"`
+	// Videos is how many of the references have a transition at one of their cuts or more (0 in a profile made before it was counted).
+	Videos int `json:"videos,omitempty"`
+}
+
+// The least evidence of transitions that makes them the creator's style: on a fifth of the cuts, in two videos or more. Fewer is a
+// detector's stray reading or a one-off, and the style stays plain cuts.
+const (
+	TransitionsMinShare  = 0.2
+	TransitionsMinVideos = 2
+)
+
+// Evident says the references measurably use transitions: some cuts have one, on at least TransitionsMinShare of the cuts, in at least
+// TransitionsMinVideos videos.
+func (tp TransitionsProfile) Evident() bool {
+	return tp.Used == TransitionsSome && tp.Share >= TransitionsMinShare && tp.Videos >= TransitionsMinVideos
 }
 
 // Level is the transitions setting the creator's videos stand for: "" when they do not measurably use transitions (plain cuts, no cuts,
 // or not measured), subtle when some of their cuts have one, lots when half of them or more do.
 func (tp TransitionsProfile) Level() string {
 	switch {
-	case tp.Used != TransitionsSome:
+	case !tp.Evident():
 		return ""
 	case tp.Share >= 0.5:
 		return LevelLots
@@ -1126,6 +1141,9 @@ func aggregateTransitions(refs []Measures) TransitionsProfile {
 		tp.Measured++
 		tp.Cuts += t.Cuts
 		with += t.Blend + t.Flash + t.Zoom
+		if t.Blend+t.Flash+t.Zoom > 0 {
+			tp.Videos++
+		}
 		kinds["blend"] += t.Blend
 		kinds["flash"] += t.Flash
 		kinds["zoom"] += t.Zoom

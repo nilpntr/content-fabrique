@@ -27,7 +27,7 @@ import (
 const SummaryStage = "stylesummary"
 
 // SummaryPromptVersion names the prompt and the tool; it is stored with the summary.
-const SummaryPromptVersion = "stylesummary.v3"
+const SummaryPromptVersion = "stylesummary.v4"
 
 // SummaryToolName is the one tool the model is made to call.
 const SummaryToolName = "describe_creator_style"
@@ -71,12 +71,12 @@ summary: one or two short sentences in the second person ("your", "you"), at mos
 
 The settings (pick one value each):
 - vibe: calm, lively or hype, the energy that fits these videos. Most creators are lively.
-- transitions: off, subtle or lots: effect transitions at the cuts (a zoom, a whip, a flash, a blend). Propose off unless the line "transitions measured in the picture" shows their videos use them: then subtle when a few of their cuts have one, lots when most do. Plain cuts on the beat are the default at every vibe, because creators read effect transitions as the mark of an automatic AI edit; the energy of a lively or hype video comes from the cuts on the beat, the pace, the camera and the text.
+- transitions: off, subtle or lots: effect transitions at the cuts (a zoom, a whip, a flash, a blend). Propose off unless the line "transitions measured in the picture" shows their videos use them (on a fifth of the cuts or more, in two videos or more; a line that says "too few to be the style" is plain cuts): then subtle when a few of their cuts have one, lots when most do. Plain cuts on the beat are the default at every vibe, because creators read effect transitions as the mark of an automatic AI edit; the energy of a lively or hype video comes from the cuts on the beat, the pace, the camera and the text.
 - text_animation: off or on. On means the title enters and leaves with a short animation. Propose on unless the style is calm and still.
 - camera_motion: off, subtle or lots: how much the editor may move the picture (a slow push, a punch-in on a beat, a handheld feel). Handheld footage that already moves suits subtle.
 - title_colour: the colour of their titles as a hex code like #RRGGBB, from the measures; empty when they use no title.
 - title_position: top, upper_third or auto.
-- title_case: upper, lower or as_typed.
+- title_case: upper, lower or as_typed: the case the measures give for the title (upper for titles in capitals, lower for lowercase titles, as_typed only for mixed case). Follow the measures; propose as_typed only when no case was measured.
 - music: always (every video has music), when_added (only when they add a song) or never.
 - pace: slower, like_mine or faster. Propose like_mine.
 - chapter_titles: on when the measures say the videos of several exercises have numbered chapter titles, else off.
@@ -275,6 +275,9 @@ func (w *Writer) Write(ctx context.Context, ws ids.WorkspaceID, runID uuid.UUID,
 		now := time.Now
 		if w.Now != nil {
 			now = w.Now
+		}
+		if c := MeasuredTitleCase(p); c != "" {
+			sug.TitleCase = c // the case is measured from the titles: the suggestion follows it
 		}
 		res.Summary = &Summary{Text: text, Suggested: sug, PromptVersion: SummaryPromptVersion, Model: resp.Model, References: p.References, WrittenAt: now().UTC()}
 		return res, nil

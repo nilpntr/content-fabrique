@@ -220,7 +220,8 @@ func Energetic(vibe string) bool { return vibe == VibeLively || vibe == VibeHype
 //   - Text animation and camera motion: the creator's, else (when the vibe was chosen by a person, for this edit or in the settings)
 //     what that vibe asks for, else the suggestion, else the vibe's. A suggestion of "off" does not hold at a lively or hype vibe: the
 //     measured "no effects" it may come from is not a reason to make a lively edit static.
-//   - The title's colour, position and case: the creator's, else the suggestion's, else what was measured, else the editor's choice.
+//   - The title's colour and position: the creator's, else the suggestion's, else what was measured, else the editor's choice. The case:
+//     the creator's, else what was measured, else the suggestion's, else as typed.
 //   - Music: the creator's, else the suggestion's, else "always" when their videos have music, else "always".
 //   - Pace: the creator's, else the suggestion's, else like their videos.
 func Resolve(p *Profile, suggested *Settings, mine Settings, runVibe string) Resolved {
@@ -295,7 +296,9 @@ func Resolve(p *Profile, suggested *Settings, mine Settings, runVibe string) Res
 	choose(&r.TitleColour, &r.Sources.TitleColour, cand{mine.TitleColour, SourceYou}, cand{sug.TitleColour, SourceSuggested}, cand{mColour, SourceMeasured})
 	choose(&r.TitlePosition, &r.Sources.TitlePosition, cand{mine.TitlePosition, SourceYou}, cand{sug.TitlePosition, SourceSuggested},
 		cand{mPosition, SourceMeasured}, cand{PositionAuto, SourceDefault})
-	choose(&r.TitleCase, &r.Sources.TitleCase, cand{mine.TitleCase, SourceYou}, cand{sug.TitleCase, SourceSuggested}, cand{mCase, SourceMeasured},
+	// The case is read from the titles themselves: what was measured comes before a suggestion (a summary call that answered as_typed
+	// for titles all in capitals made every title mixed case).
+	choose(&r.TitleCase, &r.Sources.TitleCase, cand{mine.TitleCase, SourceYou}, cand{mCase, SourceMeasured}, cand{sug.TitleCase, SourceSuggested},
 		cand{CaseAsTyped, SourceDefault})
 
 	// Music and pace.
@@ -331,6 +334,14 @@ func Resolve(p *Profile, suggested *Settings, mine Settings, runVibe string) Res
 	choose(&r.CutTiming, &r.Sources.CutTiming, cand{mine.CutTiming, SourceYou}, cand{sug.CutTiming, SourceSuggested}, cand{mTiming, SourceMeasured}, cand{CutsOnFullReps, SourceDefault})
 	choose(&r.AngleSwitches, &r.Sources.AngleSwitches, cand{mine.AngleSwitches, SourceYou}, cand{sug.AngleSwitches, SourceSuggested}, cand{mAngles, SourceMeasured}, cand{LevelOn, SourceDefault})
 	return r
+}
+
+// MeasuredTitleCase is the title_case setting the profile's titles stand for ("" when no case was measured).
+func MeasuredTitleCase(p *Profile) string {
+	if p == nil || p.Text == nil || p.Text.TitleShare == 0 {
+		return ""
+	}
+	return map[string]string{"upper": CaseUpper, "lower": CaseLower, "mixed": CaseAsTyped}[p.Text.Case]
 }
 
 // cand is a candidate value of a setting and where it comes from.

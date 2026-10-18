@@ -101,8 +101,15 @@ func TestTheCreatorAlwaysWins(t *testing.T) {
 	if r.Vibe != VibeHype || r.Sources.Vibe != SourceThisVideo || r.Transitions != LevelOff || r.Sources.Transitions != SourceYou || r.CameraMotion != LevelLots {
 		t.Fatalf("an edit's vibe: %+v %+v", r.Settings, r.Sources)
 	}
-	if r.TitleColour != "#F2E9A0" || r.Sources.TitleColour != SourceYou || r.TitleCase != CaseLower || r.Sources.TitleCase != SourceSuggested {
+	// The case is measured from the titles (capitals): it comes before the suggestion's lowercase.
+	if r.TitleColour != "#F2E9A0" || r.Sources.TitleColour != SourceYou || r.TitleCase != CaseUpper || r.Sources.TitleCase != SourceMeasured {
 		t.Errorf("the title: %+v %+v", r.Settings, r.Sources)
+	}
+	// With no case measured the suggestion holds.
+	unread := *p
+	unread.Text = nil
+	if r := Resolve(&unread, sug, Settings{}, ""); r.TitleCase != CaseLower || r.Sources.TitleCase != SourceSuggested {
+		t.Errorf("no measured case: %s from %s", r.TitleCase, r.Sources.TitleCase)
 	}
 	// A suggestion of "off" at a lively vibe does not hold: no measure makes a lively edit static by itself.
 	r = Resolve(p, &Settings{Vibe: VibeLively, Transitions: LevelOff, TextAnimation: LevelOff}, Settings{}, "")
@@ -189,7 +196,7 @@ func TestSettingsAreChecked(t *testing.T) {
 
 // ---- the summary ---------------------------------------------------------------------------------------------------------------
 
-const goodSummary = `{"summary":"Handheld gym shots that follow you, music on every video with a lift around 3 s, cream all-caps titles above your head, mostly long takes, no flashy effects.","vibe":"lively","transitions":"subtle","text_animation":"on","camera_motion":"subtle","title_colour":"#f2e9a0","title_position":"top","title_case":"upper","music":"always","pace":"like_mine","chapter_titles":"on","ending_hold":"long","cut_timing":"full_reps","angle_switches":"off"}`
+const goodSummary = `{"summary":"Handheld gym shots that follow you, music on every video with a lift around 3 s, cream all-caps titles above your head, mostly long takes, no flashy effects.","vibe":"lively","transitions":"subtle","text_animation":"on","camera_motion":"subtle","title_colour":"#f2e9a0","title_position":"top","title_case":"as_typed","music":"always","pace":"like_mine","chapter_titles":"on","ending_hold":"long","cut_timing":"full_reps","angle_switches":"off"}`
 
 func summaryAnswer(input string) llm.Response {
 	return llm.Response{
@@ -219,6 +226,10 @@ func TestTheSummaryIsOneForcedStrictCallWithABudget(t *testing.T) {
 		t.Fatalf("%v %+v", err, res)
 	}
 	s := res.Summary
+	// The live re-learn suggested as_typed for titles all in capitals: the suggestion follows the measured case whatever the answer said.
+	if p.Text.Case != "upper" || s.Suggested.TitleCase != CaseUpper {
+		t.Errorf("the suggested case %q for titles measured %q", s.Suggested.TitleCase, p.Text.Case)
+	}
 	if !strings.HasPrefix(s.Text, "Handheld gym shots") || s.Suggested.TitleColour != "#F2E9A0" || s.Suggested.Vibe != VibeLively || s.PromptVersion != SummaryPromptVersion || s.References != 5 {
 		t.Errorf("summary %+v", s)
 	}
@@ -357,7 +368,18 @@ func TestTransitionsComeFromTheCreatorNotTheVibe(t *testing.T) {
 		}
 	}
 	uses := *plain
-	uses.Transitions = TransitionsProfile{Measured: 5, Cuts: 20, Used: TransitionsSome, Kinds: []string{"blend"}, Share: 0.2}
+	// A stray reading (a zoom on 8 % of the cuts, or in one video only) is not their style: plain cuts.
+	for _, stray := range []TransitionsProfile{
+		{Measured: 10, Cuts: 50, Used: TransitionsSome, Kinds: []string{"zoom"}, Share: 0.08, Videos: 2},
+		{Measured: 10, Cuts: 10, Used: TransitionsSome, Kinds: []string{"zoom"}, Share: 0.3, Videos: 1},
+	} {
+		uses := *plain
+		uses.Transitions = stray
+		if r := Resolve(&uses, &Settings{Transitions: LevelSubtle}, Settings{}, ""); r.Transitions != LevelOff || r.Sources.Transitions != SourceDefault {
+			t.Errorf("a stray reading %+v: %s from %s", stray, r.Transitions, r.Sources.Transitions)
+		}
+	}
+	uses.Transitions = TransitionsProfile{Measured: 5, Cuts: 20, Used: TransitionsSome, Kinds: []string{"blend"}, Share: 0.2, Videos: 3}
 	if r := Resolve(&uses, nil, Settings{}, VibeCalm); r.Transitions != LevelSubtle || r.Sources.Transitions != SourceMeasured {
 		t.Errorf("a few measured: %s from %s", r.Transitions, r.Sources.Transitions)
 	}

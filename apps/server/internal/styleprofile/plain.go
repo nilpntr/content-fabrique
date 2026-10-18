@@ -155,6 +155,8 @@ func (p *Profile) PlainLines() []PlainLine {
 	case tp.Measured == 0:
 	case tp.Used == TransitionsCutOnly:
 		add("transitions", "Transitions", "Plain cuts only")
+	case tp.Used == TransitionsSome && !tp.Evident():
+		add("transitions", "Transitions", "Plain cuts (a stray effect or two)")
 	case tp.Used == TransitionsSome:
 		var kinds []string
 		for _, k := range tp.Kinds {
