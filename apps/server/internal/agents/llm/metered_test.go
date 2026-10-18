@@ -416,8 +416,17 @@ func TestUnpricedModelsAreRefusedUnlessAllowed(t *testing.T) {
 		t.Error("an unpriced model reached the network")
 	}
 
-	// LLM_ALLOW_UNPRICED=1: the call goes out, caps cannot be checked, and the row records cost 0 and says so.
-	rg = newRig(t, map[string]string{"LLM_ALLOW_UNPRICED": "1"})
+	// LLM_ALLOW_UNPRICED=1: the call goes out, caps cannot be checked, and the row records cost 0 and says so. (The model must still be
+	// described in the capabilities: an unknown one is refused before it is sent.)
+	caps, err := DefaultCapabilities()
+	if err != nil {
+		t.Fatal(err)
+	}
+	withMystery := Capabilities{"claude-mystery-9": {ThinkingOff: ThinkingOffOmit}}
+	for k, v := range caps {
+		withMystery[k] = v
+	}
+	rg = newRig(t, map[string]string{"LLM_ALLOW_UNPRICED": "1"}, func(o *FactoryOptions) { o.Caps = withMystery })
 	c, _ = rg.client(t, newWorkspaceID(), "editor")
 	if _, err := c.Messages(context.Background(), req); err != nil {
 		t.Fatal(err)

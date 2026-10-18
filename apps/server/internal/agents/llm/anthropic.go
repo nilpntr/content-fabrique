@@ -117,6 +117,8 @@ type anthropicConfig struct {
 	Stage     string
 	// Timeout overrides the per-call timeout (tests). Zero derives it from the model and max_tokens.
 	Timeout time.Duration
+	// Caps are what each model accepts (capabilities.go); nil uses the embedded catalogue's.
+	Caps Capabilities
 }
 
 // anthropicClient is the Client over anthropic-sdk-go. It does not retry (MaxRetries 0): retries live in limited.
@@ -126,6 +128,9 @@ type anthropicClient struct {
 	workspace string
 	stage     string
 	timeout   time.Duration
+	// caps map each request to what its model accepts; capsErr is why there are none (every call is then refused).
+	caps    Capabilities
+	capsErr error
 	// secrets are removed from every error message that leaves this type.
 	secrets []string
 }
@@ -138,6 +143,10 @@ func newAnthropicClient(cfg anthropicConfig) *anthropicClient {
 		}
 	}
 	c.timeout = cfg.Timeout
+	c.caps = cfg.Caps
+	if c.caps == nil {
+		c.caps, c.capsErr = DefaultCapabilities()
+	}
 	// Explicit options only: the SDK's own environment defaults (ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL ...) must not
 	// decide which key or endpoint is used.
 	opts := []option.RequestOption{
@@ -187,6 +196,10 @@ func (c *anthropicClient) requestOptions(run RunInfo) []option.RequestOption {
 
 // Messages implements Client.
 func (c *anthropicClient) Messages(ctx context.Context, req Request) (Response, error) {
+	req, err := c.adapt(req)
+	if err != nil {
+		return Response{}, err
+	}
 	params, err := toMessageParams(req)
 	if err != nil {
 		return Response{}, err
@@ -212,6 +225,10 @@ func (c *anthropicClient) Messages(ctx context.Context, req Request) (Response, 
 
 // CountTokens implements Client.
 func (c *anthropicClient) CountTokens(ctx context.Context, req Request) (int64, error) {
+	req, err := c.adapt(req)
+	if err != nil {
+		return 0, err
+	}
 	params, err := toCountParams(req)
 	if err != nil {
 		return 0, err
@@ -227,6 +244,15 @@ func (c *anthropicClient) CountTokens(ctx context.Context, req Request) (int64, 
 		return 0, c.convertError(err, st.sent.Load())
 	}
 	return res.InputTokens, nil
+}
+
+// adapt maps the request to what its model accepts (capabilities.go). count_tokens takes the same mapping: it refuses what Messages
+// refuses.
+func (c *anthropicClient) adapt(req Request) (Request, error) {
+	if c.capsErr != nil {
+		return req, fmt.Errorf("llm: the model capabilities could not be read: %w", c.capsErr)
+	}
+	return c.caps.adapt(req)
 }
 
 // convertError turns an SDK error into *APIError (an answer from the server: the request was not processed) or a
@@ -536,6 +562,10 @@ func toThinking(t *Thinking) (anthropic.ThinkingConfigParamUnion, error) {
 	case ThinkingDisabled:
 		d := anthropic.NewThinkingConfigDisabledParam()
 		return anthropic.ThinkingConfigParamUnion{OfDisabled: &d}, nil
+	case ThinkingBetweenTools:
+		// The type and nothing else: display or a budget next to it is a 400.
+		b := anthropic.NewThinkingConfigBetweenToolsParam()
+		return anthropic.ThinkingConfigParamUnion{OfBetweenTools: &b}, nil
 	}
 	return anthropic.ThinkingConfigParamUnion{}, fmt.Errorf("llm: thinking mode %q is not adaptive, enabled or disabled", t.Mode)
 }
@@ -544,18 +574,22 @@ func toToolChoice(tc *ToolChoice) (anthropic.ToolChoiceUnionParam, error) {
 	if tc == nil || tc.Type == "" {
 		return anthropic.ToolChoiceUnionParam{}, nil
 	}
+	var dp param.Opt[bool]
+	if tc.DisableParallelToolUse {
+		dp = anthropic.Bool(true)
+	}
 	switch tc.Type {
 	case "auto":
-		return anthropic.ToolChoiceUnionParam{OfAuto: &anthropic.ToolChoiceAutoParam{}}, nil
+		return anthropic.ToolChoiceUnionParam{OfAuto: &anthropic.ToolChoiceAutoParam{DisableParallelToolUse: dp}}, nil
 	case "any":
-		return anthropic.ToolChoiceUnionParam{OfAny: &anthropic.ToolChoiceAnyParam{}}, nil
+		return anthropic.ToolChoiceUnionParam{OfAny: &anthropic.ToolChoiceAnyParam{DisableParallelToolUse: dp}}, nil
 	case "none":
 		return anthropic.ToolChoiceUnionParam{OfNone: &anthropic.ToolChoiceNoneParam{}}, nil
 	case "tool":
 		if tc.Name == "" {
 			return anthropic.ToolChoiceUnionParam{}, errors.New("llm: tool_choice tool needs a name")
 		}
-		return anthropic.ToolChoiceUnionParam{OfTool: &anthropic.ToolChoiceToolParam{Name: tc.Name}}, nil
+		return anthropic.ToolChoiceUnionParam{OfTool: &anthropic.ToolChoiceToolParam{Name: tc.Name, DisableParallelToolUse: dp}}, nil
 	}
 	return anthropic.ToolChoiceUnionParam{}, fmt.Errorf("llm: tool_choice %q is not auto, any, tool or none", tc.Type)
 }

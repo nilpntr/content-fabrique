@@ -34,6 +34,14 @@ type Catalog map[string]Model
 type Model struct {
 	// Cloudflare is the provider/model name Cloudflare's REST endpoints use (anthropic/claude-opus-5.5).
 	Cloudflare string `yaml:"cloudflare"`
+	// ThinkingOff is how the model turns thinking off: "disabled" ({"type":"disabled"}), "between_tools" ({"type":"between_tools"}, and
+	// nothing else in the object) or "omit" (it cannot be turned off: no thinking field is sent, the model thinks adaptively, and effort
+	// is how a caller keeps it short). Empty: not known, and a request that asks for thinking off is refused.
+	ThinkingOff string `yaml:"thinking_off"`
+	// ThinkingOffMaxEffort is the highest effort at which thinking can be turned off (low, medium, high, xhigh or max); empty is any.
+	ThinkingOffMaxEffort string `yaml:"thinking_off_max_effort"`
+	// ForcedToolChoice says the model accepts tool_choice any or tool. Nil: not known, and a forced tool choice is refused.
+	ForcedToolChoice *bool `yaml:"forced_tool_choice"`
 }
 
 // LoadCatalog reads models.yaml from the routing directory.

@@ -64,8 +64,8 @@ judge:    { model: claude-opus-5-5, effort: high, batch: true }
 # Sonnet 5.5, resolved from v1-start whatever ROUTING_PROFILE says (evals.DefaultJudgeProfile), so a score does not move with the editor's profile: about 12,000 input tokens of pictures and text
 # and up to 3,000 of output is about $0.05 worst case, inside the budget; Opus 5.5 is twice the price and its worst case with the
 # pictures would not fit the $0.10. Calibrated against the founder's verdicts (suites/back-day.yaml).
-judge_edit: { model: claude-sonnet-5-5, max_tokens: 3000 }
+judge_edit: { model: claude-sonnet-5-5, effort: medium, max_tokens: 3000 }   # thinking off needs effort high or below (models.yaml)
 # The improvement loop's improver (cfctl eval improve, observability v1 section 8): one call per iteration that proposes one change
 # to the prompt, a playbook, a check threshold, a renderer default or a style rule, with its own budget (--improver-usd, default
 # $0.50). The loop resolves it from v1-start (Opus 5.5) whatever ROUTING_PROFILE says; the cheaper entries are for plumbing tests.
-improve_edit: { model: claude-opus-5-5, max_tokens: 6000 }
+improve_edit: { model: claude-opus-5-5, effort: medium, max_tokens: 16000 }   # room for thinking where it cannot be turned off (Opus 5.5); medium effort keeps it short
