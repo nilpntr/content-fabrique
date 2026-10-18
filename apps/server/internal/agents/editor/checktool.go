@@ -207,8 +207,8 @@ func (d Deps) checkEdit(ctx context.Context, rc runtime.RunContext, _ noArgs) (r
 	var b strings.Builder
 	b.WriteString(report.Text())
 	b.WriteString("\n\n")
-	worst := d.worstCallMicros(ctx, rc)
-	low := budgetLow(rc.Left, worst)
+	perCall := d.callCostMicros(ctx, rc)
+	low := budgetLow(rc.Left, perCall)
 	switch {
 	case fail == 0:
 		b.WriteString("All the checks that apply pass. Call finish.")
@@ -219,16 +219,32 @@ func (d Deps) checkEdit(ctx context.Context, rc runtime.RunContext, _ noArgs) (r
 	default:
 		b.WriteString("This was the check after your revision pass. Do not revise again: call finish, and say in your message what is still not as it should be and why.")
 	}
-	b.WriteString(budgetNote(rc.Left, worst))
+	b.WriteString(budgetNote(rc.Left, perCall))
 	return runtime.Result{Content: []llm.Block{llm.TextBlock(b.String())}}, nil
 }
 
+const (
+	// revisionCalls is how many model calls a revision pass takes: the edit, the preview, the check and the finish.
+	revisionCalls = 4
+	// minCallMicros is what a call is assumed to cost before the run has shown what its calls cost: $0.05.
+	minCallMicros = 50_000
+)
+
 // budgetLow says the run is close to a limit: few tool calls, little time, or little money, left. A revision pass needs about five
-// calls (an edit, a preview, a check, a finish) and the preview takes up to a minute. worst is the worst-case cost of one model call
-// of the run (max_tokens at the output price; 0 when it is not known): the metered client reserves that much before it sends a call
-// and refuses it when the run cannot cover it, so a run with fewer than two of them left cannot make a revision. (This counts the output side only, the figure the budget plan quotes; the input of a call is on top, so the warning comes a little late rather than early.)
-func budgetLow(l runtime.BudgetLeft, worst int64) bool {
-	return l.Known && (l.ToolCalls <= 7 || l.Wall < 3*time.Minute || (worst > 0 && l.Micros < 2*worst))
+// calls (an edit, a preview, a check, a finish) and the preview takes up to a minute. perCall is what a model call of this run costs
+// (callCostMicros; 0 when it is not known, which leaves the dollars out): a run with less left than a revision pass of such calls cannot
+// make one. It is what the run has really spent per call, not the worst case of a call (max_tokens at the output price): that worst
+// case is only a reservation, it is large at max effort, and a threshold built on it called every first edit "low" after one call.
+func budgetLow(l runtime.BudgetLeft, perCall int64) bool {
+	return l.Known && (l.ToolCalls <= 7 || l.Wall < 3*time.Minute || (perCall > 0 && l.Micros < revisionCalls*perCall))
+}
+
+// callCostMicros is what one model call of the run costs, from what the run has spent so far: its cost over its tool calls (every model
+// turn of the editor makes one), raised by half because later calls read a longer conversation, and never under minCallMicros (the
+// figure before the first call has shown anything). It is the mean, so one long plan_edit does not make every later call look dear.
+func callCostMicros(costMicros int64, toolCalls int) int64 {
+	mean := costMicros / int64(max(toolCalls, 1))
+	return max(mean+mean/2, minCallMicros)
 }
 
 // budgetShortNote is the line added to the budget note when the run can no longer pay for a full-size call: the next answer will be cut
@@ -237,7 +253,7 @@ const budgetShortNote = "Your budget is nearly used: keep this turn short and fi
 
 // budgetNote is what the run has left, for the end of a tool's answer ("" when it is not known): the model that sees its limits
 // coming skips the revision and finishes.
-func budgetNote(l runtime.BudgetLeft, worst int64) string {
+func budgetNote(l runtime.BudgetLeft, perCall int64) string {
 	if !l.Known {
 		return ""
 	}
@@ -246,12 +262,12 @@ func budgetNote(l runtime.BudgetLeft, worst int64) string {
 		dollars = "under $0.01"
 	}
 	s := fmt.Sprintf("\n\nLeft of your budget: %s, %d tool calls and %s.", dollars, max(l.ToolCalls, 0), approxDuration(l.Wall))
-	if budgetLow(l, worst) {
+	if budgetLow(l, perCall) {
 		s += " That is not much: finish soon, and do not start work you cannot complete."
 	}
-	if worst > 0 && l.Micros < worst+worst/4 {
-		// The metered client cuts the next call's max_tokens to what the budget can pay for (the input counts too, hence the margin over
-		// the output's worst case), and the answer may stop short.
+	if perCall > 0 && l.Micros < 2*perCall {
+		// Less than two calls like the earlier ones are left: the metered client cuts the next call's max_tokens to what the budget can
+		// pay for, and the answer may stop short.
 		s += " " + budgetShortNote
 	}
 	return s
@@ -267,23 +283,18 @@ func approxDuration(d time.Duration) string {
 	return fmt.Sprintf("%d minutes", int(d.Round(time.Minute).Minutes()))
 }
 
-// worstCallMicros is the worst-case cost of one model call of the run: its max_tokens at the output price of its model, from the run
-// row and the price table. 0 when either is not known (no price function wired, an unpriced model).
-func (d Deps) worstCallMicros(ctx context.Context, rc runtime.RunContext) int64 {
-	if d.OutputCost == nil || !rc.Left.Known {
+// callCostMicros reads what the run has spent and how many calls it has made from its row, and returns what one more call is expected to
+// cost (the package-level callCostMicros). 0 when the budget is not known or the row cannot be read (the dollar warning is off then).
+func (d Deps) callCostMicros(ctx context.Context, rc runtime.RunContext) int64 {
+	if !rc.Left.Known {
 		return 0
 	}
 	run, err := d.Store.GetAgentRun(ctx, rc.WorkspaceID, rc.RunID)
-	if err != nil || run.MaxTokens <= 0 {
+	if err != nil {
 		slog.WarnContext(ctx, "editor: the run row could not be read; the dollar warning is off", "run_id", rc.RunID.String(), "error", err)
 		return 0
 	}
-	c, err := d.OutputCost(run.Model, int64(run.MaxTokens))
-	if err != nil {
-		slog.WarnContext(ctx, "editor: the worst-case cost of a call is not known; the dollar warning is off", "model", run.Model, "error", err)
-		return 0
-	}
-	return c
+	return callCostMicros(run.CostMicros, int(run.ToolCalls))
 }
 
 // lastCheckOf is the version of the run's newest check_edit and the checks that failed in it. The newest edit_check event is the

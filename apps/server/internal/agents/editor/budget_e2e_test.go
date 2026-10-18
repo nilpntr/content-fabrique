@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
@@ -128,21 +127,36 @@ func TestRevisionOnOpusCompletesAPlanAnEditAndACheck(t *testing.T) {
 }
 
 // A budget that cannot hold the smallest call: the client refuses with the run-budget error, and the run ends at its budget gracefully
-// (when it has a previewed version) rather than failing.
+// on the version it had previewed, rather than failing. The scripted turns are so long that the money is gone after the first preview
+// and before the revision pass is done; the test insists on that (a run that never reached a preview, or that finished all its ten
+// turns, would pass the old checks without exercising the graceful finish at all).
 func TestBudgetBelowTheMinimumEndsGracefully(t *testing.T) {
-	// Turns so long that the money is gone before the revision pass: whatever is left is under what the smallest call needs.
-	x, _ := budgetRun(t, false, 300)
+	x, api := budgetRun(t, false, 140)
 	r := x.get()
-	if r.Status == store.AgentFailed && r.FailureReason != nil && *r.FailureReason == runtime.FailBudget {
-		// A run that never previewed anything may fail at its budget; this scripted run previews at its fifth call.
-		if x.artifacts(PreviewArtifact) > 0 {
-			t.Fatalf("failed at the budget with a previewed version: %s", r.Output)
-		}
+	sent := maxTokensOf(api)
+	t.Logf("max_tokens sent: %v; cost %d of %d; status %s", sent, r.CostMicros, r.BudgetMicros, r.Status)
+	if x.artifacts(PreviewArtifact) == 0 {
+		t.Fatalf("the run never previewed a version, so it cannot show the graceful finish: max_tokens sent %v", sent)
 	}
-	if x.artifacts(PreviewArtifact) > 0 && r.Status != store.AgentSucceeded {
+	if len(sent) >= len(turnUsage) {
+		t.Fatalf("the run made all %d scripted calls: the money did not run out (max_tokens sent %v)", len(sent), sent)
+	}
+	if r.Status != store.AgentSucceeded {
 		t.Fatalf("the run %s (%v) although it had previewed a version: %s", r.Status, r.FailureReason, r.Output)
+	}
+	if r.FailureReason != nil {
+		t.Fatalf("a graceful finish carries a failure reason %q", *r.FailureReason)
+	}
+	out := outputOf(t, r)
+	if out["limit"] != "dollars" || out["implicit_finish"] != true {
+		t.Fatalf("the run did not end at the budget on its previewed version: %s", r.Output)
 	}
 	if r.CostMicros > r.BudgetMicros {
 		t.Fatalf("cost %d against a budget of %d", r.CostMicros, r.BudgetMicros)
+	}
+	for i, mt := range sent {
+		if mt < 2048 {
+			t.Errorf("call %d was sent with %d tokens, under the minimum that is refused instead", i+1, mt)
+		}
 	}
 }
