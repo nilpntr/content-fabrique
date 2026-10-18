@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "be265accfef06b0a316203481e442d252062c1a224974eadef29b12ef34c396b",
-  "recorded_at": "2026-10-18T04:00:02Z",
+  "key": "47cca19cec3bbe815cbde4efa6df97afd64a8e6f0bc8a68e322c75f4d669d636",
+  "recorded_at": "2026-10-18T04:45:15Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,
@@ -12,6 +12,7 @@
       {
         "role": "user",
         "blocks": [
+          "text",
           "text",
           "text",
           "text",
@@ -125,6 +126,7 @@
       "list_footage",
       "view_clip",
       "find_moments",
+      "get_music",
       "plan_edit",
       "get_timeline",
       "get_comments",

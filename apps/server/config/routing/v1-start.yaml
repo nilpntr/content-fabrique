@@ -1,39 +1,49 @@
 # The starting profile (docs/03-architecture.md §7.5, decision D-07). Opus 5.5 where judgement matters.
 profile: v1-start
-# Effort `max` for the editor and the revision (decision D-31, pending founder confirmation: the founder wants the best result Opus 5.5
-# can give and accepts a few dollars for an edit). Thinking at that effort is long, so the output room is sized for it: max_tokens covers
-# the thinking and the answer together, and an editor turn that thinks hard, writes the plan and is cut off fails the run (at 16000 it did).
-# The editor gets 32000 tokens per call, the revision 16000. A live max-effort edit cost $1.01 and its largest call wrote 13,203 output
-# tokens, so 32000 is more than twice the largest call seen.
-#
-# Why not more: the metered client reserves the worst case of every call before it sends it, max_tokens at the output price (32000 x
-# $20/MTok = $0.64 on Opus 5.5, plus the input), and the price list (config/plans/2026-10c.yaml) gives a creator's first edit a hard run
-# budget of $2.00. A call is reserved at its worst case and settled at what it really cost, so that room is tied up for one call at a time
-# only: the first call reserves about $0.7 to $0.9 of the $2.00 and gives back what it did not use before the next one. A turn that is cut
-# off all the same is recovered from by the agent loop (two recoveries a run), and plan_edit's fields are bounded so that the room goes to
-# thinking.
-# A revision runs on the `revision` entry (the credits decide first edit or revision) with 16000: its budget is $0.80, so one full call's
-# reservation (16000 x $20/MTok = $0.32 plus the input) fits at the start and again after a call or two. Whatever the entry says, the
-# metered client cuts a call's max_tokens to what the run's budget can still pay for, and to what one call may cost at most
-# (LLM_MAX_REQUEST_MICROS, $2): floor((room - input worst case) / output price), a multiple of 16, down to min_output_tokens (2048 unless
-# an entry sets it), and refuses the call below that, which ends the run at its budget (the editor then finishes on its newest previewed
-# version). So late calls of a run get less room as the money runs down, and the editor is told when less than two calls like its
-# earlier ones are left. See spend control v1.
-# There is no `escalate` entry: escalation retries one effort step up, and there is nothing above `max`. routing.Entry refuses an
-# `escalate` whose effort is not above the stage's own, so one cannot be added back at an equal or lower effort by mistake.
-# dev-cheap and dev-mid keep effort `medium` and 24000 tokens: they exist to smoke-test the loop, the tools and the validators for cents,
-# and Haiku and Sonnet are not what max effort is for. Their limit is therefore NOT production's: a smoke test on them does not prove that
-# a max-effort call works, only a run on this profile does.
+# The editor gets 24000 tokens of output room per call (max_tokens covers the thinking and the answer together; the revision gets 12000,
+# see its entry below). The
+# default of 16000 was not enough for Opus: its plan_edit turn thought, wrote the plan and was cut off, and the run failed. Why not
+# more: the metered client reserves the worst case of every call before it sends it, max_tokens at the output price (24000 x $20/MTok
+# = $0.48 on Opus 5.5), and the spend plan gives a creator's first edit a budget of about $0.96, so a larger room would leave the run
+# too little to make calls with. A turn that is cut off all the same is recovered from by the agent loop (two recoveries a run), and
+# plan_edit's fields are bounded so that the room goes to thinking. dev-mid and dev-cheap use the same number, so a smoke test on
+# them meets the same limit.
+# A revision runs on the `revision` entry (the credits decide first edit or revision) with 12000: its budget on the creator plan is $0.32,
+# so one full call's reservation (12000 x $20/MTok = $0.24 plus the input) fits once. Whatever the entry says, the metered client cuts a
+# call's max_tokens to what the run's budget can still pay for, down to min_output_tokens (2048 unless an entry sets it), and refuses the
+# call below that, which ends the run at its budget (the editor then finishes on its newest previewed version). See spend control v1.
 editor:
   model: claude-opus-5-5
-  effort: max                    # the founder's choice (D-31), up from medium (D-17); nothing above it to escalate to
-  max_tokens: 32000              # see the note above the profile
+  effort: medium                 # Opus 5.5's default, set explicitly; tuned by D-17
+  max_tokens: 24000              # see the note above the profile
+  escalate: { when: hard_constraints_failed, effort: high, max_attempts: 1 }
   subagents:
     inspector: { enabled: false, model: claude-haiku-5-5 }   # benchmark variant only
 revision:
   model: claude-opus-5-5
+  effort: medium
+  max_tokens: 12000              # a revision's budget is a third of a first edit's ($0.32 on creator); see the note above the profile
+# Extra careful (decision D-31, pending founder confirmation): a creator may choose `quality: max` for one edit. It runs on these two
+# entries instead of `editor` and `revision` (which stay as they are for every other edit): Opus 5.5 at effort `max`, with the output room
+# that long thinking needs. A live max-effort edit cost $1.01 and its largest call wrote 13,203 output tokens, so 32000 is more than twice the
+# largest call seen. max_tokens covers the thinking and the answer together; an editor turn that thinks hard, writes the plan and is cut off
+# fails the run (at 16000 it did).
+# Reservation maths: the metered client reserves the worst case of every call before it sends it, max_tokens at the output price (32000 x
+# $20/MTok = $0.64 on Opus 5.5, plus the input), against a run budget of $2.00 for a first edit (action edit.first.max in
+# config/plans/2026-10c.yaml); a revision has 16000 (a full call is $0.32 plus the input) against $0.80. A call is reserved at its worst case
+# and settled at what it really cost, so that room is tied up for one call at a time, and the metered client cuts a call's max_tokens to
+# what the run's budget can still pay for and to what one call may cost at most (LLM_MAX_REQUEST_MICROS), refusing it below
+# min_output_tokens, which ends the run at its budget (the editor then finishes on its newest previewed version).
+# There is no `escalate` here: escalation retries one effort step up and there is nothing above `max`. routing.Entry refuses an `escalate`
+# whose effort is not above the stage's own, so one cannot be added back at an equal or lower effort by mistake.
+editor_max:
+  model: claude-opus-5-5
   effort: max
-  max_tokens: 16000              # a revision's budget is two fifths of a first edit's ($0.80 against $2.00 on a managed plan); see the note above the profile
+  max_tokens: 32000
+revision_max:
+  model: claude-opus-5-5
+  effort: max
+  max_tokens: 16000
 research:
   lead:    { model: claude-opus-5-5, effort: medium }
   workers: { model: claude-haiku-5-5, max_parallel: 6, budget_micros: 150000 }

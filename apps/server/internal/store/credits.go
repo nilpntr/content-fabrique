@@ -45,10 +45,12 @@ const (
 
 // The actions the ledger names (the price list's keys, package credits).
 const (
-	ActionEditFirst    = "edit.first"
-	ActionEditRevision = "edit.revision"
-	ActionExportFinal  = "export.final"
-	ActionIdeationRun  = "ideation.run"
+	ActionEditFirst       = "edit.first"
+	ActionEditRevision    = "edit.revision"
+	ActionEditFirstMax    = "edit.first.max"
+	ActionEditRevisionMax = "edit.revision.max"
+	ActionExportFinal     = "export.final"
+	ActionIdeationRun     = "ideation.run"
 )
 
 // How long the hold of a run lasts, and when it is renewed. The hold follows its run (the heartbeat moves its expiry forward), so these
@@ -273,7 +275,7 @@ func holdOf(h db.CreditHold) CreditHold {
 
 func validCreditAction(a string) bool {
 	switch a {
-	case ActionEditFirst, ActionEditRevision, ActionExportFinal, ActionIdeationRun:
+	case ActionEditFirst, ActionEditRevision, ActionEditFirstMax, ActionEditRevisionMax, ActionExportFinal, ActionIdeationRun:
 		return true
 	}
 	return false
@@ -394,7 +396,9 @@ func (s *Store) RunCreditsOf(ctx context.Context, ws ids.WorkspaceID, run uuid.U
 	return RunCredits{}, false, nil
 }
 
-func isEditAction(a string) bool { return a == ActionEditFirst || a == ActionEditRevision }
+func isEditAction(a string) bool {
+	return a == ActionEditFirst || a == ActionEditRevision || a == ActionEditFirstMax || a == ActionEditRevisionMax
+}
 
 func (s *Store) chargedRunCredits(ctx context.Context, ws ids.WorkspaceID, run uuid.UUID, charges []db.CreditLedger) (RunCredits, bool, error) {
 	rc := RunCredits{State: RunCreditsCharged}
@@ -579,7 +583,7 @@ func (s *Store) chargeHold(ctx context.Context, hold db.CreditHold, now time.Tim
 	}
 	// The work the charge paid for: the newest timeline version the run authored (an edit's run id is the author id of its versions).
 	var version *int32
-	if hold.Action == ActionEditFirst || hold.Action == ActionEditRevision {
+	if isEditAction(hold.Action) {
 		v, err := s.q.AgentRunTimelineVersion(ctx, db.AgentRunTimelineVersionParams{WorkspaceID: hold.WorkspaceID, AuthorID: ids.Encode(ids.PrefixRun, hold.ActionID)})
 		if err != nil {
 			return err

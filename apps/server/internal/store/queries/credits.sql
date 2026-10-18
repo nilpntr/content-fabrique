@@ -82,7 +82,7 @@ ORDER BY id;
 SELECT EXISTS (
     SELECT 1 FROM credit_ledger c
     WHERE c.workspace_id = @workspace_id AND c.project_id = @project_id AND c.kind = 'charge'
-      AND c.action IN ('edit.first', 'edit.revision')
+      AND c.action IN ('edit.first', 'edit.revision', 'edit.first.max', 'edit.revision.max')
       AND NOT EXISTS (SELECT 1 FROM credit_ledger r WHERE r.workspace_id = c.workspace_id AND r.kind = 'refund' AND r.action_id = c.action_id)
 ) AS charged;
 

@@ -14,11 +14,14 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
-// When the price list changes under workspaces that already have their allowance, the allowance they were granted is smaller than the
-// new list's. A trial's cannot be granted again (its key is "once"), so it would stay at the old size; a refilling plan's would stay old
-// until the next period. The difference is added once, as an adjustment with an actor and a reason; plans whose allowance did not grow
-// (creator, pro) are left alone, and so are their balances and top-ups.
-func TestAListSwitchTopsUpTrialAndStudioOnceAndLeavesTheRestAlone(t *testing.T) {
+// When the price list changes under workspaces that already have their allowance, an allowance granted under an older list can be smaller
+// than the new list's. A trial's cannot be granted again (its key is "once"), so it would stay at the old size; a refilling plan's would
+// stay old until the next period. The difference is added once, as an adjustment with an actor and a reason; plans whose allowance did not
+// grow are left alone, and so are their balances and top-ups.
+//
+// Going from 2026-10 to 2026-10c changes no allowance (the extra careful edits are new actions; the standard ones and the plans are as
+// they were), so the real switch adds nothing; the mechanism is tried with a list that does grow the trial and the studio plan.
+func TestAListSwitchTopsUpOnlyWhereTheAllowanceGrewAndOnlyOnce(t *testing.T) {
 	r := newRig(t)
 	ctx := context.Background()
 	old, err := credits.LoadPriceList(configfiles.Plans(), "2026-10.yaml")
@@ -38,7 +41,7 @@ func TestAListSwitchTopsUpTrialAndStudioOnceAndLeavesTheRestAlone(t *testing.T) 
 			t.Fatalf("%s under 2026-10: %+v, %v", p, res, err)
 		}
 	}
-	// The trial used a first edit (6 credits under the old list): 14 of its 20 are left. The creator has a top-up as well.
+	// The trial used a first edit (6 credits): 14 of its 20 are left. The creator has a top-up as well.
 	run, q, err := r.runWith(oldSvc, spaces[plans.Trial], r.project(spaces[plans.Trial]))
 	if err != nil || q.Credits != 6 {
 		t.Fatalf("trial first edit: %+v, %v", q, err)
@@ -61,23 +64,42 @@ func TestAListSwitchTopsUpTrialAndStudioOnceAndLeavesTheRestAlone(t *testing.T) 
 		t.Fatalf("trial balance before = %d, want 14", before[plans.Trial])
 	}
 
-	// Under the new list only the trial and the studio plan are behind: creator and pro have the same allowance as before.
-	specs := cur.List.AllowanceSpecs()
+	// The real switch (2026-10 to 2026-10c): no allowance changed, so nobody is behind and nothing is added.
+	realSpecs := cur.List.AllowanceSpecs()
+	if behind, err := r.st.WorkspacesBehindTheList(ctx, realSpecs, time.Now(), ids.WorkspaceID{}, 100); err != nil || len(behind) != 0 {
+		t.Fatalf("after the real switch %v are behind the list (%v)", behind, err)
+	}
+	for _, p := range plans.Granted {
+		if n, err := cur.SyncListSwitch(ctx, spaces[p].ID); err != nil || n != 0 {
+			t.Fatalf("%s: the real switch added %d, %v; want nothing", p, n, err)
+		}
+	}
+
+	// A list that grows the trial (20 to 30) and the studio plan (600 to 1800).
+	bigger, _ := credits.LoadDefault()
+	bigger.Version = "2099-01"
+	for p, n := range map[plans.Plan]int{plans.Trial: 30, plans.Studio: 1800} {
+		pl := bigger.Plans[p]
+		pl.AllowanceCredits = n
+		bigger.Plans[p] = pl
+	}
+	biggerSvc := credits.NewService(r.st, bigger)
+	specs := bigger.AllowanceSpecs()
 	behind, err := r.st.WorkspacesBehindTheList(ctx, specs, time.Now(), ids.WorkspaceID{}, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := behind
 	want := []ids.WorkspaceID{spaces[plans.Trial].ID, spaces[plans.Studio].ID}
-	slices.SortFunc(got, func(a, b ids.WorkspaceID) int { return slices.Compare(a.UUID[:], b.UUID[:]) })
-	slices.SortFunc(want, func(a, b ids.WorkspaceID) int { return slices.Compare(a.UUID[:], b.UUID[:]) })
-	if !slices.Equal(got, want) {
-		t.Fatalf("workspaces behind the list = %v, want the trial and the studio workspace %v", got, want)
+	cmp := func(a, b ids.WorkspaceID) int { return slices.Compare(a.UUID[:], b.UUID[:]) }
+	slices.SortFunc(behind, cmp)
+	slices.SortFunc(want, cmp)
+	if !slices.Equal(behind, want) {
+		t.Fatalf("workspaces behind the list = %v, want the trial and the studio workspace %v", behind, want)
 	}
 
 	added := map[plans.Plan]int{}
 	for _, p := range plans.Granted {
-		if added[p], err = cur.SyncListSwitch(ctx, spaces[p].ID); err != nil {
+		if added[p], err = biggerSvc.SyncListSwitch(ctx, spaces[p].ID); err != nil {
 			t.Fatalf("%s: %v", p, err)
 		}
 	}
@@ -89,19 +111,10 @@ func TestAListSwitchTopsUpTrialAndStudioOnceAndLeavesTheRestAlone(t *testing.T) 
 			t.Errorf("%s balance = %d, want %d", p, avail(p), want)
 		}
 	}
-	// The trial can now afford a first edit and a revision under the new list (16 + 7 of its 24), which 14 credits could not.
-	first, q, err := r.runWith(cur, spaces[plans.Trial], r.project(spaces[plans.Trial]))
-	if err != nil || q.Action != credits.EditFirst || q.Credits != 16 {
-		t.Fatalf("a trial's first edit after the switch: %+v, %v", q, err)
-	}
-	r.finish(spaces[plans.Trial], first, store.AgentSucceeded)
-	if avail(plans.Trial) != 24-16 {
-		t.Fatalf("trial balance after a first edit = %d, want 8", avail(plans.Trial))
-	}
 
 	// Once: a second pass, from this process or another, adds nothing and finds nobody behind.
 	for _, p := range plans.Granted {
-		if n, err := cur.SyncListSwitch(ctx, spaces[p].ID); err != nil || n != 0 {
+		if n, err := biggerSvc.SyncListSwitch(ctx, spaces[p].ID); err != nil || n != 0 {
 			t.Errorf("%s: a second pass added %d, %v", p, n, err)
 		}
 	}
@@ -121,28 +134,28 @@ func TestAListSwitchTopsUpTrialAndStudioOnceAndLeavesTheRestAlone(t *testing.T) 
 		}
 	}
 	if adj == nil || adj.Credits != 1200 || adj.Actor == nil || *adj.Actor != store.ListSwitchActor || adj.Reason == nil || *adj.Reason == "" ||
-		adj.PlanListVersion == nil || *adj.PlanListVersion != "2026-10c" || adj.ExpiresAt == nil {
+		adj.PlanListVersion == nil || *adj.PlanListVersion != "2099-01" || adj.ExpiresAt == nil {
 		t.Fatalf("studio adjustment row = %+v", adj)
 	}
 
-	// Creator keeps its credits: nothing was taken or added, whatever a video costs now.
+	// Creator keeps its credits: nothing was taken or added.
 	if avail(plans.Creator) != before[plans.Creator] {
 		t.Errorf("creator balance %d -> %d", before[plans.Creator], avail(plans.Creator))
 	}
 
-	// A later list that grows the trial again adds only what is still missing (10 earlier counts as part of the allowance); one that
-	// shrinks it adds nothing and takes nothing.
+	// A later list that grows the trial again adds only what is still missing (the 10 of the first switch count as part of the
+	// allowance); one that shrinks it adds nothing and takes nothing.
 	next, _ := credits.LoadDefault()
-	next.Version = "2099-01"
+	next.Version = "2099-02"
 	trial := next.Plans[plans.Trial]
 	trial.AllowanceCredits = 40
 	next.Plans[plans.Trial] = trial
-	nextSvc := credits.NewService(r.st, next)
-	if n, err := nextSvc.SyncListSwitch(ctx, spaces[plans.Trial].ID); err != nil || n != 10 {
+	if n, err := credits.NewService(r.st, next).SyncListSwitch(ctx, spaces[plans.Trial].ID); err != nil || n != 10 {
 		t.Fatalf("a list with a 40-credit trial added %d, %v; want 10 (40 - 20 - 10)", n, err)
 	}
 	trial.AllowanceCredits = 25
 	next.Plans[plans.Trial] = trial
+	next.Version = "2099-03"
 	if n, err := credits.NewService(r.st, next).SyncListSwitch(ctx, spaces[plans.Trial].ID); err != nil || n != 0 {
 		t.Fatalf("a list with a 25-credit trial added %d, %v; want nothing", n, err)
 	}

@@ -42,7 +42,7 @@ func TestRegisteredToolsAreTheContract(t *testing.T) {
 	if len(got) != len(defs) {
 		t.Fatalf("the agent registers %d tools, the contract lists %d", len(got), len(defs))
 	}
-	wantNames := []string{"get_brief", "list_footage", "view_clip", "find_moments", "plan_edit", "get_timeline", "get_comments", "edit_timeline", "match_exposure", "render_preview", "check_edit", "finish"}
+	wantNames := []string{"get_brief", "list_footage", "view_clip", "find_moments", "get_music", "plan_edit", "get_timeline", "get_comments", "edit_timeline", "match_exposure", "render_preview", "check_edit", "finish"}
 	for i, d := range defs {
 		g := got[i]
 		if g.Name != d.Name || g.Description != d.Description || g.Strict != d.Strict {
@@ -362,13 +362,13 @@ func TestNewAgentChecksItsTools(t *testing.T) {
 	}
 	sorted := slices.Clone(names)
 	sort.Strings(sorted)
-	if len(names) != 12 {
+	if len(names) != 13 {
 		t.Fatalf("tools: %v", names)
 	}
 	if _, err := runtime.NewAgents(a); err != nil {
 		t.Fatal(err)
 	}
-	if a.Name != "editor" || a.Stage != "editor" || a.Budgets.Micros != 5_000_000 || a.Budgets.ToolCalls != 60 || a.Budgets.WallClock.Minutes() != 30 {
+	if a.Name != "editor" || a.Stage != "editor" || a.Budgets.Micros != 5_000_000 || a.Budgets.ToolCalls != 60 || a.Budgets.WallClock.Minutes() != 15 {
 		t.Fatalf("agent: %+v", a)
 	}
 	if _, err := NewAgent(Deps{}); err == nil {

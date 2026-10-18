@@ -62,10 +62,8 @@ type fakeAnthropic struct {
 	messages int
 	requests []map[string]any
 	bodies   []string
-	// scale multiplies the output tokens of every turn (0 and 1: as scripted), to make a scripted run cost what a real max-effort Opus run
-	// does (long thinking); an answer never has more output tokens than the max_tokens the request allowed, which is what keeps a run's
-	// cost inside the reservation of its calls, as it is with the real API. The cache numbers stay as scripted: the count_tokens answer is
-	// fixed, so a bigger cache would be input that no reservation counted.
+	// scale multiplies the cache and output tokens of every turn (0 and 1: as scripted), to make a scripted run cost what a real Opus run
+	// does; an answer never has more output tokens than the max_tokens the request allowed.
 	scale int
 	// lastMax is the max_tokens of the newest request.
 	lastMax int
@@ -159,7 +157,7 @@ func (f *fakeAnthropic) turn(n int) string {
 	asset := func(a ids.AssetID) string { return `"` + a.String() + `"` }
 	u := turnUsage[min(n, len(turnUsage))-1]
 	if f.scale > 1 {
-		u[3] *= f.scale
+		u[1], u[2], u[3] = u[1]*f.scale, u[2]*f.scale, u[3]*f.scale
 	}
 	if f.lastMax > 0 {
 		u[3] = min(u[3], f.lastMax)
@@ -213,6 +211,8 @@ type e2eConfig struct {
 	planBudgets bool
 	// charged gives the project an edit that was charged first, so that the run is a revision.
 	charged bool
+	// quality is the quality of the run (credits.Standard when empty).
+	quality credits.Quality
 }
 
 // newE2E seeds the project and builds the runtime over the real llm layer in the mode the variables name.
@@ -312,7 +312,7 @@ func newE2E(t *testing.T, vars map[string]string, api *fakeAnthropic, options ..
 	if err != nil {
 		t.Fatal(err)
 	}
-	if x.run, err = svc.Create(context.Background(), e.st, runtime.StartParams{Agent: Name, WorkspaceID: e.wsA.ID, ProjectID: x.prj.UUID, Input: input, Profile: cfg.profile}); err != nil {
+	if x.run, err = svc.Create(context.Background(), e.st, runtime.StartParams{Agent: Name, WorkspaceID: e.wsA.ID, ProjectID: x.prj.UUID, Input: input, Profile: cfg.profile, Quality: cfg.quality}); err != nil {
 		t.Fatal(err)
 	}
 	return x
@@ -417,7 +417,7 @@ func TestEditorRecordedRequests(t *testing.T) {
 		}
 	}
 	first := api.requests[0]
-	if tools, _ := first["tools"].([]any); len(tools) != 12 {
+	if tools, _ := first["tools"].([]any); len(tools) != 13 {
 		t.Errorf("%d tools sent", len(tools))
 	} else {
 		var names []string
@@ -426,10 +426,10 @@ func TestEditorRecordedRequests(t *testing.T) {
 			name, _ := m["name"].(string)
 			names = append(names, name)
 		}
-		if strings.Join(names, ",") != "get_brief,list_footage,view_clip,find_moments,plan_edit,get_timeline,get_comments,edit_timeline,match_exposure,render_preview,check_edit,finish" {
+		if strings.Join(names, ",") != "get_brief,list_footage,view_clip,find_moments,get_music,plan_edit,get_timeline,get_comments,edit_timeline,match_exposure,render_preview,check_edit,finish" {
 			t.Errorf("tools: %v", names)
 		}
-		editTool, _ := tools[7].(map[string]any)
+		editTool, _ := tools[8].(map[string]any)
 		viewTool, _ := tools[2].(map[string]any)
 		if editTool["strict"] == true || viewTool["strict"] != true {
 			t.Errorf("strict flags: edit_timeline %v, view_clip %v", editTool["strict"], viewTool["strict"])
@@ -513,13 +513,13 @@ func TestEditorRunInReplayMode(t *testing.T) {
 	if r.CostMicros <= 0 || r.CostMicros >= r.BudgetMicros {
 		t.Fatalf("cost %d of budget %d", r.CostMicros, r.BudgetMicros)
 	}
-	// The run was a first edit on a creator plan: its budget is the plan's, and its 16 credits were charged when it succeeded.
+	// The run was a first edit on a creator plan: its budget is the plan's, and its 6 credits were charged when it succeeded.
 	if r.BudgetMicros != cassetteRunBudget {
 		t.Fatalf("the run's budget is %d, want the creator plan's budget for a first edit, %d", r.BudgetMicros, cassetteRunBudget)
 	}
 	bal, err := x.st.CreditBalance(context.Background(), x.wsA.ID, time.Now())
-	if err != nil || bal.Available != 34 || bal.Held != 0 {
-		t.Fatalf("credits after the run = %+v, %v; want 34 left of 50 and nothing held", bal, err)
+	if err != nil || bal.Available != 44 || bal.Held != 0 {
+		t.Fatalf("credits after the run = %+v, %v; want 44 left of 50 and nothing held", bal, err)
 	}
 	if charged, err := x.st.ProjectHasChargedEdit(context.Background(), x.wsA.ID, x.prj); err != nil || !charged {
 		t.Fatalf("the project's edit was not charged: %v %v", charged, err)

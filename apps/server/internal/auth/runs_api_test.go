@@ -47,11 +47,11 @@ func TestRunsStartEdit(t *testing.T) {
 	e := newAssetsEnv(t, func(o *assetsEnvOptions) { o.runs = true })
 	p := e.newProject("ada", "9:16", e.readyAsset("ada", "lat.mp4"))
 
-	// The budget is the creator plan's for a first edit ($2.00 for a max-effort edit, spend control v1 section 4, D-31), whatever the request says.
+	// The budget is the creator plan's for a first edit ($0.96, spend control v1 section 4), whatever the request says.
 	run := e.startEdit("ada", p, map[string]any{"instructions": "Open on the heaviest set.", "profile": "v1-start", "budget_usd": 3})
 	if !strings.HasPrefix(run.Id, "run_") || run.Agent != "editor" || run.Status != api.RunStatusQueued || run.ProjectId == nil || *run.ProjectId != p.Id ||
 		run.RoutingProfile != "v1-start" || !strings.HasPrefix(run.Model, "claude-opus") || run.BudgetMicros != creatorFirstEditBudget || run.BudgetToolCalls != 60 ||
-		run.BudgetWallClockMs != 30*60*1000 || run.BilledTo != "test" || run.CostMicros != 0 || len(run.Events) != 0 || run.LastSeq != 0 || run.Tokens.CacheHitRate != nil {
+		run.BudgetWallClockMs != 15*60*1000 || run.BilledTo != "test" || run.CostMicros != 0 || len(run.Events) != 0 || run.LastSeq != 0 || run.Tokens.CacheHitRate != nil {
 		t.Fatalf("run: %+v", run)
 	}
 	if n := e.agentRunJobs(run.Id); n != 1 {
@@ -64,7 +64,7 @@ func TestRunsStartEdit(t *testing.T) {
 	if err := e.pool.QueryRow(context.Background(), `SELECT input::text, workspace_id, project_id FROM agent_runs WHERE id = $1`, runID).Scan(&input, &ws, &project); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(input, "Open on the heaviest set.") || !strings.Contains(input, `"editor.v2.5"`) || ws != e.ws["ada"].UUID || project.String() == "" {
+	if !strings.Contains(input, "Open on the heaviest set.") || !strings.Contains(input, `"editor.v2.6"`) || ws != e.ws["ada"].UUID || project.String() == "" {
 		t.Errorf("input %s, workspace %s", input, ws)
 	}
 
@@ -88,8 +88,8 @@ func TestRunsStartEdit(t *testing.T) {
 	}
 }
 
-// creatorFirstEditBudget is config/plans/2026-10c.yaml: the creator plan's COGS budget for edit.first.
-const creatorFirstEditBudget = 2_000_000
+// creatorFirstEditBudget is config/plans/2026-10.yaml: the creator plan's COGS budget for edit.first.
+const creatorFirstEditBudget = 960_000
 
 func TestRunsStartEditRefusals(t *testing.T) {
 	e := newAssetsEnv(t, func(o *assetsEnvOptions) { o.runs = true })

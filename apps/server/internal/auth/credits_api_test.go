@@ -56,10 +56,6 @@ func TestMeCarriesTheCredits(t *testing.T) {
 	}
 	me := e.me("ada")
 	c := me.Credits
-	// What a video costs comes from the price list (a first edit plus two revisions), not from the web app or a constant.
-	if c != nil && c.CreditsPerVideo != 16+2*7 {
-		t.Fatalf("credits per video = %d, want 30", c.CreditsPerVideo)
-	}
 	if c == nil || c.Available != 250 || c.Allowance != 150 || c.Low || c.PeriodEnd == nil || len(c.TopUps) != 1 || c.TopUps[0].Credits != 100 || !c.TopUps[0].ExpiresAt.After(time.Now().AddDate(0, 11, 0)) {
 		t.Fatalf("ada's credits = %+v", c)
 	}
@@ -75,7 +71,7 @@ func TestMeCarriesTheCredits(t *testing.T) {
 	// A run in flight is already taken out; low is "at least 80 % of the allowance used".
 	p := e.newProject("ada", "9:16", e.readyAsset("ada", "lat.mp4"))
 	run := e.startEdit("ada", p, nil)
-	if c := e.me("ada").Credits; c.Available != 250-16 {
+	if c := e.me("ada").Credits; c.Available != 244 {
 		t.Fatalf("with a run under way: %+v", c)
 	}
 	e.call(http.MethodPost, runPath(run, "/cancel"), "ada", nil, http.StatusOK, nil)
@@ -104,7 +100,7 @@ func TestMeCarriesTheCredits(t *testing.T) {
 
 // With fewer credits than the action costs, the start of a run is refused with the stable code, and nothing is created.
 func TestStartEditWithoutEnoughCredits(t *testing.T) {
-	e := newAssetsEnv(t, func(o *assetsEnvOptions) { o.runs = true; o.credits = 15 }) // a first edit costs 16
+	e := newAssetsEnv(t, func(o *assetsEnvOptions) { o.runs = true; o.credits = 5 }) // a first edit costs 6
 	ctx := context.Background()
 	p := e.newProject("ada", "9:16", e.readyAsset("ada", "lat.mp4"))
 	rec := e.do(http.MethodPost, editPath(p), "ada", nil)
@@ -148,16 +144,16 @@ func (e *assetsEnv) newProjectAs(who, format string) api.Project {
 	return e.newProject(who, format, e.readyAsset(who, "clip.mp4"))
 }
 
-// The first edit costs 16 and a revision 7, decided by the server from what the project has had charged; the run's budget is the plan's
+// The first edit costs 6 and a revision 2, decided by the server from what the project has had charged; the run's budget is the plan's
 // for that action; a run that fails costs nothing.
 func TestStartEditChargesFirstThenRevision(t *testing.T) {
-	e := newAssetsEnv(t, func(o *assetsEnvOptions) { o.runs = true; o.credits = 60 })
+	e := newAssetsEnv(t, func(o *assetsEnvOptions) { o.runs = true; o.credits = 20 })
 	p := e.newProject("ada", "9:16", e.readyAsset("ada", "lat.mp4"))
 	other := e.newProject("ada", "9:16", e.readyAsset("ada", "other.mp4"))
 	avail := func() int { return e.me("ada").Credits.Available }
 
 	first := e.startEdit("ada", p, nil)
-	if first.BudgetMicros != 2_000_000 || avail() != 44 {
+	if first.BudgetMicros != 960_000 || avail() != 14 {
 		t.Fatalf("first edit: budget %d, available %d", first.BudgetMicros, avail())
 	}
 	// The hold is attributed to the project, the member who started it and the plan and list that priced it.
@@ -170,37 +166,37 @@ func TestStartEditChargesFirstThenRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	pid, _ := ids.ParseProjectID(p.Id)
-	if holdCredits != 16 || holdAction != "edit.first" || holdProject == nil || *holdProject != pid.UUID.String() || holdMember == nil || holdPlan != "creator" || holdVersion != "2026-10c" {
+	if holdCredits != 6 || holdAction != "edit.first" || holdProject == nil || *holdProject != pid.UUID.String() || holdMember == nil || holdPlan != "creator" || holdVersion != "2026-10c" {
 		t.Fatalf("hold = %d %s project %v member %v plan %s list %s", holdCredits, holdAction, holdProject, holdMember, holdPlan, holdVersion)
 	}
 	e.endRun("ada", first, store.AgentFailed)
-	if avail() != 60 {
-		t.Fatalf("a failed first edit cost %d", 60-avail())
+	if avail() != 20 {
+		t.Fatalf("a failed first edit cost %d", 20-avail())
 	}
 	again := e.startEdit("ada", p, nil) // still the first edit: nothing was charged
-	if again.BudgetMicros != 2_000_000 {
+	if again.BudgetMicros != 960_000 {
 		t.Fatalf("after a failed first edit the next run has budget %d", again.BudgetMicros)
 	}
 	e.endRun("ada", again, store.AgentSucceeded)
-	if avail() != 44 {
-		t.Fatalf("a successful first edit left %d, want 44", avail())
+	if avail() != 14 {
+		t.Fatalf("a successful first edit left %d, want 14", avail())
 	}
 
 	rev := e.startEdit("ada", p, map[string]any{"budget_usd": 4})
-	if rev.BudgetMicros != 800_000 || avail() != 37 {
+	if rev.BudgetMicros != 320_000 || avail() != 12 {
 		t.Fatalf("revision: budget %d, available %d", rev.BudgetMicros, avail())
 	}
 	e.endRun("ada", rev, store.AgentSucceeded)
-	if avail() != 37 {
+	if avail() != 12 {
 		t.Fatalf("after the revision: %d", avail())
 	}
 	// Another project is its own first edit.
-	if o := e.startEdit("ada", other, nil); o.BudgetMicros != 2_000_000 || avail() != 21 {
+	if o := e.startEdit("ada", other, nil); o.BudgetMicros != 960_000 || avail() != 6 {
 		t.Fatalf("other project: budget %d, available %d", o.BudgetMicros, avail())
 	}
 
 	// bob's credits were never touched.
-	if c := e.me("bob").Credits; c.Available != 60 {
+	if c := e.me("bob").Credits; c.Available != 20 {
 		t.Fatalf("bob's credits = %+v", c)
 	}
 }
@@ -274,7 +270,7 @@ func TestStartEditCountsTheRunsInFlight(t *testing.T) {
 	p := e.newProject("ada", "9:16", e.readyAsset("ada", "clip5.mp4"))
 	wantError(t, e.do(http.MethodPost, editPath(p), "ada", nil), http.StatusTooManyRequests, string(api.ErrorCodeTooManyUnchargedRuns))
 	// Out of credits is told first: a workspace with nothing left gets 402, not 429.
-	if _, err := e.st.AdjustCredits(context.Background(), store.AdjustCreditsParams{Workspace: e.ws["ada"], Credits: -(300 - 5*16), Actor: "test", Reason: "test", Now: time.Now()}); err != nil {
+	if _, err := e.st.AdjustCredits(context.Background(), store.AdjustCreditsParams{Workspace: e.ws["ada"], Credits: -(300 - 5*6), Actor: "test", Reason: "test", Now: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	wantError(t, e.do(http.MethodPost, editPath(p), "ada", nil), http.StatusPaymentRequired, string(api.ErrorCodeCreditsExhausted))

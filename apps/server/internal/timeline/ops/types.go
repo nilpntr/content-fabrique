@@ -137,6 +137,7 @@ type AddText struct {
 	Anchor     string          `json:"anchor,omitempty"`
 	Position   *timeline.Point `json:"position,omitempty"`
 	Animation  string          `json:"animation,omitempty"`
+	Exit       string          `json:"exit,omitempty"`
 	Fill       string          `json:"fill,omitempty"`
 	Scale      *float64        `json:"scale,omitempty"`
 	Shadow     string          `json:"shadow,omitempty"`
@@ -155,6 +156,7 @@ type UpdateText struct {
 	Anchor     string          `json:"anchor,omitempty"`
 	Position   *timeline.Point `json:"position,omitempty"`
 	Animation  string          `json:"animation,omitempty"`
+	Exit       string          `json:"exit,omitempty"`
 	Fill       string          `json:"fill,omitempty"`
 	Scale      *float64        `json:"scale,omitempty"`
 	Shadow     string          `json:"shadow,omitempty"`
@@ -250,10 +252,10 @@ type SetClipAudio struct {
 	GainDB    *float64 `json:"gain_db,omitempty"`
 }
 
-// SetMotion sets the camera move of a clip, replacing its whole motion: fields left out go back to their defaults, and the
-// preset none removes it.
+// SetMotion sets the camera move of a clip (or, without ID, of every clip of the main track), replacing its whole motion: fields left
+// out go back to their defaults, and the preset none removes it.
 type SetMotion struct {
-	ID       string   `json:"id"`
+	ID       string   `json:"id,omitempty"`
 	Preset   string   `json:"preset"`
 	AtMs     *int64   `json:"at_ms,omitempty"`
 	Strength *float64 `json:"strength,omitempty"`

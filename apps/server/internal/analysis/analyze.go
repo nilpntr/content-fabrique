@@ -5,6 +5,9 @@ import (
 	"math"
 	"sort"
 	"strings"
+
+	"github.com/nilpntr/content-fabrique/internal/camshift"
+	"github.com/nilpntr/content-fabrique/internal/media"
 )
 
 // The kinds of moment (moments.kind).
@@ -57,6 +60,10 @@ type Summary struct {
 	Gain          float64 `json:"exposure_gain"`
 	// Sharpness is the clip's mean edge energy.
 	Sharpness float64 `json:"sharpness"`
+	// Camera is static or handheld (package camshift: how much the picture itself drifts, apart from the subject), "" in a summary made
+	// before P6-06; CameraShiftPct is the drift in percent of the frame a second.
+	Camera         string  `json:"camera,omitempty"`
+	CameraShiftPct float64 `json:"camera_shift_pct,omitempty"`
 	// Percentiles is the clip's percentile exposure (Exposure). It is not stored: the stored series holds what it is computed
 	// from, so the analysis fills it in when it has just run and a reader of the stored summary computes it from the series
 	// (Summary.WithSeries). Line falls back to the stored key brightness while it is nil.
@@ -126,6 +133,13 @@ func Analyze(raw Raw, p Params, sp ShotParams) Analysis {
 		return a.Moments[i].Kind < a.Moments[j].Kind
 	})
 	a.Summary = summarise(s, a, setNo, allDur)
+	// The camera (P6-06): a tripod shot is static, a hand-held one drifts; the editor gives static footage the living camera.
+	frames := make([][]byte, raw.N())
+	for i := range frames {
+		frames[i] = raw.Thumbs[i*media.ThumbPixels : (i+1)*media.ThumbPixels]
+	}
+	cam := camshift.Measure(frames, media.ThumbSize, media.AnalysisFPS)
+	a.Summary.Camera, a.Summary.CameraShiftPct = cam.Verdict(), cam.ShiftPctPerS
 	return a
 }
 
@@ -405,6 +419,12 @@ func (s Summary) Line() string {
 	}
 	if s.Shots > 1 {
 		parts = append(parts, fmt.Sprintf("%d shots", s.Shots))
+	}
+	switch s.Camera {
+	case camshift.Static:
+		parts = append(parts, "camera static (a tripod: it needs the living camera)")
+	case camshift.Handheld:
+		parts = append(parts, fmt.Sprintf("camera hand-held (drifts %.1f %% of the frame a second)", s.CameraShiftPct))
 	}
 	if note := s.exposureNote(); note != "" {
 		parts = append(parts, note)

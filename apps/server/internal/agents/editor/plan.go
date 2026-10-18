@@ -47,6 +47,8 @@ const (
 	MaxTempoBPM        = 200
 	MaxPlanShots       = 16
 	MaxShotBeats       = 64
+	// MaxChapter is the highest chapter number of a listicle shot.
+	MaxChapter = 9
 	// nominalBPM counts the beats of a plan without a tempo (tempo_bpm 0): half a second each.
 	nominalBPM = 120
 )
@@ -55,13 +57,14 @@ const (
 var (
 	PlanRoles   = []string{"hook", "build", "peak", "detail", "step", "reveal", "payoff", "broll", "ending"}
 	PlanPaces   = []string{"steady", "building", "fast"}
-	PlanEffects = []string{"none", "punch_in", "push_in", "pull_back", "shake", "speed_ramp", "whip", "zoom_through", "flash"}
+	PlanEffects = []string{"none", "punch_in", "push_in", "pull_back", "shake", "speed_ramp", "whip", "zoom_through", "flash", "punch", "handheld"}
 )
 
 // effectFeature is the feature each effect of a plan needs: a plan never promises an effect the build cannot make.
 var effectFeature = map[string]string{
 	"punch_in": "motion:punch_in", "push_in": "motion:push_in", "pull_back": "motion:pull_back", "shake": "motion:shake",
 	"speed_ramp": "op:set_speed_ramp", "whip": "transition:whip_left", "zoom_through": "transition:zoom_through", "flash": "transition:flash",
+	"punch": "transition:punch", "handheld": "motion:handheld",
 }
 
 // PlanShot is one shot of the shot list.
@@ -76,6 +79,9 @@ type PlanShot struct {
 	Beats int `json:"beats"`
 	// Effect is the effect the shot gets (none, punch_in, push_in, pull_back, shake, speed_ramp, whip, zoom_through, flash).
 	Effect string `json:"effect,omitempty"`
+	// Chapter is the exercise or step of a listicle the shot belongs to (1 to 9), 0 for none: the first shot of a chapter gets a numbered
+	// chapter title (P6-06).
+	Chapter int `json:"chapter,omitempty"`
 	// LengthMs is Beats in milliseconds at the plan's tempo, worked out by the tool.
 	LengthMs int64 `json:"length_ms"`
 }
@@ -104,6 +110,8 @@ type Plan struct {
 	BeatMs            int64      `json:"beat_ms"`
 	EstimatedLengthMs int64      `json:"estimated_length_ms"`
 	Shots             []PlanShot `json:"shots"`
+	// Vibe is the energy of the edit the plan was written for (calm, lively or hype; P6-06).
+	Vibe string `json:"vibe,omitempty"`
 	// PromptVersion is the editor prompt the plan was written under.
 	PromptVersion string `json:"prompt_version"`
 }
@@ -127,6 +135,7 @@ type planArgsShot struct {
 	AssetID string `json:"asset_id,omitempty"`
 	Beats   int    `json:"beats"`
 	Effect  string `json:"effect,omitempty"`
+	Chapter int    `json:"chapter,omitempty"`
 }
 
 // BuildPlan checks a plan_edit call and works out its numbers. footage is the set of the project's clips (an asset id the plan names
@@ -223,7 +232,10 @@ func BuildPlan(in planArgs, footage map[string]bool, f Features, style *stylepro
 		}
 		length := int64(s.Beats) * p.BeatMs
 		p.EstimatedLengthMs += length
-		p.Shots = append(p.Shots, PlanShot{Role: s.Role, What: what, AssetID: s.AssetID, Beats: s.Beats, Effect: effect, LengthMs: length})
+		if s.Chapter < 0 || s.Chapter > MaxChapter {
+			return fail("shot %d: chapter is %d; a chapter is 1 to %d, or leave it out", n, s.Chapter, MaxChapter)
+		}
+		p.Shots = append(p.Shots, PlanShot{Role: s.Role, What: what, AssetID: s.AssetID, Beats: s.Beats, Effect: effect, Chapter: s.Chapter, LengthMs: length})
 	}
 	return p, nil
 }
@@ -249,16 +261,42 @@ func planNotes(p Plan, style *styleprofile.Profile) []string {
 		}
 		run, start = 1, i
 	}
+	energy := energetic(p.Vibe)
 	if style != nil && style.Effects.Verdict == styleprofile.EffectsNone {
 		n := 0
 		for _, s := range p.Shots {
-			if s.Effect != "none" {
+			// At lively and hype the transitions, the punch-ins on beats and the living camera are the vibe's, not gimmicks: only speed
+			// ramps and shakes go against a creator of no effects. The living camera is camera motion at every vibe.
+			if s.Effect != "none" && s.Effect != "handheld" && (!energy || s.Effect == "speed_ramp" || s.Effect == "shake") {
 				n++
 			}
 		}
-		if n > 0 {
-			notes = append(notes, fmt.Sprintf("%d shots of the plan have an effect. This creator's videos have none: set every effect to none.", n))
+		if n > 0 && energy {
+			notes = append(notes, fmt.Sprintf("%d shots of the plan have a speed ramp or a shake. This creator uses no gimmicks: keep the transitions, punch-ins and the living camera of the %s vibe, drop those.", n, VibeOr(p.Vibe)))
+		} else if n > 0 {
+			notes = append(notes, fmt.Sprintf("%d shots of the plan have an effect. This creator's videos have none and the vibe is calm: keep at most one transition (on the drop) and the living camera (handheld), set the other effects to none.", n))
 		}
+	}
+	if energy {
+		transitions := 0
+		for _, s := range p.Shots[1:] {
+			switch s.Effect {
+			case "whip", "zoom_through", "flash", "punch":
+				transitions++
+			}
+		}
+		if len(p.Shots) >= 3 && transitions == 0 {
+			notes = append(notes, fmt.Sprintf("The vibe is %s and the plan has no transition: put whip, zoom_through, punch or flash on the cut into the drop and on the strong beats (phrase starts), 250 to 400 ms, never the same one three times in a row.", VibeOr(p.Vibe)))
+		}
+	}
+	var chapters []int
+	for _, s := range p.Shots {
+		if s.Chapter > 0 && !slices.Contains(chapters, s.Chapter) {
+			chapters = append(chapters, s.Chapter)
+		}
+	}
+	if len(chapters) >= 2 {
+		notes = append(notes, fmt.Sprintf("The plan has %d chapters: give the first shot of each a numbered chapter title (\"1. <EXERCISE>\" in the creator's title style, in the top band above the head) that enters with the shot and leaves before the next chapter; inside a chapter switch the angle every 2 to 5 s at a rep boundary instead of one long take.", len(chapters)))
 	}
 	if hookMax := applyStyle(limits{}, style).hookMaxMs; p.Shots[0].LengthMs > hookMax {
 		if style != nil {
@@ -281,6 +319,9 @@ func (p Plan) describe() string {
 	fmt.Fprintf(&b, "Shot list, %d shots, %s in all (target %d s):\n", len(p.Shots), secs(p.EstimatedLengthMs), p.TargetLengthS)
 	for i, s := range p.Shots {
 		line := fmt.Sprintf("%d. %s: %d beats = %s", i+1, s.Role, s.Beats, secs2(s.LengthMs))
+		if s.Chapter > 0 {
+			line += fmt.Sprintf(", chapter %d", s.Chapter)
+		}
 		if s.Effect != "none" {
 			line += ", " + s.Effect
 		}
@@ -308,6 +349,11 @@ func (d Deps) planEdit(ctx context.Context, rc runtime.RunContext, in planArgs) 
 	plan, err := BuildPlan(in, footage, feat, style)
 	if err != nil {
 		return runtime.Result{}, err
+	}
+	if ri, ierr := parseInput(rc.Input); ierr == nil {
+		plan.Vibe = VibeOr(ri.Vibe)
+	} else {
+		plan.Vibe = DefaultVibe
 	}
 	book, err := Playbook(plan.Playbook, feat)
 	if err != nil {

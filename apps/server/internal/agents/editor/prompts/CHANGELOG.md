@@ -1,6 +1,6 @@
 # Editor system prompt: changelog
 
-The editor agent's system prompt is `editor.v2.5.md`, embedded in the Go binary, and the genre playbooks are the files in
+The editor agent's system prompt is `editor.v2.6.md`, embedded in the Go binary, and the genre playbooks are the files in
 `playbooks/`, embedded too. The text the model receives is the runtime's preamble (`runtime.SystemPreamble`, the untrusted-data
 rule) followed by this file. The prompt version (`PromptVersion` in `prompt.go`) is stored in every run's input, so a run can
 always be tied to the text it was given; a playbook has its own version (`workout.v2`, in `playbooks.go`) that the run's plan
@@ -21,6 +21,30 @@ Rules for changing it:
 - The cache hit rate of a run is visible: `cfctl agent show <run>` prints the cache write and read tokens of every model call and
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
+
+## editor.v2.6 (2026-10-18)
+
+Music, energy and text that never covers the body (P6-06). The founder's verdict on the v2.5 edits: "static/stiff, not playful/vibey",
+"all hard cuts, no visual effects on entering the text", "the text is mostly over the body", and "no gym sound under it, just the
+music". A live run at max effort ($1.01) made the same static three-long-take edit as one at medium ($0.38): the tools, the playbook
+and the style rules were the limit, not the thinking. The file is `editor.v2.6.md`, the workout playbook is `workout.v3`; it changes
+behaviour on purpose, so it is a minor version.
+
+- **The song.** A clip with a song line is music the creator gave (D-34). New tool `get_music` (its beats, downbeats, phrases, strong
+  onsets and drop). The editor puts it on with `set_sound` kind `creator_audio`, sets `source_offset_ms` so the drop lands on the end
+  of the hook, snaps the cuts to the song's own beats (`snap_cuts_to_beats` with the beat list and `sound_id`) and leaves the clips'
+  sound off; a speaking clip stays `full` and the song is ducked under it. The brief no longer says "Music: none".
+- **The vibe** (calm, lively, hype; lively by default) arrives in the opening message. The creator's style decides the look; the vibe
+  decides the energy: "no effects" in a style profile now means no gimmicks (speed ramps, shakes), not no transitions or text motion.
+- **The living camera.** `set_motion` preset `handheld` (with no id for every clip): every static shot over 2 s moves, with a punch-in
+  at the drop. It is camera motion, not an effect.
+- **Transitions** of 250 to 400 ms on the drop and strong beats at lively and hype (the new `punch` among them, the whips and zooms
+  riding a blur trail that peaks at their middle), never the same three in a row; hard cuts on ordinary beats.
+- **Text** enters (`pop`, `slide_up`, `fade`) and leaves (`exit`: `pop_out`, `slide_down`, `fade`); a listicle gets numbered chapter
+  titles (plan_edit's `chapter`); no text ever covers the head or the torso.
+- **Long takes** are split by switching angle at rep boundaries every 2 to 5 s when there are two angles.
+- **check_edit** gains `off_beat_cut`, `hook_misses_drop`, `static_shot`, `no_transitions_at_lively`, `transition_variety`,
+  `text_without_entrance` and `chapter_titles`; `text_over_subject` fails on any torso overlap.
 
 ## editor.v2.5 (2026-10-18)
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nilpntr/content-fabrique/internal/subject"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
@@ -88,6 +89,35 @@ func TestMotionPresetsInTheGraph(t *testing.T) {
 	if g := graphOf(30, withMotion(timeline.Motion{Preset: timeline.MotionNone})); strings.Contains(g, "perspective") {
 		t.Error("the preset none must not get a camera")
 	}
+	t.Run("handheld pushes, drifts, sways, punches at at_ms and keeps off the subject's head", func(t *testing.T) {
+		g := graphOf(30, withMotion(timeline.Motion{Preset: timeline.MotionHandheld, AtMs: ptr(int64(1000))}))
+		for _, want := range []string{"1+0.03+0.05*", "1+0.06*(1-pow(1-clip((in-25)/(5),0,1),3))", "*sin(0.073304*in+"} {
+			if !strings.Contains(g, want) {
+				t.Errorf("handheld: the graph lacks %q: %s", want, g[:min(len(g), 900)])
+			}
+		}
+		// The second clip drifts the other way.
+		two := specOf(30, []timeline.VideoItem{
+			clipAt("c1", assetA, 0, 2000, 0, withMotion(timeline.Motion{Preset: timeline.MotionHandheld})),
+			clipAt("c2", assetB, 0, 2000, 2000, withMotion(timeline.Motion{Preset: timeline.MotionHandheld})),
+		})
+		if g := mustCompile(t, two, Final).FilterComplex; !strings.Contains(g, "*(0.55*(2*") || !strings.Contains(g, "*(-0.55*(2*") {
+			t.Errorf("the drift does not alternate: %s", g)
+		}
+		// A head at 4 % of the frame: the push is held under what would crop it, and the punch-in goes.
+		high := subject.Track{Aspect: 0.5625, Samples: []subject.Sample{{AtMs: 500, X: 0.3, Y: 0.04, W: 0.4, H: 0.9, HeadTopY: 0.04}}}
+		res := ResolverFunc(func(id string, _ Variant) (ResolvedAsset, error) {
+			return ResolvedAsset{Location: "/a/" + id, HasAudio: true, Subject: &high}, nil
+		})
+		spec := specOf(30, []timeline.VideoItem{clipAt("c1", assetA, 0, 2000, 0, withMotion(timeline.Motion{Preset: timeline.MotionHandheld, AtMs: ptr(int64(1000))}))})
+		plan, err := Compile(spec, Final, res)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if g := plan.FilterComplex; strings.Contains(g, "1+0.03+0.05*") || strings.Contains(g, "1+0.06*") {
+			t.Errorf("the push was not limited by the subject: %s", g[:min(len(g), 900)])
+		}
+	})
 	t.Run("punch_in takes 4 to 6 frames at any frame rate", func(t *testing.T) {
 		for fps, want := range map[int]int{24: 4, 25: 4, 30: 5, 60: 6} {
 			g := graphOf(fps, withMotion(timeline.Motion{Preset: timeline.MotionPunchIn}))
@@ -184,6 +214,7 @@ func TestNewTransitionsMapToFixedXfades(t *testing.T) {
 		timeline.TransitionWhipRight:   "slideright",
 		timeline.TransitionZoomThrough: "fade",
 		timeline.TransitionFlash:       "fadewhite",
+		timeline.TransitionPunch:       "fade",
 	} {
 		spec := specOf(30, []timeline.VideoItem{
 			clipAt("c1", assetA, 0, 2000, 0),
@@ -193,7 +224,7 @@ func TestNewTransitionsMapToFixedXfades(t *testing.T) {
 		if !strings.Contains(plan.FilterComplex, "xfade=transition="+want+":") {
 			t.Errorf("%s: want xfade %s in %s", typ, want, plan.FilterComplex)
 		}
-		blur := strings.Contains(plan.FilterComplex, "gblur")
+		blur := strings.Contains(plan.FilterComplex, "gblur") || strings.Contains(plan.FilterComplex, "dblur")
 		if blur != (typ != timeline.TransitionFlash) {
 			t.Errorf("%s: blur window present = %v", typ, blur)
 		}

@@ -1,0 +1,101 @@
+{
+  "schema": "contentfabrique.timeline/v1",
+  "output": {
+    "format": "9:16",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000"
+  },
+  "tracks": [
+    {
+      "id": "main",
+      "type": "video",
+      "items": [
+        {
+          "id": "c1",
+          "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+          "source": {
+            "in_ms": 2000,
+            "out_ms": 4500
+          },
+          "at_ms": 0,
+          "motion": {
+            "preset": "handheld"
+          }
+        },
+        {
+          "id": "c2",
+          "asset_id": "ast_01jex6xx15ayjx8epfhfjj9s11",
+          "source": {
+            "in_ms": 1000,
+            "out_ms": 3500
+          },
+          "at_ms": 2500,
+          "motion": {
+            "preset": "handheld",
+            "at_ms": 900,
+            "strength": 0.12
+          }
+        },
+        {
+          "id": "c3",
+          "asset_id": "ast_01jdsx72atvnb7ssgbc57zbxj9",
+          "source": {
+            "in_ms": 5000,
+            "out_ms": 7000
+          },
+          "reframe": {
+            "mode": "blur_fill"
+          },
+          "at_ms": 4700,
+          "transition_in": {
+            "type": "punch",
+            "duration_ms": 300
+          },
+          "motion": {
+            "preset": "handheld",
+            "strength": 0.05
+          }
+        }
+      ]
+    },
+    {
+      "id": "text",
+      "type": "text",
+      "items": [
+        {
+          "id": "t1",
+          "at_ms": 100,
+          "duration_ms": 2200,
+          "text": "BACK DAY 101",
+          "style": "title_series",
+          "anchor": "upper_third",
+          "animation": "pop",
+          "exit": "pop_out"
+        },
+        {
+          "id": "t2",
+          "at_ms": 2600,
+          "duration_ms": 1800,
+          "text": "1. ROWS",
+          "style": "title_series",
+          "anchor": "upper_third",
+          "animation": "slide_up",
+          "exit": "fade"
+        },
+        {
+          "id": "t3",
+          "at_ms": 4800,
+          "duration_ms": 1700,
+          "text": "2. PULLDOWN",
+          "style": "title_series",
+          "anchor": "upper_third",
+          "animation": "fade",
+          "exit": "slide_down"
+        }
+      ]
+    }
+  ],
+  "markers": []
+}

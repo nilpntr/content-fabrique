@@ -15,7 +15,7 @@ import (
 
 // The newest price list prices every new charge, and a ledger row keeps the version that priced it: a run quoted under 2026-10 and still
 // working when the default moves on is charged what its hold said (6 credits, version 2026-10), and the next run on the project is quoted
-// from the current list (a revision is 7 credits, version 2026-10c).
+// from the current list (a revision is 2 credits, version 2026-10c).
 func TestANewListPricesNewChargesAndOldLedgerRowsKeepTheirVersion(t *testing.T) {
 	r := newRig(t)
 	ctx := context.Background()
@@ -37,7 +37,7 @@ func TestANewListPricesNewChargesAndOldLedgerRowsKeepTheirVersion(t *testing.T) 
 	r.svc = creditstest.Service(t, r.st)
 	r.finish(ws, first, store.AgentSucceeded)
 	rev, q, err := r.run(ws, project, false)
-	if err != nil || q.Action != credits.EditRevision || q.Credits != 7 || q.BudgetMicros != 800_000 || q.ListVersion != "2026-10c" {
+	if err != nil || q.Action != credits.EditRevision || q.Credits != 2 || q.BudgetMicros != 320_000 || q.ListVersion != "2026-10c" {
 		t.Fatalf("under the default: %+v, %v", q, err)
 	}
 	r.finish(ws, rev, store.AgentSucceeded)
@@ -52,10 +52,10 @@ func TestANewListPricesNewChargesAndOldLedgerRowsKeepTheirVersion(t *testing.T) 
 			got[*row.Action] = fmt.Sprintf("%d@%s", row.Credits, *row.PlanListVersion)
 		}
 	}
-	if got[string(credits.EditFirst)] != "-6@2026-10" || got[string(credits.EditRevision)] != "-7@2026-10c" {
-		t.Fatalf("charge rows %v, want the first edit at -6@2026-10 and the revision at -7@2026-10c", got)
+	if got[string(credits.EditFirst)] != "-6@2026-10" || got[string(credits.EditRevision)] != "-2@2026-10c" {
+		t.Fatalf("charge rows %v, want the first edit at -6@2026-10 and the revision at -2@2026-10c", got)
 	}
-	if b, _ := r.st.CreditBalance(ctx, ws.ID, time.Now()); b.Available != 100-6-7 {
-		t.Fatalf("balance %+v, want %d", b, 100-6-7)
+	if b, _ := r.st.CreditBalance(ctx, ws.ID, time.Now()); b.Available != 100-6-2 {
+		t.Fatalf("balance %+v, want %d", b, 100-6-2)
 	}
 }

@@ -84,7 +84,7 @@ func TestAnEditorRunNeedsAProject(t *testing.T) {
 func TestAnEditorRunHoldsItsCreditsAndTakesItsBudgetFromThePlan(t *testing.T) {
 	e := newEnv(t, newScripted(), withBilledAgent)
 	e.svc.Credits = creditstest.Service(t, e.st)
-	creditstest.Fund(t, e.st, e.ws.ID, plans.Creator, 17)
+	creditstest.Fund(t, e.st, e.ws.ID, plans.Creator, 7)
 	project := e.project()
 
 	// The caller asks for $5; the plan's budget for a first edit is what the run gets.
@@ -92,17 +92,17 @@ func TestAnEditorRunHoldsItsCreditsAndTakesItsBudgetFromThePlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.BudgetMicros != 2_000_000 {
-		t.Fatalf("budget = %d, want the creator plan's 2,000,000", run.BudgetMicros)
+	if run.BudgetMicros != 960_000 {
+		t.Fatalf("budget = %d, want the creator plan's 960,000", run.BudgetMicros)
 	}
 	h, err := e.st.GetCreditHold(context.Background(), e.ws.ID, run.ID)
-	if err != nil || h.Credits != 16 || h.Action != store.ActionEditFirst || h.Project != project || h.Plan != "creator" || h.ListVersion != "2026-10c" {
+	if err != nil || h.Credits != 6 || h.Action != store.ActionEditFirst || h.Project != project || h.Plan != "creator" || h.ListVersion != "2026-10c" {
 		t.Fatalf("hold = %+v, %v", h, err)
 	}
 	if !h.ExpiresAt.After(time.Now().Add(time.Hour)) {
 		t.Fatalf("a queued run's hold expires at %v, too soon for a busy queue", h.ExpiresAt)
 	}
-	// 17 - 16 = 1 left: the next start is refused by the hold, no run and no hold is created, and the refusal is the error the API maps to 402.
+	// 7 - 6 = 1 left: the next start is refused by the hold, no run and no hold is created, and the refusal is the error the API maps to 402.
 	other := e.project()
 	if _, err := e.startEdit(other, Budgets{}, false); !errors.Is(err, store.ErrInsufficientCredits) {
 		t.Fatalf("a second first edit with 1 credit: %v", err)
@@ -134,7 +134,7 @@ func TestAnEditorRunWithoutCreditsKeepsItsBudgetAndStillHasAHold(t *testing.T) {
 func TestARunThatFailsReleasesAndOneThatSucceedsCharges(t *testing.T) {
 	e := newEnv(t, newScripted(), withBilledAgent)
 	e.svc.Credits = creditstest.Service(t, e.st)
-	creditstest.Fund(t, e.st, e.ws.ID, plans.Creator, 60)
+	creditstest.Fund(t, e.st, e.ws.ID, plans.Creator, 20)
 	project := e.project()
 	ctx := context.Background()
 	avail := func() int {
@@ -155,31 +155,31 @@ func TestARunThatFailsReleasesAndOneThatSucceedsCharges(t *testing.T) {
 		}
 	}
 	failed, err := e.startEdit(project, Budgets{}, false)
-	if err != nil || avail() != 44 {
+	if err != nil || avail() != 14 {
 		t.Fatalf("start: %v, available %d", err, avail())
 	}
 	end(failed, store.AgentFailed, FailBudget)
-	if avail() != 60 {
-		t.Fatalf("a failed run cost %d credits", 60-avail())
+	if avail() != 20 {
+		t.Fatalf("a failed run cost %d credits", 20-avail())
 	}
 	ok, err := e.startEdit(project, Budgets{}, false)
-	if err != nil || ok.BudgetMicros != 2_000_000 {
+	if err != nil || ok.BudgetMicros != 960_000 {
 		t.Fatalf("the run after a failure is still the first edit: %+v, %v", ok, err)
 	}
 	end(ok, store.AgentSucceeded, "")
-	if avail() != 44 {
-		t.Fatalf("a successful first edit left %d credits, want 44", avail())
+	if avail() != 14 {
+		t.Fatalf("a successful first edit left %d credits, want 14", avail())
 	}
 	rev, err := e.startEdit(project, Budgets{}, false)
-	if err != nil || rev.BudgetMicros != 800_000 || avail() != 37 {
+	if err != nil || rev.BudgetMicros != 320_000 || avail() != 12 {
 		t.Fatalf("revision: %+v, %v, available %d", rev, err, avail())
 	}
 	// Cancelling it before it rendered anything releases it.
 	if _, err := e.svc.Cancel(ctx, e.ws.ID, rev.ID); err != nil {
 		t.Fatal(err)
 	}
-	if avail() != 44 {
-		t.Fatalf("a cancelled revision with no preview left %d, want 44", avail())
+	if avail() != 14 {
+		t.Fatalf("a cancelled revision with no preview left %d, want 14", avail())
 	}
 }
 
@@ -201,8 +201,8 @@ func TestARevisionRunsOnTheRevisionEntry(t *testing.T) {
 		return run
 	}
 	first := start()
-	if first.MaxTokens != 32_000 || first.Effort != "max" || first.Model != "claude-opus-5-5" || first.BudgetMicros != 2_000_000 {
-		t.Fatalf("first edit: max_tokens %d, effort %s, model %s, budget %d", first.MaxTokens, first.Effort, first.Model, first.BudgetMicros)
+	if first.MaxTokens != 24_000 || first.Model != "claude-opus-5-5" || first.BudgetMicros != 960_000 {
+		t.Fatalf("first edit: max_tokens %d, model %s, budget %d", first.MaxTokens, first.Model, first.BudgetMicros)
 	}
 	c, err := e.st.ClaimAgentRun(ctx, e.ws.ID, first.ID, time.Minute)
 	if err != nil {
@@ -212,8 +212,8 @@ func TestARevisionRunsOnTheRevisionEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	rev := start()
-	if rev.MaxTokens != 16_000 || rev.Effort != "max" || rev.Model != "claude-opus-5-5" || rev.BudgetMicros != 800_000 || rev.Stage != first.Stage {
-		t.Fatalf("revision: max_tokens %d, effort %s, model %s, budget %d, stage %s (first edit's stage %s)", rev.MaxTokens, rev.Effort, rev.Model, rev.BudgetMicros, rev.Stage, first.Stage)
+	if rev.MaxTokens != 12_000 || rev.Model != "claude-opus-5-5" || rev.BudgetMicros != 320_000 || rev.Stage != first.Stage {
+		t.Fatalf("revision: max_tokens %d, model %s, budget %d, stage %s (first edit's stage %s)", rev.MaxTokens, rev.Model, rev.BudgetMicros, rev.Stage, first.Stage)
 	}
 	if rev.MinOutputTokens != 0 {
 		t.Errorf("min_output_tokens = %d for an entry that does not set one", rev.MinOutputTokens)

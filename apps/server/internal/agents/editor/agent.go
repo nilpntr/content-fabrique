@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/analysis"
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/music"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/subject"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
@@ -25,12 +27,10 @@ const (
 	Stage = "editor"
 )
 
-// DefaultBudgets are the editor's budgets for a run that does not name its own: $5, 60 tool calls and 30 minutes. The token
+// DefaultBudgets are the editor's budgets for a run that does not name its own: $5, 60 tool calls and 15 minutes. The token
 // budget counts cache reads too, which dominate a long run (the tool definitions and the conversation are read again on every
-// call), so it is generous; the dollar budget is what really limits a run (a plan's price list sets it, config/plans). The wall clock
-// is the longest a run may have (runtime.MaxWallClock): the editor thinks at max effort (D-31), and a single call of up to 64,000
-// tokens takes minutes to write, so 15 minutes would end a long edit on the clock before it could spend its dollars.
-var DefaultBudgets = runtime.Budgets{Micros: 5_000_000, Tokens: 4_000_000, ToolCalls: 60, WallClock: runtime.MaxWallClock}
+// call), so it is generous; the dollar budget is what really limits a run.
+var DefaultBudgets = runtime.Budgets{Micros: 5_000_000, Tokens: 4_000_000, ToolCalls: 60, WallClock: 15 * time.Minute}
 
 // NewAgent defines the editor agent: its prompt, its tools, and the context it starts every run with.
 func NewAgent(d Deps) (runtime.Agent, error) {
@@ -62,7 +62,7 @@ func opening(raw json.RawMessage) ([]llm.Block, error) {
 	if err != nil {
 		return nil, err
 	}
-	blocks := []llm.Block{llm.TextBlock("Make the video for this project now. The brief, the clips and the state of the timeline follow.")}
+	blocks := []llm.Block{llm.TextBlock("Make the video for this project now. The brief, the clips and the state of the timeline follow."), llm.TextBlock(vibeNote(in.Vibe))}
 	if in.Instructions != "" {
 		blocks = append(blocks,
 			llm.TextBlock("The creator added these instructions for this run:"),
@@ -85,6 +85,8 @@ type contextCaps struct {
 	comments, commentChars int
 	// subjects is where the person is in each clip, for the footage lines (the same in every step).
 	subjects subject.Index
+	// music is the music analysis of the clips whose sound is a song (the same in every step).
+	music map[string]music.Analysis
 }
 
 var contextSteps = []contextCaps{
@@ -136,8 +138,9 @@ func (d Deps) runContext(ctx context.Context, rc runtime.RunContext) ([]llm.Bloc
 	hint := contentTypeHint(det.Project.Brief, rows, sums)
 	styleBlk := styleBlocks(d.style(ctx, ws))
 	subjects := d.subjects(ctx, ws, rows)
+	songs := d.musicOf(ctx, ws, rows)
 	for _, caps := range contextSteps {
-		caps.subjects = subjects
+		caps.subjects, caps.music = subjects, songs
 		blocks := contextBlocks(det.Project.Format, det.Project.Brief, rows, sums, status, caps)
 		if hint != "" {
 			blocks = append(blocks, llm.TextBlock(hint))
@@ -171,7 +174,7 @@ func contextBlocks(format, brief string, rows []store.ProjectFootageRow, sums ma
 		}
 		blocks = append(blocks, llm.TextBlock(intro), runtime.UntrustedBlock("brief", excerpt))
 	}
-	blocks = append(blocks, llm.TextBlock(footageText(rows, footageOpts{Detailed: caps.detailed, TitleChars: caps.titleChars, DescChars: caps.descChars, Analysis: sums, Subjects: caps.subjects})))
+	blocks = append(blocks, llm.TextBlock(footageText(rows, footageOpts{Detailed: caps.detailed, TitleChars: caps.titleChars, DescChars: caps.descChars, Analysis: sums, Subjects: caps.subjects, Music: caps.music})))
 	return append(blocks, llm.TextBlock(status))
 }
 

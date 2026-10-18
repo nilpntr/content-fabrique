@@ -38,6 +38,7 @@ describe("editor tools contract", () => {
       "list_footage",
       "view_clip",
       "find_moments",
+      "get_music",
       "plan_edit",
       "get_timeline",
       "get_comments",
@@ -129,6 +130,10 @@ describe("tool arguments", () => {
     expect(check("find_moments", { limit: 1.5 })).toBe(false);
     expect(check("find_moments", { min_score: "high" })).toBe(false);
     expect(check("find_moments", { query: "row" })).toBe(false);
+    expect(check("get_music", { asset_id: ASSET })).toBe(true);
+    expect(check("get_music", { asset_id: ASSET, from_ms: 0, to_ms: 30000 })).toBe(true);
+    expect(check("get_music", {})).toBe(false);
+    expect(check("get_music", { asset_id: ASSET, bpm: 124 })).toBe(false);
   });
 
   it("plan_edit takes the creative plan, with closed enums", () => {
@@ -148,6 +153,8 @@ describe("tool arguments", () => {
       ],
     };
     expect(check("plan_edit", plan)).toBe(true);
+    expect(check("plan_edit", { ...plan, shots: [{ role: "step", what: "Rows", beats: 8, effect: "handheld", chapter: 1 }] })).toBe(true);
+    expect(check("plan_edit", { ...plan, shots: [{ role: "step", what: "Rows", beats: 8, chapter: "one" }] })).toBe(false);
     expect(check("plan_edit", { ...plan, content_type: "cooking" })).toBe(false);
     expect(check("plan_edit", { ...plan, playbook: "podcast" })).toBe(false);
     expect(check("plan_edit", { ...plan, pace: "frantic" })).toBe(false);

@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "00d74d5d0a5ff1be9a5017184112c0e3cef7aa5f48a79b7f2de506c15eaefa1c",
-  "recorded_at": "2026-10-18T04:00:02Z",
+  "key": "4b59b68e97fda8215b5a921648c3e79271785f0dff2f5c3f3b901da09c37ac7e",
+  "recorded_at": "2026-10-18T04:45:15Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,
@@ -12,6 +12,7 @@
       {
         "role": "user",
         "blocks": [
+          "text",
           "text",
           "text",
           "text",
@@ -58,42 +59,6 @@
         "blocks": [
           "tool_result"
         ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
       }
     ],
     "tools": [
@@ -101,6 +66,7 @@
       "list_footage",
       "view_clip",
       "find_moments",
+      "get_music",
       "plan_edit",
       "get_timeline",
       "get_comments",
@@ -140,11 +106,6 @@
         "sha256": "c1a2c1dd9e9b679be49eb3856f237cf0984ba86e667f45e56d1a9934a461dcba",
         "media_type": "image/jpeg",
         "bytes": 4825
-      },
-      {
-        "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
-        "media_type": "image/jpeg",
-        "bytes": 9284
       }
     ]
   },
@@ -155,15 +116,68 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_7",
+        "id": "toolu_ed_4",
         "name": "edit_timeline",
         "input": {
-          "base_version": 1,
+          "base_version": 0,
           "ops": [
             {
-              "op": "trim_item",
+              "op": "add_clip",
+              "asset_id": "ast_01jc000000e00800000000000a",
+              "source": {
+                "in_ms": 5000,
+                "out_ms": 6500
+              },
+              "why": "The heaviest rep of the set, half of it, so it opens the video."
+            },
+            {
+              "op": "add_clip",
+              "asset_id": "ast_01jc000000e00800000000000b",
+              "source": {
+                "in_ms": 1000,
+                "out_ms": 3000
+              }
+            },
+            {
+              "op": "add_clip",
+              "asset_id": "ast_01jc000000e00800000000000a",
+              "source": {
+                "in_ms": 2000,
+                "out_ms": 3500
+              }
+            },
+            {
+              "op": "add_clip",
+              "asset_id": "ast_01jc000000e00800000000000c",
+              "source": {
+                "in_ms": 3000,
+                "out_ms": 6000
+              },
+              "reframe": {
+                "mode": "blur_fill"
+              }
+            },
+            {
+              "op": "add_clip",
+              "asset_id": "ast_01jc000000e00800000000000a",
+              "source": {
+                "in_ms": 6500,
+                "out_ms": 8000
+              }
+            },
+            {
+              "op": "add_clip",
+              "asset_id": "ast_01jc000000e00800000000000b",
+              "source": {
+                "in_ms": 4000,
+                "out_ms": 7000
+              }
+            },
+            {
+              "op": "set_transition",
               "id": "c4",
-              "out_ms": 4500
+              "type": "flash",
+              "duration_ms": 150
             },
             {
               "op": "snap_cuts_to_beats",
@@ -173,19 +187,33 @@
               },
               "options": {
                 "write_markers": true,
-                "max_shift_ms": 60
+                "max_shift_ms": 80
               }
+            },
+            {
+              "op": "set_motion",
+              "id": "c1",
+              "preset": "punch_in",
+              "at_ms": 484
+            },
+            {
+              "op": "add_text",
+              "text": "HEAVY LAT DAY",
+              "style": "title_bold",
+              "at_ms": 0,
+              "duration_ms": 2000,
+              "anchor": "upper_third"
             }
           ]
         }
       }
     ],
     "usage": {
-      "input_tokens": 440,
-      "cache_write_tokens": 800,
+      "input_tokens": 450,
+      "cache_write_tokens": 2100,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 14200,
-      "output_tokens": 120
+      "cache_read_tokens": 10800,
+      "output_tokens": 301
     }
   },
   "count_tokens": 9000

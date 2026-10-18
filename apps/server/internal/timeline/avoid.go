@@ -7,44 +7,55 @@ import (
 )
 
 // Avoiding the subject: a title that sits on the person in the footage is moved off them, by the same function in the renderer and in the
-// editor's check, so what the check says is what the render does. The person is two regions in output pixels (package subject makes them
-// from the stored subject boxes of the clips on screen): the head, which a title must never cover, and the body, which it should not
-// cover either (a physique shot shows nothing else). This file knows nothing about where the regions come from.
+// editor's check, so what the check says is what the render does. The person is three regions in output pixels (package subject makes them
+// from the stored subject boxes of the clips on screen): the head and the torso, which a title must never cover, and the whole body box,
+// which holds both and the background beside the head. This file knows nothing about where the regions come from.
 
 // AvoidsSubject says whether the renderer keeps this item off the subject: it does unless the item says avoid_subject false.
 func (t TextItem) AvoidsSubject() bool { return t.AvoidSubject == nil || *t.AvoidSubject }
 
-// Subject is the person in one sample of a clip, in pixels of the output: the head and shoulders (Head, the hard obstacle) and the whole
-// person (Body, the soft one; it contains the head). ShowsOff says the clip is a pose or physique shot, where the body is the picture.
+// Subject is the person in one sample of a clip, in pixels of the output: the head and shoulders (Head), the whole person (Body; it
+// contains the head) and the torso (Torso: the body below the head and shoulders, across the whole width of the person, or the whole body
+// when an arm is raised above the head, because what is beside the head is then an arm and not the background). A text may cover neither
+// the head nor the torso; the part of the body box beside the head, at the height of the head, is background when no arm is raised, and a
+// text may stand there. A Subject with no Torso is all torso (the whole Body). ShowsOff says the clip is a pose or physique shot.
 type Subject struct {
-	Head, Body style.Rect
-	ShowsOff   bool
+	Head, Body, Torso style.Rect
+	ShowsOff          bool
+}
+
+// torso is the part of the person a text must not cover besides the head: Torso, or the whole Body when it has none.
+func (s Subject) torso() style.Rect {
+	if s.Torso.Width() <= 0 || s.Torso.Height() <= 0 {
+		return s.Body
+	}
+	return s.Torso
 }
 
 // Avoidance says what PlaceTextAvoiding did.
 type Avoidance struct {
-	// Overlapped is true when the item as its anchor or position places it (at its own size) covers the head or the body.
+	// Overlapped is true when the item as its anchor or position places it (at its own size) covers the head or the torso.
 	Overlapped bool
-	// Cleared is true when the item as placed covers neither the head nor the body: it did not overlap, or it was moved or shrunk until it
-	// did not.
+	// Cleared is true when the item as placed covers neither the head nor the torso: it did not overlap, or it was moved or shrunk until it
+	// did not. An item that avoids the subject and is not Cleared has no place at this time: the caller moves it in time (FitText in package
+	// subject) or leaves it out. It is never drawn over the body.
 	Cleared bool
-	// OverHead is true when the item as placed still covers the head (it could not be put anywhere inside the safe zone that does not).
-	// OverBody is true when it still covers the body, the head included: a title that could only be kept off the head has OverBody and not
-	// OverHead.
+	// OverHead and OverBody say what the item covers where its anchor puts it when it could not be cleared (OverBody: the torso or the head;
+	// OverHead: the head). Both are false for a cleared item.
 	OverHead, OverBody bool
-	// Where says how it was cleared: "above" the subject, "below" all of it, "smaller" for a smaller size where it stands, "below_head" for the
-	// last resort, under the head and over the body, or "" for not moved. Scale is the scale it was placed at when the avoidance shrank it
-	// (0 when the size is the item's own).
+	// Where says how it was cleared: "above" the subject, "beside" the head (over the background next to it), "below" all of it, "smaller"
+	// for a smaller size where it stands, or "" for not moved. Scale is the scale it was placed at when the avoidance shrank it (0 when the
+	// size is the item's own).
 	Where string
 	Scale float64
 }
 
 // The places a title can be put.
 const (
-	WhereAbove     = "above"
-	WhereBelow     = "below"
-	WhereSmaller   = "smaller"
-	WhereBelowHead = "below_head"
+	WhereAbove   = "above"
+	WhereBeside  = "beside"
+	WhereBelow   = "below"
+	WhereSmaller = "smaller"
 )
 
 // avoidFactors are the shrinks tried, in order, within the allowed scale range.
@@ -53,32 +64,31 @@ var avoidFactors = []float64{1, 0.9, 0.8, 0.7, 0.6}
 // avoidGapPct is the clear space kept between a title and the subject, as a percentage of the output height.
 const avoidGapPct = 1.0
 
-// covers says what a box (the ink of a text) covers of the subjects.
+// covers says what a box (the ink of a text) covers of the subjects: the head, and the head or the torso (body).
 func covers(box style.Rect, subs []Subject) (head, body bool) {
 	for _, s := range subs {
 		if box.Overlaps(s.Head) {
 			head, body = true, true
 		}
-		if box.Overlaps(s.Body) {
+		if box.Overlaps(s.torso()) {
 			body = true
 		}
 	}
 	return head, body
 }
 
-// PlaceTextAvoiding places a text item like PlaceText and, when its box covers the subject, moves it where it does not, inside the safe
-// zone. The order is the one that keeps a title off the person and off the body:
+// PlaceTextAvoiding places a text item like PlaceText and, when its ink covers the subject's head or torso, moves it where it does not,
+// inside the safe zone. A text is never left over the body (P6-06): the order is
 //
-//  1. where its anchor puts it, when that is clear of the whole subject;
-//  2. above the subject (the band above the head), at the item's own size and then at smaller ones down to the lowest scale the item may
-//     have (0.6 of its style's), or where it stands at a smaller size when that is already clear of the subject;
-//  3. below all of the subject (the lower part of the frame), at every size, when there is room;
-//  4. as the last resort, off the head but over the body: where it stands when that clears the head, else just below the head. The result
-//     says OverBody, and the renderer and the check report it.
+//  1. where its anchor puts it, when that is clear of the head and the torso;
+//  2. above the subject (the band above the head, or above a raised hand), at the item's own size and then at smaller ones down to the
+//     lowest scale the item may have (0.6 of its style's), or where it stands at a smaller size when that is already clear;
+//  3. beside the head, over the background next to it (left or right, its letters above the shoulder line), at every size;
+//  4. below all of the subject (the lower part of the frame), at every size, when there is room: that is background too.
 //
-// A title is never put just below the head over the torso while a smaller one would fit above it. When even the head cannot be cleared, it
-// returns the item as PlaceText placed it and OverHead. An item that does not avoid the subject, or a call with no subjects, is PlaceText's
-// result untouched.
+// When none of these fits, the item is returned as PlaceText placed it, not Cleared, with what it covers there (OverHead, OverBody): it
+// must not be drawn at this time (FitText in package subject moves it in time or leaves it out). An item that does not avoid the subject
+// (avoid_subject false), or a call with no subjects, is PlaceText's result untouched and Cleared.
 func PlaceTextAvoiding(out Output, it TextItem, subs []Subject) (TextPlacement, Avoidance, error) {
 	pl, err := PlaceText(out, it)
 	if err != nil {
@@ -91,10 +101,10 @@ func PlaceTextAvoiding(out Output, it TextItem, subs []Subject) (TextPlacement, 
 	if !ok {
 		return pl, Avoidance{Cleared: true}, nil // it cannot be put inside the zone at all (unsafe_text; the renderer leaves it out)
 	}
-	if _, body := covers(pl.Layout.InkBox(box), subs); !body {
+	firstHead, firstBody := covers(pl.Layout.InkBox(box), subs)
+	if !firstBody {
 		return pl, Avoidance{Cleared: true}, nil
 	}
-	res := Avoidance{Overlapped: true}
 	gap := int(math.Round(avoidGapPct / 100 * float64(out.Height)))
 	base := 1.0
 	if it.Scale != nil {
@@ -130,6 +140,8 @@ func PlaceTextAvoiding(out Output, it TextItem, subs []Subject) (TextPlacement, 
 		r := cpl.Layout.InkBox(b)
 		r.Top -= gap
 		r.Bottom += gap
+		r.Left -= gap
+		r.Right += gap
 		return r
 	}
 	// withInkTop and withInkBottom place the layout box of cpl so that its ink starts at y (a gap under a subject) or ends at y (a gap above).
@@ -137,6 +149,11 @@ func PlaceTextAvoiding(out Output, it TextItem, subs []Subject) (TextPlacement, 
 		bx := cpl.Box
 		top := y - (cpl.Layout.InkBox(bx).Top - bx.Top)
 		return style.Rect{Left: bx.Left, Top: top, Right: bx.Right, Bottom: top + bx.Height()}
+	}
+	withInkBottom := func(cpl TextPlacement, y int) style.Rect {
+		bx := cpl.Box
+		bottom := y + (bx.Bottom - cpl.Layout.InkBox(bx).Bottom)
+		return style.Rect{Left: bx.Left, Top: bottom - bx.Height(), Right: bx.Right, Bottom: bottom}
 	}
 	// inkZone is the safe zone for a layout box moved to nb: the documented margins are about where text may be, so it is the ink that must be
 	// inside them, and the empty space of the line box above and below the letters may reach into the top and bottom margins (a title in
@@ -148,14 +165,22 @@ func PlaceTextAvoiding(out Output, it TextItem, subs []Subject) (TextPlacement, 
 		z.Inner.Bottom += nb.Bottom - ink.Bottom
 		return z
 	}
-	withInkBottom := func(cpl TextPlacement, y int) style.Rect {
-		bx := cpl.Box
-		bottom := y + (bx.Bottom - cpl.Layout.InkBox(bx).Bottom)
-		return style.Rect{Left: bx.Left, Top: bottom - bx.Height(), Right: bx.Right, Bottom: bottom}
+	// clearAt says whether the layout box nb of cpl is inside its (ink) zone with its ink, a gap around it, off every head and torso.
+	clearAt := func(cpl TextPlacement, nb style.Rect) (style.Zone, bool) {
+		z := inkZone(cpl, nb)
+		if !z.Safe(nb) {
+			return z, false
+		}
+		_, body := covers(inkPadded(cpl, nb), subs)
+		return z, !body
 	}
-	var all, heads []style.Rect
+	done := func(cpl TextPlacement, nb style.Rect, z style.Zone, where string, applied float64) (TextPlacement, Avoidance, error) {
+		cpl.Box, cpl.Zone = nb, z
+		return cpl, Avoidance{Overlapped: true, Cleared: true, Where: where, Scale: applied}, nil
+	}
+	var all []style.Rect
 	for _, s := range subs {
-		all, heads = append(all, s.Body, s.Head), append(heads, s.Head)
+		all = append(all, s.Body, s.Head)
 	}
 	// 2. Above the subject, the biggest size first; where it stands at a smaller size counts at that size.
 	for i := range scales {
@@ -171,55 +196,54 @@ func PlaceTextAvoiding(out Output, it TextItem, subs []Subject) (TextPlacement, 
 			}
 		}
 		nb := withInkBottom(cpl, obstacleTop(cpl.Box, all)-gap)
-		z := inkZone(cpl, nb)
-		if _, body := covers(cpl.Layout.InkBox(nb), subs); z.Safe(nb) && !body {
-			cpl.Box, cpl.Zone = nb, z
-			return cpl, Avoidance{Overlapped: true, Cleared: true, Where: WhereAbove, Scale: applied}, nil
+		if z, ok := clearAt(cpl, nb); ok {
+			return done(cpl, nb, z, WhereAbove, applied)
 		}
 	}
-	// 3. Below all of the subject.
+	// 3. Beside the head, over the background next to it: the letters end a gap above the highest shoulder line (the top of the torsos) and
+	// stand a gap to the left or the right of a head.
+	shoulders := torsoTop(subs) - gap
+	for i := range scales {
+		cpl, applied, ok := at(i)
+		if !ok {
+			continue
+		}
+		for _, s := range subs {
+			for _, left := range []bool{true, false} {
+				nb := withInkBottom(cpl, shoulders)
+				ink := cpl.Layout.InkBox(nb)
+				dx := (s.Head.Right + gap) - ink.Left
+				if left {
+					dx = (s.Head.Left - gap) - ink.Right
+				}
+				nb.Left, nb.Right = nb.Left+dx, nb.Right+dx
+				if z, ok := clearAt(cpl, nb); ok {
+					return done(cpl, nb, z, WhereBeside, applied)
+				}
+			}
+		}
+	}
+	// 4. Below all of the subject: the background under the person.
 	for i := range scales {
 		cpl, applied, ok := at(i)
 		if !ok {
 			continue
 		}
 		nb := withInkTop(cpl, obstacleBottom(cpl.Box, all)+gap)
-		z := inkZone(cpl, nb)
-		if _, body := covers(cpl.Layout.InkBox(nb), subs); z.Safe(nb) && !body {
-			cpl.Box, cpl.Zone = nb, z
-			return cpl, Avoidance{Overlapped: true, Cleared: true, Where: WhereBelow, Scale: applied}, nil
+		if z, ok := clearAt(cpl, nb); ok {
+			return done(cpl, nb, z, WhereBelow, applied)
 		}
 	}
-	// 4. Off the head, over the body: where it stands (at its own size, then smaller) or just under the head.
-	for i := range scales {
-		cpl, applied, ok := at(i)
-		if !ok {
-			continue
-		}
-		if b, ok := cpl.Zone.Fit(cpl.Box); ok {
-			if head, _ := covers(inkPadded(cpl, b), subs); !head {
-				where := ""
-				if i > 0 {
-					where = WhereSmaller
-				}
-				return cpl, Avoidance{Overlapped: true, OverBody: true, Where: where, Scale: applied}, nil
-			}
-		}
+	return pl, Avoidance{Overlapped: true, OverHead: firstHead, OverBody: true}, nil
+}
+
+// torsoTop is the highest top of the subjects' torsos: the shoulder line a text beside a head must stay above.
+func torsoTop(subs []Subject) int {
+	top := math.MaxInt
+	for _, s := range subs {
+		top = min(top, s.torso().Top)
 	}
-	for i := range scales {
-		cpl, applied, ok := at(i)
-		if !ok {
-			continue
-		}
-		nb := withInkTop(cpl, obstacleBottom(cpl.Box, heads)+gap)
-		z := inkZone(cpl, nb)
-		if head, _ := covers(cpl.Layout.InkBox(nb), subs); z.Safe(nb) && !head {
-			cpl.Box, cpl.Zone = nb, z
-			return cpl, Avoidance{Overlapped: true, OverBody: true, Where: WhereBelowHead, Scale: applied}, nil
-		}
-	}
-	res.OverHead, res.OverBody = true, true
-	return pl, res, nil
+	return top
 }
 
 // Cover is what an item covers of the subjects.
@@ -228,7 +252,7 @@ type Cover struct {
 }
 
 // TextCovers says what the item covers of the subjects, placed where its anchor or position puts it (and clamped into the zone): whatever
-// the item's own avoid_subject says. Body is true when the head is covered too.
+// the item's own avoid_subject says. Body is true when the head or the torso is covered.
 func TextCovers(out Output, it TextItem, subs []Subject) (Cover, error) {
 	pl, err := PlaceText(out, it)
 	if err != nil {

@@ -46,6 +46,7 @@ status, totals, every event and the usage_ledger rows, which is how a run's cost
                (MEDIA_SANDBOX_PROVIDER, MEDIA_TOOLS_IMAGE, MEDIA_TEMP_DIR), because the editor looks at frames of the footage
   --input      the user's message; or a JSON object, which is the run's input as it is. For the editor it is the extra
                instructions of the run and may be left out
+  --vibe       the energy of an editor run: calm, lively (the default) or hype (P6-06)
   --profile    a routing profile for this run, instead of ROUTING_PROFILE (dev-cheap, dev-mid, v1-start)
   --budget-usd, --max-tool-calls, --max-tokens, --wall-clock
                override the agent's budgets (dollars, count, tokens, duration such as 5m)
@@ -53,6 +54,7 @@ status, totals, every event and the usage_ledger rows, which is how a run's cost
   --yes        run is refused unless CF_ENV is local or ci and the database is this machine, with CF_ENV and DATABASE_URL
                from the same place; --yes overrides that
   --events     run: also print the events when the run ends
+  --quality    run: standard (the default) or max, the extra-careful edit (effort max, more credits, a larger budget), for an editor run
   --no-credits run an editor run without credits. By default it is charged like the API's: the workspace needs an active plan and
                enough credits (cfctl plan grant, cfctl credits grant), the run gets the plan's budget for a first edit or a revision,
                and it is charged when it succeeds, released when it fails. With --no-credits it costs nothing and keeps the budget flags,
@@ -168,6 +170,7 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 	agentName := flags.String("agent", "", "agent")
 	workspaceArg := flags.String("workspace", "", "workspace id")
 	input := flags.String("input", "", "message or JSON input")
+	vibe := flags.String("vibe", "", "editor vibe: calm, lively or hype")
 	projectArg := flags.String("project", "", "project id")
 	profile := flags.String("profile", "", "routing profile")
 	budgetUSD := flags.Float64("budget-usd", 0, "dollar budget")
@@ -178,6 +181,7 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 	yes := flags.Bool("yes", false, "confirm outside plain local development")
 	showEvents := flags.Bool("events", false, "print the events at the end")
 	noCredits := flags.Bool("no-credits", false, "run an editor run without credits (local and ci only)")
+	quality := flags.String("quality", string(credits.Standard), "standard or max (the extra-careful edit)")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -209,7 +213,7 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 	if !json.Valid(runInput) || !strings.HasPrefix(strings.TrimSpace(*input), "{") {
 		if isEditor {
 			var err error
-			if runInput, err = editor.NewInput(*input); err != nil {
+			if runInput, err = editor.NewEditInput(*input, *vibe); err != nil {
 				_, _ = fmt.Fprintf(stderr, "cfctl agent run: %v\n", err)
 				return 2
 			}
@@ -304,7 +308,7 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 	run, err := svc.Start(ctx, runtime.StartParams{
 		Agent: *agentName, WorkspaceID: ws, ProjectID: projectID.UUID, Input: runInput, Profile: *profile,
 		Budgets:   runtime.Budgets{Micros: int64(*budgetUSD * 1e6), Tokens: *maxTokens, ToolCalls: *maxCalls, WallClock: *wall},
-		NoCredits: *noCredits,
+		NoCredits: *noCredits, Quality: credits.Quality(*quality),
 	})
 	if err != nil {
 		if errors.Is(err, store.ErrInsufficientCredits) {

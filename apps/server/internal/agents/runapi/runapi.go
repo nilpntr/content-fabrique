@@ -151,9 +151,21 @@ func (h *Runs) startEdit(ctx context.Context, req api.StartEditRequestObject) (s
 	if in.Instructions != nil {
 		instructions = *in.Instructions
 	}
-	input, err := editor.NewInput(instructions)
+	vibe := ""
+	if in.Vibe != nil {
+		if vibe = string(*in.Vibe); !editor.ValidVibe(vibe) {
+			return store.AgentRun{}, bad("vibe must be one of " + fmt.Sprint(editor.Vibes))
+		}
+	}
+	input, err := editor.NewEditInput(instructions, vibe)
 	if err != nil {
 		return store.AgentRun{}, bad("instructions must be text of at most 2,000 characters")
+	}
+	quality := credits.Standard
+	if in.Quality != nil {
+		if quality = credits.Quality(*in.Quality); !quality.Valid() {
+			return store.AgentRun{}, bad("quality must be standard or max")
+		}
 	}
 	profile := ""
 	if in.Profile != nil {
@@ -193,7 +205,7 @@ func (h *Runs) startEdit(ctx context.Context, req api.StartEditRequestObject) (s
 		return err
 	}
 	run, err := h.svc.StartGuarded(ctx, runtime.StartParams{
-		Agent: editor.Name, WorkspaceID: who.Workspace, ProjectID: project.UUID, Input: input, Profile: profile,
+		Agent: editor.Name, WorkspaceID: who.Workspace, ProjectID: project.UUID, Input: input, Profile: profile, Quality: quality,
 		StartedBy: who.User,
 	}, guard)
 	switch {
@@ -217,6 +229,8 @@ func (h *Runs) startEdit(ctx context.Context, req api.StartEditRequestObject) (s
 		return store.AgentRun{}, &failure{http.StatusTooManyRequests, api.ErrorCodeTooManyUnchargedRuns, msg}
 	case errors.Is(err, runtime.ErrBYOKKeyRequired):
 		return store.AgentRun{}, &failure{http.StatusPaymentRequired, api.ErrorCodeByokKeyRequired, "this plan uses your own Anthropic key; add it in settings"}
+	case errors.Is(err, credits.ErrQualityNotInPlan):
+		return store.AgentRun{}, &failure{http.StatusPaymentRequired, api.ErrorCodeQualityNotInPlan, "this plan does not include extra-careful edits"}
 	case errors.Is(err, credits.ErrNoPlan):
 		return store.AgentRun{}, &failure{http.StatusPaymentRequired, api.ErrorCodePlanRequired, "this workspace has no active plan"}
 	case errors.Is(err, runtime.ErrInvalidInput):

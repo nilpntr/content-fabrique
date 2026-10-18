@@ -423,7 +423,8 @@ export interface paths {
          *     (`422 assets_not_usable`; an audio file is not a clip to cut).
          *     `instructions` is the creator's extra instruction for this run (text, at most 2,000 characters; the model treats it as data
          *     that steers the content of the video, nothing else). `profile` picks the model profile of the run; the default is the
-         *     server's.
+         *     server's. `vibe` is the energy of the edit (`calm`, `lively` or `hype`, default `lively`): see `EditVibe`. An audio file in
+         *     the project's footage is a song the edit can be cut to (D-34): the export then has the song and no clip sound under it.
          *
          *     **Credits.** The run costs credits, set aside (held) in the same step that creates the run: the server decides from the
          *     project whether it is the first edit (6 credits: the project has no charged edit yet) or a revision (2 credits), and the
@@ -701,7 +702,7 @@ export interface components {
          *     code as a generic failure of its HTTP status.
          * @enum {string}
          */
-        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "credits_exhausted" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured" | "assets_not_usable" | "version_conflict" | "invalid_ops" | "no_change" | "timeline_invalid" | "too_many_renders" | "run_in_progress" | "run_not_waiting" | "model_not_configured" | "edit_not_charged" | "too_many_uncharged_runs" | "byok_key_required" | "version_not_charged";
+        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "credits_exhausted" | "quality_not_in_plan" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured" | "assets_not_usable" | "version_conflict" | "invalid_ops" | "no_change" | "timeline_invalid" | "too_many_renders" | "run_in_progress" | "run_not_waiting" | "model_not_configured" | "edit_not_charged" | "too_many_uncharged_runs" | "byok_key_required" | "version_not_charged";
         ErrorDetail: {
             code: components["schemas"]["ErrorCode"];
             /** @description For people. It may change; do not branch on it. */
@@ -796,6 +797,22 @@ export interface components {
             entitlements: components["schemas"]["Entitlements"];
             credits?: components["schemas"]["Credits"];
         };
+        /** @description What an edit costs in credits. */
+        EditCost: {
+            /** @description A project's first edit. */
+            first_edit: number;
+            /** @description Any later edit of the project. */
+            revision: number;
+        };
+        /**
+         * @description What an edit costs in credits at each quality, on the price list that prices new charges. The web app shows these ("uses 16
+         *     credits instead of 6"); it never carries the numbers.
+         */
+        EditCosts: {
+            standard: components["schemas"]["EditCost"];
+            /** @description The extra-careful edit (`quality: max`); `null` when the workspace's plan does not include it (the trial, or no plan). */
+            max: components["schemas"]["EditCost"] | null;
+        };
         /** @description Credits that are not the period's allowance (bought or given) and when they expire. */
         CreditTopUp: {
             /** @description What is left of this top-up. */
@@ -810,10 +827,11 @@ export interface components {
          */
         Credits: {
             /**
-             * @description What a video costs in credits: a first edit plus two revisions, on the price list that prices new charges. Show credits as
-             *     videos by dividing by it; do not hardcode a number.
+             * @description What a standard video costs in credits: a first edit plus two revisions, on the price list that prices new charges. Show
+             *     credits as videos by dividing by it; do not hardcode a number.
              */
             credits_per_video: number;
+            edit_costs: components["schemas"]["EditCosts"];
             /** @description What a new action can use now, allowance and top-ups together. */
             available: number;
             /** @description The size of the current period's allowance; 0 when the workspace has none. */
@@ -1320,9 +1338,29 @@ export interface components {
             /** @description Extra instructions for this run, in the creator's words. Data for the model, not commands. */
             instructions?: string;
             profile?: components["schemas"]["RunProfile"];
+            vibe?: components["schemas"]["EditVibe"];
+            quality?: components["schemas"]["EditQuality"];
             /** @description Ignored. The run's spend cap is set by the server from the plan (it used to be the caller's, up to $5). */
             budget_usd?: number;
         };
+        /**
+         * @description How carefully the editor works on this one edit (a first edit or a revision; chosen per edit). `standard` is the default.
+         *     `max` is "extra careful": the editor thinks longer about every cut, which costs more credits (`credits.edit_costs` of `GET /v1/me`
+         *     has both prices) and gets a larger spend cap. The plan must include it (the trial does not): otherwise `402 quality_not_in_plan`.
+         *     The credits held and charged are those of the quality chosen.
+         * @default standard
+         * @enum {string}
+         */
+        EditQuality: "standard" | "max";
+        /**
+         * @description The energy of the edit (P6-06). The creator's style profile still decides the colours, the fonts, the title's look and place and
+         *     the rough shot length; the vibe decides how much moves: `calm` stays close to the creator's own restraint (hard cuts, a quiet
+         *     title), `lively` (the default) puts transitions on the strong beats and the drop, gives every text an entrance and an exit and
+         *     keeps the camera moving, `hype` does that on more beats with faster shots.
+         * @default lively
+         * @enum {string}
+         */
+        EditVibe: "calm" | "lively" | "hype";
         ReplyRequest: {
             /** @description The answer to the run's question. */
             text: string;
@@ -1388,8 +1426,11 @@ export interface components {
              * @enum {string}
              */
             state: "held" | "charged" | "refunded";
-            /** @enum {string} */
-            action: "edit.first" | "edit.revision";
+            /**
+             * @description The `.max` actions are the extra-careful edits (`quality: max`).
+             * @enum {string}
+             */
+            action: "edit.first" | "edit.revision" | "edit.first.max" | "edit.revision.max";
             /** @description How many credits (for `refunded`, how many were given back, which is less than the charge when part of it came from credits that had expired). */
             credits: number;
         };

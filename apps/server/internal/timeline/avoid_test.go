@@ -133,18 +133,109 @@ func TestATitleGoesAboveTheHeadSmallerNotOntoTheBack(t *testing.T) {
 	off(t, "head at 380", pl, []Subject{person(360)}, false)
 }
 
-// When even a title at the lowest scale does not fit above the head, and there is no room below all of the subject, the last resort is
-// under the head over the body, and it is said so: OverBody, not OverHead.
-func TestOverTheBodyIsTheLastResort(t *testing.T) {
+// When even a title at the lowest scale does not fit above the head, beside it or below all of the subject, it is not put over the body
+// (P6-06): it is not cleared, and the result says what it would cover where it stands, for the caller to move it in time or leave it out.
+func TestNeverOverTheBody(t *testing.T) {
 	out := baseSpec().Output
-	subs := []Subject{person(280)} // 14.6 %: 40 px of band above the head
-	pl, av, err := PlaceTextAvoiding(out, titleItem("BACK DAY 101"), subs)
-	if err != nil || !av.Overlapped || av.Cleared || av.OverHead || !av.OverBody || av.Where != WhereBelowHead {
+	subs := []Subject{person(280)} // 14.6 %: 40 px of band above the head, and the person fills the width at the head
+	subs[0].Head.Left, subs[0].Head.Right = 120, 960
+	it := titleItem("BACK DAY 101")
+	pl, av, err := PlaceTextAvoiding(out, it, subs)
+	if err != nil || !av.Overlapped || av.Cleared || !av.OverBody || av.Where != "" {
 		t.Fatalf("%+v %v", av, err)
 	}
-	off(t, "below the head", pl, subs, true)
-	if pl.Layout.InkBox(pl.Box).Top <= subs[0].Head.Bottom {
-		t.Errorf("not under the head: %+v", pl.Box)
+	if plain, _ := PlaceText(out, it); pl.Box != plain.Box {
+		t.Errorf("an item that could not be cleared was moved anyway: %+v", pl.Box)
+	}
+}
+
+// Gino's footage (the golden boxes of P6-06): the head top at 15 to 20 % of the frame, the torso filling the middle of it. Every title is
+// placed off the head and the torso, or not at all: never over the body.
+func TestGinoLikeSubjectsKeepTheTorsoClear(t *testing.T) {
+	out := baseSpec().Output
+	h := float64(out.Height)
+	w := float64(out.Width)
+	// A subject box of fractions (x, y, w, h) with the head top at hy, as the quick look reads it, in output pixels the way package subject
+	// maps it (a cover 9:16 clip on a 9:16 output: the identity): the head is the middle 60 % from the head top down 22 % of the box, the
+	// torso the rest of the box below it.
+	mk := func(x, y, bw, bh, hy float64) Subject {
+		px := func(fx, fy float64) (int, int) { return int(fx * w), int(fy * h) }
+		cx, half := x+bw/2, bw*0.3
+		hl, ht := px(cx-half, hy)
+		hr, hb := px(cx+half, hy+bh*0.22)
+		bl, bt := px(x, hy)
+		br, bb := px(x+bw, y+bh)
+		return Subject{Head: style.Rect{Left: hl, Top: ht, Right: hr, Bottom: hb}, Body: style.Rect{Left: bl, Top: bt, Right: br, Bottom: bb},
+			Torso: style.Rect{Left: bl, Top: hb, Right: br, Bottom: bb}}
+	}
+	cases := []struct {
+		name string
+		sub  Subject
+		text string
+		want []string // the acceptable places; "none" for no place
+	}{
+		{"back pose, head at 17 %", mk(0.22, 0.16, 0.56, 0.80, 0.17), "BACK DAY 101", []string{WhereAbove}},
+		{"row from behind, head at 20 %", mk(0.25, 0.19, 0.5, 0.76, 0.20), "BACK DAY 101", []string{WhereAbove}},
+		{"lat pulldown, head at 15 %, narrow", mk(0.38, 0.14, 0.24, 0.84, 0.15), "1. ROWS", []string{WhereBeside}},
+		{"close, head at 15 %, wide", mk(0.05, 0.14, 0.9, 0.86, 0.15), "3 ESSENTIALS VOOR EEN VOLLERE RUG", []string{WhereAbove, WhereBeside, "none"}},
+		{"two lines, head at 18 %", mk(0.2, 0.17, 0.6, 0.8, 0.18), "BACK DAY\nBLUEPRINT", []string{WhereAbove, WhereBeside, "none"}},
+	}
+	for _, c := range cases {
+		subs := []Subject{c.sub}
+		pl, av, err := PlaceTextAvoiding(out, titleItem(c.text), subs)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		got := av.Where
+		if !av.Cleared {
+			got = "none"
+		}
+		ok := false
+		for _, w := range c.want {
+			ok = ok || w == got || (w == WhereAbove && got == "" && !av.Overlapped)
+		}
+		if !ok {
+			t.Errorf("%s: placed %q (%+v), want one of %v", c.name, got, av, c.want)
+		}
+		if av.Cleared {
+			ink := pl.Layout.InkBox(pl.Box)
+			if ink.Overlaps(c.sub.Head) || ink.Overlaps(c.sub.Torso) {
+				t.Errorf("%s: the ink %+v covers the head %+v or the torso %+v", c.name, ink, c.sub.Head, c.sub.Torso)
+			}
+			if !pl.Zone.Safe(pl.Box) {
+				t.Errorf("%s: the box %+v is not inside the zone", c.name, pl.Box)
+			}
+		}
+	}
+}
+
+// Beside the head: a short label next to a small head, over the background, when there is no room above and the person fills the bottom.
+func TestBesideTheHead(t *testing.T) {
+	out := baseSpec().Output
+	s := Subject{
+		Head:  style.Rect{Left: 640, Top: 250, Right: 900, Bottom: 560},
+		Body:  style.Rect{Left: 560, Top: 250, Right: 980, Bottom: 1900},
+		Torso: style.Rect{Left: 560, Top: 560, Right: 980, Bottom: 1900},
+	}
+	it := titleItem("ROWS")
+	pl, av, err := PlaceTextAvoiding(out, it, []Subject{s})
+	if err != nil || !av.Cleared {
+		t.Fatalf("%+v %v", av, err)
+	}
+	if av.Where != WhereBeside && av.Where != WhereAbove && av.Where != "" {
+		t.Errorf("placed %q", av.Where)
+	}
+	ink := pl.Layout.InkBox(pl.Box)
+	if ink.Overlaps(s.Head) || ink.Overlaps(s.Torso) {
+		t.Errorf("the ink %+v covers the person", ink)
+	}
+	// A raised arm: the torso is the whole body box, so there is no background beside the head.
+	arms := s
+	arms.Body.Top, arms.Torso = 100, arms.Body
+	arms.Torso.Top = 100
+	_, av, _ = PlaceTextAvoiding(out, it, []Subject{arms})
+	if av.Where == WhereBeside {
+		t.Errorf("put beside the head over a raised arm: %+v", av)
 	}
 }
 

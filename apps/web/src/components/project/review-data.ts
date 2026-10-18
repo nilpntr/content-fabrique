@@ -13,7 +13,16 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 const num = (value: unknown): number | undefined => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
 
 type Blend = Exclude<TransitionIn["type"], "cut">;
-const BLENDS: ReadonlySet<string> = new Set<Blend>(["crossfade", "dip_to_black", "whip", "whip_left", "whip_right", "zoom_through", "flash"]);
+const BLENDS: ReadonlySet<string> = new Set<Blend>([
+  "crossfade",
+  "dip_to_black",
+  "whip",
+  "whip_left",
+  "whip_right",
+  "zoom_through",
+  "flash",
+  "punch",
+]);
 const isBlend = (value: unknown): value is Blend => typeof value === "string" && BLENDS.has(value);
 
 /** The points of a speed ramp (P3-10), or undefined when `value` is not a usable one. */

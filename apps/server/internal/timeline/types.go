@@ -73,6 +73,8 @@ const (
 	DefaultPushInStrength   = 0.10
 	DefaultPullBackStrength = 0.15
 	DefaultShakeStrength    = 0.08
+	// DefaultHandheldStrength is the push of the living camera over a shot: 100 % to about 108 % (P6-06).
+	DefaultHandheldStrength = 0.08
 )
 
 // Format is an output format (D-25).
@@ -122,12 +124,17 @@ const (
 	TransitionWhipRight   = "whip_right"
 	TransitionZoomThrough = "zoom_through"
 	TransitionFlash       = "flash"
+	// TransitionPunch is a fast scale of 1.0 to 1.15 into the cut through a blur, landing on the incoming clip (P6-06).
+	TransitionPunch = "punch"
 
 	MotionNone     = "none"
 	MotionPunchIn  = "punch_in"
 	MotionPushIn   = "push_in"
 	MotionPullBack = "pull_back"
 	MotionShake    = "shake"
+	// MotionHandheld is the living camera of a tripod shot (P6-06): a slow push, a gentle drift that alternates direction from shot to
+	// shot and a slow sway, with an optional punch-in at at_ms (the drop or a strong beat). It is camera motion, not an effect.
+	MotionHandheld = "handheld"
 
 	AnchorUpperThird = "upper_third"
 	AnchorCenter     = "center"
@@ -366,6 +373,8 @@ func (m Motion) StrengthOrDefault() float64 {
 		return DefaultPullBackStrength
 	case MotionShake:
 		return DefaultShakeStrength
+	case MotionHandheld:
+		return DefaultHandheldStrength
 	}
 	return 0
 }
@@ -456,6 +465,8 @@ type TextItem struct {
 	Anchor     string `json:"anchor,omitempty"`
 	Position   *Point `json:"position,omitempty"`
 	Animation  string `json:"animation,omitempty"`
+	// Exit is how the text leaves at its end (none, fade, pop_out or slide_down; P6-06). Empty is none.
+	Exit string `json:"exit,omitempty"`
 	// Fill, Scale, Shadow and Align change the style for this item (P6-05): a #RRGGBB fill colour, a scale of the style's size
 	// (0.6 to 1.4), a shadow (none, soft or strong) and the alignment of the lines (left, center or right). Each is left out to keep
 	// the style's own.
