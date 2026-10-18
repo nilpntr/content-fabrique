@@ -392,7 +392,7 @@ func measureVersion(ctx context.Context, st *store.Store, svc *projects.Service,
 		return evals.Measurement{}, err
 	}
 	plan, _ := planOfVersion(ctx, st, t.Workspace, vd.Version)
-	style, _, err := styleprofile.Load(ctx, st, t.Workspace)
+	style, err := styleprofile.LoadStyle(ctx, st, t.Workspace)
 	if err != nil {
 		return evals.Measurement{}, fmt.Errorf("the style profile: %w", err)
 	}
@@ -408,9 +408,9 @@ func measureVersion(ctx context.Context, st *store.Store, svc *projects.Service,
 	if det, perr := svc.Get(ctx, actor, t.Project); perr == nil {
 		m.Brief = det.Project.Brief
 	}
-	if style != nil {
-		m.StyleEvidence = style.CompactBlock()
-		for _, line := range style.Evidence {
+	if style != nil && style.Profile != nil {
+		m.StyleEvidence = style.Profile.CompactBlock()
+		for _, line := range style.Profile.Evidence {
 			if n, _, ok := strings.Cut(line, ":"); ok {
 				m.StyleNames = append(m.StyleNames, strings.TrimSpace(n))
 			}

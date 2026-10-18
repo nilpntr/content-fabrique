@@ -135,7 +135,7 @@ func cmdEvalEditor(args []string, stdout, stderr io.Writer, lookup lookupEnv, de
 	}
 	plan, author := planOfVersion(ctx, st, ws.ID, vd.Version)
 	sampler, note := renderSamplerFor(env, st)
-	style, _, serr := styleprofile.Load(ctx, st, ws.ID)
+	style, serr := styleprofile.LoadStyle(ctx, st, ws.ID)
 	if serr != nil {
 		_, _ = fmt.Fprintf(errOut, "cfctl %s: the style profile: %v\n", name, serr)
 		return 1

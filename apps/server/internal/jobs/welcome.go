@@ -35,6 +35,9 @@ type Deps struct {
 	// Render is the render pipeline for the render job. Nil when the worker has no object storage or sandbox set up: render jobs
 	// then wait (snoozed) until a worker that has them picks them up.
 	Render Renderer
+	// Style learns creator styles for the style_reference and style_profile jobs. Nil when the worker has no object storage, sandbox or
+	// model access: those jobs then wait (snoozed) until a worker that has them picks them up.
+	Style StyleLearner
 	// Transcribe is the transcription pipeline for the transcribe job. Nil when the worker has no object storage or sandbox set up:
 	// transcribe jobs then wait (snoozed) until a worker that has them picks them up.
 	Transcribe Transcriber
@@ -115,6 +118,12 @@ func Workers(deps Deps) (*river.Workers, error) {
 		return nil, err
 	}
 	if err := river.AddWorkerSafely(w, &AnalyzeWorker{deps: deps}); err != nil {
+		return nil, err
+	}
+	if err := river.AddWorkerSafely(w, &StyleReferenceWorker{deps: deps}); err != nil {
+		return nil, err
+	}
+	if err := river.AddWorkerSafely(w, &StyleProfileWorker{deps: deps}); err != nil {
 		return nil, err
 	}
 	if err := river.AddWorkerSafely(w, &RenderWorker{deps: deps}); err != nil {

@@ -40,6 +40,7 @@ type hooks struct {
 	quickLookDue     func(ctx context.Context, tx *Store, a Asset) error
 	transcribeDue    func(ctx context.Context, tx *Store, a Asset) (enqueued bool, err error)
 	analysisDue      func(ctx context.Context, tx *Store, a Asset) error
+	styleRefDue      func(ctx context.Context, tx *Store, a Asset) error
 }
 
 // SetWorkspaceCreatedHook registers fn to run, in the transaction that inserts it, for every workspace SyncWorkspace

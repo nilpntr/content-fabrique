@@ -82,7 +82,7 @@ func toolAnswer(input string) llm.Response {
 	}
 }
 
-const goodAnswer = `{"title_present":true,"text":"BUILDING LATS 101","case":"upper","colour":"#fff0b0","position":"upper_third","alignment":"center","weight":"bold","condensed":true,"lines":1,"text_height_pct":4.0,"shadow":"none","exercise_labels":false,"captions":false}`
+const goodAnswer = `{"title_present":true,"text":"BUILDING LATS 101","case":"upper","colour":"#fff0b0","position":"upper_third","alignment":"center","weight":"bold","condensed":true,"lines":1,"text_height_pct":4.0,"shadow":"none","exercise_labels":false,"captions":false,"title_entrance":"pop","chapter_titles":[]}`
 
 func newReader(t *testing.T, m *fakeModel, r *jpegRunner) *Reader {
 	t.Helper()
@@ -119,7 +119,7 @@ func TestReadMakesOneForcedStrictToolCall(t *testing.T) {
 		t.Fatalf("%d model calls", len(m.reqs))
 	}
 	req := m.reqs[0]
-	if req.Model != "claude-haiku-5-5" || req.MaxTokens != 600 {
+	if req.Model != "claude-haiku-5-5" || req.MaxTokens != 800 {
 		t.Errorf("route: %s / %d", req.Model, req.MaxTokens)
 	}
 	if req.ToolChoice == nil || req.ToolChoice.Name != VisionToolName || len(req.Tools) != 1 || !req.Tools[0].Strict {
@@ -158,11 +158,15 @@ func TestAReadCostsLessThanTheBudget(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", profile, err)
 		}
-		if route.Model != "claude-haiku-5-5" || route.MaxTokens != 600 {
+		if route.Model != "claude-haiku-5-5" || route.MaxTokens != 800 {
 			t.Errorf("%s routes to %+v", profile, route)
 		}
-		frames := [][]byte{{0xFF, 0xD8}, {0xFF, 0xD8}, {0xFF, 0xD8}}
-		req := route.Apply(BuildVisionRequest(frames, []float64{0.4, 1.8, 3.2}))
+		frames := make([][]byte, VisionFrames+LaterFrames)
+		at := make([]float64, len(frames))
+		for i := range frames {
+			frames[i], at[i] = []byte{0xFF, 0xD8}, float64(i)
+		}
+		req := route.Apply(BuildVisionRequest(frames, at, VisionFrames))
 		tokens, err := llm.EstimateTokens(req)
 		if err != nil {
 			t.Fatal(err)
@@ -217,7 +221,7 @@ func TestReadOutcomesThatAreNotAnAnswer(t *testing.T) {
 
 func TestFramesFailures(t *testing.T) {
 	m := &fakeModel{resp: toolAnswer(goodAnswer)}
-	// Two of the three pictures: the call is made with two frames.
+	// Four of the five pictures: the call is made with four frames.
 	rd := newReader(t, m, &jpegRunner{skip: 1})
 	res, err := rd.Read(context.Background(), ids.WorkspaceID{UUID: uuid.New()}, uuid.New(), tmpVideo(t), 10)
 	if err != nil || res.Text == nil {
@@ -229,7 +233,7 @@ func TestFramesFailures(t *testing.T) {
 			images++
 		}
 	}
-	if images != 2 {
+	if images != VisionFrames-1 {
 		t.Errorf("%d images", images)
 	}
 	// No picture: an error, and the model is not called.
@@ -244,7 +248,7 @@ func TestValidateTitleStyle(t *testing.T) {
 	if err != nil || ok.Colour != "#FFF0B0" || ok.Position != "upper_third" || ok.TextHeightPct != 4.0 || ok.Shadow != "none" {
 		t.Fatalf("%v %+v", err, ok)
 	}
-	none, err := ValidateTitleStyle(json.RawMessage(`{"title_present":false,"text":"","case":"none","colour":"","position":"none","alignment":"none","weight":"none","condensed":false,"lines":0,"text_height_pct":0,"shadow":"none","exercise_labels":true,"captions":false}`))
+	none, err := ValidateTitleStyle(json.RawMessage(`{"title_present":false,"text":"","case":"none","colour":"","position":"none","alignment":"none","weight":"none","condensed":false,"lines":0,"text_height_pct":0,"shadow":"none","exercise_labels":true,"captions":false,"title_entrance":"unknown","chapter_titles":[]}`))
 	if err != nil || none.TitlePresent || none.Text != "" || !none.ExerciseLabels {
 		t.Fatalf("%v %+v", err, none)
 	}
@@ -286,5 +290,33 @@ func TestHookTimes(t *testing.T) {
 	long := HookTimes(60)
 	if len(short) != VisionFrames || short[2] > 1 || long[2] > 3.6 || long[0] >= long[1] || long[1] >= long[2] {
 		t.Errorf("%v %v", short, long)
+	}
+}
+
+// The entrance and the chapter titles (stylevision.v3): read from the frames after later cuts, cleaned one by one, a bad one left out.
+func TestTheReadSeesTheEntranceAndTheChapterTitles(t *testing.T) {
+	answer := strings.Replace(goodAnswer, `"chapter_titles":[]`, `"chapter_titles":["1. FIRST MOVE FOR THE BACK","visit www.example.com","2. SECOND MOVE FOR THE BACK"]`, 1)
+	m := &fakeModel{resp: toolAnswer(answer)}
+	res, err := newReader(t, m, &jpegRunner{}).ReadWith(context.Background(), ids.WorkspaceID{UUID: uuid.New()}, uuid.New(), tmpVideo(t), 30, []float64{2, 9, 16, 24})
+	if err != nil || res.Text == nil {
+		t.Fatalf("%v %+v", err, res)
+	}
+	if res.Text.Entrance != "pop" || !res.Text.ChaptersRead || len(res.Text.Chapters) != 2 || res.Text.Chapters[1] != "2. SECOND MOVE FOR THE BACK" {
+		t.Errorf("read %+v", res.Text)
+	}
+	images, later := 0, 0
+	for _, b := range m.reqs[0].Messages[0].Content {
+		if b.Type == llm.BlockImage {
+			images++
+		}
+		if strings.Contains(b.Text, "just after a later cut") {
+			later++
+		}
+	}
+	if images != VisionFrames+LaterFrames || later != LaterFrames {
+		t.Errorf("%d images, %d after cuts", images, later)
+	}
+	if lt := LaterTimes(nil, 30); lt != nil {
+		t.Errorf("no cuts: %v", lt)
 	}
 }

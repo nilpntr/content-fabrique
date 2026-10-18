@@ -164,3 +164,26 @@ func TestAMovingEndingMayBeHeldLonger(t *testing.T) {
 	last.Motion.AtMs = &off
 	wantStatus(t, RunChecks(CheckInput{Spec: spec, Plan: workoutPlan(), Style: p, Vibe: VibeLively}), CheckHeldEnding, CheckFail)
 }
+
+// The creator's pace in "Your style" (slower x1.25, like my videos x1, faster x0.8) scales the targets after the vibe: check_edit takes it
+// from the effective settings when the input has none, and plan_edit's targets say it.
+func TestTheCreatorsPaceSettingScalesThePaceTargets(t *testing.T) {
+	p := paceProfile(2.0, 3.5, 2.5)
+	spec := specOf(t, []shot{{asset: assetA, in: 0, out: 1900}, {asset: assetA, in: 10000, out: 12000}, {asset: assetB, in: 0, out: 2000}}, title(0), nil)
+	for setting, want := range map[string]int64{styleprofile.PaceSlower: 2500, styleprofile.PaceLikeMine: 2000, styleprofile.PaceFaster: 1600} {
+		set := stillSettings(p)
+		set.Pace = setting
+		r := RunChecks(CheckInput{Spec: spec, Plan: workoutPlan(), Style: p, Vibe: VibeLively, Settings: set})
+		if r.Metrics.PaceMedianMs != want {
+			t.Errorf("%s: the target median is %d ms, want %d", setting, r.Metrics.PaceMedianMs, want)
+		}
+	}
+	set := stillSettings(p)
+	set.Pace = styleprofile.PaceFaster
+	if d := Pace(p, TypeWorkout, VibeLively, paceSetting(set)).Describe(); !strings.Contains(d, `the creator's pace setting "faster" (x0.8)`) {
+		t.Errorf("describe: %s", d)
+	}
+	if paceSetting(nil) != "" {
+		t.Error("no style has no pace setting")
+	}
+}

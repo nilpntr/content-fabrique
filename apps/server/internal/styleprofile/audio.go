@@ -38,17 +38,31 @@ const (
 
 // MeasureAudio listens to the file and returns the audio measures; cutsS are the cuts found in the picture.
 func MeasureAudio(ctx context.Context, runner media.Runner, path string, cutsS []float64) (AudioStats, error) {
+	return MeasureAudioIn(ctx, runner, "", path, cutsS)
+}
+
+// MeasureAudioIn is MeasureAudio with the sandbox's output under tempDir ("" for the system's temporary directory).
+func MeasureAudioIn(ctx context.Context, runner media.Runner, tempDir, path string, cutsS []float64) (AudioStats, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return AudioStats{}, err
 	}
-	rep, err := audiocheck.Check(ctx, runner, abs, nil)
+	var opts []audiocheck.Option
+	if tempDir != "" {
+		work, err := os.MkdirTemp(tempDir, "audiocheck-")
+		if err != nil {
+			return AudioStats{}, err
+		}
+		defer func() { _ = os.RemoveAll(work) }()
+		opts = append(opts, audiocheck.WithWorkDir(work))
+	}
+	rep, err := audiocheck.Check(ctx, runner, abs, nil, opts...)
 	if err != nil {
 		return AudioStats{}, fmt.Errorf("styleprofile: audio: %w", err)
 	}
 	var sp spectrum
 	if rep.HasAudio {
-		if sp, err = dumpSpectrum(ctx, runner, abs); err != nil {
+		if sp, err = dumpSpectrum(ctx, runner, tempDir, abs); err != nil {
 			return AudioStats{}, err
 		}
 	}
@@ -56,8 +70,8 @@ func MeasureAudio(ctx context.Context, runner media.Runner, path string, cutsS [
 }
 
 // dumpSpectrum runs the sound dump in the sandbox and analyses it.
-func dumpSpectrum(ctx context.Context, runner media.Runner, abs string) (spectrum, error) {
-	dir, err := os.MkdirTemp("", "styleaudio-")
+func dumpSpectrum(ctx context.Context, runner media.Runner, tempDir, abs string) (spectrum, error) {
+	dir, err := os.MkdirTemp(tempDir, "styleaudio-")
 	if err != nil {
 		return spectrum{}, err
 	}

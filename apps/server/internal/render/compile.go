@@ -93,12 +93,14 @@ func Compile(spec *timeline.Spec, profile Profile, resolver AssetResolver) (Plan
 		return Plan{}, err
 	}
 
-	// The video graph uses inputs 0..n-1 (one per clip); the audio graph appends the audio track items.
-	video, err := c.videoGraph(subs)
+	// The video graph uses inputs 0..n-1 (one per clip); the audio graph appends the audio track items. The audio graph is built first
+	// so that every regular input is known before the video graph numbers the motion-graphics overlay inputs, which args puts after all
+	// of them (overlayInputArgs): built the other way round, a song's input and the first overlay segment got the same index.
+	audio, err := c.audioGraph(resolver)
 	if err != nil {
 		return Plan{}, err
 	}
-	audio, err := c.audioGraph(resolver)
+	video, err := c.videoGraph(subs)
 	if err != nil {
 		return Plan{}, err
 	}

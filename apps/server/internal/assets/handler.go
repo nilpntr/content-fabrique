@@ -75,7 +75,8 @@ func assetOf(a store.Asset) api.Asset {
 		tags = []string{}
 	}
 	titleSource := api.TitleSource(a.TitleSource)
-	out := api.Asset{
+	purpose := api.AssetPurpose(a.Purpose)
+	out := api.Asset{Purpose: &purpose,
 		Id: a.ID.String(), Kind: api.AssetKind(a.Kind), Status: api.AssetStatus(a.Status), Filename: a.Filename,
 		ContentType: a.ContentType, SizeBytes: a.SizeBytes, Sha256: a.Sha256, Title: a.Title, TitleSource: &titleSource,
 		Description: a.Description, Tags: tags, FailureReason: a.FailureReason, IngestProgress: int(a.IngestProgress), IngestStage: a.IngestStage,
@@ -167,6 +168,8 @@ func (h *Handler) CreateAsset(ctx context.Context, req api.CreateAssetRequestObj
 			return api.CreateAsset401JSONResponse{UnauthenticatedJSONResponse: api.UnauthenticatedJSONResponse(body(e))}, nil
 		case 403:
 			return api.CreateAsset403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(body(e))}, nil
+		case 409:
+			return api.CreateAsset409JSONResponse(body(e)), nil
 		case 413:
 			return api.CreateAsset413JSONResponse(body(e)), nil
 		case 415:
@@ -205,7 +208,11 @@ func (h *Handler) ListAssets(ctx context.Context, req api.ListAssetsRequestObjec
 		if req.Params.Q != nil {
 			query = *req.Params.Q
 		}
-		rows, next, e = h.svc.List(ctx, who, query, limit, cursor)
+		purpose := store.PurposeFootage
+		if req.Params.Purpose != nil {
+			purpose = string(*req.Params.Purpose)
+		}
+		rows, next, e = h.svc.ListOf(ctx, who, purpose, query, limit, cursor)
 	}
 	if e != nil {
 		switch e.Status {
@@ -376,6 +383,8 @@ func (h *Handler) DeleteAsset(ctx context.Context, req api.DeleteAssetRequestObj
 			return api.DeleteAsset403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(body(e))}, nil
 		case 404:
 			return api.DeleteAsset404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(body(e))}, nil
+		case 409:
+			return api.DeleteAsset409JSONResponse(body(e)), nil
 		case 500:
 			return api.DeleteAsset500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(body(e))}, nil
 		case 503:

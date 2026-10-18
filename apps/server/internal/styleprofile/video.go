@@ -365,6 +365,12 @@ func patch(f []byte, x0, y0, size int) float64 {
 // MeasureVideo runs the style pass in the sandbox over the file and computes the picture measures: the cuts and the shot lengths, the
 // motion proxies, the light and the colour. The file is untrusted: it is only ever an input of the sandbox job.
 func MeasureVideo(ctx context.Context, runner media.Runner, path string) (Measures, error) {
+	return MeasureVideoIn(ctx, runner, "", path)
+}
+
+// MeasureVideoIn is MeasureVideo with the sandbox's output under tempDir ("" for the system's temporary directory): a worker's sandbox
+// may only write inside its allowed roots.
+func MeasureVideoIn(ctx context.Context, runner media.Runner, tempDir, path string) (Measures, error) {
 	var m Measures
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -383,7 +389,7 @@ func MeasureVideo(ctx context.Context, runner media.Runner, path string) (Measur
 	if m.DurationS <= 0 || m.DurationS > media.MaxStyleSeconds {
 		return m, fmt.Errorf("styleprofile: a reference video is 1 to %d seconds long, this one is %.1f", media.MaxStyleSeconds, m.DurationS)
 	}
-	dir, err := os.MkdirTemp("", "styleprofile-")
+	dir, err := os.MkdirTemp(tempDir, "styleprofile-")
 	if err != nil {
 		return m, err
 	}
@@ -424,6 +430,8 @@ func MeasureVideo(ctx context.Context, runner media.Runner, path string) (Measur
 	v.LumaMean, v.LumaP90, v.SatMean, v.SatP90 = lightOf(frames)
 	v.MotionMedian, v.ZoomEvents, v.PushInShare, v.Flashes, v.VignetteRatio = motionStats(thumbs(raw))
 	v.Camera = camshift.Measure(thumbs(raw), tsz, media.StyleThumbFPS)
+	ts := transitionsOf(m.CutsS, points, thumbs(raw))
+	m.Transitions = &ts
 	if mins := m.DurationS / 60; mins > 0 {
 		v.EffectsPerMinute = round1(float64(v.ZoomEvents+v.Flashes) / mins)
 	}

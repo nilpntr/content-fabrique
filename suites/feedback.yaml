@@ -1,4 +1,4 @@
-# Recorded human feedback on the editor's edits (D-36, docs/design/observability-v1.md section 7). Every item is shown to the AI judge
+# Recorded human feedback on the editor's edits (D-38, docs/design/observability-v1.md section 7). Every item is shown to the AI judge
 # as a rule that outweighs its own taste, and an item with a `detector` is also measured from the timeline and the checks, without a
 # model: that measurement is the item's score, with its weight (default 3, three judge dimensions). Add what the founder or a creator
 # says about an edit here, with where and when it was said; a new detector is a function in apps/server/internal/evals/feedback.go.

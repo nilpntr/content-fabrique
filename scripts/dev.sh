@@ -40,7 +40,7 @@ load_env() {
 
 load_env "$ENV_FILE"
 
-# `task dev:obs` (D-36): the three processes send their spans to the local Phoenix, with content (prompts, tool results, thumbnails). This
+# `task dev:obs` (D-38): the three processes send their spans to the local Phoenix, with content (prompts, tool results, thumbnails). This
 # wins over the env file, so a hosted endpoint in .env never receives content from here; the headers (a hosted token) are dropped.
 if [ "${DEV_OBS:-}" = "1" ]; then
 	if [ "${CF_ENV:-local}" != "local" ]; then

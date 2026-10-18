@@ -101,7 +101,7 @@ SELECT * FROM moments WHERE workspace_id = @workspace_id AND asset_id = @asset_i
 -- name: ListAssetsForAnalysis :many
 SELECT a.* FROM assets a
 LEFT JOIN asset_signals s ON s.workspace_id = a.workspace_id AND s.asset_id = a.id
-WHERE a.workspace_id = @workspace_id AND a.kind = 'video' AND a.status = 'ready' AND a.deleted_at IS NULL
+WHERE a.workspace_id = @workspace_id AND a.kind = 'video' AND a.status = 'ready' AND a.deleted_at IS NULL AND a.purpose = 'footage'
   AND (@include_done::boolean OR s.asset_id IS NULL OR s.version < @version::integer OR s.source_ingested_at IS DISTINCT FROM a.ingested_at)
 ORDER BY a.id
 LIMIT @row_limit;

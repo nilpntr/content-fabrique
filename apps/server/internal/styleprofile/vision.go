@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -33,7 +34,7 @@ import (
 const VisionStage = "stylevision"
 
 // VisionPromptVersion names the prompt and the tool; it is stored with the read.
-const VisionPromptVersion = "stylevision.v2"
+const VisionPromptVersion = "stylevision.v3"
 
 // VisionToolName is the one tool the model is made to call.
 const VisionToolName = "describe_title_style"
@@ -45,13 +46,19 @@ const MaxVisionMicros int64 = 10_000
 // MaxTitleChars is the longest title text kept.
 const MaxTitleChars = 120
 
-// VisionFrames is how many frames of the hook the model sees, and visionLongSide the long side of each in pixels.
+// VisionFrames is how many frames of the hook the model sees, LaterFrames how many frames just after later cuts (for the chapter
+// titles), and visionLongSide the long side of each in pixels. The first two hook frames are a fraction of a second apart, so the model
+// can see how the title comes on.
 const (
-	VisionFrames   = 3
+	VisionFrames   = 5
+	LaterFrames    = 3
 	visionLongSide = 512
 )
 
-const visionSystem = `You describe how the on-screen title of a short vertical video looks, for a video editor that has to reproduce the style. You see three frames from the first seconds of one video. Call describe_title_style once.
+// MaxChapterTitles is the most chapter titles a read keeps.
+const MaxChapterTitles = 4
+
+const visionSystem = `You describe how the on-screen titles of a short vertical video look, for a video editor that has to reproduce the style. You see frames from the first seconds of one video (the first two a fraction of a second apart) and, when the video has cuts, a frame just after some of its later cuts. Call describe_title_style once.
 
 title_present: true when the video shows a title or headline (large text added by the editor of the video). Subtitles and spoken-word captions are not titles.
 text: the title as written, at most 120 characters, keeping its line breaks as spaces. Empty when there is no title.
@@ -66,6 +73,8 @@ text_height_pct: the height of the capital letters of the title as a percentage 
 shadow: none (flat letters with nothing behind them), soft (a faint shadow) or strong (a heavy dark shadow that makes the letters look raised); none when there is no title.
 exercise_labels: true when there are small labels besides the title that name an exercise, a muscle or a tag.
 captions: true when spoken-word captions are shown.
+title_entrance: how the title comes on, from the first frames: pop (it grows or bounces in), slide (it moves in), fade (it gets more opaque), typewriter (letters appear one by one), none (it is simply there in full), unknown (the frames do not show it).
+chapter_titles: in the frames just after later cuts, the numbered section titles of a list video (a number and a name, such as "2. <EXERCISE>"), as written, at most 4; an empty list when there are none. The main title is not a chapter title.
 
 Rules:
 - Describe only what is visible. Never name a person.
@@ -89,9 +98,11 @@ var visionSchema = json.RawMessage(`{
     "text_height_pct": {"type": "number", "description": "The height of the capital letters as a percentage of the frame height, 0.5 to 20; 0 for none."},
     "shadow": {"type": "string", "enum": ["none", "soft", "strong"], "description": "The drop shadow behind the letters."},
     "exercise_labels": {"type": "boolean", "description": "True when small labels name an exercise or a tag."},
-    "captions": {"type": "boolean", "description": "True when spoken-word captions are shown."}
+    "captions": {"type": "boolean", "description": "True when spoken-word captions are shown."},
+    "title_entrance": {"type": "string", "enum": ["none", "pop", "slide", "fade", "typewriter", "unknown"], "description": "How the title comes on."},
+    "chapter_titles": {"type": "array", "items": {"type": "string"}, "description": "Numbered chapter titles seen after later cuts, at most 4."}
   },
-  "required": ["title_present", "text", "case", "colour", "position", "alignment", "weight", "condensed", "lines", "text_height_pct", "shadow", "exercise_labels", "captions"],
+  "required": ["title_present", "text", "case", "colour", "position", "alignment", "weight", "condensed", "lines", "text_height_pct", "shadow", "exercise_labels", "captions", "title_entrance", "chapter_titles"],
   "additionalProperties": false
 }`)
 
@@ -99,12 +110,21 @@ func visionTool() llm.Tool {
 	return llm.Tool{Name: VisionToolName, Description: "Record how the title of the video looks.", InputSchema: visionSchema, Strict: true}
 }
 
-// BuildVisionRequest is the Messages request for a text read, before the route (model, max_tokens) is applied.
-func BuildVisionRequest(frames [][]byte, atS []float64) llm.Request {
+// BuildVisionRequest is the Messages request for a text read, before the route (model, max_tokens) is applied. The frames after
+// hookFrames are the ones just after later cuts.
+func BuildVisionRequest(frames [][]byte, atS []float64, hookFrames ...int) llm.Request {
+	hook := len(frames)
+	if len(hookFrames) > 0 {
+		hook = min(hookFrames[0], len(frames))
+	}
 	content := make([]llm.Block, 0, 2*len(frames)+1)
 	for i, f := range frames {
+		where := "from the opening"
+		if i >= hook {
+			where = "just after a later cut"
+		}
 		content = append(content,
-			llm.TextBlock(fmt.Sprintf("Frame %d of %d, %.1f s into the video:", i+1, len(frames), atS[i])),
+			llm.TextBlock(fmt.Sprintf("Frame %d of %d, %s, %.2f s into the video:", i+1, len(frames), where, atS[i])),
 			llm.Block{Type: llm.BlockImage, Image: &llm.Image{MediaType: "image/jpeg", Data: f}},
 		)
 	}
@@ -154,6 +174,8 @@ func ValidateTitleStyle(raw json.RawMessage) (TextStyle, error) {
 		Shadow         *string  `json:"shadow"`
 		ExerciseLabels *bool    `json:"exercise_labels"`
 		Captions       *bool    `json:"captions"`
+		TitleEntrance  *string  `json:"title_entrance"`
+		ChapterTitles  []string `json:"chapter_titles"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
@@ -164,7 +186,8 @@ func ValidateTitleStyle(raw json.RawMessage) (TextStyle, error) {
 		return TextStyle{}, reject("trailing data")
 	}
 	if in.TitlePresent == nil || in.Text == nil || in.Case == nil || in.Colour == nil || in.Position == nil || in.Alignment == nil ||
-		in.Weight == nil || in.Condensed == nil || in.Lines == nil || in.TextHeightPct == nil || in.Shadow == nil || in.ExerciseLabels == nil || in.Captions == nil {
+		in.Weight == nil || in.Condensed == nil || in.Lines == nil || in.TextHeightPct == nil || in.Shadow == nil || in.ExerciseLabels == nil || in.Captions == nil ||
+		in.TitleEntrance == nil || in.ChapterTitles == nil {
 		return TextStyle{}, reject("a field is missing")
 	}
 	oneOf := func(name, v string, allowed ...string) error {
@@ -184,6 +207,7 @@ func ValidateTitleStyle(raw json.RawMessage) (TextStyle, error) {
 		{"alignment", *in.Alignment, []string{"left", "center", "right", "none"}},
 		{"weight", *in.Weight, []string{"regular", "bold", "none"}},
 		{"shadow", *in.Shadow, []string{"none", "soft", "strong"}},
+		{"title_entrance", *in.TitleEntrance, []string{"none", "pop", "slide", "fade", "typewriter", "unknown"}},
 	} {
 		if err := oneOf(c.name, c.v, c.allowed...); err != nil {
 			return TextStyle{}, err
@@ -206,9 +230,27 @@ func ValidateTitleStyle(raw json.RawMessage) (TextStyle, error) {
 	if h := *in.TextHeightPct; math.IsNaN(h) || math.IsInf(h, 0) || h < 0 || h > 30 {
 		return TextStyle{}, reject("text_height_pct is %v", h)
 	}
-	t := TextStyle{TitlePresent: *in.TitlePresent, ExerciseLabels: *in.ExerciseLabels, Captions: *in.Captions}
+	if len(in.ChapterTitles) > 2*MaxChapterTitles {
+		return TextStyle{}, reject("%d chapter titles", len(in.ChapterTitles))
+	}
+	t := TextStyle{TitlePresent: *in.TitlePresent, ExerciseLabels: *in.ExerciseLabels, Captions: *in.Captions, ChaptersRead: true}
+	// A chapter title is the creator's words like the title: one that is too long or looks like a link or an order is left out (the read
+	// keeps the others), never cut.
+	for _, c := range in.ChapterTitles {
+		if len(t.Chapters) >= MaxChapterTitles {
+			break
+		}
+		c, _ = textclean.Model(c, 4*MaxTitleChars)
+		if c == "" || utf8.RuneCountInString(c) > MaxTitleChars || suspicious.MatchString(strings.ToLower(norm.NFKC.String(c))) {
+			continue
+		}
+		t.Chapters = append(t.Chapters, c)
+	}
 	if !t.TitlePresent {
 		return t, nil
+	}
+	if e := *in.TitleEntrance; e != "unknown" {
+		t.Entrance = e
 	}
 	t.Text, t.Case, t.Colour, t.Position, t.Alignment, t.Weight = text, *in.Case, strings.ToUpper(colour), *in.Position, *in.Alignment, *in.Weight
 	t.Condensed, t.Lines = *in.Condensed, *in.Lines
@@ -233,6 +275,8 @@ type Reader struct {
 	Models llm.ClientFactory
 	Router Router
 	Runner media.Runner
+	// TempDir is where the frames are cut ("" for the system's temporary directory); it must be inside the sandbox's allowed roots.
+	TempDir string
 }
 
 // VisionResult is a text read and what it cost.
@@ -244,10 +288,11 @@ type VisionResult struct {
 	Reason string
 }
 
-// HookTimes are the times the three frames are taken at: spread over the first seconds of the video, where the title is.
+// HookTimes are the times the hook frames are taken at: two in the first third of a second (how the title comes on), then three spread
+// over the first seconds of the video, where the title is.
 func HookTimes(durationS float64) []float64 {
 	span := min(durationS, 3.6)
-	return []float64{round2(span * 0.12), round2(span * 0.5), round2(span * 0.88)}
+	return []float64{round2(min(0.08, span*0.02)), round2(min(0.3, span*0.08)), round2(span * 0.12), round2(span * 0.5), round2(span * 0.88)}
 }
 
 // Frames cuts the hook frames of the file in the sandbox, as JPEGs of visionLongSide px, and returns the times of the ones that were cut.
@@ -256,7 +301,7 @@ func (r *Reader) Frames(ctx context.Context, path string, atS []float64) ([][]by
 	if err != nil {
 		return nil, nil, err
 	}
-	dir, err := os.MkdirTemp("", "stylevision-")
+	dir, err := os.MkdirTemp(r.TempDir, "stylevision-")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -293,8 +338,30 @@ func (r *Reader) Frames(ctx context.Context, path string, atS []float64) ([][]by
 	return out, kept, nil
 }
 
-// Read makes the text read of the file for a workspace. runID is the ledger's run id (one query gives the cost of an analysis).
+// LaterTimes are the times of the frames after later cuts: just after up to LaterFrames of the cuts, spread over them.
+func LaterTimes(cutsS []float64, durationS float64) []float64 {
+	if len(cutsS) == 0 {
+		return nil
+	}
+	pick := make([]float64, 0, LaterFrames)
+	n := len(cutsS)
+	for i := range min(n, LaterFrames) {
+		c := cutsS[(i*n)/min(n, LaterFrames)]
+		if at := round2(c + 0.6); at < durationS-0.1 {
+			pick = append(pick, at)
+		}
+	}
+	return pick
+}
+
+// Read makes the text read of the file for a workspace, without the frames after later cuts. runID is the ledger's run id.
 func (r *Reader) Read(ctx context.Context, ws ids.WorkspaceID, runID uuid.UUID, path string, durationS float64) (VisionResult, error) {
+	return r.ReadWith(ctx, ws, runID, path, durationS, nil)
+}
+
+// ReadWith makes the text read of the file for a workspace: the hook frames and a frame just after some of the cuts (cutsS), for the
+// chapter titles. runID is the ledger's run id (one query gives the cost of an analysis).
+func (r *Reader) ReadWith(ctx context.Context, ws ids.WorkspaceID, runID uuid.UUID, path string, durationS float64, cutsS []float64) (VisionResult, error) {
 	route, err := r.Router.Resolve("", VisionStage)
 	if err != nil {
 		return VisionResult{}, fmt.Errorf("route: %w", err)
@@ -303,12 +370,19 @@ func (r *Reader) Read(ctx context.Context, ws ids.WorkspaceID, runID uuid.UUID, 
 	if err != nil {
 		return VisionResult{}, fmt.Errorf("model client: %w", err)
 	}
-	atS := HookTimes(durationS)
+	hook := HookTimes(durationS)
+	atS := append(slices.Clone(hook), LaterTimes(cutsS, durationS)...)
 	frames, atS, err := r.Frames(ctx, path, atS) // atS is now the times of the frames that were cut, in step with them
 	if err != nil {
 		return VisionResult{}, err
 	}
-	req := route.Apply(BuildVisionRequest(frames, atS))
+	hookCut := 0
+	for _, t := range atS {
+		if slices.Contains(hook, t) {
+			hookCut++
+		}
+	}
+	req := route.Apply(BuildVisionRequest(frames, atS, hookCut))
 	req.Run = llm.RunInfo{ID: runID, Profile: route.Profile, Budget: llm.NewRunBudget(MaxVisionMicros)}
 	resp, err := client.Messages(ctx, req)
 	res := VisionResult{Usage: resp.Usage, Model: resp.Model}

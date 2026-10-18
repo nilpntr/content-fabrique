@@ -27,6 +27,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/api"
 	"github.com/nilpntr/content-fabrique/internal/assets"
 	"github.com/nilpntr/content-fabrique/internal/config"
+	"github.com/nilpntr/content-fabrique/internal/creatorstyle"
 	"github.com/nilpntr/content-fabrique/internal/credits/creditstest"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
@@ -122,6 +123,14 @@ func newAssetsEnv(t *testing.T, opts ...func(*assetsEnvOptions)) *assetsEnv {
 		}
 		runs = rt.Service
 	}
+	var posters creatorstyle.Presigner
+	if e.objs != nil {
+		posters = e.objs
+	}
+	styleSvc, err := creatorstyle.NewService(st, posters, jobs.NewEnqueuer(client, nil), quiet())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := Mount(e.mux, Deps{
 		Config:     config.Config{AppOrigin: testOrigin, ClerkSecretKey: "sk_test_unused", ClerkWebhookSecret: testWebhookSecret},
 		Store:      st,
@@ -129,6 +138,7 @@ func newAssetsEnv(t *testing.T, opts ...func(*assetsEnvOptions)) *assetsEnv {
 		JWKSClient: &jwks.Client{Backend: e.f.backend},
 		Assets:     e.svc,
 		Runs:       runs,
+		Style:      styleSvc,
 	}); err != nil {
 		t.Fatal(err)
 	}

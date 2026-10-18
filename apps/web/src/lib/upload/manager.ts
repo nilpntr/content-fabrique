@@ -26,6 +26,8 @@ export type UploadStatus = "queued" | "starting" | "uploading" | "completing" | 
 export interface UploadItem {
   /** Local id; stable across reloads. */
   id: string;
+  /** `style_reference` for a style video (P6-05b); absent for footage. */
+  purpose?: "style_reference";
   /** The server's asset id, once created. */
   assetId: string | null;
   name: string;
@@ -305,8 +307,11 @@ export class UploadManager {
 
   // ── Commands ──────────────────────────────────────────────────────────────
 
-  /** Adds files to the queue. A file that is an interrupted upload (same name, size and date) continues that upload. */
-  async add(picked: readonly (File | PickedFile)[]): Promise<AddResult> {
+  /**
+   * Adds files to the queue. A file that is an interrupted upload (same name, size and date) continues that upload. `purpose:
+   * "style_reference"` uploads them as the creator's style videos, which are never footage.
+   */
+  async add(picked: readonly (File | PickedFile)[], options: { purpose?: "style_reference" } = {}): Promise<AddResult> {
     await this.ready;
     const result: AddResult = { added: 0, resumed: 0, duplicates: 0, rejected: [] };
     for (const entry of picked) {
@@ -347,6 +352,7 @@ export class UploadManager {
         error: null,
         createdAt: this.clock.now(),
         handle,
+        ...(options.purpose ? { purpose: options.purpose } : {}),
       };
       const item = this.newItem(rec, file, "queued");
       this.items.push(item);
@@ -556,7 +562,7 @@ export class UploadManager {
       await this.store.put(rec).catch((error) => WARN("could not store an upload", error));
       throwIfAborted(signal);
       try {
-        const created = this.api.create({ filename: rec.name, size_bytes: rec.size, content_type: rec.type });
+        const created = this.api.create({ filename: rec.name, size_bytes: rec.size, content_type: rec.type, ...(rec.purpose ? { purpose: rec.purpose } : {}) });
         // The call itself is not abortable (the server may have made the asset), so a cancel afterwards removes it.
         created.then(
           (response) => {
@@ -614,7 +620,7 @@ export class UploadManager {
   /** Finds the active upload of this file after a create call whose answer was lost. A failed look-up is an error, not a reason to create a second upload. */
   private async adopt(item: Item, signal: AbortSignal): Promise<Job | null> {
     const { rec } = item;
-    const recent = await this.call(item, signal, () => this.api.recent(100, signal));
+    const recent = await this.call(item, signal, () => this.api.recent(100, signal, rec.purpose));
     const candidates = this.createdCandidates(rec, recent);
     const stored = candidates.length === 1 ? candidates[0] : undefined;
     if (!stored) {
@@ -633,7 +639,7 @@ export class UploadManager {
   /** A cancelled upload whose create call may have made an asset: look for it and abort it. */
   private async abortCreated(rec: UploadRecord): Promise<void> {
     try {
-      const found = this.createdCandidates(rec, await this.api.recent(100));
+      const found = this.createdCandidates(rec, await this.api.recent(100, undefined, rec.purpose));
       const only = found.length === 1 ? found[0] : undefined;
       if (only) {
         await this.abortOnServer(only.id);
@@ -1027,6 +1033,7 @@ export class UploadManager {
     return {
       id: item.id,
       assetId: item.rec.assetId,
+      ...(item.rec.purpose ? { purpose: item.rec.purpose } : {}),
       name: item.rec.name,
       size,
       status: item.status,
