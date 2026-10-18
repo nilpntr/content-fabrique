@@ -22,7 +22,9 @@ import (
 // image as its storage reference and the new ones as small thumbnails, the thinking summary and the answer.
 
 // tracer is the global provider's tracer, looked up on every use so a test can install its own provider.
-func tracer() trace.Tracer { return otel.Tracer("github.com/nilpntr/content-fabrique/internal/agents/llm") }
+func tracer() trace.Tracer {
+	return otel.Tracer("github.com/nilpntr/content-fabrique/internal/agents/llm")
+}
 
 // Span attributes of our own, next to the OpenInference ones.
 const (
