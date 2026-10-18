@@ -70,6 +70,15 @@ The same spec gives the same frames, byte for byte, on one platform (architectur
 - fonts loaded as bytes from the image's vendored OFL files (never the system's), kerning and ligatures off;
 - a device scale factor of 1 (section 3).
 
+**A frame that hangs is drawn again** (cf-motion `frames.go`). A frame takes a few milliseconds; once in CI Chrome's screenshot of a
+frame never came back. A frame that takes over `--frame-timeout` (5 s) is sought and captured again on the same page; if that hangs
+too, Chrome is restarted (launched, loaded and mounted again) once per render and the render resumes from that frame; a third hang
+fails the render with "no frame in 5s, twice, nor once more after restarting chrome". What the page reported before the hang still
+fails the render. Since a frame is a function of its time and the job alone, a frame drawn again, on the same page or a fresh Chrome,
+is byte for byte the frame of a render that never hung: `TestIntegrationFrameRetryInDocker` injects the hang (the runner's test-only
+`--test-hang N:K`) and compares the hashes. The manifest says how many frames were drawn again and how often Chrome was restarted;
+the render logs it.
+
 **Tested by hashing** (`internal/motion/integration_test.go`): every template renders twice to identical frames, and the frames' hashes match `testdata/golden-hashes.json`, which holds one set per platform (`amd64/HeadlessChrome/155.0.8059.84`, `arm64/...`). CI requires the entry of its platform (`CF_MOTION_REQUIRE_GOLDEN`). The amd64 set was recorded under emulation on Apple silicon; if CI's native x86-64 disagrees, the test prints the platform's hashes to add after a look at the frames.
 
 ## 5. The sandbox and the security model

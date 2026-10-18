@@ -29,7 +29,8 @@ func main() {
 	fs.StringVar(&o.Job, "job", "", "the job file")
 	fs.StringVar(&o.Out, "out", "", "the output directory for the frames and manifest.json")
 	fs.StringVar(&o.Tmp, "tmp", os.TempDir(), "scratch space for the browser profile")
-	fs.DurationVar(&o.FrameTimeout, "frame-timeout", 20*time.Second, "the longest one frame may take")
+	fs.DurationVar(&o.FrameTimeout, "frame-timeout", 5*time.Second, "the longest one frame may take before it is drawn again (a frame takes a few ms)")
+	fs.StringVar(&o.TestHang, "test-hang", "", "tests only: N:K makes the first K attempts at frame N hang")
 	fs.DurationVar(&o.LoadTimeout, "load-timeout", 30*time.Second, "the longest the page load and mount may take")
 	version := fs.Bool("version", false, "print the version and exit")
 	if err := fs.Parse(os.Args[1:]); err != nil {

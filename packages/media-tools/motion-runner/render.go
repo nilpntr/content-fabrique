@@ -30,6 +30,8 @@ type Options struct {
 	// FrameTimeout bounds one frame (seek and capture); LoadTimeout the page load and mount.
 	FrameTimeout time.Duration
 	LoadTimeout  time.Duration
+	// TestHang is the test-only --test-hang "N:K" (frames.go): the first K attempts at frame N hang.
+	TestHang string
 }
 
 // Manifest is what the runner writes next to the frames. The worker reads it as untrusted output.
@@ -39,6 +41,8 @@ type Manifest struct {
 	Arch     string          `json:"arch"`
 	Segments []SegmentResult `json:"segments"`
 	Timing   Timing          `json:"timing"`
+	// Recovery says how many frames were drawn again after a hang, and how many times Chrome was restarted for one.
+	Recovery frameRecovery `json:"recovery"`
 }
 
 // SegmentResult lists the frames of one segment: Dir/f%06d.png for i in [0, Frames), the first being StartFrame.
@@ -110,52 +114,36 @@ func run(ctx context.Context, o Options) (err error) {
 		return fmt.Errorf("output: %w", err)
 	}
 
-	b, err := launchChrome(ctx, o.Chrome, o.Tmp, job.CSSWidth, job.CSSHeight)
+	hang, err := parseHang(o.TestHang)
 	if err != nil {
 		return err
 	}
-	defer b.close()
+	var version string
+	open := func(ctx context.Context) (page, error) {
+		cp, err := openPage(ctx, o, job, scene, bundle, fonts)
+		if err != nil {
+			return nil, err
+		}
+		version = cp.version
+		return cp, nil
+	}
+	first, err := openPage(ctx, o, job, scene, bundle, fonts)
+	if err != nil {
+		return err
+	}
+	version, launched := first.version, first.attached
+	f := &frames{open: open, cur: first, timeout: o.FrameTimeout, restarts: 1, hang: hang, note: stderrNote}
+	defer func() { f.cur.close() }()
 	defer func() {
 		if err != nil {
-			if tail := b.stderr.String(); tail != "" && (errors.Is(err, errChromeGone) || strings.Contains(err.Error(), "closed the pipe")) {
+			if tail := f.cur.logTail(); tail != "" && (errors.Is(err, errChromeGone) || strings.Contains(err.Error(), "closed the pipe")) {
 				err = fmt.Errorf("%w\nchrome's log:\n%s", err, tail)
 			}
 		}
 	}()
-	p := &problems{}
-	s := &session{c: b.client, p: p, bundle: bundle, loaded: make(chan struct{}, 1)}
-
-	var version struct {
-		Product string `json:"product"`
-	}
-	if err := b.client.call(ctx, "", "Browser.getVersion", nil, &version); err != nil {
-		return fmt.Errorf("chrome did not answer: %w", err)
-	}
-	var target struct {
-		TargetID string `json:"targetId"`
-	}
-	if err := b.client.call(ctx, "", "Target.createTarget", map[string]any{"url": "about:blank"}, &target); err != nil {
-		return err
-	}
-	var attached struct {
-		SessionID string `json:"sessionId"`
-	}
-	if err := b.client.call(ctx, "", "Target.attachToTarget", map[string]any{"targetId": target.TargetID, "flatten": true}, &attached); err != nil {
-		return err
-	}
-	s.id = attached.SessionID
-	go s.watch(ctx)
-	launched := time.Now()
-
-	if err := s.prepare(ctx, job); err != nil {
-		return err
-	}
-	if err := s.load(ctx, o.LoadTimeout, scene, job, fonts); err != nil {
-		return err
-	}
 	loaded := time.Now()
 
-	m := Manifest{Version: 1, Chrome: version.Product, Arch: runtime.GOARCH}
+	m := Manifest{Version: 1, Arch: runtime.GOARCH}
 	checks := inkChecks(job)
 	for k, seg := range job.Segments {
 		dir := fmt.Sprintf("s%d", k)
@@ -164,7 +152,7 @@ func run(ctx context.Context, o Options) (err error) {
 		}
 		res := SegmentResult{StartFrame: seg.StartFrame, Frames: seg.EndFrame - seg.StartFrame, Dir: dir, Clip: seg.Clip}
 		for n := seg.StartFrame; n < seg.EndFrame; n++ {
-			png, err := s.frame(ctx, o.FrameTimeout, job.FrameMs(n), seg.Clip, job.Scale())
+			png, err := f.capture(ctx, n, job.FrameMs(n), seg.Clip, job.Scale())
 			if err != nil {
 				return fmt.Errorf("frame %d (%.3f s): %w", n, job.FrameMs(n)/1000, err)
 			}
@@ -182,7 +170,8 @@ func run(ctx context.Context, o Options) (err error) {
 		}
 		m.Segments = append(m.Segments, res)
 	}
-	if err := p.err(); err != nil {
+	m.Chrome, m.Recovery = version, f.rec
+	if err := f.cur.problems(); err != nil {
 		return err
 	}
 	done := time.Now()
@@ -211,6 +200,69 @@ func writeNew(name string, data []byte) error {
 		return fmt.Errorf("output: %w", err)
 	}
 	return f.Close()
+}
+
+// chromePage is a page of a running Chrome with the scene loaded and the job mounted.
+type chromePage struct {
+	b       *browser
+	s       *session
+	p       *problems
+	version string
+	// attached is when the page was attached (Chrome launched), before the scene was loaded.
+	attached time.Time
+}
+
+func (c *chromePage) frame(ctx context.Context, timeout time.Duration, ms float64, clip PixelRect, scale float64) ([]byte, error) {
+	return c.s.frame(ctx, timeout, ms, clip, scale)
+}
+func (c *chromePage) problems() error { return c.p.err() }
+func (c *chromePage) logTail() string { return c.b.stderr.String() }
+func (c *chromePage) close()          { c.b.close() }
+
+// openPage launches Chrome, opens a page, prepares it, loads the scene and mounts the job.
+func openPage(ctx context.Context, o Options, job *Job, scene, bundle string, fonts []pageFont) (cp *chromePage, err error) {
+	b, err := launchChrome(ctx, o.Chrome, o.Tmp, job.CSSWidth, job.CSSHeight)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			if tail := b.stderr.String(); tail != "" && (errors.Is(err, errChromeGone) || strings.Contains(err.Error(), "closed the pipe")) {
+				err = fmt.Errorf("%w\nchrome's log:\n%s", err, tail)
+			}
+			b.close()
+		}
+	}()
+	p := &problems{}
+	s := &session{c: b.client, p: p, bundle: bundle, loaded: make(chan struct{}, 1)}
+	var version struct {
+		Product string `json:"product"`
+	}
+	if err := b.client.call(ctx, "", "Browser.getVersion", nil, &version); err != nil {
+		return nil, fmt.Errorf("chrome did not answer: %w", err)
+	}
+	var target struct {
+		TargetID string `json:"targetId"`
+	}
+	if err := b.client.call(ctx, "", "Target.createTarget", map[string]any{"url": "about:blank"}, &target); err != nil {
+		return nil, err
+	}
+	var attached struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := b.client.call(ctx, "", "Target.attachToTarget", map[string]any{"targetId": target.TargetID, "flatten": true}, &attached); err != nil {
+		return nil, err
+	}
+	s.id = attached.SessionID
+	go s.watch(ctx)
+	at := time.Now()
+	if err := s.prepare(ctx, job); err != nil {
+		return nil, err
+	}
+	if err := s.load(ctx, o.LoadTimeout, scene, job, fonts); err != nil {
+		return nil, err
+	}
+	return &chromePage{b: b, s: s, p: p, version: version.Product, attached: at}, nil
 }
 
 // session is the page the frames are drawn in.
