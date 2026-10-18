@@ -19,6 +19,16 @@
     ]
   },
   "components": {
+    "chrome-headless-shell": {
+      "category": "copyleft-exception",
+      "binaryLicence": "BSD-3-clause AND LGPL-2.1-or-later (bundled components)",
+      "copyrightSha256": "80253764cf5dde31aae6aa57ff29d460947d110f3eae31cb9cf208fb5ffcc089",
+      "reason": "chrome-headless-shell from Chrome for Testing: Chromium (BSD-3-Clause) with the third-party components built into it, some of them LGPL (its LICENSE file lists every one). Chrome and its libraries run as a separate process inside the media sandbox (the motion-graphics renderer, D-35); never linked into our code and never distributed. Pinned by version and by the SHA-256 of each architecture's archive.",
+      "sourceSha256": [
+        "a5d71b91aa996fef00517cd212b2dfb816b43055edefbe727e6fd562d4ae1f9c",
+        "0c83c2520b513835c712590781adbdbcab4c14ca04d4809be5055ff2c8937a51"
+      ]
+    },
     "ffmpeg": {
       "category": "copyleft-exception",
       "binaryLicence": "GPL-2.0-or-later",
@@ -44,16 +54,45 @@
       "copyrightSha256": "41f82bb4d24b304f30f7136bc47abdd083782e4265c984160f5649d1e78ea49c",
       "sourceSha256": "1b364c3400bf7b1cc2c47a25dd0d3edd8331da451412aa5539080f78f8f70b63"
     },
+    "golang-runtime": {
+      "category": "permissive",
+      "binaryLicence": "BSD-3-clause",
+      "copyrightSha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+    },
+    "libasound2t64": {
+      "category": "copyleft-exception",
+      "binaryLicence": "LGPL-2.1-or-later",
+      "copyrightSha256": "28615d5f059d212259b6a82f6326daf8753349df8dfbdcd108310460ed2ec04f",
+      "reason": "A shared library chrome-headless-shell loads (directly or through GLib). Chrome and its libraries run as a separate process inside the media sandbox (the motion-graphics renderer, D-35); never linked into our code and never distributed."
+    },
     "libass9": {
       "category": "permissive",
       "binaryLicence": "ISC",
       "copyrightSha256": "c3eb686a3786caa0e3033ee78908b6996a60fe9d163ecf7dc1c61871e19f88b7"
+    },
+    "libatk1.0-0t64": {
+      "category": "copyleft-exception",
+      "binaryLicence": "LGPL-2.1-or-later",
+      "copyrightSha256": "72fbc9d2c44016dd061f3f63f75253e57089bcd23a4f9023039de4631e7cf918",
+      "reason": "A shared library chrome-headless-shell loads (directly or through GLib). Chrome and its libraries run as a separate process inside the media sandbox (the motion-graphics renderer, D-35); never linked into our code and never distributed."
     },
     "libatomic1": {
       "category": "copyleft-exception",
       "binaryLicence": "GPL-3.0-or-later WITH GCC-exception-3.1",
       "copyrightSha256": "20390f8a6f3b1e4d7cb45dd8652dabb259bbef688cbad839bcdb0b9ba7252f79",
       "reason": "GCC runtime library, linked by the allowed tools. The GCC Runtime Library Exception lets programs link it without becoming GPL. Part of the container's OS layer, not our code."
+    },
+    "libatspi2.0-0t64": {
+      "category": "copyleft-exception",
+      "binaryLicence": "LGPL-2.1-or-later",
+      "copyrightSha256": "72fbc9d2c44016dd061f3f63f75253e57089bcd23a4f9023039de4631e7cf918",
+      "reason": "A shared library chrome-headless-shell loads (directly or through GLib). Chrome and its libraries run as a separate process inside the media sandbox (the motion-graphics renderer, D-35); never linked into our code and never distributed."
+    },
+    "libblkid1": {
+      "category": "copyleft-exception",
+      "binaryLicence": "LGPL-2.1-or-later",
+      "copyrightSha256": "56b67e2eb8bac5a15d91e261d558d73f1f029113cced229753138194997366b6",
+      "reason": "A shared library chrome-headless-shell loads (directly or through GLib). Chrome and its libraries run as a separate process inside the media sandbox (the motion-graphics renderer, D-35); never linked into our code and never distributed."
     },
     "libbrotli1": {
       "category": "permissive",
@@ -71,15 +110,36 @@
       "copyrightSha256": "f5788886720a2605a946e81d571e6c8162b09f58d2e2ceb8d36e5768fccd850d",
       "reason": "glibc, the C library the allowed tools run on. Dynamically linked, never linked into our code."
     },
+    "libcap2": {
+      "category": "permissive",
+      "binaryLicence": "BSD-3-clause",
+      "copyrightSha256": "04f9fb974e10f6ca0cd226811f72b3855f8383daad0e5de7adac8d5b0b7796c3"
+    },
     "libdav1d7": {
       "category": "permissive",
       "binaryLicence": "BSD-2-clause",
       "copyrightSha256": "38aaebbbf5ab0c19a5d4029acb5ce6566f8bd95e07eff6f6472753f5bea83d97"
     },
+    "libdbus-1-3": {
+      "category": "copyleft-exception",
+      "binaryLicence": "AFL-2.1 OR GPL-2.0-or-later",
+      "copyrightSha256": "f5fd0bfcceb21f4c23a517368abcbfe8a4c1cfb3b521757b50fae4898840fe35",
+      "reason": "D-Bus client library, dual-licensed; used under the Academic Free License 2.1 (permissive, not on the short list). Loaded by chrome-headless-shell. Chrome and its libraries run as a separate process inside the media sandbox (the motion-graphics renderer, D-35); never linked into our code and never distributed."
+    },
+    "libdrm2": {
+      "category": "permissive",
+      "binaryLicence": "MIT",
+      "copyrightSha256": "512c9a57fd8b449aa157351da9df07bf8e19f767e496a72205a4020268ddb2e0"
+    },
     "libexpat1": {
       "category": "permissive",
       "binaryLicence": "MIT",
       "copyrightSha256": "60919fe1a156395ff14511bb6ff79756c50ade2fff59ac60c9bae1d8a7fe6292"
+    },
+    "libffi8": {
+      "category": "permissive",
+      "binaryLicence": "MIT",
+      "copyrightSha256": "25ee86cfccc2b7eb9a156a127f1e1b38c46c231f516ff201912223eaf62ee186"
     },
     "libfontconfig1": {
       "category": "permissive",
@@ -96,6 +156,11 @@
       "binaryLicence": "LGPL-2.1-or-later",
       "copyrightSha256": "a9b76593ba12d42b47000f8779d0b631432147980e71464e8ba88238becbc038",
       "reason": "Bidi text layout, a dependency of libass. Dynamically linked into the ffmpeg process only."
+    },
+    "libgbm1": {
+      "category": "permissive",
+      "binaryLicence": "MIT",
+      "copyrightSha256": "55268f06fbc193ee1a4fe694045a9cec58ba727d74bb17b5b1d54de36873a038"
     },
     "libgcc-s1": {
       "category": "copyleft-exception",
@@ -120,6 +185,24 @@
       "binaryLicence": "MIT",
       "copyrightSha256": "9295e101a07824e8ae77c448884bd357a64b831cd4c47f125bf4ac7ea0d8f911"
     },
+    "libmount1": {
+      "category": "copyleft-exception",
+      "binaryLicence": "LGPL-2.1-or-later",
+      "copyrightSha256": "56b67e2eb8bac5a15d91e261d558d73f1f029113cced229753138194997366b6",
+      "reason": "A shared library chrome-headless-shell loads (directly or through GLib). Chrome and its libraries run as a separate process inside the media sandbox (the motion-graphics renderer, D-35); never linked into our code and never distributed."
+    },
+    "libnspr4": {
+      "category": "copyleft-exception",
+      "binaryLicence": "MPL-2.0",
+      "copyrightSha256": "3c4fcc131809b2b6993513bfe4cf6f1ede391ec84f1d5ceca78fb75537b22452",
+      "reason": "Mozilla NSPR/NSS, file-level weak copyleft (MPL-2.0), unmodified and dynamically loaded by chrome-headless-shell. Chrome and its libraries run as a separate process inside the media sandbox (the motion-graphics renderer, D-35); never linked into our code and never distributed."
+    },
+    "libnss3": {
+      "category": "copyleft-exception",
+      "binaryLicence": "MPL-2.0",
+      "copyrightSha256": "3f450f9453233852b3a469a36a897cc68fb87be3e8b3a5ba64f63a7904528408",
+      "reason": "Mozilla NSPR/NSS, file-level weak copyleft (MPL-2.0), unmodified and dynamically loaded by chrome-headless-shell. Chrome and its libraries run as a separate process inside the media sandbox (the motion-graphics renderer, D-35); never linked into our code and never distributed."
+    },
     "libpcre2-8-0": {
       "category": "permissive",
       "binaryLicence": "BSD-3-clause",
@@ -130,22 +213,99 @@
       "binaryLicence": "libpng",
       "copyrightSha256": "7e729164c60950b2b57f1712d82a051c9ba54f421c9b69815d9e4686ddc5709b"
     },
+    "libselinux1": {
+      "category": "permissive",
+      "binaryLicence": "public-domain",
+      "copyrightSha256": "864f1bb189f609075d580b8c4aada16d85a44546884f1687989e1cacc8c56751"
+    },
     "libstdc++6": {
       "category": "copyleft-exception",
       "binaryLicence": "GPL-3.0-or-later WITH GCC-exception-3.1",
       "copyrightSha256": "20390f8a6f3b1e4d7cb45dd8652dabb259bbef688cbad839bcdb0b9ba7252f79",
       "reason": "GCC C++ runtime, needed by libzimg and libharfbuzz inside the ffmpeg process (see libatomic1)."
     },
+    "libsystemd0": {
+      "category": "copyleft-exception",
+      "binaryLicence": "LGPL-2.1-or-later",
+      "copyrightSha256": "a79e4b379cabbd960bb44f6cc1a069081a3778c59a25ee529b68df5a2cb7d27d",
+      "reason": "A shared library chrome-headless-shell loads (directly or through GLib). Chrome and its libraries run as a separate process inside the media sandbox (the motion-graphics renderer, D-35); never linked into our code and never distributed."
+    },
+    "libudev1": {
+      "category": "copyleft-exception",
+      "binaryLicence": "LGPL-2.1-or-later",
+      "copyrightSha256": "a79e4b379cabbd960bb44f6cc1a069081a3778c59a25ee529b68df5a2cb7d27d",
+      "reason": "A shared library chrome-headless-shell loads (directly or through GLib). Chrome and its libraries run as a separate process inside the media sandbox (the motion-graphics renderer, D-35); never linked into our code and never distributed."
+    },
     "libunibreak6": {
       "category": "permissive",
       "binaryLicence": "Zlib",
       "copyrightSha256": "b3470fe912c697024754b5fd352d9f3b856b6696c4e7f85c34e91a044de276cd"
+    },
+    "libx11-6": {
+      "category": "permissive",
+      "binaryLicence": "MIT",
+      "copyrightSha256": "0b380a7fd5b2228f26e9585e56f14812efd3350f3df307507d2bc055dfd8de3e"
     },
     "libx264-164": {
       "category": "copyleft-exception",
       "binaryLicence": "GPL-2.0-or-later",
       "copyrightSha256": "b8b4d68a602bf580d47237c3119e52ac7a70121de39fb365ca28a63b3a200655",
       "reason": "x264, the H.264 encoder (D-16 amendment names it). Loaded only by the ffmpeg process in the container."
+    },
+    "libxau6": {
+      "category": "permissive",
+      "binaryLicence": "MIT",
+      "copyrightSha256": "118dd263a7b91c8f21c489f949bf13281dff9e766deea92b829dac4dce66601a"
+    },
+    "libxcb1": {
+      "category": "permissive",
+      "binaryLicence": "MIT",
+      "copyrightSha256": "4f7cb9db6bf6542f5417e3d674c780d3a5fd12291a54d63054fb576ee0cfae80"
+    },
+    "libxcomposite1": {
+      "category": "permissive",
+      "binaryLicence": "MIT",
+      "copyrightSha256": "e37c7a7e4026343c3e5c13990a6d9a8879194ae3ab26bfe420b34f6f206bf35f"
+    },
+    "libxdamage1": {
+      "category": "permissive",
+      "binaryLicence": "MIT",
+      "copyrightSha256": "09182bc7805ff77a41251e450cebd0d33c48a74ba8ec4b734855a22c86f50417"
+    },
+    "libxdmcp6": {
+      "category": "permissive",
+      "binaryLicence": "MIT",
+      "copyrightSha256": "1bcbb50f8603fe8b86d330bfa460b772ea04fbd3c70e4499f0768b5340b9fd6e"
+    },
+    "libxext6": {
+      "category": "permissive",
+      "binaryLicence": "MIT",
+      "copyrightSha256": "bc57e445ca1d9fe082c8d54189dd411ff26caa8552c9c63d44ea06a982f32124"
+    },
+    "libxfixes3": {
+      "category": "permissive",
+      "binaryLicence": "MIT",
+      "copyrightSha256": "051ffe073ab38244c504bb379903b4ecda6081fb3d97d0d3dce44bc11712eef2"
+    },
+    "libxi6": {
+      "category": "permissive",
+      "binaryLicence": "MIT",
+      "copyrightSha256": "c812f9c54513ae593aab9580b54a4b18219648df7068d49ca1daa47f522ba3fa"
+    },
+    "libxkbcommon0": {
+      "category": "permissive",
+      "binaryLicence": "MIT",
+      "copyrightSha256": "5eeaeb1b6e029a0274e1573765bb0bae2926ef96a3679203faa4fd00fdaeaa88"
+    },
+    "libxrandr2": {
+      "category": "permissive",
+      "binaryLicence": "MIT",
+      "copyrightSha256": "6d8e6239cfe9dd25bbeef06dcf0610d802ebbdc8968db87cf5adf00ff98927d4"
+    },
+    "libxrender1": {
+      "category": "permissive",
+      "binaryLicence": "MIT",
+      "copyrightSha256": "ed2a78123a5076b4f11da38cb1ffb85b5cb9fdc26b5746c517b1d7e7a9029704"
     },
     "libzimg2": {
       "category": "permissive",

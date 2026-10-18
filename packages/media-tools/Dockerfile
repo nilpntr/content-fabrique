@@ -23,7 +23,75 @@
 # separate processes inside our own containers and are never linked into our code or distributed. LICENSES.md and
 # licenses/policy.json list every component; CI fails on anything outside that allowlist.
 
+#
+# Motion graphics (D-35, docs/design/motion-graphics-v1.md): chrome-headless-shell from Chrome for Testing, pinned by version and
+# by the SHA-256 of each architecture's archive, unpacked into /opt/chrome with only the files it needs, and cf-motion, the runner
+# that drives it over a DevTools pipe (motion-runner/, Go standard library only, built statically here). The template bundle is not
+# in the image: the worker mounts it read-only for every job. Chrome and its libraries are assembled in their own stage, so a change
+# there does not rebuild ffmpeg.
+
 ARG DEBIAN_IMAGE=debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
+# golang:1.27.2-trixie, the multi-architecture index digest (2026-10-18).
+ARG GO_IMAGE=golang:1.27.2-trixie@sha256:47667934874913a449b96faa7ef4777fa285d9ec29126ee80ed61c45b7cccf0e
+
+FROM ${GO_IMAGE} AS runner
+COPY motion-runner/ /src/motion-runner/
+RUN set -eux; \
+    cd /src/motion-runner; \
+    GOWORK=off CGO_ENABLED=0 GOFLAGS=-trimpath go build -ldflags='-s -w -buildid=' -o /out/cf-motion .; \
+    cp /usr/local/go/LICENSE /out/go-LICENSE; \
+    go env GOVERSION >/out/go-version
+
+FROM ${DEBIAN_IMAGE} AS chrome
+# The same archive date as the build stage below: change both together.
+ARG DEBIAN_SNAPSHOT=20261016T000000Z
+# Chrome for Testing's chrome-headless-shell (Stable on 2026-10-18) and the SHA-256 of its two archives, computed from the downloads
+# (https://storage.googleapis.com/chrome-for-testing-public/<version>/<platform>/chrome-headless-shell-<platform>.zip).
+ARG CHROME_VERSION=155.0.8059.84
+ARG CHROME_SHA256_AMD64=a5d71b91aa996fef00517cd212b2dfb816b43055edefbe727e6fd562d4ae1f9c
+ARG CHROME_SHA256_ARM64=0c83c2520b513835c712590781adbdbcab4c14ca04d4809be5055ff2c8937a51
+RUN set -eux; \
+    rm -f /etc/apt/sources.list.d/*; \
+    printf '%s\n' \
+      'Types: deb' \
+      "URIs: http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}/" \
+      'Suites: trixie trixie-updates' \
+      'Components: main' \
+      'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
+      '' \
+      'Types: deb' \
+      "URIs: http://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}/" \
+      'Suites: trixie-security' \
+      'Components: main' \
+      'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
+      > /etc/apt/sources.list.d/debian.sources; \
+    printf 'Acquire::Check-Valid-Until "false";\nAPT::Install-Recommends "false";\n' > /etc/apt/apt.conf.d/99snapshot; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl unzip dpkg-dev \
+      libx11-6 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 libxcb1 libxkbcommon0 \
+      libasound2t64 libatk1.0-0t64 libatspi2.0-0t64 libdbus-1-3 libexpat1 libgbm1 libglib2.0-0t64 libnspr4 libnss3
+# Chrome for Testing: the archive of this architecture, checked, unpacked and pruned to what a headless capture needs (no other
+# locales, no hyphenation dictionaries, no SwiftShader or Vulkan: the GPU is off and Skia rasterises in software).
+RUN set -eux; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) platform=linux64; sum="${CHROME_SHA256_AMD64}" ;; \
+      arm64) platform=linux-arm64; sum="${CHROME_SHA256_ARM64}" ;; \
+      *) echo "no chrome-headless-shell for $(dpkg --print-architecture)" >&2; exit 1 ;; \
+    esac; \
+    url="https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/${platform}/chrome-headless-shell-${platform}.zip"; \
+    curl -fsSL --retry 3 -o /tmp/chs.zip "$url"; \
+    echo "${sum}  /tmp/chs.zip" | sha256sum -c -; \
+    unzip -q /tmp/chs.zip -d /tmp/chs; \
+    mv "/tmp/chs/chrome-headless-shell-${platform}" /opt/chrome; \
+    cd /opt/chrome; \
+    rm -rf hyphen-data libvk_swiftshader.so libvulkan.so.1 vk_swiftshader_icd.json; \
+    find locales -type f ! -name en-US.pak -delete; \
+    echo "$url" >/tmp/chrome-url; echo "$sum" >/tmp/chrome-sum
+COPY scripts/assemble-chrome.sh /usr/local/sbin/
+RUN set -eux; \
+    /usr/local/sbin/assemble-chrome.sh "${CHROME_VERSION}" "$(cat /tmp/chrome-sum)" "$(cat /tmp/chrome-url)"; \
+    mkdir -p /rootfs-chrome/tmp; chmod 1777 /rootfs-chrome/tmp; \
+    chroot /rootfs-chrome /opt/chrome/chrome-headless-shell --version
 
 FROM ${DEBIAN_IMAGE} AS build
 # The package archive date (UTC). A newer date means newer library versions: update licenses/policy.json and LICENSES.md with it.
@@ -124,6 +192,28 @@ RUN set -eux; \
     chroot /rootfs /usr/local/bin/whisper-vad-speech-segments --help >/dev/null 2>&1; \
     /usr/local/sbin/smoke-charsets.sh /rootfs/tmp/smoke /tmp/smoke chroot /rootfs /usr/local/bin/ffmpeg; \
     rm -rf /rootfs/tmp/smoke
+
+# Motion graphics (D-35): Chrome and its libraries from the chrome stage, cf-motion from the runner stage, and their rows in the
+# inventory. A library both stages ship is the same file from the same snapshot; its inventory row is kept once.
+COPY --from=chrome /rootfs-chrome/ /rootfs-chrome/
+COPY --from=runner /out/ /runner-out/
+RUN set -eux; \
+    inv=/rootfs/usr/share/media-tools/inventory.tsv; \
+    extra=/rootfs-chrome/usr/share/media-tools/inventory-chrome.tsv; \
+    cp -a /rootfs-chrome/. /rootfs/; \
+    rm -f /rootfs/usr/share/media-tools/inventory-chrome.tsv; \
+    while IFS= read -r row; do \
+      name=$(printf '%s' "$row" | cut -f2); \
+      cut -f2 "$inv" | grep -qxF "$name" || printf '%s\n' "$row" >>"$inv"; \
+    done <"$extra"; \
+    cp /runner-out/cf-motion /rootfs/usr/local/bin/cf-motion; \
+    mkdir -p /rootfs/usr/share/doc/golang-runtime; \
+    cp /runner-out/go-LICENSE /rootfs/usr/share/doc/golang-runtime/copyright; \
+    goversion=$(cat /runner-out/go-version); \
+    printf 'runtime\tgolang-runtime\t%s\thttps://go.dev/dl/ (the Go runtime and standard library linked into cf-motion)\t\n' "${goversion#go}" >>"$inv"; \
+    chroot /rootfs /opt/chrome/chrome-headless-shell --version; \
+    chroot /rootfs /usr/local/bin/cf-motion -version; \
+    chroot /rootfs /usr/local/bin/ffmpeg -hide_banner -version >/dev/null
 
 FROM scratch
 COPY --from=build /rootfs/ /

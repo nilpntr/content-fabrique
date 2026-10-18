@@ -1,0 +1,146 @@
+{
+  "schema": "contentfabrique.timeline/v1",
+  "output": {
+    "format": "9:16",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000"
+  },
+  "tracks": [
+    {
+      "id": "main",
+      "type": "video",
+      "items": [
+        {
+          "id": "c1",
+          "asset_id": "ast_01j3er3kwcgrasdgd4aznmxxe0",
+          "source": {
+            "in_ms": 0,
+            "out_ms": 16000
+          },
+          "at_ms": 0
+        }
+      ]
+    },
+    {
+      "id": "graphics",
+      "type": "graphics",
+      "items": [
+        {
+          "id": "g1",
+          "template": "title_pop",
+          "at_ms": 0,
+          "duration_ms": 2400,
+          "anchor": "upper_third",
+          "params": {
+            "text": "BACK DAY 101",
+            "style": "title_series",
+            "fill": "#F2E9A0",
+            "energy": "hype",
+            "accents_ms": [
+              484,
+              968,
+              1452,
+              1936
+            ]
+          }
+        },
+        {
+          "id": "g2",
+          "template": "chapter_card",
+          "at_ms": 2400,
+          "duration_ms": 2200,
+          "anchor": "upper_third",
+          "params": {
+            "text": "SHRUGS VOOR UPPER TRAPS",
+            "number": 1,
+            "style": "title_series",
+            "accent": "#FF5A1F",
+            "accents_ms": [
+              2420,
+              2904
+            ]
+          }
+        },
+        {
+          "id": "g3",
+          "template": "chapter_card",
+          "at_ms": 4600,
+          "duration_ms": 2200,
+          "anchor": "upper_third",
+          "params": {
+            "text": "SEATED ROW",
+            "number": 2,
+            "layout": "two_line",
+            "align": "left"
+          }
+        },
+        {
+          "id": "g4",
+          "template": "highlight_word",
+          "at_ms": 6800,
+          "duration_ms": 2000,
+          "anchor": "upper_third",
+          "params": {
+            "text": "SQUEEZE AT THE TOP",
+            "word": 1,
+            "energy": "calm",
+            "backing": "plate"
+          }
+        },
+        {
+          "id": "g5",
+          "template": "counter",
+          "at_ms": 8800,
+          "duration_ms": 1800,
+          "anchor": "center",
+          "params": {
+            "text": "REPS",
+            "from": 0,
+            "to": 12
+          }
+        },
+        {
+          "id": "g6",
+          "template": "lower_label",
+          "at_ms": 10600,
+          "duration_ms": 1600,
+          "anchor": "lower_third",
+          "params": {
+            "text": "LAT PULLDOWN",
+            "accent": "#FFD60A"
+          }
+        },
+        {
+          "id": "g7",
+          "template": "blur_in",
+          "at_ms": 12200,
+          "duration_ms": 1800,
+          "position": {
+            "x": 0.5,
+            "y": 0.3
+          },
+          "avoid_subject": false,
+          "params": {
+            "text": "how it feels",
+            "style": "title_lowercase",
+            "shadow": "strong"
+          }
+        },
+        {
+          "id": "g8",
+          "template": "outro_card",
+          "at_ms": 14000,
+          "duration_ms": 2000,
+          "anchor": "center",
+          "params": {
+            "text": "SAVE FOR\nBACK DAY",
+            "scale": 0.9
+          }
+        }
+      ]
+    }
+  ],
+  "markers": []
+}

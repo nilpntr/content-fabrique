@@ -136,8 +136,12 @@ def check(policy: dict, comps: list[Component], ffmpeg_conf: str) -> tuple[list[
         if c.copyright_sha256 != e.get("copyrightSha256"):
             fails.append(f"{c.name} {c.version}: its copyright file changed since the last review (now {c.copyright_sha256}). "
                          f"Read the diff of the licences, then update copyrightSha256 in licenses/policy.json")
-        if c.kind in ("source", "font") and c.declared_sha256 != e.get("sourceSha256"):
-            fails.append(f"{c.name}: source checksum {c.declared_sha256} is not the reviewed {e.get('sourceSha256')}")
+        # A source tarball, a font file or a prebuilt binary archive is pinned by its SHA-256. A binary archive differs per
+        # architecture, so sourceSha256 may list one checksum per architecture the image is built for.
+        pinned = e.get("sourceSha256")
+        allowed = pinned if isinstance(pinned, list) else [pinned]
+        if c.kind in ("source", "font", "binary") and c.declared_sha256 not in allowed:
+            fails.append(f"{c.name}: source checksum {c.declared_sha256} is not the reviewed {pinned}")
     for name in sorted(set(entries) - names):
         warns.append(f"allowlist entry {name} matches nothing in the image (stale?)")
 

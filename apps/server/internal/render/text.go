@@ -102,7 +102,7 @@ func (c *compiler) subtitles() (*Subtitles, error) {
 			b.addText(layerWatermark, 0, c.total, lay, zone, box, style.AnimNone, style.AlignCenter)
 		}
 	}
-	c.plan.Warnings = b.warnings
+	c.plan.Warnings = append(c.plan.Warnings, b.warnings...)
 	return b.subtitles(), nil
 }
 

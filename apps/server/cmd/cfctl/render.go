@@ -16,6 +16,7 @@ import (
 	"syscall"
 
 	"github.com/nilpntr/content-fabrique/internal/media"
+	"github.com/nilpntr/content-fabrique/internal/motion"
 	"github.com/nilpntr/content-fabrique/internal/render"
 	"github.com/nilpntr/content-fabrique/internal/sandbox"
 	"github.com/nilpntr/content-fabrique/internal/subject"
@@ -44,6 +45,10 @@ so run it through the validator first if it did not come from one.
   --subjects   a JSON file of subject boxes per asset id ({"ast_...": {"aspect": 0.5625, "samples": [{"at_ms": 1000, "x": 0.2,
                "y": 0.2, "w": 0.6, "h": 0.7, "head_top_y": 0.22}]}}): titles that would cover the head are moved off it, as in the
                platform's renders, which read the boxes from the asset's quick look
+  --motion-fallback  draw the graphics track (motion-graphics templates, D-35) as ASS text with each template's fallback animation,
+               instead of rendering the overlays with headless Chrome in the sandbox
+  --motion-chrome    the chrome-headless-shell binary for the overlays with --provider local (default $CF_MOTION_CHROME; cf-motion
+               must be on PATH); docker and hardened use the image's
   --dry-run    print the ffmpeg command line and the filter graph, and do not run it
 
 Prints the sound cues (cue_only sounds are never mixed in) and progress while it runs.
@@ -64,6 +69,8 @@ func cmdRender(args []string, stdout, stderr io.Writer) int {
 	fontsArg := flags.String("fonts-dir", "", "directory with the font files, for the local provider")
 	dryRun := flags.Bool("dry-run", false, "print the command and do not run it")
 	subjectsArg := flags.String("subjects", "", "a JSON file of subject boxes per asset id, for keeping titles off the head")
+	motionFallback := flags.Bool("motion-fallback", false, "draw the graphics track as ASS text instead of motion-graphics overlays")
+	motionChrome := flags.String("motion-chrome", "", "chrome-headless-shell for the motion graphics with --provider local (default $CF_MOTION_CHROME)")
 
 	// The spec path may come before or after the flags.
 	var positional []string
@@ -95,6 +102,7 @@ func cmdRender(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	profile.MotionFallback = *motionFallback
 	data, err := os.ReadFile(positional[0])
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "cfctl render: %v\n", err)
@@ -160,6 +168,10 @@ func cmdRender(args []string, stdout, stderr io.Writer) int {
 		StemOutput: *stemArg,
 		WorkDir:    workDir,
 		FontsDir:   *fontsArg,
+		Motion: render.MotionOptions{Chrome: *motionChrome, Report: func(r motion.Report) {
+			_, _ = fmt.Fprintf(stderr, "motion graphics: %d frames in %.2f s (%s; chrome start %d ms, page %d ms, frames %d ms)\n",
+				r.Frames, r.Duration.Seconds(), r.Chrome, r.Timing.LaunchMs, r.Timing.LoadMs, r.Timing.FramesMs)
+		}},
 		Progress: func(p render.Progress) {
 			if tenth := int(p.Fraction * 10); tenth != lastTenth || p.Done {
 				lastTenth = tenth

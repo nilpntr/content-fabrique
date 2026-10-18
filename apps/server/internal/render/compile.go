@@ -82,6 +82,11 @@ func Compile(spec *timeline.Spec, profile Profile, resolver AssetResolver) (Plan
 		return Plan{}, err
 	}
 
+	// The graphics track (D-35): motion-graphics overlays, or their ASS fallback as text items (graphics.go).
+	if err := c.graphics(); err != nil {
+		return Plan{}, err
+	}
+
 	// Text, captions and the preview watermark are one generated ASS script, burned in after the clips are joined.
 	subs, err := c.subtitles()
 	if err != nil {
@@ -115,6 +120,7 @@ func Compile(spec *timeline.Spec, profile Profile, resolver AssetResolver) (Plan
 		audio.loudnorm.Pass1Args = c.pass1Args(audio.pass1Graph)
 	}
 	c.collectMaps()
+	c.graphicsTimeMap()
 	return c.plan, nil
 }
 
@@ -234,6 +240,7 @@ func (c *compiler) layout(resolver AssetResolver) error {
 // args builds the ffmpeg argument list up to the output path.
 func (c *compiler) args() []string {
 	args := c.inputArgs(nil)
+	args = append(args, c.overlayInputArgs()...)
 	args = append(args, "-filter_complex", c.plan.FilterComplex, "-map", "[vout]", "-map", "[aout]")
 	p := c.profile
 	args = append(args, "-c:v", "libx264", "-preset", p.X264Preset, "-crf", strconv.Itoa(p.CRF))

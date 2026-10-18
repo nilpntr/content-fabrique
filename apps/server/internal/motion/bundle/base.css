@@ -1,0 +1,49 @@
+/* The stage of the motion-graphics scene. Transparent everywhere: the frames are composited over the video. */
+html, body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+#stage {
+  position: relative;
+  overflow: hidden;
+}
+
+/* Type is laid out by the worker with the fonts' own advance widths (internal/timeline/style), so Chrome must not change
+   them: no kerning, no ligatures, no synthesised bold or italic, no hinting. */
+#stage, #stage * {
+  box-sizing: border-box;
+  font-kerning: none;
+  font-variant-ligatures: none;
+  font-feature-settings: "kern" 0, "liga" 0, "calt" 0;
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+}
+
+.cf-item {
+  position: absolute;
+  pointer-events: none;
+}
+
+.cf-item[hidden] {
+  display: none;
+}
+
+.cf-line {
+  position: absolute;
+  white-space: pre;
+}
+
+.cf-word {
+  display: inline-block;
+  white-space: pre;
+  transform-origin: 50% 60%;
+}
+
+.cf-clip {
+  position: absolute;
+  overflow: visible;
+}
