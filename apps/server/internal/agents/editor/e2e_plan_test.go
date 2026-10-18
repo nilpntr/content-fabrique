@@ -14,7 +14,7 @@ func checkPlanAndChecks(t *testing.T, x *e2e) {
 	if !ok {
 		t.Fatal("the run recorded no creative_plan artifact")
 	}
-	if plan.ContentType != "workout" || plan.PlaybookVersion != "workout.v2" || plan.TempoBPM != 124 || plan.BeatMs != 484 || len(plan.Shots) != 6 || plan.PromptVersion != PromptVersion {
+	if plan.ContentType != "workout" || plan.PlaybookVersion != "workout.v3" || plan.TempoBPM != 124 || plan.BeatMs != 484 || len(plan.Shots) != 6 || plan.PromptVersion != PromptVersion {
 		t.Errorf("plan: %+v", plan)
 	}
 	if plan.Shots[0].LengthMs != 3*484 || plan.EstimatedLengthMs != 25*484 {

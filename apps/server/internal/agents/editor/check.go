@@ -109,6 +109,8 @@ type AssetAnalysis struct {
 	// Series holds the luma and 90th percentile luma of the clip, when the stored analysis has them.
 	Series    analysis.Series
 	HasSeries bool
+	// Camera is static or handheld when the analysis measured it (P6-06): footage that moves by itself is not a static shot.
+	Camera string
 }
 
 // CheckInput is what Check reads.
@@ -136,6 +138,11 @@ type CheckInput struct {
 	// audio checks do not apply).
 	Audio     *AudioResult
 	AudioSkip string
+	// Music is the edit's song on the timeline (its beats, hits and drop), nil when the edit has none or it was not analysed: the music
+	// checks do not apply then (P6-06).
+	Music *TimelineMusic
+	// Vibe is the energy of the edit (calm, lively or hype; P6-06); empty takes the plan's, else the default (lively).
+	Vibe string
 }
 
 // Metrics are the numbers behind the checks, for the run feed and for comparing runs.
@@ -228,6 +235,8 @@ type limits struct {
 	styled             bool
 	// looseBeat says the creator's cuts are known not to sit on a beat grid, so beat_sync does not apply.
 	looseBeat bool
+	// effectsMax is the most effects a cut (0.5, more at lively and hype).
+	effectsMax float64
 }
 
 // applyStyle sets the thresholds from the creator's style profile: a creator who lets takes run, uses no effects, cuts loosely near the
@@ -289,7 +298,18 @@ func RunChecks(in CheckInput) Report {
 	}
 	items := slices.Clone(main.Items)
 	slices.SortStableFunc(items, func(a, b timeline.VideoItem) int { return cmp.Compare(a.AtMs, b.AtMs) })
+	if in.Vibe == "" && in.Plan != nil {
+		in.Vibe = in.Plan.Vibe
+	}
 	lim := applyStyle(typeLimits[typ], in.Style)
+	// The vibe (P6-06): at lively and hype a creator's "no effects" is no gimmicks (speed ramps, shakes), not no transitions or text motion,
+	// and a busier edit is allowed more effects a cut.
+	vibe := VibeOr(in.Vibe)
+	lim.effectsMax = effectsMax
+	if energetic(vibe) {
+		lim.noEffects = false
+		lim.effectsMax = map[string]float64{VibeLively: 0.6, VibeHype: 1.0}[vibe]
+	}
 	weakStyle := ""
 	if in.Style != nil && !in.Style.Firm() {
 		weakStyle = fmt.Sprintf("the creator style profile rests on %d reference videos; it sets thresholds from %d", in.Style.References, styleprofile.MinReferences)
@@ -316,6 +336,7 @@ func RunChecks(in CheckInput) Report {
 	r.Checks = []Check{
 		c.hookLength(), c.hookTitle(), c.shotPacing(), c.shotVariety(), c.paceBuilds(), c.repBoundaries(), c.deadTime(),
 		c.effectDensity(), c.textSafe(), c.textOverSubject(), c.duration(targetS), c.brightness(), c.crushed(), c.beatSync(), c.styleMatch(),
+		c.offBeatCut(), c.hookMissesDrop(), c.staticShot(), c.noTransitions(), c.transitionVariety(), c.textWithoutEntrance(), c.chapterTitles(),
 	}
 	if a := in.Audio; a != nil {
 		r.Checks = append(r.Checks, audioChecks(*a)...)
@@ -594,7 +615,7 @@ func (c *checker) deadTime() Check {
 // countEffects counts the effects of the main track: motion presets, transitions that are not cuts and speed ramps (also separately).
 func countEffects(items []timeline.VideoItem) (effects, ramps int) {
 	for i, it := range items {
-		if it.Motion.Active() {
+		if it.Motion.Active() && it.Motion.Preset != timeline.MotionHandheld { // the living camera is camera motion, not an effect
 			effects++
 		}
 		if i > 0 && it.TransitionIn != nil && it.TransitionIn.Type != timeline.TransitionCut && it.TransitionIn.Type != "" {
@@ -624,7 +645,7 @@ func (c *checker) effectDensity() Check {
 	per := float64(effects) / float64(cuts)
 	c.m.EffectsPerCut = math.Round(per*100) / 100
 	switch {
-	case per > effectsMax:
+	case per > c.lim.effectsMax:
 		return c.fail(CheckEffectDensity, "%d effects in %d cuts (%.2f per cut) is too busy; use about one per 3 or 4 cuts and keep the ones on the best moments", effects, cuts, per)
 	case ramps > rampsMax:
 		return c.fail(CheckEffectDensity, "%d shots have a speed ramp; at most %d, on the shots that deserve it", ramps, rampsMax)
@@ -842,6 +863,9 @@ func (c *checker) editStats() styleprofile.EditStats {
 		e.FirstCutS = float64(c.items[1].AtMs) / 1000
 	}
 	e.Effects, _ = countEffects(c.items)
+	if energetic(c.in.Vibe) {
+		e.Effects = countGimmicks(c.items) // at lively and hype the creator's "no effects" is held to no gimmicks
+	}
 	for _, it := range c.items {
 		if it.Look != nil && it.Look.Preset != "" && it.Look.Preset != timeline.LookNone {
 			e.Graded = true

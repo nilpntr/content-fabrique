@@ -145,7 +145,7 @@ func TestTheStyleNoteNamesTheTitleTemplate(t *testing.T) {
 // A title that is not in a form the creator uses is borderline: the check passes and says so.
 func TestAnOddTitleIsBorderlineNotAFailure(t *testing.T) {
 	spec := withTitle(t, buildingLats(t), func(it *timeline.TextItem) { it.Text = "BACK BLUEPRINT" })
-	r := RunChecks(CheckInput{Spec: spec, Plan: workoutPlan(), Style: ginoProfile(t)})
+	r := RunChecks(CheckInput{Spec: spec, Plan: workoutPlan(), Style: ginoProfile(t), Vibe: VibeCalm})
 	c := wantStatus(t, r, CheckStyleMatch, CheckPass)
 	if !strings.Contains(c.Detail, "borderline, not a failure: title_pattern") || !strings.Contains(c.Detail, "ending in 101") {
 		t.Errorf("detail: %s", c.Detail)

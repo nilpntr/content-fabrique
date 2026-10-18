@@ -72,8 +72,32 @@
       }
     },
     {
+      "name": "get_music",
+      "description": "Read the music analysis of a song: a clip from list_footage with a song line (an audio clip the creator gave, or a video whose sound is the song). Returns its tempo, its beats, downbeats and phrases (four bars), its strong onsets and its drop, as milliseconds of the song's own time, and how to use them: the song goes on the timeline with set_sound kind creator_audio (the export then has the song and no gym sound), the hook ends on the drop (choose source_offset_ms so the drop plays at the first cut), and the cuts land on its beats (snap_cuts_to_beats with these beats_ms as the grid and sound_id the song's item). Give from_ms and to_ms for a part of a long song (at most 90 seconds are listed at once).",
+      "strict": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "asset_id": {
+            "type": "string",
+            "description": "The id of the song's clip from list_footage, such as ast_01j9z0q3w4x5y6z7a8b9c0d1e2."
+          },
+          "from_ms": {
+            "type": "integer",
+            "description": "Optional. Where in the song to start listing, in whole milliseconds of its own time. The default is its start."
+          },
+          "to_ms": {
+            "type": "integer",
+            "description": "Optional. Where in the song to stop listing. The default is 90 seconds after from_ms, or its end."
+          }
+        },
+        "required": ["asset_id"],
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "plan_edit",
-      "description": "Write your creative plan before the first edit. It is the understand step: from the footage, the analysis and the brief, say what kind of video this is and what you will make of it. content_type is one of talking, unboxing_product, workout, vlog, tutorial or general (the genre of the footage); playbook is the playbook you will follow (usually the same, general when nothing fits well). story is the video in one line (at most 140 characters), hook what the first 1 to 2 seconds show (at most 140), arc how it builds (at most 240), ending how it ends (at most 140). target_length_s is the length you aim for in whole seconds, 5 to 120. tempo_bpm is the beat grid's tempo, 120 to 128 for a short video cut to music later, or 0 for a video that follows speech and has no beat grid (60 to 200 are allowed). pace is steady, building or fast. shots is the shot list, 1 to 16 shots in order: its role (hook, build, peak, detail, step, reveal, payoff, broll or ending), what it shows in a few words (at most 80 characters), optionally the clip it comes from (asset_id from list_footage), its length in beats (1 to 64; with tempo_bpm 0 a beat is half a second) and optionally the effect it gets (none, punch_in, push_in, pull_back, shake, speed_ramp, whip, zoom_through or flash). The plan is a short working note, not an essay: think briefly before you call it, and keep every field brief; a call that is too long is cut off at the output limit and you have to send it again. The creator sees the plan in the run feed. The answer gives you the playbook for the genre you chose, the length of a beat in milliseconds and what your shot list adds up to. You can call it again to change the plan; the last one counts. The first edit_timeline call is refused until you have a plan.",
+      "description": "Write your creative plan before the first edit. It is the understand step: from the footage, the analysis and the brief, say what kind of video this is and what you will make of it. content_type is one of talking, unboxing_product, workout, vlog, tutorial or general (the genre of the footage); playbook is the playbook you will follow (usually the same, general when nothing fits well). story is the video in one line (at most 140 characters), hook what the first 1 to 2 seconds show (at most 140), arc how it builds (at most 240), ending how it ends (at most 140). target_length_s is the length you aim for in whole seconds, 5 to 120. tempo_bpm is the beat grid's tempo, 120 to 128 for a short video cut to music later, or 0 for a video that follows speech and has no beat grid (60 to 200 are allowed). pace is steady, building or fast. shots is the shot list, 1 to 16 shots in order: its role (hook, build, peak, detail, step, reveal, payoff, broll or ending), what it shows in a few words (at most 80 characters), optionally the clip it comes from (asset_id from list_footage), its length in beats (1 to 64; with tempo_bpm 0 a beat is half a second), optionally the effect it gets (none, punch_in, push_in, pull_back, shake, speed_ramp, whip, zoom_through or flash; handheld is the living camera of a tripod shot, camera motion and not an effect) and optionally its chapter (the number of the exercise or step it belongs to in a listicle, 1 to 9, which gets a numbered chapter title). With a song, tempo_bpm is the song's tempo rounded. The plan is a short working note, not an essay: think briefly before you call it, and keep every field brief; a call that is too long is cut off at the output limit and you have to send it again. The creator sees the plan in the run feed. The answer gives you the playbook for the genre you chose, the length of a beat in milliseconds and what your shot list adds up to. You can call it again to change the plan; the last one counts. The first edit_timeline call is refused until you have a plan.",
       "strict": true,
       "input_schema": {
         "type": "object",
@@ -142,8 +166,12 @@
                 },
                 "effect": {
                   "type": "string",
-                  "enum": ["none", "punch_in", "push_in", "pull_back", "shake", "speed_ramp", "whip", "zoom_through", "flash"],
-                  "description": "Optional. The effect the shot gets: none, punch_in, push_in, pull_back, shake, speed_ramp, whip, zoom_through or flash."
+                  "enum": ["none", "punch_in", "push_in", "pull_back", "shake", "speed_ramp", "whip", "zoom_through", "flash", "handheld"],
+                  "description": "Optional. The effect the shot gets: none, punch_in, push_in, pull_back, shake, speed_ramp, whip, zoom_through or flash; or handheld, the living camera of a tripod shot (a slow push and drift: camera motion, not an effect)."
+                },
+                "chapter": {
+                  "type": "integer",
+                  "description": "Optional. In a listicle (several exercises or steps), the number of the chapter the shot belongs to, 1 to 9; the first shot of each chapter gets a numbered chapter title. Leave it out for a video with one subject."
                 }
               },
               "required": ["role", "what", "beats"],

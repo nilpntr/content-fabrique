@@ -82,6 +82,20 @@ func LoadAssetAnalysis(ctx context.Context, src AnalysisSource, ws ids.Workspace
 		}
 		out[r.AssetID.String()] = a
 	}
+	// The camera of each clip (P6-06), from the summaries when the source can read them.
+	if ss, ok := src.(interface {
+		ListAssetAnalysisSummaries(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.AnalysisSummaryRow, error)
+	}); ok {
+		if rows, err := ss.ListAssetAnalysisSummaries(ctx, ws, assets); err == nil {
+			for _, r := range rows {
+				var s analysis.Summary
+				if a, ok := out[r.AssetID.String()]; ok && json.Unmarshal(r.Summary, &s) == nil {
+					a.Camera = s.Camera
+					out[r.AssetID.String()] = a
+				}
+			}
+		}
+	}
 	spans, err := src.ListAssetSpans(ctx, ws, assets)
 	if err != nil {
 		return nil, fmt.Errorf("read the reps and the dead time: %w", err)
@@ -123,6 +137,22 @@ func CheckVersion(ctx context.Context, projects Projects, src AnalysisSource, ws
 		return Report{}, err
 	}
 	in := CheckInput{Version: version, Spec: spec, Plan: plan, Assets: assets, Issues: vd.Issues, Style: style}
+	// The song, when the edit has one and the source can read its analysis (P6-06).
+	if mr, ok := src.(MusicReader); ok {
+		var songs []ids.AssetID
+		for _, it := range timeline.MusicItems(spec) {
+			if ref, ok := it.AssetRef(); ok {
+				if aid, err := ids.ParseAssetID(ref); err == nil {
+					songs = append(songs, aid)
+				}
+			}
+		}
+		if an, err := LoadMusic(ctx, mr, ws, songs); err == nil {
+			in.Music = MusicOnTimeline(spec, an)
+		} else {
+			slog.WarnContext(ctx, "editor: the song's analysis could not be read; the music checks do not apply", "error", err)
+		}
+	}
 	// Where the person is in the clips, for the title checks: read from the quick look when the source can (a source that cannot has none).
 	if rd, ok := src.(subject.Reader); ok {
 		if ix, err := subject.LoadForSpec(ctx, rd, ws, spec); err == nil {
