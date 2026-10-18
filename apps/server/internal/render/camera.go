@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/nilpntr/content-fabrique/internal/subject"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
@@ -85,18 +86,34 @@ func (c *compiler) cameraFor(cl clip) (*camera, error) {
 	}
 	// zoom_through: the outgoing clip zooms in over the first half of the transition and holds, the incoming clip holds
 	// the zoom over the first half and zooms out over the second half, so at the middle of the crossfade both are zoomed.
-	if cl.transition == timeline.TransitionZoomThrough && cl.overlapFrames > 0 {
+	// A punch is the same move, smaller (punchStrength): the outgoing clip scales 1.0 to 1.15 into the cut and the incoming one lands from
+	// 1.15 to the full frame.
+	if s := throughStrength(cl.transition); s > 0 && cl.overlapFrames > 0 {
 		half := float64(cl.overlapFrames) / 2
-		k.zooms = append(k.zooms, fmt.Sprintf("1+%s*pow(1-%s,3)", num(zoomThroughStrength), progress("in-"+num(half), num(half))))
+		k.zooms = append(k.zooms, fmt.Sprintf("1+%s*pow(1-%s,3)", num(s), progress("in-"+num(half), num(half))))
 	}
 	if cl.idx+1 < len(c.clips) {
-		if next := c.clips[cl.idx+1]; next.transition == timeline.TransitionZoomThrough && next.overlapFrames > 0 {
+		if next := c.clips[cl.idx+1]; throughStrength(next.transition) > 0 && next.overlapFrames > 0 {
 			half := float64(next.overlapFrames) / 2
 			start := cl.outFrames - next.overlapFrames
-			k.zooms = append(k.zooms, fmt.Sprintf("1+%s*pow(%s,3)", num(zoomThroughStrength), progress(fmt.Sprintf("in-%d", start), num(half))))
+			k.zooms = append(k.zooms, fmt.Sprintf("1+%s*pow(%s,3)", num(throughStrength(next.transition)), progress(fmt.Sprintf("in-%d", start), num(half))))
 		}
 	}
 	return k, nil
+}
+
+// punchStrength is how far a punch transition scales into the cut (P6-06).
+const punchStrength = 0.15
+
+// throughStrength is the zoom of a transition that zooms through the cut: zoom_through and punch; 0 for the others.
+func throughStrength(transition string) float64 {
+	switch transition {
+	case timeline.TransitionZoomThrough:
+		return zoomThroughStrength
+	case timeline.TransitionPunch:
+		return punchStrength
+	}
+	return 0
 }
 
 // progress is the expression for how far through a window of length `length` the clip is, from 0 to 1.
@@ -140,6 +157,8 @@ func (c *compiler) addMotion(k *camera, cl clip, m timeline.Motion) error {
 		k.zooms = append(k.zooms, fmt.Sprintf("1+%s*(1-%s)", num(s), smooth(progress("in", fmt.Sprintf("%d", last)))))
 	case timeline.MotionShake:
 		return c.addShake(k, cl, s, max(at, 0))
+	case timeline.MotionHandheld:
+		c.addHandheld(k, cl, s, at)
 	default:
 		return fmt.Errorf("%w: clip %s has unknown motion preset %q", ErrInvalidSpec, cl.item.ID, m.Preset)
 	}
@@ -178,4 +197,110 @@ func (c *compiler) addShake(k *camera, cl clip, strength float64, start int64) e
 	k.dx = fmt.Sprintf("%s*(%s)", room("W"), axis("x"))
 	k.dy = fmt.Sprintf("%s*(%s)", room("H"), axis("y"))
 	return nil
+}
+
+// The living camera (P6-06): a tripod shot is given the motion of a hand-held one, so it never sits dead still. The zoom pushes slowly
+// from HandheldBase over the base to the strength (smoothstep over the clip), the window drifts across the room the zoom leaves (from one
+// side to the other, the direction alternating from one clip to the next) and sways slowly on both axes (sines of a fraction of a hertz,
+// phases from a hash of the clip's id), and a punch-in of HandheldPunch lands at at_ms when it is given. The window stays inside the frame
+// at every frame: the drift and the sway together use at most handheldDrift+handheldSway of the room the push leaves.
+const (
+	// HandheldBase is the zoom the living camera starts from, so it has room to drift from the first frame.
+	HandheldBase = 0.03
+	// HandheldPunch is the punch-in of a handheld clip at its at_ms.
+	HandheldPunch = 0.06
+	// handheldDrift and handheldSway are the shares of the horizontal room the drift crosses and the sway uses; handheldSwayY the share of
+	// the vertical room the vertical sway uses.
+	handheldDrift   = 0.55
+	handheldSway    = 0.3
+	handheldSwayY   = 0.4
+	handheldSwayHz  = 0.35
+	handheldSwayYHz = 0.23
+	// handheldMargin is the room kept between the window and the top of the subject (the head, a raised hand or the lift) and the sides of
+	// the head, as a fraction of the frame.
+	handheldMargin = 0.02
+)
+
+func (c *compiler) addHandheld(k *camera, cl clip, strength float64, at int64) {
+	last := max(cl.outFrames-1, 1)
+	punch := 0.0
+	if at >= 0 {
+		punch = HandheldPunch
+	}
+	s, base, punch := c.handheldLimit(cl, strength, punch)
+	p := progress("in", fmt.Sprintf("%d", last))
+	push := fmt.Sprintf("1+%s+%s*%s", num(base), num(round6(s-base)), smooth(p))
+	k.zooms = append(k.zooms, push)
+	if punch > 0 {
+		ramp := punchRampFrames(c.fps)
+		start := max(0, at-ramp)
+		if at == start {
+			k.zooms = append(k.zooms, "1+"+num(punch))
+		} else {
+			k.zooms = append(k.zooms, fmt.Sprintf("1+%s*(1-pow(1-%s,3))", num(punch), progress(fmt.Sprintf("in-%d", start), fmt.Sprintf("%d", at-start))))
+		}
+	}
+	dir := 1.0
+	if cl.idx%2 == 1 {
+		dir = -1
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte("cf-handheld:" + cl.item.ID))
+	seed := h.Sum64()
+	ph1 := float64(seed&0xffff) / 65536 * 2 * math.Pi
+	ph2 := float64((seed>>16)&0xffff) / 65536 * 2 * math.Pi
+	w1 := 2 * math.Pi * handheldSwayHz / float64(c.fps)
+	w2 := 2 * math.Pi * handheldSwayYHz / float64(c.fps)
+	roomX := fmt.Sprintf("W*(1-1/(%s))/2", push)
+	roomY := fmt.Sprintf("H*(1-1/(%s))/2", push)
+	k.dx = fmt.Sprintf("%s*(%s*(2*%s-1)+%s*sin(%s*in+%s))", roomX, num(dir*handheldDrift), p, num(handheldSway), num(round6(w1)), num(round6(ph1)))
+	k.dy = fmt.Sprintf("%s*%s*sin(%s*in+%s)", roomY, num(handheldSwayY), num(round6(w2)), num(round6(ph2)))
+}
+
+// handheldLimit keeps the living camera off the subject: the push (and the punch-in) is limited so that the window, wherever the drift
+// and the sway put it, never crops the top of the subject (the head, a raised hand, the lift) or the sides of the head, with
+// handheldMargin to spare. Without a subject box the strength is as given. It returns the push, the base and the punch to use.
+func (c *compiler) handheldLimit(cl clip, strength, punch float64) (s, base, p float64) {
+	s, base, p = strength, HandheldBase, punch
+	tr := cl.asset.Subject
+	if tr == nil {
+		return s, base, p
+	}
+	rf := timeline.Reframe{Mode: timeline.DefaultReframe}
+	if cl.item.Reframe != nil {
+		rf = *cl.item.Reframe
+	}
+	out := c.spec.Output
+	w, hgt := float64(out.Width), float64(out.Height)
+	src := cl.item.Source
+	maxZ := math.Inf(1)
+	// edge is the free share of the frame on one side, share how many times the room the push leaves the window may move toward it.
+	limit := func(edge, share float64) {
+		if edge <= handheldMargin {
+			maxZ = math.Min(maxZ, 1)
+			return
+		}
+		maxZ = math.Min(maxZ, 1/math.Max(1-2*(edge-handheldMargin)/share, 1e-6))
+	}
+	for _, sm := range tr.Near(src.InMs, src.OutMs) {
+		bx0, by0, bx1, by1 := sm.Body()
+		body := subject.MapBox(bx0, by0, bx1, by1, tr.Aspect, rf, out)
+		hx0, hy0, hx1, hy1 := sm.Head()
+		head := subject.MapBox(hx0, hy0, hx1, hy1, tr.Aspect, rf, out)
+		top := math.Min(float64(body.Top), float64(head.Top)) / hgt
+		limit(top, 1+handheldSwayY)
+		limit(float64(head.Left)/w, 1+handheldDrift+handheldSway)
+		limit(1-float64(head.Right)/w, 1+handheldDrift+handheldSway)
+	}
+	if math.IsInf(maxZ, 1) || (1+s)*(1+p) <= maxZ {
+		return s, base, p
+	}
+	// Too close: the punch goes first, then the push, down to a breath of 1 % (a shot is never dead still, but the head stays whole).
+	p = math.Max(0, maxZ/(1+s)-1)
+	if p < 0.01 {
+		p = 0
+		s = math.Max(maxZ-1, 0.01)
+	}
+	base = math.Min(base, s/2)
+	return round6(s), round6(base), round6(p)
 }

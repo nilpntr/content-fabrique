@@ -38,6 +38,9 @@ type Plan struct {
 	Loudnorm *LoudnormPlan `json:"loudnorm,omitempty"`
 	// SoundReady is true for an edit whose sound is a bed and the effects (P3-12): see SoundReadyEffectGainDB.
 	SoundReady bool `json:"sound_ready,omitempty"`
+	// MusicLed is true for an edit with music in its export (P6-06, D-34): the clips' ambience bed is left out and the music, with any
+	// speech over it (the music ducked under the speech), is the programme.
+	MusicLed bool `json:"music_led,omitempty"`
 	// Bed is the loudness evening of the clips' own sound, nil when no clip is in bed mode.
 	Bed *BedPlan `json:"bed,omitempty"`
 	// StemLabel is the pad of the audio mix without the preview's beat guide ("" when there is no guide): Execute can write it as a

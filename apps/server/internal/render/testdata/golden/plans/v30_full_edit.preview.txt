@@ -75,7 +75,7 @@ filter_complex:
   [2:v]trim=end=3.000,setpts=PTS-STARTPTS,setpts=PTS/0.5,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=180,setpts=PTS-STARTPTS,scale=540:960:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=540:960:x='clip(0.5*iw-270,0,iw-540)':y='clip(0.5*ih-480,0,ih-960)',setsar=1,format=gbrp,curves=all='0/0.07 1/0.93',format=yuv420p,eq=saturation=0.85:contrast=0.95,format=yuv420p,setsar=1,fps=30,settb=AVTB[v2];
   [v0][v1]xfade=transition=fade:duration=0.300000:offset=1.900000[j1];
   [j1][v2]xfade=transition=slideleft:duration=0.200000:offset=4.100000[w2];
-  [w2]gblur=sigma=6:enable='gte(t,4.100000)*lt(t,4.300000)'[vj];
+  [w2]dblur=angle=0:radius=11:enable='gte(t,4.100000)*lt(t,4.300000)',dblur=angle=0:radius=18:enable='gte(t,4.133333)*lt(t,4.266667)',dblur=angle=0:radius=30:enable='gte(t,4.200000)*lt(t,4.233333)'[vj];
   [vj]ass=filename=subs.ass:fontsdir=fonts[vout];
   anullsrc=r=48000:cl=stereo:d=10.100[abed];
   [1:a]atrim=end=3.000,asetpts=PTS-STARTPTS,atempo=1.25,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=-2dB,afade=t=in:st=0:d=0.300000,afade=t=out:st=2.200000:d=0.200000,atrim=end=2.400,asetpts=PTS-STARTPTS,adelay=1900:all=1[as1];

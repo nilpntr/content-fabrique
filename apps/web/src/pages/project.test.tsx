@@ -1,10 +1,10 @@
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { rememberRun } from "@/components/project/last-run";
 import { apiError, type FakeApi, installApi, json, renderApp } from "@/test-api";
 import { ME } from "@/test-clerk";
-import { annotation, annotationId, clip, event, project, projectId, readyRender, render, renderId, run, runId, timelineVersion, versionSummary } from "@/test-fixtures";
+import { annotation, annotationId, clip, event, project, projectId, readyRender, render, renderId, run, runId, timelineVersion, v2Artifacts, v2Run, versionSummary } from "@/test-fixtures";
 import { ProjectPage } from "./project";
 
 vi.mock("@tanstack/react-router", async (original) => ({
@@ -57,10 +57,19 @@ function page(props: Partial<Parameters<typeof ProjectPage>[0]> = {}) {
 
 /** The review screen is up: the versions and their specs have loaded. */
 const reviewUp = () => screen.findByRole("group", { name: "Version" });
-const selectorButton = (version: number) => within(screen.getByRole("group", { name: "Version" })).getByRole("button", { name: new RegExp(`^v${version}`) });
+const selectorButton = (version: number) => within(screen.getByRole("group", { name: "Version" })).getByRole("button", { name: `Version ${version}` });
 const noRenders = { "GET /v1/projects/{id}/renders": apiError(404, "not_found") };
+/** The renders asked for to play a version (the download asks for its own, `profile=final`). */
+const previewCalls = (fake: FakeApi) => fake.callsTo("GET /v1/projects/{id}/renders").filter((call) => call.query.get("profile") === "preview");
+const details = () => screen.getByTestId("project-details") as HTMLDetailsElement;
+/** Opens "Details", as a click on its summary does. */
+const openDetails = () =>
+  act(() => {
+    details().open = true;
+    details().dispatchEvent(new Event("toggle"));
+  });
 
-test("the review shows the latest version: its clip names from the project's footage, and the versions with their change summaries", async () => {
+test("the review shows the latest version: its clip names from the project's footage, and (in Details) the versions with their change summaries", async () => {
   api(noRenders);
   page();
   await reviewUp();
@@ -69,7 +78,11 @@ test("the review shows the latest version: its clip names from the project's foo
   expect(selectorButton(3).getAttribute("aria-pressed")).toBe("true");
   // The filmstrip labels the clip with the asset's title.
   expect(within(screen.getByRole("region", { name: "Timeline" })).getByText("Row 2")).toBeTruthy();
-  const history = screen.getByRole("region", { name: "Versions" });
+  // What changed in the version on screen names the clip, not its id.
+  expect(screen.getByText("Sped Row 2 up to 2x")).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "Versions" })).toBeNull();
+  openDetails();
+  const history = await screen.findByRole("region", { name: "Versions" });
   expect(within(history).getByText("Sped c2 up to 2x")).toBeTruthy();
   expect(within(history).getByText("Removed c1")).toBeTruthy();
   expect(within(history).getByText("Added c2")).toBeTruthy();
@@ -80,10 +93,12 @@ test("with no renders API there is no video, a placeholder that says so, and a n
   api(noRenders);
   page();
   await reviewUp();
-  expect(await screen.findByText(/Video previews aren't available yet/)).toBeTruthy();
+  expect(await screen.findByText(/Videos can't be played here yet/)).toBeTruthy();
   expect(document.querySelector("video")).toBeNull();
-  expect(screen.getByText("No video preview yet")).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Render preview" })).toBeNull();
+  expect(screen.getByText("No video yet")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Show me" })).toBeNull();
+  // No renders, so nothing to download either.
+  expect(screen.queryByTestId("download")).toBeNull();
   expect(screen.getByRole("group", { name: /Timeline tracks/ })).toBeTruthy();
 });
 
@@ -96,12 +111,11 @@ test("a ready preview plays the render's MP4 and uses its time map", async () =>
   page();
   await waitFor(() => expect(document.querySelector("video")?.getAttribute("src")).toBe("https://files.test/preview.mp4"));
   expect(screen.queryByTestId("placeholder-frame")).toBeNull();
-  expect(fake.callsTo("GET /v1/projects/{id}/renders")[0]?.query.get("version")).toBe("3");
-  expect(fake.callsTo("GET /v1/projects/{id}/renders")[0]?.query.get("profile")).toBe("preview");
+  expect(previewCalls(fake)[0]?.query.get("version")).toBe("3");
   await waitFor(() => expect(fake.callsTo("GET /time-map.json")).toHaveLength(1));
   // No notice or button: the video is the answer.
-  expect(screen.queryByRole("button", { name: "Render preview" })).toBeNull();
-  expect(screen.queryByText(/aren't available/)).toBeNull();
+  expect(screen.queryByRole("button", { name: "Show me" })).toBeNull();
+  expect(screen.queryByText(/can't be played here/)).toBeNull();
 });
 
 test("a time map that cannot be fetched falls back to the one made from the spec; the video still plays", async () => {
@@ -116,7 +130,7 @@ test("a time map that cannot be fetched falls back to the one made from the spec
   expect(screen.getByRole("group", { name: /Timeline tracks/ })).toBeTruthy();
 });
 
-test("without a preview, 'Render preview' asks for one; its progress shows, and when it is ready the video appears", async () => {
+test("without a preview, 'Show me' asks for one; its progress shows, and when it is ready the video appears", async () => {
   let polls = 0;
   let queued = false;
   const fake = api({
@@ -128,18 +142,18 @@ test("without a preview, 'Render preview' asks for one; its progress shows, and 
     "GET /v1/renders/{id}": () => (polls++ === 0 ? render({ id: renderId(2), timeline_version: 3, status: "rendering", progress: 40, stage: "rendering" }) : readyRender({ id: renderId(2), timeline_version: 3 })),
   });
   page();
-  expect(await screen.findByText("There is no video preview of v3 yet.")).toBeTruthy();
+  expect(await screen.findByText("Version 3 isn't ready to watch yet.")).toBeTruthy();
 
-  fireEvent.click(screen.getByRole("button", { name: "Render preview" }));
-  const bar = await screen.findByRole("progressbar", { name: "Preview of v3" });
+  fireEvent.click(screen.getByRole("button", { name: "Show me" }));
+  const bar = await screen.findByRole("progressbar", { name: "Preparing Version 3" });
   expect(fake.callsTo("POST /v1/projects/{id}/renders")[0]?.body).toEqual({ version: 3, profile: "preview" });
   // The queued render first, then what the render says when it is fetched.
   expect(bar.getAttribute("aria-valuenow")).toBe("0");
-  await waitFor(() => expect(screen.getByRole("progressbar", { name: "Preview of v3" }).getAttribute("aria-valuenow")).toBe("40"));
-  expect(screen.getByText(/Rendering a preview of v3/)).toBeTruthy();
+  await waitFor(() => expect(screen.getByRole("progressbar", { name: "Preparing Version 3" }).getAttribute("aria-valuenow")).toBe("40"));
+  expect(screen.getByText(/Putting your video together/)).toBeTruthy();
 
   await waitFor(() => expect(document.querySelector("video")?.getAttribute("src")).toBe("https://files.test/preview.mp4"), POLL);
-  expect(screen.queryByRole("progressbar")).toBeNull();
+  expect(screen.queryByRole("progressbar", { name: "Preparing Version 3" })).toBeNull();
 }, 12_000);
 
 test("a failed preview says why and can be tried again; a refused request says why", async () => {
@@ -149,9 +163,9 @@ test("a failed preview says why and can be tried again; a refused request says w
     "POST /v1/projects/{id}/renders": apiError(422, "timeline_invalid"),
   });
   page();
-  expect((await screen.findByRole("alert")).textContent).toBe("The preview of v3 could not be made: a clip it uses is gone.");
+  expect((await screen.findByRole("alert")).textContent).toBe("Version 3 could not be shown: a clip it uses has been deleted.");
   fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-  await waitFor(() => expect(screen.getAllByRole("alert").map((alert) => alert.textContent).join(" ")).toMatch(/a clip it uses has been deleted/));
+  await waitFor(() => expect(screen.getAllByRole("alert").map((alert) => alert.textContent).join(" ")).toMatch(/uses a clip that has been deleted/));
   expect(fake.callsTo("POST /v1/projects/{id}/renders")).toHaveLength(1);
 });
 
@@ -171,20 +185,22 @@ test("a video that will not load (its URL expired) asks for fresh URLs", async (
 test("choosing another version shows it, and asks for that version's preview", async () => {
   const fake = api({ "GET /v1/projects/{id}/renders": { items: [], next_cursor: null } });
   page();
-  expect(await screen.findByText("There is no video preview of v3 yet.")).toBeTruthy();
+  expect(await screen.findByText("Version 3 isn't ready to watch yet.")).toBeTruthy();
 
-  fireEvent.click(within(screen.getByRole("region", { name: "Versions" })).getByRole("button", { name: /^v1/ }));
-  expect(await screen.findByText("There is no video preview of v1 yet.")).toBeTruthy();
+  fireEvent.click(selectorButton(1));
+  expect(await screen.findByText("Version 1 isn't ready to watch yet.")).toBeTruthy();
   expect(selectorButton(1).getAttribute("aria-pressed")).toBe("true");
-  expect(screen.getByText(/You are looking at v1, not the latest version/)).toBeTruthy();
-  expect(fake.callsTo("GET /v1/projects/{id}/renders").map((call) => call.query.get("version"))).toEqual(["3", "1"]);
+  expect(screen.getByText(/You're watching Version 1, not the latest/)).toBeTruthy();
+  expect(previewCalls(fake).map((call) => call.query.get("version"))).toEqual(["3", "1"]);
+  // The download follows the version on screen.
+  expect(screen.getByRole("button", { name: "Download Version 1" })).toBeTruthy();
   // v1 has two clips: both are on its filmstrip.
   const timeline = within(screen.getByRole("region", { name: "Timeline" }));
   expect(timeline.getByText("Row 1")).toBeTruthy();
   expect(timeline.getByText("Row 2")).toBeTruthy();
   // The selector takes it back.
   fireEvent.click(selectorButton(3));
-  expect(await screen.findByText("There is no video preview of v3 yet.")).toBeTruthy();
+  expect(await screen.findByText("Version 3 isn't ready to watch yet.")).toBeTruthy();
   expect(selectorButton(3).getAttribute("aria-pressed")).toBe("true");
 });
 
@@ -250,8 +266,8 @@ test("the project's comments come from the API: yours, a teammate's and the edit
   expect(within(row("Use the other take")).getByText("Teammate")).toBeTruthy();
   expect(within(row("Done: trimmed.")).getByText("Editor")).toBeTruthy();
   expect(within(row("Done: trimmed.")).getByText("Agent reply")).toBeTruthy();
-  expect(within(row("Make the title bigger")).getByText("made on v2")).toBeTruthy();
-  expect(within(row("Make the title bigger")).getAllByText(/Addressed in v3/).length).toBeGreaterThan(0);
+  expect(within(row("Make the title bigger")).getByText("on Version 2")).toBeTruthy();
+  expect(within(row("Make the title bigger")).getAllByText(/Addressed in Version 3|Changed in Version 3/).length).toBeGreaterThan(0);
   expect(within(panel()).queryByText(/aren't saved/)).toBeNull();
 });
 
@@ -318,7 +334,7 @@ test("a comment the API refuses is taken back, with the reason; the others stay"
   await waitFor(() => expect(fake.callsTo("POST /v1/annotations")).toHaveLength(1));
   await waitFor(() => expect(within(panel()).queryByText("Will be refused")).toBeNull());
   expect(within(panel()).getByText("Already saved")).toBeTruthy();
-  expect(within(panel()).getByRole("alert").textContent).toMatch(/role in this workspace can't change this comment/);
+  expect(within(panel()).getByRole("alert").textContent).toMatch(/You can only change your own comments/);
   // Dismissed.
   fireEvent.click(within(panel()).getByRole("button", { name: "Dismiss" }));
   expect(within(panel()).queryByRole("alert")).toBeNull();
@@ -428,41 +444,42 @@ test("if the comments cannot be loaded the review still works and says so", asyn
   expect(screen.getByRole("group", { name: /Timeline tracks/ })).toBeTruthy();
 });
 
-test("edit again starts a run with the new instructions and reports it; the spending cap is shown", async () => {
+test("'Tell me what to change' starts a run with the creator's words and reports it; no dollars are shown", async () => {
   const fake = api({ ...noRenders, "POST /v1/projects/{id}/edit": json(202, run({ id: runId(9), status: "queued" })) });
   const onRunStarted = vi.fn();
   page({ onRunStarted });
   await reviewUp();
-  fireEvent.click(screen.getByRole("button", { name: "Edit again" }));
-  expect(screen.getByText("$5.00")).toBeTruthy();
-  fireEvent.change(screen.getByRole("textbox", { name: /What should change/ }), { target: { value: " Make it shorter " } });
-  fireEvent.click(within(screen.getByRole("form", { name: "Edit again" })).getByRole("button", { name: "Edit again" }));
+  const box = screen.getByRole("textbox", { name: /Tell me what to change/ }) as HTMLTextAreaElement;
+  expect(screen.queryByText(/\$\d/)).toBeNull();
+  fireEvent.change(box, { target: { value: " Make it shorter " } });
+  fireEvent.click(within(screen.getByRole("form", { name: "Tell me what to change" })).getByRole("button", { name: "Make the changes" }));
   await waitFor(() => expect(onRunStarted).toHaveBeenCalledWith(runId(9)));
   expect(fake.callsTo("POST /v1/projects/{id}/edit")[0]?.body).toEqual({ instructions: "Make it shorter" });
   expect(fake.callsTo("POST /v1/projects/{id}/edit")[0]?.path).toBe(`/v1/projects/${P}/edit`);
-  // The form closes.
-  expect(screen.queryByRole("form", { name: "Edit again" })).toBeNull();
+  // The box is emptied for the next round.
+  expect(box.value).toBe("");
 });
 
 test.each([
   [409, "run_in_progress", /still working/],
-  [422, "assets_not_usable", /no ready video clip/],
+  [422, "assets_not_usable", /clips can be used any more/],
   [402, "plan_required", /active plan/],
-  [403, "insufficient_role", /can't start the editor/],
-])("edit again refused with %s %s says why and keeps the instructions", async (status, code, message) => {
+  [403, "insufficient_role", /can't edit videos/],
+])("a change refused with %s %s says why in plain words, with no code, and keeps the text", async (status, code, message) => {
   api({ ...noRenders, "POST /v1/projects/{id}/edit": apiError(status, code) });
   const onRunStarted = vi.fn();
   page({ onRunStarted });
   await reviewUp();
-  fireEvent.click(screen.getByRole("button", { name: "Edit again" }));
-  fireEvent.change(screen.getByRole("textbox", { name: /What should change/ }), { target: { value: "Shorter" } });
-  fireEvent.click(within(screen.getByRole("form", { name: "Edit again" })).getByRole("button", { name: "Edit again" }));
-  expect((await screen.findByRole("alert")).textContent).toMatch(message);
-  expect((screen.getByRole("textbox", { name: /What should change/ }) as HTMLTextAreaElement).value).toBe("Shorter");
+  fireEvent.change(screen.getByRole("textbox", { name: /Tell me what to change/ }), { target: { value: "Shorter" } });
+  fireEvent.click(within(screen.getByRole("form", { name: "Tell me what to change" })).getByRole("button", { name: "Make the changes" }));
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toMatch(message);
+  expect(alert.textContent).not.toContain(code);
+  expect((screen.getByRole("textbox", { name: /Tell me what to change/ }) as HTMLTextAreaElement).value).toBe("Shorter");
   expect(onRunStarted).not.toHaveBeenCalled();
 });
 
-test("while a run is going the panel follows it and Edit again waits; when it finishes the new version appears", async () => {
+test("while a run is going a calm progress card follows it and the change box waits; when it finishes the new version appears", async () => {
   let runPolls = 0;
   let finished = false;
   const fake = api({
@@ -476,17 +493,21 @@ test("while a run is going the panel follows it and Edit again waits; when it fi
   });
   page({ runId: runId(5) });
   await reviewUp();
-  const panel = within(await screen.findByRole("region", { name: "The editor is working" }));
-  expect(panel.getByRole("status").textContent).toBe("Editing the timeline (v2)…");
+  const progress = within(await screen.findByTestId("edit-progress"));
+  // The stage in plain words: no tool, no step, no version number.
+  expect(progress.getByRole("status").textContent).toBe("Cutting to the music…");
+  expect(progress.getByText("Cutting to the music").closest("li")?.getAttribute("data-state")).toBe("current");
+  expect(screen.queryByText(/edit_timeline|Editing the timeline/)).toBeNull();
   expect(selectorButton(2).getAttribute("aria-pressed")).toBe("true");
-  expect(screen.getByRole("button", { name: "Edit again" }).hasAttribute("disabled")).toBe(true);
-  expect(screen.getByText(/You can edit again when it has finished/)).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Make the changes" }).getAttribute("aria-disabled")).toBe("true");
+  expect(screen.getByText(/You can ask for changes when I'm done/)).toBeTruthy();
 
-  // The next poll: the run is done, so the project and its versions are fetched again and the screen reopens on v3.
-  expect(await screen.findByRole("heading", { name: "The editor finished" }, POLL)).toBeTruthy();
+  // The next poll: the run is done, so the project and its versions are fetched again and the screen reopens on v3, with the note.
+  expect(await screen.findByText("Sped the row up.", {}, POLL)).toBeTruthy();
   await waitFor(() => expect(selectorButton(3).getAttribute("aria-pressed")).toBe("true"));
+  expect(screen.queryByTestId("edit-progress")).toBeNull();
   expect(fake.callsTo("GET /v1/projects/{id}/timelines").length).toBeGreaterThan(1);
-  expect(screen.getByRole("button", { name: "Edit again" }).hasAttribute("disabled")).toBe(false);
+  expect(screen.getByRole("button", { name: "Make the changes" }).getAttribute("aria-disabled")).not.toBe("true");
 }, 12_000);
 
 test("a project opened without ?run= follows the run this browser started, else the run that made the latest version", async () => {
@@ -494,7 +515,7 @@ test("a project opened without ?run= follows the run this browser started, else 
   const first = page();
   await reviewUp();
   expect(fake.callsTo("GET /v1/runs/{id}")[0]?.path).toBe(`/v1/runs/${runId(1)}`);
-  expect(await screen.findByRole("heading", { name: "The editor finished" })).toBeTruthy();
+  expect(within(await screen.findByTestId("what-i-made")).getByText("Cut it down to the row.")).toBeTruthy();
   first.unmount();
 
   rememberRun(P, runId(4));
@@ -528,15 +549,15 @@ test("specs are fetched lazily: the latest and the one on screen, and the screen
   const fetched = () => fake.callsTo("GET /v1/projects/{id}/timelines/{version}").map((call) => call.path.split("/").at(-1));
   expect(fetched()).toEqual(["3"]);
 
-  fireEvent.click(within(screen.getByRole("region", { name: "Versions" })).getByRole("button", { name: /^v1/ }));
+  fireEvent.click(selectorButton(1));
   // v1 is on screen but its spec is still on the way: the screen stays, with a small loading line, and v2 is never fetched.
-  expect(await screen.findByText("Loading v1…")).toBeTruthy();
+  expect(await screen.findByText("Loading Version 1…")).toBeTruthy();
   expect(screen.getByRole("group", { name: "Version" })).toBeTruthy();
-  expect(screen.queryByText("Loading v3…")).toBeNull();
+  expect(screen.queryByText("Loading Version 3…")).toBeNull();
   expect(fetched()).toEqual(["3", "1"]);
   release();
-  await waitFor(() => expect(screen.queryByText("Loading v1…")).toBeNull());
-  expect(screen.getByText(/Video previews aren't available yet/)).toBeTruthy();
+  await waitFor(() => expect(screen.queryByText("Loading Version 1…")).toBeNull());
+  expect(screen.getByText(/Videos can't be played here yet/)).toBeTruthy();
   expect(fetched()).toEqual(["3", "1"]);
 });
 
@@ -553,32 +574,33 @@ test("asking for a preview is tracked per version: another version is not shown 
     },
   });
   page();
-  fireEvent.click(await screen.findByRole("button", { name: "Render preview" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Show me" }));
   expect(await screen.findByRole("button", { name: "Starting…" })).toBeTruthy();
-  fireEvent.click(within(screen.getByRole("region", { name: "Versions" })).getByRole("button", { name: /^v2/ }));
-  expect(await screen.findByText("There is no video preview of v2 yet.")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Render preview" }).hasAttribute("disabled")).toBe(false);
+  fireEvent.click(selectorButton(2));
+  expect(await screen.findByText("Version 2 isn't ready to watch yet.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Show me" }).hasAttribute("disabled")).toBe(false);
   finish();
 });
 
-test("before the first cut: a run that is going says it is on its way; with none, the editor can be started", async () => {
+test("before the first cut: a run that is going says so calmly; with none, the first video can be started", async () => {
   const empty = { "GET /v1/projects/{id}": project(1), "GET /v1/projects/{id}/timelines": { items: [], next_before: null } };
   api({ ...empty, "GET /v1/runs/{id}": run({ status: "running" }) });
   page({ runId: runId(1) });
-  expect(await screen.findByRole("heading", { name: "Your first cut is on its way" })).toBeTruthy();
+  expect(await screen.findByRole("heading", { name: "I'm making your video" })).toBeTruthy();
+  expect(screen.getByText("Getting ready…")).toBeTruthy();
   cleanup();
 
   api({ ...empty });
   page();
-  expect(await screen.findByRole("heading", { name: "No cut yet" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Start the editor" })).toBeTruthy();
-  expect(screen.queryByText("Waiting for the editor to start…")).toBeNull();
+  expect(await screen.findByRole("heading", { name: "No video yet" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Make my video" })).toBeTruthy();
+  expect(screen.queryByTestId("edit-progress")).toBeNull();
 });
 
 test("a project that does not exist, or cannot be loaded, says so", async () => {
   const fake = installApi({ "GET /v1/projects/{id}": apiError(404, "not_found") });
   page();
-  expect((await screen.findByRole("alert")).textContent).toContain("We couldn't find this project");
+  expect((await screen.findByRole("alert")).textContent).toContain("We couldn't find this video");
   expect(screen.getByRole("link", { name: /All projects/ }).getAttribute("href")).toBe("/projects");
   cleanup();
 
@@ -587,7 +609,7 @@ test("a project that does not exist, or cannot be loaded, says so", async () => 
   expect((await screen.findByRole("alert")).textContent).toContain("could not be loaded");
 });
 
-test("the header shows the format, the status, the clip count, and the footage lists a clip that is gone", async () => {
+test("the header shows the status in plain words and the clip count; Details has the format and lists a clip that is gone", async () => {
   api({
     ...noRenders,
     "GET /v1/projects/{id}": project(1, {
@@ -602,10 +624,123 @@ test("the header shows the format, the status, the clip count, and the footage l
   page();
   await reviewUp();
   const header = screen.getByRole("heading", { level: 1 }).parentElement as HTMLElement;
-  expect(within(header).getByText("9:16")).toBeTruthy();
-  expect(within(header).getByText("Editing")).toBeTruthy();
+  expect(within(header).getByText("Editing…")).toBeTruthy();
   expect(within(header).getByText("1 clip")).toBeTruthy();
-  fireEvent.click(screen.getByText("Brief and footage"));
-  expect(screen.getByText("Open on the pose")).toBeTruthy();
-  expect(screen.getByText("No longer available")).toBeTruthy();
+  expect(within(header).queryByText("9:16")).toBeNull();
+  openDetails();
+  const inside = within(details());
+  expect(await inside.findByText("Open on the pose")).toBeTruthy();
+  expect(inside.getByText("No longer available")).toBeTruthy();
+  expect(inside.getByText("9:16")).toBeTruthy();
+});
+
+// ── Plain words, Details (the founder's "less dev" pass) ────────────────────
+
+/** A project whose latest version was made by the v2 editor run: plan, two rounds of checks, the finish. */
+function v2Api(extra: Record<string, object> = {}) {
+  return api({
+    ...noRenders,
+    "GET /v1/projects/{id}/timelines": { items: [versionSummary(3, { summary: ["Sped c2 up to 2x"], author_id: runId(1) })], next_before: null },
+    "GET /v1/runs/{id}": v2Run({ timeline_version: 3 }),
+    "GET /v1/runs/{id}/artifacts": v2Artifacts(),
+    ...extra,
+  });
+}
+
+test("Details is collapsed by default: no steps, checks, costs, codes or ids until it is opened", async () => {
+  v2Api();
+  page();
+  await reviewUp();
+  await screen.findByTestId("what-i-made");
+  expect(details().open).toBe(false);
+  expect(within(details()).getByText("Details")).toBeTruthy();
+  // None of the technical side is on the page.
+  expect(screen.queryByTestId("run-cost")).toBeNull();
+  expect(screen.queryByTestId("edit-checks")).toBeNull();
+  expect(screen.queryByTestId("creative-plan")).toBeNull();
+  expect(screen.queryByRole("list", { name: "Steps" })).toBeNull();
+  expect(screen.queryByText(/\$\d/)).toBeNull();
+  expect(screen.queryByText(/run_01|prj_01|toolu_|tool call|Opus/)).toBeNull();
+  // The timeline is for commenting: no effect badges until Details is open.
+  expect(document.querySelector('[data-slot="clip-badges"]')).toBeNull();
+
+  openDetails();
+  expect(details().open).toBe(true);
+  expect(await screen.findByTestId("run-cost")).toBeTruthy();
+  expect(screen.getByTestId("edit-checks")).toBeTruthy();
+  expect(screen.getByTestId("creative-plan")).toBeTruthy();
+  expect(within(details()).getByText(runId(1))).toBeTruthy();
+  // Nothing was deleted, only moved: the closing note is not repeated in Details, and the run's own Stop or answer box is not there.
+  expect(within(details()).queryByTestId("run-summary")).toBeNull();
+});
+
+test("a finished edit says what it made, the self-review in one line with the checks one click away, and the plan as a storyboard", async () => {
+  v2Api();
+  page();
+  const made = await screen.findByTestId("what-i-made");
+  expect(made.textContent).toContain("A 24 second vertical cut of Gino's back day");
+
+  const review = screen.getByTestId("self-review");
+  await waitFor(() => expect(review.textContent).toContain("I fixed 1 thing before showing you this"));
+  const checked = review.querySelector("details") as HTMLDetailsElement;
+  expect(checked.open).toBe(false);
+  // The checks have plain names, never their ids.
+  expect(within(review).getByText("Even brightness")).toBeTruthy();
+  expect(review.textContent).not.toMatch(/brightness_jump|match_exposure/);
+
+  const board = await screen.findByTestId("storyboard");
+  expect(within(board).getByText("Opens on your heaviest lat pulldown lockout, with a quick zoom")).toBeTruthy();
+  expect(within(board).getByText("Ends on your back pose, held, with a flash")).toBeTruthy();
+  expect(board.textContent).not.toMatch(/BPM|beats|hook|punch_in/);
+});
+
+test("a failed edit says why in a sentence, that nothing was charged, and offers one thing to do; the code is only in Details", async () => {
+  const fake = v2Api({
+    "GET /v1/runs/{id}": run({ status: "failed", failure_reason: "budget", events: [event(1, "status", "failed reason=budget limit=dollars")], last_seq: 1 }),
+    "POST /v1/projects/{id}/edit": json(202, run({ id: runId(6), status: "queued" })),
+  });
+  const onRunStarted = vi.fn();
+  page({ onRunStarted });
+  const card = await screen.findByTestId("edit-progress");
+  expect(card.getAttribute("data-state")).toBe("failed");
+  expect(within(card).getByRole("alert").textContent).toBe("This edit was bigger than I could finish in one go. Nothing was charged.");
+  expect(card.textContent).not.toMatch(/budget|dollars|limit/);
+  fireEvent.click(within(card).getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(onRunStarted).toHaveBeenCalledWith(runId(6)));
+  expect(fake.callsTo("POST /v1/projects/{id}/edit")[0]?.body).toEqual({});
+
+  openDetails();
+  expect(await within(details()).findByText("budget")).toBeTruthy();
+});
+
+test("Download makes the full video of the version on screen, follows it, and then links to the file", async () => {
+  let made = false;
+  const fake = api({
+    ...noRenders,
+    "GET /v1/projects/{id}/renders": (call: { query: URLSearchParams }) =>
+      call.query.get("profile") === "final" ? { items: made ? [render({ id: renderId(9), timeline_version: 3, profile: "final", status: "rendering", progress: 30 })] : [], next_cursor: null } : apiError(404, "not_found"),
+    "POST /v1/projects/{id}/renders": () => {
+      made = true;
+      return json(202, render({ id: renderId(9), timeline_version: 3, profile: "final", status: "queued" }));
+    },
+    "GET /v1/renders/{id}": readyRender({ id: renderId(9), timeline_version: 3, profile: "final" }),
+  });
+  page();
+  fireEvent.click(await screen.findByRole("button", { name: "Download video" }));
+  await waitFor(() => expect(fake.callsTo("POST /v1/projects/{id}/renders")[0]?.body).toEqual({ version: 3, profile: "final" }));
+  const link = await screen.findByRole("link", { name: "Download video" });
+  expect(link.getAttribute("href")).toBe("https://files.test/preview.mp4");
+});
+
+test("a download of work that was never paid for says what to do, without the code", async () => {
+  api({
+    ...noRenders,
+    "GET /v1/projects/{id}/renders": (call: { query: URLSearchParams }) => (call.query.get("profile") === "final" ? { items: [], next_cursor: null } : apiError(404, "not_found")),
+    "POST /v1/projects/{id}/renders": apiError(422, "version_not_charged"),
+  });
+  page();
+  fireEvent.click(await screen.findByRole("button", { name: "Download video" }));
+  const alert = await within(screen.getByTestId("download")).findByRole("alert");
+  expect(alert.textContent).toMatch(/can't be downloaded yet.*Ask me for a change/);
+  expect(alert.textContent).not.toContain("version_not_charged");
 });

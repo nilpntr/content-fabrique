@@ -22,7 +22,7 @@ var update = flag.Bool("update", false, "rewrite the golden plans and golden fra
 func renderFixtures(t testing.TB) []string {
 	t.Helper()
 	var names []string
-	for _, list := range []string{"render.txt", "render-text.txt", "render-motion.txt", "render-looks.txt"} {
+	for _, list := range []string{"render.txt", "render-text.txt", "render-motion.txt", "render-looks.txt", "render-camera.txt"} {
 		f, err := os.Open(filepath.Join(fixturesDir, list)) //nolint:gosec // test fixture
 		if err != nil {
 			t.Fatal(err)
@@ -40,8 +40,8 @@ func renderFixtures(t testing.TB) []string {
 		}
 		_ = f.Close()
 	}
-	if len(names) != 34 {
-		t.Fatalf("want 34 render fixtures (20 in render.txt, 6 text and caption fixtures in render-text.txt, 4 motion fixtures in render-motion.txt, 4 look and sound-effect fixtures in render-looks.txt), have %d", len(names))
+	if len(names) != 35 {
+		t.Fatalf("want 35 render fixtures (20 in render.txt, 6 text and caption fixtures in render-text.txt, 4 motion fixtures in render-motion.txt, 4 look and sound-effect fixtures in render-looks.txt, 1 living-camera fixture in render-camera.txt), have %d", len(names))
 	}
 	return names
 }

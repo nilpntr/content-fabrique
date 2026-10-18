@@ -428,3 +428,64 @@ export function useRenderTimeMap(renderId: string | undefined, url: string | und
   return query.data;
 }
 
+/** What the Download button knows about the final video of a version. */
+export type FinalRenderState =
+  | { kind: "loading" }
+  /** The API cannot make final videos (no renders endpoint): the button is not offered. */
+  | { kind: "unavailable" }
+  | { kind: "none" }
+  | { kind: "working"; progress: number }
+  | { kind: "ready"; url: string; render: Render }
+  | { kind: "failed"; render: Render };
+
+/**
+ * The final video of a version (`profile: final`, full size, from the originals): found through the project's render list, followed
+ * through GET /v1/renders/{id} every 2 s while it is made. `requestRender` asks for one. An export costs no credits; the API refuses
+ * one for work that was never paid for (`edit_not_charged`, `version_not_charged`), and `requestError` then carries why.
+ */
+export function useFinalRender(projectId: string, version: number | undefined) {
+  const { userId, orgId, ready } = useScope();
+  const getClient = useApiClient();
+  const queryClient = useQueryClient();
+  const list = useQuery({
+    queryKey: [RENDERS_QUERY_KEY, userId, orgId, projectId, version, "final"],
+    queryFn: ({ signal }) => fetchRenders(getClient(), projectId, version as number, "final", signal),
+    enabled: ready && version !== undefined,
+    retry: (count, error) => !isMissingEndpoint(error) && retryUnlessClientError(count, error),
+  });
+  const chosen = useMemo(() => pickRender((list.data ?? []).filter((render) => render.profile === "final")), [list.data]);
+  const detail = useQuery({
+    queryKey: [RENDER_QUERY_KEY, userId, orgId, chosen?.id],
+    queryFn: ({ signal }) => fetchRender(getClient(), chosen?.id as string, signal),
+    enabled: ready && Boolean(chosen),
+    staleTime: 0,
+    retry: retryUnlessClientError,
+    refetchInterval: (q) => (q.state.data?.status === "queued" || q.state.data?.status === "rendering" ? 2000 : false),
+  });
+  const request = useMutation({
+    mutationFn: (requested: number) => createRender(getClient(), projectId, requested, "final"),
+    onSuccess: (render) => {
+      queryClient.setQueryData([RENDER_QUERY_KEY, userId, orgId, render.id], render);
+      queryClient.setQueryData<Render[]>([RENDERS_QUERY_KEY, userId, orgId, projectId, render.timeline_version, "final"], (old) => [render, ...(old ?? []).filter((candidate) => candidate.id !== render.id)]);
+    },
+  });
+  const asked = request.variables === version;
+
+  let state: FinalRenderState;
+  if (version === undefined) state = { kind: "none" };
+  else if (list.isError) state = isMissingEndpoint(list.error) ? { kind: "unavailable" } : { kind: "none" };
+  else if (list.isPending) state = { kind: "loading" };
+  else if (!chosen) state = { kind: "none" };
+  else {
+    const render = detail.data ?? chosen;
+    if (render.status === "failed") state = { kind: "failed", render };
+    else if (render.status === "ready") state = render.files?.mp4.url ? { kind: "ready", url: render.files.mp4.url, render } : { kind: "loading" };
+    else state = { kind: "working", progress: Math.min(100, Math.max(0, Math.round(render.progress))) };
+  }
+  const { mutate } = request;
+  const requestRender = useCallback(() => {
+    if (version !== undefined) mutate(version);
+  }, [mutate, version]);
+  return { state, requestRender, requesting: request.isPending && asked, requestError: request.isError && asked ? request.error : undefined };
+}
+

@@ -151,7 +151,13 @@ func (h *Runs) startEdit(ctx context.Context, req api.StartEditRequestObject) (s
 	if in.Instructions != nil {
 		instructions = *in.Instructions
 	}
-	input, err := editor.NewInput(instructions)
+	vibe := ""
+	if in.Vibe != nil {
+		if vibe = string(*in.Vibe); !editor.ValidVibe(vibe) {
+			return store.AgentRun{}, bad("vibe must be one of " + fmt.Sprint(editor.Vibes))
+		}
+	}
+	input, err := editor.NewEditInput(instructions, vibe)
 	if err != nil {
 		return store.AgentRun{}, bad("instructions must be text of at most 2,000 characters")
 	}

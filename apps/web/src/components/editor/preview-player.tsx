@@ -30,10 +30,20 @@ export interface PreviewPlayerProps {
   onPinModeChange: (on: boolean) => void;
   onPlacePin: (pin: Pin) => void;
   pins: FramePin[];
+  /** The video as a creator sees it on their phone: big, its own shape, with play, time and scrub. No frame stepping, no timecodes. */
+  simple?: boolean;
 }
 
-export function PreviewPlayer({ player, version, src, assetNames, placeholderLabel, onVideoError, pinMode, onPinModeChange, onPlacePin, pins }: PreviewPlayerProps) {
+/** "0:07". */
+const clock = (ms: number): string => {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+};
+
+export function PreviewPlayer({ player, version, src, assetNames, placeholderLabel, onVideoError, pinMode, onPinModeChange, onPlacePin, pins, simple = false }: PreviewPlayerProps) {
   const [w, h] = RATIO[version.output.format];
+  // A simple player hugs the video: the card is as wide as the frame, which is as tall as the screen allows.
+  const frameWidth = `min(100%, calc(var(--stage-h) * ${w} / ${h}))`;
 
   const frameClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     if (!pinMode) return player.toggle();
@@ -43,14 +53,22 @@ export function PreviewPlayer({ player, version, src, assetNames, placeholderLab
   };
 
   return (
-    <div className="overflow-hidden rounded-xl bg-surface-raised shadow-soft ring-1 ring-border">
+    <div
+      data-variant={simple ? "simple" : "detailed"}
+      className={cn(
+        "overflow-hidden bg-surface-raised shadow-soft ring-1 ring-border",
+        simple ? "mx-auto rounded-[22px] [--stage-h:min(68svh,40rem)] md:mx-0" : "rounded-xl [--stage-h:min(52svh,34rem)]",
+      )}
+      // A width with no percentage, so that a grid column sized to its content gets the frame's width; max-width keeps it on a phone.
+      style={simple ? { width: `calc(var(--stage-h) * ${w} / ${h})`, maxWidth: "100%" } : undefined}
+    >
       <div
-        className="flex items-center justify-center bg-neutral-950 p-3 [--stage-h:min(52svh,34rem)]"
-        style={{ minHeight: "calc(var(--stage-h) + 1.5rem)" }}
+        className={cn("flex items-center justify-center", simple ? "bg-black" : "bg-neutral-950 p-3")}
+        style={simple ? undefined : { minHeight: "calc(var(--stage-h) + 1.5rem)" }}
       >
         <div
-          className="relative overflow-hidden rounded-lg bg-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]"
-          style={{ aspectRatio: `${w} / ${h}`, width: `min(100%, calc(var(--stage-h) * ${w} / ${h}))` }}
+          className={cn("relative overflow-hidden bg-black", simple ? "w-full" : "rounded-lg shadow-[0_0_0_1px_rgba(255,255,255,0.08)]")}
+          style={{ aspectRatio: `${w} / ${h}`, width: simple ? undefined : frameWidth }}
         >
           {src ? (
             // biome-ignore lint/a11y/useMediaCaption: a work-in-progress preview has no captions track.
@@ -104,13 +122,17 @@ export function PreviewPlayer({ player, version, src, assetNames, placeholderLab
         >
           {player.playing ? <Pause /> : <Play />}
         </Button>
-        <Button variant="ghost" size="icon" aria-label="Previous frame" title="Previous frame (,)" onClick={() => player.step(-1)}>
-          <ChevronLeft />
-        </Button>
-        <Button variant="ghost" size="icon" aria-label="Next frame" title="Next frame (.)" onClick={() => player.step(1)}>
-          <ChevronRight />
-        </Button>
-        <PlayheadControls player={player} />
+        {simple ? null : (
+          <>
+            <Button variant="ghost" size="icon" aria-label="Previous frame" title="Previous frame (,)" onClick={() => player.step(-1)}>
+              <ChevronLeft />
+            </Button>
+            <Button variant="ghost" size="icon" aria-label="Next frame" title="Next frame (.)" onClick={() => player.step(1)}>
+              <ChevronRight />
+            </Button>
+          </>
+        )}
+        <PlayheadControls player={player} simple={simple} />
         <Button
           variant={pinMode ? "default" : "secondary"}
           size="sm"
@@ -121,7 +143,7 @@ export function PreviewPlayer({ player, version, src, assetNames, placeholderLab
           onClick={() => onPinModeChange(!pinMode)}
         >
           <MapPin />
-          <span className="hidden sm:inline">Pin</span>
+          <span className={simple ? "sr-only" : "hidden sm:inline"}>Pin</span>
         </Button>
       </div>
     </div>
@@ -170,12 +192,13 @@ function PlaceholderFrame({
 }
 
 /** The clock and the scrub slider: the parts of the controls that follow the playhead. */
-function PlayheadControls({ player }: { player: PlayerController }) {
+function PlayheadControls({ player, simple = false }: { player: PlayerController; simple?: boolean }) {
   const currentMs = usePlayhead(player);
+  const time = simple ? clock : formatTimecode;
   return (
     <>
-      <output className="font-mono text-[12.5px] tabular-nums text-muted-foreground" aria-label="Playhead">
-        <span className="text-foreground">{formatTimecode(currentMs)}</span> / {formatTimecode(player.durationMs)}
+      <output className={cn("text-[12.5px] tabular-nums text-muted-foreground", !simple && "font-mono")} aria-label="Playhead">
+        <span className="text-foreground">{time(currentMs)}</span> / {time(player.durationMs)}
       </output>
       <input
         type="range"
@@ -185,7 +208,7 @@ function PlayheadControls({ player }: { player: PlayerController }) {
         step={1}
         value={currentMs}
         onChange={(event) => player.seek(Number(event.target.value))}
-        className="order-last h-5 min-w-40 basis-full cursor-pointer accent-brand sm:order-none sm:flex-1 sm:basis-0"
+        className={cn("h-5 cursor-pointer accent-brand", simple ? "order-last min-w-0 basis-full" : "order-last min-w-40 basis-full sm:order-none sm:flex-1 sm:basis-0")}
       />
     </>
   );

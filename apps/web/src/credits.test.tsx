@@ -58,44 +58,45 @@ test("the chip is not there without a balance", () => {
 
 test("the shell has no credits chip until /v1/me reports a balance, and then shows it", async () => {
   installApi({ "GET /v1/me": ME });
-  renderAt("/reports");
-  await screen.findByRole("heading", { name: "Reports" });
+  renderAt("/settings");
+  await screen.findByRole("heading", { name: "Settings" });
   await screen.findByTestId("sidebar-workspace");
   expect(screen.queryByTestId("credits-chip")).toBeNull();
 
   act(() => root?.unmount());
   installApi({ "GET /v1/me": { ...ME, credits: CREDITS } });
-  renderAt("/reports");
+  renderAt("/settings");
   const chip = await screen.findByTestId("credits-chip");
   expect(chip.getAttribute("data-state")).toBe("ok");
-  expect(chip.textContent).toContain("42");
+  // Counted in videos: 42 credits are 4 whole videos.
+  expect(chip.textContent).toContain("4 videos");
   expect(chip.getAttribute("aria-label")).toBe(creditsSummary(CREDITS as never));
   expect(chip.getAttribute("href")).toBe("/settings");
 });
 
 test("a nearly used allowance and an empty one change the chip", async () => {
   installApi({ "GET /v1/me": { ...ME, credits: { ...CREDITS, available: 6, low: true } } });
-  renderAt("/reports");
+  renderAt("/settings");
   expect((await screen.findByTestId("credits-chip")).getAttribute("data-state")).toBe("low");
 
   act(() => root?.unmount());
   installApi({ "GET /v1/me": { ...ME, credits: { ...CREDITS, available: 0, low: true } } });
-  renderAt("/reports");
+  renderAt("/settings");
   await waitFor(() => expect(screen.getByTestId("credits-chip").getAttribute("data-state")).toBe("empty"));
 });
 
-test("the summary names what is left, the allowance and the renewal", () => {
-  expect(creditsSummary({ available: 1, allowance: 0, period_end: null, low: false, top_ups: [] })).toBe("1 credit left");
-  expect(creditsSummary({ ...CREDITS, period_end: "2099-11-14T00:00:00Z" })).toBe("42 credits left, 60 in this period's allowance, renews 14 Nov 2099");
+test("the summary names what is left in videos, the exact credits and the renewal", () => {
+  expect(creditsSummary({ available: 1, allowance: 0, period_end: null, low: false, top_ups: [] })).toBe("Enough for a few changes (1 credit)");
+  expect(creditsSummary({ ...CREDITS, period_end: "2099-11-14T00:00:00Z" })).toBe("≈ 4 videos left this month (42 credits), renews 14 Nov 2099");
 });
 
 test("Settings spells the balance out, with the top-ups, and has no card without one", async () => {
   installApi({ "GET /v1/me": { ...ME, credits: { ...CREDITS, available: 12, low: true } } });
   renderAt("/settings");
   const card = await screen.findByTestId("credits-card");
-  expect(card.textContent).toContain("12");
+  expect(card.textContent).toContain("≈ 1 video left this month");
   expect(card.textContent).toContain("Running low");
-  expect(card.textContent).toContain("48 of 60 used this period");
+  expect(card.textContent).toContain("12 credits left of 60 this month");
   expect(card.textContent).toContain("20 credits");
   expect(card.textContent).toContain("valid until 1 Dec 2099");
 
@@ -136,29 +137,29 @@ test("any call refused with 402 credits_exhausted announces it, and a 402 plan_r
 
 test("the out-of-credits dialog says what happened, what is left and when it renews, and closes", async () => {
   installApi({ "GET /v1/me": { ...ME, credits: { ...CREDITS, available: 1 } } });
-  renderAt("/reports");
+  renderAt("/settings");
   await screen.findByTestId("credits-chip");
   act(() => announceCreditsExhausted());
   const dialog = await screen.findByRole("dialog");
-  expect(dialog.textContent).toContain("You're out of credits");
+  expect(dialog.textContent).toContain("You've used up your videos for now");
   expect(dialog.textContent).toContain("Nothing was charged");
-  expect(dialog.textContent).toContain("renews on 14 Nov 2099");
+  expect(dialog.textContent).toContain("You get new ones on 14 Nov 2099");
   expect(dialog.textContent).toContain("1 credit left");
   fireEvent.click(screen.getByRole("button", { name: "Close", hidden: false }));
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 
 test("starting an edit with no credits says so, and a missing plan still says that", () => {
-  expect(startEditMessage(new ApiError(402, "credits_exhausted", ""))).toBe("Your workspace doesn't have enough credits for an edit.");
-  expect(startEditMessage(new ApiError(402, "plan_required", ""))).toBe("Your workspace needs an active plan to use the editor.");
+  expect(startEditMessage(new ApiError(402, "credits_exhausted", ""))).toBe("You've used up your videos for now. See your plan in Settings.");
+  expect(startEditMessage(new ApiError(402, "plan_required", ""))).toBe("You need an active plan to edit videos. Choose one in Settings.");
 });
 
 test("the dialog works without a balance too", async () => {
   installApi({ "GET /v1/me": ME });
-  renderAt("/reports");
+  renderAt("/settings");
   await screen.findByTestId("sidebar-workspace");
   act(() => announceCreditsExhausted());
   const dialog = await screen.findByRole("dialog");
-  expect(dialog.textContent).toContain("You're out of credits");
-  expect(dialog.textContent).not.toContain("renews");
+  expect(dialog.textContent).toContain("You've used up your videos for now");
+  expect(dialog.textContent).not.toContain("new ones on");
 });

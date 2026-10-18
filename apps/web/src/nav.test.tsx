@@ -24,10 +24,10 @@ function Layout() {
   );
 }
 
-// The nav items point at /, /reports, /settings, /projects and /projects/new; this tree adds children and a page outside the nav.
+// The nav items point at /, /settings, /library, /projects and /projects/new; this tree adds children and a page outside the nav.
 async function activeAt(path: string) {
   const rootRoute = createRootRoute({ component: Layout });
-  const routes = ["/", "/reports", "/settings", "/reports/$id", "/projects", "/projects/new", "/projects/$id", "/elsewhere"].map((to) =>
+  const routes = ["/", "/library", "/settings", "/settings/$id", "/projects", "/projects/new", "/projects/$id", "/elsewhere"].map((to) =>
     createRoute({ getParentRoute: () => rootRoute, path: to, component: () => null }),
   );
   const router = createRouter({
@@ -43,19 +43,19 @@ async function activeAt(path: string) {
 }
 
 test("an exact path activates its item", async () => {
-  expect(await activeAt("/reports")).toBe("Reports");
+  expect(await activeAt("/settings")).toBe("Settings");
 });
 
 test("a trailing slash does not matter", async () => {
-  expect(await activeAt("/reports/")).toBe("Reports");
+  expect(await activeAt("/settings/")).toBe("Settings");
 });
 
 test("a child route keeps its parent's item active", async () => {
-  expect(await activeAt("/reports/42")).toBe("Reports");
+  expect(await activeAt("/settings/42")).toBe("Settings");
 });
 
 test("/ is active only on /, not on every page", async () => {
-  expect(await activeAt("/")).toBe("Overview");
+  expect(await activeAt("/")).toBe("Home");
 });
 
 test("a page outside the nav has no active item", async () => {
@@ -63,15 +63,15 @@ test("a page outside the nav has no active item", async () => {
 });
 
 test("an unknown child path (a 404) activates nothing", async () => {
-  expect(await activeAt("/reports/a/b")).toBe("none");
+  expect(await activeAt("/settings/a/b")).toBe("none");
 });
 
 test("a lookalike path is not a child", async () => {
-  expect(await activeAt("/reportsx")).toBe("none");
+  expect(await activeAt("/settingsx")).toBe("none");
 });
 
-test("a nested nav item wins over its parent: /projects/new is New project", async () => {
-  expect(await activeAt("/projects/new")).toBe("New project");
+test("a nested nav item wins over its parent: /projects/new is New video", async () => {
+  expect(await activeAt("/projects/new")).toBe("New video");
 });
 
 test("the parent of a nested nav item is active on its own page and on its children", async () => {
@@ -80,4 +80,9 @@ test("the parent of a nested nav item is active on its own page and on its child
 
 test("a project page (/projects/<id>) belongs to Projects", async () => {
   expect(await activeAt("/projects/prj_1")).toBe("Projects");
+});
+
+test("only pages that do something are in the nav", async () => {
+  const { NAV_ITEMS } = await import("./nav");
+  expect(NAV_ITEMS.map((item) => item.title)).toEqual(["Home", "Projects", "New video", "Library", "Settings"]);
 });

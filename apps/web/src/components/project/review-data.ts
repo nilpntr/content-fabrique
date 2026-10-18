@@ -13,7 +13,16 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 const num = (value: unknown): number | undefined => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
 
 type Blend = Exclude<TransitionIn["type"], "cut">;
-const BLENDS: ReadonlySet<string> = new Set<Blend>(["crossfade", "dip_to_black", "whip", "whip_left", "whip_right", "zoom_through", "flash"]);
+const BLENDS: ReadonlySet<string> = new Set<Blend>([
+  "crossfade",
+  "dip_to_black",
+  "whip",
+  "whip_left",
+  "whip_right",
+  "zoom_through",
+  "flash",
+  "punch",
+]);
 const isBlend = (value: unknown): value is Blend => typeof value === "string" && BLENDS.has(value);
 
 /** The points of a speed ramp (P3-10), or undefined when `value` is not a usable one. */
@@ -138,6 +147,21 @@ export function markersOf(spec: unknown): BeatMarker[] {
   return out.sort((a, b) => a.at_ms - b.at_ms);
 }
 
+/** The texts on screen (the `text` tracks: titles, captions), in time order. */
+export function textItems(spec: unknown): { at_ms: number; text: string }[] {
+  if (!isRecord(spec) || !Array.isArray(spec.tracks)) return [];
+  const out: { at_ms: number; text: string }[] = [];
+  for (const track of spec.tracks) {
+    if (!isRecord(track) || track.type !== "text" || !Array.isArray(track.items)) continue;
+    for (const raw of track.items) {
+      const at = isRecord(raw) ? num(raw.at_ms) : undefined;
+      if (at === undefined || !isRecord(raw) || typeof raw.text !== "string" || raw.text.trim() === "") continue;
+      out.push({ at_ms: at, text: raw.text.trim() });
+    }
+  }
+  return out.sort((a, b) => a.at_ms - b.at_ms);
+}
+
 /** Where the last clip ends: the length of the video. */
 export function specDurationMs(items: readonly VideoItem[]): number {
   return items.reduce((end, item) => Math.max(end, item.at_ms + itemOutputDurationMs(item)), 0);
@@ -221,6 +245,7 @@ export function toReviewVersion(input: VersionInputs, projectFormat: OutputForma
     items,
     sfx: sfxItems(input.version.spec),
     markers: markersOf(input.version.spec),
+    texts: textItems(input.version.spec),
     time_map: timeMap,
     ...(input.previewUrl ? { preview_url: input.previewUrl } : {}),
   };

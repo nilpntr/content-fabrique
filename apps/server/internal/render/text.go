@@ -26,7 +26,8 @@ type mappedWord struct {
 // Warning is something the renderer left out of the picture because it could not be drawn safely. Compile does not fail for it:
 // the rest of the render is fine, and the caller shows the warning (the editor agent reads it).
 type Warning struct {
-	// Code is text_dropped, caption_dropped, text_moved or text_over_subject.
+	// Code is text_dropped, caption_dropped, text_moved, text_retimed (shown at another time, where it is clear of the person) or
+	// text_over_subject (left out: it would cover the person at every time).
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
@@ -48,28 +49,41 @@ func (c *compiler) subtitles() (*Subtitles, error) {
 		switch tr := t.(type) {
 		case *timeline.TextTrack:
 			for _, it := range tr.Items {
-				var obstacles []timeline.Subject
-				if it.AvoidsSubject() && len(subjects) > 0 {
-					obstacles = subject.Regions(c.spec, subjects.Lookup, it.AtMs, it.AtMs+it.DurationMs)
+				var lookup subject.Lookup
+				if len(subjects) > 0 {
+					lookup = subjects.Lookup
 				}
-				pl, av, err := timeline.PlaceTextAvoiding(out, it, obstacles)
+				// A character the font cannot draw is left out of the text, as the layout never measured it.
+				if pl, err := timeline.PlaceText(out, it); err == nil {
+					if bad := pl.Style.Unsupported(it.Text); len(bad) > 0 {
+						it.Text = dropUnsupported(pl.Style, it.Text)
+					}
+				}
+				// Never over the person's body (P6-06): where there is no room at the item's own time, it is shown in the part of its time
+				// that has room, or at the nearest time that has, or it is left out.
+				fit, err := subject.FitText(c.spec, lookup, it, c.totalMs)
 				if err != nil {
 					return nil, fmt.Errorf("%w: text item %s: %w", ErrInvalidSpec, it.ID, err)
 				}
-				// A character the font cannot draw is left out of the text, as the layout never measured it.
-				if bad := pl.Style.Unsupported(it.Text); len(bad) > 0 {
-					it.Text = dropUnsupported(pl.Style, it.Text)
-					if pl, av, err = timeline.PlaceTextAvoiding(out, it, obstacles); err != nil {
-						return nil, fmt.Errorf("%w: text item %s: %w", ErrInvalidSpec, it.ID, err)
+				pl, av := fit.Placement, fit.Avoidance
+				switch fit.How {
+				case subject.FitDropped:
+					what := "body"
+					if av.OverHead {
+						what = "head"
 					}
+					b.warn("text_over_subject", "text item %s is left out: it would cover the subject's %s and there is no room above the head, beside it or below the person at any time of the video", it.ID, what)
+					continue
+				case subject.FitTrimmed, subject.FitMoved:
+					verb := "shortened"
+					if fit.How == subject.FitMoved {
+						verb = "moved"
+					}
+					b.warn("text_retimed", "text item %s was %s to %d-%d ms, where it fits clear of the subject (at %d-%d ms it would cover their body)",
+						it.ID, verb, fit.AtMs, fit.AtMs+fit.DurationMs, it.AtMs, it.AtMs+it.DurationMs)
+					it.AtMs, it.DurationMs = fit.AtMs, fit.DurationMs
 				}
 				switch {
-				case av.OverHead:
-					b.warn("text_over_subject", "text item %s covers the subject's head and could not be moved off it inside the safe zone", it.ID)
-				case av.OverBody && av.Where == timeline.WhereBelowHead:
-					b.warn("text_over_subject", "text item %s is below the subject's head, over their body: there is no room above the head or below the body inside the safe zone", it.ID)
-				case av.OverBody:
-					b.warn("text_over_subject", "text item %s is off the subject's head but still covers their body", it.ID)
 				case av.Overlapped && av.Where == timeline.WhereSmaller:
 					b.warn("text_moved", "text item %s was shrunk to scale %g to keep it clear of the subject", it.ID, av.Scale)
 				case av.Overlapped:
@@ -80,7 +94,7 @@ func (c *compiler) subtitles() (*Subtitles, error) {
 					b.warn("text_dropped", "text item %s is left out: its %d x %d px box cannot be put inside the %s safe zone", it.ID, pl.Box.Width(), pl.Box.Height(), out.Format)
 					continue
 				}
-				b.addText(layerText, timeline.Frame(it.AtMs, c.fps), timeline.Frame(it.AtMs+it.DurationMs, c.fps), pl.Layout, pl.Zone, box, it.AnimationOrDefault(), pl.Align)
+				b.addText(layerText, timeline.Frame(it.AtMs, c.fps), timeline.Frame(it.AtMs+it.DurationMs, c.fps), pl.Layout, pl.Zone, box, it.AnimationOrDefault(), it.Exit, pl.Align)
 			}
 		case *timeline.CaptionsTrack:
 			if tr.Enabled {
@@ -99,7 +113,7 @@ func (c *compiler) subtitles() (*Subtitles, error) {
 		lay := style.Measure(st, out.ShortSide(), "PREVIEW", style.MaxBoxWidth(zone, out.Width))
 		w, h := lay.Box()
 		if box, ok := zone.Fit(style.PlaceWatermark(zone, w, h)); ok {
-			b.addText(layerWatermark, 0, c.total, lay, zone, box, style.AnimNone, style.AlignCenter)
+			b.addText(layerWatermark, 0, c.total, lay, zone, box, style.AnimNone, style.ExitNone, style.AlignCenter)
 		}
 	}
 	c.plan.Warnings = append(c.plan.Warnings, b.warnings...)

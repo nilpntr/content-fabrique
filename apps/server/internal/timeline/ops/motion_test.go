@@ -34,6 +34,26 @@ func TestSetMotion(t *testing.T) {
 			t.Fatal("none must remove the motion from the spec")
 		}
 	})
+	t.Run("handheld, on one clip with a punch-in and without an id on every clip", func(t *testing.T) {
+		out := mustApply(t, base, `[{"op":"set_motion","preset":"handheld"},{"op":"set_motion","id":"c2","preset":"handheld","at_ms":1000}]`)
+		cs := clips(t, out)
+		for i, c := range cs {
+			if c.Motion == nil || c.Motion.Preset != timeline.MotionHandheld {
+				t.Fatalf("clip %d: %+v", i, c.Motion)
+			}
+		}
+		if cs[1].Motion.AtMs == nil || *cs[1].Motion.AtMs != 1000 || cs[0].Motion.AtMs != nil {
+			t.Fatalf("at_ms: %+v %+v", cs[0].Motion, cs[1].Motion)
+		}
+		// at_ms belongs to one clip.
+		if _, res := apply(t, base, `[{"op":"set_motion","preset":"handheld","at_ms":100}]`); res.OK() || res.Errors()[0].Code != CodeBadArgument {
+			t.Fatalf("%+v", res.Issues)
+		}
+		// none without an id clears every clip.
+		if out = mustApply(t, out, `[{"op":"set_motion","preset":"none"}]`); clips(t, out)[0].Motion != nil || clips(t, out)[2].Motion != nil {
+			t.Fatal("none without an id must clear every clip")
+		}
+	})
 	t.Run("does not change the timing", func(t *testing.T) {
 		out := mustApply(t, base, `[{"op":"set_motion","id":"c1","preset":"push_in"}]`)
 		if got := clipTimes(t, out); got != "c1:0-3000 c2:3000-7000 c3:7000-10000" {

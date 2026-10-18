@@ -234,7 +234,7 @@ func TestAudioChecks(t *testing.T) {
 		{"licensed track on an asset without a licence record", licensed("s1", assetNoRights, 0, 0, nil), []Code{CodeUnlicensedAudio}},
 		{"licensed track on an attested asset", licensed("s1", assetAttested, 0, 0, nil), []Code{CodeUnlicensedAudio}},
 		{"licensed track on a video asset", licensed("s1", assetVideo60, 0, 0, nil), []Code{CodeWrongAssetKind}},
-		{"creator audio on a video asset", creator("s1", assetVideo60, 0, 0, nil), []Code{CodeWrongAssetKind}},
+		{"creator audio on a video asset (the sound of a video of theirs, D-34)", creator("s1", assetVideo60, 0, 0, nil), nil},
 		{"licensed track on an unknown asset", licensed("s1", assetUnknown, 0, 0, nil), []Code{CodeUnknownAsset}},
 		{"creator audio with an attestation", creator("s1", assetAttested, 0, 0, nil), nil},
 		{"creator audio without an attestation", creator("s1", assetNoRights, 0, 0, nil), []Code{CodeUnlicensedAudio}},

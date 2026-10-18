@@ -26,10 +26,11 @@ func CatalogOf(rows []store.ProjectCatalogRow) Catalog { return catalogOf(rows) 
 
 // catalogOf builds the catalog from the rows ListProjectCatalogAssets returned.
 //
-// Rights: the rights field applies to audio (D-03). A creator's own upload is not licensed, and the attestation that
-// would make it "attested" (the creator says they own it) has no record in the database yet, so every asset is "none"
-// here: a creator_audio item on it is an unlicensed_audio error, which is the safe answer until that record exists
-// (the timeline note, section 3). Image assets are not part of the catalog; the timeline has no image items.
+// Rights: the rights field applies to audio (D-03). A creator's own upload is never "licensed" (no licence record exists),
+// so a licensed_track on it stays an unlicensed_audio error. It is "attested" (D-34): the creator uploaded it into their
+// workspace and is responsible for the rights to the music they upload or the sound of their own videos they use, so a
+// creator_audio item may play it. A trend sound stays a cue (D-03). Image assets are not part of the catalog; the
+// timeline has no image items.
 func catalogOf(rows []store.ProjectCatalogRow) Catalog {
 	c := make(Catalog, len(rows))
 	for _, r := range rows {
@@ -45,7 +46,7 @@ func catalogOf(rows []store.ProjectCatalogRow) Catalog {
 		if r.DurationMs == nil || *r.DurationMs <= 0 {
 			continue
 		}
-		c[r.AssetID.String()] = timeline.Asset{DurationMs: *r.DurationMs, Kind: kind, Rights: timeline.RightsNone, Title: r.Title}
+		c[r.AssetID.String()] = timeline.Asset{DurationMs: *r.DurationMs, Kind: kind, Rights: timeline.RightsAttested, Title: r.Title}
 	}
 	return c
 }

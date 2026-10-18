@@ -4,7 +4,7 @@
 
 ## 1. Why
 
-The founder, after the first edits with the creator's style: the edits feel static, with "no visual effects on entering the text in the screen". Titles today are ASS subtitles with `fade`, `pop_in`, `slide_up` and `typewriter`: one line of type that appears. The references for the feel are herk-edit-kit's `MOTION_PHILOSOPHY.md` (type is a character: word-by-word reveals with scale and blur, motion blur on movement, something new every 0.3 to 0.6 s, holds long enough to read) and open-edit's renderer (HTML compositions rendered in headless Chrome on a virtual clock, frame-exact, with transparency).
+The founder, after the first edits with the creator's style: the edits feel static, with "no visual effects on entering the text in the screen". Titles were ASS subtitles with `fade`, `pop_in`, `slide_up` and `typewriter`; P6-06 (D-34) added a `pop` entrance and exits to them. That is still one block of type that appears and leaves. The references for the feel are herk-edit-kit's `MOTION_PHILOSOPHY.md` (type is a character: word-by-word reveals with scale and blur, motion blur on movement, something new every 0.3 to 0.6 s, holds long enough to read) and open-edit's renderer (HTML compositions rendered in headless Chrome on a virtual clock, frame-exact, with transparency).
 
 What we want is designer-grade type motion (per-word overshoot, blur-in, masked wipes, a marker swipe, a number that counts, letters that drop) that lands on the beat, that the editor can choose and parameterise, and that renders deterministically inside the media sandbox.
 
@@ -12,15 +12,15 @@ What we want is designer-grade type motion (per-word overshoot, blur-in, masked 
 
 The editor never writes HTML, CSS or JavaScript. It writes a **graphics item** on the timeline: a template from a versioned library and its params, validated by the timeline schema like every other field (D-02). The library is ours, reviewed, golden-tested and versioned with the server.
 
-| Template | What it does | Accents land | ASS fallback |
+| Template | What it does | Accents land | ASS fallback (entrance, exit) |
 |---|---|---|---|
-| `title_pop` | word by word: each word scales up from 0.55 with a blur, overshoots and settles; then floats and pulses on the beat; leaves last word first | word *i* (its overshoot peak) on accent *i*; the accents after the last word pulse the title | `pop_in` |
-| `blur_in` | the title sharpens out of a blur while it drifts into place, line by line; no overshoot | line *i* sharp on accent *i* | `fade` |
-| `chapter_card` | "1. SHRUGS VOOR UPPER TRAPS": the number pops first in the accent colour with a small turn, then the line sweeps in word by word from behind a hard edge; `two_line` puts the number on its own line | number on the first, sweep on the second | `slide_up` |
-| `highlight_word` | the line rises in, then a slanted marker in the accent colour swipes in behind one word, which turns to the colour that reads on it | marker on the first | `fade` |
-| `counter` | "0 → 12 REPS": tabular digits count with an ease-out and land with a pop; the label slides in next to them | the count lands on the first | `pop_in` |
-| `lower_label` | a small label on a plate: an accent stripe drops in, the plate wipes out from it, the words rise in from below its edge | it enters on the first | `slide_up` |
-| `outro_card` | the loop card: letters drop in with a blur, an accent line grows from the centre, the card breathes, and it pushes out and blurs on the last frame so the video loops | the letters start on the first | `fade` |
+| `title_pop` | word by word: each word scales up from 0.55 with a blur, overshoots and settles; then floats and pulses on the beat; leaves last word first | word *i* (its overshoot peak) on accent *i*; the accents after the last word pulse the title | `pop`, `pop_out` |
+| `blur_in` | the title sharpens out of a blur while it drifts into place, line by line; no overshoot | line *i* sharp on accent *i* | `fade`, `fade` |
+| `chapter_card` | "1. SHRUGS VOOR UPPER TRAPS": the number pops first in the accent colour with a small turn, then the line sweeps in word by word from behind a hard edge; `two_line` puts the number on its own line | number on the first, sweep on the second | `slide_up`, `slide_down` |
+| `highlight_word` | the line rises in, then a slanted marker in the accent colour swipes in behind one word, which turns to the colour that reads on it | marker on the first | `fade`, `fade` |
+| `counter` | "0 → 12 REPS": tabular digits count with an ease-out and land with a pop; the label slides in next to them | the count lands on the first | `pop`, `pop_out` |
+| `lower_label` | a small label on a plate: an accent stripe drops in, the plate wipes out from it, the words rise in from below its edge | it enters on the first | `slide_up`, `slide_down` |
+| `outro_card` | the loop card: letters drop in with a blur, an accent line grows from the centre, the card breathes, and it pushes out and blurs on the last frame so the video loops | the letters start on the first | `fade`, `pop_out` |
 
 Every template has an exit (the words leave, the plate wipes back, the card pushes out) that ends with the item.
 
@@ -116,7 +116,7 @@ The same spec gives the same frames, byte for byte, on one platform (architectur
 
 ## 7. Tests
 
-- `internal/timeline`: the graphics track decodes strictly and round-trips (fixture `v48_graphics_9x16`, all seven templates); invalid fixtures `i77` to `i84` (unknown template, a param of another template, a counter without `to`, an accent outside the item, a highlighted word that does not exist, an unsafe box, an item past the end, two graphics tracks); the TypeScript types are regenerated and Ajv checks the schema half.
+- `internal/timeline`: the graphics track decodes strictly and round-trips (fixture `v50_graphics_9x16`, all seven templates); invalid fixtures `i77` to `i84` (unknown template, a param of another template, a counter without `to`, an accent outside the item, a highlighted word that does not exist, an unsafe box, an item past the end, two graphics tracks); the TypeScript types are regenerated and Ajv checks the schema half.
 - `internal/motion`: the catalog, bundle and schema agree; the bundle source rules (CSP, no markup or network APIs); `title_pop` lands each word's peak on its accent; staggers in range; every template enters before it leaves; the box is the text item's box; overlays keep off the head; segments merge and clip on even pixels; the job is deterministic; the job matches the runner's contract (`packages/media-tools/motion-runner/testdata/job.json`, written by this test, parsed by the runner's strict decoder in its own test).
 - `packages/media-tools/motion-runner`: bad jobs are refused (20 cases, from unknown fields and a path in a font name to a clip outside the frame); the request allowlist (16 URLs); the DevTools pipe framing and size cap; the client's calls, errors and closed pipe; the blank, ink and spill checks on synthetic PNGs; the Chrome flags (pipe, proxy, resolver; never a debugging port, `--allow-file-access-from-files` or `--disable-web-security`).
 - `internal/render`: the graphics fixture compiles to overlays (inputs after the others, before the ASS script, scaled in the preview, in the time map); the fallback draws the same words in the same boxes; a plan from another bundle is refused.

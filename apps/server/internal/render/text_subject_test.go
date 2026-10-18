@@ -108,12 +108,62 @@ func TestTheTitleGoesAboveAHeadAt17PercentAndWarnsWhenItEndsOverTheBody(t *testi
 	if len(plan.Warnings) != 1 || plan.Warnings[0].Code != "text_moved" || !strings.Contains(plan.Warnings[0].Message, "above") {
 		t.Errorf("warnings %+v", plan.Warnings)
 	}
-	// A head at 14.6 %: no room above at any size, and the body is all around: the title goes under the head and the render says it is over the body.
+	// A head at 14.6 %: no room above at any size, the person is all around, and the clip is the whole video: the title is never put over
+	// the body (P6-06), so it is left out, and the render says so.
 	plan, err = Compile(spec, Final, resolver(0.146, 0.14, 0.78))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Warnings) != 1 || plan.Warnings[0].Code != "text_over_subject" || !strings.Contains(plan.Warnings[0].Message, "body") {
+	if len(plan.Warnings) != 1 || plan.Warnings[0].Code != "text_over_subject" || !strings.Contains(plan.Warnings[0].Message, "left out") {
 		t.Errorf("warnings %+v", plan.Warnings)
+	}
+	if plan.Subtitles != nil && strings.Contains(plan.Subtitles.ASS, "BACK") {
+		t.Error("the title was drawn over the body")
+	}
+}
+
+// A title over two clips, one a close-up with no room clear of the body and one a wide shot with room above the head, is shown only over
+// the wide shot; a title over the close-up alone is moved to the wide shot (P6-06). Neither is drawn over the body.
+const (
+	fxClose = "ast_01j3er3kwcgrasdgd4aznmxxe0"
+	fxWide  = "ast_01j3er3kwcgrasdgd4aznmxxe1"
+)
+
+func TestATitleWithNoRoomIsShownWhereItFits(t *testing.T) {
+	tracks := map[string]subject.Track{
+		"close": {Aspect: 0.5625, Samples: []subject.Sample{{AtMs: 1000, X: 0.05, Y: 0.14, W: 0.9, H: 0.86, HeadTopY: 0.146}}},
+		"wide":  {Aspect: 0.5625, Samples: []subject.Sample{{AtMs: 1000, X: 0.3, Y: 0.34, W: 0.4, H: 0.6, HeadTopY: 0.35}}},
+	}
+	resolver := ResolverFunc(func(id string, _ Variant) (ResolvedAsset, error) {
+		name := "wide"
+		if id == fxClose {
+			name = "close"
+		}
+		tr := tracks[name]
+		return ResolvedAsset{Location: "/tmp/" + id + ".mp4", HasAudio: true, Subject: &tr}, nil
+	})
+	spec := func(text timeline.TextItem) *timeline.Spec {
+		s := overridesSpec(text)
+		main, _ := s.Tracks[0].(*timeline.VideoTrack)
+		first := main.Items[0]
+		first.AssetID, first.Source = fxClose, timeline.Source{InMs: 0, OutMs: 2000}
+		second := first
+		second.ID, second.AssetID, second.AtMs = "c2", fxWide, 2000
+		main.Items = []timeline.VideoItem{first, second}
+		return s
+	}
+	plan, err := Compile(spec(timeline.TextItem{ID: "t1", AtMs: 1000, DurationMs: 2000, Text: "BACK DAY 101", Style: "title_series", Anchor: "upper_third"}), Final, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Warnings) == 0 || plan.Warnings[0].Code != "text_retimed" || !strings.Contains(plan.Warnings[0].Message, "shortened to 2000-3000 ms") {
+		t.Errorf("over two clips: %+v", plan.Warnings)
+	}
+	plan, err = Compile(spec(timeline.TextItem{ID: "t1", AtMs: 0, DurationMs: 1500, Text: "BACK DAY 101", Style: "title_series", Anchor: "upper_third"}), Final, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Warnings) == 0 || plan.Warnings[0].Code != "text_retimed" || !strings.Contains(plan.Warnings[0].Message, "moved to 2000-3500 ms") {
+		t.Errorf("over the close-up: %+v", plan.Warnings)
 	}
 }

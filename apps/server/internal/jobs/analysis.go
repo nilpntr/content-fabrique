@@ -27,7 +27,7 @@ const DefaultAnalysisConcurrency = 2
 // 30 minute clip 17 minutes).
 const AnalysisTimeout = 30 * time.Minute
 
-// AnalyzeArgs is enqueued, in the transaction that marks a video ready, for that asset.
+// AnalyzeArgs is enqueued, in the transaction that marks a video or an audio asset (a song, P6-06) ready, for that asset.
 type AnalyzeArgs struct {
 	WorkspaceID ids.WorkspaceID `json:"workspace_id"`
 	AssetID     ids.AssetID     `json:"asset_id"`

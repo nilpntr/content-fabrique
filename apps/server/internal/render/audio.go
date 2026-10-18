@@ -76,14 +76,20 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 		bedPads []string
 		bedPlan = &BedPlan{TargetLUFS: BedTargetLUFS, BelowLU: BedBelowSpeechLU, MaxGainDB: bedMaxGainDB}
 		meter   []string
+		// An edit with music is music-led (P6-06, D-34): the music is the sound, the clips' ambience bed is left out under it, speech
+		// stays and the music is ducked under it.
+		musicLed   = timeline.HasMusic(c.spec)
+		speechPads []string
+		musicPads  []string
 	)
+	c.plan.MusicLed = musicLed
 	for i, cl := range c.clips {
 		a := cl.item.Audio
 		mode := timeline.ClipAudioMode(a)
 		if mode != timeline.AudioModeMute && mode != timeline.AudioModeBed && mode != timeline.AudioModeFull {
 			return audioResult{}, fmt.Errorf("%w: clip %s: audio mode %q is not one of mute, bed and full", ErrInvalidSpec, cl.item.ID, mode)
 		}
-		if mode == timeline.AudioModeMute || !cl.asset.HasAudio {
+		if mode == timeline.AudioModeMute || !cl.asset.HasAudio || (musicLed && mode == timeline.AudioModeBed) {
 			continue
 		}
 		it := cl.item
@@ -145,7 +151,7 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 		if mode == timeline.AudioModeBed {
 			bedPads = append(bedPads, pad)
 		} else {
-			mixPads = append(mixPads, pad)
+			speechPads = append(speechPads, pad)
 		}
 	}
 	hasBed := false
@@ -219,6 +225,14 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 			})
 			f := []string{"atrim=end=" + secs(dur), "asetpts=PTS-STARTPTS", stereo48}
 			fadeIn, fadeOut := com.FadeMs()
+			// Music that plays to the end of the video ends with a short fade unless the item says how (a song cut off on its last frame
+			// clicks), and starts with a fade of a few ms so a track entered mid-note does not click either.
+			if fadeOut == 0 && com.AtMs+dur >= c.totalMs && dur > 2*MusicEndFadeMs {
+				fadeOut = MusicEndFadeMs
+			}
+			if fadeIn == 0 && dur > 2*bedFadeMs {
+				fadeIn = bedFadeMs
+			}
 			if fadeIn > 0 {
 				f = append(f, "afade=t=in:st=0:d="+secs(fadeIn))
 			}
@@ -231,8 +245,20 @@ func (c *compiler) audioGraph(resolver AssetResolver) (audioResult, error) {
 			f = append(f, volumeFilter(com.GainDBOrDefault())...)
 			pad := fmt.Sprintf("au%d", k)
 			stmts = append(stmts, chain([]string{fmt.Sprintf("%d:a", k)}, f, pad))
-			mixPads = append(mixPads, pad)
+			musicPads = append(musicPads, pad)
 		}
+	}
+	// Speech over music: the music is ducked under the speech (a sidechain compressor keyed on the speech, a few dB), then both are the
+	// programme. Without speech or without music, the pads go to the programme as they are.
+	switch {
+	case len(speechPads) > 0 && len(musicPads) > 0:
+		sp, mu := mixOf(&stmts, speechPads, "aspeech"), mixOf(&stmts, musicPads, "amusic")
+		stmts = append(stmts, fmt.Sprintf("[%s]asplit=2[aspmix][aspkey]", sp),
+			fmt.Sprintf("[%s][aspkey]sidechaincompress=threshold=%s:ratio=%s:attack=%d:release=%d[amusicd]", mu, num(musicDuckThreshold), num(musicDuckRatio), musicDuckAttackMs, musicDuckReleaseMs))
+		mixPads = append(mixPads, "aspmix", "amusicd")
+	default:
+		mixPads = append(mixPads, speechPads...)
+		mixPads = append(mixPads, musicPads...)
 	}
 
 	// The programme is the bed plus every source and track item; it is the part that is normalised. The beat guide is a
@@ -373,6 +399,28 @@ func (c *compiler) soundReadyMix(stmts, bedPads, sfxStmts, sfxPads []string, gui
 	}
 	res.statements = stmts
 	return res, nil
+}
+
+// The music mix (P6-06, D-34). The music of an edit (licensed_track, creator_audio) is the programme with any speech: normalised to the
+// web's -14 LUFS with a true peak at -1 dBTP (TargetLUFS, TargetTP). Under speech it is ducked by a sidechain compressor keyed on the
+// speech: from about -20 dBFS of speech at 3:1, so speech at its usual -12 dBFS takes the music down about 5 dB (earshot and practice:
+// duck 3 to 6 dB under a voice), with a quick attack and a release that does not pump between words. Music that plays to the end of the
+// video fades out over its last MusicEndFadeMs.
+const (
+	MusicEndFadeMs     = 400
+	musicDuckThreshold = 0.1
+	musicDuckRatio     = 3.0
+	musicDuckAttackMs  = 15
+	musicDuckReleaseMs = 250
+)
+
+// mixOf sums the pads into one (amix, no normalisation) under the label, or returns the one pad there is.
+func mixOf(stmts *[]string, pads []string, label string) string {
+	if len(pads) == 1 {
+		return pads[0]
+	}
+	*stmts = append(*stmts, fmt.Sprintf("[%s]amix=inputs=%d:duration=longest:normalize=0:dropout_transition=0[%s]", strings.Join(pads, "]["), len(pads), label))
+	return label
 }
 
 // beatGuide returns the statements of the generated click track, ending in [abeat], or nil when the profile has none or

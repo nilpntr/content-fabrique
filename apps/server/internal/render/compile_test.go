@@ -645,14 +645,15 @@ func TestPlanSurvivesJSON(t *testing.T) {
 	}
 }
 
-// The whip's blur runs while the transition does and not a frame longer: the window is end-exclusive.
+// The whip's blur trail runs while the transition does and not a frame longer (every window is end-exclusive), and grows to a peak at
+// its middle: three directional blurs over the whole, the middle half and the middle frames.
 func TestWhipBlurWindowIsEndExclusive(t *testing.T) {
 	items := []timeline.VideoItem{
 		clipAt("c1", assetA, 0, 2000, 0),
 		clipAt("c2", assetB, 0, 2000, 1700, withTransition(timeline.TransitionWhip, 300)),
 	}
 	g := mustCompile(t, specOf(30, items), Final).FilterComplex
-	if want := "gblur=sigma=12:enable='gte(t,1.700000)*lt(t,2.000000)'"; !strings.Contains(g, want) {
+	if want := "dblur=angle=0:radius=22:enable='gte(t,1.700000)*lt(t,2.000000)',dblur=angle=0:radius=36:enable='gte(t,1.766667)*lt(t,1.933333)',dblur=angle=0:radius=60:enable='gte(t,1.800000)*lt(t,1.900000)'"; !strings.Contains(g, want) {
 		t.Errorf("graph lacks %q:\n%s", want, PrettyFilter(g))
 	}
 }

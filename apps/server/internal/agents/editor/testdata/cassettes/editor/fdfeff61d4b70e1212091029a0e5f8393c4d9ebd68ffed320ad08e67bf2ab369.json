@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "stage": "editor",
+  "key": "fdfeff61d4b70e1212091029a0e5f8393c4d9ebd68ffed320ad08e67bf2ab369",
+  "recorded_at": "2026-10-18T04:45:15Z",
+  "request": {
+    "model": "claude-haiku-5-5",
+    "max_tokens": 24000,
+    "effort": "medium",
+    "system_blocks": 1,
+    "messages": [
+      {
+        "role": "user",
+        "blocks": [
+          "text",
+          "text",
+          "text",
+          "text",
+          "text",
+          "text",
+          "text",
+          "text",
+          "text",
+          "text"
+        ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
+        ]
+      }
+    ],
+    "tools": [
+      "get_brief",
+      "list_footage",
+      "view_clip",
+      "find_moments",
+      "get_music",
+      "plan_edit",
+      "get_timeline",
+      "get_comments",
+      "edit_timeline",
+      "match_exposure",
+      "render_preview",
+      "check_edit",
+      "finish"
+    ]
+  },
+  "response": {
+    "id": "msg_fake",
+    "model": "claude-haiku-5-5",
+    "stop_reason": "tool_use",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_ed_2",
+        "name": "view_clip",
+        "input": {
+          "asset_id": "ast_01jc000000e00800000000000a"
+        }
+      }
+    ],
+    "usage": {
+      "input_tokens": 380,
+      "cache_write_tokens": 900,
+      "cache_write_1h_tokens": 0,
+      "cache_read_tokens": 9200,
+      "output_tokens": 74
+    }
+  }
+}

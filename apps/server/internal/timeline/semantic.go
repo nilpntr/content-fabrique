@@ -197,7 +197,7 @@ func (c *checker) checkMotion(it VideoItem, path string, dur int64) {
 	if !m.Active() {
 		if m.AtMs != nil || m.Strength != nil {
 			c.add(CodeInvalidMotion, mp,
-				"item %s has motion preset none with at_ms or strength; none takes no parameters. Leave them out, or choose punch_in, push_in, pull_back or shake",
+				"item %s has motion preset none with at_ms or strength; none takes no parameters. Leave them out, or choose punch_in, push_in, pull_back, shake or handheld",
 				it.ID)
 		}
 		return
@@ -210,9 +210,9 @@ func (c *checker) checkMotion(it VideoItem, path string, dur int64) {
 	if m.AtMs == nil {
 		return
 	}
-	if m.Preset != MotionPunchIn && m.Preset != MotionShake {
+	if m.Preset != MotionPunchIn && m.Preset != MotionShake && m.Preset != MotionHandheld {
 		c.add(CodeInvalidMotion, mp+"/at_ms",
-			"item %s has at_ms on the motion preset %s, which runs over the whole clip and has no moment to land on; at_ms is only for punch_in and shake. Remove at_ms",
+			"item %s has at_ms on the motion preset %s, which runs over the whole clip and has no moment to land on; at_ms is only for punch_in, shake and handheld (its punch-in). Remove at_ms",
 			it.ID, m.Preset)
 		return
 	}
@@ -533,7 +533,9 @@ func (c *checker) checkAudioAsset(item AudioItem, assetID string, eff int64, pat
 			"audio item %s needs the asset from %d to %d ms (source_offset_ms plus the %d ms it plays) but asset %s is %d ms long; lower source_offset_ms to at most %d or shorten the item",
 			com.ID, com.SourceOffsetMs, com.SourceOffsetMs+eff, eff, assetID, asset.DurationMs, max(asset.DurationMs-eff, 0))
 	}
-	if asset.Kind != AssetAudio {
+	// A creator_audio item may play the sound of one of the creator's own videos (a reference video whose song they want, D-34); a licensed
+	// track is an audio asset with its licence.
+	if asset.Kind != AssetAudio && (item.AudioKind() != AudioCreatorAudio || asset.Kind != AssetVideo) {
 		c.add(CodeWrongAssetKind, path+"/asset_id",
 			"audio item %s (%s) uses asset %s, which is a %s asset; use an audio asset",
 			com.ID, item.AudioKind(), assetID, asset.Kind)

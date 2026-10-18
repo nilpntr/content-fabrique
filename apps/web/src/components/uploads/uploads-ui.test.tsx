@@ -211,14 +211,15 @@ test("?samples=local keeps the samples even when the API has assets", async () =
   expect(fetchMock.mock.calls.every(([request]) => new URL(request.url).pathname !== "/v1/assets")).toBe(true);
 });
 
-test("when the API cannot list assets the samples are shown", async () => {
+test("when the API cannot list assets the library says so with a retry, and never shows made-up clips", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (request: Request) => (new URL(request.url).pathname === "/v1/me" ? json(ME) : json({ error: { code: "plan_required", message: "no plan" } }, 402))),
   );
   renderLibrary("/library");
-  expect(await screen.findByText("Back double biceps pose")).toBeTruthy();
-  expect((await screen.findByRole("note")).textContent).toBe("Sample clips until you upload your own");
+  expect((await screen.findByRole("alert")).textContent).toContain("Your clips could not be loaded");
+  expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+  expect(screen.queryByText("Back double biceps pose")).toBeNull();
 });
 
 test("a component that selects part of the queue renders when that part changes, not on every progress tick", () => {

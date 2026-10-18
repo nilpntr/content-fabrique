@@ -166,11 +166,22 @@ func (g GraphicsItem) StyleOrDefault() string {
 func FallbackAnimation(template string) string {
 	switch template {
 	case TemplateTitlePop, TemplateCounter:
-		return style.AnimPopIn
+		return style.AnimPop
 	case TemplateChapterCard, TemplateLowerLabel:
 		return style.AnimSlideUp
 	}
 	return style.AnimFade
+}
+
+// FallbackExit is the ASS exit that stands in for a template's exit when motion graphics are off.
+func FallbackExit(template string) string {
+	switch template {
+	case TemplateTitlePop, TemplateCounter, TemplateOutroCard:
+		return style.ExitPopOut
+	case TemplateChapterCard, TemplateLowerLabel:
+		return style.ExitSlideDown
+	}
+	return style.ExitFade
 }
 
 // FormatCount writes a counter value with the item's decimals.
@@ -221,7 +232,7 @@ func (g GraphicsItem) AsText() TextItem {
 	p := g.Params
 	t := TextItem{
 		ID: g.ID, AtMs: g.AtMs, DurationMs: g.DurationMs, Text: g.DisplayText(), Style: g.StyleOrDefault(),
-		Anchor: g.Anchor, Position: g.Position, Animation: FallbackAnimation(g.Template),
+		Anchor: g.Anchor, Position: g.Position, Animation: FallbackAnimation(g.Template), Exit: FallbackExit(g.Template),
 		Fill: p.Fill, Scale: p.Scale, Shadow: p.Shadow, Align: p.Align, AvoidSubject: g.AvoidSubject,
 	}
 	return t

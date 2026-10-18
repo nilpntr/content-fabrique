@@ -19,10 +19,10 @@ interface StepDef {
 }
 
 const STEPS = [
-  { id: "format", label: "Format", title: "Choose a format", description: "Where will this video live? The cut is made for this size, and it can't change later." },
-  { id: "footage", label: "Footage", title: "Pick your footage", description: "Choose the clips the editor may use. Nothing outside this selection ends up in the cut." },
-  { id: "brief", label: "Instructions", title: "Add instructions", description: "Describe the cut you have in mind, or skip this and let the editor decide." },
-  { id: "review", label: "Review", title: "Review and create", description: "Check the three choices, then start the project." },
+  { id: "format", label: "Format", title: "Where will you post it?", description: "I'll make the video the right shape for it. This can't change later." },
+  { id: "footage", label: "Clips", title: "Pick your clips", description: "Choose the clips I can use. Nothing else ends up in the video." },
+  { id: "brief", label: "Your idea", title: "Tell me what you want", description: "Which clip opens, a title, the pace. Or skip this and leave it to me." },
+  { id: "review", label: "Review", title: "Review and start", description: "Look over your choices, then I'll start editing." },
 ] as const satisfies readonly StepDef[];
 
 export interface NewProjectFlowProps {
@@ -36,13 +36,13 @@ export interface NewProjectFlowProps {
   /** A poster or preview would not load (an expired URL): fetch the library again. */
   onMediaError?: () => void;
   /** The most the first edit may cost, in dollars. Shown on the review step. */
-  budgetUsd?: number;
+  costNote?: string;
   /** Words for a failed `onCreate`, from the error it threw. Without it, or for an error it returns nothing for, a general line is shown. */
   describeError?: (error: unknown) => string | undefined;
 }
 
 /** The new-project flow: format, footage, instructions, then a review. All state lives here until `onCreate`. */
-export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:16", onMediaError, budgetUsd, describeError }: NewProjectFlowProps) {
+export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:16", onMediaError, costNote, describeError }: NewProjectFlowProps) {
   const [stepIndex, setStepIndex] = React.useState(0);
   const [format, setFormat] = React.useState<Format>(initialFormat);
   const [pickedIds, setAssetIds] = React.useState<AssetId[]>([]);
@@ -88,7 +88,7 @@ export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:
     try {
       await onCreate({ format, assetIds: [...assetIds], brief: brief.trim(), ...(title.trim() === "" ? {} : { title: title.trim() }) });
     } catch (error) {
-      setFailed(describeError?.(error) ?? "The project could not be created. Try again.");
+      setFailed(describeError?.(error) ?? "Your video could not be started. Try again.");
       // The button stayed focusable while pending; make sure the focus is on it for the retry.
       createRef.current?.focus();
     } finally {
@@ -101,8 +101,8 @@ export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:
   return (
     <div className="space-y-6">
       <div className="animate-rise space-y-1.5">
-        <h1 className="text-[1.625rem] leading-tight font-semibold tracking-[-0.025em] text-balance">New project</h1>
-        <p className="max-w-prose text-muted-foreground">Start a job in three steps: a format, your footage, and what you want made.</p>
+        <h1 className="text-[1.625rem] leading-tight font-semibold tracking-[-0.025em] text-balance">New video</h1>
+        <p className="max-w-prose text-muted-foreground">Three quick steps: where it's going, which clips, and what you'd like.</p>
       </div>
 
       <nav aria-label="Progress">
@@ -156,7 +156,7 @@ export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:
           {step.id === "review" ? (
             <ReviewStep assets={assets} format={format} assetIds={assetIds} brief={brief} onEdit={(target) => go(STEPS.findIndex((s) => s.id === target))}
               disabled={creating}
-              budgetUsd={budgetUsd}
+              costNote={costNote}
               title={title}
               onMediaError={onMediaError}
             />
@@ -165,7 +165,7 @@ export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:
       </section>
 
       <p role="status" className="sr-only">
-        {creating ? "Creating the project" : ""}
+        {creating ? "Starting your video" : ""}
       </p>
       {failed ? (
         <p role="alert" className="rounded-xl bg-del-wash px-3 py-2 text-destructive">
@@ -202,7 +202,7 @@ export function NewProjectFlow({ assets, onCreate, onCancel, initialFormat = "9:
           {isLast ? (
             // Stays focusable while pending (aria-disabled), so the focus is not lost on press.
             <Button ref={createRef} size="lg" onClick={create} disabled={creating || !hasClips} focusableWhenDisabled>
-              {creating ? "Creating…" : "Create project"}
+              {creating ? "Starting…" : "Make my video"}
             </Button>
           ) : (
             <Button onClick={() => go(stepIndex + 1)} disabled={!canAdvance}>

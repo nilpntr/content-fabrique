@@ -28,11 +28,11 @@ const date = (iso: string): string => {
 /** What the quick look has to say about a clip that has no description yet. */
 function quickLookNote(asset: Asset): string | undefined {
   if (asset.description?.trim()) return undefined;
-  if (asset.status !== "ready") return "The quick look starts once the clip has been processed.";
-  if (asset.quickLook === "failed") return "The quick look could not describe this clip. You can still rename it.";
+  if (asset.status !== "ready") return "I'll look at this clip as soon as it's ready.";
+  if (asset.quickLook === "failed") return "I couldn't describe this clip. You can still rename it.";
   // Absent for clips the quick look does not apply to (older uploads), and skipped when nothing is owed.
-  if (asset.quickLook !== "pending") return "This clip has no quick look.";
-  return "The quick look is reading this clip. Its description and tags show up here in a moment.";
+  if (asset.quickLook !== "pending") return "No description for this clip.";
+  return "I'm watching this clip. What's in it shows up here in a moment.";
 }
 
 function TitleEditor({ title, onRename }: { title: string; onRename: (title: string) => Promise<void> }) {
@@ -145,10 +145,10 @@ export function ClipDetails({ asset, onClose, onRename }: { asset: Asset | null;
                 {date(asset.createdAt) ? <span className="text-[12px] text-subtle-foreground">Added {date(asset.createdAt)}</span> : null}
               </div>
             </SheetHeader>
-            <section aria-label="Quick look" className="space-y-2.5 px-4 pb-6">
+            <section aria-label="What's in it" className="space-y-2.5 px-4 pb-6">
               <h3 className="flex items-center gap-1.5 text-[11px] font-medium tracking-[0.08em] text-subtle-foreground uppercase">
                 <Sparkles aria-hidden className="size-3.5" />
-                Quick look
+                What's in it
               </h3>
               {asset.description?.trim() ? <p className="text-[13.5px] leading-relaxed text-pretty">{asset.description}</p> : null}
               {note ? <p className="text-[13px] text-muted-foreground">{note}</p> : null}

@@ -175,7 +175,7 @@ test("the flow carries the format, the clips and the chip-filled brief into onCr
   next();
 
   // Step 3: the example chips fill the textarea; a second one is added below the first.
-  const textarea = screen.getByRole("textbox", { name: /Instructions/ }) as HTMLTextAreaElement;
+  const textarea = screen.getByRole("textbox", { name: /^What you want/ }) as HTMLTextAreaElement;
   expect(textarea.value).toBe("");
   const first = EXAMPLE_PROMPTS[0];
   const second = EXAMPLE_PROMPTS[1];
@@ -189,7 +189,7 @@ test("the flow carries the format, the clips and the chip-filled brief into onCr
   expect((screen.getByLabelText(/^Idea/) as HTMLInputElement).disabled).toBe(true);
   expect((screen.getByLabelText(/^Sound/) as HTMLInputElement).disabled).toBe(true);
   fireEvent.click(screen.getAllByRole("button", { name: /^Review/ }).at(-1) as HTMLElement);
-  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  fireEvent.click(screen.getByRole("button", { name: "Make my video" }));
   expect(onCreate).toHaveBeenCalledWith({
     format: "4:5",
     assetIds: [SAMPLE_ASSETS[0]?.id, SAMPLE_ASSETS[2]?.id],
@@ -206,17 +206,17 @@ test("review summarises the choices and Create project sends the payload once", 
   fireEvent.click(checkbox(/Back double biceps/));
   fireEvent.click(checkbox(/Barbell row/));
   next();
-  fireEvent.change(screen.getByRole("textbox", { name: /Instructions/ }), { target: { value: "  Open on the pose  " } });
+  fireEvent.change(screen.getByRole("textbox", { name: /^What you want/ }), { target: { value: "  Open on the pose  " } });
   fireEvent.click(screen.getAllByRole("button", { name: /^Review/ }).at(-1) as HTMLElement);
 
   // The step heading takes focus, and the summary shows each choice.
-  expect(document.activeElement?.textContent).toBe("Review and create");
-  const summary = within(screen.getByRole("region", { name: "Review and create" }));
+  expect(document.activeElement?.textContent).toBe("Review and start");
+  const summary = within(screen.getByRole("region", { name: "Review and start" }));
   expect(summary.getByText("1920×1080", { exact: false })).toBeTruthy();
   expect(summary.getByText("2 clips")).toBeTruthy();
   expect(summary.getByText("Open on the pose")).toBeTruthy();
 
-  const create = screen.getByRole("button", { name: "Create project" });
+  const create = screen.getByRole("button", { name: "Make my video" });
   fireEvent.click(create);
   fireEvent.click(create);
   expect(onCreate).toHaveBeenCalledTimes(1);
@@ -235,11 +235,11 @@ test("an empty brief is sent as an empty string, and a failed create shows an er
   fireEvent.click(checkbox(/Back double biceps/));
   next();
   fireEvent.click(screen.getAllByRole("button", { name: /^Review/ }).at(-1) as HTMLElement);
-  expect(screen.getByText(/None\. The editor will pick/)).toBeTruthy();
+  expect(screen.getByText(/None\. I'll decide from your clips/)).toBeTruthy();
 
-  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
-  await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/could not be created/));
-  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  fireEvent.click(screen.getByRole("button", { name: "Make my video" }));
+  await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/could not be started/));
+  fireEvent.click(screen.getByRole("button", { name: "Make my video" }));
   await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(2));
   expect(onCreate).toHaveBeenLastCalledWith({ format: "9:16", assetIds: [SAMPLE_ASSETS[0]?.id], brief: "" });
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
@@ -306,15 +306,15 @@ test("create locks the flow while pending, keeps focus on the button, and keeps 
   next();
   fireEvent.click(screen.getAllByRole("button", { name: /^Review/ }).at(-1) as HTMLElement);
 
-  const create = screen.getByRole("button", { name: "Create project" }) as HTMLButtonElement;
+  const create = screen.getByRole("button", { name: "Make my video" }) as HTMLButtonElement;
   create.focus();
   fireEvent.click(create);
   expect(onCreate).toHaveBeenCalledTimes(1);
-  const pending = screen.getByRole("button", { name: "Creating…" }) as HTMLButtonElement;
+  const pending = screen.getByRole("button", { name: "Starting…" }) as HTMLButtonElement;
   expect(pending).toBe(create);
   expect(pending.getAttribute("aria-disabled")).toBe("true");
   expect(document.activeElement).toBe(pending);
-  expect(screen.getByRole("status").textContent).toContain("Creating");
+  expect(screen.getByRole("status").textContent).toContain("Starting");
   for (const name of ["Back", "Edit format", "Edit footage", "Edit instructions"]) {
     expect((screen.getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(true);
   }
@@ -328,7 +328,7 @@ test("create locks the flow while pending, keeps focus on the button, and keeps 
 
   fail();
   await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
-  const again = screen.getByRole("button", { name: "Create project" });
+  const again = screen.getByRole("button", { name: "Make my video" });
   expect(document.activeElement).toBe(again);
   expect((screen.getByRole("button", { name: "Back" }) as HTMLButtonElement).disabled).toBe(false);
   // The error stays while the user does nothing, and goes once they act.
@@ -344,7 +344,7 @@ test("brief: an example that would not fit is disabled with a hint and never tru
   next();
   fireEvent.click(checkbox(/Back double biceps/));
   next();
-  const textarea = screen.getByRole("textbox", { name: /Instructions/ }) as HTMLTextAreaElement;
+  const textarea = screen.getByRole("textbox", { name: /^What you want/ }) as HTMLTextAreaElement;
   const describedBy = (textarea.getAttribute("aria-describedby") ?? "").split(" ");
   expect(describedBy).toHaveLength(2);
   expect(describedBy.some((id) => document.getElementById(id)?.textContent?.includes("/ 2000"))).toBe(true);

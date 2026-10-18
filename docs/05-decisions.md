@@ -37,7 +37,8 @@
 | D-30 | Semantic search lives in Postgres with pgvector, hybrid with full-text search; no separate vector database | Proposed (director, 2026-10-17; founder asked) |
 | D-31 | Spend control: credits charged per action; every action's COGS budget is derived from its price (≤ 40 % of net credit value); caps hold across processes in the database; platform breaker | Accepted (director, 2026-10-17; founder asked) |
 | D-32 | Audio: effects are synthesised in ffmpeg and edits are checked with ffmpeg measurements; no audio models, nothing ported from earshot but its numbers and ideas | Accepted (founder decision, 2026-10-17) |
-| D-33 | Exports are sound-ready: no music and no trend sound, the clips' own sound as a low bed, effects on top, speech as the programme; amends D-03 | Proposed (director, 2026-10-17; the founder confirms) |
+| D-33 | Exports are sound-ready: no music and no trend sound, the clips' own sound as a low bed, effects on top, speech as the programme; amends D-03 | Proposed (director, 2026-10-17; the founder confirms); superseded by D-34 for an edit with a song |
+| D-34 | Music from the creator: a song the creator uploads (or the sound of one of their videos) is analysed once and is the export's only sound, -14 LUFS; the creator answers for its rights; supersedes D-33 for an edit with a song | Proposed (director, 2026-10-18; the founder confirms) |
 | D-35 | Motion graphics are versioned HTML templates (Web Animations API) the editor picks by name and params, rendered frame by frame by chrome-headless-shell on a virtual clock inside the media sandbox and composited by ffmpeg; ASS text stays as the fallback; amends D-26's render column for graphic templates | Proposed (engineering, 2026-10-18; security review by the director, licence question for P0-12) |
 
 ---
@@ -755,7 +756,7 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 
 ## D-33 Exports are sound-ready
 
-> Status: **Proposed** by the director (2026-10-17), built in P3-12 so that it can be listened to; the founder confirms or changes it. Every part is reversible: the clip sound mode is a field of the timeline, the levels are constants in `internal/render/plan.go` and `internal/audiocheck`, and the editor's behaviour is one prompt version (`editor.v2.1`).
+> Status: **Proposed** by the director (2026-10-17), built in P3-12 so that it can be listened to; the founder confirms or changes it. **Superseded by [D-34](#d-34-music-from-the-creator) for an edit with a song**; an edit without one is still sound-ready as below. Every part is reversible: the clip sound mode is a field of the timeline, the levels are constants in `internal/render/plan.go` and `internal/audiocheck`, and the editor's behaviour is one prompt version (`editor.v2.1`).
 
 **Context.** D-03 keeps the trend sound out of the export, and until now a clip's own sound was off unless the editor turned it on, so a workout export was silent between the few generated effects: the creator had to add a sound in TikTok before the video felt like anything, and the effects (mixed after the programme normalisation at a fixed level) were tuned for a programme. The first live runs showed the cost: a silent video with an impact in it. The founder's footage has real gym sound in it (plates, a room), which is exactly the ambience a sound-ready cut wants under the creator's trend sound.
 
@@ -778,6 +779,29 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 - Measured on the founder's 26 s back-day edit with a bed on every clip: bed -24.2 LUFS (median short-term), effects at -11.1, -9.6 and -14.5 LUFS, integrated -21.0 LUFS, true peak -2.7 to -2.8 dBTP. (An earlier version of this decision normalised the bed and the effects together to -17 LUFS; that lifted the bed to -18, 4 LU under a trend sound, and was changed before merge.) The levers are `BedTargetLUFS`, `SoundReadyEffectGainDB` and `SoundReadyCeilingDB` in `internal/render/plan.go`.
 
 **Revisit** when the founder has listened to a few real exports, or when transcripts are available to the editor.
+
+## D-34 Music from the creator
+
+> Status: **Proposed** by the director (2026-10-18), built in P6-06 so that it can be watched and listened to; the founder confirms or changes it. **Supersedes [D-33](#d-33-exports-are-sound-ready)** for an edit that has a song; an edit without one is still sound-ready as D-33 says. Every part is reversible: the song is an ordinary `creator_audio` item of the timeline, the mix is a few constants in `internal/render/audio.go`, and the editor's behaviour is one prompt version (`editor.v2.6`).
+
+**Context.** The founder watched the first edits of the gym footage and asked for "no gym sound under the video, just the music": every reference video has loud music (about -12 to -20 LUFS momentary), and a drop 2 to 4.5 s in where the hook ends and the cut or the reveal lands. A sound-ready export (D-33: the gym as a quiet bed, the creator adds a trending sound in TikTok) gives the editor nothing to cut to, and the bed is exactly the sound the founder does not want.
+
+**Decision.** The creator gives the edit a song, and the export carries it.
+- **Where the song comes from.** An audio file the creator uploads into the project (the normal upload: the same tenancy, size and type checks as every asset; `audio/*` was already accepted), or the sound of one of their own videos (a reference whose song they want: a `creator_audio` item may name a video asset, and `cfctl music extract` writes that sound as a file for local work). The **creator is responsible for the rights** to music they upload or use from their videos: the asset catalog marks the creator's own uploads `attested`, which is what `creator_audio` needs (a `licensed_track` still needs a licence record). A trend sound added in TikTok stays possible: export without a song, and the edit is sound-ready as before (D-03 is unchanged: a `trend_sound` is a cue and never mixed).
+- **Analysed once, without a model.** The analyze job measures an audio asset (and a video whose sound is music) when it is ready (package `music`, table `asset_music`): the tempo and a beat grid with downbeats and phrases, the strong onsets, the drop, the loudness. The editor reads it (a song line in the footage list, the tool `get_music`), cuts to it and `check_edit` holds the cuts to it.
+- **The mix is the music.** An edit with a song is music-led: the clips' ambience bed is left out (a clip in `bed` mode is silent under a song), a clip in `full` mode (speech) stays and the song is ducked under it (a sidechain compressor keyed on the speech, about 5 dB), sound effects only when the plan adds them. The programme is normalised to **-14 LUFS integrated with the true peak at or under -1 dBTP** (the renderer's existing two-pass `loudnorm`), and a song that plays to the end fades out over its last 400 ms.
+
+**Alternatives.**
+- **Keep exports sound-ready (D-33) and only recommend a sound.** Rejected for the founder's footage: the edit cannot land its hook on a drop it cannot hear, and the gym bed is what the founder asked to remove.
+- **Licensed music from a library.** Out of scope for now (no licence deals); the decision does not prevent it (`licensed_track` exists).
+- **A rights attestation record per upload.** The schema has `RightsAttested` but no table; for now the upload itself is the attestation and the terms say the creator answers for it. Revisit when uploads get a consent step (P7-02).
+
+**Consequences.**
+- The export's sound is the song (-14 LUFS), not a bed at -21; the ears use the programme profile for it.
+- The analysis adds one audio pass per audio asset and per video clip with sound (a fraction of a second; the clip's own analysis never fails because of it).
+- Measured on the demo of the founder's footage with a synthetic 124 BPM track: -14.0 LUFS integrated, sample peak -2.2 dBFS, the song the only audio input of the graph.
+
+**Revisit** when the founder has listened to edits with real songs, or when uploads get an explicit consent step.
 
 ## D-35 Motion graphics are HTML templates rendered by headless Chrome in the media sandbox
 

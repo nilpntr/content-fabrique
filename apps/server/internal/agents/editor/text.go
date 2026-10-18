@@ -11,6 +11,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/analysis"
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/music"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/subject"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
@@ -60,6 +61,9 @@ type footageOpts struct {
 	Analysis map[ids.AssetID]analysis.Summary
 	// Subjects is where the person is in each clip (the quick look's boxes): numbers only, printed as a line about where the head is.
 	Subjects subject.Index
+	// Music is the music analysis of the clips whose sound is a song (an audio clip, or a video of the creator's): numbers only, printed
+	// as a line about the tempo, the drop and the phrases (P6-06).
+	Music map[string]music.Analysis
 }
 
 // footageText lists the clips.
@@ -68,7 +72,7 @@ func footageText(rows []store.ProjectFootageRow, o footageOpts) string {
 		return "Footage: this project has no usable clips."
 	}
 	var b strings.Builder
-	anySubject := false
+	anySubject, anySong := false, false
 	fmt.Fprintf(&b, "Footage: %d clips, in the creator's order. Only these can go on the timeline.\n", len(rows))
 	for n, r := range rows {
 		var dur int64
@@ -94,6 +98,10 @@ func footageText(rows []store.ProjectFootageRow, o footageOpts) string {
 		if sum, ok := o.Analysis[r.AssetID]; ok {
 			fmt.Fprintf(&b, "  analysis: %s\n", sum.Line())
 		}
+		if m, ok := o.Music[r.AssetID.String()]; ok && m.Music {
+			fmt.Fprintf(&b, "  song: %s\n", m.Line())
+			anySong = true
+		}
 		if !o.Full && n >= o.Detailed {
 			continue
 		}
@@ -113,6 +121,9 @@ func footageText(rows []store.ProjectFootageRow, o footageOpts) string {
 			}
 			fmt.Fprintf(&b, "  description: %s\n", runtime.Untrusted("clip_description", d))
 		}
+	}
+	if anySong {
+		b.WriteString("\nA song line means the clip's sound is music the edit can be cut to (D-34): put it on the timeline with set_sound kind creator_audio and its asset_id (the export then has the song and no gym sound), end the hook on its drop and cut on its beats (get_music lists them).\n")
 	}
 	if anySubject {
 		b.WriteString("\nA subject line says where the person's head is in the clip: its top as a percentage of the frame height at the sampled times. A title above the head needs the band between the top of the safe zone and that line; check_edit says when a title covers the head.\n")

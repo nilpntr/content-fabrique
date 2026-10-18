@@ -24,7 +24,7 @@ func graphicsResolver(dir string) AssetResolver {
 // audio, each shifted to its segment's start and laid over the joined clips before the ASS script (so the watermark stays on top),
 // scaled down for the preview.
 func TestGraphicsCompileToOverlays(t *testing.T) {
-	spec := loadFixture(t, "v48_graphics_9x16", testAssets(t))
+	spec := loadFixture(t, "v50_graphics_9x16", testAssets(t))
 	for _, prof := range Profiles() {
 		plan, err := Compile(spec, prof, graphicsResolver("/assets"))
 		if err != nil {
@@ -69,7 +69,7 @@ func TestGraphicsCompileToOverlays(t *testing.T) {
 // With motion graphics off, every graphics item is drawn as ASS text in its box with its template's fallback animation, and the plan
 // has no motion job and no overlay.
 func TestGraphicsFallBackToASSText(t *testing.T) {
-	spec := loadFixture(t, "v48_graphics_9x16", testAssets(t))
+	spec := loadFixture(t, "v50_graphics_9x16", testAssets(t))
 	prof := Preview
 	prof.MotionFallback = true
 	plan, err := Compile(spec, prof, graphicsResolver("/assets"))
@@ -120,7 +120,7 @@ func findGraphic(t *testing.T, spec *timeline.Spec, id string) timeline.Graphics
 }
 
 func TestGraphicsRefuseAStalePlan(t *testing.T) {
-	spec := loadFixture(t, "v48_graphics_9x16", testAssets(t))
+	spec := loadFixture(t, "v50_graphics_9x16", testAssets(t))
 	plan, err := Compile(spec, Preview, graphicsResolver("/assets"))
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +159,7 @@ func TestIntegrationGraphicsRenderInDocker(t *testing.T) {
 	d.Runtime = *dockerRuntime
 	runner := &media.SandboxRunner{Provider: d, Image: *dockerImage, Limits: DefaultLimits()}
 	ctx := context.Background()
-	spec := loadFixture(t, "v48_graphics_9x16", testAssets(t))
+	spec := loadFixture(t, "v50_graphics_9x16", testAssets(t))
 	src := filepath.Join(root, "src")
 	if err := os.Mkdir(src, 0o700); err != nil {
 		t.Fatal(err)

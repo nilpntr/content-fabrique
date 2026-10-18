@@ -78,7 +78,7 @@ func TestAnalyzeIsEnqueuedByTheIngestAndWaitsForAWorkerThatCanRunIt(t *testing.T
 		t.Fatalf("%d analyze jobs after a re-ingest, want a new one", jobsFor())
 	}
 
-	// An audio file never gets one.
+	// An audio file gets one too: it is a song, and the job makes its music analysis (P6-06).
 	audio := e.newUploadedAsset(t, w, store.AssetKindAudio, "voice.mp3", []byte("data"))
 	if _, err := e.api.ClaimAssetForIngest(context.Background(), w.ID, audio.ID); err != nil {
 		t.Fatal(err)
@@ -87,7 +87,7 @@ func TestAnalyzeIsEnqueuedByTheIngestAndWaitsForAWorkerThatCanRunIt(t *testing.T
 		t.Fatal(err)
 	}
 	var n int
-	if err := e.super.QueryRow(context.Background(), `SELECT count(*) FROM river_job WHERE kind = 'analyze' AND args->>'asset_id' = $1`, audio.ID.String()).Scan(&n); err != nil || n != 0 {
+	if err := e.super.QueryRow(context.Background(), `SELECT count(*) FROM river_job WHERE kind = 'analyze' AND args->>'asset_id' = $1`, audio.ID.String()).Scan(&n); err != nil || n != 1 {
 		t.Errorf("audio got %d analyze jobs (%v)", n, err)
 	}
 }
