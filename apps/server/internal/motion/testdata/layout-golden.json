@@ -1,0 +1,161 @@
+{
+  "apart_in_time": [
+    {
+      "id": "g1",
+      "drawn": true,
+      "fit": "in_place",
+      "at_ms": 0,
+      "duration_ms": 2500,
+      "box": [
+        294,
+        240,
+        786,
+        512
+      ]
+    },
+    {
+      "id": "g2",
+      "drawn": true,
+      "fit": "in_place",
+      "at_ms": 2500,
+      "duration_ms": 2500,
+      "box": [
+        200,
+        240,
+        880,
+        674
+      ]
+    }
+  ],
+  "captions_band_stacks_above": [
+    {
+      "id": "g1",
+      "drawn": true,
+      "fit": "in_place",
+      "at_ms": 0,
+      "duration_ms": 3000,
+      "box": [
+        338,
+        1154,
+        741,
+        1260
+      ]
+    },
+    {
+      "id": "g2",
+      "drawn": true,
+      "fit": "in_place",
+      "clash": "above",
+      "with": "g1",
+      "at_ms": 1000,
+      "duration_ms": 3000,
+      "box": [
+        276,
+        1028,
+        803,
+        1134
+      ]
+    }
+  ],
+  "counter_meets_chapter_card": [
+    {
+      "id": "g4",
+      "drawn": true,
+      "fit": "in_place",
+      "at_ms": 19400,
+      "duration_ms": 2903,
+      "box": [
+        246,
+        240,
+        833,
+        512
+      ]
+    },
+    {
+      "id": "g5",
+      "drawn": true,
+      "fit": "in_place",
+      "clash": "below",
+      "with": "g4",
+      "at_ms": 20000,
+      "duration_ms": 2500,
+      "box": [
+        200,
+        532,
+        880,
+        966
+      ]
+    }
+  ],
+  "graphic_meets_text": [
+    {
+      "id": "g1",
+      "drawn": true,
+      "fit": "in_place",
+      "clash": "below",
+      "with": "t1",
+      "at_ms": 500,
+      "duration_ms": 2500,
+      "box": [
+        459,
+        410,
+        620,
+        560
+      ]
+    }
+  ],
+  "no_room_anywhere_left_out": [
+    {
+      "id": "g1",
+      "drawn": true,
+      "fit": "in_place",
+      "at_ms": 0,
+      "duration_ms": 4000,
+      "box": [
+        196,
+        240,
+        884,
+        374
+      ]
+    },
+    {
+      "id": "g2",
+      "drawn": false,
+      "fit": "in_place",
+      "clash": "dropped",
+      "with": "g1",
+      "at_ms": 500,
+      "duration_ms": 2500
+    }
+  ],
+  "no_room_to_stack_moves_in_time": [
+    {
+      "id": "g1",
+      "drawn": true,
+      "fit": "in_place",
+      "at_ms": 1000,
+      "duration_ms": 2500,
+      "box": [
+        196,
+        240,
+        884,
+        374
+      ]
+    },
+    {
+      "id": "g2",
+      "drawn": true,
+      "fit": "in_place",
+      "clash": "moved",
+      "with": "g1",
+      "at_ms": 3500,
+      "duration_ms": 2500,
+      "box": [
+        302,
+        185,
+        778,
+        489
+      ]
+    }
+  ]
+}

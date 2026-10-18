@@ -17,7 +17,8 @@ import (
 //
 // Isolation. The browser speaks the DevTools protocol over a pipe only (no port), every network request goes to a proxy that
 // does not exist and every host name resolves to nothing, so even a sandbox with a network would give the page none.
-// Extensions, sync, component updates, crash reporting, background networking and every phone-home feature are off.
+// Extensions, sync, component updates, crash reporting, background networking and every phone-home feature are off. V8 runs
+// without a JIT and without WebAssembly, and WebRTC may not use UDP around the proxy (the runtime removes it from the page too).
 // --no-sandbox turns off Chrome's own process sandbox: it needs user namespaces or a setuid helper, which the container
 // sandbox (no capabilities, no-new-privileges, gVisor) does not give it. The page is our own template code with the
 // creator's words set as text; the container is the boundary (docs/design/motion-graphics-v1.md section 5).
@@ -55,6 +56,8 @@ func chromeFlags(userDataDir string, cssW, cssH int) []string {
 		"--disable-features=Translate,OptimizationHints,MediaRouter,DialMediaRouteProvider,AutofillServerCommunication,CertificateTransparencyComponentUpdater,InterestFeedContentSuggestions,PrivacySandboxSettings4,NetworkTimeServiceQuerying,PaintHolding",
 		"--disable-file-system",
 		"--deny-permission-prompts",
+		// WebRTC (which runtime.js also removes) may not open a UDP socket around the dead proxy.
+		"--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
 		// Determinism.
 		"--force-color-profile=srgb",
 		"--font-render-hinting=none",
@@ -70,7 +73,9 @@ func chromeFlags(userDataDir string, cssW, cssH int) []string {
 		"--disable-frame-rate-limit",
 		"--disable-gpu-vsync",
 		"--disable-skia-runtime-opts",
-		"--js-flags=--random-seed=1 --max-old-space-size=512",
+		// No JIT and no WebAssembly: the templates are a few hundred lines of plain JS run once per frame, and an interpreter-only V8
+		// takes the JIT compilers out of reach of the page.
+		"--js-flags=--random-seed=1 --max-old-space-size=512 --jitless --no-expose-wasm",
 		// Resources.
 		"--disable-dev-shm-usage",
 		"--renderer-process-limit=1",

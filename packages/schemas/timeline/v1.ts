@@ -1106,7 +1106,9 @@ export type PositionY1 = number;
  */
 export type AvoidTheSubject1 = boolean;
 /**
- * The overlays. They may overlap each other and sit anywhere inside the total duration.
+ * The overlays, at most 64. They may overlap each other in time and sit anywhere inside the total duration; the renderer keeps two on screen at once apart in the frame.
+ *
+ * @maxItems 64
  */
 export type GraphicsItems = GraphicsItem[];
 /**

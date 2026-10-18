@@ -2,7 +2,6 @@ package render
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -41,7 +40,8 @@ type MotionOptions struct {
 	Report func(motion.Report)
 }
 
-// motionBundleDir is the directory in the work directory that the template bundle is staged into (and mounted read-only from).
+// motionBundleDir is the directory in the work directory that the template bundle is staged into (and mounted read-only from):
+// beside the motion run's own writable directory (motion.OutDir), never inside it.
 const motionBundleDir = "motion-bundle"
 
 // runMotion renders the plan's overlays into the work directory, through the same runner as ffmpeg (the media-tools image has
@@ -94,7 +94,8 @@ func (c *compiler) graphicsItems() []timeline.GraphicsItem {
 }
 
 // graphics prepares the graphics track. In the fallback it replaces c.spec by a copy with the items added as text items; otherwise
-// it fills c.plan.Motion and c.overlays.
+// it fills c.plan.Motion and c.overlays. Either way the items are laid out by motion.Layout first (never over the body, never over
+// another overlay or a text on screen at the same time), the function the editor's checks call too.
 func (c *compiler) graphics() error {
 	items := c.graphicsItems()
 	if len(items) == 0 {
@@ -105,67 +106,41 @@ func (c *compiler) graphics() error {
 			return fmt.Errorf("%w: graphics item %s: %s: %w", ErrInvalidSpec, it.ID, field, err)
 		}
 	}
-	if c.profile.MotionFallback {
-		cp := *c.spec
-		cp.Tracks = slices.Clone(c.spec.Tracks)
-		tt := &timeline.TextTrack{ID: "graphics_fallback"}
-		for _, it := range items {
-			tt.Items = append(tt.Items, it.AsText())
-		}
-		cp.Tracks = append(cp.Tracks, tt)
-		c.spec = &cp
-		return nil
-	}
 	subjects := subject.Index{}
 	for _, cl := range c.clips {
 		if cl.asset.Subject != nil {
 			subjects[cl.item.AssetID] = *cl.asset.Subject
 		}
 	}
-	var resolved []motion.Resolved
 	var lookup subject.Lookup
 	if len(subjects) > 0 {
 		lookup = subjects.Lookup
 	}
-	for _, it := range items {
-		// Never over the person's body, like a text item (P6-06): where there is no room at the item's own time it is shown in the part
-		// of its time that has room, or at the nearest time that has, or it is left out (subject.FitText, the renderer's and the check's).
-		fit, err := subject.FitText(c.spec, lookup, it.AsText(), c.totalMs)
-		if err != nil {
-			return fmt.Errorf("%w: graphics item %s: %w", ErrInvalidSpec, it.ID, err)
-		}
-		switch fit.How {
-		case subject.FitDropped:
-			c.warn("text_over_subject", "graphics item %s is left out: it would cover the subject and there is no room above the head, beside it or below the person at any time of the video", it.ID)
-			continue
-		case subject.FitTrimmed, subject.FitMoved:
-			c.warn("text_retimed", "graphics item %s was %s to %d-%d ms, where it fits clear of the subject (at %d-%d ms it would cover their body)",
-				it.ID, map[string]string{subject.FitTrimmed: "shortened", subject.FitMoved: "moved"}[fit.How], fit.AtMs, fit.AtMs+fit.DurationMs, it.AtMs, it.EndMs())
-			it = retime(it, fit.AtMs, fit.DurationMs, fit.How == subject.FitMoved)
-		}
-		r, err := motion.Resolve(c.spec.Output, it, fit.Regions)
-		if errors.Is(err, motion.ErrNotPlaceable) {
-			c.plan.Warnings = append(c.plan.Warnings, Warning{Code: "text_dropped", Message: fmt.Sprintf("graphics item %s is left out: its box cannot be put inside the %s safe zone", it.ID, c.spec.Output.Format)})
+	laid, err := motion.Layout(c.spec, lookup, c.totalMs)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidSpec, err)
+	}
+	var resolved []motion.Resolved
+	var fallback []timeline.TextItem
+	for _, l := range laid {
+		if !c.warnLaid(l) {
 			continue
 		}
-		if err != nil {
-			return fmt.Errorf("%w: graphics item %s: %w", ErrInvalidSpec, it.ID, err)
-		}
-		av := r.Avoid
-		switch {
-		case av.OverHead:
-			c.warn("text_over_subject", "graphics item %s covers the subject's head and could not be moved off it inside the safe zone", it.ID)
-		case av.OverBody:
-			c.warn("text_over_subject", "graphics item %s is off the subject's head but still covers their body", it.ID)
-		case av.Overlapped && av.Where == timeline.WhereSmaller:
-			c.warn("text_moved", "graphics item %s was shrunk to scale %g to keep it clear of the subject", it.ID, av.Scale)
-		case av.Overlapped:
-			c.warn("text_moved", "graphics item %s was moved %s the subject to keep it clear of them", it.ID, av.Where)
-		}
-		if it.AtMs >= c.totalMs {
+		if l.Item.AtMs >= c.totalMs {
 			continue
 		}
-		resolved = append(resolved, r)
+		if c.profile.MotionFallback {
+			fallback = append(fallback, fallbackText(l, c.spec.Output))
+			continue
+		}
+		resolved = append(resolved, l.Resolved)
+	}
+	if c.profile.MotionFallback {
+		cp := *c.spec
+		cp.Tracks = slices.Clone(c.spec.Tracks)
+		cp.Tracks = append(cp.Tracks, &timeline.TextTrack{ID: "graphics_fallback", Items: fallback})
+		c.spec = &cp
+		return nil
 	}
 	if len(resolved) == 0 {
 		return nil
@@ -178,21 +153,58 @@ func (c *compiler) graphics() error {
 	return nil
 }
 
-// retime gives an item a new time: a moved item keeps its accents where they were in it (shifted with it), a shortened one keeps the
-// accents its new time still holds.
-func retime(it timeline.GraphicsItem, at, dur int64, moved bool) timeline.GraphicsItem {
-	shift := int64(0)
-	if moved {
-		shift = at - it.AtMs
+// warnLaid adds the warnings of a laid-out item and says whether it is drawn.
+func (c *compiler) warnLaid(l motion.Laid) bool {
+	it, id := l.Original, l.Original.ID
+	switch {
+	case l.Fit.How == subject.FitDropped:
+		c.warn("text_over_subject", "graphics item %s is left out: it would cover the subject and there is no room above the head, beside it or below the person at any time of the video", id)
+		return false
+	case l.NotPlaceable:
+		c.warn("text_dropped", "graphics item %s is left out: its box cannot be put inside the %s safe zone", id, c.spec.Output.Format)
+		return false
+	case l.Clash == motion.ClashDropped:
+		c.warn("graphics_overlap", "graphics item %s is left out: it would be drawn over %s (on screen %d-%d ms) and there is no room below or above it or at a time next to it", id, l.With, l.WithAtMs, l.WithEndMs)
+		return false
 	}
-	var acc []int64
-	for _, a := range it.Params.AccentsMs {
-		if a += shift; a >= at && a < at+dur {
-			acc = append(acc, a)
+	if l.Fit.How == subject.FitTrimmed || l.Fit.How == subject.FitMoved {
+		c.warn("text_retimed", "graphics item %s was %s to %d-%d ms, where it fits clear of the subject (at %d-%d ms it would cover their body)",
+			id, map[string]string{subject.FitTrimmed: "shortened", subject.FitMoved: "moved"}[l.Fit.How], l.Fit.AtMs, l.Fit.AtMs+l.Fit.DurationMs, it.AtMs, it.EndMs())
+	}
+	switch l.Clash {
+	case motion.ClashBelow, motion.ClashAbove:
+		c.warn("graphics_overlap", "graphics item %s was moved %s %s, which is on screen at the same time in the same place", id, l.Clash, l.With)
+	case motion.ClashMoved:
+		c.warn("graphics_overlap", "graphics item %s was moved to %d-%d ms: at its own time it would be drawn over %s (on screen %d-%d ms)", id, l.Item.AtMs, l.Item.EndMs(), l.With, l.WithAtMs, l.WithEndMs)
+	}
+	switch av := l.Resolved.Avoid; {
+	case av.OverHead:
+		c.warn("text_over_subject", "graphics item %s covers the subject's head and could not be moved off it inside the safe zone", id)
+	case av.OverBody:
+		c.warn("text_over_subject", "graphics item %s is off the subject's head but still covers their body", id)
+	case av.Overlapped && av.Where == timeline.WhereSmaller:
+		c.warn("text_moved", "graphics item %s was shrunk to scale %g to keep it clear of the subject", id, av.Scale)
+	case av.Overlapped:
+		c.warn("text_moved", "graphics item %s was moved %s the subject to keep it clear of them", id, av.Where)
+	}
+	return true
+}
+
+// fallbackText is a laid-out item as the text item the fallback draws: at the time it was laid out at, and where it was stacked to
+// keep it off another overlay, at the centre of its box (placed already, so it does not avoid the subject again).
+func fallbackText(l motion.Laid, out timeline.Output) timeline.TextItem {
+	t := l.Item.AsText()
+	if l.Clash == motion.ClashBelow || l.Clash == motion.ClashAbove {
+		b := l.Resolved.Box
+		w, h := float64(out.Width), float64(out.Height)
+		t.Anchor, t.Position = "", &timeline.Point{X: float64(b.Left+b.Right) / 2 / w, Y: float64(b.Top+b.Bottom) / 2 / h}
+		if sc := l.Resolved.Avoid.Scale; sc > 0 {
+			t.Scale = &sc
 		}
+		no := false
+		t.AvoidSubject = &no
 	}
-	it.AtMs, it.DurationMs, it.Params.AccentsMs = at, dur, acc
-	return it
+	return t
 }
 
 // graphicsTimeMap adds the overlays to the time map like text items: [frame(at_ms), frame(end)). (In the fallback they are text items

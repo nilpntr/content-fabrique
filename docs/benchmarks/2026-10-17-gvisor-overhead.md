@@ -66,4 +66,4 @@ cd apps/server
 go run ./cmd/cfctl media bench --providers docker,hardened --runs 3 --cpus 4
 ```
 
-`hardened` needs `runsc` registered with the Docker daemon (`runsc install`, then reload Docker). It does not run on Docker Desktop or OrbStack on a Mac. To rerun in CI: Actions, workflow `ci`, "Run workflow", branch of your choice; the table is in the `gvisor-bench` job summary and the `gvisor-bench` artefact.
+`hardened` needs `runsc` registered with the Docker daemon (`runsc install`, then reload Docker); in production register it as `runsc install -- --oci-seccomp`, so the container's seccomp profile is enforced inside gVisor too (a syscall filter under Chrome's renderer, whose own sandbox is off: [motion-graphics-v1](../design/motion-graphics-v1.md) section 5). It does not run on Docker Desktop or OrbStack on a Mac. To rerun in CI: Actions, workflow `ci`, "Run workflow", branch of your choice; the table is in the `gvisor-bench` job summary and the `gvisor-bench` artefact.
