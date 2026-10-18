@@ -23,6 +23,8 @@ export interface NewProjectInput {
   assetIds: AssetId[];
   /** The trimmed free-text instructions; an empty string when the creator wrote none. */
   brief: string;
+  /** `max` for an extra careful first edit; left out for a standard one. */
+  quality?: "max";
   /** The trimmed project name. Left out when the creator gave none (the server names the project). */
   title?: string;
 }

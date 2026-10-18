@@ -25,6 +25,11 @@ var (
 	// ErrNoPlan is returned when the workspace has no active plan: no price, no budget. The API's paywall answers first, so this is a
 	// race with a revoke, or the CLI on a workspace that was never granted a plan.
 	ErrNoPlan = errors.New("credits: the workspace has no active plan")
+	// ErrQualityNotInPlan is returned when an edit asks for quality max (the extra-careful edit) on a plan that does not include it (the
+	// trial), or on a price list that has none. The API answers 402 quality_not_in_plan.
+	ErrQualityNotInPlan = errors.New("credits: the plan does not include extra-careful edits")
+	// ErrQualityInvalid is returned for a quality that is neither standard nor max.
+	ErrQualityInvalid = errors.New("credits: the quality is not standard or max")
 	// ErrNotConfigured is returned when an editor run is started by a runtime that was given no credits service. It fails closed: no
 	// editor run is ever started without a hold.
 	ErrNotConfigured = errors.New("credits: this runtime has no credits service, so an editor run cannot be started")
@@ -77,7 +82,9 @@ func (s *Service) now() time.Time {
 
 // Quote is what an action will cost, decided on the server.
 type Quote struct {
-	Action  Action
+	Action Action
+	// Quality is the quality the edit was asked for (standard or max); Action already says which.
+	Quality Quality
 	Credits int
 	// BudgetMicros is the hard budget of the run, from the plan's COGS budget for the action. 0 means "keep the caller's budget": a run
 	// started without credits (development) is not capped by a plan it may not have.
@@ -94,13 +101,22 @@ type Quote struct {
 }
 
 // QuoteEdit decides which edit this run is, what it costs and what budget it gets. It locks the project's row first (the caller has
-// usually done so already), so two requests for one project cannot both be the first edit.
+// usually done so already), so two requests for one project cannot both be the first edit. The quality is the creator's choice for this
+// edit (empty means standard): max is priced as its own action (edit.first.max, edit.revision.max) with its own credits and budget, and
+// is refused with ErrQualityNotInPlan on a plan that does not include it. The hold and the charge use the action's credits and this
+// list's version.
 //
 // The first edit is the run on a project that has no charged edit yet. A run that failed was released and never charged, so after a failed
 // first run the next one is the first edit again; a run that was cancelled after it made a version was charged, so the next one is a revision (a cancel after a preview of earlier work was released).
 //
 // With free set (cfctl agent run --no-credits) the workspace need not have a plan and the run costs no credits.
-func (s *Service) QuoteEdit(ctx context.Context, tx *store.Store, ws ids.WorkspaceID, project ids.ProjectID, free bool) (Quote, error) {
+func (s *Service) QuoteEdit(ctx context.Context, tx *store.Store, ws ids.WorkspaceID, project ids.ProjectID, free bool, quality Quality) (Quote, error) {
+	if quality == "" {
+		quality = Standard
+	}
+	if !quality.Valid() {
+		return Quote{}, fmt.Errorf("%w: %q", ErrQualityInvalid, quality)
+	}
 	if _, err := tx.GetProjectForUpdate(ctx, ws, project); err != nil {
 		return Quote{}, err
 	}
@@ -108,11 +124,11 @@ func (s *Service) QuoteEdit(ctx context.Context, tx *store.Store, ws ids.Workspa
 	if err != nil {
 		return Quote{}, err
 	}
-	action := EditFirst
-	if charged {
-		action = EditRevision
+	action := ActionFor(!charged, quality)
+	q := Quote{Action: action, Quality: quality, ListVersion: s.List.Version, Free: free}
+	if quality == Max && !s.List.Offers(Max) {
+		return Quote{}, fmt.Errorf("%w: price list %s has none", ErrQualityNotInPlan, s.List.Version)
 	}
-	q := Quote{Action: action, ListVersion: s.List.Version, Free: free}
 	ent, err := tx.GetEntitlements(ctx, ws)
 	if err != nil {
 		return Quote{}, err
@@ -129,6 +145,9 @@ func (s *Service) QuoteEdit(ctx context.Context, tx *store.Store, ws ids.Workspa
 	q.Plan = ent.Plan
 	if free {
 		return q, nil
+	}
+	if quality == Max && !s.List.Plans[ent.Plan].QualityMax {
+		return Quote{}, fmt.Errorf("%w: the %s plan", ErrQualityNotInPlan, ent.Plan)
 	}
 	q.BillingMode = s.List.Plans[ent.Plan].BillingMode
 	q.UnchargedCap = s.List.Plans[ent.Plan].UnchargedRunsPerDay
@@ -220,6 +239,12 @@ func (s *Service) RecordFinalExport(ctx context.Context, tx *store.Store, ws ids
 // SyncAllowance grants the workspace's allowance for the current period (see store.SyncAllowance).
 func (s *Service) SyncAllowance(ctx context.Context, ws ids.WorkspaceID) (store.AllowanceResult, error) {
 	return s.Store.SyncAllowance(ctx, ws, s.List.AllowanceSpecs(), s.now())
+}
+
+// SyncListSwitch is the one-off step after the price list changed under a workspace that already has its allowance (see
+// store.TopUpAllowanceToList): the credits the new list adds to the allowance it was granted. Idempotent. It returns the credits added.
+func (s *Service) SyncListSwitch(ctx context.Context, ws ids.WorkspaceID) (int, error) {
+	return s.Store.TopUpAllowanceToList(ctx, ws, s.List.AllowanceSpecs(), s.now())
 }
 
 // TopUpExpiry is when a top-up granted at t expires.

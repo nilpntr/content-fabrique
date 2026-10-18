@@ -72,6 +72,12 @@ func (r *rig) project(ws store.Workspace) ids.ProjectID {
 // run creates a queued run with a hold, the way the runtime does: quote, create, hold, all in one transaction.
 func (r *rig) run(ws store.Workspace, project ids.ProjectID, free bool) (store.AgentRun, credits.Quote, error) {
 	r.t.Helper()
+	return r.runQ(ws, project, free, credits.Standard)
+}
+
+// runQ is run for an edit of the given quality.
+func (r *rig) runQ(ws store.Workspace, project ids.ProjectID, free bool, quality credits.Quality) (store.AgentRun, credits.Quote, error) {
+	r.t.Helper()
 	ctx := context.Background()
 	var (
 		run store.AgentRun
@@ -79,7 +85,7 @@ func (r *rig) run(ws store.Workspace, project ids.ProjectID, free bool) (store.A
 	)
 	err := r.st.InTx(ctx, func(tx *store.Store) error {
 		var err error
-		if q, err = r.svc.QuoteEdit(ctx, tx, ws.ID, project, free); err != nil {
+		if q, err = r.svc.QuoteEdit(ctx, tx, ws.ID, project, free, quality); err != nil {
 			return err
 		}
 		budget := q.BudgetMicros
@@ -124,7 +130,7 @@ func TestQuoteDecidesFirstOrRevisionFromTheProject(t *testing.T) {
 	project, other := r.project(ws), r.project(ws)
 
 	first, q, err := r.run(ws, project, false)
-	if err != nil || q.Action != credits.EditFirst || q.Credits != 6 || q.BudgetMicros != 960_000 || q.Plan != plans.Creator || q.ListVersion != "2026-10" {
+	if err != nil || q.Action != credits.EditFirst || q.Credits != 6 || q.BudgetMicros != 960_000 || q.Plan != plans.Creator || q.ListVersion != "2026-10c" {
 		t.Fatalf("first run: %+v, %v", q, err)
 	}
 	if first.BudgetMicros != 960_000 {

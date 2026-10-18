@@ -217,6 +217,8 @@ type e2eConfig struct {
 	planBudgets bool
 	// charged gives the project an edit that was charged first, so that the run is a revision.
 	charged bool
+	// quality is the quality of the run (credits.Standard when empty).
+	quality credits.Quality
 }
 
 // newE2E seeds the project and builds the runtime over the real llm layer in the mode the variables name.
@@ -316,7 +318,7 @@ func newE2E(t *testing.T, vars map[string]string, api *fakeAnthropic, options ..
 	if err != nil {
 		t.Fatal(err)
 	}
-	if x.run, err = svc.Create(context.Background(), e.st, runtime.StartParams{Agent: Name, WorkspaceID: e.wsA.ID, ProjectID: x.prj.UUID, Input: input, Profile: cfg.profile}); err != nil {
+	if x.run, err = svc.Create(context.Background(), e.st, runtime.StartParams{Agent: Name, WorkspaceID: e.wsA.ID, ProjectID: x.prj.UUID, Input: input, Profile: cfg.profile, Quality: cfg.quality}); err != nil {
 		t.Fatal(err)
 	}
 	return x

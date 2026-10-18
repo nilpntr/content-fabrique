@@ -18,6 +18,11 @@ interface PlanCard {
 /**
  * The plans and prices of the product plan (docs/01 section 10). They are hypotheses to be validated in the beta, so the
  * prices say "about". Billing arrives with P7-01; until then the cards only inform.
+ *
+ * The cards do not say how many videos a plan pays for. That number follows from the price list (config/plans: the plan's credit
+ * allowance over what a video costs in credits), which changes with the model's effort and the budgets (D-31), and this page has no
+ * plan to ask the API about. The API gives it once there is one: `GET /v1/me` has `credits.credits_per_video`, and
+ * `GET /v1/workspace/plan` has `limits.exports`, the videos a period pays for.
  */
 export const PLAN_CARDS: readonly PlanCard[] = [
   {
@@ -25,28 +30,28 @@ export const PLAN_CARDS: readonly PlanCard[] = [
     name: "Trial",
     price: "On request",
     billing: "AI included, billed by us",
-    includes: ["2 exported videos", "2 GB storage", "Previews are watermarked; exports never are"],
+    includes: ["Edit credits to try it, once", "2 GB storage", "Previews are watermarked; exports never are"],
   },
   {
     id: "studio",
     name: "Studio (BYOK)",
     price: "About €25 / month",
     billing: "AI billed to your own Anthropic key",
-    includes: ["60 exports a month", "100 GB storage", "Trend board", "Ideas"],
+    includes: ["Edit credits every month", "100 GB storage", "Trend board", "Ideas"],
   },
   {
     id: "creator",
     name: "Creator (managed)",
     price: "About €59 / month",
     billing: "AI included, billed by us from credits",
-    includes: ["15 videos a month", "50 GB storage", "Trend board", "Ideas"],
+    includes: ["Edit credits every month", "50 GB storage", "Trend board", "Ideas"],
   },
   {
     id: "pro",
     name: "Pro (managed)",
     price: "About €129 / month",
     billing: "AI included, billed by us from credits",
-    includes: ["40 videos a month", "200 GB storage", "Brand kit", "Priority renders", "TikTok drafts"],
+    includes: ["Edit credits every month", "200 GB storage", "Brand kit", "Priority renders", "TikTok drafts"],
   },
 ];
 

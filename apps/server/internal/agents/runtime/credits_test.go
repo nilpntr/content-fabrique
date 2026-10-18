@@ -96,7 +96,7 @@ func TestAnEditorRunHoldsItsCreditsAndTakesItsBudgetFromThePlan(t *testing.T) {
 		t.Fatalf("budget = %d, want the creator plan's 960,000", run.BudgetMicros)
 	}
 	h, err := e.st.GetCreditHold(context.Background(), e.ws.ID, run.ID)
-	if err != nil || h.Credits != 6 || h.Action != store.ActionEditFirst || h.Project != project || h.Plan != "creator" || h.ListVersion != "2026-10" {
+	if err != nil || h.Credits != 6 || h.Action != store.ActionEditFirst || h.Project != project || h.Plan != "creator" || h.ListVersion != "2026-10c" {
 		t.Fatalf("hold = %+v, %v", h, err)
 	}
 	if !h.ExpiresAt.After(time.Now().Add(time.Hour)) {

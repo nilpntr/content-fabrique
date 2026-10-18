@@ -3,8 +3,10 @@ package editor
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 
+	"github.com/nilpntr/content-fabrique/internal/credits"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
@@ -19,6 +21,18 @@ func budgetRun(t *testing.T, revision bool, scale int) (*e2e, *fakeAnthropic) {
 	api := &fakeAnthropic{scale: scale}
 	vars := map[string]string{"LLM_MODE": "record", "LLM_CASSETTE_DIR": t.TempDir(), "ANTHROPIC_API_KEY": "sk-ant-api03-FAKE-not-a-real-key-0123456789"}
 	x := newE2E(t, vars, api, func(c *e2eConfig) { c.profile, c.planBudgets, c.charged = "v1-start", true, revision })
+	x.execute()
+	return x, api
+}
+
+// budgetRunMax is budgetRun for an extra careful edit (quality max).
+func budgetRunMax(t *testing.T, revision bool, scale int) (*e2e, *fakeAnthropic) {
+	t.Helper()
+	api := &fakeAnthropic{scale: scale}
+	vars := map[string]string{"LLM_MODE": "record", "LLM_CASSETTE_DIR": t.TempDir(), "ANTHROPIC_API_KEY": "sk-ant-api03-FAKE-not-a-real-key-0123456789"}
+	x := newE2E(t, vars, api, func(c *e2eConfig) {
+		c.profile, c.planBudgets, c.charged, c.quality = "v1-start", true, revision, credits.Max
+	})
 	x.execute()
 	return x, api
 }
@@ -159,4 +173,54 @@ func TestBudgetBelowTheMinimumEndsGracefully(t *testing.T) {
 			t.Errorf("call %d was sent with %d tokens, under the minimum that is refused instead", i+1, mt)
 		}
 	}
+}
+
+// An extra careful first edit on Opus (D-31): effort max, a $2.00 budget and 32,000 tokens a call. Its calls shrink as the money runs low,
+// the cost never passes the budget, and the run ends succeeded on its previewed version.
+func TestMaxFirstEditOnOpusFitsItsBudget(t *testing.T) {
+	x, api := budgetRunMax(t, false, 15)
+	r := x.get()
+	if r.BudgetMicros != 2_000_000 || r.MaxTokens != 32_000 || r.Effort != "max" || r.Model != "claude-opus-5-5" || r.Stage != "editor" {
+		t.Fatalf("run: budget %d, max_tokens %d, effort %s, model %s, stage %s", r.BudgetMicros, r.MaxTokens, r.Effort, r.Model, r.Stage)
+	}
+	if r.Status != store.AgentSucceeded {
+		t.Fatalf("the run %s (%v): %s", r.Status, r.FailureReason, r.Output)
+	}
+	if r.CostMicros <= 0 || r.CostMicros > r.BudgetMicros {
+		t.Fatalf("cost %d against a budget of %d", r.CostMicros, r.BudgetMicros)
+	}
+	sent := maxTokensOf(api)
+	if sent[0] != 32_000 {
+		t.Errorf("the first call asked for %d tokens, want the max entry's 32,000", sent[0])
+	}
+	for i, mt := range sent {
+		if mt > 32_000 {
+			t.Errorf("call %d asked for %d tokens, over the max entry's 32,000", i+1, mt)
+		}
+	}
+	if !slices.ContainsFunc(sent, func(mt int) bool { return mt < 32_000 }) {
+		t.Errorf("no call was shortened: %v", sent)
+	}
+	if x.artifacts(PreviewArtifact) == 0 || x.artifacts(PlanArtifact) == 0 {
+		t.Errorf("previews %d, plans %d", x.artifacts(PreviewArtifact), x.artifacts(PlanArtifact))
+	}
+	// The run was held and is charged as the extra careful action, at its own credits.
+	h, err := x.st.GetCreditHold(context.Background(), x.run.WorkspaceID, x.run.ID)
+	if err == nil {
+		t.Errorf("the hold of a finished run is still there: %+v", h)
+	}
+	rows, err := x.st.CreditLedger(context.Background(), x.run.WorkspaceID, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var charged bool
+	for _, row := range rows {
+		if row.Kind == store.CreditCharge && row.Action != nil && *row.Action == store.ActionEditFirstMax && row.Credits == -16 {
+			charged = true
+		}
+	}
+	if !charged {
+		t.Errorf("no charge of 16 credits for edit.first.max in the ledger: %+v", rows)
+	}
+	t.Logf("max_tokens sent: %v; cost %d of %d; %d calls", sent, r.CostMicros, r.BudgetMicros, len(sent))
 }

@@ -704,7 +704,7 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 
 **Decision** (details in [spend control v1](design/spend-control-v1.md)):
 - **Credits** are the customer's currency.
-  - **Prices are per action**, from a versioned price list in `config/plans`: a first edit is 6, a revision 2, an export 0. 10 credits make a "video".
+  - **Prices are per action**, from a versioned price list in `config/plans`: a first edit is 6, a revision 2, an export 0. 10 credits make a "video". (2026-10c keeps these and adds the extra careful actions below; a video's cost in credits is always derived from the list.)
   - Each plan's allowance expires at the end of its period. Top-ups last 12 months.
   - A credit **hold** is taken before an action starts, so the last credits can be raced safely.
   - Credits are charged only on success. Failed runs are refunded and recorded as unbilled COGS.
@@ -717,6 +717,10 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
   - The founder gets `cfctl spend report` (margin per workspace, plan and action, plus unbilled COGS), typed `spend.alert` events, and a daily reconciliation against the provider's usage report.
 - **Ledgers are append-only** for the app role. Money is stored as integers.
 - **Built in P7-01a** ([spend control v1, "As built (P7-01a)"](design/spend-control-v1.md#as-built-p7-01a)): the price list and plans in `config/plans`, the profit-invariant test, the credit ledger with consumption tracked per grant, the hold-settle-release on editor runs, the allowance periods, `402 credits_exhausted`, `cfctl credits`. Its deviations from the text above are listed there.
+- **Update, 2026-10-18: max effort is an option per edit, not for everyone. PENDING FOUNDER CONFIRMATION.** The founder: "Online I always see Opus 5.5 at max effort is needed for the best results; $2 for an edit is not a problem and maybe needed", then: do not switch everyone to max effort.
+  - **Quality per edit.** `quality: standard | max` on the start-edit request (a first edit or a revision), default `standard`. **Standard is exactly what it was**: effort medium, 24,000 / 12,000 tokens, the 2026-10 credits (6 / 2) and budgets ($0.96 / $0.32 on creator), so nobody's videos per month change. **Max** ("extra careful") runs on new routing entries `editor_max` / `revision_max` (Opus 5.5, effort `max`, 32,000 / 16,000 tokens; a live max-effort edit cost $1.01) with a run budget of $2.00 for a first edit and $0.80 for a revision, priced as their own actions `edit.first.max` (16 credits) and `edit.revision.max` (7), derived so that the profit invariant holds for every plan (`max_cogs_share` stays 0.40). The hold and the charge use the chosen action's credits and the list version.
+  - **Who.** The trial cannot use it (`402 quality_not_in_plan`); studio (BYOK) can on its own key; creator and pro can. The new price list is `config/plans/2026-10c.yaml` (not deployed yet, so editable until confirmed; the old file is never edited; `credits.ListFile` is the newest file, a test keeps it so). `GET /v1/me` carries `credits.edit_costs` and `credits_per_video` so the web app shows "Extra careful: uses 16 credits instead of 6" without carrying a number.
+  - **General fixes kept:** a video's credits derived from the list (no "1 video = 10 credits" in code), `max_tokens` fitted to the lesser of the run's budget and the per-call cap, the cache-aware reservation, `escalate` validation, a one-off allowance top-up when a list grows an allowance (adds nothing for 2026-10c). Details in [spend control v1, section 3a](design/spend-control-v1.md#3a-update-2026-10c-the-extra-careful-edit-opt-in-per-edit-d-31-pending-founder-confirmation).
 
 **Alternatives.**
 - Pass-through token pricing to customers: unpredictable for creators, and it exposes our margin.

@@ -66,11 +66,13 @@ test("the paywall shows the plans with their prices, and no checkout", async () 
     return within(el);
   };
   expect(card("trial").getByText("On request")).toBeTruthy();
-  expect(card("trial").getByText("2 exported videos")).toBeTruthy();
+  expect(card("trial").getByText("Edit credits to try it, once")).toBeTruthy();
   expect(card("studio").getByText("About €25 / month")).toBeTruthy();
   expect(card("studio").getByText(/own Anthropic key/)).toBeTruthy();
   expect(card("creator").getByText("About €59 / month")).toBeTruthy();
-  expect(card("creator").getByText("15 videos a month")).toBeTruthy();
+  expect(card("creator").getByText("Edit credits every month")).toBeTruthy();
+  // The cards state no count of videos: that number is the price list's, and the API has it once a plan exists.
+  expect(paywall.textContent).not.toMatch(/\d+ (exported )?videos|\d+ exports/);
   expect(card("pro").getByText("About €129 / month")).toBeTruthy();
   expect(card("pro").getByText("Priority renders")).toBeTruthy();
 

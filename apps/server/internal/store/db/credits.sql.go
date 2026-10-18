@@ -386,6 +386,44 @@ func (q *Queries) GetCreditSource(ctx context.Context, arg GetCreditSourceParams
 	return i, err
 }
 
+const getCurrentAllowanceGrant = `-- name: GetCurrentAllowanceGrant :one
+SELECT g.id, g.credits, g.expires_at,
+       COALESCE((SELECT SUM(a.credits) FROM credit_ledger a
+                 WHERE a.workspace_id = g.workspace_id AND a.kind = 'adjust' AND a.idempotency_key LIKE 'listswitch:' || g.id || ':%'), 0)::integer AS added
+FROM credit_ledger g
+WHERE g.workspace_id = $1 AND g.kind = 'grant_allowance' AND g.plan = $2
+  AND (g.expires_at IS NULL OR g.expires_at > $3)
+  AND NOT EXISTS (SELECT 1 FROM credit_ledger e WHERE e.grant_id = g.id AND e.kind = 'expire')
+ORDER BY g.created_at DESC, g.id DESC
+LIMIT 1
+`
+
+type GetCurrentAllowanceGrantParams struct {
+	WorkspaceID ids.WorkspaceID
+	Plan        *string
+	Now         *time.Time
+}
+
+type GetCurrentAllowanceGrantRow struct {
+	ID        uuid.UUID
+	Credits   int32
+	ExpiresAt *time.Time
+	Added     int32
+}
+
+// The newest allowance of the plan that has not expired, and the credits that list switches have added to it.
+func (q *Queries) GetCurrentAllowanceGrant(ctx context.Context, arg GetCurrentAllowanceGrantParams) (GetCurrentAllowanceGrantRow, error) {
+	row := q.db.QueryRow(ctx, getCurrentAllowanceGrant, arg.WorkspaceID, arg.Plan, arg.Now)
+	var i GetCurrentAllowanceGrantRow
+	err := row.Scan(
+		&i.ID,
+		&i.Credits,
+		&i.ExpiresAt,
+		&i.Added,
+	)
+	return i, err
+}
+
 const insertCreditHold = `-- name: InsertCreditHold :one
 INSERT INTO credit_holds (workspace_id, action, action_id, credits, project_id, member_user_id, plan, plan_list_version, expires_at, idempotency_key)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -881,6 +919,61 @@ func (q *Queries) ListExpiredCreditHoldsWithFrozen(ctx context.Context, arg List
 	return items, nil
 }
 
+const listWorkspacesBehindTheList = `-- name: ListWorkspacesBehindTheList :many
+SELECT wp.workspace_id
+FROM workspace_plans wp
+JOIN workspaces w ON w.id = wp.workspace_id AND w.deleted_at IS NULL
+WHERE wp.plan = ANY($1::text[]) AND wp.status = 'active' AND (wp.current_period_end IS NULL OR wp.current_period_end > $2)
+  AND wp.workspace_id > $3
+  AND EXISTS (
+      SELECT 1 FROM credit_ledger g
+      WHERE g.workspace_id = wp.workspace_id AND g.kind = 'grant_allowance' AND g.plan = wp.plan
+        AND (g.expires_at IS NULL OR g.expires_at > $2)
+        AND NOT EXISTS (SELECT 1 FROM credit_ledger e WHERE e.grant_id = g.id AND e.kind = 'expire')
+        AND g.credits + COALESCE((SELECT SUM(a.credits) FROM credit_ledger a
+                                  WHERE a.workspace_id = g.workspace_id AND a.kind = 'adjust' AND a.idempotency_key LIKE 'listswitch:' || g.id || ':%'), 0) < ($4::integer[])[array_position($1::text[], wp.plan)])
+ORDER BY wp.workspace_id
+LIMIT $5
+`
+
+type ListWorkspacesBehindTheListParams struct {
+	Plans      []string
+	Now        *time.Time
+	After      ids.WorkspaceID
+	Allowances []int32
+	RowLimit   int32
+}
+
+// Workspaces whose current allowance was granted under a smaller allowance than the price list now has for their plan (@plans and
+// @allowances are the list's, side by side): the list changed under them, and TopUpAllowanceToList adds the difference once. A top-up
+// of an earlier switch counts as part of the allowance, so the list that comes after this one adds only what is still missing. The job
+// re-checks each one under the account lock; this only narrows the list.
+func (q *Queries) ListWorkspacesBehindTheList(ctx context.Context, arg ListWorkspacesBehindTheListParams) ([]ids.WorkspaceID, error) {
+	rows, err := q.db.Query(ctx, listWorkspacesBehindTheList,
+		arg.Plans,
+		arg.Now,
+		arg.After,
+		arg.Allowances,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ids.WorkspaceID
+	for rows.Next() {
+		var workspace_id ids.WorkspaceID
+		if err := rows.Scan(&workspace_id); err != nil {
+			return nil, err
+		}
+		items = append(items, workspace_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkspacesNeedingAllowance = `-- name: ListWorkspacesNeedingAllowance :many
 SELECT wp.workspace_id
 FROM workspace_plans wp
@@ -974,7 +1067,7 @@ const projectHasChargedEdit = `-- name: ProjectHasChargedEdit :one
 SELECT EXISTS (
     SELECT 1 FROM credit_ledger c
     WHERE c.workspace_id = $1 AND c.project_id = $2 AND c.kind = 'charge'
-      AND c.action IN ('edit.first', 'edit.revision')
+      AND c.action IN ('edit.first', 'edit.revision', 'edit.first.max', 'edit.revision.max')
       AND NOT EXISTS (SELECT 1 FROM credit_ledger r WHERE r.workspace_id = c.workspace_id AND r.kind = 'refund' AND r.action_id = c.action_id)
 ) AS charged
 `

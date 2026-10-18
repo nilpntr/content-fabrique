@@ -54,6 +54,7 @@ status, totals, every event and the usage_ledger rows, which is how a run's cost
   --yes        run is refused unless CF_ENV is local or ci and the database is this machine, with CF_ENV and DATABASE_URL
                from the same place; --yes overrides that
   --events     run: also print the events when the run ends
+  --quality    run: standard (the default) or max, the extra-careful edit (effort max, more credits, a larger budget), for an editor run
   --no-credits run an editor run without credits. By default it is charged like the API's: the workspace needs an active plan and
                enough credits (cfctl plan grant, cfctl credits grant), the run gets the plan's budget for a first edit or a revision,
                and it is charged when it succeeds, released when it fails. With --no-credits it costs nothing and keeps the budget flags,
@@ -180,6 +181,7 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 	yes := flags.Bool("yes", false, "confirm outside plain local development")
 	showEvents := flags.Bool("events", false, "print the events at the end")
 	noCredits := flags.Bool("no-credits", false, "run an editor run without credits (local and ci only)")
+	quality := flags.String("quality", string(credits.Standard), "standard or max (the extra-careful edit)")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -306,7 +308,7 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 	run, err := svc.Start(ctx, runtime.StartParams{
 		Agent: *agentName, WorkspaceID: ws, ProjectID: projectID.UUID, Input: runInput, Profile: *profile,
 		Budgets:   runtime.Budgets{Micros: int64(*budgetUSD * 1e6), Tokens: *maxTokens, ToolCalls: *maxCalls, WallClock: *wall},
-		NoCredits: *noCredits,
+		NoCredits: *noCredits, Quality: credits.Quality(*quality),
 	})
 	if err != nil {
 		if errors.Is(err, store.ErrInsufficientCredits) {

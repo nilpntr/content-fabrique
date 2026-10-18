@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/api"
+	"github.com/nilpntr/content-fabrique/internal/credits"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
@@ -37,7 +38,7 @@ func (s *apiServer) GetMe(ctx context.Context, _ api.GetMeRequestObject) (api.Ge
 		if b, err := s.credits.CreditBalance(ctx, p.WorkspaceID, time.Now()); err != nil {
 			s.logger.ErrorContext(ctx, "reading the workspace credits failed", "error", err)
 		} else {
-			c := creditsOf(b)
+			c := creditsOf(b, s.list, e)
 			out.Credits = &c
 		}
 	}
@@ -50,10 +51,18 @@ type CreditReader interface {
 }
 
 // creditsOf is the balance as the API shows it. low is "at least 80 % of the allowance is used": what is available is at most a fifth of it.
-func creditsOf(b store.CreditBalance) api.Credits {
+func creditsOf(b store.CreditBalance, list *credits.PriceList, e store.Entitlements) api.Credits {
 	top := make([]api.CreditTopUp, 0, len(b.TopUps))
 	for _, t := range b.TopUps {
 		top = append(top, api.CreditTopUp{Credits: t.Credits, ExpiresAt: t.ExpiresAt})
 	}
-	return api.Credits{Available: b.Available, Allowance: b.Allowance, PeriodEnd: b.PeriodEnd, Low: b.Allowance > 0 && b.Available*5 <= b.Allowance, TopUps: top}
+	// What an edit costs at each quality, from the list; the extra-careful price only for a plan that includes it.
+	first, revision, _ := list.EditCredits(e.Plan, credits.Standard)
+	costs := api.EditCosts{Standard: api.EditCost{FirstEdit: first, Revision: revision}}
+	if e.Active {
+		if first, revision, ok := list.EditCredits(e.Plan, credits.Max); ok {
+			costs.Max = &api.EditCost{FirstEdit: first, Revision: revision}
+		}
+	}
+	return api.Credits{CreditsPerVideo: list.CreditsPerVideo(), EditCosts: costs, Available: b.Available, Allowance: b.Allowance, PeriodEnd: b.PeriodEnd, Low: b.Allowance > 0 && b.Available*5 <= b.Allowance, TopUps: top}
 }

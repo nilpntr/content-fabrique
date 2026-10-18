@@ -172,6 +172,38 @@ func (e *NoStageError) Error() string {
 // Efforts are the values the Messages API accepts for output_config.effort.
 var Efforts = []string{"low", "medium", "high", "xhigh", "max"}
 
+// effortRank orders Efforts from the least to the most thinking.
+func effortRank(effort string) int { return slices.Index(Efforts, effort) }
+
+// checkEscalation validates a stage's `escalate` entry (a retry one effort step up when the hard constraints failed): its effort must be
+// a real one and strictly above the stage's own, because "escalating" to the same or a lower effort is not an escalation. A stage that is
+// already at the top (`max`) therefore cannot have one; the profile leaves the entry out.
+func checkEscalation(profile, stage string, n *yaml.Node, effort string) error {
+	var esc *yaml.Node
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == "escalate" {
+			esc = n.Content[i+1]
+		}
+	}
+	if esc == nil {
+		return nil
+	}
+	if esc.Kind != yaml.MappingNode {
+		return fmt.Errorf("routing: stage %q of profile %q: escalate must be a mapping", stage, profile)
+	}
+	to := scalar(esc, "effort")
+	if !slices.Contains(Efforts, to) {
+		return fmt.Errorf("routing: stage %q of profile %q: escalate.effort %q is not one of %s", stage, profile, to, strings.Join(Efforts, ", "))
+	}
+	if effort == "" {
+		return fmt.Errorf("routing: stage %q of profile %q: escalate needs the stage to set its own effort, to compare against", stage, profile)
+	}
+	if effortRank(to) <= effortRank(effort) {
+		return fmt.Errorf("routing: stage %q of profile %q: escalate.effort %q is not above the stage's own effort %q (a stage at max has nothing to escalate to: leave escalate out)", stage, profile, to, effort)
+	}
+	return nil
+}
+
 // Entry resolves a stage path, such as "editor" or "research.lead", to its model, effort and max_tokens.
 func (p Profile) Entry(stage string) (Entry, error) {
 	if p.doc == nil {
@@ -202,6 +234,9 @@ func (p Profile) Entry(stage string) (Entry, error) {
 	e := Entry{Model: scalar(n, "model"), Effort: scalar(n, "effort"), Batch: scalar(n, "batch") == "true"}
 	if e.Effort != "" && !slices.Contains(Efforts, e.Effort) {
 		return Entry{}, fmt.Errorf("routing: stage %q of profile %q: effort %q is not one of %s", stage, p.Name, e.Effort, strings.Join(Efforts, ", "))
+	}
+	if err := checkEscalation(p.Name, stage, n, e.Effort); err != nil {
+		return Entry{}, err
 	}
 	if v := scalar(n, "max_tokens"); v != "" {
 		mt, err := strconv.Atoi(v)
