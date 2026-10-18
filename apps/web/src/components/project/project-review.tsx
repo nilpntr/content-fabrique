@@ -1,6 +1,6 @@
 import { CircleAlert, Film, Loader2 } from "lucide-react";
 import * as React from "react";
-import { ReviewScreen } from "@/components/editor/review-screen";
+import { type ReviewContext, ReviewScreen } from "@/components/editor/review-screen";
 import type { OutputFormat, ReviewAnnotation, ReviewVersion } from "@/components/editor/types";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -9,7 +9,9 @@ import { type CommentTarget, useAnnotations, useCommentActions } from "@/lib/api
 import { useMe } from "@/lib/api/hooks";
 import { usePreviewRender, useRenderTimeMap, useTimelineSpecs } from "@/lib/api/project-hooks";
 import { toReviewAnnotation, toReviewAnnotations } from "./annotations";
+import { versionName } from "@/lib/words";
 import { renderMessage } from "./errors";
+import { humanizeChange } from "./plain-words";
 import { PreviewStatus } from "./preview-status";
 import { loadingReviewVersion, toReviewVersion } from "./review-data";
 import { VersionHistory } from "./version-history";
@@ -28,6 +30,9 @@ export function ProjectReview({
   versions,
   runActive = false,
   now,
+  detailed = false,
+  aside,
+  empty,
 }: {
   project: Project;
   /** Newest first, as the API lists them. */
@@ -35,6 +40,12 @@ export function ProjectReview({
   /** An editor run is working: with no version yet, the screen says the first cut is on its way. */
   runActive?: boolean;
   now?: number;
+  /** The technical side shows: effect badges and the beat grid on the timeline, frame stepping, the version list. */
+  detailed?: boolean;
+  /** Next to the video: what the editor made, what to change, the download. Gets the number of open comments too. */
+  aside?: (context: ReviewContext & { openComments: number }) => React.ReactNode;
+  /** Shown instead of the empty state while there is no version yet (the editor's progress, the box to start it). */
+  empty?: React.ReactNode;
 }) {
   const latest = versions.reduce((max, version) => Math.max(max, version.version), 0);
   const [shown, setShown] = React.useState<number | undefined>(undefined);
@@ -91,13 +102,14 @@ export function ProjectReview({
   const commentsNote = annotations.isError ? "Your comments could not be loaded. Reload the page to try again." : undefined;
 
   if (versions.length === 0) {
+    if (empty !== undefined) return <>{empty}</>;
     return (
       <section aria-label="Review" className="grid place-items-center rounded-xl bg-surface-raised px-6 py-16 text-center shadow-soft ring-1 ring-border">
         <div className="max-w-sm space-y-2">
           {runActive ? <Loader2 aria-hidden className="mx-auto size-6 text-brand motion-safe:animate-spin" /> : <Film aria-hidden className="mx-auto size-6 text-muted-foreground" />}
-          <h2 className="text-[15px] font-semibold tracking-[-0.01em]">{runActive ? "Your first cut is on its way" : "No cut yet"}</h2>
+          <h2 className="text-[15px] font-semibold tracking-[-0.01em]">{runActive ? "Your video is on its way" : "No video yet"}</h2>
           <p className="text-[13px] text-muted-foreground text-pretty">
-            {runActive ? "The editor is looking at your footage. The cut shows up here as soon as it has one." : "Start the editor below to make the first cut from your footage."}
+            {runActive ? "I'm going through your clips. The video shows up here as soon as the first cut is ready." : "Tell me what you'd like below, and I'll make the first cut from your clips."}
           </p>
         </div>
       </section>
@@ -116,12 +128,15 @@ export function ProjectReview({
   if (failed) {
     return (
       <p role="alert" className="rounded-xl bg-del-wash px-4 py-3 text-destructive">
-        The versions of this project could not be loaded. Reload the page to try again.
+        Your video could not be loaded. Reload the page to try again.
       </p>
     );
   }
 
   const requestError = preview.requestError ? renderMessage(preview.requestError) : undefined;
+  const openComments = stored.filter((comment) => comment.status === "open" && !comment.reply_to).length;
+  const describeVersion = (version: (typeof reviewVersions)[number]) =>
+    version.loading ? version.summary : humanizeChange(version.summary, version.items, assetNames);
 
   return (
     <ReviewScreen
@@ -132,7 +147,7 @@ export function ProjectReview({
       comments={stored}
       assetNames={assetNames}
       localVideo={false}
-      placeholderLabel={renderState.kind === "ready" ? "Preview loading" : "No video preview yet"}
+      placeholderLabel={renderState.kind === "ready" ? "Loading the video" : "No video yet"}
       commentsNote={commentsNote}
       onCommentCreate={onCommentCreate}
       onCommentUpdate={(id, patch) => void actions.update(id, patch)}
@@ -141,13 +156,16 @@ export function ProjectReview({
       onDismissCommentsError={actions.clearError}
       onVersionChange={setShown}
       onVideoError={preview.refreshUrls}
+      detailed={detailed}
+      describeVersion={describeVersion}
+      aside={aside ? (context) => aside({ ...context, openComments }) : undefined}
       aboveVideo={({ version }) => {
         if (version.loading) {
           const query = specOf.get(version.version);
           return query?.isError ? (
             <div role="alert" className="flex flex-wrap items-center gap-3 rounded-[10px] bg-del-wash px-3 py-2 text-[12.5px] text-destructive">
               <CircleAlert aria-hidden className="size-3.5 shrink-0" />
-              v{version.version} could not be loaded.
+              {versionName(version.version)} could not be loaded.
               <Button size="sm" variant="secondary" className="ml-auto" onClick={() => void query.refetch()}>
                 Try again
               </Button>
@@ -155,7 +173,7 @@ export function ProjectReview({
           ) : (
             <p role="status" className="flex items-center gap-2 rounded-[10px] bg-wash px-3 py-2 text-[12.5px] text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)]">
               <Loader2 aria-hidden className="size-3.5 motion-safe:animate-spin" />
-              Loading v{version.version}…
+              Loading {versionName(version.version)}…
             </p>
           );
         }
@@ -163,7 +181,7 @@ export function ProjectReview({
           <PreviewStatus state={renderState} version={version.version} onRequest={preview.requestRender} requesting={preview.requesting} requestError={requestError} />
         );
       }}
-      belowTimeline={({ version, selectVersion }) => <VersionHistory versions={versions} selected={version.version} onSelect={selectVersion} now={now} />}
+      belowTimeline={detailed ? ({ version, selectVersion }) => <VersionHistory versions={versions} selected={version.version} onSelect={selectVersion} now={now} /> : undefined}
     />
   );
 }

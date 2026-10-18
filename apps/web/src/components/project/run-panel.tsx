@@ -28,7 +28,7 @@ function replyErrorMessage(error: unknown): string {
  * the question box when it asks something, and at the end the editor's own summary or why it failed. It follows the run by
  * polling (see `useRun`) and stops asking once the run has finished.
  */
-export function RunPanel({ runId, assetTitles, className }: { runId: string; assetTitles: ReadonlyMap<string, string>; className?: string }) {
+export function RunPanel({ runId, assetTitles, controls = true, className }: { runId: string; assetTitles: ReadonlyMap<string, string>; controls?: boolean; className?: string }) {
   const query = useRunQuery(runId);
   const cancel = useCancelRun();
   const reply = useReplyToRun();
@@ -61,7 +61,7 @@ export function RunPanel({ runId, assetTitles, className }: { runId: string; ass
     );
   }
 
-  return <RunView run={run} artifacts={stored.data} assetTitles={assetTitles} className={className} onCancel={() => cancel.mutate({ runId, text: "" })} cancelling={cancel.isPending || cancel.isSuccess} cancelError={cancel.isError} onReply={(text) => reply.mutate({ runId, text })} replying={reply.isPending} replyError={reply.isError ? replyErrorMessage(reply.error) : undefined} />;
+  return <RunView run={run} artifacts={stored.data} assetTitles={assetTitles} controls={controls} className={className} onCancel={() => cancel.mutate({ runId, text: "" })} cancelling={cancel.isPending || cancel.isSuccess} cancelError={cancel.isError} onReply={(text) => reply.mutate({ runId, text })} replying={reply.isPending} replyError={reply.isError ? replyErrorMessage(reply.error) : undefined} />;
 }
 
 export interface RunViewProps {
@@ -75,11 +75,16 @@ export interface RunViewProps {
   onReply: (text: string) => void;
   replying?: boolean;
   replyError?: string;
+  /**
+   * Whether the panel has its own Stop button, answer box and closing summary. Default true. Off where the page shows those in
+   * plain words already (the project page keeps the panel in its Details).
+   */
+  controls?: boolean;
   className?: string;
 }
 
 /** The run panel for a run that is already loaded. */
-export function RunView({ run, artifacts: stored, assetTitles, onCancel, cancelling = false, cancelError = false, onReply, replying = false, replyError, className }: RunViewProps) {
+export function RunView({ run, artifacts: stored, assetTitles, onCancel, cancelling = false, cancelError = false, onReply, replying = false, replyError, controls = true, className }: RunViewProps) {
   const active = isRunActive(run.status);
   const working = run.status === "queued" || run.status === "running";
   const steps = React.useMemo(() => runSteps(run.events ?? [], assetTitles, { live: working }), [run.events, assetTitles, working]);
@@ -100,7 +105,7 @@ export function RunView({ run, artifacts: stored, assetTitles, onCancel, cancell
         <h2 id={titleId} className="text-[15px] font-semibold tracking-[-0.01em]">
           {heading}
         </h2>
-        {active ? (
+        {active && controls ? (
           <Button variant="secondary" size="sm" className="ml-auto" onClick={onCancel} disabled={cancelling} aria-label={cancelling ? "Stopping the editor" : "Stop the editor"}>
             <CircleStop aria-hidden />
             {cancelling ? "Stopping…" : "Stop"}
@@ -119,12 +124,13 @@ export function RunView({ run, artifacts: stored, assetTitles, onCancel, cancell
         </p>
       ) : null}
 
-      {run.status === "waiting_input" ? <QuestionBox question={run.question ?? ""} onReply={onReply} replying={replying} error={replyError} /> : null}
+      {run.status === "waiting_input" && controls ? <QuestionBox question={run.question ?? ""} onReply={onReply} replying={replying} error={replyError} /> : null}
+      {run.status === "waiting_input" && !controls ? <p className="text-[13.5px]">{run.question || "The editor needs more information."}</p> : null}
 
       {artifacts.plan ? <CreativePlanCard plan={artifacts.plan} assetTitles={assetTitles} className="animate-rise" /> : null}
       {artifacts.rounds.length > 0 ? <EditChecksCard rounds={artifacts.rounds} className="animate-rise" /> : null}
 
-      {run.status === "succeeded" ? <FinishSummary text={run.summary || "The editor made your first cut."} version={run.timeline_version} className="animate-rise" /> : null}
+      {run.status === "succeeded" && controls ? <FinishSummary text={run.summary || "The editor made your first cut."} version={run.timeline_version} className="animate-rise" /> : null}
       {run.status === "failed" ? (
         <div role="alert" className="space-y-1 rounded-[10px] bg-del-wash px-3 py-2 text-[13.5px]">
           <p className="font-medium text-destructive">

@@ -54,6 +54,8 @@ export interface ReviewTimelineProps {
   onCancelDraft: () => void;
   onSelectRegion: (id: string) => void;
   onHoverRegion: (id: string | null) => void;
+  /** Whether the editing details show on the clips: effect badges, transitions, the sound lane, the beat grid and the details line. Default true. */
+  detailed?: boolean;
 }
 
 function ReviewTimelineView({
@@ -73,6 +75,7 @@ function ReviewTimelineView({
   onCancelDraft,
   onSelectRegion,
   onHoverRegion,
+  detailed = true,
 }: ReviewTimelineProps) {
   const viewportRef = React.useRef<HTMLDivElement>(null);
   const contentRef = React.useRef<HTMLDivElement>(null);
@@ -96,8 +99,8 @@ function ReviewTimelineView({
   const lanesH = laneCount * LANE_H + LANE_GAP * 2;
 
   // What the editor put in the cut: sound effects get a lane of their own, the beat grid goes in the ruler.
-  const sfx = version.sfx ?? EMPTY_SFX;
-  const markers = version.markers ?? EMPTY_MARKERS;
+  const sfx = detailed ? (version.sfx ?? EMPTY_SFX) : EMPTY_SFX;
+  const markers = detailed ? (version.markers ?? EMPTY_MARKERS) : EMPTY_MARKERS;
   const sfxLayout = React.useMemo(() => sfxRows(sfx, scale), [sfx, scale]);
   const sfxH = sfx.length > 0 ? sfxLaneHeight(sfxLayout.count) : 0;
   const [pinnedFocus, setPinnedFocus] = React.useState<Focus | null>(null);
@@ -219,7 +222,7 @@ function ReviewTimelineView({
   return (
     <section aria-label="Timeline" className="relative rounded-xl bg-surface-raised shadow-soft ring-1 ring-border">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 pt-2.5 pb-2">
-        <h2 className="text-[13px] font-semibold tracking-[-0.01em]">Timeline</h2>
+        <h2 className="text-[13px] font-semibold tracking-[-0.01em]">{detailed ? "Timeline" : "Comment on a moment"}</h2>
 
         <output aria-label="Selection" className="flex min-h-7 items-center gap-2 font-mono text-[12px] tabular-nums text-muted-foreground">
           {draft ? (
@@ -239,7 +242,9 @@ function ReviewTimelineView({
               </span>
             )
           ) : (
-            <span className="hidden font-sans text-[12px] sm:inline">Drag to select a range, click for a point · I and O set in and out</span>
+            <span className="hidden font-sans text-[12px] sm:inline">
+              {detailed ? "Drag to select a range, click for a point · I and O set in and out" : "Drag across the clips, or tap one spot, then say what to change"}
+            </span>
           )}
         </output>
 
@@ -312,11 +317,11 @@ function ReviewTimelineView({
               onPointerUp={onSurfaceUp}
               onPointerCancel={onSurfaceCancel}
             >
-              <Filmstrip version={version} scale={scale} assetNames={assetNames} control={focusControl} />
+              <Filmstrip version={version} scale={scale} assetNames={assetNames} control={focusControl} detailed={detailed} />
 
               <DownbeatLines markers={markers} scale={scale} height={FILM_H + sfxH} />
               <CutLines scale={scale} cuts={cuts} />
-              <TransitionMarks items={version.items} scale={scale} height={FILM_H} control={focusControl} />
+              {detailed ? <TransitionMarks items={version.items} scale={scale} height={FILM_H} control={focusControl} /> : null}
 
               {sfxH > 0 ? (
                 // biome-ignore lint/a11y/useSemanticElements: a lane drawn on the timeline surface; a fieldset cannot be positioned like this.
@@ -367,7 +372,7 @@ function ReviewTimelineView({
           </div>
         </div>
 
-        <div className="mt-2">
+        <div className={cn("mt-2", !detailed && "hidden")}>
           <TimelineDetails
             focus={peekFocus ?? pinnedFocus}
             pinnedFocus={pinnedFocus}
@@ -400,11 +405,13 @@ const Filmstrip = React.memo(function Filmstrip({
   scale,
   assetNames,
   control,
+  detailed = true,
 }: {
   version: ReviewVersion;
   scale: TimelineScale;
   assetNames?: Record<string, string>;
   control: FocusControl;
+  detailed?: boolean;
 }) {
   return (
     <div className="absolute inset-x-0 top-0 overflow-hidden" style={{ height: FILM_H }}>
@@ -429,17 +436,17 @@ const Filmstrip = React.memo(function Filmstrip({
           >
             <div className="absolute inset-0 flex flex-col justify-between px-1.5 py-1" style={{ paddingLeft: 6 + lead }}>
               <div className="flex min-w-0 items-center gap-1 text-[10.5px] leading-none font-medium drop-shadow-[0_1px_1px_rgba(0,0,0,0.5)]">
-                <ClipHandle item={item} control={control} />
+                {detailed ? <ClipHandle item={item} control={control} /> : null}
                 <span className="min-w-0 truncate">
-                  {assetNames?.[item.asset_id] ?? item.asset_id}
-                  {item.speed_ramp ? (
+                  {assetNames?.[item.asset_id] ?? (detailed ? item.asset_id : "Clip")}
+                  {!detailed ? null : item.speed_ramp ? (
                     <span className="ml-1 font-mono opacity-80">ramp</span>
                   ) : (
                     item.speed !== 1 && <span className="ml-1 font-mono opacity-80">{item.speed}×</span>
                   )}
                 </span>
               </div>
-              <ClipBadges item={item} control={control} />
+              {detailed ? <ClipBadges item={item} control={control} /> : null}
             </div>
           </div>
         );

@@ -85,7 +85,7 @@ export function statusLabel(status: CommentStatus): string {
     case "open":
       return "Open";
     case "addressed":
-      return `Addressed in v${status.version}`;
+      return `Addressed in Version ${status.version}`;
     case "applied":
       return "Applied";
     case "resolved":
@@ -93,7 +93,7 @@ export function statusLabel(status: CommentStatus): string {
     case "unmapped":
       return "No longer mapped";
     case "newer":
-      return `Made on v${status.version} (newer)`;
+      return `Made on Version ${status.version} (newer)`;
   }
 }
 
