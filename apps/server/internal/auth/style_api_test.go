@@ -248,3 +248,54 @@ func TestStartEditTakesAVibe(t *testing.T) {
 		t.Errorf("input %s", r.Input)
 	}
 }
+
+// PUT replaces all the creator's settings (the web app sends the whole set); PATCH changes only the ones given and clears the ones named,
+// so one change never resets the others; the workspace's own only.
+func TestStylePatchChangesOnlyWhatItIsGiven(t *testing.T) {
+	e := newAssetsEnv(t)
+	var got api.CreatorStyle
+	put := api.UpdateStyleRequest{Settings: api.StyleSettings{Vibe: ptrOf(api.EditVibeHype), Transitions: ptrOf(api.StyleLevelLots), TitleCase: ptrOf(api.StyleTitleCaseUpper)}}
+	e.call(http.MethodPut, "/v1/style", "ada", put, http.StatusOK, &got)
+	e.call(http.MethodPut, "/v1/style", "bob", api.UpdateStyleRequest{Settings: api.StyleSettings{Vibe: ptrOf(api.EditVibeCalm)}}, http.StatusOK, nil)
+
+	got = api.CreatorStyle{}
+	e.call(http.MethodPatch, "/v1/style", "ada", api.PatchStyleRequest{Settings: &api.StyleSettings{ChapterTitles: ptrOf(api.StyleToggleOn)}}, http.StatusOK, &got)
+	s := got.Settings
+	if s.ChapterTitles == nil || *s.ChapterTitles != api.StyleToggleOn || s.Vibe == nil || *s.Vibe != api.EditVibeHype || s.Transitions == nil || *s.Transitions != api.StyleLevelLots ||
+		s.TitleCase == nil || *s.TitleCase != api.StyleTitleCaseUpper {
+		t.Fatalf("a patch reset the other settings: %+v", s)
+	}
+	if got.Effective.Sources.Transitions != api.StyleSettingSourceYou || got.Effective.Sources.Vibe != api.StyleSettingSourceYou {
+		t.Errorf("sources %+v", got.Effective.Sources)
+	}
+
+	// Clearing one gives it back to the layers below; the others stay.
+	got = api.CreatorStyle{}
+	e.call(http.MethodPatch, "/v1/style", "editor", api.PatchStyleRequest{Clear: &[]string{"transitions"}}, http.StatusOK, &got)
+	if got.Settings.Transitions != nil || got.Effective.Sources.Transitions == api.StyleSettingSourceYou || got.Settings.Vibe == nil || got.Settings.ChapterTitles == nil {
+		t.Errorf("after clearing transitions: %+v / %+v", got.Settings, got.Effective.Sources)
+	}
+
+	// What is not a setting, or both set and cleared, is refused and changes nothing; a viewer may not.
+	e.fail(http.MethodPatch, "/v1/style", "ada", api.PatchStyleRequest{Clear: &[]string{"colour_of_the_sky"}}, http.StatusBadRequest, api.ErrorCodeInvalidRequest)
+	e.fail(http.MethodPatch, "/v1/style", "ada", api.PatchStyleRequest{Settings: &api.StyleSettings{Pace: ptrOf(api.StylePaceFaster)}, Clear: &[]string{"pace"}}, http.StatusBadRequest, api.ErrorCodeInvalidRequest)
+	e.fail(http.MethodPatch, "/v1/style", "viewer", api.PatchStyleRequest{Clear: &[]string{"vibe"}}, http.StatusForbidden, api.ErrorCodeInsufficientRole)
+	got = api.CreatorStyle{}
+	e.call(http.MethodGet, "/v1/style", "ada", nil, http.StatusOK, &got)
+	if got.Settings.Pace != nil || got.Settings.Vibe == nil {
+		t.Errorf("a refused patch changed the settings: %+v", got.Settings)
+	}
+	// Bob's are his own.
+	got = api.CreatorStyle{}
+	e.call(http.MethodGet, "/v1/style", "bob", nil, http.StatusOK, &got)
+	if got.Settings.Vibe == nil || *got.Settings.Vibe != api.EditVibeCalm || got.Settings.ChapterTitles != nil {
+		t.Errorf("bob's settings: %+v", got.Settings)
+	}
+
+	// PUT still replaces the whole set: what it leaves out is not set.
+	got = api.CreatorStyle{}
+	e.call(http.MethodPut, "/v1/style", "ada", api.UpdateStyleRequest{Settings: api.StyleSettings{Pace: ptrOf(api.StylePaceSlower)}}, http.StatusOK, &got)
+	if got.Settings.Vibe != nil || got.Settings.ChapterTitles != nil || got.Settings.Pace == nil {
+		t.Errorf("PUT kept settings it did not name: %+v", got.Settings)
+	}
+}

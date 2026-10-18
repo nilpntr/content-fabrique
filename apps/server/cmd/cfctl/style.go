@@ -35,16 +35,19 @@ const styleUsage = `Usage:
                       [--title-case upper|lower|as_typed] [--music always|when_added|never] [--pace slower|like_mine|faster]
                       [--chapter-titles off|on] [--title-template '<TOPIC> <N>'] [--ending-hold short|long] [--cut-timing full_reps|mid_rep]
                       [--angle-switches off|on] [--text-pattern single_title|story_captions|dialogue|none]
-                      [--text-position top|upper_third|middle|lower_third|auto] [flags]
+                      [--text-position top|upper_third|middle|lower_third|auto] [--clear title_case,transitions,...] [flags]
   cfctl style clear   --workspace <wks_... or org_...> [flags]
+
+set changes only the settings it is given; the creator's other settings stay. A setting given as "suggested" (--transitions suggested),
+or named in --unset, goes back to the suggestion, the measures or the default.
 
 DEVELOPMENT ONLY, like cfctl project show (refused unless CF_ENV is local, ci or bench). The creator style profile (P6-05,
 docs/design/style-profile-v1.md) is what a creator's finished videos look and sound like: cuts and shot lengths, effects, the light, the
 title text, the music. analyze measures the reference videos you name (local files; they are only ever an input of the sandbox, and
-nothing of them is kept but numbers and the title text), reads the title style from three frames of each hook with one Haiku call
+nothing of them is kept but numbers and the title text), reads the text (the hook and a frame of each shot) with one Haiku call
 (at most $0.01 a reference, metered like every model call), aggregates the measures into the workspace's profile and prints it.
 show prints the stored profile in plain language with the summary and the effective settings, with --json as the stored document.
-set replaces the creator's settings (a flag left out is not set). clear forgets the whole style, as DELETE /v1/style does. Every
+set changes the settings it is given and keeps the others (as PATCH /v1/style does). clear forgets the whole style, as DELETE /v1/style does. Every
 command goes through the code the app uses (package creatorstyle): the files are stored as references measured from files (no asset),
 and the profile and its summary are made from them and the app's references together (P6-05b, docs/design/style-profile-v1.md
 section 11).
@@ -526,13 +529,22 @@ func cmdStyleSet(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 	flags.StringVar(&in.AngleSwitches, "angle-switches", "", "off or on")
 	flags.StringVar(&in.TextPattern, "text-pattern", "", "single_title, story_captions, dialogue or none")
 	flags.StringVar(&in.TextPosition, "text-position", "", "top, upper_third, middle, lower_third or auto")
+	clearArg := flags.String("clear", "", "settings to give back to the suggestion, the measures or the default, comma separated (title_case,transitions)")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		return 2
 	}
-	if _, err := in.Normalize(); err != nil {
+	// Only the settings given change (the creator's others stay); a setting given as "suggested" is cleared, like --clear.
+	var unset []string
+	for _, name := range strings.Split(*clearArg, ",") {
+		if name = strings.TrimSpace(strings.ReplaceAll(name, "-", "_")); name != "" {
+			unset = append(unset, name)
+		}
+	}
+	unset = append(unset, in.TakeCleared("suggested")...)
+	if _, err := (styleprofile.Settings{}).Merge(in, unset); err != nil {
 		_, _ = fmt.Fprintf(stderr, "cfctl %s: %v\n", name, err)
 		return 2
 	}
@@ -560,12 +572,12 @@ func cmdStyleSet(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 		_, _ = fmt.Fprintf(env.err, "cfctl %s: %v\n", name, err)
 		return 1
 	}
-	v, e := svc.PutSettings(ctx, creatorstyle.Actor{Workspace: ws.ID}, in)
+	v, e := svc.PatchSettings(ctx, creatorstyle.Actor{Workspace: ws.ID}, in, unset)
 	if e != nil {
 		_, _ = fmt.Fprintf(env.err, "cfctl %s: %s\n", name, e.Message)
 		return 1
 	}
-	_, _ = fmt.Fprintln(env.out, "stored the creator's settings")
+	_, _ = fmt.Fprintln(env.out, "changed the creator's settings (the others stay)")
 	printStyle(env.out, v.Style, false, false)
 	return 0
 }

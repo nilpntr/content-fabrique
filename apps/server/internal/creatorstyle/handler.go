@@ -282,6 +282,42 @@ func (h *Handler) UpdateStyle(ctx context.Context, req api.UpdateStyleRequestObj
 	return api.UpdateStyle200JSONResponse(StyleOf(v)), nil
 }
 
+// PatchStyle is PATCH /v1/style: only the settings given change, the ones named in clear go back to the layers below.
+func (h *Handler) PatchStyle(ctx context.Context, req api.PatchStyleRequestObject) (api.PatchStyleResponseObject, error) {
+	who, e := h.begin(ctx, true)
+	if e == nil && req.Body == nil {
+		e = invalid("a request body is required")
+	}
+	var v View
+	if e == nil {
+		var change styleprofile.Settings
+		if req.Body.Settings != nil {
+			change = SettingsOf(*req.Body.Settings)
+		}
+		var unset []string
+		if req.Body.Clear != nil {
+			unset = *req.Body.Clear
+		}
+		v, e = h.svc.PatchSettings(ctx, who, change, unset)
+	}
+	if e != nil {
+		switch e.Status {
+		case 400:
+			return api.PatchStyle400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body(e))}, nil
+		case 401:
+			return api.PatchStyle401JSONResponse{UnauthenticatedJSONResponse: api.UnauthenticatedJSONResponse(body(e))}, nil
+		case 403:
+			return api.PatchStyle403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(body(e))}, nil
+		case 500:
+			return api.PatchStyle500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(body(e))}, nil
+		case 503:
+			return api.PatchStyle503JSONResponse{UnavailableJSONResponse: api.UnavailableJSONResponse(body(e))}, nil
+		}
+		return nil, undocumented("patchStyle", e)
+	}
+	return api.PatchStyle200JSONResponse(StyleOf(v)), nil
+}
+
 // ResetStyle is DELETE /v1/style.
 func (h *Handler) ResetStyle(ctx context.Context, _ api.ResetStyleRequestObject) (api.ResetStyleResponseObject, error) {
 	who, e := h.begin(ctx, true)

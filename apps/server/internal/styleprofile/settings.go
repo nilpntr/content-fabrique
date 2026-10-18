@@ -163,6 +163,57 @@ func (s Settings) Normalize() (Settings, error) {
 	return out, nil
 }
 
+// SettingNames are the JSON names of the settings, in order.
+func SettingNames() []string {
+	var s Settings
+	var out []string
+	for _, f := range s.fields() {
+		out = append(out, f.name)
+	}
+	return out
+}
+
+// Merge is the settings with the ones set in change put on them (an empty field of change keeps the current one) and the named ones
+// cleared (back to the layer below: the suggestion, the measures or the default). A name in clear that is not a setting, or one that is
+// both set and cleared, is refused; the result is normalised.
+func (s Settings) Merge(change Settings, unset []string) (Settings, error) {
+	out := s
+	cur := map[string]*string{}
+	for _, f := range out.fields() {
+		cur[f.name] = f.v
+	}
+	set := map[string]bool{}
+	for _, f := range change.fields() {
+		if strings.TrimSpace(*f.v) != "" {
+			*cur[f.name] = *f.v
+			set[f.name] = true
+		}
+	}
+	for _, name := range unset {
+		v, ok := cur[name]
+		switch {
+		case !ok:
+			return Settings{}, fmt.Errorf("%w: %q is not a setting (one of %s)", ErrInvalidSettings, name, strings.Join(SettingNames(), ", "))
+		case set[name]:
+			return Settings{}, fmt.Errorf("%w: %s is both set and cleared", ErrInvalidSettings, name)
+		}
+		*v = ""
+	}
+	return out.Normalize()
+}
+
+// TakeCleared empties the settings whose value is word (cfctl's "suggested") and returns their names.
+func (s *Settings) TakeCleared(word string) []string {
+	var out []string
+	for _, f := range s.fields() {
+		if strings.EqualFold(strings.TrimSpace(*f.v), word) {
+			*f.v = ""
+			out = append(out, f.name)
+		}
+	}
+	return out
+}
+
 // IsZero says no setting is set.
 func (s Settings) IsZero() bool { return s == Settings{} }
 

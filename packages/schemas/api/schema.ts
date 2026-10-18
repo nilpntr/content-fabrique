@@ -661,8 +661,9 @@ export interface paths {
         get: operations["getStyle"];
         /**
          * Set the creator's settings
-         * @description Replaces the creator's settings with `settings`: a setting that is absent is not set (the suggestion and the measures decide
-         *     it). Learning the style again never changes them. Only owners and editors may change them.
+         * @description Replaces the creator's settings with `settings`: **all of them**. A setting that is absent is not set (the suggestion and the
+         *     measures decide it), so a client sends the complete set it wants (the web app does). To change one setting and keep the others,
+         *     use `PATCH /v1/style`. Learning the style again never changes them. Only owners and editors may change them.
          */
         put: operations["updateStyle"];
         post?: never;
@@ -674,7 +675,14 @@ export interface paths {
         delete: operations["resetStyle"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Change some of the creator's settings
+         * @description Changes only the settings given in `settings` and gives the ones named in `clear` back to the suggestion, the measures or the
+         *     default; every other setting of the creator's stays as it is. A name that is not a setting, or one that is both given and
+         *     cleared, is `400`. The read and the write are one transaction, so two changes at once both land. Only owners and editors may
+         *     change them.
+         */
+        patch: operations["patchStyle"];
         trace?: never;
     };
     "/v1/style/relearn": {
@@ -1941,6 +1949,11 @@ export interface components {
              * @description When the `poster_url`s stop working. Present when one is.
              */
             poster_urls_expire_at?: string;
+        };
+        PatchStyleRequest: {
+            settings?: components["schemas"]["StyleSettings"];
+            /** @description The settings to give back to the suggestion, the measures or the default, by their names (such as `title_case`). */
+            clear?: string[];
         };
         UpdateStyleRequest: {
             settings: components["schemas"]["StyleSettings"];
@@ -3308,6 +3321,36 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    patchStyle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchStyleRequest"];
+            };
+        };
+        responses: {
+            /** @description The style as it is now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatorStyle"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthenticated"];
             402: components["responses"]["PlanRequired"];
             403: components["responses"]["Forbidden"];
