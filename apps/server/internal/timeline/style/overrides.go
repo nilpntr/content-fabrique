@@ -169,3 +169,35 @@ func (s Style) CapHeightPct(shortSide, outH int) float64 {
 	}
 	return s.CapHeightPx(shortSide) / float64(outH) * 100
 }
+
+// Shrinking a text to keep it off the person (the placement in package timeline) may go below MinScale, the smallest scale a spec may
+// ask for, down to MinFitScale, but never below what is legible: capitals of at least LegibleCapPct of the frame height (2.2 % is about
+// 42 px on a 1920 px tall frame, the size of the smallest titles in the references the founder collected; a phone shows it at about 3 mm).
+const (
+	MinFitScale   = 0.45
+	LegibleCapPct = 2.2
+)
+
+// FitFloor is the smallest scale (relative to the style's own size) the placement may shrink the style to on an output whose shorter side
+// is shortSide and whose height is outH: MinFitScale, or more when the style's capitals would otherwise be under LegibleCapPct of the
+// height. A style that is small to begin with may have a floor over 1: it is never shrunk then. A font with no cap height has MinScale.
+func (s Style) FitFloor(shortSide, outH int) float64 {
+	pct := s.CapHeightPct(shortSide, outH)
+	if pct <= 0 {
+		return MinScale
+	}
+	return math.Max(MinFitScale, math.Ceil(LegibleCapPct/pct*100)/100)
+}
+
+// Shrunk returns the style at a scale of its own size that the placement chose (it may be below MinScale, down to MinFitScale): a style
+// of its own, with an id that names the scale, like With. It is not an override a spec can ask for, so it is not validated as one;
+// the caller keeps it at or above FitFloor.
+func (s Style) Shrunk(scale float64) Style {
+	if scale == 1 || scale <= 0 || math.IsNaN(scale) {
+		return s
+	}
+	pct := math.Floor(scale*100 + 0.5)
+	s.EmPct *= pct / 100
+	s.ID += "~s" + strconv.Itoa(int(pct))
+	return s
+}

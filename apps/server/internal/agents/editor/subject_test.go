@@ -56,7 +56,8 @@ func TestTextOverSubject(t *testing.T) {
 	}
 	// Two moments in the clip: the head high at one and lower at the other, so there is no clear band for the whole title; the second half
 	// of its time has room, so the renderer shows it then, and the check says so.
-	wall := subject.Index{assetA: {Aspect: 0.5625, Samples: []subject.Sample{{AtMs: 500, X: 0.2, Y: 0.1, W: 0.6, H: 0.8, HeadTopY: 0.12}, {AtMs: 1500, X: 0.2, Y: 0.45, W: 0.6, H: 0.5, HeadTopY: 0.5}}}}
+	// (At the first moment the arms are raised above the head, so there is no room beside it either.)
+	wall := subject.Index{assetA: {Aspect: 0.5625, Samples: []subject.Sample{{AtMs: 500, X: 0.2, Y: 0.05, W: 0.6, H: 0.85, HeadTopY: 0.12}, {AtMs: 1500, X: 0.2, Y: 0.45, W: 0.6, H: 0.5, HeadTopY: 0.5}}}}
 	wide := withTitle(t, buildingLats(t), func(it *timeline.TextItem) { it.Text = "BACK DAY\nBLUEPRINT" })
 	c = wantStatus(t, run(wide, wall), CheckTextOverSubject, CheckPass)
 	if !strings.Contains(c.Detail, "fits clear of the person's body only at 1000-2000 ms") || !strings.Contains(c.Detail, "scale down to 0.6") {
@@ -76,14 +77,16 @@ func TestTextOverSubject(t *testing.T) {
 // check fails for a hook or chapter title that ends up elsewhere, notes it for any other text, and fails any text set not to avoid the
 // person that covers their torso.
 func TestTextOverTheBodyNeverStays(t *testing.T) {
-	// The head starts at 14.6 % (280 px): 40 px of band above it, too little for the title even at 0.6, and the person is wide.
-	track := subject.Index{assetA: {Aspect: 0.5625, Samples: []subject.Sample{{AtMs: 1000, X: 0.05, Y: 0.14, W: 0.9, H: 0.85, HeadTopY: 0.146}}}}
+	// The head starts at 14.6 % (280 px): 40 px of band above it, too little for the title at any legible size, the person is wide and
+	// the arms are raised above the head, so there is no background beside it either.
+	track := subject.Index{assetA: {Aspect: 0.5625, Samples: []subject.Sample{{AtMs: 1000, X: 0.05, Y: 0.08, W: 0.9, H: 0.91, HeadTopY: 0.146}}}}
 	run := func(spec *timeline.Spec) Report {
 		return RunChecks(CheckInput{Spec: spec, Plan: workoutPlan(), Style: ginoProfile(t), Subjects: track})
 	}
 	// The hook title: the renderer shows it on the last shot (another clip, with nobody in its box); that is not a hook any more.
 	c := wantStatus(t, run(buildingLats(t)), CheckTextOverSubject, CheckFail)
-	for _, want := range []string{"has no room clear of the person's body at 0-2000 ms", "the renderer shows it at", "the head starts at y 280", "one line"} {
+	for _, want := range []string{"has no room clear of the person's body at 0-2000 ms", "the renderer shows it at", "the head starts at y 280", "tried: above the head",
+		"beside it", "smallest legible scale"} {
 		if !strings.Contains(c.Detail, want) {
 			t.Errorf("the hook: lacks %q: %s", want, c.Detail)
 		}
@@ -128,7 +131,7 @@ func TestTheFootageListSaysWhereTheHeadIs(t *testing.T) {
 func TestTheStyleNoteNamesTheTitleTemplate(t *testing.T) {
 	p := ginoProfile(t)
 	note := styleNote(p)
-	for _, want := range []string{"series format, <TOPIC> <number> in capitals (always ending in 101)", "do not invent a name", "Keep a title of up to 22 characters on one line"} {
+	for _, want := range []string{"series format, <TOPIC> <number> in capitals (always ending in 101)", "do not invent a name", "never reuse one of their titles", "Keep a title of up to 22 characters on one line"} {
 		if !strings.Contains(note, want) {
 			t.Errorf("the note lacks %q:\n%s", want, note)
 		}
@@ -137,8 +140,8 @@ func TestTheStyleNoteNamesTheTitleTemplate(t *testing.T) {
 		t.Errorf("the creator's words are in our note:\n%s", note)
 	}
 	data := styleBlocks(p)[1].Text
-	if !strings.Contains(data, "title templates: a series title") || !strings.Contains(data, "'BUILDING LATS 101'") {
-		t.Errorf("the block lacks the templates:\n%s", data)
+	if !strings.Contains(data, `title templates: a series title, "<TOPIC> 101" in capitals`) || strings.Contains(data, "BUILDING LATS 101") || strings.Contains(data, "their own words") {
+		t.Errorf("the block lacks the templates, or quotes a title:\n%s", data)
 	}
 }
 

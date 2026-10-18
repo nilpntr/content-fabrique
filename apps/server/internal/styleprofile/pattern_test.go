@@ -42,9 +42,16 @@ func TestTitlePatternsOfTheReferences(t *testing.T) {
 		t.Error("Follows")
 	}
 	block := p.CompactBlock()
-	for _, want := range []string{"title templates: a series title, <TOPIC> <number> in capitals (67 % of the titles", "'BUILDING LATS 101'", "always ends in 101", "a lowercase witty line", "Prefer the most common template"} {
+	for _, want := range []string{`title templates: a series title, "<TOPIC> 101" in capitals (a topic of 2 words`, "(67 % of the titles)",
+		"a witty line, a lowercase line of 6 words about this video", "Write a new title for this video", "never reuse a title"} {
 		if !strings.Contains(block, want) {
 			t.Errorf("block lacks %q:\n%s", want, block)
+		}
+	}
+	// The templates give the form, never the creator's titles: an editor shown a title copies it.
+	for _, title := range p.ReferenceTitles() {
+		if strings.Contains(block, title) {
+			t.Errorf("the block quotes the reference title %q:\n%s", title, block)
 		}
 	}
 	// The creator's words are only in the block (untrusted data): not in the one-line fix.
