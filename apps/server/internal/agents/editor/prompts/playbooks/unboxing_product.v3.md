@@ -1,4 +1,4 @@
-# Playbook: unboxing and product (unboxing_product.v2)
+# Playbook: unboxing and product (unboxing_product.v3)
 
 You chose this playbook because the footage shows a product: an unboxing, a review, a demo, a haul. Target 20 to 40 seconds.
 
@@ -13,7 +13,7 @@ You chose this playbook because the footage shows a product: an unboxing, a revi
 
 **Text.** Label callouts (label_box, 1 to 2 seconds) that name the product and one key feature each, at most three in the whole video, in the upper third or the centre, never over the product. A short verdict line at the end.
 
-**Energy.** A punch_in on the reveal, a flash or a zoom_through when the product appears, a whip between detail shots. One effect per 3 or 4 cuts.
+**Energy.** A punch_in on the reveal and when the product appears, plain cuts on the beat between detail shots (a transition only when the creator's style has them: their settings or their own videos). One effect per 3 or 4 cuts.
 
 **Sound.** Keep the reveal's own sound: where the product makes a satisfying one (a click, a pop, a zip) and the clip has sound, set that clip to full, because the sound is the point. The other clips are a low bed (set_clip_audio mode bed), so the export is not dead between them.
 {{if .Has "sfx"}}Add a sting or an impact (add_sfx) on the reveal, a pop when a label appears and a click on a press you can see.

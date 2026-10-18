@@ -44,6 +44,15 @@ func TestTheDefaultPriceListLoads(t *testing.T) {
 	if l.Version+".yaml" != credits.ListFile {
 		t.Fatalf("version %q for file %s", l.Version, credits.ListFile)
 	}
+	// The creator style's "learn again" passes per day (P6-05b), and the default for a plan whose file has none.
+	for p, want := range map[plans.Plan]int{plans.Trial: 2, plans.Creator: 3, plans.Studio: 5, plans.Pro: 5} {
+		if pl, ok := l.Plan(p); !ok || pl.RelearnsPerDay() != want {
+			t.Errorf("%s: %d relearns a day, want %d", p, pl.RelearnsPerDay(), want)
+		}
+	}
+	if (credits.Plan{}).RelearnsPerDay() != credits.DefaultStyleRelearnsPerDay {
+		t.Error("the default")
+	}
 }
 
 // The values of the design note (spend control v1 sections 3 and 4) are in the file.
@@ -269,6 +278,7 @@ func TestLoadRefusesBadFiles(t *testing.T) {
 		"free plan that refills": {"2026-10.yaml", strings.Replace(good, "refill: false", "refill: true", 1), "free plan cannot refill"},
 		"no allowance":           {"2026-10.yaml", strings.Replace(good, "allowance_credits: 20", "allowance_credits: 0", 1), "out of range"},
 		"no uncharged cap":       {"2026-10.yaml", strings.Replace(good, "uncharged_runs_per_day: 5", "uncharged_runs_per_day: 0", 1), "out of range"},
+		"negative relearns":      {"2026-10.yaml", strings.Replace(good, "style_relearns_per_day: 2", "style_relearns_per_day: -1", 1), "out of range"},
 		"share above one":        {"2026-10.yaml", strings.Replace(good, "max_cogs_share: 0.40", "max_cogs_share: 1.40", 1), "max_cogs_share"},
 	} {
 		t.Run(name, func(t *testing.T) {

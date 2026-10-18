@@ -84,6 +84,7 @@ export interface paths {
          *     must occur, as the start of a word, in the asset's title, description, tags or file name, with English stemming
          *     (`row` finds "Barbell rows"). Characters other than letters and digits only separate words; a `q` without any
          *     word lists everything.
+         *     Only the assets of one `purpose` are listed: the footage by default, the style references with `purpose=style_reference`.
          */
         get: operations["listAssets"];
         put?: never;
@@ -96,6 +97,12 @@ export interface paths {
          *     `POST /v1/assets/{id}/parts`, and finishes with `POST /v1/assets/{id}/complete`. A part URL is valid for 15 minutes;
          *     the upload as a whole for 24 hours.
          *     Only owners and editors may upload. At most 25 uploads can be in progress per workspace.
+         *
+         *     `purpose: style_reference` uploads one of the creator's own finished videos as a style reference (see `getStyle`): it is
+         *     never listed with the footage and cannot be used in a project, and once its ingest is done its style is measured in the
+         *     background. A style reference must be a video of at most 1 GiB (`413 file_too_large`, `415 unsupported_content_type`) and
+         *     at most 3 minutes long (a longer one ends `failed` with `too_long`); a workspace has at most 10 that are not failed
+         *     (`409 too_many_references`).
          */
         post: operations["createAsset"];
         delete?: never;
@@ -127,7 +134,8 @@ export interface paths {
         /**
          * Delete an asset
          * @description Soft-deletes the asset and enqueues the deletion of its objects. An asset whose upload is still in progress is
-         *     aborted as well. Only owners and editors may delete.
+         *     aborted as well. A style reference is not deleted here (`409 style_reference`): `DELETE /v1/style/references/{id}`
+         *     removes it with what was measured from it and makes the style again. Only owners and editors may delete.
          */
         delete: operations["deleteAsset"];
         options?: never;
@@ -298,7 +306,7 @@ export interface paths {
          *     ingested) and a video or an audio file. An asset id that is unknown, deleted or belongs to another workspace is
          *     `404 not_found` (the same answer for all three, so an id from another workspace cannot be told from one that never
          *     existed); assets that exist but are not usable (still uploading or processing, failed, or an image) make it
-         *     `422 assets_not_usable`.
+         *     `422 assets_not_usable`. A style reference is never footage: naming one is `422 assets_not_usable` too.
          *     The project starts with no timeline: `current_timeline_version` is `null`. A timeline needs at least one clip, so
          *     version 1 is made by the first edit (`POST /v1/projects/{id}/timelines` with `base_version` 0, or the editor run).
          *     Only owners and editors may create projects.
@@ -423,8 +431,9 @@ export interface paths {
          *     (`422 assets_not_usable`; an audio file is not a clip to cut).
          *     `instructions` is the creator's extra instruction for this run (text, at most 2,000 characters; the model treats it as data
          *     that steers the content of the video, nothing else). `profile` picks the model profile of the run; the default is the
-         *     server's. `vibe` is the energy of the edit (`calm`, `lively` or `hype`, default `lively`): see `EditVibe`. An audio file in
-         *     the project's footage is a song the edit can be cut to (D-34): the export then has the song and no clip sound under it.
+         *     server's. `vibe` is the energy of this edit (`calm`, `lively` or `hype`); without it the workspace's style decides
+         *     (`GET /v1/style`, `effective.vibe`, `lively` when nothing is set): see `EditVibe`. An audio file in the project's footage is a
+         *     song the edit can be cut to (D-34): the export then has the song and no clip sound under it.
          *
          *     **Credits.** The run costs credits, set aside (held) in the same step that creates the run: the server decides from the
          *     project whether it is the first edit (6 credits: the project has no charged edit yet) or a revision (2 credits), and the
@@ -624,6 +633,99 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/style": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The creator's style
+         * @description Everything the editor knows of how this creator's videos look and what the creator chose:
+         *
+         *     - `summary`: a short description in plain words written by a model from the measures of the reference videos, with the
+         *       settings it suggests (`summary.suggested`); `null` until the references were learnt.
+         *     - `measures`: what was measured from the reference videos, in plain words (`lines`); `null` without any.
+         *     - `settings`: the creator's own settings (`PUT /v1/style`). A setting that is absent is not set.
+         *     - `effective`: what the editor follows, every setting decided, with where each came from (`sources`): the creator's own
+         *       setting wins, then the suggestion, then the measures, then the default. A measured "no effects" never turns text
+         *       animation or camera motion off at a lively or hype vibe on its own. Transitions are off unless the creator sets them or
+         *       their reference videos measurably use them (plain cuts on the beat are the default at every vibe).
+         *     - `references`: the reference videos (uploaded with `POST /v1/assets` and `purpose: style_reference`) with the state of their
+         *       analysis, and `status`/`progress` for the whole: `learning` while any reference is being uploaded, ingested or measured, or
+         *       the profile is being made from them.
+         *
+         *     A workspace with nothing has `status: empty` and the default settings. Every role may read it.
+         */
+        get: operations["getStyle"];
+        /**
+         * Set the creator's settings
+         * @description Replaces the creator's settings with `settings`: a setting that is absent is not set (the suggestion and the measures decide
+         *     it). Learning the style again never changes them. Only owners and editors may change them.
+         */
+        put: operations["updateStyle"];
+        post?: never;
+        /**
+         * Forget the creator's style
+         * @description Deletes the reference videos (their files are removed in the background), everything measured from them, the summary and the
+         *     creator's settings. Only owners and editors may reset it.
+         */
+        delete: operations["resetStyle"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/style/relearn": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Learn the style again from the reference videos
+         * @description Measures every reference video again and writes a new summary, in the background (`202`; follow `status` with
+         *     `GET /v1/style`). The creator's settings stay, and so do the profile and the summary the editor uses until every reference is
+         *     measured again; then the profile is made once and one summary is written. Each reference costs at most $0.01 of model time
+         *     and the pass's one summary at most $0.03, metered like every model call. While a pass (or a new reference) is being measured
+         *     another is refused (`409 style_learning_in_progress`), and a workspace may start as many passes per UTC day as its plan allows
+         *     (`style_relearns_per_day`, then `429 too_many_relearns`). Only owners and editors may start it.
+         */
+        post: operations["relearnStyle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/style/references/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The asset's TypeID. */
+                id: components["parameters"]["AssetIdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a reference video
+         * @description Deletes the reference video and what was measured from it, and makes the profile again from the others in the background. An
+         *     asset that is not a style reference of this workspace is `404 not_found`. Only owners and editors may remove one.
+         */
+        delete: operations["removeStyleReference"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/annotations": {
         parameters: {
             query?: never;
@@ -702,7 +804,7 @@ export interface components {
          *     code as a generic failure of its HTTP status.
          * @enum {string}
          */
-        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "credits_exhausted" | "quality_not_in_plan" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured" | "assets_not_usable" | "version_conflict" | "invalid_ops" | "no_change" | "timeline_invalid" | "too_many_renders" | "run_in_progress" | "run_not_waiting" | "model_not_configured" | "edit_not_charged" | "too_many_uncharged_runs" | "byok_key_required" | "version_not_charged";
+        ErrorCode: "invalid_request" | "unauthenticated" | "invalid_token" | "plan_required" | "credits_exhausted" | "quality_not_in_plan" | "no_active_workspace" | "user_deleted" | "workspace_deleted" | "not_a_member" | "origin_not_allowed" | "invalid_signature" | "invalid_event" | "payload_too_large" | "internal_error" | "identity_unavailable" | "auth_not_configured" | "queue_not_migrated" | "webhook_not_configured" | "insufficient_role" | "not_found" | "upload_not_active" | "upload_expired" | "file_too_large" | "unsupported_content_type" | "parts_mismatch" | "size_mismatch" | "too_many_uploads" | "storage_unavailable" | "storage_not_configured" | "assets_not_usable" | "version_conflict" | "invalid_ops" | "no_change" | "timeline_invalid" | "too_many_renders" | "run_in_progress" | "run_not_waiting" | "model_not_configured" | "edit_not_charged" | "too_many_uncharged_runs" | "byok_key_required" | "version_not_charged" | "too_many_references" | "style_learning_in_progress" | "too_many_relearns" | "style_reference";
         ErrorDetail: {
             code: components["schemas"]["ErrorCode"];
             /** @description For people. It may change; do not branch on it. */
@@ -857,6 +959,12 @@ export interface components {
         /** @enum {string} */
         AssetKind: "video" | "audio" | "image";
         /**
+         * @description What an asset is for: `footage` (a clip the editor may cut, the default) or `style_reference` (one of the creator's own
+         *     finished videos, uploaded only so that their style can be learnt: never listed with the footage, never used in a project).
+         * @enum {string}
+         */
+        AssetPurpose: "footage" | "style_reference";
+        /**
          * @description `uploading` (the multipart upload is in progress), `uploaded` (the object is complete; ingest is queued),
          *     `processing` (the ingest is running: see `ingest_progress`), `ready` (probed, with its derivatives), or `failed`
          *     (see `failure_reason`).
@@ -883,6 +991,8 @@ export interface components {
         Asset: {
             id: components["schemas"]["AssetId"];
             kind: components["schemas"]["AssetKind"];
+            /** @description Present on every asset the server returns (optional in the schema only so older clients and fixtures still type-check). */
+            purpose?: components["schemas"]["AssetPurpose"];
             status: components["schemas"]["AssetStatus"];
             /** @description The file's name as the server stored it (a path and control characters removed, at most 255 bytes). */
             filename: string;
@@ -1103,6 +1213,8 @@ export interface components {
             content_type: string;
             /** @description Optional SHA-256 of the file, in hex. */
             sha256?: string;
+            /** @description `style_reference` for one of the creator's finished videos uploaded as a style reference; the default is `footage`. */
+            purpose?: components["schemas"]["AssetPurpose"];
         };
         /**
          * @description `active` (parts can be uploaded), `completed`, `aborted` (by the client or by the clean-up job) or `expired` (past
@@ -1353,11 +1465,12 @@ export interface components {
          */
         EditQuality: "standard" | "max";
         /**
-         * @description The energy of the edit (P6-06). The creator's style profile still decides the colours, the fonts, the title's look and place and
-         *     the rough shot length; the vibe decides how much moves: `calm` stays close to the creator's own restraint (hard cuts, a quiet
-         *     title), `lively` (the default) puts transitions on the strong beats and the drop, gives every text an entrance and an exit and
-         *     keeps the camera moving, `hype` does that on more beats with faster shots.
-         * @default lively
+         * @description The energy of the edit (P6-06). The creator's style still decides the colours, the fonts, the title's look and place and the
+         *     rough shot length; the vibe decides how much moves: `calm` stays close to the creator's own restraint (cuts on the strong
+         *     beats, a quiet title), `lively` cuts on the beats and phrase starts, gives every text an entrance and an exit and keeps the
+         *     camera moving, `hype` does that on more beats with faster shots. No vibe adds effect transitions: those come only from the
+         *     creator's settings or their own videos. A run without one uses the workspace's
+         *     (`GET /v1/style`, `effective.vibe`; `lively` when nothing is set).
          * @enum {string}
          */
         EditVibe: "calm" | "lively" | "hype";
@@ -1618,6 +1731,201 @@ export interface components {
             items: components["schemas"]["Render"][];
             /** @description Pass it as `cursor` for the next page. Null on the last page. */
             next_cursor: string | null;
+        };
+        /**
+         * @description `off`, `subtle` (a few, on the strongest moments) or `lots` (on most strong beats).
+         * @enum {string}
+         */
+        StyleLevel: "off" | "subtle" | "lots";
+        /** @enum {string} */
+        StyleToggle: "off" | "on";
+        /**
+         * @description `top` (at the top of the safe area, above the person), `upper_third` (a third of the way down) or `auto` (the editor picks, never on the person).
+         * @enum {string}
+         */
+        StyleTitlePosition: "top" | "upper_third" | "auto";
+        /**
+         * @description `upper` (ALL CAPS), `lower` (all lowercase) or `as_typed`.
+         * @enum {string}
+         */
+        StyleTitleCase: "upper" | "lower" | "as_typed";
+        /**
+         * @description `always` (every video is cut to music), `when_added` (only when the creator adds a song) or `never`.
+         * @enum {string}
+         */
+        StyleMusic: "always" | "when_added" | "never";
+        /**
+         * @description `slower`, `like_mine` (like the creator's own videos) or `faster`.
+         * @enum {string}
+         */
+        StylePace: "slower" | "like_mine" | "faster";
+        /**
+         * @description `long` (the last shot is held clearly longer than the others) or `short` (it is as long as the others).
+         * @enum {string}
+         */
+        StyleEndingHold: "short" | "long";
+        /**
+         * @description `full_reps` (cuts fall at the end of a rep) or `mid_rep` (cuts fall on the beat, also in the middle of a rep).
+         * @enum {string}
+         */
+        StyleCutTiming: "full_reps" | "mid_rep";
+        /**
+         * @description Where an effective setting came from: `this_video` (the vibe of one edit), `you` (the creator's own setting), `suggested`
+         *     (the AI's suggestion from the reference videos), `measured` (measured from them), `vibe` (what the vibe asks for) or `default`.
+         * @enum {string}
+         */
+        StyleSettingSource: "this_video" | "you" | "suggested" | "measured" | "vibe" | "default";
+        /** @description Settings of the creator's style. A property that is absent is not set. */
+        StyleSettings: {
+            vibe?: components["schemas"]["EditVibe"];
+            transitions?: components["schemas"]["StyleLevel"];
+            text_animation?: components["schemas"]["StyleToggle"];
+            camera_motion?: components["schemas"]["StyleLevel"];
+            /** @description The colour of the title's letters, like `#RRGGBB`. */
+            title_colour?: string;
+            title_position?: components["schemas"]["StyleTitlePosition"];
+            title_case?: components["schemas"]["StyleTitleCase"];
+            music?: components["schemas"]["StyleMusic"];
+            pace?: components["schemas"]["StylePace"];
+            chapter_titles?: components["schemas"]["StyleToggle"];
+            /**
+             * @description The form of the titles, the words that change as slots in capitals between angle brackets, such as `<TOPIC> <N>` or
+             *     `<N> MOVES FOR <GOAL>`. Letters, digits, spaces, slots and common punctuation.
+             */
+            title_template?: string;
+            ending_hold?: components["schemas"]["StyleEndingHold"];
+            cut_timing?: components["schemas"]["StyleCutTiming"];
+            angle_switches?: components["schemas"]["StyleToggle"];
+        };
+        StyleSettingSources: {
+            vibe: components["schemas"]["StyleSettingSource"];
+            transitions: components["schemas"]["StyleSettingSource"];
+            text_animation: components["schemas"]["StyleSettingSource"];
+            camera_motion: components["schemas"]["StyleSettingSource"];
+            title_colour: components["schemas"]["StyleSettingSource"];
+            title_position: components["schemas"]["StyleSettingSource"];
+            title_case: components["schemas"]["StyleSettingSource"];
+            music: components["schemas"]["StyleSettingSource"];
+            pace: components["schemas"]["StyleSettingSource"];
+            chapter_titles: components["schemas"]["StyleSettingSource"];
+            title_template: components["schemas"]["StyleSettingSource"];
+            ending_hold: components["schemas"]["StyleSettingSource"];
+            cut_timing: components["schemas"]["StyleSettingSource"];
+            angle_switches: components["schemas"]["StyleSettingSource"];
+        };
+        /**
+         * @description What the editor follows. `title_colour` is `null` when nothing decides it (the editor then uses the title style's own), and
+         *     `title_template` when no form was learnt or set (the editor picks the words).
+         */
+        EffectiveStyleSettings: {
+            vibe: components["schemas"]["EditVibe"];
+            transitions: components["schemas"]["StyleLevel"];
+            text_animation: components["schemas"]["StyleToggle"];
+            camera_motion: components["schemas"]["StyleLevel"];
+            title_colour: string | null;
+            title_position: components["schemas"]["StyleTitlePosition"];
+            title_case: components["schemas"]["StyleTitleCase"];
+            music: components["schemas"]["StyleMusic"];
+            pace: components["schemas"]["StylePace"];
+            chapter_titles: components["schemas"]["StyleToggle"];
+            title_template: string | null;
+            ending_hold: components["schemas"]["StyleEndingHold"];
+            cut_timing: components["schemas"]["StyleCutTiming"];
+            angle_switches: components["schemas"]["StyleToggle"];
+            sources: components["schemas"]["StyleSettingSources"];
+        };
+        /**
+         * @description The description of the style in plain words, written by a model from the measures and a few frames of the reference videos
+         *     (untrusted model text: show it as text), and the settings it suggests.
+         */
+        StyleSummary: {
+            text: string;
+            suggested: components["schemas"]["StyleSettings"];
+            /** @description How many reference videos it was written from. */
+            references: number;
+            prompt_version: string;
+            /** Format: date-time */
+            written_at: string;
+        };
+        StyleMeasure: {
+            /**
+             * @description A stable name of the line (`shots`, `first_cut`, `effects`, `look`, `title`, `music`, `length`, `ending`, `shot_tail`,
+             *     `transitions`, `camera`, `cuts`, `title_entrance`, `title_form`, `chapters` ...).
+             */
+            id: string;
+            label: string;
+            value: string;
+        };
+        /** @description What was measured from the reference videos, in plain words. */
+        StyleMeasures: {
+            references: number;
+            confidence: number;
+            /** @description Enough videos (3 or more) for the editor's checks to hold an edit to the measures; fewer are a hint. */
+            firm: boolean;
+            lines: components["schemas"]["StyleMeasure"][];
+        };
+        /**
+         * @description `uploading`, `processing` (the file is being prepared), `analysing` (its style is being measured), `ready` or `failed`.
+         * @enum {string}
+         */
+        StyleReferenceStatus: "uploading" | "processing" | "analysing" | "ready" | "failed";
+        StyleReference: {
+            /** @description The reference's asset; `null` for a video measured by the team from a file (it can only be removed by resetting the style). */
+            asset_id: string | null;
+            /** @description The file's name. */
+            name: string;
+            status: components["schemas"]["StyleReferenceStatus"];
+            /**
+             * @description Why it is `failed`, a code that is safe to show: an upload or ingest code of the asset (see `Asset.failure_reason`), or
+             *     `too_long` (over 3 minutes), `no_video_stream`, `analysis_failed`.
+             */
+            failure_reason: string | null;
+            /** @description How far the preparation of the file is while `processing`. */
+            progress: number;
+            duration_ms: number | null;
+            /** @description A short-lived URL of a still of the video, until `poster_urls_expire_at`. */
+            poster_url: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        StyleLimits: {
+            max_references: number;
+            /** Format: int64 */
+            max_size_bytes: number;
+            max_duration_ms: number;
+        };
+        StyleProgress: {
+            /** @description References measured. */
+            done: number;
+            /** @description References that are not failed. */
+            total: number;
+        };
+        CreatorStyle: {
+            /**
+             * @description `empty` (nothing learnt and no reference), `learning` (references are being uploaded or measured, or the profile made) or `ready`.
+             * @enum {string}
+             */
+            status: "empty" | "learning" | "ready";
+            progress: components["schemas"]["StyleProgress"];
+            summary: components["schemas"]["StyleSummary"] | null;
+            measures: components["schemas"]["StyleMeasures"] | null;
+            settings: components["schemas"]["StyleSettings"];
+            effective: components["schemas"]["EffectiveStyleSettings"];
+            references: components["schemas"]["StyleReference"][];
+            limits: components["schemas"]["StyleLimits"];
+            /**
+             * Format: date-time
+             * @description When the profile was last made.
+             */
+            learned_at: string | null;
+            /**
+             * Format: date-time
+             * @description When the `poster_url`s stop working. Present when one is.
+             */
+            poster_urls_expire_at?: string;
+        };
+        UpdateStyleRequest: {
+            settings: components["schemas"]["StyleSettings"];
         };
         /**
          * @description What a comment is about, and what `target_id` is a TypeID of.
@@ -1922,6 +2230,8 @@ export interface operations {
     listAssets: {
         parameters: {
             query?: {
+                /** @description Which assets to list (default `footage`, the library). */
+                purpose?: components["schemas"]["AssetPurpose"];
                 /** @description Search words, at most 100 characters. At most the first 8 words are used. */
                 q?: string;
                 /** @description How many assets to return (default 50). */
@@ -1978,7 +2288,16 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             402: components["responses"]["PlanRequired"];
             403: components["responses"]["Forbidden"];
-            /** @description `file_too_large`: more than 20 GB. */
+            /** @description `too_many_references`: the workspace has its 10 style references already (remove one first). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `file_too_large`: more than 20 GB, or a style reference of more than 1 GiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -1987,7 +2306,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description `unsupported_content_type`: not one of the accepted media types. */
+            /** @description `unsupported_content_type`: not one of the accepted media types, or a style reference that is not a video. */
             415: {
                 headers: {
                     [name: string]: unknown;
@@ -2063,6 +2382,15 @@ export interface operations {
             402: components["responses"]["PlanRequired"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description `style_reference`: the asset is a style reference; remove it with `DELETE /v1/style/references/{id}`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             500: components["responses"]["InternalError"];
             503: components["responses"]["Unavailable"];
         };
@@ -2881,6 +3209,155 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Render"];
                 };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getStyle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The style. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatorStyle"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    updateStyle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateStyleRequest"];
+            };
+        };
+        responses: {
+            /** @description The style as it is now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatorStyle"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    resetStyle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Forgotten. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    relearnStyle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Learning; the style as it is now. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatorStyle"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            /** @description `style_learning_in_progress`: the reference videos are being measured; learn again when that is done. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `too_many_relearns`: the workspace has learnt its style again as often as its plan allows today (UTC). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    removeStyleReference: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The asset's TypeID. */
+                id: components["parameters"]["AssetIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthenticated"];

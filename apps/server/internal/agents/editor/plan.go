@@ -243,8 +243,12 @@ func BuildPlan(in planArgs, footage map[string]bool, f Features, style *stylepro
 // BeatMs is the length of one beat at bpm, in whole milliseconds (rounded half up, as the beat utilities round).
 func BeatMs(bpm int) int64 { return (60000*2 + int64(bpm)) / (2 * int64(bpm)) }
 
-// planNotes are the things about a valid plan that the editor should hear now rather than at check_edit.
-func planNotes(p Plan, style *styleprofile.Profile) []string {
+// transitionEffects are the plan's effects that are transitions; the others (but none) move the camera or the speed.
+var transitionEffects = map[string]bool{"whip": true, "zoom_through": true, "flash": true, "punch": true}
+
+// planNotes are the things about a valid plan that the editor should hear now rather than at check_edit. set is the creator's
+// effective settings (nil for the defaults).
+func planNotes(p Plan, style *styleprofile.Profile, set *styleprofile.Resolved) []string {
 	var notes []string
 	target := int64(p.TargetLengthS) * 1000
 	if p.EstimatedLengthMs < target*durationLoPct/100 || p.EstimatedLengthMs > target*durationHiPct/100 {
@@ -261,8 +265,28 @@ func planNotes(p Plan, style *styleprofile.Profile) []string {
 		}
 		run, start = 1, i
 	}
+	// What the creator's settings turn off (a measured "no effects" turns nothing off by itself).
+	if lim := applyStyle(limits{}, style, set); lim.transitionsOff || lim.cameraOff {
+		trans, moves := 0, 0
+		for _, s := range p.Shots {
+			switch {
+			case s.Effect == "none":
+			case transitionEffects[s.Effect]:
+				trans++
+			default:
+				moves++
+			}
+		}
+		if lim.transitionsOff && trans > 0 {
+			notes = append(notes, fmt.Sprintf("%d shots of the plan have a transition. This style is plain cuts on the beat (transitions off): make those cuts plain cuts. Effect transitions read as an automatic AI edit to creators.", trans))
+		}
+		if lim.cameraOff && moves > 0 {
+			notes = append(notes, fmt.Sprintf("%d shots of the plan have a motion or a speed ramp. The creator's settings turn camera motion off: set those effects to none.", moves))
+		}
+	}
 	energy := energetic(p.Vibe)
-	if style != nil && style.Effects.Verdict == styleprofile.EffectsNone {
+	// A measured "no effects" with nothing the creator turned off: no gimmicks at lively and hype, restraint at calm.
+	if lim := applyStyle(limits{}, style, set); style != nil && style.Effects.Verdict == styleprofile.EffectsNone && !lim.transitionsOff && !lim.cameraOff {
 		n := 0
 		for _, s := range p.Shots {
 			// At lively and hype the transitions, the punch-ins on beats and the living camera are the vibe's, not gimmicks: only speed
@@ -272,21 +296,21 @@ func planNotes(p Plan, style *styleprofile.Profile) []string {
 			}
 		}
 		if n > 0 && energy {
-			notes = append(notes, fmt.Sprintf("%d shots of the plan have a speed ramp or a shake. This creator uses no gimmicks: keep the transitions, punch-ins and the living camera of the %s vibe, drop those.", n, VibeOr(p.Vibe)))
+			notes = append(notes, fmt.Sprintf("%d shots of the plan have a speed ramp or a shake. This creator uses no gimmicks: keep the punch-ins and the living camera of the %s vibe, drop those.", n, VibeOr(p.Vibe)))
 		} else if n > 0 {
-			notes = append(notes, fmt.Sprintf("%d shots of the plan have an effect. This creator's videos have none and the vibe is calm: keep at most one transition (on the drop) and the living camera (handheld), set the other effects to none.", n))
+			notes = append(notes, fmt.Sprintf("%d shots of the plan have an effect. This creator's videos have none and the vibe is calm: keep the living camera (handheld), set the other effects to none.", n))
 		}
 	}
-	if energy {
+	// Lots of transitions is the creator's own (their setting or their videos): a plan without them is not their style.
+	if lim := applyStyle(limits{}, style, set); set != nil && set.Transitions == styleprofile.LevelLots && !lim.transitionsOff && len(p.Shots) >= 3 {
 		transitions := 0
 		for _, s := range p.Shots[1:] {
-			switch s.Effect {
-			case "whip", "zoom_through", "flash", "punch":
+			if transitionEffects[s.Effect] {
 				transitions++
 			}
 		}
-		if len(p.Shots) >= 3 && transitions == 0 {
-			notes = append(notes, fmt.Sprintf("The vibe is %s and the plan has no transition: put whip, zoom_through, punch or flash on the cut into the drop and on the strong beats (phrase starts), 250 to 400 ms, never the same one three times in a row.", VibeOr(p.Vibe)))
+		if transitions == 0 {
+			notes = append(notes, "The creator's style has lots of transitions and the plan has none: put one on the cut into the drop and on the strong beats (phrase starts), never the same one three times in a row.")
 		}
 	}
 	var chapters []int
@@ -295,11 +319,11 @@ func planNotes(p Plan, style *styleprofile.Profile) []string {
 			chapters = append(chapters, s.Chapter)
 		}
 	}
-	if len(chapters) >= 2 {
+	if len(chapters) >= 2 && (set == nil || set.ChapterTitles != styleprofile.LevelOff) {
 		notes = append(notes, fmt.Sprintf("The plan has %d chapters: give the first shot of each a numbered chapter title (\"1. <EXERCISE>\" in the creator's title style, in the top band above the head) that enters with the shot and leaves before the next chapter; inside a chapter switch the angle every 2 to 5 s at a rep boundary instead of one long take.", len(chapters)))
 	}
 	// The pace targets (pace.go): the shots between the hook and the ending, and the ending, against the creator's measured lengths.
-	if pace := Pace(style, p.ContentType, p.Vibe, ""); pace.Applies && len(p.Shots) >= 3 {
+	if pace := Pace(style, p.ContentType, p.Vibe, paceSetting(set)); pace.Applies && len(p.Shots) >= 3 {
 		var lengths []int64
 		long := 0
 		for _, s := range p.Shots[1 : len(p.Shots)-1] {
@@ -318,7 +342,7 @@ func planNotes(p Plan, style *styleprofile.Profile) []string {
 			notes = append(notes, fmt.Sprintf("The ending is %s; hold it at most %s, or up to %s with a push and a punch-in on a beat (set_motion handheld with at_ms on the beat).", secs(end), secs(pace.EndingMs), secs(pace.EndingMovingMs)))
 		}
 	}
-	if hookMax := applyStyle(limits{}, style).hookMaxMs; p.Shots[0].LengthMs > hookMax {
+	if hookMax := applyStyle(limits{}, style, set).hookMaxMs; p.Shots[0].LengthMs > hookMax {
 		if style != nil {
 			notes = append(notes, fmt.Sprintf("The hook shot is %s long. The creator's first cut comes by %s.", secs(p.Shots[0].LengthMs), secs(hookMax)))
 		} else {
@@ -365,12 +389,15 @@ func (d Deps) planEdit(ctx context.Context, rc runtime.RunContext, in planArgs) 
 		footage[v.AssetID.String()] = true
 	}
 	feat := d.features()
-	style := d.style(ctx, ws)
+	st := d.styleFor(ctx, ws, rc.Input)
+	style := profileOf(st)
 	plan, err := BuildPlan(in, footage, feat, style)
 	if err != nil {
 		return runtime.Result{}, err
 	}
-	if ri, ierr := parseInput(rc.Input); ierr == nil {
+	if st != nil {
+		plan.Vibe = st.Resolved.Vibe // this run's, else the creator's style's (P6-05b)
+	} else if ri, ierr := parseInput(rc.Input); ierr == nil {
 		plan.Vibe = VibeOr(ri.Vibe)
 	} else {
 		plan.Vibe = DefaultVibe
@@ -387,15 +414,16 @@ func (d Deps) planEdit(ctx context.Context, rc runtime.RunContext, in planArgs) 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Plan saved (it is shown to the creator). Content type %s, playbook %s.\n", plan.ContentType, plan.PlaybookVersion)
 	b.WriteString(plan.describe())
-	if d := Pace(firmStyle(style), plan.ContentType, plan.Vibe, "").Describe(); d != "" {
+	set := settingsOf(st)
+	if d := Pace(firmStyle(style), plan.ContentType, plan.Vibe, paceSetting(set)).Describe(); d != "" {
 		b.WriteString(d + "\n")
 	}
-	for _, n := range planNotes(plan, firmStyle(style)) {
+	for _, n := range planNotes(plan, firmStyle(style), set) {
 		b.WriteString("Note: " + n + "\n")
 	}
 	b.WriteString("\nThe playbook for this kind of video. Follow it; it is the craft of the genre, and check_edit will measure your edit against it.\n\n")
 	// The profile block itself is in the run context already; the note carries the points that decide the plan.
-	return runtime.Result{Content: []llm.Block{llm.TextBlock(b.String() + book + styleNoteFor(style, plan.Vibe))}}, nil
+	return runtime.Result{Content: []llm.Block{llm.TextBlock(b.String() + book + styleNote(st))}}, nil
 }
 
 // features is what the build offers (the tests of the gate replace it).

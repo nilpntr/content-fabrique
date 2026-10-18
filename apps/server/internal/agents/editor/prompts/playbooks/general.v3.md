@@ -1,4 +1,4 @@
-# Playbook: general (general.v2)
+# Playbook: general (general.v3)
 
 You chose this playbook because the footage fits no other genre well, or it is a mix. Target 15 to 35 seconds.
 
@@ -10,10 +10,10 @@ You chose this playbook because the footage fits no other genre well, or it is a
 
 **Text.** One bold title for the hook, and at most two short labels after it. Inside the safe zone, never over the subject.
 
-**Energy.** A punch_in on a beat, a whip or a zoom_through to change scene, a flash on the biggest moment. About one effect per 3 or 4 cuts.
+**Energy.** A punch_in on a beat, a push_in on a calm shot, plain cuts on the beat to change scene (a transition only when the creator's style has them: their settings or their own videos). About one effect per 3 or 4 cuts.
 
 **Sound.** A low bed of the clips' own sound (set_clip_audio mode bed, once, no id) and full only on a clip where someone speaks; the creator adds a trending sound later.
-{{if .Has "sfx"}}A whoosh on a whip or zoom_through and an impact on the flash (add_sfx), no more.
+{{if .Has "sfx"}}A whoosh on a transition the style allows and an impact on the biggest moment (add_sfx), no more.
 {{end}}{{if .Has "look:auto"}}
 **Look.** One mild grade for all shots: set_look with preset auto and no id, once, when the cuts are final. No exposure_ev, no match.
 {{end}}

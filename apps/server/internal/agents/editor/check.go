@@ -148,6 +148,10 @@ type CheckInput struct {
 	// Style is the creator's style profile (P6-05), nil for a workspace that has none: the thresholds then are the defaults of the
 	// content type, and style_match does not apply.
 	Style *styleprofile.Profile
+	// Settings are the creator's effective settings for this edit (P6-05b: their own, the AI's suggestion, the vibe), nil for the
+	// defaults (a lively vibe). They decide what may move (transitions, camera motion, text animation), the pace and the music; a
+	// measured "no effects" in Style decides none of that.
+	Settings *styleprofile.Resolved
 	// Rendered is the luma of the version's preview render (a mean in Luma and a 90th percentile in High per sample, as the analysis
 	// series), nil when there is no preview of the version yet: the checks that look at the rendered picture do not apply then.
 	Rendered *analysis.Series
@@ -164,8 +168,8 @@ type CheckInput struct {
 	// OverlaySkip says why and overlay_legibility does not apply.
 	Overlay     map[string]RegionLuma
 	OverlaySkip string
-	// PaceSetting is the creator's own pace setting (PaceSettings: "slower", "like_my_videos", "faster"; "" for none), which scales the
-	// pace targets after the vibe.
+	// PaceSetting is the creator's own pace setting (PaceSettings: "slower", "like_mine", "faster"; "" takes the Settings' pace), which
+	// scales the pace targets after the vibe.
 	PaceSetting string
 }
 
@@ -253,40 +257,57 @@ type limits struct {
 	beatGrid     bool    // the video follows a beat grid
 	gridRequired bool    // a plan for this type may not have tempo 0
 	paceBuilds   bool    // the cuts speed up toward the end
-	// hookMaxMs is the longest first shot (the default is hookMaxMs), and the rest come from the creator's style profile (applyStyle):
-	// noEffects, no motion preset, transition or ramp at all; noTitle, no title is expected; durLo and durHi, the length range when
-	// the plan names no target; styled, a profile is in force.
-	hookMaxMs          int64
-	noEffects, noTitle bool
-	durLo, durHi       int64
-	styled             bool
+	// hookMaxMs is the longest first shot (the default is hookMaxMs), and the rest come from the creator's style profile and settings
+	// (applyStyle): transitionsOff and cameraOff, no transition, or no motion preset or speed ramp, because the creator's settings
+	// say so; effectsLots, the settings ask for lots of motion (a higher ceiling); noTitle, no title is expected; durLo and durHi, the
+	// length range when the plan names no target; styled, a profile is in force.
+	hookMaxMs                          int64
+	transitionsOff, cameraOff, noTitle bool
+	effectsLots                        bool
+	durLo, durHi                       int64
+	styled                             bool
 	// looseBeat says the creator's cuts are known not to sit on a beat grid, so beat_sync does not apply.
 	looseBeat bool
 	// effectsMax is the most effects a cut (0.5, more at lively and hype).
 	effectsMax float64
 }
 
-// applyStyle sets the thresholds from the creator's style profile: a creator who lets takes run, uses no effects, cuts loosely near the
-// music and has a first cut after two seconds is not held to the defaults of a fast edit. The profile loosens the checks that
-// assume a montage (shot pacing, the pace building, the effect minimum, the beat grid, the hook length) and the style_match check
-// measures the edit against the profile instead.
-func applyStyle(l limits, p *styleprofile.Profile) limits {
+// applyStyle sets the thresholds from the creator's style profile and settings: a creator who lets takes run, uses no effects, cuts
+// loosely near the music and has a first cut after two seconds is not held to the defaults of a fast edit. The profile loosens the
+// checks that assume a montage (shot pacing, the pace building, the effect minimum, the beat grid, the hook length) and the style_match
+// check measures the edit against the profile instead. What may move is the settings' (set, nil for the defaults): a measured "no
+// effects" never forbids transitions or camera motion on its own (P6-05b).
+func applyStyle(l limits, p *styleprofile.Profile, set *styleprofile.Resolved) limits {
 	l.hookMaxMs = hookMaxMs
+	r := styleprofile.Resolve(p, nil, styleprofile.Settings{}, "")
+	if set != nil {
+		r = *set
+	}
+	l.transitionsOff = r.Transitions == styleprofile.LevelOff
+	l.cameraOff = r.CameraMotion == styleprofile.LevelOff
+	l.effectsLots = r.Transitions == styleprofile.LevelLots || r.CameraMotion == styleprofile.LevelLots
+	if r.Music == styleprofile.MusicNever {
+		l.beatGrid, l.gridRequired = false, false // no music: the cuts follow the clips' own sound and action
+	}
 	if !p.Firm() {
 		return l // a profile of one or two videos is a hint for the prompt, not a rule for the checks
 	}
 	l.styled = true
 	pc, th := p.Pacing, p.Thresholds()
-	// The median shot: what the creator's videos have, with room, from quartiles and capped (thresholds.go), never under the default.
-	l.medianShotMs = max(l.medianShotMs, int64(th.MedianShotMaxS*1000))
+	// The median shot: what the creator's videos have, with room, from quartiles and capped (thresholds.go), never under the default. A
+	// creator who asks for a faster pace than their videos keeps the default of a fast edit; a slower one gets half as much room again.
+	switch r.Pace {
+	case styleprofile.PaceFaster:
+	case styleprofile.PaceSlower:
+		l.medianShotMs = max(l.medianShotMs, int64(th.MedianShotMaxS*1500))
+	default:
+		l.medianShotMs = max(l.medianShotMs, int64(th.MedianShotMaxS*1000))
+	}
 	// The checks that assume a fast edit are loosened for a creator of long takes or of few effects; a montage or busy-effects profile
 	// keeps the minimum effect rate and the building pace.
 	if pc.Style == styleprofile.PaceLongTake || p.Effects.Verdict == styleprofile.EffectsNone || p.Effects.Verdict == styleprofile.EffectsLight {
 		l.minEffects = 0
 		l.paceBuilds = false
-	}
-	if p.Effects.Verdict == styleprofile.EffectsNone {
-		l.noEffects = true
 	}
 	if p.CutsOffBeat() {
 		l.beatGrid, l.gridRequired, l.looseBeat = false, false, true
@@ -325,17 +346,25 @@ func RunChecks(in CheckInput) Report {
 	}
 	items := slices.Clone(main.Items)
 	slices.SortStableFunc(items, func(a, b timeline.VideoItem) int { return cmp.Compare(a.AtMs, b.AtMs) })
+	// The vibe (P6-06): this edit's, as the creator's settings resolve it (P6-05b), else the plan's.
+	if in.PaceSetting == "" {
+		in.PaceSetting = paceSetting(in.Settings)
+	}
+	if in.Vibe == "" && in.Settings != nil {
+		in.Vibe = in.Settings.Vibe
+	}
 	if in.Vibe == "" && in.Plan != nil {
 		in.Vibe = in.Plan.Vibe
 	}
-	lim := applyStyle(typeLimits[typ], in.Style)
-	// The vibe (P6-06): at lively and hype a creator's "no effects" is no gimmicks (speed ramps, shakes), not no transitions or text motion,
-	// and a busier edit is allowed more effects a cut.
+	lim := applyStyle(typeLimits[typ], in.Style, in.Settings)
+	// A busier edit is allowed more effects a cut at lively and hype, and when the creator's settings ask for lots.
 	vibe := VibeOr(in.Vibe)
 	lim.effectsMax = effectsMax
 	if energetic(vibe) {
-		lim.noEffects = false
 		lim.effectsMax = map[string]float64{VibeLively: 0.6, VibeHype: 1.0}[vibe]
+	}
+	if lim.effectsLots {
+		lim.effectsMax = max(lim.effectsMax, effectsMaxLots)
 	}
 	weakStyle := ""
 	if in.Style != nil && !in.Style.Firm() {
@@ -367,7 +396,7 @@ func RunChecks(in CheckInput) Report {
 	r.Checks = []Check{
 		c.hookLength(), c.hookTitle(), c.shotPacing(), c.longShot(), c.heldEnding(), c.shotVariety(), c.paceBuilds(), c.repBoundaries(), c.deadTime(),
 		c.effectDensity(), c.textSafe(), c.textOverSubject(), c.duration(targetS), c.brightness(), c.crushed(), c.beatSync(), c.styleMatch(), c.titleCopied(),
-		c.offBeatCut(), c.hookMissesDrop(), c.staticShot(), c.noTransitions(), c.transitionVariety(), c.textWithoutEntrance(), c.chapterTitles(),
+		c.offBeatCut(), c.hookMissesDrop(), c.staticShot(), c.transitionsMatch(), c.transitionVariety(), c.textWithoutEntrance(), c.chapterTitles(),
 	}
 	if len(graphicsOf(in.Spec)) > 0 { // the motion-graphics checks (check_graphics.go), only for an edit that has some
 		r.Checks = append(r.Checks, c.overlayReadable(), c.overlayOverSubject(), c.overlayLegibility())
@@ -639,6 +668,9 @@ func (c *checker) asset(it timeline.VideoItem) (AssetAnalysis, bool) {
 }
 
 func (c *checker) repBoundaries() Check {
+	if s := c.in.Settings; s != nil && s.CutTiming == styleprofile.CutsMidRep {
+		return c.skip(CheckRepBoundaries, "the creator's cuts fall in the middle of a rep (their style): the cuts follow the beat, not the end of a rep")
+	}
 	type miss struct {
 		text string
 		off  int64
@@ -769,32 +801,47 @@ func (c *checker) deadTime() Check {
 	return c.pass(CheckDeadTime, "%.0f %% of the screen time is dead time (at most %.0f %%)", share*100, deadShareMax*100)
 }
 
-// countEffects counts the effects of the main track: motion presets, transitions that are not cuts and speed ramps (also separately).
-func countEffects(items []timeline.VideoItem) (effects, ramps int) {
+// effectKinds counts the effects of the main track by kind. The living camera (handheld) is camera motion and not an effect: it is
+// counted apart.
+type effectKinds struct{ transitions, motions, handheld, ramps int }
+
+func countEffectKinds(items []timeline.VideoItem) effectKinds {
+	var k effectKinds
 	for i, it := range items {
-		if it.Motion.Active() && it.Motion.Preset != timeline.MotionHandheld { // the living camera is camera motion, not an effect
-			effects++
+		switch {
+		case it.Motion.Active() && it.Motion.Preset == timeline.MotionHandheld:
+			k.handheld++
+		case it.Motion.Active():
+			k.motions++
 		}
 		if i > 0 && it.TransitionIn != nil && it.TransitionIn.Type != timeline.TransitionCut && it.TransitionIn.Type != "" {
-			effects++
+			k.transitions++
 		}
 		if it.HasRamp() {
-			effects++
-			ramps++
+			k.ramps++
 		}
 	}
-	return effects, ramps
+	return k
 }
 
+// effectsMaxLots is the most effects per cut when the creator's settings ask for lots of transitions or camera motion.
+const effectsMaxLots = 1.5
+
 func (c *checker) effectDensity() Check {
-	effects, ramps := countEffects(c.items)
+	k := countEffectKinds(c.items)
+	effects, ramps := k.transitions+k.motions+k.ramps, k.ramps
 	cuts := len(c.items) - 1
 	c.m.Effects, c.m.Ramps, c.m.Cuts = effects, ramps, cuts
-	if c.lim.noEffects {
-		if effects > 0 {
-			return c.fail(CheckEffectDensity, "%d effects (motion presets, transitions, speed ramps); the creator uses none: take them out", effects)
-		}
-		return c.pass(CheckEffectDensity, "no effects, as in the creator's videos")
+	// The creator's settings first: what they turned off stays off, whatever the vibe.
+	switch {
+	case c.lim.transitionsOff && c.lim.cameraOff && effects > 0:
+		return c.fail(CheckEffectDensity, "%d effects (transitions, motion presets, speed ramps); the creator's settings turn transitions and camera motion off: take them out", effects)
+	case c.lim.transitionsOff && k.transitions > 0:
+		return c.fail(CheckEffectDensity, "%d transitions; the style has transitions off: make every cut a plain cut on the beat", k.transitions)
+	case c.lim.cameraOff && k.motions+k.handheld+k.ramps > 0:
+		return c.fail(CheckEffectDensity, "%d motion presets and speed ramps; the creator's settings turn camera motion off: take them out", k.motions+k.handheld+k.ramps)
+	case c.lim.transitionsOff && c.lim.cameraOff:
+		return c.pass(CheckEffectDensity, "no effects, as the creator's settings ask")
 	}
 	if cuts < 1 {
 		return c.skip(CheckEffectDensity, "there are no cuts")
@@ -807,7 +854,10 @@ func (c *checker) effectDensity() Check {
 	case ramps > rampsMax:
 		return c.fail(CheckEffectDensity, "%d shots have a speed ramp; at most %d, on the shots that deserve it", ramps, rampsMax)
 	case c.lim.minEffects > 0 && cuts >= 4 && per < c.lim.minEffects:
-		return c.fail(CheckEffectDensity, "%d effects in %d cuts (%.2f per cut) is flat; add a punch_in on a beat, or a whip or flash between scenes (about one per 3 or 4 cuts)", effects, cuts, per)
+		if c.lim.transitionsOff {
+			return c.fail(CheckEffectDensity, "%d effects in %d cuts (%.2f per cut) is flat; add a punch_in or a push_in on a beat (about one per 3 or 4 cuts); the cuts stay plain", effects, cuts, per)
+		}
+		return c.fail(CheckEffectDensity, "%d effects in %d cuts (%.2f per cut) is flat; add a punch_in on a beat, or a transition the style allows between scenes (about one per 3 or 4 cuts)", effects, cuts, per)
 	}
 	return c.pass(CheckEffectDensity, "%d effects in %d cuts (%.2f per cut), %d speed ramps", effects, cuts, per, ramps)
 }
@@ -1019,7 +1069,8 @@ func (c *checker) editStats() styleprofile.EditStats {
 	if len(c.items) > 1 {
 		e.FirstCutS = float64(c.items[1].AtMs) / 1000
 	}
-	e.Effects, _ = countEffects(c.items)
+	k := countEffectKinds(c.items)
+	e.Effects, e.Transitions, e.Motions, e.Ramps = k.transitions+k.motions+k.ramps, k.transitions, k.motions+k.handheld, k.ramps
 	if energetic(c.in.Vibe) {
 		e.Effects = countGimmicks(c.items) // at lively and hype the creator's "no effects" is held to no gimmicks
 	}
@@ -1035,6 +1086,10 @@ func (c *checker) editStats() styleprofile.EditStats {
 			e.Captions = e.Captions || t.Enabled
 		case *timeline.TextTrack:
 			for _, it := range t.Items {
+				e.Texts++
+				if it.AnimationOrDefault() != timeline.AnimationNone {
+					e.Animated++
+				}
 				if !strings.HasPrefix(it.Style, "title_") {
 					e.Labels++
 					continue
@@ -1042,7 +1097,7 @@ func (c *checker) editStats() styleprofile.EditStats {
 				e.Titles++
 				if it.AtMs < firstTitleAt { // the case judged is the earliest title's, whatever track it is on
 					firstTitleAt = it.AtMs
-					e.TitleCase, e.TitleAtS = styleprofile.CaseOf(it.Text), float64(it.AtMs)/1000
+					e.TitleCase, e.TitleAtS, e.TitleText = styleprofile.CaseOf(it.Text), float64(it.AtMs)/1000, it.Text
 					e.TitleFill, e.TitleLines, e.TitleHeightPct, e.TitleShadow = "", 0, 0, "" // not the look of a later title
 					c.titleLook(&e, it)
 				}
@@ -1104,7 +1159,7 @@ func (c *checker) styleMatch() Check {
 		}
 		return c.skip(CheckStyleMatch, "this workspace has no creator style profile")
 	}
-	d := c.in.Style.Compare(c.editStats())
+	d := c.in.Style.CompareWith(c.editStats(), c.in.Settings)
 	c.m.StyleScore = d.Score
 	*c.dist = &d
 	soft := ""
@@ -1155,7 +1210,10 @@ func (c *checker) titleCopied() Check {
 	}
 	if len(copied) > 0 {
 		form := "their most common form"
-		if p.Text != nil && len(p.Text.Patterns) > 0 {
+		switch s := c.in.Settings; {
+		case s != nil && s.TitleTemplate != "" && s.Sources.TitleTemplate == styleprofile.SourceYou:
+			form = "the form the creator chose (the title_form block)"
+		case p.Text != nil && len(p.Text.Patterns) > 0:
 			form = p.Text.Patterns[0].Template()
 		}
 		return c.fail(CheckTitleCopied, "%s is word for word the title of one of the creator's reference videos: write a new title for this video in the creator's template, %s, with the topic of this footage",
