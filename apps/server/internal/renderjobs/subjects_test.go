@@ -2,8 +2,8 @@ package renderjobs
 
 import (
 	"context"
-	"math"
 	"errors"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
