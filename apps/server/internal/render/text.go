@@ -48,9 +48,9 @@ func (c *compiler) subtitles() (*Subtitles, error) {
 		switch tr := t.(type) {
 		case *timeline.TextTrack:
 			for _, it := range tr.Items {
-				var obstacles []style.Rect
+				var obstacles []timeline.Subject
 				if it.AvoidsSubject() && len(subjects) > 0 {
-					obstacles = subject.HeadRects(c.spec, subjects.Lookup, it.AtMs, it.AtMs+it.DurationMs)
+					obstacles = subject.Regions(c.spec, subjects.Lookup, it.AtMs, it.AtMs+it.DurationMs)
 				}
 				pl, av, err := timeline.PlaceTextAvoiding(out, it, obstacles)
 				if err != nil {
@@ -64,12 +64,16 @@ func (c *compiler) subtitles() (*Subtitles, error) {
 					}
 				}
 				switch {
-				case av.Overlapped && av.Cleared && av.Where == "smaller":
-					b.warn("text_moved", "text item %s was shrunk to scale %g to keep it clear of the subject's head", it.ID, av.Scale)
-				case av.Overlapped && av.Cleared:
-					b.warn("text_moved", "text item %s was moved %s the subject's head to keep it clear of it", it.ID, av.Where)
-				case av.Overlapped:
+				case av.OverHead:
 					b.warn("text_over_subject", "text item %s covers the subject's head and could not be moved off it inside the safe zone", it.ID)
+				case av.OverBody && av.Where == timeline.WhereBelowHead:
+					b.warn("text_over_subject", "text item %s is below the subject's head, over their body: there is no room above the head or below the body inside the safe zone", it.ID)
+				case av.OverBody:
+					b.warn("text_over_subject", "text item %s is off the subject's head but still covers their body", it.ID)
+				case av.Overlapped && av.Where == timeline.WhereSmaller:
+					b.warn("text_moved", "text item %s was shrunk to scale %g to keep it clear of the subject", it.ID, av.Scale)
+				case av.Overlapped:
+					b.warn("text_moved", "text item %s was moved %s the subject to keep it clear of them", it.ID, av.Where)
 				}
 				box, ok := pl.Zone.Fit(pl.Box)
 				if !ok {

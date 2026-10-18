@@ -168,7 +168,7 @@ Two independent agent-native projects converge on the same pattern: **the LLM wr
 
 ### 3.4 Captions, safe zones, beat-snapping
 
-- **TikTok UI-safe zones.** The best-sourced numbers come from TikTok's In-Feed Ads template scaled to 1080×1920: keep text, faces and logos out of the **top 240 px, bottom 660 px and 120 px on each side**. The right-hand action column (≈ 180 px wide, from y ≈ 840) is measured, not official. Blogs disagree, so the renderer uses configurable, conservative defaults. △ [Socialync](https://www.socialync.io/tools/safe-zones/tiktok)
+- **TikTok UI-safe zones.** The best-sourced numbers come from TikTok's In-Feed Ads template scaled to 1080×1920: keep text, faces and logos out of the **top 240 px, bottom 660 px and 120 px on each side**. The right-hand action column (≈ 180 px wide, from y ≈ 840) is measured, not official. Blogs disagree, so the renderer uses configurable, conservative defaults. △ [Socialync](https://www.socialync.io/tools/safe-zones/tiktok) Checked again for P6-05 (2026-10-18): the 240 px comes from TikTok's ad specification (Ads Help, In-Feed Ads; the file is 720×1280 and scaled); one checker reserves 220 px, others 150, 130 and 90 px without a source, and nobody publishes a figure for organic posts. The top 240 px stays; it is a limit on where text may be (the ink), see style-profile-v1 section 8b.
 - **Caption style:** short uppercase word chunks are the norm (video-use defaults to 2-word uppercase chunks) ◐.
 - **Beat-snapping** is missing from the agent-native tools surveyed. It is our differentiator for music-driven fitness edits.
 

@@ -427,7 +427,7 @@ func (q *Queries) ListAssetDerivatives(ctx context.Context, arg ListAssetDerivat
 }
 
 const listAssetSubjects = `-- name: ListAssetSubjects :many
-SELECT id AS asset_id, (quick_look -> 'subjects')::jsonb AS subjects FROM assets
+SELECT id AS asset_id, (quick_look -> 'subjects')::jsonb AS subjects, title, tags FROM assets
 WHERE workspace_id = $1 AND id = ANY($2::uuid[]) AND status = 'ready' AND deleted_at IS NULL
   AND quick_look_status = 'succeeded' AND jsonb_typeof(quick_look -> 'subjects') = 'object'
 `
@@ -440,10 +440,12 @@ type ListAssetSubjectsParams struct {
 type ListAssetSubjectsRow struct {
 	AssetID  ids.AssetID
 	Subjects json.RawMessage
+	Title    string
+	Tags     []string
 }
 
 // Where the person is in the sampled frames of several videos (the quick look's "subjects" member), for the editor's checks and the
-// compiler's title placement. A video with none is not in the result.
+// compiler's title placement, with the title and tags (a pose or physique shot is told by them). A video with none is not in the result.
 func (q *Queries) ListAssetSubjects(ctx context.Context, arg ListAssetSubjectsParams) ([]ListAssetSubjectsRow, error) {
 	rows, err := q.db.Query(ctx, listAssetSubjects, arg.WorkspaceID, arg.AssetIds)
 	if err != nil {
@@ -453,7 +455,12 @@ func (q *Queries) ListAssetSubjects(ctx context.Context, arg ListAssetSubjectsPa
 	var items []ListAssetSubjectsRow
 	for rows.Next() {
 		var i ListAssetSubjectsRow
-		if err := rows.Scan(&i.AssetID, &i.Subjects); err != nil {
+		if err := rows.Scan(
+			&i.AssetID,
+			&i.Subjects,
+			&i.Title,
+			&i.Tags,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

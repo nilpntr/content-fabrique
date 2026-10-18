@@ -33,13 +33,13 @@ func TestTextOverSubject(t *testing.T) {
 	}
 	// One line at the top of the safe zone clears the head.
 	r := run(buildingLats(t), headAt22())
-	if c := wantStatus(t, r, CheckTextOverSubject, CheckPass); !strings.Contains(c.Detail, "none on the head") {
+	if c := wantStatus(t, r, CheckTextOverSubject, CheckPass); !strings.Contains(c.Detail, "none on the person") {
 		t.Errorf("one line: %s", c.Detail)
 	}
-	// Two lines run into it: the renderer clears them (below the head), and the line says so with the numbers of the band.
+	// Two lines run into it: the renderer clears them (above the head, smaller), and the line says so with the numbers of the band.
 	two := withTitle(t, buildingLats(t), func(it *timeline.TextItem) { it.Text = "BACK DAY\nBLUEPRINT" })
 	c := wantStatus(t, run(two, headAt22()), CheckTextOverSubject, CheckPass)
-	for _, want := range []string{"covers the head", "the renderer moves it", "the head starts at y 422 (22 % from the top)", "clear band above it is 182 px"} {
+	for _, want := range []string{"covers the subject", "the renderer moves it above the head at scale", "the head starts at y 422 (22 % from the top)", "clear band above it is 182 px"} {
 		if !strings.Contains(c.Detail, want) {
 			t.Errorf("moved: lacks %q: %s", want, c.Detail)
 		}
@@ -69,6 +69,44 @@ func TestTextOverSubject(t *testing.T) {
 	c = wantStatus(t, run(buildingLats(t), other), CheckTextOverSubject, CheckSkip)
 	if !strings.Contains(c.Detail, "no text is on top of a clip with a subject box") {
 		t.Errorf("other clip: %s", c.Detail)
+	}
+}
+
+// The body is protected too: a title that ends up over it because there is no room above the head or below the body is a note, and a
+// failure on a pose or physique shot (the clip's title or tags say so), where the body is the picture.
+func TestTextOverTheBodyIsANoteOrAFailureOnAPoseShot(t *testing.T) {
+	// The head starts at 14.6 % (280 px): 40 px of band above it, too little for the title even at 0.6.
+	track := func(showsOff bool) subject.Index {
+		return subject.Index{assetA: {Aspect: 0.5625, Samples: []subject.Sample{{AtMs: 1000, X: 0.2, Y: 0.14, W: 0.6, H: 0.75, HeadTopY: 0.146}}, ShowsOff: showsOff}}
+	}
+	run := func(ix subject.Index) Report {
+		return RunChecks(CheckInput{Spec: buildingLats(t), Plan: workoutPlan(), Style: ginoProfile(t), Subjects: ix})
+	}
+	c := wantStatus(t, run(track(false)), CheckTextOverSubject, CheckPass)
+	for _, want := range []string{"borderline", "over the body", "the head starts at y 280"} {
+		if !strings.Contains(c.Detail, want) {
+			t.Errorf("a note lacks %q: %s", want, c.Detail)
+		}
+	}
+	c = wantStatus(t, run(track(true)), CheckTextOverSubject, CheckFail)
+	for _, want := range []string{"over the body in a pose shot", "one line and a smaller scale"} {
+		if !strings.Contains(c.Detail, want) {
+			t.Errorf("a failure lacks %q: %s", want, c.Detail)
+		}
+	}
+	// A title set not to avoid the subject that covers the body only: a note, and a failure on a pose shot.
+	offTitle := func() *timeline.Spec {
+		return withTitle(t, buildingLats(t), func(it *timeline.TextItem) {
+			f := false
+			it.AvoidSubject = &f
+			it.Anchor = timeline.AnchorCenter // over the chest: the body, and not the head
+		})
+	}
+	side := track
+	wantStatus(t, RunChecks(CheckInput{Spec: offTitle(), Plan: workoutPlan(), Style: ginoProfile(t), Subjects: side(false)}), CheckTextOverSubject, CheckPass)
+	c = wantStatus(t, RunChecks(CheckInput{Spec: offTitle(), Plan: workoutPlan(), Style: ginoProfile(t), Subjects: side(true)}), CheckTextOverSubject, CheckFail)
+	if !strings.Contains(c.Detail, "set not to avoid it") {
+		t.Errorf("off, pose: %s", c.Detail)
 	}
 }
 

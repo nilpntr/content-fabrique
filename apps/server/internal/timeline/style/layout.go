@@ -3,6 +3,7 @@ package style
 import (
 	"math"
 	"strings"
+	"unicode"
 )
 
 // Layout is a text laid out in a style: the lines after word wrap, their widths and the box they take. All sizes are pixels
@@ -182,3 +183,93 @@ func PlaceWatermark(z Zone, w, h int) Rect {
 
 // MaxBoxWidth is the widest box a text may take in a zone: the width of the zone's centre column.
 func MaxBoxWidth(z Zone, outW int) int { return z.Column(outW).Width() }
+
+// How far above the capitals the ink of a line may rise, as a share of the cap height. The numbers are the largest rises measured with
+// libass over every style (TestTheInkBoxHoldsTheInk, which fails when a glyph draws above the ink box) with a margin of a few percent:
+//
+//   - inkAscender, plain Latin text: an ascender or a lowercase "f" or "l" (up to 0.08 in the fonts of the registry);
+//   - inkSymbol, a line with a bracket, "$", "/", "|", "@", "^", "~" or "*": a bar or a slash is the tallest glyph of a font (0.33 for the
+//     "|" of Inter, 0.21 for the "/" of Montserrat);
+//   - inkAccent, a letter with an accent that sits above the capital (Ä É Ñ Ö: up to 0.32);
+//   - inkTall, a ring or a stacked accent (Å Ů: 0.44; Ǻ and the Vietnamese letters with two marks: 0.63).
+const (
+	inkAscender = 0.08
+	inkSymbol   = 0.36
+	inkAccent   = 0.36
+	inkTall     = 0.66
+)
+
+// tallMark says whether a rune carries a ring, a stacked accent or a combining mark: the tallest marks over a capital.
+func tallMark(r rune) bool {
+	switch r {
+	case 'Å', 'å', 'Ů', 'ů':
+		return true
+	}
+	return r >= 0x1E00 && r <= 0x1EFF || r >= 0x01D5 && r <= 0x01DC || r == 0x01FA || r == 0x01FB || r >= 0x0300 && r <= 0x036F
+}
+
+// inkRise is how far above the capitals the ink of the line can rise, as a share of the cap height.
+func inkRise(line string) float64 {
+	up := inkAscender
+	if strings.ContainsAny(line, "()[]{}$/|@^~*") {
+		up = inkSymbol
+	}
+	for _, r := range line {
+		switch {
+		case tallMark(r):
+			return inkTall
+		case r > 0x7F && unicode.IsLetter(r):
+			up = math.Max(up, inkAccent)
+		}
+	}
+	return up
+}
+
+// hasDescender says whether a character of the line hangs below the baseline: a descender, or an accented letter (a cedilla, an ogonek).
+// Punctuation outside Basic Latin (a curly apostrophe, a dash) does not.
+func hasDescender(line string) bool {
+	if strings.ContainsAny(line, "gjpqyQ,;()[]{}/|@_$") {
+		return true
+	}
+	for _, r := range line {
+		if r > 0x7F && unicode.IsLetter(r) {
+			return true
+		}
+	}
+	return false
+}
+
+// InkBox is where the ink of the text can be, for a layout box placed on the output (padding included): the same width, and
+// vertically from just above the capitals of the first line to the baseline of the last, with room below it only when a character hangs
+// below the baseline. A line box is far taller than the capitals in it (Anton's is about twice as tall), so for a title in capitals the
+// ink box is about half the layout box: the part of the box a head can be in without touching a letter is the empty space of the line.
+// The layout box stays the one that must be inside the safe zone; this is what a head or a body is tested against. libass puts the
+// baseline of a line WinAscent font units under its top; a test renders every style and checks the ink against this box.
+func (l Layout) InkBox(box Rect) Rect {
+	t := tableOf(l.Style.FontOf())
+	total := t.WinAscent + t.WinDescent
+	if l.Style.Box || total == 0 || len(l.Lines) == 0 {
+		return box // a boxed style draws the box itself: the ink is all of the layout box
+	}
+	k := float64(l.LineHeight) / float64(total)
+	capH := float64(t.CapHeight) * k
+	if t.CapHeight == 0 {
+		capH = 0.7 * float64(t.UnitsPerEm) * k
+	}
+	up := inkRise(l.Lines[0]) // only the first line sets the top of the ink
+	lineTop := float64(box.Top + l.Pad)
+	first := lineTop + float64(t.WinAscent)*k
+	last := first + float64(len(l.Lines)-1)*float64(l.LineHeight)
+	top := int(math.Floor(first-capH*(1+up))) - l.Pad
+	bottom := int(math.Ceil(last)) + l.Pad
+	if hasDescender(l.Lines[len(l.Lines)-1]) { // and only the last the bottom
+		bottom = int(math.Ceil(last+float64(t.WinDescent)*k)) + l.Pad
+	}
+	// Not clamped to the layout box: a stacked accent in Inter draws above the line box itself, and the ink box says so (the caller moves
+	// the zone by how far the ink is from the box, in either direction).
+	out := Rect{Left: box.Left, Top: top, Right: box.Right, Bottom: bottom}
+	if out.Bottom <= out.Top {
+		return box
+	}
+	return out
+}

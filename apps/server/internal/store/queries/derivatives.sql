@@ -113,8 +113,8 @@ ORDER BY id
 LIMIT @row_limit;
 
 -- Where the person is in the sampled frames of several videos (the quick look's "subjects" member), for the editor's checks and the
--- compiler's title placement. A video with none is not in the result.
+-- compiler's title placement, with the title and tags (a pose or physique shot is told by them). A video with none is not in the result.
 -- name: ListAssetSubjects :many
-SELECT id AS asset_id, (quick_look -> 'subjects')::jsonb AS subjects FROM assets
+SELECT id AS asset_id, (quick_look -> 'subjects')::jsonb AS subjects, title, tags FROM assets
 WHERE workspace_id = @workspace_id AND id = ANY(@asset_ids::uuid[]) AND status = 'ready' AND deleted_at IS NULL
   AND quick_look_status = 'succeeded' AND jsonb_typeof(quick_look -> 'subjects') = 'object';

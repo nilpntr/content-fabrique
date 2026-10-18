@@ -1,6 +1,6 @@
 # Editor system prompt: changelog
 
-The editor agent's system prompt is `editor.v2.4.md`, embedded in the Go binary, and the genre playbooks are the files in
+The editor agent's system prompt is `editor.v2.5.md`, embedded in the Go binary, and the genre playbooks are the files in
 `playbooks/`, embedded too. The text the model receives is the runtime's preamble (`runtime.SystemPreamble`, the untrusted-data
 rule) followed by this file. The prompt version (`PromptVersion` in `prompt.go`) is stored in every run's input, so a run can
 always be tied to the text it was given; a playbook has its own version (`workout.v2`, in `playbooks.go`) that the run's plan
@@ -21,6 +21,17 @@ Rules for changing it:
 - The cache hit rate of a run is visible: `cfctl agent show <run>` prints the cache write and read tokens of every model call and
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
+
+## editor.v2.5 (2026-10-18)
+
+The person, not only the head (P6-05 follow-up). The live run of v2.4 passed 15 of 15 checks with a one-line title in the creator's
+colour, and the placement put it below the head, over the upper back of a physique shot, because the band above a head at 17 % of the
+frame was thinner than the title's line box. The renderer and `check_edit` now keep the title off the whole person (above the head at
+a smaller size, else below all of them, over the body only as the last resort) and measure the letters, not the empty half of the line
+box. The off-the-head bullet says so: keep the title off the whole person, use one line and a short text when the head is high, and
+expect `text_over_subject` to fail for a title over the body of a pose or physique clip (its title or tags say so) and to note it
+elsewhere. The file is `editor.v2.5.md`; the tools do not change (`check_edit`'s `text_over_subject` has the new cases), so it is a
+patch of the v2.4 text.
 
 ## editor.v2.4 (2026-10-18)
 

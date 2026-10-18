@@ -14,6 +14,8 @@ import (
 	"encoding/json"
 	"math"
 	"slices"
+	"strings"
+	"unicode"
 )
 
 // The limits of what is kept.
@@ -48,6 +50,25 @@ type Sample struct {
 type Track struct {
 	Aspect  float64  `json:"aspect"`
 	Samples []Sample `json:"samples"`
+	// ShowsOff says the clip is a pose or physique shot (its title or tags say so): the body is what it shows, so a title over it is a
+	// failure and not a note. It is not part of the stored boxes; Load sets it from the asset's labels.
+	ShowsOff bool `json:"-"`
+}
+
+// poseWords are the words of a title or tag that mark a pose or physique shot.
+var poseWords = map[string]bool{"pose": true, "poses": true, "posing": true, "posed": true, "physique": true, "flex": true, "flexing": true, "flexed": true}
+
+// ShowsOffTheBody says whether the labels of a clip (its title and tags) mark it as a pose or physique shot: any whole word of them is
+// one of poseWords ("back pose", "posing routine"; "hip flexor" is not). The words are only compared, never passed on.
+func ShowsOffTheBody(title string, tags []string) bool {
+	for _, label := range append([]string{title}, tags...) {
+		for _, w := range strings.FieldsFunc(strings.ToLower(label), func(r rune) bool { return !unicode.IsLetter(r) }) {
+			if poseWords[w] {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
@@ -156,6 +177,20 @@ func (s Sample) Head() (x0, y0, x1, y1 float64) {
 	cx := s.X + s.W/2
 	half := s.W * headCentre / 2
 	return cx - half, s.HeadTopY, cx + half, math.Min(s.HeadTopY+s.H*headFraction, s.Y+s.H)
+}
+
+// raisedAbove is how far above the top of the head, as a fraction of the frame height, the subject box must start for what is up there to
+// count as a raised arm or hand: a model's box starts a little above the hair, and that is not a body part.
+const raisedAbove = 0.03
+
+// Body is the whole person as a box of fractions: the subject box, from the top of the head down, or from its own top when a raised arm or
+// hand is clearly above the head. It is the part a title should not cover either.
+func (s Sample) Body() (x0, y0, x1, y1 float64) {
+	top := s.HeadTopY
+	if s.HeadTopY-s.Y > raisedAbove {
+		top = s.Y
+	}
+	return s.X, top, s.X + s.W, s.Y + s.H
 }
 
 // TopPct is the top of the head of the highest sample as a percentage of the frame height, for the editor's line about a clip.

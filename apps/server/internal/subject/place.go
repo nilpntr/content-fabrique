@@ -44,14 +44,16 @@ func MapBox(x0, y0, x1, y1, aspect float64, rf timeline.Reframe, out timeline.Ou
 	return style.Rect{Left: int(math.Floor(ax)), Top: int(math.Floor(ay)), Right: int(math.Ceil(bx)), Bottom: int(math.Ceil(by))}
 }
 
-// HeadRects are the head regions of the subjects of the main-track clips that are on screen between startMs and endMs of the output, in
-// pixels of the output. A clip contributes the samples taken in the part of its source that plays in that window, or its nearest sample.
-func HeadRects(spec *timeline.Spec, lookup Lookup, startMs, endMs int64) []style.Rect {
+// Regions are the subjects of the main-track clips that are on screen between startMs and endMs of the output, in pixels of the output:
+// the head (the head and shoulders) and the body (the whole subject box, a raised arm included, so "above the body" is above the highest
+// hand or the head). ShowsOff says the clip is a pose or physique shot. A clip contributes the samples taken in the part of its source that plays in that
+// window, or its nearest sample. Both regions are widened by the camera while the text is on screen.
+func Regions(spec *timeline.Spec, lookup Lookup, startMs, endMs int64) []timeline.Subject {
 	main, _, ok := timeline.MainTrack(spec)
 	if !ok || lookup == nil {
 		return nil
 	}
-	var out []style.Rect
+	var out []timeline.Subject
 	// The clips in time order, so a clip knows the transition into the next one.
 	items := slices.Clone(main.Items)
 	slices.SortStableFunc(items, func(a, b timeline.VideoItem) int { return cmp.Compare(a.AtMs, b.AtMs) })
@@ -73,8 +75,10 @@ func HeadRects(spec *timeline.Spec, lookup Lookup, startMs, endMs int64) []style
 		cam := cameraOver(items, i, spec.Output.FPS, os-cs, oe-cs)
 		for _, s := range tr.Near(in, outMs) {
 			x0, y0, x1, y1 := s.Head()
-			r := MapBox(x0, y0, x1, y1, tr.Aspect, rf, spec.Output)
-			out = append(out, withCamera(r, cam, spec.Output))
+			head := MapBox(x0, y0, x1, y1, tr.Aspect, rf, spec.Output)
+			bx0, by0, bx1, by1 := s.Body()
+			body := MapBox(bx0, by0, bx1, by1, tr.Aspect, rf, spec.Output)
+			out = append(out, timeline.Subject{Head: withCamera(head, cam, spec.Output), Body: withCamera(body, cam, spec.Output), ShowsOff: tr.ShowsOff})
 		}
 	}
 	return out
