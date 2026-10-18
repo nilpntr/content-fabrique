@@ -344,6 +344,47 @@ func (s *Service) PutSettings(ctx context.Context, who Actor, in styleprofile.Se
 	return s.view(ctx, who.Workspace)
 }
 
+// PatchSettings changes only the settings that are given and clears the ones named (P6-05d): the creator's other settings stay. The
+// read and the write are one transaction under the workspace's style lock, so two changes at once both land.
+func (s *Service) PatchSettings(ctx context.Context, who Actor, change styleprofile.Settings, unset []string) (View, *Error) {
+	var bad error
+	err := s.store.InTx(ctx, func(tx *store.Store) error {
+		if err := tx.LockWorkspaceStyle(ctx, who.Workspace); err != nil {
+			return err
+		}
+		var cur styleprofile.Settings
+		row, err := tx.GetCreatorStyleSettings(ctx, who.Workspace)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+		case err != nil:
+			return err
+		default:
+			if cur, err = styleprofile.ParseSettings(row.Settings); err != nil {
+				s.logger.WarnContext(ctx, "creatorstyle: the stored settings cannot be read; they are replaced", "error", err)
+				cur = styleprofile.Settings{}
+			}
+		}
+		next, err := cur.Merge(change, unset)
+		if err != nil {
+			bad = err
+			return err
+		}
+		raw, err := json.Marshal(next)
+		if err != nil {
+			return err
+		}
+		_, err = tx.SaveCreatorStyleSettings(ctx, who.Workspace, raw, who.User)
+		return err
+	})
+	switch {
+	case bad != nil:
+		return View{}, invalid(strings.TrimPrefix(bad.Error(), "styleprofile: "))
+	case err != nil:
+		return View{}, s.internal(ctx, "change the settings", err)
+	}
+	return s.view(ctx, who.Workspace)
+}
+
 // Remove deletes a reference video: the asset (its objects are removed by a job), its measures, and the profile is made again from the
 // others. An asset that is not a style reference of the workspace is not found.
 func (s *Service) Remove(ctx context.Context, who Actor, id ids.AssetID) *Error {

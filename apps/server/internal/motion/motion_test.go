@@ -123,7 +123,16 @@ func TestBundleSourceRules(t *testing.T) {
 	if strings.Contains(string(csp[1]), "unsafe") {
 		t.Errorf("the CSP allows unsafe sources: %s", csp[1])
 	}
-	banned := regexp.MustCompile(`innerHTML|outerHTML|insertAdjacentHTML|document\.write|\beval\s*\(|new Function|\bimport\s*\(|\bfetch\s*\(|XMLHttpRequest|WebSocket|setAttribute\(\s*['"]style|\.src\s*=|url\(`)
+	// Markup and code from strings, loading, and style or attributes from strings (a template sets style properties one by one,
+	// as numbers it computed, and never an attribute).
+	banned := regexp.MustCompile(`innerHTML|outerHTML|insertAdjacentHTML|document\.write|\beval\s*\(|new Function|\bimport\s*\(|\bfetch\s*\(|XMLHttpRequest|WebSocket|` +
+		`setAttribute\(|setAttributeNS\(|\.src\s*=|srcdoc|url\(|cssText|setProperty|DOMParser|createContextualFragment|RTCPeerConnection\s*\(`)
+	for _, bad := range []string{`el.style.cssText = s`, `el.style.setProperty('--x', v)`, `el.setAttribute('class', c)`, `f.srcdoc = h`,
+		`new DOMParser().parseFromString(h, 'text/html')`, `range.createContextualFragment(h)`, `new RTCPeerConnection()`, `el.innerHTML = t`} {
+		if !banned.MatchString(bad) {
+			t.Errorf("the banned list misses %q", bad)
+		}
+	}
 	_ = fs.WalkDir(Bundle(), ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".js") {
 			return err

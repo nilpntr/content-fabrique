@@ -167,23 +167,20 @@ func (c *checker) textWithoutEntrance() Check {
 	}
 	var bare []string
 	texts := 0
-	for _, t := range c.in.Spec.Tracks {
-		tt, ok := t.(*timeline.TextTrack)
-		if !ok {
-			continue
+	for _, it := range screenTexts(c.in.Spec) {
+		texts++
+		if it.Graphic != nil {
+			continue // a motion graphic enters and leaves by its template
 		}
-		for _, it := range tt.Items {
-			texts++
-			var miss []string
-			if it.AnimationOrDefault() == timeline.AnimationNone {
-				miss = append(miss, "entrance")
-			}
-			if it.Exit == "" || it.Exit == "none" {
-				miss = append(miss, "exit")
-			}
-			if len(miss) > 0 {
-				bare = append(bare, fmt.Sprintf("%s has no %s", it.ID, strings.Join(miss, " and no ")))
-			}
+		var miss []string
+		if it.AnimationOrDefault() == timeline.AnimationNone {
+			miss = append(miss, "entrance")
+		}
+		if it.Exit == "" || it.Exit == "none" {
+			miss = append(miss, "exit")
+		}
+		if len(miss) > 0 {
+			bare = append(bare, fmt.Sprintf("%s has no %s", it.ID, strings.Join(miss, " and no ")))
 		}
 	}
 	switch {

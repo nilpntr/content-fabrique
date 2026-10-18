@@ -31,7 +31,7 @@ const JudgeStage = "judge_edit"
 
 // JudgePromptVersion names the judge's prompt and tool. A change to either is a new version: cached verdicts of the old one are not
 // reused.
-const JudgePromptVersion = "judge_edit.v1"
+const JudgePromptVersion = "judge_edit.v2"
 
 // MaxJudgeMicros is the hard budget of one judge call: $0.10. It is a llm.Budget, so a call whose worst case does not fit is cut (its
 // max_tokens) or refused before it is sent.
@@ -282,7 +282,7 @@ Score each dimension from 1 to 5 and write the rationale first, two to four sent
 - hook: does the first second stop the scroll (a strong image, a promise, motion), and is the title readable at once? 5 = an obvious stop.
 - energy_pace: does the edit move (cuts, motion, the length of shots against the music), without dead stretches? A long take that holds a still frame for seconds feels dead. 5 = it never sags.
 - ai_look: does it look like an automatic AI edit? Effect transitions (punch, zoom, whip, flash), a zoom on every shot, generic text, symmetric robotic pacing read as AI; real creators of this kind cut hard and keep it simple. 1 = it looks hand-made by the creator, 5 = obviously automatic.
-- text: is the text legible (size, contrast, time on screen) and placed well? Text must never cover the person's body or face. 5 = clean and readable, nothing covered.
+- text: is every text legible (size, contrast, time on screen: a second or more per line) and placed well: the title, story captions, chapter cards and other graphics, all listed in the timeline data with their words and placement rule? A title must never cover the person's body; a story caption may sit over the chest when the creator's own videos do that, but never over the face; no text ever covers the face. 5 = clean and readable, nothing covered that should not be.
 - style_match: would the creator's followers take it for one of the creator's own videos (compare with their contact sheets: framing, takes, title look, colour)? 5 = indistinguishable.
 - story_arc: does it have a beginning, a build and an ending that pays off the hook? 5 = a complete little story.
 

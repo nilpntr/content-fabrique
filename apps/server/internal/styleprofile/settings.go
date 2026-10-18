@@ -81,6 +81,8 @@ var settingValues = map[string][]string{
 	"ending_hold":    {HoldShort, HoldLong},
 	"cut_timing":     {CutsOnFullReps, CutsMidRep},
 	"angle_switches": {LevelOff, LevelOn},
+	"text_pattern":   TextPatterns,
+	"text_position":  {TextTop, TextUpperThird, TextMiddle, TextLowerThird, PositionAuto},
 }
 
 // SettingValues returns the allowed values of a setting (nil for title_colour, a hex code, and for an unknown name).
@@ -107,6 +109,10 @@ type Settings struct {
 	EndingHold    string `json:"ending_hold,omitempty"`
 	CutTiming     string `json:"cut_timing,omitempty"`
 	AngleSwitches string `json:"angle_switches,omitempty"`
+	// TextPattern is how the video's text is told (P6-05d): one title, story captions (a new short line on each shot), dialogue (quoted
+	// lines) or none; TextPosition where the lines of story captions and dialogue sit (top, upper_third, middle, lower_third or auto).
+	TextPattern  string `json:"text_pattern,omitempty"`
+	TextPosition string `json:"text_position,omitempty"`
 }
 
 // fields lists the settings with their JSON names, for validation and resolution.
@@ -121,7 +127,7 @@ func (s *Settings) fields() []struct {
 		{"vibe", &s.Vibe}, {"transitions", &s.Transitions}, {"text_animation", &s.TextAnimation}, {"camera_motion", &s.CameraMotion},
 		{"title_colour", &s.TitleColour}, {"title_position", &s.TitlePosition}, {"title_case", &s.TitleCase}, {"music", &s.Music}, {"pace", &s.Pace},
 		{"chapter_titles", &s.ChapterTitles}, {"title_template", &s.TitleTemplate}, {"ending_hold", &s.EndingHold}, {"cut_timing", &s.CutTiming},
-		{"angle_switches", &s.AngleSwitches},
+		{"angle_switches", &s.AngleSwitches}, {"text_pattern", &s.TextPattern}, {"text_position", &s.TextPosition},
 	}
 }
 
@@ -155,6 +161,57 @@ func (s Settings) Normalize() (Settings, error) {
 		}
 	}
 	return out, nil
+}
+
+// SettingNames are the JSON names of the settings, in order.
+func SettingNames() []string {
+	var s Settings
+	var out []string
+	for _, f := range s.fields() {
+		out = append(out, f.name)
+	}
+	return out
+}
+
+// Merge is the settings with the ones set in change put on them (an empty field of change keeps the current one) and the named ones
+// cleared (back to the layer below: the suggestion, the measures or the default). A name in clear that is not a setting, or one that is
+// both set and cleared, is refused; the result is normalised.
+func (s Settings) Merge(change Settings, unset []string) (Settings, error) {
+	out := s
+	cur := map[string]*string{}
+	for _, f := range out.fields() {
+		cur[f.name] = f.v
+	}
+	set := map[string]bool{}
+	for _, f := range change.fields() {
+		if strings.TrimSpace(*f.v) != "" {
+			*cur[f.name] = *f.v
+			set[f.name] = true
+		}
+	}
+	for _, name := range unset {
+		v, ok := cur[name]
+		switch {
+		case !ok:
+			return Settings{}, fmt.Errorf("%w: %q is not a setting (one of %s)", ErrInvalidSettings, name, strings.Join(SettingNames(), ", "))
+		case set[name]:
+			return Settings{}, fmt.Errorf("%w: %s is both set and cleared", ErrInvalidSettings, name)
+		}
+		*v = ""
+	}
+	return out.Normalize()
+}
+
+// TakeCleared empties the settings whose value is word (cfctl's "suggested") and returns their names.
+func (s *Settings) TakeCleared(word string) []string {
+	var out []string
+	for _, f := range s.fields() {
+		if strings.EqualFold(strings.TrimSpace(*f.v), word) {
+			*f.v = ""
+			out = append(out, f.name)
+		}
+	}
+	return out
 }
 
 // IsZero says no setting is set.
@@ -220,7 +277,8 @@ func Energetic(vibe string) bool { return vibe == VibeLively || vibe == VibeHype
 //   - Text animation and camera motion: the creator's, else (when the vibe was chosen by a person, for this edit or in the settings)
 //     what that vibe asks for, else the suggestion, else the vibe's. A suggestion of "off" does not hold at a lively or hype vibe: the
 //     measured "no effects" it may come from is not a reason to make a lively edit static.
-//   - The title's colour, position and case: the creator's, else the suggestion's, else what was measured, else the editor's choice.
+//   - The title's colour and position: the creator's, else the suggestion's, else what was measured, else the editor's choice. The case:
+//     the creator's, else what was measured, else the suggestion's, else as typed.
 //   - Music: the creator's, else the suggestion's, else "always" when their videos have music, else "always".
 //   - Pace: the creator's, else the suggestion's, else like their videos.
 func Resolve(p *Profile, suggested *Settings, mine Settings, runVibe string) Resolved {
@@ -295,7 +353,9 @@ func Resolve(p *Profile, suggested *Settings, mine Settings, runVibe string) Res
 	choose(&r.TitleColour, &r.Sources.TitleColour, cand{mine.TitleColour, SourceYou}, cand{sug.TitleColour, SourceSuggested}, cand{mColour, SourceMeasured})
 	choose(&r.TitlePosition, &r.Sources.TitlePosition, cand{mine.TitlePosition, SourceYou}, cand{sug.TitlePosition, SourceSuggested},
 		cand{mPosition, SourceMeasured}, cand{PositionAuto, SourceDefault})
-	choose(&r.TitleCase, &r.Sources.TitleCase, cand{mine.TitleCase, SourceYou}, cand{sug.TitleCase, SourceSuggested}, cand{mCase, SourceMeasured},
+	// The case is read from the titles themselves: what was measured comes before a suggestion (a summary call that answered as_typed
+	// for titles all in capitals made every title mixed case).
+	choose(&r.TitleCase, &r.Sources.TitleCase, cand{mine.TitleCase, SourceYou}, cand{mCase, SourceMeasured}, cand{sug.TitleCase, SourceSuggested},
 		cand{CaseAsTyped, SourceDefault})
 
 	// Music and pace.
@@ -330,7 +390,47 @@ func Resolve(p *Profile, suggested *Settings, mine Settings, runVibe string) Res
 	choose(&r.EndingHold, &r.Sources.EndingHold, cand{mine.EndingHold, SourceYou}, cand{sug.EndingHold, SourceSuggested}, cand{mHold, SourceMeasured}, cand{HoldLong, SourceDefault})
 	choose(&r.CutTiming, &r.Sources.CutTiming, cand{mine.CutTiming, SourceYou}, cand{sug.CutTiming, SourceSuggested}, cand{mTiming, SourceMeasured}, cand{CutsOnFullReps, SourceDefault})
 	choose(&r.AngleSwitches, &r.Sources.AngleSwitches, cand{mine.AngleSwitches, SourceYou}, cand{sug.AngleSwitches, SourceSuggested}, cand{mAngles, SourceMeasured}, cand{LevelOn, SourceDefault})
+
+	// The text pattern and where its lines sit (P6-05d): measured from the text of every shot.
+	var mPattern, mTextPos string
+	if p != nil && p.Text != nil && p.Text.PatternRead > 0 {
+		mPattern = p.Text.Pattern
+		if l := p.Text.LineLook; l != nil && (mPattern == PatternStoryCaptions || mPattern == PatternDialogue) {
+			mTextPos = l.Position
+		}
+	}
+	choose(&r.TextPattern, &r.Sources.TextPattern, cand{mine.TextPattern, SourceYou}, cand{mPattern, SourceMeasured}, cand{PatternSingleTitle, SourceDefault})
+	choose(&r.TextPosition, &r.Sources.TextPosition, cand{mine.TextPosition, SourceYou}, cand{mTextPos, SourceMeasured}, cand{PositionAuto, SourceDefault})
 	return r
+}
+
+// Lines says the effective style tells its text in lines over the shots: story captions or dialogue.
+func (r Resolved) Lines() bool {
+	return r.TextPattern == PatternStoryCaptions || r.TextPattern == PatternDialogue
+}
+
+// FaceOnly says the lines of this style may stand on the person's body and only keep off the face (a text item's avoid face): the style
+// tells its text in lines, and they sit in the middle of the frame, or the creator's own lines lie over the body (half of them or more).
+// A title, and the text of a creator whose lines sit clear of the body, keeps off the whole body.
+func (s *Style) FaceOnly() bool {
+	if s == nil || !s.Resolved.Lines() {
+		return false
+	}
+	if s.Resolved.TextPosition == TextMiddle {
+		return true
+	}
+	if p := s.Profile; p != nil && p.Text != nil && p.Text.LineLook != nil {
+		return p.Text.LineLook.OverBodyShare >= 0.5
+	}
+	return false
+}
+
+// MeasuredTitleCase is the title_case setting the profile's titles stand for ("" when no case was measured).
+func MeasuredTitleCase(p *Profile) string {
+	if p == nil || p.Text == nil || p.Text.TitleShare == 0 {
+		return ""
+	}
+	return map[string]string{"upper": CaseUpper, "lower": CaseLower, "mixed": CaseAsTyped}[p.Text.Case]
 }
 
 // cand is a candidate value of a setting and where it comes from.

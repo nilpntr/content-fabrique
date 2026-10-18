@@ -29,15 +29,15 @@ ideation: { model: claude-haiku-5-5, effort: medium }
 # The quick look (P1-04b): a title, description and tags for each new clip from four small frames. Haiku 5.5 in every
 # profile: the call has a budget of $0.003, so no profile routes it higher.
 quicklook: { model: claude-haiku-5-5, max_tokens: 700 }
-# The creator style profile's text read (P6-05, stylevision.v3): the title, how it comes on and the chapter titles, from up to 8 frames. Haiku 5.5 in
-# every profile; each call has a budget of $0.01 (styleprofile.MaxVisionMicros).
-stylevision: { model: claude-haiku-5-5, max_tokens: 800 }
+# The creator style profile's text read (P6-05, stylevision.v4): the title, how it comes on, the chapter titles and the text of every shot
+# (P6-05d), from up to 15 frames. Haiku 5.5 in every profile; each call has a budget of $0.01 (styleprofile.MaxVisionMicros).
+stylevision: { model: claude-haiku-5-5, max_tokens: 1500 }
 # The style summary (P6-05b): one call per (re)analysis that describes the creator's style in plain words and suggests the default
 # settings, from the measures and up to three frames. Haiku 5.5 here; each call has a budget of $0.03 (styleprofile.MaxSummaryMicros).
 stylesummary: { model: claude-haiku-5-5, max_tokens: 800 }
 tagging:  { model: claude-haiku-5-5, batch: true }
 judge:    { model: claude-haiku-5-5, effort: high, batch: true }
-# The eval suite's judge of a finished edit (D-38, observability v1 section 7). The suite resolves the judge from v1-start (Sonnet 5.5)
+# The eval suite's judge of a finished edit (D-39, observability v1 section 7). The suite resolves the judge from v1-start (Sonnet 5.5)
 # whatever ROUTING_PROFILE says, so that scores stay comparable; this Haiku entry only exists so dev-cheap stays Haiku-only and is used
 # when a run asks for --judge-profile dev-cheap (a smoke test of the plumbing, not a score to compare).
 judge_edit: { model: claude-haiku-5-5, max_tokens: 3000 }

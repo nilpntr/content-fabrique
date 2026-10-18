@@ -119,18 +119,28 @@ func detectAITransitions(m Measured) (string, string) {
 }
 
 func detectTextOnBody(m Measured) (string, string) {
+	// D-38: a title (and a title graphic) keeps off the body, a story caption of a caption creator off the face; the checks hold each to
+	// its own rule, so the item fails when any of them fails.
+	watched := map[string]bool{editor.CheckTextOverSubject: true, editor.CheckTextOverFace: true, editor.CheckOverlayOverSubject: true}
+	var fails, passes []string
 	for _, c := range m.Report.Checks {
-		if c.ID == editor.CheckTextOverSubject {
-			switch c.Status {
-			case editor.CheckFail:
-				return Fail, c.Detail
-			case editor.CheckPass:
-				return Pass, c.Detail
-			}
-			return Skip, c.Detail
+		if !watched[c.ID] {
+			continue
+		}
+		switch c.Status {
+		case editor.CheckFail:
+			fails = append(fails, c.ID+": "+c.Detail)
+		case editor.CheckPass:
+			passes = append(passes, c.ID)
 		}
 	}
-	return Skip, "the text-over-subject check did not run"
+	switch {
+	case len(fails) > 0:
+		return Fail, strings.Join(fails, "; ")
+	case len(passes) > 0:
+		return Pass, "no text covers what it must keep off (" + strings.Join(passes, ", ") + ")"
+	}
+	return Skip, "the text placement checks did not apply"
 }
 
 // staticTakeMs is how long a shot may hold with no camera motion before it reads as dead.

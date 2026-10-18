@@ -121,6 +121,29 @@ export const SETTINGS: readonly ChoiceWords[] = [
     ],
   },
   {
+    key: "text_pattern",
+    label: "Text on screen",
+    explain: "How your videos tell their words: one title, a short line on every shot, or a dialogue.",
+    options: [
+      { value: "single_title", label: "One title" },
+      { value: "story_captions", label: "A line per shot" },
+      { value: "dialogue", label: "Dialogue" },
+      { value: "none", label: "No text" },
+    ],
+  },
+  {
+    key: "text_position",
+    label: "Where the lines sit",
+    explain: "For lines and dialogue. In the middle they may sit on your chest, never on your face.",
+    options: [
+      { value: "top", label: "Top" },
+      { value: "upper_third", label: "High" },
+      { value: "middle", label: "Middle" },
+      { value: "lower_third", label: "Low" },
+      { value: "auto", label: "Let the editor pick" },
+    ],
+  },
+  {
     key: "music",
     label: "Music",
     explain: "Whether your video is cut to music.",

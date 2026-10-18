@@ -671,11 +671,13 @@ jobs:
           echo "${GVISOR_SHA512}  $RUNNER_TEMP/gvisor.tar.zstd" | sha512sum -c -
           sudo tar --zstd -xf "$RUNNER_TEMP/gvisor.tar.zstd" -C /usr/local/bin
           runsc --version
-          sudo runsc install
+          # --oci-seccomp: the container's seccomp profile is enforced inside gVisor too, as production registers it (motion-graphics-v1 section 5).
+          sudo runsc install -- --oci-seccomp
           sudo systemctl reload docker || sudo systemctl restart docker
           sleep 3
           docker info --format '{{json .Runtimes}}' | tee "$RUNNER_TEMP/runtimes.json"
           grep -q runsc "$RUNNER_TEMP/runtimes.json"
+          grep -q oci-seccomp "$RUNNER_TEMP/runtimes.json"
 
       - name: Prove containers really run under gVisor
         run: |

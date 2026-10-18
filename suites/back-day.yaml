@@ -1,4 +1,4 @@
-# The back-day suite (D-38, docs/design/observability-v1.md section 7): `cfctl eval suite --suite ../../suites/back-day.yaml` from
+# The back-day suite (D-39, docs/design/observability-v1.md section 7): `cfctl eval suite --suite ../../suites/back-day.yaml` from
 # apps/server. The ids here are placeholders: a creator's footage, references and renders are never committed. Put the real ones in
 # suites/back-day.local.yaml (gitignored), which uses the same shape and overrides by case id, for example:
 #

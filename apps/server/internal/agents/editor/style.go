@@ -109,7 +109,7 @@ func styleBlocks(st *styleprofile.Style) []llm.Block {
 			runtime.UntrustedBlock(StyleBlockKind, body),
 		)
 	}
-	blocks = append(blocks, llm.TextBlock(settingsText(st.Resolved, st.Profile)))
+	blocks = append(blocks, llm.TextBlock(settingsText(st.Resolved, st.Profile)+faceOnlyText(st)))
 	if t := st.Resolved.TitleTemplate; t != "" {
 		// The form holds the creator's own fixed words (or what they typed): data, like the profile.
 		blocks = append(blocks, runtime.UntrustedBlock(TitleFormBlockKind, t))
@@ -198,6 +198,9 @@ func settingsText(r styleprofile.Resolved, p *styleprofile.Profile) string {
 		title = append(title, fmt.Sprintf("in lowercase (%s)", sourceWords(src.TitleCase)))
 	}
 	b.WriteString("- Title: " + strings.Join(title, ", ") + ".\n")
+	if l := textLinesText(r, p); l != "" {
+		b.WriteString(l)
+	}
 	switch r.Music {
 	case styleprofile.MusicNever:
 		fmt.Fprintf(&b, "- Music: never (%s). The video has no music: no beat grid (tempo_bpm 0), cut on the action and the clips' own sound (set_clip_audio full on speech, bed otherwise).\n", sourceWords(src.Music))
@@ -311,4 +314,74 @@ func styleNote(st *styleprofile.Style) string {
 	}
 	b.WriteString(". ")
 	return strings.TrimSpace(b.String()) + "\n"
+}
+
+// textLinesText is the settings line of the text pattern (P6-05d): how the creator tells the text of a video, in our words (the pattern,
+// the look and the language are enums and numbers; no line of the creator's), "" for one title (the title line says it all).
+func textLinesText(r styleprofile.Resolved, p *styleprofile.Profile) string {
+	src := sourceWords(r.Sources.TextPattern)
+	lang, look := "", ""
+	if p != nil && p.Text != nil {
+		if p.Text.Language != "" {
+			lang = styleprofile.LanguageName(p.Text.Language)
+		}
+		if l := p.Text.LineLook; l != nil {
+			var parts []string
+			switch l.Case {
+			case "sentence":
+				parts = append(parts, "written as a sentence (a capital first letter, the rest lowercase)")
+			case "upper":
+				parts = append(parts, "in capitals")
+			case "lower":
+				parts = append(parts, "in lowercase")
+			}
+			if l.Colour != "" {
+				parts = append(parts, "fill "+l.Colour)
+			}
+			if l.HeightPct > 0 {
+				parts = append(parts, fmt.Sprintf("small letters (about %.1f %% of the frame height: subtitle_clean, scale 1)", l.HeightPct))
+			}
+			if l.WordsHi > 0 {
+				parts = append(parts, fmt.Sprintf("%d to %d words a line", max(l.WordsLo, 2), l.WordsHi))
+			}
+			look = strings.Join(parts, ", ")
+		}
+	}
+	where := map[string]string{
+		styleprofile.TextTop: "anchor upper_third, at the top", styleprofile.TextUpperThird: "position x 0.5, y 0.33",
+		styleprofile.TextMiddle: "anchor center, in the middle of the frame", styleprofile.TextLowerThird: "anchor lower_third",
+	}[r.TextPosition]
+	if where == "" {
+		where = "anchor center"
+	}
+	language := "in the language of their text"
+	if lang != "" {
+		language = "in " + lang + ", the language of their text"
+	}
+	var b strings.Builder
+	switch r.TextPattern {
+	case styleprofile.PatternStoryCaptions:
+		fmt.Fprintf(&b, "- Text: story captions (%s). Tell the video in short lines, one on every shot (the last, the reveal, may be bare): a mini-story about this footage told line by line (what they changed, what they did, what it gave), %s; never a title of their own and never a line of theirs. Each line is an add_text with style subtitle_clean", src, language)
+	case styleprofile.PatternDialogue:
+		fmt.Fprintf(&b, "- Text: dialogue (%s). Two to four quoted lines, one per shot, two speakers answering each other (a short exchange about the footage, in quotes), %s, then a cut to the reveal with no text. Each line is an add_text with style subtitle_clean", src, language)
+	case styleprofile.PatternNone:
+		return fmt.Sprintf("- Text: none (%s). No title and no captions.\n", src)
+	default:
+		return ""
+	}
+	if look != "" {
+		b.WriteString(", " + look)
+	}
+	fmt.Fprintf(&b, ", %s (%s), on screen for its whole shot and at least 1 s, entering with its shot.", where, sourceWords(r.Sources.TextPosition))
+	b.WriteString("\n")
+	return b.String()
+}
+
+// faceOnlyText is the settings line on where the lines may stand: on the body, never on the face (avoid face), for a style whose lines
+// lie over the body.
+func faceOnlyText(st *styleprofile.Style) string {
+	if !st.FaceOnly() {
+		return ""
+	}
+	return "- Lines on the body: this creator's lines sit over the person, on the chest. Give each line avoid \"face\": the renderer then keeps it off the face only, never off the chest. Titles keep avoiding the whole body.\n"
 }

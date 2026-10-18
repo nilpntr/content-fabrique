@@ -145,6 +145,8 @@ type AddText struct {
 	Align      string          `json:"align,omitempty"`
 	// AvoidSubject false keeps the renderer from moving the text off the subject's head.
 	AvoidSubject *bool `json:"avoid_subject,omitempty"`
+	// Avoid is body (the default) or face (only the head: a caption over the chest).
+	Avoid string `json:"avoid,omitempty"`
 }
 
 // UpdateText changes the fields of a text item that are set.
@@ -164,6 +166,8 @@ type UpdateText struct {
 	Align      string          `json:"align,omitempty"`
 	// AvoidSubject sets whether the renderer keeps the text off the subject's head.
 	AvoidSubject *bool `json:"avoid_subject,omitempty"`
+	// Avoid sets what of the person the text keeps off: body or face.
+	Avoid string `json:"avoid,omitempty"`
 }
 
 // RemoveText removes a text item.

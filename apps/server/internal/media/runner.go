@@ -31,6 +31,9 @@ type Invocation struct {
 	// Timeout overrides the runner's wall-clock limit for this one run; zero keeps the runner's. A long clip needs more
 	// time than a probe does, so the caller scales it.
 	Timeout time.Duration
+	// Limits, when set, replace the runner's limits for this one run (Timeout still overrides their timeout): a motion-graphics
+	// run (Chrome) needs more memory and processes than ffmpeg (motion.DefaultLimits).
+	Limits *sandbox.Limits
 }
 
 // Runner executes media tools. In production it is a SandboxRunner.
@@ -68,6 +71,9 @@ func (r *SandboxRunner) Run(ctx context.Context, inv Invocation) (sandbox.Result
 		mounts = append(mounts, sandbox.Mount{Host: inv.OutputDir, Container: sandbox.WorkDir, Writable: true})
 	}
 	limits := r.Limits
+	if inv.Limits != nil {
+		limits = *inv.Limits
+	}
 	if inv.Timeout > 0 {
 		limits.Timeout = inv.Timeout
 	}

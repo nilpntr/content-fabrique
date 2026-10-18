@@ -70,3 +70,18 @@ func TestTextStyleOverridesOps(t *testing.T) {
 		}
 	}
 }
+
+// A caption that keeps off the face only (P6-05d): add_text and update_text take avoid; body, the default, is stored as nothing.
+func TestTextAvoidModeOps(t *testing.T) {
+	out := mustApply(t, baseSpec(t), `[{"op":"add_text","id":"cap1","at_ms":0,"duration_ms":1500,"text":"And I kept going","style":"subtitle_clean","anchor":"center","avoid":"face"}]`)
+	if it := textItemsByID(t, out)["cap1"]; it.Avoid != timeline.AvoidFace || !it.AvoidsFaceOnly() {
+		t.Fatalf("added: %+v", it)
+	}
+	out = mustApply(t, out, `[{"op":"update_text","id":"cap1","avoid":"body"}]`)
+	if it := textItemsByID(t, out)["cap1"]; it.Avoid != "" || it.AvoidsFaceOnly() {
+		t.Fatalf("updated to body: %+v", it)
+	}
+	if r := timeline.Validate(mustJSON(t, out), fixtureCatalog(t)); !r.OK() {
+		t.Errorf("the result does not validate: %+v", r.Issues)
+	}
+}

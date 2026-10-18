@@ -28,13 +28,15 @@ func (p *Profile) structureLines(withWords bool) []string {
 		out = append(out, line)
 	}
 	if tp := p.Transitions; tp.Measured > 0 {
-		switch tp.Used {
-		case TransitionsNone:
+		switch {
+		case tp.Used == TransitionsNone:
 			out = append(out, "transitions measured in the picture: none (the videos have no cuts)")
-		case TransitionsCutOnly:
+		case tp.Used == TransitionsCutOnly:
 			out = append(out, "transitions measured in the picture: plain cuts only")
+		case !tp.Evident():
+			out = append(out, fmt.Sprintf("transitions measured in the picture: plain cuts (%s on %.0f %% of the cuts in %d of the videos, too few to be the style)", strings.Join(tp.Kinds, ", "), tp.Share*100, tp.Videos))
 		default:
-			out = append(out, fmt.Sprintf("transitions measured in the picture: %s on %.0f %% of the cuts", strings.Join(tp.Kinds, ", "), tp.Share*100))
+			out = append(out, fmt.Sprintf("transitions measured in the picture: %s on %.0f %% of the cuts, in %d of the videos", strings.Join(tp.Kinds, ", "), tp.Share*100, tp.Videos))
 		}
 	}
 	if p.Camera.Level == CameraSubtle {
@@ -47,6 +49,9 @@ func (p *Profile) structureLines(withWords bool) []string {
 		out = append(out, "cuts against the movement: not measurable (the shots around the cuts are too short to find reps in)")
 	}
 	if t := p.Text; t != nil {
+		if w := t.patternWords(); w != "" {
+			out = append(out, w)
+		}
 		if t.Entrance != "" {
 			out = append(out, "title entrance: "+t.Entrance)
 		}

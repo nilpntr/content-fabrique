@@ -25,7 +25,7 @@ var allowedEmpty = map[string]bool{
 	"WHISPER_MODELS_DIR":     true,
 	// Only the local provider reads it (a chrome-headless-shell on the host for the motion graphics, D-35).
 	"CF_MOTION_CHROME": true,
-	// Empty is metadata-only spans, the default everywhere; `task dev:obs` sets it to 1 for its own processes (D-38).
+	// Empty is metadata-only spans, the default everywhere; `task dev:obs` sets it to 1 for its own processes (D-39).
 	"OTEL_TRACE_CONTENT": true,
 }
 
@@ -216,7 +216,7 @@ var validators = map[string]validator{
 		}
 		return ""
 	},
-	// Content capture in spans (prompts, the creator's text, frames) is for the local stack and its own Phoenix only (D-38): staging and
+	// Content capture in spans (prompts, the creator's text, frames) is for the local stack and its own Phoenix only (D-39): staging and
 	// production export to Axiom, and config.Load refuses to start there with it.
 	"OTEL_TRACE_CONTENT": func(r *run, val string) string {
 		if val != "1" && val != "0" {
