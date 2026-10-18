@@ -202,13 +202,15 @@ func TestImproveKeepsAChangeThatHelps(t *testing.T) {
 		Baseline: func(context.Context) (*RunResult, bool, error) {
 			return result(70, 80, map[string]float64{"a": 60, "b": 80, "held": 80}), false, nil
 		},
-		Propose: func(_ context.Context, in ImproverInput, budget int64) (Proposal, int64, error) {
+		Propose: func(_ context.Context, in ImproverInput, budget int64, validate func(Proposal) (Proposal, error)) (Proposal, int64, []Attempt, error) {
 			proposals++
 			shown = in
 			if budget > 400_000 {
 				t.Errorf("improver budget %d", budget)
 			}
-			return Proposal{Title: "tune a style rule", Rationale: "r", Edits: []Edit{{Path: thresholds, Old: old, New: old + " // tuned"}}}, 50_000, nil
+			p, err := validate(Proposal{Title: "tune a style rule", Rationale: "the lowest cases miss the creator's pace; this rule sets it from the references.",
+				ExpectedEffect: "style_match rises", Edits: []Edit{{Path: thresholds, Old: old, New: old + " // tuned"}}})
+			return p, 50_000, []Attempt{{N: 1, Title: p.Title, File: p.File()}}, err
 		},
 		Evaluate: func(_ context.Context, dir, label string, live bool, left int64) (*RunResult, error) {
 			if live || left <= 0 || !strings.Contains(label, "tune") {
@@ -263,10 +265,11 @@ func TestImproveRejectsAndExplains(t *testing.T) {
 		after     *RunResult
 		wantNote  string
 	}{
-		"prompt change without --live": {Proposal{Title: "p", Edits: []Edit{{Path: prompt, Old: "You", New: "Thou"}}}, false, nil, "Not evaluated"},
-		"not on the allowlist":         {Proposal{Title: "x", Edits: []Edit{{Path: "apps/server/go.mod", Old: "module", New: "x"}}}, false, nil, "Refused"},
-		"does not build":               {Proposal{Title: "b", Edits: []Edit{{Path: "apps/server/internal/styleprofile/thresholds.go", Old: "package styleprofile", New: "package broken"}}}, true, nil, "does not build"},
-		"worse":                        {Proposal{Title: "w", Edits: []Edit{{Path: "apps/server/internal/styleprofile/thresholds.go", Old: "package styleprofile", New: "package styleprofile // x"}}}, false, result(60, 80, map[string]float64{"a": 50, "b": 70, "held": 80}), "Rejected"},
+		"prompt change without --live": {named(Proposal{Title: "Reword the opening of the prompt", Edits: []Edit{{Path: prompt, Old: "You", New: "Thou"}}}), false, nil, "Not evaluated"},
+		"not on the allowlist":         {named(Proposal{Title: "Rename the Go module now", Edits: []Edit{{Path: "apps/server/go.mod", Old: "module", New: "x"}}}), false, nil, "Refused"},
+		"a stub":                       {Proposal{Title: "x", Edits: []Edit{{Path: "x", Old: "x", New: "x"}}}, false, nil, "is not a description of a change"},
+		"does not build":               {named(Proposal{Title: "Break the style package name", Edits: []Edit{{Path: "apps/server/internal/styleprofile/thresholds.go", Old: "package styleprofile", New: "package broken"}}}), true, nil, "does not build"},
+		"worse":                        {named(Proposal{Title: "Comment the style package line", Edits: []Edit{{Path: "apps/server/internal/styleprofile/thresholds.go", Old: "package styleprofile", New: "package styleprofile // x"}}}), false, result(60, 80, map[string]float64{"a": 50, "b": 70, "held": 80}), "Rejected"},
 	} {
 		repo := &fakeRepo{root: repoRoot(t), buildFail: tc.buildFail}
 		if strings.Contains(tc.proposal.Edits[0].Old, "You") {
@@ -279,7 +282,14 @@ func TestImproveRejectsAndExplains(t *testing.T) {
 			Baseline: func(context.Context) (*RunResult, bool, error) {
 				return result(70, 80, map[string]float64{"a": 60, "b": 80, "held": 80}), false, nil
 			},
-			Propose: func(context.Context, ImproverInput, int64) (Proposal, int64, error) { return tc.proposal, 1000, nil },
+			Propose: func(_ context.Context, _ ImproverInput, _ int64, validate func(Proposal) (Proposal, error)) (Proposal, int64, []Attempt, error) {
+				p, err := validate(tc.proposal)
+				a := Attempt{N: 1, Title: p.Title, File: p.File()}
+				if err != nil {
+					a.Error = err.Error()
+				}
+				return p, 1000, []Attempt{a}, err
+			},
 			Evaluate: func(context.Context, string, string, bool, int64) (*RunResult, error) {
 				if tc.after == nil {
 					t.Errorf("%s: evaluated", name)
@@ -368,7 +378,7 @@ func TestImproverRequestAndAnswer(t *testing.T) {
 		all = append(all, b.Text)
 	}
 	text := strings.Join(all, "\n")
-	for _, want := range []string{`<untrusted_data kind="file">`, "prompt text", "long_shot", "x (rejected)"} {
+	for _, want := range []string{`<file path="p.md" kind="prompt">`, "prompt text", "long_shot", "x (rejected)"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("request lacks %q", want)
 		}
@@ -376,16 +386,24 @@ func TestImproverRequestAndAnswer(t *testing.T) {
 	if req.ToolChoice.Name != ImproveToolName || !req.Tools[0].Strict {
 		t.Error("the tool is not forced and strict")
 	}
-	answer, _ := json.Marshal(map[string]any{"title": "t", "rationale": "r", "expected_effect": "e", "edits": []map[string]string{{"path": "a", "old": "b", "new": "c"}}})
+	answer, _ := json.Marshal(map[string]any{"title": "Lengthen the pace target for long takes", "rationale": "The long-take cases fail long_shot on shots the creator holds himself.",
+		"expected_effect": "long_shot passes", "edits": []map[string]string{{"path": "p.md", "old": "prompt text", "new": "c"}}, "no_change_reason": ""})
 	fc := &fakeClient{reply: func(llm.Request) (llm.Response, error) {
 		return llm.Response{StopReason: "tool_use", Content: []llm.Block{{Type: llm.BlockToolUse, Name: ImproveToolName, Input: answer}}}, nil
 	}}
 	im := &Improver{Models: fakeFactory{fc}, Router: fakeRouter{}}
-	p, cost, err := im.Propose(context.Background(), ids.WorkspaceID{UUID: uuid.New()}, in, 200_000)
-	if err != nil || p.Title != "t" || len(p.Edits) != 1 || cost != 12_345 {
-		t.Errorf("proposal %+v cost %d err %v", p, cost, err)
+	p, cost, attempts, err := im.Propose(context.Background(), ids.WorkspaceID{UUID: uuid.New()}, in, 200_000, nil, MaxImproverAttempts)
+	if err != nil || len(p.Edits) != 1 || cost != 12_345 || len(attempts) != 1 || attempts[0].Error != "" {
+		t.Errorf("proposal %+v cost %d attempts %v err %v", p, cost, attempts, err)
 	}
 	if b, ok := fc.calls[0].Run.Budget.(*llm.RunBudget); !ok || b.Remaining() > 200_000 {
 		t.Error("the improver call has no budget")
 	}
+}
+
+// named fills a test proposal's rationale and expected effect.
+func named(p Proposal) Proposal {
+	p.Rationale = "The lowest cases fail on this, and the change addresses the most common cause across them."
+	p.ExpectedEffect = "the failing check passes; nothing else moves"
+	return p
 }

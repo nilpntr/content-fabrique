@@ -2,6 +2,7 @@ package evals
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -46,8 +47,8 @@ type ImproveDeps struct {
 	Baseline func(ctx context.Context) (res *RunResult, cached bool, err error)
 	// Evaluate runs the suite on the code in the scratch worktree dir, with a label and a spending limit.
 	Evaluate func(ctx context.Context, dir, label string, live bool, maxMicros int64) (*RunResult, error)
-	// Propose asks the improver.
-	Propose func(ctx context.Context, in ImproverInput, budget int64) (Proposal, int64, error)
+	// Propose asks the improver for a change that passes validate (asking again after a refusal); it returns every attempt.
+	Propose func(ctx context.Context, in ImproverInput, budget int64, validate func(Proposal) (Proposal, error)) (Proposal, int64, []Attempt, error)
 	// TraceURL makes a case's trace link ("" when there is none).
 	TraceURL func(traceID string) string
 	Log      func(format string, a ...any)
@@ -77,14 +78,16 @@ type ImproveOptions struct {
 
 // Iteration is one tried change.
 type Iteration struct {
-	N          int
-	Proposal   Proposal
-	Invalid    string // why the proposal was refused before it was tried
-	NotRun     string // why it was not evaluated
-	Before     *RunResult
-	After      *RunResult
-	Accepted   bool
-	Reasons    []string
+	N        int
+	Proposal Proposal
+	Invalid  string // why the proposal was refused before it was tried
+	NotRun   string // why it was not evaluated
+	Before   *RunResult
+	After    *RunResult
+	Accepted bool
+	Reasons  []string
+	// Attempts are the improver's proposals in this iteration, with why each refused one was refused.
+	Attempts   []Attempt
 	Decision   *Decision
 	Diff       string
 	CostMicros int64
@@ -183,18 +186,29 @@ func Improve(ctx context.Context, d ImproveDeps, o ImproveOptions) (*ImproveResu
 		}
 		low := lowest(before, o.LowCases)
 		logf("iteration %d: asking the improver about %d low cases", n, len(low))
-		p, cost, err := d.Propose(ctx, ImproverInput{Suite: o.Suite.Name, Cases: low, Files: files, Tried: tried, Feedback: o.Suite.Feedback}, budget)
+		validate := func(p Proposal) (Proposal, error) {
+			if err := CheckProposalText(p); err != nil {
+				return p, err
+			}
+			return ValidateProposal(p, dir)
+		}
+		p, cost, attempts, err := d.Propose(ctx, ImproverInput{Suite: o.Suite.Name, Cases: low, Files: files, Tried: tried, Feedback: o.Suite.Feedback}, budget, validate)
 		it.CostMicros += cost
 		res.Spent += cost
-		if err != nil {
-			it.Invalid = err.Error()
+		it.Attempts = attempts
+		for _, a := range attempts {
+			if a.Error != "" {
+				logf("iteration %d: proposal %d refused: %s", n, a.N, a.Error)
+			}
+		}
+		if errors.Is(err, ErrNoChange) {
+			it.NotRun = err.Error()
 			res.Iterations = append(res.Iterations, it)
 			traceIteration(ctx, it)
 			continue
 		}
-		if p, err = ValidateProposal(p, dir); err != nil {
-			it.Proposal, it.Invalid = p, err.Error()
-			tried = append(tried, p.Title+" (refused: "+err.Error()+")")
+		if err != nil {
+			it.Invalid = err.Error()
 			res.Iterations = append(res.Iterations, it)
 			traceIteration(ctx, it)
 			continue
@@ -283,7 +297,12 @@ func traceIteration(ctx context.Context, it Iteration) {
 	_, s := tracer().Start(ctx, fmt.Sprintf("eval.improve.iteration %d", it.N), trace.WithAttributes(
 		telemetry.Kind(telemetry.KindChain), attribute.String("cf.change.kind", it.Proposal.Kind), attribute.String("cf.change.file", it.Proposal.File()),
 		attribute.String("cf.change.title", it.Proposal.Title), attribute.Bool("cf.accepted", it.Accepted), attribute.Int64("cf.cost_micros", it.CostMicros),
-		attribute.String("cf.invalid", it.Invalid), attribute.String("cf.not_run", it.NotRun), attribute.StringSlice("cf.reasons", it.Reasons)))
+		attribute.String("cf.invalid", it.Invalid), attribute.String("cf.not_run", it.NotRun), attribute.StringSlice("cf.reasons", it.Reasons),
+		attribute.Int("cf.attempts", len(it.Attempts))))
+	for _, a := range it.Attempts {
+		s.AddEvent("proposal", trace.WithAttributes(attribute.Int("cf.attempt", a.N), attribute.String("cf.change.title", a.Title),
+			attribute.String("cf.change.file", a.File), attribute.String("cf.refused", a.Error)))
+	}
 	if it.Before != nil && it.Before.Mean != nil {
 		s.SetAttributes(attribute.Float64("cf.before.mean", *it.Before.Mean))
 	}
@@ -309,6 +328,14 @@ func writeReport(res *ImproveResult, o ImproveOptions, d ImproveDeps) (string, e
 	b.WriteString("\n")
 	for _, it := range res.Iterations {
 		fmt.Fprintf(&b, "## Iteration %d: %s\n\n", it.N, cmpOr(it.Proposal.Title, "(no proposal)"))
+		for _, a := range it.Attempts {
+			if a.Error != "" {
+				fmt.Fprintf(&b, "- Proposal %d (%q, `%s`) refused: %s\n", a.N, a.Title, a.File, a.Error)
+			}
+		}
+		if len(it.Attempts) > 0 {
+			b.WriteString("\n")
+		}
 		switch {
 		case it.Invalid != "":
 			fmt.Fprintf(&b, "**Refused before it was tried:** %s\n\n", it.Invalid)

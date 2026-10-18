@@ -45,7 +45,8 @@ suite run an experiment. Nothing is spent beyond --max-usd (improver calls, judg
 
   --max-usd         the hard total (required, more than 0)
   --iterations      changes to try, each on top of the last kept one; default 1
-  --improver-usd    the budget of one improver call; default 0.50
+  --improver-usd    the budget of the improver in one iteration, every attempt included (a refused proposal is sent back with the
+                    exact error and asked again, up to 3 proposals); default 0.50
   --min-gain        the least rise of the mean that keeps a change, in points of 100, whatever the noise; default 0.5
   --max-regression  the most one case may drop beyond its noise; default 5
   --held-out-slack  the most the held-out mean may drop beyond its noise; default 1
@@ -156,11 +157,21 @@ func cmdEvalImprove(args []string, stdout, stderr io.Writer, lookup lookupEnv, d
 		Evaluate: func(ctx context.Context, dir, label string, live bool, left int64) (*evals.RunResult, error) {
 			return evaluateIn(ctx, se, f, dir, label, live, left, outDir)
 		},
-		Propose: func(ctx context.Context, in evals.ImproverInput, budget int64) (evals.Proposal, int64, error) {
+		Propose: func(ctx context.Context, in evals.ImproverInput, budget int64, validate func(evals.Proposal) (evals.Proposal, error)) (evals.Proposal, int64, []evals.Attempt, error) {
 			if *proposalFile != "" {
-				return readProposal(*proposalFile)
+				// Your own change: checked once, nobody to ask again.
+				p, _, err := readProposal(*proposalFile)
+				if err == nil {
+					p, err = validate(p)
+				}
+				a := evals.Attempt{N: 1, Title: p.Title, File: p.File()}
+				if err != nil {
+					a.Error = err.Error()
+					return p, 0, []evals.Attempt{a}, fmt.Errorf("--proposal: %w", err)
+				}
+				return p, 0, []evals.Attempt{a}, nil
 			}
-			return improver.Propose(ctx, ws, in, budget)
+			return improver.Propose(ctx, ws, in, budget, validate, evals.MaxImproverAttempts)
 		},
 		TraceURL: func(id string) string {
 			if se.deps.Phoenix == nil {
