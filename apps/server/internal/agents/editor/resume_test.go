@@ -213,28 +213,30 @@ func TestBudgetLowCountsTheDollars(t *testing.T) {
 	left := func(micros int64) runtime.BudgetLeft {
 		return runtime.BudgetLeft{Known: true, ToolCalls: 40, Wall: 12 * time.Minute, Micros: micros}
 	}
+	// A call that has cost $0.10 so far (perCall): a revision pass is four of them, $0.40.
+	const perCall = 100_000
 	for _, c := range []struct {
-		name   string
-		l      runtime.BudgetLeft
-		worst  int64
-		wantLo bool
+		name    string
+		l       runtime.BudgetLeft
+		perCall int64
+		wantLo  bool
 	}{
-		{"plenty of everything", left(2_000_000), 480_000, false},
-		{"two worst-case calls left", left(960_000), 480_000, false},
-		{"fewer than two worst-case calls left", left(900_000), 480_000, true},
-		{"no price known: dollars do not count", left(1_000), 0, false},
-		{"few tool calls", runtime.BudgetLeft{Known: true, ToolCalls: 7, Wall: 12 * time.Minute, Micros: 2_000_000}, 480_000, true},
-		{"little time", runtime.BudgetLeft{Known: true, ToolCalls: 40, Wall: 2 * time.Minute, Micros: 2_000_000}, 480_000, true},
-		{"not known", runtime.BudgetLeft{}, 480_000, false},
+		{"plenty of everything", left(2_000_000), perCall, false},
+		{"a revision pass left exactly", left(400_000), perCall, false},
+		{"less than a revision pass left", left(399_000), perCall, true},
+		{"no cost known: dollars do not count", left(1_000), 0, false},
+		{"few tool calls", runtime.BudgetLeft{Known: true, ToolCalls: 7, Wall: 12 * time.Minute, Micros: 2_000_000}, perCall, true},
+		{"little time", runtime.BudgetLeft{Known: true, ToolCalls: 40, Wall: 2 * time.Minute, Micros: 2_000_000}, perCall, true},
+		{"not known", runtime.BudgetLeft{}, perCall, false},
 	} {
-		if got := budgetLow(c.l, c.worst); got != c.wantLo {
+		if got := budgetLow(c.l, c.perCall); got != c.wantLo {
 			t.Errorf("%s: low = %v, want %v", c.name, got, c.wantLo)
 		}
 	}
-	if got := budgetNote(left(900_000), 480_000); !strings.Contains(got, "Left of your budget: $0.90, 40 tool calls and 12 minutes.") || !strings.Contains(got, "finish soon") {
+	if got := budgetNote(left(150_000), perCall); !strings.Contains(got, "Left of your budget: $0.15, 40 tool calls and 12 minutes.") || !strings.Contains(got, "finish soon") {
 		t.Errorf("a note near the dollar limit: %q", got)
 	}
-	if got := budgetNote(left(3_500_000), 480_000); !strings.Contains(got, "$3.50") || strings.Contains(got, "finish soon") {
+	if got := budgetNote(left(3_500_000), perCall); !strings.Contains(got, "$3.50") || strings.Contains(got, "finish soon") {
 		t.Errorf("a note with room: %q", got)
 	}
 	if got := budgetNote(runtime.BudgetLeft{}, 0); got != "" {
@@ -242,26 +244,68 @@ func TestBudgetLowCountsTheDollars(t *testing.T) {
 	}
 }
 
-// The tools work out the worst-case call of the run from its row (max_tokens, model) and the price function: with fewer than two of them
-// left in dollars the preview and the check say so, and a failing first check says not to revise.
+// What a call costs is what the run has spent per call so far, raised by half for the longer conversation later calls read, and never
+// under the floor that holds before the run has shown anything.
+func TestCallCostFollowsWhatTheRunSpent(t *testing.T) {
+	for _, c := range []struct {
+		cost  int64
+		calls int
+		want  int64
+	}{
+		{0, 0, minCallMicros},      // before the first call: the floor
+		{0, 1, minCallMicros},      // nothing spent yet
+		{30_000, 1, minCallMicros}, // a cheap first call: the floor
+		{200_000, 2, 150_000},      // $0.10 a call, plus half
+		{1_010_000, 10, 151_500},   // the live max-effort edit: $0.101 a call
+	} {
+		if got := callCostMicros(c.cost, c.calls); got != c.want {
+			t.Errorf("callCostMicros(%d, %d) = %d, want %d", c.cost, c.calls, got, c.want)
+		}
+	}
+}
+
+// The main settings: a first edit has $0.96 and the editor's max_tokens is 24,000 (a worst-case call of $0.48 and more). Judged on the
+// worst case it was "low" from the first call on, and the editor was told not to revise. Judged on what the run spent it is not low
+// until the money is nearly gone: after one call of $0.06 a fresh first edit has plenty, and with $0.10 left it is low.
+func TestAFreshFirstEditIsNotLowAndOneWithTenCentsIs(t *testing.T) {
+	perCall := callCostMicros(60_000, 1) // one call of $0.06 so far
+	fresh := runtime.BudgetLeft{Known: true, ToolCalls: 55, Wall: 14 * time.Minute, Micros: 900_000}
+	if budgetLow(fresh, perCall) {
+		t.Errorf("a fresh first edit ($0.90 left of $0.96, after one call of $0.06) is low; per call %d", perCall)
+	}
+	if got := budgetNote(fresh, perCall); strings.Contains(got, "finish soon") || strings.Contains(got, "not much") {
+		t.Errorf("a fresh first edit is told to finish: %q", got)
+	}
+	poor := runtime.BudgetLeft{Known: true, ToolCalls: 30, Wall: 10 * time.Minute, Micros: 100_000}
+	if !budgetLow(poor, perCall) {
+		t.Errorf("a run with $0.10 left is not low; per call %d", perCall)
+	}
+	if got := budgetNote(poor, perCall); !strings.Contains(got, "finish soon") {
+		t.Errorf("a run with $0.10 left is not told to finish: %q", got)
+	}
+}
+
+// The tools read what the run spent from its row: a fresh run with money left gets no warning, and a failing first check says not to
+// revise only when the money left is under a revision pass of calls like the ones so far.
 func TestToolsWarnWhenTheDollarsRunLow(t *testing.T) {
 	r := newDBRun(t)
-	// The run row has max_tokens 1000; at 20 micros a token a call is 20000 micros, so under 40000 is low.
-	r.deps.OutputCost = func(_ string, maxTokens int64) (int64, error) { return maxTokens * 20, nil }
-	r.rebuild()
+	// The run so far: 4 tool calls and $0.40, so a call is $0.10 plus half, $0.15; a revision pass (four calls) is $0.60.
+	if _, err := r.pool.Exec(context.Background(), `UPDATE agent_runs SET cost_micros = 400000, tool_calls = 4 WHERE id = $1`, r.run.ID); err != nil {
+		t.Fatal(err)
+	}
 	r.ok(r.next(), ToolPlanEdit, planCall(validPlanArgs(r.clip.String())))
 	r.ok(r.next(), ToolEditTimeline, r.opsArgs(r.prj, addClipOp(r.clip, 6000, 9000), addClipOp(r.clip, 9000, 12000)))
 
 	rich := r.next()
-	rich.Left = runtime.BudgetLeft{Known: true, ToolCalls: 40, Wall: 12 * time.Minute, Micros: 500_000}
-	if text := textOf(r.ok(rich, ToolRenderPreview, `{}`)); !strings.Contains(text, "Left of your budget: $0.50") || strings.Contains(text, "finish soon") {
+	rich.Left = runtime.BudgetLeft{Known: true, ToolCalls: 40, Wall: 12 * time.Minute, Micros: 700_000}
+	if text := textOf(r.ok(rich, ToolRenderPreview, `{}`)); !strings.Contains(text, "Left of your budget: $0.70") || strings.Contains(text, "finish soon") {
 		t.Errorf("a preview with money left:\n%s", text)
 	}
 	poor := r.next()
-	poor.Left = runtime.BudgetLeft{Known: true, ToolCalls: 40, Wall: 12 * time.Minute, Micros: 30_000}
+	poor.Left = runtime.BudgetLeft{Known: true, ToolCalls: 40, Wall: 12 * time.Minute, Micros: 100_000}
 	r.smp.series = renderedFlat([3]float64{3000, 24, 40}, [3]float64{3000, 24, 40})
 	text := textOf(r.ok(poor, ToolCheckEdit, `{}`))
-	if !strings.Contains(text, "$0.03") || !strings.Contains(text, "finish soon") || !strings.Contains(text, "do not start a revision") {
+	if !strings.Contains(text, "$0.10") || !strings.Contains(text, "finish soon") || !strings.Contains(text, "do not start a revision") {
 		t.Errorf("a check with the dollars nearly gone:\n%s", text)
 	}
 }
