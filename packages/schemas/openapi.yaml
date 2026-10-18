@@ -1323,8 +1323,9 @@ paths:
         - `measures`: what was measured from the reference videos, in plain words (`lines`); `null` without any.
         - `settings`: the creator's own settings (`PUT /v1/style`). A setting that is absent is not set.
         - `effective`: what the editor follows, every setting decided, with where each came from (`sources`): the creator's own
-          setting wins, then the suggestion, then the measures, then the default. A measured "no effects" never turns transitions or
-          text animation off at a lively or hype vibe on its own.
+          setting wins, then the suggestion, then the measures, then the default. A measured "no effects" never turns text
+          animation or camera motion off at a lively or hype vibe on its own. Transitions are off unless the creator sets them or
+          their reference videos measurably use them (plain cuts on the beat are the default at every vibe).
         - `references`: the reference videos (uploaded with `POST /v1/assets` and `purpose: style_reference`) with the state of their
           analysis, and `status`/`progress` for the whole: `learning` while any reference is being uploaded, ingested or measured, or
           the profile is being made from them.
@@ -2998,9 +2999,10 @@ components:
       enum: [calm, lively, hype]
       description: |
         The energy of the edit (P6-06). The creator's style still decides the colours, the fonts, the title's look and place and the
-        rough shot length; the vibe decides how much moves: `calm` stays close to the creator's own restraint (hard cuts, a quiet
-        title), `lively` puts transitions on the strong beats and the drop, gives every text an entrance and an exit and keeps the
-        camera moving, `hype` does that on more beats with faster shots. A run without one uses the workspace's
+        rough shot length; the vibe decides how much moves: `calm` stays close to the creator's own restraint (cuts on the strong
+        beats, a quiet title), `lively` cuts on the beats and phrase starts, gives every text an entrance and an exit and keeps the
+        camera moving, `hype` does that on more beats with faster shots. No vibe adds effect transitions: those come only from the
+        creator's settings or their own videos. A run without one uses the workspace's
         (`GET /v1/style`, `effective.vibe`; `lively` when nothing is set).
 
     ReplyRequest:

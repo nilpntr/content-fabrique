@@ -198,11 +198,14 @@ type Resolved struct {
 	Sources Settings `json:"sources"`
 }
 
-// vibeDefaults is what a vibe asks for, of the settings that move: calm keeps close to restraint, lively and hype move.
+// vibeDefaults is what a vibe asks for, of the settings that move: calm keeps close to restraint, lively and hype move. No vibe asks for
+// transitions: creators read effect transitions (punches, zooms, whips) as the mark of an automatic AI edit, so the energy of a vibe
+// comes from the cuts on the beat, the pace, the camera and the text, and transitions come only from the creator's own videos or their
+// setting (Resolve).
 var vibeDefaults = map[string]Settings{
-	VibeCalm:   {Transitions: LevelSubtle, TextAnimation: LevelOn, CameraMotion: LevelSubtle},
-	VibeLively: {Transitions: LevelSubtle, TextAnimation: LevelOn, CameraMotion: LevelSubtle},
-	VibeHype:   {Transitions: LevelLots, TextAnimation: LevelOn, CameraMotion: LevelLots},
+	VibeCalm:   {Transitions: LevelOff, TextAnimation: LevelOn, CameraMotion: LevelSubtle},
+	VibeLively: {Transitions: LevelOff, TextAnimation: LevelOn, CameraMotion: LevelSubtle},
+	VibeHype:   {Transitions: LevelOff, TextAnimation: LevelOn, CameraMotion: LevelLots},
 }
 
 // Energetic says the vibe asks for motion whatever the creator's measured effects: lively and hype.
@@ -212,9 +215,11 @@ func Energetic(vibe string) bool { return vibe == VibeLively || vibe == VibeHype
 // creator's settings, and for one edit the vibe chosen for it (runVibe, "" for none). The creator always wins, and:
 //
 //   - The vibe: this edit's, else the creator's, else the suggestion's, else lively.
-//   - Transitions, text animation and camera motion: the creator's, else (when the vibe was chosen by a person, for this edit or in the
-//     settings) what that vibe asks for, else the suggestion, else the vibe's. A suggestion of "off" does not hold at a lively or hype
-//     vibe: the measured "no effects" it may come from is not a reason to make a lively edit static.
+//   - Transitions: the creator's; else, when their videos measurably use transitions, the suggestion (when it is not off) or the level
+//     measured; else off, at every vibe. A vibe never asks for transitions.
+//   - Text animation and camera motion: the creator's, else (when the vibe was chosen by a person, for this edit or in the settings)
+//     what that vibe asks for, else the suggestion, else the vibe's. A suggestion of "off" does not hold at a lively or hype vibe: the
+//     measured "no effects" it may come from is not a reason to make a lively edit static.
 //   - The title's colour, position and case: the creator's, else the suggestion's, else what was measured, else the editor's choice.
 //   - Music: the creator's, else the suggestion's, else "always" when their videos have music, else "always".
 //   - Pace: the creator's, else the suggestion's, else like their videos.
@@ -235,12 +240,27 @@ func Resolve(p *Profile, suggested *Settings, mine Settings, runVibe string) Res
 	chosenVibe := r.Sources.Vibe == SourceThisVideo || r.Sources.Vibe == SourceYou
 	vd := vibeDefaults[r.Vibe]
 
-	// What moves.
+	// Transitions: only the creator's own, or what their videos measurably use (the suggestion follows the measure).
+	measured := ""
+	if p != nil {
+		measured = p.Transitions.Level()
+	}
+	switch {
+	case mine.Transitions != "":
+		r.Transitions, r.Sources.Transitions = mine.Transitions, SourceYou
+	case measured != "" && sug.Transitions != "" && sug.Transitions != LevelOff:
+		r.Transitions, r.Sources.Transitions = sug.Transitions, SourceSuggested
+	case measured != "":
+		r.Transitions, r.Sources.Transitions = measured, SourceMeasured
+	default:
+		r.Transitions, r.Sources.Transitions = LevelOff, SourceDefault
+	}
+
+	// What else moves.
 	for _, m := range []struct {
 		dst, src            *string
 		mine, sug, fromVibe string
 	}{
-		{&r.Transitions, &r.Sources.Transitions, mine.Transitions, sug.Transitions, vd.Transitions},
 		{&r.TextAnimation, &r.Sources.TextAnimation, mine.TextAnimation, sug.TextAnimation, vd.TextAnimation},
 		{&r.CameraMotion, &r.Sources.CameraMotion, mine.CameraMotion, sug.CameraMotion, vd.CameraMotion},
 	} {

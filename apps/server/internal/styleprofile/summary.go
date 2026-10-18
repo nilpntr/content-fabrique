@@ -27,7 +27,7 @@ import (
 const SummaryStage = "stylesummary"
 
 // SummaryPromptVersion names the prompt and the tool; it is stored with the summary.
-const SummaryPromptVersion = "stylesummary.v2"
+const SummaryPromptVersion = "stylesummary.v3"
 
 // SummaryToolName is the one tool the model is made to call.
 const SummaryToolName = "describe_creator_style"
@@ -71,7 +71,7 @@ summary: one or two short sentences in the second person ("your", "you"), at mos
 
 The settings (pick one value each):
 - vibe: calm, lively or hype, the energy that fits these videos. Most creators are lively.
-- transitions: off, subtle or lots. The measures count only effects applied to the picture (zoom punch-ins, flashes, speed ramps). "No effects" there does not mean a creator wants no transitions: for a lively or hype vibe propose subtle or lots; propose off only for a calm, still style.
+- transitions: off, subtle or lots: effect transitions at the cuts (a zoom, a whip, a flash, a blend). Propose off unless the line "transitions measured in the picture" shows their videos use them: then subtle when a few of their cuts have one, lots when most do. Plain cuts on the beat are the default at every vibe, because creators read effect transitions as the mark of an automatic AI edit; the energy of a lively or hype video comes from the cuts on the beat, the pace, the camera and the text.
 - text_animation: off or on. On means the title enters and leaves with a short animation. Propose on unless the style is calm and still.
 - camera_motion: off, subtle or lots: how much the editor may move the picture (a slow push, a punch-in on a beat, a handheld feel). Handheld footage that already moves suits subtle.
 - title_colour: the colour of their titles as a hex code like #RRGGBB, from the measures; empty when they use no title.

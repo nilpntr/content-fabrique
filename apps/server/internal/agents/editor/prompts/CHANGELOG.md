@@ -42,6 +42,17 @@ when a form is set. The file is `editor.v2.8.md`, a patch of v2.7:
   vibe, in plan_edit and in check_edit (`PaceSettings`, `paceSetting`).
 - **The title form.** The words of v2.7's title templates and the creator's title_form setting are one instruction: the setting's
   form wins, else the most common; the creator's titles stay out of every block (title_copied).
+- **Plain cuts on the beat (a creator's verdict).** On a live edit with punch and zoom_through transitions the creator said "the
+  transitions really look AI, nobody uses those transition effects, only someone who throws it into an automatic edit" (the music, the
+  beat cuts and the movement were praised). Transitions are now off at every vibe by default: no vibe asks for them; they come only
+  from the creator's setting (subtle or lots) or from their own videos when those measurably use them (then only those kinds, at
+  about their rate). The new section "Plain cuts on the beat" replaces "Transitions (lively and hype)" and says why; the vibe notes,
+  the settings lines and plan_edit's notes say the same. The playbooks are `workout.v5`, `general.v3`, `vlog.v3`,
+  `unboxing_product.v3`, `talking.v3` and `tutorial.v3` (energy from punch-ins, cuts on the beat and text, no effect transitions).
+  Text entrances and exits stay. check_edit's `no_transitions_at_lively` is replaced by `transitions_match_style`: it fails a
+  transition when the effective style has them off, none (fewer than one cut in four) at lots, too many at subtle, and a kind or a
+  rate the creator's videos do not have when the level was measured; `style_match`'s `transitions` off is a rule whatever its
+  source. The summary prompt (`stylesummary.v3`) proposes transitions only when the measures show them.
 
 ## editor.v2.7 (2026-10-18)
 

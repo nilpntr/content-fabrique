@@ -38,18 +38,18 @@ var ContentTypes = []string{TypeTalking, TypeUnboxing, TypeWorkout, TypeVlog, Ty
 
 // playbookVersions maps a playbook to its current version, which is also the name of its file.
 var playbookVersions = map[string]string{
-	TypeTalking:  "talking.v2",
-	TypeUnboxing: "unboxing_product.v2",
-	TypeWorkout:  "workout.v4",
-	TypeVlog:     "vlog.v2",
-	TypeTutorial: "tutorial.v2",
-	TypeGeneral:  "general.v2",
+	TypeTalking:  "talking.v3",
+	TypeUnboxing: "unboxing_product.v3",
+	TypeWorkout:  "workout.v5",
+	TypeVlog:     "vlog.v3",
+	TypeTutorial: "tutorial.v3",
+	TypeGeneral:  "general.v3",
 }
 
 //go:embed prompts/playbooks/*.md
 var playbookFS embed.FS
 
-// PlaybookVersion is the version of a playbook ("workout.v4"), or "" for a name that is not a playbook.
+// PlaybookVersion is the version of a playbook ("workout.v5"), or "" for a name that is not a playbook.
 func PlaybookVersion(name string) string { return playbookVersions[name] }
 
 // ValidContentType reports whether name is one of the content types.

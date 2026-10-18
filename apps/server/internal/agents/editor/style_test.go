@@ -150,14 +150,15 @@ func TestAGenericEditFailsTheStyleMatch(t *testing.T) {
 		t.Errorf("effect_density: %s", c.Detail)
 	}
 
-	// The same edit with no settings at all: the measured "no effects" is not a rule, and the effects are allowed (a hidden rule made
-	// the edits static).
+	// The same edit with no settings at all: the measured "no effects" is not a rule for what moves (the motions are allowed: a hidden
+	// rule made the edits static), and the transitions fail because plain cuts on the beat are the default of every vibe.
 	free := RunChecks(CheckInput{Spec: spec, Plan: workoutPlan(), Style: ginoProfile(t)})
-	if c := wantStatus(t, free, CheckEffectDensity, CheckPass); strings.Contains(c.Detail, "creator") {
+	if c := wantStatus(t, free, CheckEffectDensity, CheckFail); !strings.Contains(c.Detail, "the style has transitions off") {
 		t.Errorf("effect_density with the defaults: %s", c.Detail)
 	}
+	wantStatus(t, free, CheckTransitionsStyle, CheckFail)
 	for _, d := range free.Style.Failed() {
-		if d.ID == "transitions" || d.ID == "camera_motion" || d.ID == "effects" {
+		if d.ID == "camera_motion" || d.ID == "effects" || d.ID == "text_animation" {
 			t.Errorf("a measured none failed %s: %+v", d.ID, d)
 		}
 	}
@@ -301,7 +302,7 @@ func TestRunContextAndPlanCarryTheStoredStyle(t *testing.T) {
 	res := e.ok(rc, ToolPlanEdit, planCall(validPlanArgs(a.String())))
 	text := textOf(res)
 	// At the default (lively) vibe the shots follow the creator's cut-up videos, with targets from their measured shot lengths.
-	for _, want := range []string{"Creator style:", "the shots follow the creator's cut-up videos", "Pace targets, from the creator's measured shot lengths at the lively vibe", "This edit's vibe is lively: transitions subtle"} {
+	for _, want := range []string{"Creator style:", "the shots follow the creator's cut-up videos", "Pace targets, from the creator's measured shot lengths at the lively vibe", "This edit's vibe is lively: transitions off"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("plan_edit's answer lacks %q:\n%s", want, text)
 		}
@@ -314,7 +315,7 @@ func TestRunContextAndPlanCarryTheStoredStyle(t *testing.T) {
 		t.Fatal(err)
 	}
 	text = textOf(e.ok(e.runCtx(e.wsA, prj, ""), ToolPlanEdit, planCall(validPlanArgs(a.String()))))
-	if !strings.Contains(text, "The creator's settings turn transitions off") {
+	if !strings.Contains(text, "This style is plain cuts on the beat (transitions off)") {
 		t.Errorf("plan_edit with transitions off:\n%s", text)
 	}
 	// A vibe for this edit is in the run context, and the creator's own "off" still holds at hype.

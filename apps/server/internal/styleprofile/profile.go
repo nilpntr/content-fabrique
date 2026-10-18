@@ -341,6 +341,18 @@ type TransitionsProfile struct {
 	Share    float64  `json:"share"`
 }
 
+// Level is the transitions setting the creator's videos stand for: "" when they do not measurably use transitions (plain cuts, no cuts,
+// or not measured), subtle when some of their cuts have one, lots when half of them or more do.
+func (tp TransitionsProfile) Level() string {
+	switch {
+	case tp.Used != TransitionsSome:
+		return ""
+	case tp.Share >= 0.5:
+		return LevelLots
+	}
+	return LevelSubtle
+}
+
 // The uses of transitions.
 const (
 	TransitionsNone    = "none"

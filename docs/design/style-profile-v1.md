@@ -267,8 +267,10 @@ in the second person ("Handheld gym shots that follow you, music on every video 
 untrusted: unknown or missing fields, a value outside its enum, a colour that is not a hex code, an empty summary or one over 320
 characters, a link, a handle or words aimed at a reader make it `invalid_output` and the profile is stored without a new summary.
 
-**Three layers** (`styleprofile.Resolve`): the vibe is this edit's, else the creator's, else the suggestion's, else lively. Transitions,
-text animation and camera motion are the creator's, else (when a person chose the vibe) the vibe's, else the suggestion's (except an
+**Three layers** (`styleprofile.Resolve`): the vibe is this edit's, else the creator's, else the suggestion's, else lively.
+Transitions are the creator's; else, when their videos measurably use transitions (`Transitions.Used` some), the suggestion (when it
+is not off) or the measured level (subtle, lots from half the cuts); else off, at every vibe (D-36: no vibe asks for transitions).
+Text animation and camera motion are the creator's, else (when a person chose the vibe) the vibe's, else the suggestion's (except an
 "off" at a lively or hype vibe), else the vibe's. The title's colour, place and case are the creator's, else the suggestion's, else
 measured. Music is the creator's, else the suggestion's, else "always" when the videos have music. Pace is the creator's, else the
 suggestion's, else "like my videos". Every value carries its source (`you`, `suggested`, `measured`, `vibe`, `this_video`, `default`),
@@ -325,7 +327,7 @@ and found the cuts not measurable against the movement: their shots around the c
 **Settings.** Five more are overridable, with the same precedence (the creator, then the AI suggestion, then the measures, then the
 default): `chapter_titles` (on, off), `title_template` (a form the creator types, validated: letters, digits, spaces, slots in capitals,
 80 characters; it reaches the editor as an untrusted `title_form` block), `ending_hold` (long, short), `cut_timing` (full_reps, mid_rep)
-and `angle_switches` (on, off). The summary call (`stylesummary.v2`) suggests the four enums too and is asked to mention what stands
+and `angle_switches` (on, off). The summary call (`stylesummary.v2`, now `v3`, which proposes transitions only when the measures show them) suggests the four enums too and is asked to mention what stands
 out ("long holds at the end", "numbered chapter titles", "cuts mid-rep"); it sees that the titles follow a form but not the form's words.
 
 **The editor** (`editor.v2.8`): the creator_style block lists the title forms ("fill the slots from the footage; never copy a title of

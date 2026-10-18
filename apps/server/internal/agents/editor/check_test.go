@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/nilpntr/content-fabrique/internal/analysis"
+	"github.com/nilpntr/content-fabrique/internal/styleprofile"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
@@ -221,7 +222,8 @@ func TestEffectDensityCheck(t *testing.T) {
 
 	fx := slicesCopy(plain)
 	fx[1].motion, fx[4].trans = timeline.MotionPunchIn, timeline.TransitionFlash
-	r := RunChecks(CheckInput{Spec: specOf(t, fx, title(0), nil)})
+	subtle := styleprofile.Resolve(nil, nil, styleprofile.Settings{Transitions: styleprofile.LevelSubtle}, "") // transitions are off by default
+	r := RunChecks(CheckInput{Spec: specOf(t, fx, title(0), nil), Settings: &subtle})
 	wantStatus(t, r, CheckEffectDensity, CheckPass)
 	if r.Metrics.Effects != 2 || r.Metrics.EffectsPerCut != 0.29 {
 		t.Errorf("effects %d, per cut %v", r.Metrics.Effects, r.Metrics.EffectsPerCut)

@@ -233,7 +233,7 @@ Sections 2 and 3 are the generic craft of a genre. A creator who shows us their 
 | `off_beat_cut` | a cut is more than 60 ms from a beat or a strong onset of the song (a transition counts at its start or its middle); n/a without a song |
 | `hook_misses_drop` | the first cut is more than 60 ms from the song's drop; the fix names the `source_offset_ms` that moves the drop onto it |
 | `static_shot` | a shot over 2 s has no camera motion and the footage does not move by itself; skipped at calm for a creator whose own camera is static |
-| `no_transitions_at_lively` | at lively or hype all cuts are hard, at hype fewer than a quarter are transitions, or the cut on the drop is hard |
+| `transitions_match_style` (replaced `no_transitions_at_lively` in `editor.v2.8`, D-36) | the edit has a transition where the creator's effective style has them off (the default at every vibe), fewer than a quarter of the cuts are transitions where it asks for lots, more than a few where it asks for subtle, or a kind or rate their videos do not have when the level was measured |
 | `transition_variety` | the same transition three times in a row |
 | `text_without_entrance` | at lively or hype a text has no entrance or no exit |
 | `chapter_titles` | the plan has two or more chapters and the edit fewer numbered titles |

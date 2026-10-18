@@ -109,7 +109,7 @@ func styleBlocks(st *styleprofile.Style) []llm.Block {
 			runtime.UntrustedBlock(StyleBlockKind, body),
 		)
 	}
-	blocks = append(blocks, llm.TextBlock(settingsText(st.Resolved)))
+	blocks = append(blocks, llm.TextBlock(settingsText(st.Resolved, st.Profile)))
 	if t := st.Resolved.TitleTemplate; t != "" {
 		// The form holds the creator's own fixed words (or what they typed): data, like the profile.
 		blocks = append(blocks, runtime.UntrustedBlock(TitleFormBlockKind, t))
@@ -136,7 +136,7 @@ func sourceWords(source string) string {
 
 // settingsText is the creator's effective settings as the editor reads them: one line per setting, what it asks for, and where it came
 // from. Every word is ours: the values are enums and a hex colour.
-func settingsText(r styleprofile.Resolved) string {
+func settingsText(r styleprofile.Resolved, p *styleprofile.Profile) string {
 	var b strings.Builder
 	b.WriteString("The creator's settings for this edit. They win over the measured style, the playbook and the defaults of this prompt; check_edit holds the edit to them. A measured \"effects: none\" describes the creator's posted videos (no zoom punches or flashes were found in them) and does not turn off what these settings ask for.\n")
 	src := r.Sources
@@ -148,13 +148,23 @@ func settingsText(r styleprofile.Resolved) string {
 	default:
 		fmt.Fprintf(&b, "- Vibe: lively (%s). Energy without gimmicks: the hook ends on the drop or the music's lift, cuts on the strong beats and phrase starts, the picture and the text never sit dead still.\n", sourceWords(src.Vibe))
 	}
+	kinds := "whip_left, whip_right, zoom_through or flash"
+	if src.Transitions == styleprofile.SourceMeasured && p != nil {
+		var ts []string
+		for _, k := range p.Transitions.Kinds {
+			ts = append(ts, measuredTransitionTypes[k]...)
+		}
+		if len(ts) > 0 {
+			kinds = "only the kinds their videos use: " + strings.Join(ts, " or ") + fmt.Sprintf(", on about %.0f %% of the cuts like theirs", p.Transitions.Share*100)
+		}
+	}
 	switch r.Transitions {
 	case styleprofile.LevelOff:
-		fmt.Fprintf(&b, "- Transitions: off (%s). Hard cuts only: no set_transition other than cut.\n", sourceWords(src.Transitions))
+		fmt.Fprintf(&b, "- Transitions: off (%s). Plain cuts on the beat: no set_transition other than cut. Effect transitions read as an automatic AI edit to creators; the energy comes from the cuts on the beat, the pace, the camera and the text.\n", sourceWords(src.Transitions))
 	case styleprofile.LevelLots:
-		fmt.Fprintf(&b, "- Transitions: lots (%s). A transition (whip_left, whip_right, zoom_through or flash, 150 to 400 ms) on most strong beats, the phrase starts and the drop; never the same one three times in a row; hard cuts on the ordinary beats.\n", sourceWords(src.Transitions))
+		fmt.Fprintf(&b, "- Transitions: lots (%s). A transition (%s, 150 to 400 ms) on at least every fourth cut, on the strong beats, the phrase starts and the drop; never the same one three times in a row; plain cuts on the ordinary beats.\n", sourceWords(src.Transitions), kinds)
 	default:
-		fmt.Fprintf(&b, "- Transitions: subtle (%s). A few, on the strongest moments: one on the drop or the biggest moment and between two exercises or scenes (whip_left, whip_right, zoom_through or flash, 150 to 300 ms); hard cuts elsewhere.\n", sourceWords(src.Transitions))
+		fmt.Fprintf(&b, "- Transitions: subtle (%s). A few, on the strongest moments: one on the drop or the biggest moment, or between two exercises or scenes (%s, 150 to 300 ms); plain cuts elsewhere.\n", sourceWords(src.Transitions), kinds)
 	}
 	if r.TextAnimation == styleprofile.LevelOff {
 		fmt.Fprintf(&b, "- Text animation: off (%s). Every text appears without an animation.\n", sourceWords(src.TextAnimation))

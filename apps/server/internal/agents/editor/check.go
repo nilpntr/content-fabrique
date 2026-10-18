@@ -392,7 +392,7 @@ func RunChecks(in CheckInput) Report {
 	r.Checks = []Check{
 		c.hookLength(), c.hookTitle(), c.shotPacing(), c.longShot(), c.heldEnding(), c.shotVariety(), c.paceBuilds(), c.repBoundaries(), c.deadTime(),
 		c.effectDensity(), c.textSafe(), c.textOverSubject(), c.duration(targetS), c.brightness(), c.crushed(), c.beatSync(), c.styleMatch(), c.titleCopied(),
-		c.offBeatCut(), c.hookMissesDrop(), c.staticShot(), c.noTransitions(), c.transitionVariety(), c.textWithoutEntrance(), c.chapterTitles(),
+		c.offBeatCut(), c.hookMissesDrop(), c.staticShot(), c.transitionsMatch(), c.transitionVariety(), c.textWithoutEntrance(), c.chapterTitles(),
 	}
 	if a := in.Audio; a != nil {
 		r.Checks = append(r.Checks, audioChecks(*a)...)
@@ -824,7 +824,7 @@ func (c *checker) effectDensity() Check {
 	case c.lim.transitionsOff && c.lim.cameraOff && effects > 0:
 		return c.fail(CheckEffectDensity, "%d effects (transitions, motion presets, speed ramps); the creator's settings turn transitions and camera motion off: take them out", effects)
 	case c.lim.transitionsOff && k.transitions > 0:
-		return c.fail(CheckEffectDensity, "%d transitions; the creator's settings turn transitions off: make every cut a hard cut", k.transitions)
+		return c.fail(CheckEffectDensity, "%d transitions; the style has transitions off: make every cut a plain cut on the beat", k.transitions)
 	case c.lim.cameraOff && k.motions+k.handheld+k.ramps > 0:
 		return c.fail(CheckEffectDensity, "%d motion presets and speed ramps; the creator's settings turn camera motion off: take them out", k.motions+k.handheld+k.ramps)
 	case c.lim.transitionsOff && c.lim.cameraOff:
@@ -841,7 +841,10 @@ func (c *checker) effectDensity() Check {
 	case ramps > rampsMax:
 		return c.fail(CheckEffectDensity, "%d shots have a speed ramp; at most %d, on the shots that deserve it", ramps, rampsMax)
 	case c.lim.minEffects > 0 && cuts >= 4 && per < c.lim.minEffects:
-		return c.fail(CheckEffectDensity, "%d effects in %d cuts (%.2f per cut) is flat; add a punch_in on a beat, or a whip or flash between scenes (about one per 3 or 4 cuts)", effects, cuts, per)
+		if c.lim.transitionsOff {
+			return c.fail(CheckEffectDensity, "%d effects in %d cuts (%.2f per cut) is flat; add a punch_in or a push_in on a beat (about one per 3 or 4 cuts); the cuts stay plain", effects, cuts, per)
+		}
+		return c.fail(CheckEffectDensity, "%d effects in %d cuts (%.2f per cut) is flat; add a punch_in on a beat, or a transition the style allows between scenes (about one per 3 or 4 cuts)", effects, cuts, per)
 	}
 	return c.pass(CheckEffectDensity, "%d effects in %d cuts (%.2f per cut), %d speed ramps", effects, cuts, per, ramps)
 }

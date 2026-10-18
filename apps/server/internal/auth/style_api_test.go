@@ -21,7 +21,7 @@ func TestStyleSettingsRolesAndTenancy(t *testing.T) {
 	if got.Status != api.CreatorStyleStatusEmpty || got.Summary != nil || got.Measures != nil || len(got.References) != 0 {
 		t.Fatalf("an empty style: %+v", got)
 	}
-	if got.Effective.Vibe != api.EditVibeLively || got.Effective.Transitions != api.StyleLevelSubtle || got.Effective.Sources.Vibe != api.StyleSettingSourceDefault {
+	if got.Effective.Vibe != api.EditVibeLively || got.Effective.Transitions != api.StyleLevelOff || got.Effective.Sources.Vibe != api.StyleSettingSourceDefault {
 		t.Errorf("the defaults: %+v", got.Effective)
 	}
 	if got.Limits.MaxReferences != 10 || got.Limits.MaxSizeBytes != 1<<30 || got.Limits.MaxDurationMs != 180_000 {

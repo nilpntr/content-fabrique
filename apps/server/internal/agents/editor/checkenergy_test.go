@@ -6,6 +6,7 @@ import (
 
 	"github.com/nilpntr/content-fabrique/internal/camshift"
 	"github.com/nilpntr/content-fabrique/internal/music"
+	"github.com/nilpntr/content-fabrique/internal/styleprofile"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
@@ -21,17 +22,15 @@ func TestTheStaticEditFailsTheEnergyChecksAtLively(t *testing.T) {
 	if !strings.Contains(c.Detail, "set_motion with preset handheld") || !strings.Contains(c.Detail, "c2 (9.0 s)") {
 		t.Errorf("static: %s", c.Detail)
 	}
-	c = wantStatus(t, r, CheckNoTransitions, CheckFail)
-	if !strings.Contains(c.Detail, "all 3 cuts are hard cuts") {
-		t.Errorf("transitions: %s", c.Detail)
-	}
+	// Plain cuts are the style at every vibe: the hard cuts pass.
+	wantStatus(t, r, CheckTransitionsStyle, CheckPass)
 	c = wantStatus(t, r, CheckTextWithoutEntrance, CheckFail)
 	if !strings.Contains(c.Detail, "t1 has no entrance and no exit") {
 		t.Errorf("text: %s", c.Detail)
 	}
-	// At calm, the transitions and the text motion are not asked for; the camera still breathes.
+	// At calm, the text motion is not asked for; the camera still breathes.
 	calm := RunChecks(CheckInput{Spec: staticEdit(t), Plan: workoutPlan(), Vibe: VibeCalm})
-	wantStatus(t, calm, CheckNoTransitions, CheckSkip)
+	wantStatus(t, calm, CheckTransitionsStyle, CheckPass)
 	wantStatus(t, calm, CheckTextWithoutEntrance, CheckSkip)
 	wantStatus(t, calm, CheckStaticShot, CheckFail)
 	// Footage that moves by itself is not dead still.
@@ -42,22 +41,69 @@ func TestTheStaticEditFailsTheEnergyChecksAtLively(t *testing.T) {
 func TestTheLivelyEditPassesTheEnergyChecks(t *testing.T) {
 	spec := specOf(t, []shot{
 		{asset: assetA, in: 0, out: 2500, motion: timeline.MotionHandheld},
-		{asset: assetA, in: 3000, out: 6000, motion: timeline.MotionHandheld, trans: timeline.TransitionPunch},
+		{asset: assetA, in: 3000, out: 6000, motion: timeline.MotionHandheld},
 		{asset: assetB, in: 0, out: 3000, motion: timeline.MotionHandheld},
-		{asset: assetB, in: 4000, out: 7000, motion: timeline.MotionHandheld, trans: timeline.TransitionWhipLeft},
+		{asset: assetB, in: 4000, out: 7000, motion: timeline.MotionHandheld},
 	}, title(0), nil)
 	tt, _ := spec.Tracks[1].(*timeline.TextTrack)
 	tt.Items[0].Animation, tt.Items[0].Exit = "pop", "pop_out"
-	r := RunChecks(CheckInput{Spec: spec, Plan: workoutPlan(), Vibe: VibeLively})
-	for _, id := range []string{CheckStaticShot, CheckNoTransitions, CheckTextWithoutEntrance} {
-		wantStatus(t, r, id, CheckPass)
+	for _, vibe := range Vibes {
+		r := RunChecks(CheckInput{Spec: spec, Plan: workoutPlan(), Vibe: vibe})
+		for _, id := range []string{CheckStaticShot, CheckTransitionsStyle} {
+			wantStatus(t, r, id, CheckPass)
+		}
+		// The living camera is not an effect.
+		if r.Metrics.Effects != 0 {
+			t.Errorf("%s: effects %d: the handheld clips were counted", vibe, r.Metrics.Effects)
+		}
 	}
-	// The living camera is not an effect: a creator of no effects is not failed for it, and the density counts only the transitions.
-	if r.Metrics.Effects != 2 {
-		t.Errorf("effects %d: the handheld clips were counted", r.Metrics.Effects)
+	wantStatus(t, RunChecks(CheckInput{Spec: spec, Plan: workoutPlan(), Vibe: VibeLively}), CheckTextWithoutEntrance, CheckPass)
+}
+
+// Transitions follow the creator's effective style, never the vibe: none by default at every vibe (a creator's verdict on punch and
+// zoom_through transitions was that they look like an automatic AI edit); lots when the creator asks for lots, and then an edit without
+// them fails; a few when subtle; and when their videos use them, only those kinds at about their rate.
+func TestTransitionsMatchTheStyleNotTheVibe(t *testing.T) {
+	withTrans := func(types ...string) *timeline.Spec {
+		shots := []shot{{asset: assetA, in: 0, out: 2000}}
+		for i, ty := range types {
+			shots = append(shots, shot{asset: assetA, in: int64(i+1) * 2000, out: int64(i+1)*2000 + 2000, trans: ty})
+		}
+		return specOf(t, shots, nil, nil)
 	}
-	// hype wants a transition on every fourth cut at least: 2 of 3 is plenty.
-	wantStatus(t, RunChecks(CheckInput{Spec: spec, Plan: workoutPlan(), Vibe: VibeHype}), CheckNoTransitions, CheckPass)
+	cut := timeline.TransitionCut
+	punchy := withTrans(timeline.TransitionPunch, cut, timeline.TransitionZoomThrough, cut)
+	for _, vibe := range Vibes {
+		c := wantStatus(t, RunChecks(CheckInput{Spec: punchy, Plan: workoutPlan(), Vibe: vibe}), CheckTransitionsStyle, CheckFail)
+		if !strings.Contains(c.Detail, "plain cuts on the beat (transitions off, the default)") || !strings.Contains(c.Detail, "automatic AI edit") {
+			t.Errorf("%s: %s", vibe, c.Detail)
+		}
+	}
+	set := func(level string) *styleprofile.Resolved {
+		r := styleprofile.Resolve(nil, nil, styleprofile.Settings{Transitions: level}, "")
+		return &r
+	}
+	plain := withTrans(cut, cut, cut, cut)
+	c := wantStatus(t, RunChecks(CheckInput{Spec: plain, Plan: workoutPlan(), Settings: set(styleprofile.LevelLots)}), CheckTransitionsStyle, CheckFail)
+	if !strings.Contains(c.Detail, "0 of 4 cuts are transitions; the style asks for lots (the creator's choice)") {
+		t.Errorf("lots: %s", c.Detail)
+	}
+	wantStatus(t, RunChecks(CheckInput{Spec: punchy, Plan: workoutPlan(), Settings: set(styleprofile.LevelLots)}), CheckTransitionsStyle, CheckPass)
+	wantStatus(t, RunChecks(CheckInput{Spec: plain, Plan: workoutPlan(), Settings: set(styleprofile.LevelSubtle)}), CheckTransitionsStyle, CheckPass)
+	wantStatus(t, RunChecks(CheckInput{Spec: punchy, Plan: workoutPlan(), Settings: set(styleprofile.LevelSubtle)}), CheckTransitionsStyle, CheckFail)
+
+	// Videos that blend at a fifth of their cuts: a crossfade is theirs, a punch is not.
+	p := ginoProfile(t)
+	p.Transitions = styleprofile.TransitionsProfile{Measured: 5, Cuts: 20, Used: styleprofile.TransitionsSome, Kinds: []string{"blend"}, Share: 0.2}
+	measured := styleprofile.Resolve(p, nil, styleprofile.Settings{}, "")
+	if measured.Transitions != styleprofile.LevelSubtle || measured.Sources.Transitions != styleprofile.SourceMeasured {
+		t.Fatalf("measured %+v", measured)
+	}
+	wantStatus(t, RunChecks(CheckInput{Spec: withTrans(timeline.TransitionCrossfade, cut, cut, cut), Plan: workoutPlan(), Style: p, Settings: &measured}), CheckTransitionsStyle, CheckPass)
+	c = wantStatus(t, RunChecks(CheckInput{Spec: withTrans(timeline.TransitionPunch, cut, cut, cut), Plan: workoutPlan(), Style: p, Settings: &measured}), CheckTransitionsStyle, CheckFail)
+	if !strings.Contains(c.Detail, "the creator's videos use only blend") || !strings.Contains(c.Detail, "crossfade") {
+		t.Errorf("measured kinds: %s", c.Detail)
+	}
 }
 
 // A transition switches the picture at its middle: beat_sync counts it on the beat when its middle is.

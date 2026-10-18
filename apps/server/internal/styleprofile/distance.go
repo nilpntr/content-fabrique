@@ -418,7 +418,7 @@ func (d Distance) Text() string {
 
 // compareMotion adds the dimensions of what moves: transitions, camera motion (motion presets and speed ramps) and text animation, from
 // the effective settings. A setting the creator chose themselves is a hard dimension; one from the vibe, the suggestion or the default
-// is advice.
+// is advice, except transitions off, which is always a rule (the default of every vibe: plain cuts on the beat).
 func (p *Profile) compareMotion(e EditStats, r Resolved, add, addSoft func(id, value, expected string, ok bool, fix string)) {
 	cuts := max(len(e.ShotsS)-1, 0)
 	shots := len(e.ShotsS)
@@ -429,9 +429,9 @@ func (p *Profile) compareMotion(e EditStats, r Resolved, add, addSoft func(id, v
 		return addSoft
 	}
 	switch r.Transitions {
-	case LevelOff:
-		pick(SourceYou)("transitions", fmt.Sprintf("%d transitions", e.Transitions), "none (transitions are off)", e.Transitions == 0,
-			"make every cut a hard cut: transitions are turned off")
+	case LevelOff: // the default of every vibe too: always a rule (transitions read as an automatic edit)
+		pick(SourceYou)("transitions", fmt.Sprintf("%d transitions", e.Transitions), "none (plain cuts on the beat)", e.Transitions == 0,
+			"make every cut a plain cut on the beat: this style has no transitions")
 	case LevelLots:
 		need := (cuts + 1) / 2
 		pick(r.Sources.Transitions)("transitions", fmt.Sprintf("%d transitions in %d cuts", e.Transitions, cuts), fmt.Sprintf("at least %d (lots: on most strong beats)", need),

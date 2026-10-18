@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "4eea54376b20a47c96695f909016022d5ad737948b89a7a6e5e982e922769996",
-  "recorded_at": "2026-10-18T06:20:42Z",
+  "key": "da57c7e7238cc32a435518a51a3a664b2f0ee4cff85425213afdda726b0580e7",
+  "recorded_at": "2026-10-18T06:41:38Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,
@@ -22,42 +22,6 @@
           "text",
           "text",
           "text"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
         ]
       },
       {
@@ -154,11 +118,6 @@
         "sha256": "c1a2c1dd9e9b679be49eb3856f237cf0984ba86e667f45e56d1a9934a461dcba",
         "media_type": "image/jpeg",
         "bytes": 4825
-      },
-      {
-        "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
-        "media_type": "image/jpeg",
-        "bytes": 9284
       }
     ]
   },
@@ -169,16 +128,16 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_8",
+        "id": "toolu_ed_5",
         "name": "render_preview",
         "input": {}
       }
     ],
     "usage": {
-      "input_tokens": 400,
+      "input_tokens": 410,
       "cache_write_tokens": 600,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 15000,
+      "cache_read_tokens": 12900,
       "output_tokens": 40
     }
   },

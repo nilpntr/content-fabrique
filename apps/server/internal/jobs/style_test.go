@@ -207,7 +207,7 @@ func TestAStyleReferenceIsLearntThroughTheQueue(t *testing.T) {
 	if err != nil || st.Profile == nil || st.Profile.References != 1 || st.Summary == nil || !strings.HasPrefix(st.Summary.Text, "Long takes") {
 		t.Fatalf("style %+v %v", st, err)
 	}
-	if st.Mine.Vibe != styleprofile.VibeHype || st.Resolved.Vibe != styleprofile.VibeHype || st.Resolved.Transitions != styleprofile.LevelLots {
+	if st.Mine.Vibe != styleprofile.VibeHype || st.Resolved.Vibe != styleprofile.VibeHype || st.Resolved.CameraMotion != styleprofile.LevelLots {
 		t.Errorf("learning the style changed the creator's choice: %+v / %+v", st.Mine, st.Resolved.Settings)
 	}
 	if got := model.count(styleprofile.SummaryToolName); got != 1 {

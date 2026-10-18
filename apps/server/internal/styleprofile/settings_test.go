@@ -34,12 +34,12 @@ func still(p *Profile) *Resolved {
 
 func TestTheDefaultsWithNothingSet(t *testing.T) {
 	r := Resolve(nil, nil, Settings{}, "")
-	want := Settings{Vibe: VibeLively, Transitions: LevelSubtle, TextAnimation: LevelOn, CameraMotion: LevelSubtle, TitlePosition: PositionAuto,
+	want := Settings{Vibe: VibeLively, Transitions: LevelOff, TextAnimation: LevelOn, CameraMotion: LevelSubtle, TitlePosition: PositionAuto,
 		TitleCase: CaseAsTyped, Music: MusicAlways, Pace: PaceLikeMine, ChapterTitles: LevelOn, EndingHold: HoldLong, CutTiming: CutsOnFullReps, AngleSwitches: LevelOn}
 	if r.Settings != want {
 		t.Fatalf("defaults %+v", r.Settings)
 	}
-	if r.Sources.Vibe != SourceDefault || r.Sources.Transitions != SourceVibe || r.Sources.TitleColour != "" {
+	if r.Sources.Vibe != SourceDefault || r.Sources.Transitions != SourceDefault || r.Sources.TitleColour != "" {
 		t.Errorf("sources %+v", r.Sources)
 	}
 }
@@ -66,15 +66,19 @@ func TestMeasuredNoEffectsAndTheCreatorAsksForLotsOfTransitions(t *testing.T) {
 	if x, _ := dimOf(p.CompareWith(moving, &r), "transitions"); !x.OK {
 		t.Errorf("an edit with the transitions: %+v", x)
 	}
-	// And with nothing set at all, a measured "no effects" still turns nothing off: the edit may have transitions.
+	// And with nothing set at all, a measured "no effects" turns no motion off (text animation and the camera move), and transitions are
+	// off because no vibe asks for them and these videos have plain cuts: an edit with transitions is out of the style, and nothing else.
 	def := Resolve(p, nil, Settings{}, "")
-	if def.Transitions == LevelOff || def.TextAnimation == LevelOff || def.CameraMotion == LevelOff {
-		t.Errorf("a measured none turned something off: %+v", def.Settings)
+	if def.Transitions != LevelOff || def.Sources.Transitions != SourceDefault || def.TextAnimation == LevelOff || def.CameraMotion == LevelOff {
+		t.Errorf("the defaults of a creator of plain cuts: %+v %+v", def.Settings, def.Sources)
 	}
 	for _, x := range p.CompareWith(moving, &def).Dimensions {
-		if !x.OK && !x.Soft {
-			t.Errorf("an edit with a few transitions fails %s for a creator of no measured effects", x.ID)
+		if !x.OK && !x.Soft && x.ID != "transitions" {
+			t.Errorf("an edit with a few transitions fails %s for a creator who chose nothing", x.ID)
 		}
+	}
+	if x, _ := dimOf(p.CompareWith(moving, &def), "transitions"); x.OK || x.Soft {
+		t.Errorf("transitions in a style of plain cuts: %+v", x)
 	}
 }
 
@@ -82,14 +86,14 @@ func TestTheCreatorAlwaysWins(t *testing.T) {
 	p := Aggregate(referenceMeasures(t))
 	sug := &Settings{Vibe: VibeCalm, Transitions: LevelOff, TextAnimation: LevelOff, CameraMotion: LevelOff, TitleColour: "#FFFFFF", TitleCase: CaseLower, Music: MusicNever, Pace: PaceSlower}
 
-	// A calm suggestion of "off" holds when nobody chose anything else.
+	// A calm suggestion of "off" holds when nobody chose anything else (transitions are off by default: these videos have plain cuts).
 	r := Resolve(p, sug, Settings{}, "")
-	if r.Vibe != VibeCalm || r.Transitions != LevelOff || r.Sources.Transitions != SourceSuggested || r.TitleColour != "#FFFFFF" || r.Music != MusicNever {
+	if r.Vibe != VibeCalm || r.Transitions != LevelOff || r.Sources.Transitions != SourceDefault || r.TextAnimation != LevelOff || r.Sources.TextAnimation != SourceSuggested || r.TitleColour != "#FFFFFF" || r.Music != MusicNever {
 		t.Fatalf("the suggestion: %+v %+v", r.Settings, r.Sources)
 	}
-	// The creator picks lively: the vibe's motion wins over the suggestion's "off".
+	// The creator picks lively: the vibe's motion wins over the suggestion's "off", and a vibe never asks for transitions.
 	r = Resolve(p, sug, Settings{Vibe: VibeLively}, "")
-	if r.Transitions != LevelSubtle || r.Sources.Transitions != SourceVibe || r.TextAnimation != LevelOn || r.CameraMotion != LevelSubtle {
+	if r.Transitions != LevelOff || r.Sources.Transitions != SourceDefault || r.TextAnimation != LevelOn || r.CameraMotion != LevelSubtle {
 		t.Fatalf("a chosen vibe: %+v %+v", r.Settings, r.Sources)
 	}
 	// One edit is hype: lots, but the creator's own "transitions off" still wins.
@@ -102,7 +106,7 @@ func TestTheCreatorAlwaysWins(t *testing.T) {
 	}
 	// A suggestion of "off" at a lively vibe does not hold: no measure makes a lively edit static by itself.
 	r = Resolve(p, &Settings{Vibe: VibeLively, Transitions: LevelOff, TextAnimation: LevelOff}, Settings{}, "")
-	if r.Transitions != LevelSubtle || r.TextAnimation != LevelOn {
+	if r.Transitions != LevelOff || r.TextAnimation != LevelOn {
 		t.Errorf("a lively suggestion of off: %+v", r.Settings)
 	}
 	// An unknown vibe for the edit is ignored.
@@ -336,6 +340,40 @@ func TestPlainLinesSayItInWords(t *testing.T) {
 			if strings.Contains(l.Value, jargon) {
 				t.Errorf("%s says %q", l.ID, l.Value)
 			}
+		}
+	}
+}
+
+// Transitions come from the creator's own videos or their setting, never from a vibe: plain cuts by default at every vibe; a creator
+// whose videos measurably use transitions gets that level (the suggestion follows it, never the other way); the creator wins.
+func TestTransitionsComeFromTheCreatorNotTheVibe(t *testing.T) {
+	plain := Aggregate(referenceMeasures(t))
+	for _, vibe := range Vibes {
+		if r := Resolve(plain, &Settings{Transitions: LevelLots}, Settings{}, vibe); r.Transitions != LevelOff || r.Sources.Transitions != SourceDefault {
+			t.Errorf("%s, plain cuts measured, a suggestion of lots: %s from %s", vibe, r.Transitions, r.Sources.Transitions)
+		}
+		if r := Resolve(nil, nil, Settings{}, vibe); r.Transitions != LevelOff {
+			t.Errorf("%s with nothing: %s", vibe, r.Transitions)
+		}
+	}
+	uses := *plain
+	uses.Transitions = TransitionsProfile{Measured: 5, Cuts: 20, Used: TransitionsSome, Kinds: []string{"blend"}, Share: 0.2}
+	if r := Resolve(&uses, nil, Settings{}, VibeCalm); r.Transitions != LevelSubtle || r.Sources.Transitions != SourceMeasured {
+		t.Errorf("a few measured: %s from %s", r.Transitions, r.Sources.Transitions)
+	}
+	uses.Transitions.Share = 0.6
+	if r := Resolve(&uses, nil, Settings{}, ""); r.Transitions != LevelLots || r.Sources.Transitions != SourceMeasured {
+		t.Errorf("most measured: %s from %s", r.Transitions, r.Sources.Transitions)
+	}
+	if r := Resolve(&uses, &Settings{Transitions: LevelSubtle}, Settings{}, ""); r.Transitions != LevelSubtle || r.Sources.Transitions != SourceSuggested {
+		t.Errorf("the suggestion over the measure: %s from %s", r.Transitions, r.Sources.Transitions)
+	}
+	if r := Resolve(&uses, &Settings{Transitions: LevelOff}, Settings{}, ""); r.Transitions != LevelLots || r.Sources.Transitions != SourceMeasured {
+		t.Errorf("a suggestion of off against the measure: %s from %s", r.Transitions, r.Sources.Transitions)
+	}
+	for _, mine := range []string{LevelOff, LevelSubtle, LevelLots} {
+		if r := Resolve(plain, nil, Settings{Transitions: mine}, VibeHype); r.Transitions != mine || r.Sources.Transitions != SourceYou {
+			t.Errorf("the creator's %s: %s from %s", mine, r.Transitions, r.Sources.Transitions)
 		}
 	}
 }
