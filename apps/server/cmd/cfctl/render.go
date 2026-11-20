@@ -106,14 +106,14 @@ func cmdRender(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	profile.MotionFallback = *motionFallback
 	if *proofArg {
 		if profile.Name != render.ProfilePreview {
 			_, _ = fmt.Fprintln(stderr, "cfctl render: --proof is a preview with shot numbers; a final render never has them")
 			return 2
 		}
-		profile.ShotNumbers = true
+		profile = render.Proof
 	}
+	profile.MotionFallback = *motionFallback
 	data, err := os.ReadFile(positional[0])
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "cfctl render: %v\n", err)

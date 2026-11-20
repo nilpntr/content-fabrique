@@ -136,8 +136,10 @@ func (h *RenderAPI) CreateRender(ctx context.Context, req api.CreateRenderReques
 			e = invalid("a request body is required")
 		default:
 			want := ProofAuto
-			if p := req.Body.Proof; p != nil {
-				want = map[bool]Proof{true: ProofOn, false: ProofOff}[*p]
+			if p := req.Body.Proof; p != nil && *p {
+				want = ProofOn
+			} else if p != nil {
+				want = ProofOff
 			}
 			r, created, e = h.svc.RequestWith(ctx, UserCaller(who.Workspace, who.User), project, req.Body.Version, string(req.Body.Profile), want)
 		}

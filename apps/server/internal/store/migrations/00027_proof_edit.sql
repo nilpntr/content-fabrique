@@ -73,8 +73,10 @@ SELECT cf_grant_app_dml('clip_feedback');
 
 DROP TABLE clip_feedback;
 DROP INDEX renders_active_key;
--- A version may have had a plain preview and a proof at once; the proofs go so the old key holds again.
-DELETE FROM renders WHERE proof;
+-- A version may have had a plain preview and a proof at once. The proofs become failed renders so the old key holds again; the
+-- clean-up job then removes their objects (it purges failed renders), so nothing is left behind in storage.
+UPDATE renders SET status = 'failed', stage = NULL, failure_reason = 'interrupted', finished_at = coalesce(finished_at, now())
+WHERE proof AND status IN ('queued', 'rendering', 'ready');
 CREATE UNIQUE INDEX renders_active_key ON renders (project_id, timeline_version, profile)
     WHERE status IN ('queued', 'rendering', 'ready');
 ALTER TABLE renders DROP CONSTRAINT renders_proof_check;

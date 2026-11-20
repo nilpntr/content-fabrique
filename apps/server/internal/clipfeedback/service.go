@@ -20,8 +20,6 @@ const (
 	MaxPageSize     = 500
 	// MaxNoteChars is the longest note (clip_feedback_note_check).
 	MaxNoteChars = store.MaxClipFeedbackNoteChars
-	// shotListFeedbackRows bounds the feedback read for one shot list (the rows on the clips of one version).
-	shotListFeedbackRows = 1000
 )
 
 // Error is a failure with the answer to give for it. The message never contains request data.
@@ -56,6 +54,7 @@ type Store interface {
 	ListProjectCatalogAssets(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID) ([]store.ProjectCatalogRow, error)
 	SaveClipFeedback(ctx context.Context, ws ids.WorkspaceID, in store.NewClipFeedback) (store.ClipFeedback, error)
 	ListClipFeedback(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID, limit int) ([]store.ClipFeedback, error)
+	ListAllClipFeedback(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.ClipFeedback, error)
 	DeleteClipFeedback(ctx context.Context, ws ids.WorkspaceID, id ids.ClipFeedbackID) error
 }
 
@@ -132,18 +131,10 @@ func (s *Service) ShotList(ctx context.Context, ws ids.WorkspaceID, project ids.
 		titles[a.AssetID.String()] = a.Title
 	}
 	shots := timeline.Shots(spec)
-	var assets []ids.AssetID
-	seen := map[string]bool{}
-	for _, sh := range shots {
-		if aid, err := ids.ParseAssetID(sh.AssetID); err == nil && !seen[sh.AssetID] {
-			seen[sh.AssetID] = true
-			assets = append(assets, aid)
-		}
-	}
 	var rows []store.ClipFeedback
-	if len(assets) > 0 {
+	if assets := ShotAssets(shots); len(assets) > 0 {
 		var err error
-		if rows, err = s.store.ListClipFeedback(ctx, ws, assets, shotListFeedbackRows); err != nil {
+		if rows, err = s.store.ListAllClipFeedback(ctx, ws, assets); err != nil {
 			return ShotList{}, s.internal(ctx, "list clip feedback", err)
 		}
 	}
@@ -283,24 +274,35 @@ func (s *Service) Delete(ctx context.Context, ws ids.WorkspaceID, id ids.ClipFee
 	return nil
 }
 
-// Reader is what LoadRules reads. *store.Store is the real one.
+// Reader is what LoadRules reads: every row on the clips, never a page of them (a rule left out would let an edit play a ruled-out
+// shot). *store.Store is the real one.
 type Reader interface {
-	ListClipFeedback(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID, limit int) ([]store.ClipFeedback, error)
+	ListAllClipFeedback(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.ClipFeedback, error)
 }
-
-// MaxRules is the most feedback rows read for one edit: far more than a creator gives on the clips of one project.
-const MaxRules = 1000
 
 // LoadRules reads the rules on the given clips, by clip (none for no clips).
 func LoadRules(ctx context.Context, rd Reader, ws ids.WorkspaceID, assets []ids.AssetID) (map[string][]Rule, error) {
 	if len(assets) == 0 {
 		return map[string][]Rule{}, nil
 	}
-	rows, err := rd.ListClipFeedback(ctx, ws, assets, MaxRules)
+	rows, err := rd.ListAllClipFeedback(ctx, ws, assets)
 	if err != nil {
 		return nil, fmt.Errorf("read the clip feedback: %w", err)
 	}
 	return ByAsset(rows), nil
+}
+
+// ShotAssets is the distinct clips the shots play, in shot order (an id that does not parse is left out: it is no clip of ours).
+func ShotAssets(shots []timeline.Shot) []ids.AssetID {
+	var out []ids.AssetID
+	seen := map[string]bool{}
+	for _, s := range shots {
+		if aid, err := ids.ParseAssetID(s.AssetID); err == nil && !seen[s.AssetID] {
+			seen[s.AssetID] = true
+			out = append(out, aid)
+		}
+	}
+	return out
 }
 
 // internal logs an unexpected failure and returns the 500 that says nothing about it.

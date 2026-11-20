@@ -109,9 +109,10 @@ func Range(shot timeline.Shot, kind string, offsetMs int64, wholeClip bool, clip
 // Overlap is how many milliseconds the ranges [a0, a1) and [b0, b1) share.
 func Overlap(a0, a1, b0, b1 int64) int64 { return max(0, min(a1, b1)-max(a0, b0)) }
 
-// Touches says the shot plays some of the rule's range (any of it: the shot list shows the feedback a shot is near).
+// Touches says the shot plays the rule's range: more than ToleranceMs of it, the same bar as Violations, so the shot list shows on a
+// shot exactly the feedback that holds for it (a shot that only grazes a range can still get its own).
 func (r Rule) Touches(s timeline.Shot) bool {
-	return s.AssetID == r.AssetID && Overlap(s.Source.InMs, s.Source.OutMs, r.StartMs, r.EndMs) > 0
+	return s.AssetID == r.AssetID && Overlap(s.Source.InMs, s.Source.OutMs, r.StartMs, r.EndMs) > ToleranceMs
 }
 
 // Violation is a shot that plays a range the creator ruled out.
@@ -126,8 +127,8 @@ func Violations(shots []timeline.Shot, rules map[string][]Rule) []Violation {
 	var out []Violation
 	for _, s := range shots {
 		for _, r := range rules[s.AssetID] {
-			if ov := Overlap(s.Source.InMs, s.Source.OutMs, r.StartMs, r.EndMs); ov > ToleranceMs {
-				out = append(out, Violation{Shot: s, Rule: r, OverlapMs: ov})
+			if r.Touches(s) {
+				out = append(out, Violation{Shot: s, Rule: r, OverlapMs: Overlap(s.Source.InMs, s.Source.OutMs, r.StartMs, r.EndMs)})
 			}
 		}
 	}

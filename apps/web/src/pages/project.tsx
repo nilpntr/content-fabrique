@@ -58,7 +58,8 @@ export function ProjectPage({
   const run = useRun(runId);
   const runActive = isRunActive(run.data?.status);
   // A creator who asked for proofs sees the shot list next to the video and "Make it final" instead of the download.
-  const proofs = useStyle().data?.effective.proof_edits === "on";
+  const proofSetting = useStyle().data?.effective.proof_edits;
+  const proofs = proofSetting === "on";
   const stored = useRunArtifacts(runId, { wanted: run.data ? hasArtifactEvents(run.data.events ?? []) : false, status: run.data?.status });
   const artifacts = React.useMemo(() => runArtifacts(run.data?.events ?? [], stored.data), [run.data?.events, stored.data]);
 
@@ -170,6 +171,7 @@ export function ProjectPage({
           versions={versionList}
           runActive={runActive}
           detailed={details}
+          proof={proofSetting === undefined ? undefined : proofs}
           empty={runActive ? null : <FirstCut>{feedback}</FirstCut>}
           aside={({ version, openComments }) => {
             // The editor's note belongs to the version its run ended on; another version says what changed in it.

@@ -136,8 +136,8 @@ func TestTheMigrationLabelsTheOldClips(t *testing.T) {
 		t.Errorf("the hidden tags are still searched: %d", len(got))
 	}
 
-	// Down clears what the backfill wrote; up writes it again, the same.
-	if _, err := m.Down(ctx); err != nil {
+	// Down (to just before the backfill, past any later migration) clears what the backfill wrote; up writes it again, the same.
+	if _, err := m.DownTo(ctx, store.FacetBackfillVersion-1); err != nil {
 		t.Fatal(err)
 	}
 	if got := read("cable"); len(got.facets) != 0 || got.exercise != "" {

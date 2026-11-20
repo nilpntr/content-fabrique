@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { event, render } from "@/test-fixtures";
-import { isRunActive, mergeEvents, pickRender, runPollDelay } from "./project-hooks";
+import { isRunActive, mergeEvents, pickRender, previewsOf, runPollDelay } from "./project-hooks";
 
 test("a run is active until it has finished, and is polled while it is", () => {
   for (const status of ["queued", "running", "waiting_input"] as const) expect(isRunActive(status)).toBe(true);
@@ -35,4 +35,13 @@ test("of a version's renders, a ready one is shown, else one in progress, else t
   expect(pickRender([failed, working])?.id).toBe("ren_working");
   expect(pickRender([failed])?.id).toBe("ren_failed");
   expect(pickRender([])).toBeUndefined();
+});
+
+test("a creator who reviews proofs sees only proofs, and one who does not, only plain previews", () => {
+  const plain = render({ id: "ren_plain", status: "ready" });
+  const proof = render({ id: "ren_proof", status: "ready", proof: true });
+  expect(pickRender(previewsOf([plain, proof], true))?.id).toBe("ren_proof");
+  expect(pickRender(previewsOf([proof, plain], false))?.id).toBe("ren_plain");
+  expect(pickRender(previewsOf([plain], true))).toBeUndefined();
+  expect(previewsOf([plain, proof], undefined)).toHaveLength(2);
 });

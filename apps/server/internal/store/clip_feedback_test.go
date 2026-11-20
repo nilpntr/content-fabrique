@@ -11,6 +11,22 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
+func TestPlainFirstPrefersAPreviewWithoutShotNumbers(t *testing.T) {
+	ready := func(r store.Render) bool { return r.Status == store.RenderReady }
+	proof := store.Render{Status: store.RenderReady, Proof: true}
+	plain := store.Render{Status: store.RenderReady}
+	failed := store.Render{Status: store.RenderFailed}
+	if r := store.PlainFirst([]store.Render{proof, failed, plain}, ready); r == nil || r.Proof {
+		t.Errorf("a plain preview exists: got %+v", r)
+	}
+	if r := store.PlainFirst([]store.Render{failed, proof}, ready); r == nil || !r.Proof {
+		t.Errorf("only a proof: got %+v", r)
+	}
+	if r := store.PlainFirst([]store.Render{failed}, ready); r != nil {
+		t.Errorf("nothing usable: got %+v", r)
+	}
+}
+
 // proofSuite is part of repositorySuite, which TestRepository runs as the superuser and TestRoleSplit runs again as the app role (DML
 // rights; the app may delete clip feedback). It covers proof renders (a preview only, deduped apart from the plain preview) and the clip
 // feedback store: one row per thing said about one range, the tenancy rule, and what the composite foreign keys refuse.
@@ -98,10 +114,10 @@ func proofSuite(t *testing.T, st *store.Store, suffix string) {
 		if err != nil || first.ID.IsZero() || first.Kind != store.ClipNeverUse || first.ShotNumber != 5 {
 			t.Fatalf("save: %+v, %v", first, err)
 		}
-		// The same thing about the same range again is the same row, with the new note.
-		in.Note, in.ShotNumber = "blurry", 6
+		// The same thing about the same range again is the same row, with the new note and who said it last.
+		in.Note, in.ShotNumber, in.CreatedByID = "blurry", 6, "usr_other"
 		again, err := st.SaveClipFeedback(ctx, a.w.ID, in)
-		if err != nil || again.ID != first.ID || again.Note != "blurry" || again.ShotNumber != 6 {
+		if err != nil || again.ID != first.ID || again.Note != "blurry" || again.ShotNumber != 6 || again.CreatedByID != "usr_other" {
 			t.Fatalf("save again: %+v, %v", again, err)
 		}
 		later := in
@@ -119,6 +135,9 @@ func proofSuite(t *testing.T, st *store.Store, suffix string) {
 		}
 		if rows, err := st.ListClipFeedback(ctx, a.w.ID, []ids.AssetID{a.asset}, 1); err != nil || len(rows) != 1 {
 			t.Errorf("list with a limit: %d rows, %v", len(rows), err)
+		}
+		if rows, err := st.ListAllClipFeedback(ctx, a.w.ID, []ids.AssetID{a.asset}); err != nil || len(rows) != 2 {
+			t.Errorf("list all: %d rows, %v", len(rows), err)
 		}
 
 		// Tenancy: workspace B neither sees nor deletes A's rows, and cannot store feedback on A's clip or project.

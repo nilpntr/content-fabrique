@@ -257,9 +257,12 @@ export const fetchRenders = async (client: ApiClient, id: string, version: numbe
 export const fetchRender = async (client: ApiClient, id: string, signal?: AbortSignal): Promise<Render> =>
   unwrap(await client.GET("/v1/renders/{id}", { params: { path: { id } }, signal }));
 
-/** Queues a render (202), or returns the render that already waits, runs or is ready for that version and profile (200). */
-export const createRender = async (client: ApiClient, id: string, version: number, profile: RenderProfile): Promise<Render> =>
-  unwrap(await client.POST("/v1/projects/{id}/renders", { params: { path: { id } }, body: { version, profile } }));
+/**
+ * Queues a render (202), or returns the render that already waits, runs or is ready for that version, profile and proof (200). A
+ * preview is a proof (shot numbers burned in) when `proof` says so; left out, it follows the creator's `proof_edits` setting.
+ */
+export const createRender = async (client: ApiClient, id: string, version: number, profile: RenderProfile, proof?: boolean): Promise<Render> =>
+  unwrap(await client.POST("/v1/projects/{id}/renders", { params: { path: { id } }, body: proof === undefined ? { version, profile } : { version, profile, proof } }));
 
 // ── Proof edits and clip feedback ───────────────────────────────────────────
 

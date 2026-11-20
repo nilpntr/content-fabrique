@@ -118,6 +118,23 @@ func (s *Store) ListRenders(ctx context.Context, ws ids.WorkspaceID, project ids
 	return rows, mapErr(err)
 }
 
+// PlainFirst returns the first render of a list (newest first) that usable accepts, a plain preview before a proof: what measures or
+// judges the picture should not read the shot numbers of a proof when the same version has a render without them. Nil when none is
+// usable.
+func PlainFirst(renders []Render, usable func(Render) bool) *Render {
+	var proof *Render
+	for i := range renders {
+		switch r := &renders[i]; {
+		case !usable(*r):
+		case !r.Proof:
+			return r
+		case proof == nil:
+			proof = r
+		}
+	}
+	return proof
+}
+
 // CountRendersInFlight is how many renders of the workspace are waiting or running.
 func (s *Store) CountRendersInFlight(ctx context.Context, ws ids.WorkspaceID) (int, error) {
 	n, err := s.q.CountRendersInFlight(ctx, ws)

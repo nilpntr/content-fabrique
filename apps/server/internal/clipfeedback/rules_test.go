@@ -70,8 +70,8 @@ func TestViolationsHoldInEveryLaterEdit(t *testing.T) {
 	if d := vs[1].Detail(); !strings.Contains(d, "start at 6.0 s or later") || !strings.Contains(d, "in_ms to 6000") {
 		t.Errorf("start-later detail %q", d)
 	}
-	if !rules["ast_a"][0].Touches(shots[0]) || rules["ast_a"][0].Touches(shots[4]) {
-		t.Error("Touches: any overlap of the same clip, never another clip")
+	if rules["ast_a"][0].Touches(shots[0]) || !rules["ast_a"][0].Touches(shots[1]) || rules["ast_a"][0].Touches(shots[4]) {
+		t.Error("Touches: more than the tolerance of the same clip, never a graze, never another clip")
 	}
 	if p := rules["ast_b"][0].Plain(); p != "start that take at 6.0 s or later: do not play 4.0 s to 6.0 s" {
 		t.Errorf("plain %q", p)

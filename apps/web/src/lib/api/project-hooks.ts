@@ -325,6 +325,10 @@ export function pickRender(renders: readonly Render[]): Render | undefined {
   return renders.find((render) => render.status === "ready") ?? renders.find((render) => render.status === "queued" || render.status === "rendering") ?? renders[0];
 }
 
+/** The previews that count: only proofs, only plain ones, or (undefined) all of them. */
+export const previewsOf = (renders: readonly Render[], proof: boolean | undefined): Render[] =>
+  renders.filter((render) => proof === undefined || Boolean(render.proof) === proof);
+
 /** An answer that means the API has no such endpoint. */
 const isMissingEndpoint = (error: unknown) => error instanceof ApiError && (error.status === 404 || error.status === 405 || error.status === 501);
 
@@ -333,8 +337,11 @@ const isMissingEndpoint = (error: unknown) => error instanceof ApiError && (erro
  * (polled every 2 s while it works; its presigned URLs are renewed shortly before they expire). `request` queues one when
  * there is none (or the last failed). `refreshUrls` fetches the render again for fresh URLs, at most every 10 s: call it
  * when the video fails to load.
+ *
+ * `proof` is the creator's proof_edits setting once it is known: then only proofs (with shot numbers) or only plain previews count,
+ * and `request` asks for that kind, so the video next to the shot list always has the numbers. Undefined: any preview.
  */
-export function usePreviewRender(projectId: string, version: number | undefined) {
+export function usePreviewRender(projectId: string, version: number | undefined, proof?: boolean) {
   const { userId, orgId, ready } = useScope();
   const getClient = useApiClient();
   const queryClient = useQueryClient();
@@ -345,7 +352,7 @@ export function usePreviewRender(projectId: string, version: number | undefined)
     enabled: ready && version !== undefined,
     retry: (count, error) => !isMissingEndpoint(error) && retryUnlessClientError(count, error),
   });
-  const chosen = useMemo(() => pickRender(list.data ?? []), [list.data]);
+  const chosen = useMemo(() => pickRender(previewsOf(list.data ?? [], proof)), [list.data, proof]);
   const detailKey = [RENDER_QUERY_KEY, userId, orgId, chosen?.id];
   const detail = useQuery({
     queryKey: detailKey,
@@ -366,7 +373,7 @@ export function usePreviewRender(projectId: string, version: number | undefined)
 
   // The variable is the version asked for, so that the state below is the one of the version on screen, not of another that was asked for a moment ago.
   const request = useMutation({
-    mutationFn: (requested: number) => createRender(getClient(), projectId, requested, "preview"),
+    mutationFn: (requested: number) => createRender(getClient(), projectId, requested, "preview", proof),
     onSuccess: (render) => {
       // The render says which version it is of; that may no longer be the one on screen.
       const key = [RENDERS_QUERY_KEY, userId, orgId, projectId, render.timeline_version];
@@ -508,14 +515,14 @@ export function useShotList(projectId: string, version: number | undefined, { en
 }
 
 /**
- * Feedback on a shot ("never use it again", "start it later") and taking it back. Either answer changes the shot list of every
- * version that plays that clip, so all shot lists of the project are fetched again.
+ * Feedback on a shot ("never use it again", "start it later") and taking it back. Feedback holds for the clip in every project, so
+ * either answer changes the shot list of every version, of any project, that plays that clip: all shot lists are fetched again.
  */
-export function useClipFeedbackActions(projectId: string) {
+export function useClipFeedbackActions() {
   const { userId, orgId } = useScope();
   const getClient = useApiClient();
   const queryClient = useQueryClient();
-  const refresh = () => void queryClient.invalidateQueries({ queryKey: [SHOTS_QUERY_KEY, userId, orgId, projectId] });
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: [SHOTS_QUERY_KEY, userId, orgId] });
   const give = useMutation({ mutationFn: (body: GiveClipFeedbackRequest) => giveClipFeedback(getClient(), body), onSuccess: refresh });
   const remove = useMutation({ mutationFn: (id: string) => deleteClipFeedback(getClient(), id), onSuccess: refresh });
   return { give, remove };

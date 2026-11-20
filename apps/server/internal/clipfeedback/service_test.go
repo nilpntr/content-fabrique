@@ -72,6 +72,10 @@ func (f *fakeStore) ListClipFeedback(_ context.Context, ws ids.WorkspaceID, asse
 	return out[:min(len(out), limit)], nil
 }
 
+func (f *fakeStore) ListAllClipFeedback(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.ClipFeedback, error) {
+	return f.ListClipFeedback(ctx, ws, assets, 1<<30)
+}
+
 func (f *fakeStore) DeleteClipFeedback(_ context.Context, ws ids.WorkspaceID, id ids.ClipFeedbackID) error {
 	for i, r := range f.rows {
 		if r.ID == id && r.WorkspaceID == ws {

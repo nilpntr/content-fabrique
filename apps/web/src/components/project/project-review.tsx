@@ -31,6 +31,7 @@ export function ProjectReview({
   runActive = false,
   now,
   detailed = false,
+  proof,
   aside,
   empty,
 }: {
@@ -42,6 +43,8 @@ export function ProjectReview({
   now?: number;
   /** The technical side shows: effect badges and the beat grid on the timeline, frame stepping, the version list. */
   detailed?: boolean;
+  /** The creator reviews proofs (true) or plain previews (false); undefined until the style is known: any preview shows. */
+  proof?: boolean;
   /** Next to the video: what the editor made, what to change, the download. Gets the number of open comments too. */
   aside?: (context: ReviewContext & { openComments: number }) => React.ReactNode;
   /** Shown instead of the empty state while there is no version yet (the editor's progress, the box to start it). */
@@ -61,7 +64,7 @@ export function ProjectReview({
   const specs = useTimelineSpecs(project.id, needed);
   const specOf = new Map(needed.map((summary, index) => [summary.version, specs[index]]));
 
-  const preview = usePreviewRender(project.id, selected);
+  const preview = usePreviewRender(project.id, selected, proof);
   const renderState = preview.state;
   const readyRender = renderState.kind === "ready" ? renderState.render : undefined;
   const renderTimeMap = useRenderTimeMap(readyRender?.id, preview.timeMapUrl);

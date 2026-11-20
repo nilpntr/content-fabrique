@@ -416,9 +416,10 @@ func (r *run) execute(ctx context.Context) (finished, error) {
 	if err != nil {
 		return finished{}, fileErr(ReasonInvalidTimeline, err)
 	}
+	if r.render.Proof && profile.Name == render.ProfilePreview { // the row's check keeps proofs to previews
+		profile = render.Proof
+	}
 	profile.MotionFallback = r.p.cfg.MotionFallback
-	// A proof is the preview with the shot numbers burned in (render.Proof); the row's check keeps it to previews.
-	profile.ShotNumbers = r.render.Proof && profile.Name == render.ProfilePreview
 	inputs, err := st.ListRenderInputs(ctx, r.ws, r.render.ProjectID)
 	if err != nil {
 		return finished{}, fmt.Errorf("render inputs: %w", err)

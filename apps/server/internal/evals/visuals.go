@@ -68,14 +68,15 @@ func (p *Pictures) Sheet(ctx context.Context, t Target) (*Picture, error) {
 	if err != nil {
 		return nil, err
 	}
-	for i := range list {
-		if r := list[i]; r.Status == store.RenderReady && r.ContactSheetKey != nil && r.ObjectsPurgedAt == nil {
-			sheet, err := p.read(ctx, *r.ContactSheetKey, maxSheetBytes)
-			if err != nil {
-				return nil, err
-			}
-			return &Picture{Label: "contact sheet", JPEG: sheet}, nil
+	// A plain preview before a proof: the judge should not see the proof's shot numbers as text of the edit.
+	if r := store.PlainFirst(list, func(r store.Render) bool {
+		return r.Status == store.RenderReady && r.ContactSheetKey != nil && r.ObjectsPurgedAt == nil
+	}); r != nil {
+		sheet, err := p.read(ctx, *r.ContactSheetKey, maxSheetBytes)
+		if err != nil {
+			return nil, err
 		}
+		return &Picture{Label: "contact sheet", JPEG: sheet}, nil
 	}
 	return nil, ErrNoRender
 }
@@ -86,13 +87,9 @@ func (p *Pictures) Render(ctx context.Context, t Target, spec *timeline.Spec) (*
 	if err != nil {
 		return nil, nil, err
 	}
-	var r *store.Render
-	for i := range list {
-		if list[i].Status == store.RenderReady && list[i].ContactSheetKey != nil && list[i].Mp4Key != nil && list[i].ObjectsPurgedAt == nil {
-			r = &list[i]
-			break
-		}
-	}
+	r := store.PlainFirst(list, func(r store.Render) bool {
+		return r.Status == store.RenderReady && r.ContactSheetKey != nil && r.Mp4Key != nil && r.ObjectsPurgedAt == nil
+	})
 	if r == nil {
 		return nil, nil, ErrNoRender
 	}

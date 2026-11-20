@@ -14,7 +14,7 @@ import { feedbackWords, SHOTS_HINT, START_LATER_SECONDS, shotLine } from "./shot
  */
 export function ShotListCard({ projectId, version, className }: { projectId: string; version: number; className?: string }) {
   const shots = useShotList(projectId, version);
-  const { give, remove } = useClipFeedbackActions(projectId);
+  const { give, remove } = useClipFeedbackActions();
   const headingId = React.useId();
   const error = give.error ?? remove.error;
   return (

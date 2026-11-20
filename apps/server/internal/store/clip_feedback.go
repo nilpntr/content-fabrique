@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store/db"
@@ -69,6 +70,34 @@ func (s *Store) ListClipFeedback(ctx context.Context, ws ids.WorkspaceID, assets
 	}
 	rows, err := s.q.ListClipFeedback(ctx, db.ListClipFeedbackParams{WorkspaceID: ws, AssetIds: list, RowLimit: int32(min(limit, maxClipFeedbackRowLimit))}) //nolint:gosec // capped
 	return rows, mapErr(err)
+}
+
+// maxClipFeedbackRows bounds ListAllClipFeedback: far more than a creator ever gives, a guard against a runaway loop only.
+const maxClipFeedbackRows = 100_000
+
+// ListAllClipFeedback returns every row of the workspace's feedback on the given clips (on every clip when assets is empty), newest
+// first, page by page: what the editor and its checks apply must not miss an old row. More than maxClipFeedbackRows is an error.
+func (s *Store) ListAllClipFeedback(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]ClipFeedback, error) {
+	list := make([]uuid.UUID, len(assets))
+	for i, a := range assets {
+		list[i] = a.UUID
+	}
+	var out []ClipFeedback
+	p := db.ListClipFeedbackParams{WorkspaceID: ws, AssetIds: list, RowLimit: maxClipFeedbackRowLimit}
+	for {
+		rows, err := s.q.ListClipFeedback(ctx, p)
+		if err != nil {
+			return nil, mapErr(err)
+		}
+		out = append(out, rows...)
+		if len(rows) < maxClipFeedbackRowLimit {
+			return out, nil
+		}
+		if len(out) >= maxClipFeedbackRows {
+			return nil, fmt.Errorf("store: over %d clip feedback rows", maxClipFeedbackRows)
+		}
+		p.Before = pgtype.UUID{Bytes: rows[len(rows)-1].ID.UUID, Valid: true}
+	}
 }
 
 // GetClipFeedback returns one row of the workspace's feedback, or ErrNotFound.
