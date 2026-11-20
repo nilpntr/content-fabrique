@@ -50,7 +50,7 @@ func (w *ResearchSweepWorker) Work(ctx context.Context, _ *river.Job[ResearchSwe
 	if ret == (research.Retention{}) {
 		ret = research.DefaultRetention()
 	}
-	res, err := w.deps.Store.SweepResearch(ctx, w.deps.now(), ret.Default)
+	res, err := w.deps.Store.SweepResearch(ctx, w.deps.now(), ret)
 	if err != nil {
 		return fmt.Errorf("sweep research: %w", err)
 	}

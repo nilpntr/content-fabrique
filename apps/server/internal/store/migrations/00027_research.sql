@@ -24,6 +24,11 @@
 -- research_findings:    a claim of the playbook, always with the evidence it rests on (at least one id; there is no foreign key on an array,
 --                         so the sweeper deletes the findings of deleted evidence).
 
+-- research_forgotten:   the tombstones of `cfctl research forget`: the platform and the SHA-256 of the normalized handle, nothing else. A creator
+--                         with a tombstone is refused by the store (creator and post), so a forgotten person is never ingested again.
+--                         `forget --undo` removes the tombstone. The hash is of a public handle, so it hides nothing from someone who
+--                         already has the handle; it only keeps the handle itself out of the table.
+
 -- +goose Up
 
 CREATE TABLE research_creators (
@@ -40,7 +45,7 @@ CREATE TABLE research_creators (
     updated_at   timestamptz      NOT NULL DEFAULT now(),
     CONSTRAINT research_creators_key UNIQUE (platform, handle),
     CONSTRAINT research_creators_platform_check CHECK (platform IN ('tiktok', 'instagram', 'youtube')),
-    CONSTRAINT research_creators_handle_check CHECK (handle ~ '^[a-z0-9._]{1,64}$'),
+    CONSTRAINT research_creators_handle_check CHECK (handle ~ '^[a-z0-9._][a-z0-9._-]{0,63}$'),
     CONSTRAINT research_creators_url_check CHECK (profile_url ~ '^https://[^[:space:]]{4,255}$'),
     CONSTRAINT research_creators_why_check CHECK (char_length(why_similar) <= 500),
     CONSTRAINT research_creators_similarity_check CHECK (similarity BETWEEN 0 AND 1),
@@ -66,7 +71,7 @@ CREATE TABLE research_posts (
     CONSTRAINT research_posts_key UNIQUE (platform, external_id),
     CONSTRAINT research_posts_url_key UNIQUE (url),
     CONSTRAINT research_posts_platform_check CHECK (platform IN ('tiktok', 'instagram', 'youtube')),
-    CONSTRAINT research_posts_url_check CHECK (url ~ '^https://[^[:space:]?#]{4,255}$'),
+    CONSTRAINT research_posts_url_check CHECK (url ~ '^https://[^[:space:]?#]{4,255}(\?v=[A-Za-z0-9_-]{11})?$'),
     CONSTRAINT research_posts_external_id_check CHECK (external_id ~ '^[A-Za-z0-9_-]{1,64}$'),
     CONSTRAINT research_posts_posted_check CHECK ((posted_at IS NULL) = (posted_at_source IS NULL)),
     CONSTRAINT research_posts_posted_source_check CHECK (posted_at_source IS NULL OR posted_at_source IN ('id', 'api', 'manual')),
@@ -107,8 +112,8 @@ CREATE TABLE research_evidence (
     -- The hash of the response (hex SHA-256), never the response.
     CONSTRAINT research_evidence_raw_ref_check CHECK (raw_ref IS NULL OR raw_ref ~ '^[0-9a-f]{64}$'),
     CONSTRAINT research_evidence_retain_check CHECK (retain_until > observed_at),
-    -- The YouTube API terms: refresh or delete within 30 days.
-    CONSTRAINT research_evidence_youtube_retain_check CHECK (source <> 'youtube_api' OR retain_until <= observed_at + interval '30 days')
+    -- The YouTube API terms: refresh or delete within 30 days. Counted in seconds, so the session time zone (DST) cannot change the answer.
+    CONSTRAINT research_evidence_youtube_retain_check CHECK (source <> 'youtube_api' OR extract(epoch FROM (retain_until - observed_at)) <= 2592000)
 );
 
 CREATE INDEX research_evidence_retain_idx ON research_evidence (retain_until);
@@ -177,8 +182,20 @@ CREATE INDEX research_findings_evidence_idx ON research_findings USING gin (evid
 
 SELECT cf_grant_app_dml('research_findings');
 
+CREATE TABLE research_forgotten (
+    platform    text        NOT NULL,
+    handle_hash text        NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (platform, handle_hash),
+    CONSTRAINT research_forgotten_platform_check CHECK (platform IN ('tiktok', 'instagram', 'youtube')),
+    CONSTRAINT research_forgotten_hash_check CHECK (handle_hash ~ '^[0-9a-f]{64}$')
+);
+
+SELECT cf_grant_app_dml('research_forgotten');
+
 -- +goose Down
 
+DROP TABLE research_forgotten;
 DROP TABLE research_findings;
 DROP TABLE research_annotations;
 DROP TABLE research_evidence;

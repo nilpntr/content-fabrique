@@ -42,6 +42,23 @@ SELECT platform FROM research_posts WHERE id = @id;
 -- name: GetResearchCreatorPlatform :one
 SELECT platform FROM research_creators WHERE id = @id;
 
+-- name: GetResearchCreatorByID :one
+SELECT * FROM research_creators WHERE id = @id;
+
+-- name: CountResearchEvidenceIDs :one
+SELECT count(*)::bigint FROM research_evidence WHERE id = ANY(@ids::uuid[]);
+
+-- The tombstones of `forget`.
+
+-- name: InsertResearchForgotten :exec
+INSERT INTO research_forgotten (platform, handle_hash) VALUES (@platform, @handle_hash) ON CONFLICT DO NOTHING;
+
+-- name: IsResearchForgotten :one
+SELECT EXISTS (SELECT 1 FROM research_forgotten WHERE platform = @platform AND handle_hash = @handle_hash);
+
+-- name: DeleteResearchForgotten :execrows
+DELETE FROM research_forgotten WHERE platform = @platform AND handle_hash = @handle_hash;
+
 -- name: InsertResearchEvidence :one
 INSERT INTO research_evidence (post_id, creator_id, source, method, observed_at, observer, metrics, raw_ref, retain_until, run_id)
 VALUES (@post_id, @creator_id, @source, @method, @observed_at, @observer, @metrics, @raw_ref, @retain_until, @run_id)
@@ -73,8 +90,21 @@ SELECT * FROM research_findings WHERE playbook_version = @playbook_version ORDER
 
 -- The retention sweep. Each step is a query of its own so that they run in one transaction (store.SweepResearch).
 
+-- An observation goes when its own retain_until has passed, or when the retention in force now would already have deleted it (the setting
+-- was lowered): YouTube rows are cut at ytCutoff, every other source at defaultCutoff.
 -- name: DeleteExpiredResearchEvidence :many
-DELETE FROM research_evidence WHERE retain_until <= @now RETURNING id;
+DELETE FROM research_evidence
+WHERE retain_until <= @now
+   OR (source = 'youtube_api' AND observed_at <= @youtube_cutoff)
+   OR (source <> 'youtube_api' AND observed_at <= @default_cutoff)
+RETURNING id;
+
+-- A finding whose evidence is gone (any id no longer exists) cannot be checked any more, and a finding older than the retention is data
+-- about third parties too: both go, and the playbook is regenerated.
+-- name: DeleteOrphanResearchFindings :execrows
+DELETE FROM research_findings f
+WHERE f.created_at <= @findings_cutoff
+   OR EXISTS (SELECT 1 FROM unnest(f.evidence_ids) AS e(id) WHERE NOT EXISTS (SELECT 1 FROM research_evidence r WHERE r.id = e.id));
 
 -- name: DeleteResearchFindingsByEvidence :execrows
 DELETE FROM research_findings WHERE evidence_ids && @evidence_ids::uuid[];

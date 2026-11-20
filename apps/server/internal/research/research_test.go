@@ -114,6 +114,9 @@ func TestParsePostURL(t *testing.T) {
 		"https://www.tiktok.com/@Some.Creator/video/7301234567890123456?is_from_webapp=1": {Platform: research.TikTok, ExternalID: "7301234567890123456", Handle: "some.creator", URL: "https://www.tiktok.com/@Some.Creator/video/7301234567890123456"},
 		"http://tiktok.com/@a_b/video/1234567890/":                                        {Platform: research.TikTok, ExternalID: "1234567890", Handle: "a_b", URL: "https://www.tiktok.com/@a_b/video/1234567890"},
 		"https://www.instagram.com/reel/C1a2B3c4D5e/?igsh=x":                              {Platform: research.Instagram, ExternalID: "C1a2B3c4D5e", URL: "https://www.instagram.com/reel/C1a2B3c4D5e/"},
+		"https://www.instagram.com/reel/p/CxYz12345/":                                     {Platform: research.Instagram, ExternalID: "CxYz12345", URL: "https://www.instagram.com/p/CxYz12345/"},
+		"https://www.instagram.com/p/reel/CxYz12345/":                                     {Platform: research.Instagram, ExternalID: "CxYz12345", URL: "https://www.instagram.com/reel/CxYz12345/"},
+		"https://www.instagram.com/tv/CxYz12345/":                                         {Platform: research.Instagram, ExternalID: "CxYz12345", URL: "https://www.instagram.com/tv/CxYz12345/"},
 		"https://www.instagram.com/some.one/p/CxYz12345/":                                 {Platform: research.Instagram, ExternalID: "CxYz12345", URL: "https://www.instagram.com/p/CxYz12345/"},
 		"https://www.youtube.com/shorts/abcDEF12345":                                      {Platform: research.YouTube, ExternalID: "abcDEF12345", URL: "https://www.youtube.com/shorts/abcDEF12345"},
 		"https://youtu.be/abcDEF12345?t=3":                                                {Platform: research.YouTube, ExternalID: "abcDEF12345", URL: "https://www.youtube.com/watch?v=abcDEF12345"},
@@ -153,7 +156,16 @@ func TestHandleAndProfileURL(t *testing.T) {
 	if h, err := research.NormalizeHandle(" @Some_One.99 "); err != nil || h != "some_one.99" {
 		t.Fatalf("NormalizeHandle = %q, %v", h, err)
 	}
-	for _, bad := range []string{"", "@", "a b", "a/b", "https://x.com/a", strings.Repeat("a", 65), "é"} {
+	if h, err := research.NormalizeHandle("@My-Channel_1"); err != nil || h != "my-channel_1" {
+		t.Fatalf("a hyphenated handle: %q %v", h, err)
+	}
+	a, _ := research.HandleHash(research.TikTok, "@Gino")
+	b, _ := research.HandleHash(research.TikTok, "gino")
+	c, _ := research.HandleHash(research.YouTube, "gino")
+	if a != b || a == c || len(a) != 64 || strings.Contains(a, "gino") {
+		t.Fatalf("HandleHash: %s %s %s", a, b, c)
+	}
+	for _, bad := range []string{"", "@", "-lead", "a b", "a/b", "https://x.com/a", strings.Repeat("a", 65), "é"} {
 		if _, err := research.NormalizeHandle(bad); err == nil {
 			t.Errorf("NormalizeHandle(%q) accepted", bad)
 		}
@@ -221,6 +233,29 @@ func TestCheckFixtureRefusesMedia(t *testing.T) {
 	good := `{"title":"A caption #fitness","author_name":"x","author_url":"https://www.tiktok.com/@x","thumbnail_url":"https://p16.example.com/thumb.jpeg?x=1","html":"<blockquote></blockquote>","stats":{"views":10}}`
 	if err := research.CheckFixture([]byte(good)); err != nil {
 		t.Fatalf("a metadata fixture: %v", err)
+	}
+	// Content, not just the extension: video hosts, mime types and links buried in longer strings (an oEmbed html).
+	if err := research.CheckFixture([]byte(`{"thumbnail_url":"https://p16-sign-va.tiktokcdn.com/obj/tos/x~tplv-resize:200.jpeg","html":"<blockquote><a href=\"https://www.tiktok.com/@a/video/1234567\">x</a></blockquote><script async src=\"https://www.tiktok.com/embed.js\"></script>"}`)); err != nil {
+		t.Fatalf("thumbnails and embeds are metadata: %v", err)
+	}
+	for name, doc := range map[string]string{
+		"tiktok video host":     `{"url":"https://v16-webapp.tiktok.com/abc/def/?mime_type=video_mp4&br=1"}`,
+		"tiktok cdn video host": `{"u":"https://v19.tiktokcdn.com/path/without/extension"}`,
+		"youtube video host":    `{"u":"https://rr3---sn-abc.googlevideo.com/videoplayback?id=1"}`,
+		"instagram video host":  `{"u":"https://video.cdninstagram.com/v/t50/x"}`,
+		"facebook video host":   `{"u":"https://video-ams4-1.xx.fbcdn.net/v/t42/x"}`,
+		"mime type in a query":  `{"u":"https://example.com/x?mime_type=video"}`,
+		"video_mp4 in text":     `{"note":"format video_mp4 at 720p"}`,
+		"play_addr in text":     `{"note":"see play_addr.url_list"}`,
+		"download_addr in text": `{"note":"download_addr"}`,
+		"mp4 link inside html":  `{"html":"<div>watch <a href=\"https://cdn.example.com/a/b.mp4?x=1\">here</a></div>"}`,
+		"m3u8 link inside text": `{"note":"stream at https://cdn.example.com/live/index.m3u8 now"}`,
+		"video tag in html":     `{"html":"<video src=x></video>"}`,
+		"video mime type":       `{"type":"video/mp4"}`,
+	} {
+		if err := research.CheckFixture([]byte(doc)); !errors.Is(err, research.ErrMedia) {
+			t.Errorf("%s: err = %v, want ErrMedia", name, err)
+		}
 	}
 	bad := map[string]string{
 		"media_url key":        `{"media_url":"https://example.com/a"}`,

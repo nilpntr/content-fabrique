@@ -14,6 +14,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countResearchEvidenceIDs = `-- name: CountResearchEvidenceIDs :one
+SELECT count(*)::bigint FROM research_evidence WHERE id = ANY($1::uuid[])
+`
+
+func (q *Queries) CountResearchEvidenceIDs(ctx context.Context, ids []uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countResearchEvidenceIDs, ids)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countResearchOfCreator = `-- name: CountResearchOfCreator :one
 SELECT
     (SELECT count(*) FROM research_posts p WHERE p.creator_id = $1)::bigint AS posts,
@@ -36,12 +47,24 @@ func (q *Queries) CountResearchOfCreator(ctx context.Context, creatorID uuid.UUI
 
 const deleteExpiredResearchEvidence = `-- name: DeleteExpiredResearchEvidence :many
 
-DELETE FROM research_evidence WHERE retain_until <= $1 RETURNING id
+DELETE FROM research_evidence
+WHERE retain_until <= $1
+   OR (source = 'youtube_api' AND observed_at <= $2)
+   OR (source <> 'youtube_api' AND observed_at <= $3)
+RETURNING id
 `
 
+type DeleteExpiredResearchEvidenceParams struct {
+	Now           time.Time
+	YoutubeCutoff time.Time
+	DefaultCutoff time.Time
+}
+
 // The retention sweep. Each step is a query of its own so that they run in one transaction (store.SweepResearch).
-func (q *Queries) DeleteExpiredResearchEvidence(ctx context.Context, now time.Time) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, deleteExpiredResearchEvidence, now)
+// An observation goes when its own retain_until has passed, or when the retention in force now would already have deleted it (the setting
+// was lowered): YouTube rows are cut at ytCutoff, every other source at defaultCutoff.
+func (q *Queries) DeleteExpiredResearchEvidence(ctx context.Context, arg DeleteExpiredResearchEvidenceParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, deleteExpiredResearchEvidence, arg.Now, arg.YoutubeCutoff, arg.DefaultCutoff)
 	if err != nil {
 		return nil, err
 	}
@@ -71,6 +94,22 @@ WHERE c.status <> 'approved'
 // A candidate or dropped creator with no post and no observation, and untouched for the retention time, is only a handle: delete it.
 func (q *Queries) DeleteIdleResearchCreators(ctx context.Context, before time.Time) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteIdleResearchCreators, before)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteOrphanResearchFindings = `-- name: DeleteOrphanResearchFindings :execrows
+DELETE FROM research_findings f
+WHERE f.created_at <= $1
+   OR EXISTS (SELECT 1 FROM unnest(f.evidence_ids) AS e(id) WHERE NOT EXISTS (SELECT 1 FROM research_evidence r WHERE r.id = e.id))
+`
+
+// A finding whose evidence is gone (any id no longer exists) cannot be checked any more, and a finding older than the retention is data
+// about third parties too: both go, and the playbook is regenerated.
+func (q *Queries) DeleteOrphanResearchFindings(ctx context.Context, findingsCutoff time.Time) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOrphanResearchFindings, findingsCutoff)
 	if err != nil {
 		return 0, err
 	}
@@ -117,6 +156,23 @@ func (q *Queries) DeleteResearchFindingsByEvidence(ctx context.Context, evidence
 	return result.RowsAffected(), nil
 }
 
+const deleteResearchForgotten = `-- name: DeleteResearchForgotten :execrows
+DELETE FROM research_forgotten WHERE platform = $1 AND handle_hash = $2
+`
+
+type DeleteResearchForgottenParams struct {
+	Platform   string
+	HandleHash string
+}
+
+func (q *Queries) DeleteResearchForgotten(ctx context.Context, arg DeleteResearchForgottenParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteResearchForgotten, arg.Platform, arg.HandleHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getResearchCreator = `-- name: GetResearchCreator :one
 SELECT id, platform, handle, profile_url, why_similar, similarity, status, approved_by, approved_at, created_at, updated_at FROM research_creators WHERE platform = $1 AND handle = $2
 `
@@ -128,6 +184,29 @@ type GetResearchCreatorParams struct {
 
 func (q *Queries) GetResearchCreator(ctx context.Context, arg GetResearchCreatorParams) (ResearchCreator, error) {
 	row := q.db.QueryRow(ctx, getResearchCreator, arg.Platform, arg.Handle)
+	var i ResearchCreator
+	err := row.Scan(
+		&i.ID,
+		&i.Platform,
+		&i.Handle,
+		&i.ProfileUrl,
+		&i.WhySimilar,
+		&i.Similarity,
+		&i.Status,
+		&i.ApprovedBy,
+		&i.ApprovedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getResearchCreatorByID = `-- name: GetResearchCreatorByID :one
+SELECT id, platform, handle, profile_url, why_similar, similarity, status, approved_by, approved_at, created_at, updated_at FROM research_creators WHERE id = $1
+`
+
+func (q *Queries) GetResearchCreatorByID(ctx context.Context, id uuid.UUID) (ResearchCreator, error) {
+	row := q.db.QueryRow(ctx, getResearchCreatorByID, id)
 	var i ResearchCreator
 	err := row.Scan(
 		&i.ID,
@@ -283,6 +362,38 @@ func (q *Queries) InsertResearchFinding(ctx context.Context, arg InsertResearchF
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const insertResearchForgotten = `-- name: InsertResearchForgotten :exec
+
+INSERT INTO research_forgotten (platform, handle_hash) VALUES ($1, $2) ON CONFLICT DO NOTHING
+`
+
+type InsertResearchForgottenParams struct {
+	Platform   string
+	HandleHash string
+}
+
+// The tombstones of `forget`.
+func (q *Queries) InsertResearchForgotten(ctx context.Context, arg InsertResearchForgottenParams) error {
+	_, err := q.db.Exec(ctx, insertResearchForgotten, arg.Platform, arg.HandleHash)
+	return err
+}
+
+const isResearchForgotten = `-- name: IsResearchForgotten :one
+SELECT EXISTS (SELECT 1 FROM research_forgotten WHERE platform = $1 AND handle_hash = $2)
+`
+
+type IsResearchForgottenParams struct {
+	Platform   string
+	HandleHash string
+}
+
+func (q *Queries) IsResearchForgotten(ctx context.Context, arg IsResearchForgottenParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isResearchForgotten, arg.Platform, arg.HandleHash)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const listResearchAnnotationsForPost = `-- name: ListResearchAnnotationsForPost :many

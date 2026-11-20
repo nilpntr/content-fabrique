@@ -9,12 +9,11 @@ import (
 	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/research"
-	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
 const researchUsage = `Usage:
-  cfctl research sources
-  cfctl research forget <handle> [--platform tiktok|instagram|youtube] [--yes] [--allow-production] [--env-file <path>]
+  cfctl research sources [--env-file <path>]
+  cfctl research forget <handle> [--platform tiktok|instagram|youtube] [--undo] [--yes] [--allow-production] [--env-file <path>]
   cfctl research sweep [--yes] [--allow-production] [--env-file <path>]
 
 The creator research engine (docs/05-decisions.md D-41) keeps links, metadata, short notes and our own derived numbers about other
@@ -24,12 +23,14 @@ everything on a timer.
   sources   print the allow-list of sources (each with the methods, metrics and platforms it may use) and the retention in force
             (RESEARCH_RETENTION_DAYS, default 365; RESEARCH_YOUTUBE_RETENTION_DAYS, default and maximum 30). No database.
   forget    the takedown: delete the creator with this handle (on one platform, or on every platform without --platform), their posts,
-            annotations and evidence, and the findings that rested on that evidence. It cannot be undone. Exit 1 when no creator has the
-            handle. Run it on request, in any environment: production needs --allow-production and --yes.
+            annotations and evidence, and the findings that rested on that evidence, and keep a tombstone (the platform and a hash of the
+            handle, nothing else) so the creator is never ingested again, even if we held no data on them. The data cannot be brought
+            back. Run it on request, in any environment: production needs --allow-production and --yes.
   sweep     delete now what the daily research_sweep job would delete: observations past their retain_until, the findings, posts and idle
             candidate creators left without evidence. Safe to run twice.
 
   --platform          limit forget to one platform
+  --undo              with forget: remove the tombstone, so the creator may be ingested again (no data comes back)
   --yes               needed unless CF_ENV is local or ci and the database is on this machine
   --allow-production  needed in addition to --yes when CF_ENV=production
   --env-file          the env file; default .env at the repository root
@@ -45,7 +46,7 @@ func cmdResearch(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 		_, _ = fmt.Fprint(stdout, researchUsage)
 		return 0
 	case "sources":
-		return cmdResearchSources(stdout, stderr, lookup)
+		return cmdResearchSources(args[1:], stdout, stderr, lookup)
 	case "forget":
 		return cmdResearchForget(args[1:], stdout, stderr, lookup, deps)
 	case "sweep":
@@ -55,12 +56,29 @@ func cmdResearch(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 	return 2
 }
 
-func cmdResearchSources(stdout, stderr io.Writer, lookup lookupEnv) int {
-	ret, err := research.LoadRetention(func(k string) string { v, _ := lookup(k); return v })
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "cfctl research sources: %v\n", err)
+func cmdResearchSources(args []string, stdout, stderr io.Writer, lookup lookupEnv) int {
+	const name = "research sources"
+	flags := flag.NewFlagSet(name, flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	flags.Usage = func() { _, _ = fmt.Fprint(stderr, researchUsage) }
+	envFileArg := flags.String("env-file", "", "env file")
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 2
 	}
+	// The same env file, with the same precedence, as `sweep`: the retention printed is the retention the sweep uses.
+	env, code := loadAgentEnv(name, *envFileArg, stdout, stderr, lookup)
+	if code != 0 {
+		return code
+	}
+	ret, err := research.LoadRetention(env.get)
+	if err != nil {
+		_, _ = fmt.Fprintf(env.err, "cfctl %s: %v\n", name, err)
+		return 2
+	}
+	stdout = env.out
 	_, _ = fmt.Fprintln(stdout, "Allowed sources (a source that is not listed cannot write evidence):")
 	for _, s := range research.Sources() {
 		methods := make([]string, 0, 2)
@@ -90,6 +108,7 @@ func cmdResearchForget(args []string, stdout, stderr io.Writer, lookup lookupEnv
 	envFileArg := flags.String("env-file", "", "env file")
 	yes := flags.Bool("yes", false, "confirm outside plain local development")
 	allowProd := flags.Bool("allow-production", false, "allow CF_ENV=production")
+	undo := flags.Bool("undo", false, "remove the tombstone")
 	var handle string
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		handle, args = args[0], args[1:]
@@ -138,16 +157,21 @@ func cmdResearchForget(args []string, stdout, stderr io.Writer, lookup lookupEnv
 		return code
 	}
 	defer st.Close()
+	if *undo {
+		n, err := st.UnforgetResearchCreator(ctx, platform, h)
+		if err != nil {
+			_, _ = fmt.Fprintf(env.err, "cfctl %s: %v\n", name, err)
+			return 1
+		}
+		_, _ = fmt.Fprintf(env.out, "removed %d tombstone(s) for %q; no data was brought back\n", n, h)
+		return 0
+	}
 	res, err := st.ForgetResearchCreator(ctx, platform, h)
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		_, _ = fmt.Fprintf(env.err, "cfctl %s: no creator with the handle %q\n", name, h)
-		return 1
-	case err != nil:
+	if err != nil {
 		_, _ = fmt.Fprintf(env.err, "cfctl %s: %v\n", name, err)
 		return 1
 	}
-	_, _ = fmt.Fprintf(env.out, "forgot %q: %d creator(s), %d post(s), %d annotation(s), %d observation(s), %d finding(s)\n",
+	_, _ = fmt.Fprintf(env.out, "forgot %q: %d creator(s), %d post(s), %d annotation(s), %d observation(s), %d finding(s); the handle is now blocked from ingestion\n",
 		h, res.Creators, res.Posts, res.Annotations, res.Evidence, res.Findings)
 	return 0
 }
@@ -191,7 +215,7 @@ func cmdResearchSweep(args []string, stdout, stderr io.Writer, lookup lookupEnv,
 		return code
 	}
 	defer st.Close()
-	res, err := st.SweepResearch(ctx, time.Now(), ret.Default)
+	res, err := st.SweepResearch(ctx, time.Now(), ret)
 	if err != nil {
 		_, _ = fmt.Fprintf(env.err, "cfctl %s: %v\n", name, err)
 		return 1

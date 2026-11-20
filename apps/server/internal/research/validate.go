@@ -1,6 +1,8 @@
 package research
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
@@ -25,7 +27,7 @@ type PostRef struct {
 
 var (
 	tiktokPath    = regexp.MustCompile(`^/@([A-Za-z0-9._]{1,64})/video/(\d{6,25})/?$`)
-	instagramPath = regexp.MustCompile(`^(?:/[A-Za-z0-9._]{1,64})?/(?:p|reel|tv)/([A-Za-z0-9_-]{5,32})/?$`)
+	instagramPath = regexp.MustCompile(`^(?:/[A-Za-z0-9._]{1,64})?/(p|reel|tv)/([A-Za-z0-9_-]{5,32})/?$`)
 	youtubeShorts = regexp.MustCompile(`^/shorts/([A-Za-z0-9_-]{11})/?$`)
 	youtubeID     = regexp.MustCompile(`^[A-Za-z0-9_-]{11}$`)
 )
@@ -52,14 +54,7 @@ func ParsePostURL(raw string) (PostRef, error) {
 		}
 	case "instagram.com":
 		if m := instagramPath.FindStringSubmatch(path); m != nil {
-			kind := "p"
-			switch {
-			case strings.Contains(path, "/reel/"):
-				kind = "reel"
-			case strings.Contains(path, "/tv/"):
-				kind = "tv"
-			}
-			return PostRef{Platform: Instagram, ExternalID: m[1], URL: "https://www.instagram.com/" + kind + "/" + m[1] + "/"}, nil
+			return PostRef{Platform: Instagram, ExternalID: m[2], URL: "https://www.instagram.com/" + m[1] + "/" + m[2] + "/"}, nil
 		}
 	case "youtube.com":
 		if m := youtubeShorts.FindStringSubmatch(path); m != nil {
@@ -85,15 +80,27 @@ func clip(s string) string {
 	return s
 }
 
-var handleRe = regexp.MustCompile(`^[a-z0-9._]{1,64}$`)
+// handleRe is a plain handle: letters, digits, dot and underscore, and hyphens after the first character (YouTube handles have them).
+var handleRe = regexp.MustCompile(`^[a-z0-9._][a-z0-9._-]{0,63}$`)
 
 // NormalizeHandle lower-cases a creator handle and removes the @. It refuses anything that is not a plain handle.
 func NormalizeHandle(h string) (string, error) {
 	h = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(h), "@"))
 	if !handleRe.MatchString(h) {
-		return "", fmt.Errorf("research: %q is not a creator handle (letters, digits, dot and underscore, at most 64)", clip(h))
+		return "", fmt.Errorf("research: %q is not a creator handle (letters, digits, dot, underscore and hyphen, at most 64)", clip(h))
 	}
 	return h, nil
+}
+
+// HandleHash is what a takedown keeps of a creator: the SHA-256 (hex) of the platform and the normalized handle. The same handle on
+// another platform is another person, so the platform is part of the hash.
+func HandleHash(p Platform, handle string) (string, error) {
+	h, err := NormalizeHandle(handle)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(string(p) + ":" + h))
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // ProfileURL returns the canonical profile link of a handle. Every profile link we store is built here, never taken from a response.

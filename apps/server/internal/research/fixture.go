@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"path"
+	"regexp"
 	"strings"
 )
 
@@ -62,28 +64,61 @@ func walk(at string, v any) error {
 			}
 		}
 	case string:
-		l := strings.ToLower(strings.TrimSpace(x))
-		switch {
-		case strings.HasPrefix(l, "data:"):
-			return fmt.Errorf("%w: data URI at %s", ErrMedia, at)
-		case len(x) > MaxFixtureString:
-			return fmt.Errorf("%w: string of %d characters at %s", ErrMedia, len(x), at)
-		case isLink(l) && hasMediaExtension(l):
-			return fmt.Errorf("%w: link to a media file at %s", ErrMedia, at)
+		if err := checkString(at, x); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func isLink(s string) bool {
-	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
+// mediaMarkers are fragments that say a string describes video or audio content, wherever they sit in it (a query string, an embed's
+// HTML, a pasted JSON string).
+var mediaMarkers = []string{
+	"mime_type=video", "mime=video", "mime_type=audio", "video/mp4", "video/webm", "video/quicktime", "application/x-mpegurl", "audio/mpeg",
+	"video_mp4", "play_addr", "playaddr", "download_addr", "downloadaddr", "<video", "<source ",
 }
 
-func hasMediaExtension(link string) bool {
-	if i := strings.IndexAny(link, "?#"); i >= 0 {
-		link = link[:i]
+// videoHosts are the hosts that serve video files: a URL on one of them is refused whatever its path says. pictureHosts (thumbnails,
+// avatars) are not refused for their host, because oEmbed gives a thumbnail link; they are judged by their path.
+var videoHosts = regexp.MustCompile(`(?i)^(` +
+	`v\d+[a-z0-9-]*\.(tiktokcdn[a-z-]*\.com|tiktok\.com|tiktokv\.com|muscdn\.com|byteoversea\.com)` + // v16-webapp.tiktok.com, v19.tiktokcdn.com
+	`|([a-z0-9-]+\.)*googlevideo\.com` +
+	`|video[a-z0-9.-]*\.cdninstagram\.com` +
+	`|video[a-z0-9.-]*\.fbcdn\.net` +
+	`)$`)
+
+var pictureHosts = regexp.MustCompile(`(?i)^(p\d+[a-z0-9-]*|[a-z0-9-]*sign[a-z0-9-]*)\.(tiktokcdn[a-z-]*\.com|muscdn\.com)$`)
+
+// urlInText finds the links inside a longer string.
+var urlInText = regexp.MustCompile(`(?i)https?://[^\s"'<>\\)]+`)
+
+func checkString(at, x string) error {
+	l := strings.ToLower(strings.TrimSpace(x))
+	if strings.HasPrefix(l, "data:") {
+		return fmt.Errorf("%w: data URI at %s", ErrMedia, at)
 	}
-	return IsMediaName(link)
+	if len(x) > MaxFixtureString {
+		return fmt.Errorf("%w: string of %d characters at %s", ErrMedia, len(x), at)
+	}
+	for _, m := range mediaMarkers {
+		if strings.Contains(l, m) {
+			return fmt.Errorf("%w: %q marker at %s", ErrMedia, m, at)
+		}
+	}
+	for _, link := range urlInText.FindAllString(x, -1) {
+		u, err := url.Parse(link)
+		if err != nil {
+			continue
+		}
+		host := strings.ToLower(u.Hostname())
+		if videoHosts.MatchString(host) && !pictureHosts.MatchString(host) {
+			return fmt.Errorf("%w: link to a video host at %s", ErrMedia, at)
+		}
+		if IsMediaName(u.Path) {
+			return fmt.Errorf("%w: link to a media file at %s", ErrMedia, at)
+		}
+	}
+	return nil
 }
 
 // IsMediaName says whether a file name or URL path ends in the extension of a video or audio file.

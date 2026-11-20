@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -23,6 +25,19 @@ func TestResearchCommands(t *testing.T) {
 			t.Errorf("sources output has %q", unwanted)
 		}
 	}
+	// The retention printed is the one in the env file, the same source `sweep` reads.
+	envFile := filepath.Join(t.TempDir(), "research.env")
+	if err := os.WriteFile(envFile, []byte("RESEARCH_RETENTION_DAYS=90\nRESEARCH_YOUTUBE_RETENTION_DAYS=7\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errb.Reset()
+	if code := cmdResearch([]string{"sources", "--env-file", envFile}, &out, &errb, lookup, defaultAgentDeps()); code != 0 ||
+		!strings.Contains(out.String(), "kept 90 days") || !strings.Contains(out.String(), "kept 7 days") || strings.Contains(out.String(), "kept 365 days") {
+		t.Fatalf("sources with an env file: %d\n%s%s", code, out.String(), errb.String())
+	}
+	out.Reset()
+	errb.Reset()
 	bad := func(retention string) (string, bool) {
 		if retention == "RESEARCH_RETENTION_DAYS" {
 			return "0", true
@@ -45,6 +60,8 @@ func TestResearchCommands(t *testing.T) {
 		{[]string{"forget", "gino", "--platform", "myspace"}, 2},
 		{[]string{"forget", "gino", "extra"}, 2},
 		{[]string{"sweep", "extra"}, 2},
+		{[]string{"forget", "-lead"}, 2},
+		{[]string{"sources", "--env-file", "/does/not/exist.env"}, 2},
 	} {
 		out.Reset()
 		errb.Reset()

@@ -36,6 +36,20 @@ const (
 	ResearchDropped   = "dropped"
 )
 
+// ErrForgotten is returned for a creator who was forgotten on request (`cfctl research forget`): they are never ingested again, until
+// `forget --undo` removes the tombstone. It wraps ErrInvalid.
+var ErrForgotten = fmt.Errorf("%w: this creator was forgotten on request and is not ingested again", ErrInvalid)
+
+// forgotten says whether the creator has a tombstone.
+func (s *Store) forgotten(ctx context.Context, p research.Platform, handle string) (bool, error) {
+	hash, err := research.HandleHash(p, handle)
+	if err != nil {
+		return false, invalidf("%v", err)
+	}
+	ok, err := s.q.IsResearchForgotten(ctx, db.IsResearchForgottenParams{Platform: string(p), HandleHash: hash})
+	return ok, mapErr(err)
+}
+
 func invalidf(format string, a ...any) error {
 	return fmt.Errorf("%w: "+format, append([]any{ErrInvalid}, a...)...)
 }
@@ -62,6 +76,11 @@ func (s *Store) UpsertResearchCreator(ctx context.Context, in NewResearchCreator
 	link, err := research.ProfileURL(in.Platform, handle)
 	if err != nil {
 		return ResearchCreator{}, invalidf("%v", err)
+	}
+	if gone, err := s.forgotten(ctx, in.Platform, handle); err != nil {
+		return ResearchCreator{}, err
+	} else if gone {
+		return ResearchCreator{}, ErrForgotten
 	}
 	r, err := s.q.UpsertResearchCreator(ctx, db.UpsertResearchCreatorParams{
 		Platform: string(in.Platform), Handle: handle, ProfileUrl: link, WhySimilar: in.WhySimilar, Similarity: in.Similarity,
@@ -120,6 +139,26 @@ func (s *Store) UpsertResearchPost(ctx context.Context, in NewResearchPost) (Res
 	}
 	if in.DurationS != nil && (*in.DurationS < 0 || *in.DurationS > 7200) {
 		return ResearchPost{}, invalidf("duration_s must be between 0 and 7200")
+	}
+	creator, err := s.q.GetResearchCreatorByID(ctx, in.CreatorID)
+	if err != nil {
+		return ResearchPost{}, mapErr(err)
+	}
+	if creator.Platform != string(ref.Platform) {
+		return ResearchPost{}, invalidf("the post is on %s but the creator is on %s", ref.Platform, creator.Platform)
+	}
+	if ref.Handle != "" && ref.Handle != creator.Handle {
+		return ResearchPost{}, invalidf("the post link belongs to another creator than the one given")
+	}
+	for _, h := range []string{creator.Handle, ref.Handle} {
+		if h == "" {
+			continue
+		}
+		if gone, err := s.forgotten(ctx, ref.Platform, h); err != nil {
+			return ResearchPost{}, err
+		} else if gone {
+			return ResearchPost{}, ErrForgotten
+		}
 	}
 	var src *string
 	if in.PostedAtSource != "" {
@@ -286,6 +325,20 @@ func (s *Store) AddResearchFinding(ctx context.Context, in NewResearchFinding) (
 	if len(in.EvidenceIDs) == 0 {
 		return ResearchFinding{}, invalidf("a finding needs the evidence it rests on")
 	}
+	seen := make(map[uuid.UUID]bool, len(in.EvidenceIDs))
+	for _, id := range in.EvidenceIDs {
+		if seen[id] {
+			return ResearchFinding{}, invalidf("evidence id %s is listed twice", id)
+		}
+		seen[id] = true
+	}
+	n, err := s.q.CountResearchEvidenceIDs(ctx, in.EvidenceIDs)
+	if err != nil {
+		return ResearchFinding{}, mapErr(err)
+	}
+	if int(n) != len(in.EvidenceIDs) {
+		return ResearchFinding{}, invalidf("a finding can rest only on evidence that exists: %d of %d ids found", n, len(in.EvidenceIDs))
+	}
 	if !slices.Contains(research.Dimensions(), in.Dimension) {
 		return ResearchFinding{}, invalidf("dimension %q is not one of %v", in.Dimension, research.Dimensions())
 	}
@@ -316,14 +369,24 @@ type ResearchSweepResult struct {
 	Creators int64
 }
 
-// SweepResearch is the retention sweeper: it deletes every observation whose retain_until has passed, the findings that rested on one
-// (the playbook is regenerated from what is left), the posts left without any observation (and with them their annotations) and the
-// candidate or dropped creators left with nothing and untouched for idle. It runs in one transaction and is safe to run twice. A
-// creator that was approved stays: a person chose them, and only `forget` removes them.
-func (s *Store) SweepResearch(ctx context.Context, now time.Time, idle time.Duration) (ResearchSweepResult, error) {
+// SweepResearch is the retention sweeper. It deletes every observation whose retain_until has passed AND every observation the retention
+// in force now would already have deleted (the setting was lowered after it was written), the findings that rested on one, the findings
+// whose evidence no longer exists and the findings older than the retention (the playbook is regenerated from what is left), the posts
+// left without any observation (and with them their annotations) and the candidate or dropped creators left with nothing and untouched
+// for the retention time. It runs in one transaction and is safe to run twice. An approved creator stays: a person chose them, and only
+// `forget` removes them. The zero Retention means the defaults.
+func (s *Store) SweepResearch(ctx context.Context, now time.Time, ret research.Retention) (ResearchSweepResult, error) {
+	if ret == (research.Retention{}) {
+		ret = research.DefaultRetention()
+	}
+	if err := ret.Valid(); err != nil {
+		return ResearchSweepResult{}, invalidf("%v", err)
+	}
 	var res ResearchSweepResult
 	err := s.runTx(ctx, func(tx *Store) error {
-		expired, err := tx.q.DeleteExpiredResearchEvidence(ctx, now)
+		expired, err := tx.q.DeleteExpiredResearchEvidence(ctx, db.DeleteExpiredResearchEvidenceParams{
+			Now: now, YoutubeCutoff: now.Add(-ret.YouTube), DefaultCutoff: now.Add(-ret.Default),
+		})
 		if err != nil {
 			return err
 		}
@@ -333,10 +396,15 @@ func (s *Store) SweepResearch(ctx context.Context, now time.Time, idle time.Dura
 				return err
 			}
 		}
+		orphans, err := tx.q.DeleteOrphanResearchFindings(ctx, now.Add(-ret.Default))
+		if err != nil {
+			return err
+		}
+		res.Findings += orphans
 		if res.Posts, err = tx.q.DeleteOrphanResearchPosts(ctx, now.Add(-ResearchOrphanGrace)); err != nil {
 			return err
 		}
-		res.Creators, err = tx.q.DeleteIdleResearchCreators(ctx, now.Add(-idle))
+		res.Creators, err = tx.q.DeleteIdleResearchCreators(ctx, now.Add(-ret.Default))
 		return err
 	})
 	return res, mapErr(err)
@@ -352,8 +420,9 @@ type ResearchForgetResult struct {
 }
 
 // ForgetResearchCreator is the takedown: it deletes the creator with the handle (on one platform, or on every platform when platform is
-// empty), their posts, annotations and evidence, and the findings that rested on that evidence. It returns ErrNotFound when no creator has
-// the handle. Run it on request and say so in the log: it cannot be undone.
+// empty), their posts, annotations and evidence, and the findings that rested on that evidence, and leaves a tombstone (the platform and
+// the hash of the handle) so that the creator is never ingested again. Having no data on the person is not an error. Run it on request:
+// the data cannot be brought back (UnforgetResearchCreator only lifts the tombstone).
 func (s *Store) ForgetResearchCreator(ctx context.Context, platform research.Platform, handle string) (ResearchForgetResult, error) {
 	h, err := research.NormalizeHandle(handle)
 	if err != nil {
@@ -370,8 +439,20 @@ func (s *Store) ForgetResearchCreator(ctx context.Context, platform research.Pla
 		if err != nil {
 			return err
 		}
-		if len(creators) == 0 {
-			return ErrNotFound
+		// The tombstone is written whether or not we hold data on the person: a request to forget someone we have not met yet still
+		// keeps them out. Without a platform it covers all three.
+		platforms := []research.Platform{platform}
+		if platform == "" {
+			platforms = research.Platforms()
+		}
+		for _, p := range platforms {
+			hash, err := research.HandleHash(p, h)
+			if err != nil {
+				return err
+			}
+			if err := tx.q.InsertResearchForgotten(ctx, db.InsertResearchForgottenParams{Platform: string(p), HandleHash: hash}); err != nil {
+				return err
+			}
 		}
 		for _, c := range creators {
 			counts, err := tx.q.CountResearchOfCreator(ctx, c.ID)
@@ -399,10 +480,32 @@ func (s *Store) ForgetResearchCreator(ctx context.Context, platform research.Pla
 		}
 		return nil
 	})
-	if errors.Is(err, ErrNotFound) {
-		return ResearchForgetResult{}, ErrNotFound
-	}
 	return res, mapErr(err)
+}
+
+// UnforgetResearchCreator removes the tombstone of a forgotten creator (on one platform, or on every platform when platform is empty), so
+// they can be ingested again. It does not bring back any data. It returns how many tombstones went.
+func (s *Store) UnforgetResearchCreator(ctx context.Context, platform research.Platform, handle string) (int64, error) {
+	if _, err := research.NormalizeHandle(handle); err != nil {
+		return 0, invalidf("%v", err)
+	}
+	platforms := []research.Platform{platform}
+	if platform == "" {
+		platforms = research.Platforms()
+	}
+	var n int64
+	for _, p := range platforms {
+		hash, err := research.HandleHash(p, handle)
+		if err != nil {
+			return 0, invalidf("%v", err)
+		}
+		k, err := s.q.DeleteResearchForgotten(ctx, db.DeleteResearchForgottenParams{Platform: string(p), HandleHash: hash})
+		if err != nil {
+			return 0, mapErr(err)
+		}
+		n += k
+	}
+	return n, nil
 }
 
 // runTx runs fn in a transaction, or directly when the Store already is one.

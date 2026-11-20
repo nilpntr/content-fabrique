@@ -389,6 +389,12 @@ type ResearchFinding struct {
 	CreatedAt       time.Time
 }
 
+type ResearchForgotten struct {
+	Platform   string
+	HandleHash string
+	CreatedAt  time.Time
+}
+
 type ResearchPost struct {
 	ID             uuid.UUID
 	Platform       string
