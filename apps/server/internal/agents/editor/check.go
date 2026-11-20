@@ -289,6 +289,9 @@ func applyStyle(l limits, p *styleprofile.Profile, set *styleprofile.Resolved) l
 	}
 	l.transitionsOff = r.Transitions == styleprofile.LevelOff
 	l.cameraOff = r.CameraMotion == styleprofile.LevelOff
+	if l.cameraOff {
+		l.minEffects = 0 // nothing but transitions could add effects, and the style has no motion: a flat edit is the style
+	}
 	l.effectsLots = r.Transitions == styleprofile.LevelLots || r.CameraMotion == styleprofile.LevelLots
 	if r.Music == styleprofile.MusicNever {
 		l.beatGrid, l.gridRequired = false, false // no music: the cuts follow the clips' own sound and action
@@ -406,7 +409,7 @@ func RunChecks(in CheckInput) Report {
 		c.hookLength(), c.hookTitle(), c.shotPacing(), c.longShot(), c.heldEnding(), c.shotVariety(), c.paceBuilds(), c.repBoundaries(), c.deadTime(),
 		c.effectDensity(), c.textSafe(), c.textOverSubject(), c.duration(targetS), c.brightness(), c.crushed(), c.beatSync(), c.styleMatch(), c.titleCopied(),
 		c.offBeatCut(), c.hookMissesDrop(), c.staticShot(), c.transitionsMatch(), c.transitionVariety(), c.textWithoutEntrance(), c.chapterTitles(),
-		c.formatFollowed(),
+		c.formatFollowed(), c.beatGridFixed(), c.shotReused(),
 	}
 	r.Checks = append(r.Checks, c.speechChecks()...) // speech_cut_clean and hook_line, only for a speech-led edit (checkspeech.go)
 	if c.linesOn() {                                 // the text-pattern checks (checktext.go), only for a style told in lines
@@ -580,6 +583,10 @@ func (c *checker) heldEnding() Check {
 		return c.fail(CheckHeldEnding, "the ending (%s) is held %s, longer than %s even with its push and punch-in (from %s). Trim it to about %s: it loops back to the hook",
 			last.ID, secs2(d), secs2(p.EndingMovingMs), p.source(), secs2(p.EndingMs))
 	}
+	if c.lim.cameraOff {
+		return c.fail(CheckHeldEnding, "the ending (%s) is held %s; at most %s (from %s), and the creator's settings turn camera motion off. Trim it to about %s",
+			last.ID, secs2(d), secs2(p.EndingMs), p.source(), secs2(p.EndingMs))
+	}
 	return c.fail(CheckHeldEnding, "the ending (%s) is held %s and sits still; at most %s (from %s). Trim it to about %s, or give it set_motion handheld with at_ms on a beat (a push with a punch-in on the beat) and keep it under %s",
 		last.ID, secs2(d), secs2(p.EndingMs), p.source(), secs2(p.EndingMs), secs2(p.EndingMovingMs))
 }
@@ -628,6 +635,9 @@ func nearlyEqual(a, b int64) bool {
 }
 
 func (c *checker) shotVariety() Check {
+	if c.onFixedGrid() {
+		return c.skip(CheckShotVariety, "the cuts follow a fixed 2-beat grid: shots of the same length in a row are the rhythm (beat_grid_fixed judges it)")
+	}
 	run, best, bestAt := 1, 1, 0
 	for i := 1; i < len(c.durs); i++ {
 		if nearlyEqual(c.durs[i], c.durs[i-1]) {
@@ -669,6 +679,9 @@ func (c *checker) paceBuilds() Check {
 	n := len(c.durs)
 	if !c.lim.paceBuilds {
 		return c.skip(CheckPaceBuilds, "does not apply to a %s video", c.typ)
+	}
+	if c.onFixedGrid() {
+		return c.skip(CheckPaceBuilds, "the cuts follow a fixed 2-beat grid: the shots keep their length")
 	}
 	if n < paceBuildsMinShots {
 		return c.skip(CheckPaceBuilds, "only %d shots", n)

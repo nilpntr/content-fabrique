@@ -22,6 +22,17 @@ Rules for changing it:
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
 
+## workout.v9 (2026-11-20)
+
+Gino's rules (docs/design/gino-edit-rules.md, rules 1, 4 and 6). The editor prompt stays `editor.v2.12`. The playbook text changes:
+
+- The living camera, punch-in and "loop back to the hook" lines now yield to the creator's settings: camera motion off means no
+  motion at all, text animation off means texts just appear, and a creator whose style ends on a quiet shot is not asked to loop.
+- A line on the fixed 2-beat grid (every shot 2 beats, cuts on even beats, last shot 4 beats, total a multiple of 4: equal lengths
+  in a row are the rhythm), and one on using every moment once (no source range twice, a tripod clip gives one shot).
+- Matching checks in `check_edit`: `beat_grid_fixed` and `shot_reused` are new; `shot_variety` and `pace_builds` do not apply on a
+  fixed grid; `static_shot`, `text_without_entrance` and the effect minimum do not apply when the settings turn that motion off.
+
 ## editor.v2.12, talking.v5, tutorial.v5 and unboxing_product.v5 (2026-11-20)
 
 Cutting on speech (docs/design/ai-video-editor-plan.md, piece 1). The editor never read the transcript, so talking, tutorial and
