@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/media"
-	"github.com/nilpntr/content-fabrique/internal/sandbox"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
@@ -474,13 +473,7 @@ func measureSound(ctx context.Context, runner media.Runner, dir, path string, m 
 		return err
 	}
 	wav := filepath.Join(out, fileAudio16k)
-	fi, err := os.Lstat(wav)
-	if errors.Is(err, os.ErrNotExist) {
-		// ffmpeg exited 0 but wrote nothing: it always creates its output once it starts, so this is the sandbox (an output
-		// directory it cannot write), not the sound.
-		return &sandbox.UnavailableError{Reason: "the tool in the sandbox exited cleanly but wrote no output (can it write its output directory?)", Err: errNoOutput}
-	}
-	if err != nil || !fi.Mode().IsRegular() || fi.Size() > maxVideoFile {
+	if fi, err := os.Lstat(wav); err != nil || !fi.Mode().IsRegular() || fi.Size() > maxVideoFile {
 		x.SoundUnreadable = true
 		return nil
 	}

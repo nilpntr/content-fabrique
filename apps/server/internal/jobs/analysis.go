@@ -9,7 +9,6 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/nilpntr/content-fabrique/internal/ids"
-	"github.com/nilpntr/content-fabrique/internal/sandbox"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
@@ -100,8 +99,7 @@ func (w *AnalyzeWorker) Work(ctx context.Context, job *river.Job[AnalyzeArgs]) e
 	case errors.Is(err, ErrAnalysisNotReady):
 		return w.snooze(ctx, job, notReadySnooze, err.Error())
 	case err != nil && ctx.Err() == nil && isUnavailable(err):
-		reason, _ := sandbox.Unavailable(err)
-		return w.snooze(ctx, job, sandboxWaitSnooze, sandbox.UnavailableMessage(reason)+": "+err.Error())
+		return w.snooze(ctx, job, sandboxWait(w.deps.now().Sub(job.CreatedAt)), err.Error()) // err says "the sandbox is unavailable: ..."
 	case err != nil:
 		w.deps.logger().WarnContext(ctx, "analysis attempt failed", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "attempt", job.Attempt, "error", err)
 		return err

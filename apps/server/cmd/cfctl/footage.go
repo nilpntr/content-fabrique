@@ -160,14 +160,14 @@ func cmdFootageCheck(args []string, stdout, stderr io.Writer, deps footageDeps) 
 	unavailable := ""
 	for i, target := range targets {
 		results[i].File = files[i]
+		if resolveErr[i] != nil {
+			results[i].Error = resolveErr[i].Error()
+			code = max(code, 1)
+			continue
+		}
 		if unavailable != "" {
 			// The same sandbox would fail the same way on every other file.
 			results[i].Error, results[i].SandboxUnavailable = unavailable, true
-			continue
-		}
-		if resolveErr[i] != nil {
-			results[i].Error = resolveErr[i].Error()
-			code = 1
 			continue
 		}
 		a, err := ingest.Check(ctx, runner, target, ingest.CheckOptions{Use: use, WorkDir: work})
@@ -180,7 +180,7 @@ func cmdFootageCheck(args []string, stdout, stderr io.Writer, deps footageDeps) 
 		}
 		if err != nil {
 			results[i].Error = err.Error()
-			code = 1
+			code = max(code, 1)
 			continue
 		}
 		if sizes[size[i]] > 1 {
@@ -192,8 +192,8 @@ func cmdFootageCheck(args []string, stdout, stderr io.Writer, deps footageDeps) 
 				}
 			}
 		}
-		if a.Verdict == ingest.Unusable && code == 0 {
-			code = 1
+		if a.Verdict == ingest.Unusable {
+			code = max(code, 1)
 		}
 		results[i].Assessment = a
 	}

@@ -37,6 +37,9 @@ func TestMountFailure(t *testing.T) {
 		"moov atom not found",
 		"Permission denied", // no mount path: not ours to judge
 		"/tmp/x: Permission denied",
+		"/in/0x: Permission denied",              // not a mount the job was given
+		"/work/../etc: Permission denied",        // nor a plain name in /work
+		"/work/out.mp4: Operation not permitted", // what gVisor answers a refused call: not a mount problem
 		"",
 	}
 	for _, s := range yes {
@@ -79,13 +82,9 @@ func TestUnavailable(t *testing.T) {
 	if !strings.HasPrefix(ue.Error(), "the sandbox is unavailable: Docker is not running") {
 		t.Fatalf("message: %q", ue.Error())
 	}
-	if _, ok := Unavailable(fmt.Errorf("%w: x", ErrSandbox)); !ok {
-		t.Fatal("any ErrSandbox is unavailable")
-	}
-	if _, ok := Unavailable(fmt.Errorf("%w: x", ErrInputUnreadable)); !ok {
-		t.Fatal("ErrInputUnreadable is unavailable")
-	}
-	for _, err := range []error{nil, ErrTimeout, context.Canceled, errors.New("ffmpeg exited 1")} {
+	// Only causes no input can bring about: a remote runner that restarted, or one unreadable input, keep their usual handling.
+	for _, err := range []error{nil, ErrTimeout, context.Canceled, errors.New("ffmpeg exited 1"),
+		fmt.Errorf("%w: remote job x is gone from the runner", ErrSandbox), fmt.Errorf("%w: /in/0", ErrInputUnreadable)} {
 		if _, ok := Unavailable(err); ok {
 			t.Errorf("%v is not unavailable", err)
 		}

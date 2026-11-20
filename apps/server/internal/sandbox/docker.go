@@ -99,10 +99,12 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 	}
 	checkAs := user
 	if rootless {
-		checkAs = fmt.Sprintf("%d:%d", uid, gid) // container root is the worker's own uid on the host
+		// Container root is the daemon's own host user: the worker's uid, for a rootless daemon the worker runs itself (one of
+		// another user, through DOCKER_HOST, is not supported; its jobs fail as mount failures).
+		checkAs = fmt.Sprintf("%d:%d", uid, gid)
 	}
 	if err := checkAccess(v.mounts, checkAs); err != nil {
-		return Result{}, &UnavailableError{Reason: "the sandbox's user cannot read the job's files or write its output directory", Err: err}
+		return Result{}, err
 	}
 	name, err := containerName()
 	if err != nil {

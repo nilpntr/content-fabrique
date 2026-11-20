@@ -77,10 +77,13 @@ const JobRescueAfter = IngestTimeout + 30*time.Minute
 // noIngestSnooze is how long an ingest waits when the worker has no media pipeline (no object storage or no sandbox set up).
 const noIngestSnooze = 5 * time.Minute
 
-// sandboxWaitSnooze is how long a media job waits when the sandbox is unavailable (sandbox.Unavailable): Docker is down, the
-// gVisor runtime or the image is missing, or the tools cannot write their output directory. That is never the file's fault, so
-// the job waits without using an attempt, and the asset stays processing (stage waiting) rather than failed.
-const sandboxWaitSnooze = 2 * time.Minute
+// sandboxWait is how long a media job waits when the sandbox is unavailable (sandbox.Unavailable): Docker is down, the gVisor
+// runtime or the image is missing, or the tools cannot write their output directory. That is never the file's fault, so the job
+// waits without using an attempt, and the asset stays processing (stage waiting) rather than failed. The wait grows with the
+// job's age, from 2 minutes to half an hour: each try of an ingest downloads the original again before it reaches the sandbox.
+func sandboxWait(age time.Duration) time.Duration {
+	return min(max(age/4, 2*time.Minute), 30*time.Minute)
+}
 
 // SandboxWaitMax is how long an ingest waits, snoozed, for an unavailable sandbox. After that its attempts count again, and the
 // last one fails the asset as processing_failed (ours, not the file's: the creator can upload it again).
@@ -114,10 +117,11 @@ func (w *AssetIngestWorker) Work(ctx context.Context, job *river.Job[AssetIngest
 		w.deps.logger().InfoContext(ctx, "asset ingest skipped", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "reason", err.Error())
 		return river.JobCancel(err)
 	case err != nil:
-		if reason, ok := sandbox.Unavailable(err); ok && ctx.Err() == nil {
+		if _, ok := sandbox.Unavailable(err); ok && ctx.Err() == nil {
 			if age := w.deps.now().Sub(job.CreatedAt); age < SandboxWaitMax {
-				w.deps.logger().WarnContext(ctx, "asset ingest waits: "+sandbox.UnavailableMessage(reason), "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "retry_in", sandboxWaitSnooze, "age", age.Round(time.Minute), "error", err)
-				return river.JobSnooze(sandboxWaitSnooze)
+				wait := sandboxWait(age)
+				w.deps.logger().WarnContext(ctx, "asset ingest waits for the sandbox", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "retry_in", wait, "age", age.Round(time.Minute), "error", err)
+				return river.JobSnooze(wait)
 			}
 		}
 		w.deps.logger().WarnContext(ctx, "asset ingest attempt failed", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "attempt", job.Attempt, "error", err)
