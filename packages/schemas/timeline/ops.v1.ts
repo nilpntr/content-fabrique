@@ -1200,7 +1200,7 @@ export type Preset2 = "none" | "punchy" | "warm" | "cool" | "bw" | "matte" | "au
  */
 export type MatchExposure1 = boolean;
 /**
- * Create or change the captions track (burned-in captions from the transcript). The fields you leave out stay as they are; on a new captions track style defaults to word_highlight and enabled to true. fill and accent are the creator's colours (title colour and accent from the creator_style block). keywords lists the words keyword_emphasis draws in the accent colour. corrections is the creator's own fixes of misheard words: it replaces the whole list ([] clears it), so never send it unless the creator asked for a fix, and keep the ones already in the timeline. Give at least one field.
+ * Create or change the captions track (burned-in captions from the transcript). The fields you leave out stay as they are; on a new captions track style defaults to word_highlight and enabled to true. fill and accent are the creator's colours (title colour and accent from the creator_style block); "" clears one. keywords lists the words keyword_emphasis draws in the accent colour. corrections is the creator's own fixes of misheard words: it replaces the whole list ([] clears it), so never send it unless the creator asked for a fix, and keep the ones already in the timeline. Give at least one field.
  */
 export type SetCaptions = SetCaptions1 & SetCaptions2;
 export type SetCaptions1 =
@@ -1249,11 +1249,11 @@ export type Uppercase = boolean;
  */
 export type MaximumWords = number;
 /**
- * The colour of the caption letters as #RRGGBB, normally the creator's title colour. Without it the style's own colour (white) is used.
+ * The colour of the caption letters as #RRGGBB, normally the creator's title colour. An empty string clears it, back to the style's own colour (white).
  */
 export type CaptionColour = string;
 /**
- * The colour of the spoken word (word_highlight) or of the key words (keyword_emphasis) as #RRGGBB, normally the creator's accent colour. Without it the style's own accent is used.
+ * The colour of the spoken word (word_highlight) or of the key words (keyword_emphasis) as #RRGGBB, normally the creator's accent colour. An empty string clears it, back to the style's own accent.
  */
 export type AccentColour = string;
 /**
@@ -1280,6 +1280,10 @@ export type KeyWords =
  */
 export type Word = number;
 /**
+ * The word as the transcript had it when the fix was made. If the transcript no longer has this word at that position, the fix is skipped. Optional.
+ */
+export type HeardAs = string;
+/**
  * What the word is shown as: 1 to 40 characters, no control characters and none of the characters < > { } \ | ^ ~ [ ] $ and the backtick.
  */
 export type Replacement = string;
@@ -1291,6 +1295,7 @@ export type Replacement = string;
 export type WordCorrections = {
   asset_id: AssetId;
   word: Word;
+  was?: HeardAs;
   text: Replacement;
 }[];
 /**

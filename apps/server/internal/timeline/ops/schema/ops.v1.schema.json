@@ -491,6 +491,18 @@
       "title": "Accent colour",
       "description": "The colour of the spoken word (word_highlight) or of the key words (keyword_emphasis) as #RRGGBB, normally the creator's accent colour. Without it the style's own accent is used."
     },
+    "captionFillOrClear": {
+      "type": "string",
+      "pattern": "^(#[0-9A-Fa-f]{6})?$",
+      "title": "Caption colour",
+      "description": "The colour of the caption letters as #RRGGBB, normally the creator's title colour. An empty string clears it, back to the style's own colour (white)."
+    },
+    "captionAccentOrClear": {
+      "type": "string",
+      "pattern": "^(#[0-9A-Fa-f]{6})?$",
+      "title": "Accent colour",
+      "description": "The colour of the spoken word (word_highlight) or of the key words (keyword_emphasis) as #RRGGBB, normally the creator's accent colour. An empty string clears it, back to the style's own accent."
+    },
     "captionKeywords": {
       "type": "array",
       "maxItems": 12,
@@ -526,6 +538,12 @@
             "maximum": 99999,
             "title": "Word",
             "description": "The position of the word in the asset's transcript, from 0."
+          },
+          "was": {
+            "type": "string",
+            "maxLength": 80,
+            "title": "Heard as",
+            "description": "The word as the transcript had it when the fix was made. If the transcript no longer has this word at that position, the fix is skipped. Optional."
           },
           "text": {
             "type": "string",
@@ -1676,7 +1694,7 @@
     "set_captions": {
       "type": "object",
       "title": "set_captions",
-      "description": "Create or change the captions track (burned-in captions from the transcript). The fields you leave out stay as they are; on a new captions track style defaults to word_highlight and enabled to true. fill and accent are the creator's colours (title colour and accent from the creator_style block). keywords lists the words keyword_emphasis draws in the accent colour. corrections is the creator's own fixes of misheard words: it replaces the whole list ([] clears it), so never send it unless the creator asked for a fix, and keep the ones already in the timeline. Give at least one field.",
+      "description": "Create or change the captions track (burned-in captions from the transcript). The fields you leave out stay as they are; on a new captions track style defaults to word_highlight and enabled to true. fill and accent are the creator's colours (title colour and accent from the creator_style block); \"\" clears one. keywords lists the words keyword_emphasis draws in the accent colour. corrections is the creator's own fixes of misheard words: it replaces the whole list ([] clears it), so never send it unless the creator asked for a fix, and keep the ones already in the timeline. Give at least one field.",
       "additionalProperties": false,
       "required": [
         "op"
@@ -1705,10 +1723,10 @@
           "$ref": "#/$defs/maxWords"
         },
         "fill": {
-          "$ref": "#/$defs/captionFill"
+          "$ref": "#/$defs/captionFillOrClear"
         },
         "accent": {
-          "$ref": "#/$defs/captionAccent"
+          "$ref": "#/$defs/captionAccentOrClear"
         },
         "keywords": {
           "$ref": "#/$defs/captionKeywords"

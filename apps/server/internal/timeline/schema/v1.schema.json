@@ -969,6 +969,7 @@
         "properties": {
           "asset_id": { "$ref": "#/$defs/assetId" },
           "word": { "type": "integer", "minimum": 0, "maximum": 99999, "title": "Word", "description": "The position of the word in the asset's transcript, from 0." },
+          "was": { "type": "string", "maxLength": 80, "title": "Heard as", "description": "The word as the transcript had it when the fix was made. If the transcript no longer has this word at that position, the fix is skipped. Optional." },
           "text": {
             "type": "string",
             "minLength": 1,

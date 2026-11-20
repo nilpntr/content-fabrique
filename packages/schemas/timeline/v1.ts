@@ -945,6 +945,10 @@ export type KeyWords =
  */
 export type Word = number;
 /**
+ * The word as the transcript had it when the fix was made. If the transcript no longer has this word at that position, the fix is skipped. Optional.
+ */
+export type HeardAs = string;
+/**
  * What the word is shown as: 1 to 40 characters, no control characters and none of the characters < > { } \ | ^ ~ [ ] $ and the backtick.
  */
 export type Replacement = string;
@@ -959,6 +963,7 @@ export type Replacement = string;
 export type WordCorrections = {
   asset_id: AssetId;
   word: Word;
+  was?: HeardAs;
   text: Replacement;
 }[];
 /**
