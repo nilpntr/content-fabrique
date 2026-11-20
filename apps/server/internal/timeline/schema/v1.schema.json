@@ -918,9 +918,9 @@
         "type": { "const": "captions", "title": "Track type", "description": "\"captions\"." },
         "from": { "const": "transcript", "title": "Source", "description": "\"transcript\": the words come from the transcript of the clips' audio." },
         "style": {
-          "enum": ["word_highlight", "chunk"],
+          "enum": ["word_highlight", "chunk", "keyword_emphasis"],
           "title": "Style",
-          "description": "word_highlight shows a few words and highlights the one being said. chunk shows each group of words at once."
+          "description": "word_highlight shows a few words and highlights the one being said. chunk shows each group of words at once. keyword_emphasis shows each group at once and draws its key words (see keywords) in the accent colour."
         },
         "enabled": { "type": "boolean", "title": "Enabled", "description": "True to render the captions. False keeps the settings without rendering them." },
         "uppercase": { "type": "boolean", "default": true, "title": "Uppercase", "description": "True to write the captions in capitals. Default true." },
@@ -931,6 +931,52 @@
           "default": 2,
           "title": "Maximum words",
           "description": "The most words on screen at once, 1 to 4. Default 2."
+        },
+        "fill": { "$ref": "#/$defs/captionFill" },
+        "accent": { "$ref": "#/$defs/captionAccent" },
+        "keywords": { "$ref": "#/$defs/captionKeywords" },
+        "corrections": { "$ref": "#/$defs/captionCorrections" }
+      }
+    },
+    "captionFill": {
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{6}$",
+      "title": "Caption colour",
+      "description": "The colour of the caption letters as #RRGGBB, normally the creator's title colour. Without it the style's own colour (white) is used."
+    },
+    "captionAccent": {
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{6}$",
+      "title": "Accent colour",
+      "description": "The colour of the spoken word (word_highlight) or of the key words (keyword_emphasis) as #RRGGBB, normally the creator's accent colour. Without it the style's own accent is used."
+    },
+    "captionKeywords": {
+      "type": "array",
+      "maxItems": 12,
+      "title": "Key words",
+      "description": "Words that keyword_emphasis draws in the accent colour (matched whatever the case, ignoring punctuation). Without any, the longest word of each group is emphasised. At most 12.",
+      "items": { "type": "string", "minLength": 1, "maxLength": 24, "pattern": "^[^\\x00-\\x1f\\x7f<>{}\\\\|^~\\[\\]$`\\s]+$" }
+    },
+    "captionCorrections": {
+      "type": "array",
+      "maxItems": 200,
+      "title": "Word corrections",
+      "description": "The creator's fixes of misheard words: the word at position `word` (counted from 0) of the transcript of asset `asset_id` is shown as `text`. The timing stays the transcript's. At most 200, one per word.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["asset_id", "word", "text"],
+        "properties": {
+          "asset_id": { "$ref": "#/$defs/assetId" },
+          "word": { "type": "integer", "minimum": 0, "maximum": 99999, "title": "Word", "description": "The position of the word in the asset's transcript, from 0." },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40,
+            "pattern": "^[^\\x00-\\x1f\\x7f<>{}\\\\|^~\\[\\]$`]+$",
+            "title": "Replacement",
+            "description": "What the word is shown as: 1 to 40 characters, no control characters and none of the characters < > { } \\ | ^ ~ [ ] $ and the backtick."
+          }
         }
       }
     },

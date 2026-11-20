@@ -1200,12 +1200,24 @@ export type Preset2 = "none" | "punchy" | "warm" | "cool" | "bw" | "matte" | "au
  */
 export type MatchExposure1 = boolean;
 /**
- * Create or change the captions track (burned-in captions from the transcript). The fields you leave out stay as they are; on a new captions track style defaults to word_highlight and enabled to true. Give at least one field.
+ * Create or change the captions track (burned-in captions from the transcript). The fields you leave out stay as they are; on a new captions track style defaults to word_highlight and enabled to true. fill and accent are the creator's colours (title colour and accent from the creator_style block). keywords lists the words keyword_emphasis draws in the accent colour. corrections is the creator's own fixes of misheard words: it replaces the whole list ([] clears it), so never send it unless the creator asked for a fix, and keep the ones already in the timeline. Give at least one field.
  */
 export type SetCaptions = SetCaptions1 & SetCaptions2;
 export type SetCaptions1 =
   | {
       enabled: unknown;
+    }
+  | {
+      fill: unknown;
+    }
+  | {
+      accent: unknown;
+    }
+  | {
+      keywords: unknown;
+    }
+  | {
+      corrections: unknown;
     }
   | {
       style: unknown;
@@ -1225,9 +1237,9 @@ export type Op17 = "set_captions";
  */
 export type Enabled = boolean;
 /**
- * word_highlight shows a few words and highlights the one being said. chunk shows each group of words at once.
+ * word_highlight shows a few words and highlights the one being said. chunk shows each group of words at once. keyword_emphasis shows each group at once and draws its key words (see keywords) in the accent colour.
  */
-export type Style = "word_highlight" | "chunk";
+export type Style = "word_highlight" | "chunk" | "keyword_emphasis";
 /**
  * True to write the captions in capitals. Default true.
  */
@@ -1236,6 +1248,51 @@ export type Uppercase = boolean;
  * The most words on screen at once, 1 to 4. Default 2.
  */
 export type MaximumWords = number;
+/**
+ * The colour of the caption letters as #RRGGBB, normally the creator's title colour. Without it the style's own colour (white) is used.
+ */
+export type CaptionColour = string;
+/**
+ * The colour of the spoken word (word_highlight) or of the key words (keyword_emphasis) as #RRGGBB, normally the creator's accent colour. Without it the style's own accent is used.
+ */
+export type AccentColour = string;
+/**
+ * Words that keyword_emphasis draws in the accent colour (matched whatever the case, ignoring punctuation). Without any, the longest word of each group is emphasised. At most 12.
+ *
+ * @maxItems 12
+ */
+export type KeyWords =
+  | []
+  | [string]
+  | [string, string]
+  | [string, string, string]
+  | [string, string, string, string]
+  | [string, string, string, string, string]
+  | [string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string, string, string, string, string];
+/**
+ * The position of the word in the asset's transcript, from 0.
+ */
+export type Word = number;
+/**
+ * What the word is shown as: 1 to 40 characters, no control characters and none of the characters < > { } \ | ^ ~ [ ] $ and the backtick.
+ */
+export type Replacement = string;
+/**
+ * The creator's fixes of misheard words: the word at position `word` (counted from 0) of the transcript of asset `asset_id` is shown as `text`. The timing stays the transcript's. At most 200, one per word.
+ *
+ * @maxItems 200
+ */
+export type WordCorrections = {
+  asset_id: AssetId;
+  word: Word;
+  text: Replacement;
+}[];
 /**
  * Set what a clip's own sound does and how loud. mode is mute (nothing; the default), bed (a low ambience under the edit, evened out across clips and never normalised up to the programme: for footage with no speech) or full (the programme, for speech). Without id it sets every clip of the main track, which is how to set the bed policy once. The fields you leave out stay as they are. use_source is the old spelling of full and mute; give mode or use_source, not both.
  */
@@ -1699,6 +1756,10 @@ export interface SetCaptions2 {
   style?: Style;
   uppercase?: Uppercase;
   max_words?: MaximumWords;
+  fill?: CaptionColour;
+  accent?: AccentColour;
+  keywords?: KeyWords;
+  corrections?: WordCorrections;
 }
 export interface SetClipAudio2 {
   op: Op18;
