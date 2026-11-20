@@ -104,6 +104,6 @@ A `sandbox.Router` (itself a `Provider`) picks per job. It sends a job to `harde
 | Phase | Slice | Cost |
 |---|---|---|
 | **1 (first PR)** | `cf-job` in the image, `Job.Inputs/Outputs/Steps`, the `remote` provider, the compose `runner` profile, an integration test that renders a fixture through MinIO. No Cloudflare. | $0 |
-| 2 | `apps/sandbox-gateway` under `wrangler dev`, then staging; measure cold start and wall time for 30 s and 90 s edits; fill the table in section 5 | Inside the included usage |
+| 2 | `apps/sandbox-gateway` under `wrangler dev`, then staging; measure cold start and wall time for 30 s and 90 s edits; fill the table in section 5. **Spike done 2026-11-20**: [render-runtime-spike](render-runtime-spike.md) (go, with the changes in its section 7) | Inside the included usage |
 | 3 | Router and fallback, orphan sweep, spend cap, amend D-08 and D-09 | $0 |
 | 4 | Split rendering; the transcription decision (D-27) | Metered |

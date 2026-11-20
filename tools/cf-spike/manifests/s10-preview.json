@@ -1,0 +1,144 @@
+{
+  "case": "s10-preview",
+  "note": "the remote integration test's manifest: v08_transition_crossfade, Preview, 640x360 sources",
+  "profile": "preview",
+  "duration_ms": 8600,
+  "total_frames": 258,
+  "width": 540,
+  "height": 960,
+  "uploads": {
+    "cases/s10-preview/subs.ass": "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 2\nScaledBorderAndShadow: yes\nYCbCr Matrix: None\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: watermark,Inter,37,\u0026H55FFFFFF,\u0026H55FFFFFF,\u0026H87000000,\u0026HFF000000,-1,0,0,0,100,100,0,0,1,2,0,5,0,0,0,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 2,0:00:00.00,0:00:08.58,watermark,,0,0,0,,{\\an5\\pos(886.5,261.5)}PREVIEW\n"
+  },
+  "inputs": [
+    {
+      "path": "/in/0",
+      "key": "src/sd/0.mp4"
+    },
+    {
+      "path": "/in/1",
+      "key": "src/sd/1.mp4"
+    },
+    {
+      "path": "/in/subs.ass",
+      "key": "cases/s10-preview/subs.ass"
+    }
+  ],
+  "steps": [
+    [
+      "ffmpeg",
+      "-hide_banner",
+      "-nostdin",
+      "-loglevel",
+      "error",
+      "-nostats",
+      "-progress",
+      "/work/progress-render.txt",
+      "-protocol_whitelist",
+      "file",
+      "-format_whitelist",
+      "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg",
+      "-t",
+      "3.000",
+      "-i",
+      "/in/0",
+      "-protocol_whitelist",
+      "file",
+      "-format_whitelist",
+      "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg",
+      "-ss",
+      "10.000",
+      "-t",
+      "3.000",
+      "-i",
+      "/in/0",
+      "-protocol_whitelist",
+      "file",
+      "-format_whitelist",
+      "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,mp3,aac,wav,flac,ogg",
+      "-ss",
+      "5.000",
+      "-t",
+      "3.000",
+      "-i",
+      "/in/1",
+      "-filter_complex",
+      "[0:v]trim=end=3.000,setpts=PTS-STARTPTS,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=90,setpts=PTS-STARTPTS,scale=540:960:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=540:960:x='clip(0.5*iw-270,0,iw-540)':y='clip(0.5*ih-480,0,ih-960)',setsar=1,format=yuv420p,setsar=1,fps=30,settb=AVTB,sidedata=mode=delete:type=DISPLAYMATRIX[v0];[1:v]trim=end=3.000,setpts=PTS-STARTPTS,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=90,setpts=PTS-STARTPTS,scale=540:960:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=540:960:x='clip(0.5*iw-270,0,iw-540)':y='clip(0.5*ih-480,0,ih-960)',setsar=1,format=yuv420p,setsar=1,fps=30,settb=AVTB,sidedata=mode=delete:type=DISPLAYMATRIX[v1];[2:v]trim=end=3.000,setpts=PTS-STARTPTS,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=90,setpts=PTS-STARTPTS,scale=540:960:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=540:960:x='clip(0.5*iw-270,0,iw-540)':y='clip(0.5*ih-480,0,ih-960)',setsar=1,format=yuv420p,setsar=1,fps=30,settb=AVTB,sidedata=mode=delete:type=DISPLAYMATRIX[v2];[v0][v1]xfade=transition=fade:duration=0.400000:offset=2.600000[j1];[j1][v2]concat=n=2:v=1:a=0[vj];[vj]ass=filename=/in/subs.ass:fontsdir=/usr/share/fonts/cf[vout];anullsrc=r=48000:cl=stereo:d=8.600[abed];[abed]anull[aout]",
+      "-map",
+      "[vout]",
+      "-map",
+      "[aout]",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "28",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      "-ar",
+      "48000",
+      "-ac",
+      "2",
+      "-map_metadata",
+      "-1",
+      "-map_chapters",
+      "-1",
+      "-fflags",
+      "+bitexact",
+      "-flags:v",
+      "+bitexact",
+      "-flags:a",
+      "+bitexact",
+      "-y",
+      "/work/out.mp4"
+    ],
+    [
+      "ffprobe",
+      "-v",
+      "error",
+      "-count_frames",
+      "-show_entries",
+      "stream=codec_type,width,height,nb_read_frames:format=duration",
+      "-of",
+      "json",
+      "/work/out.mp4"
+    ],
+    [
+      "ffmpeg",
+      "-nostdin",
+      "-v",
+      "error",
+      "-y",
+      "-ss",
+      "1",
+      "-i",
+      "/work/out.mp4",
+      "-frames:v",
+      "1",
+      "/work/poster.jpg"
+    ]
+  ],
+  "outputs": [
+    {
+      "path": "/work/out.mp4",
+      "key": "results/{run}/s10-preview/out.mp4",
+      "content_type": "video/mp4",
+      "max_bytes": 268435456
+    },
+    {
+      "path": "/work/poster.jpg",
+      "key": "results/{run}/s10-preview/poster.jpg",
+      "content_type": "image/jpeg"
+    }
+  ],
+  "limits": {
+    "cpu": 4,
+    "memory_mb": 4096,
+    "pids": 1024,
+    "timeout_ms": 1800000
+  }
+}
