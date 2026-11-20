@@ -180,6 +180,24 @@ type AssetSignal struct {
 	UpdatedAt        time.Time
 }
 
+type ClipFeedback struct {
+	ID              ids.ClipFeedbackID
+	WorkspaceID     ids.WorkspaceID
+	AssetID         ids.AssetID
+	Kind            string
+	StartMs         int64
+	EndMs           int64
+	ProjectID       ids.ProjectID
+	TimelineVersion int32
+	ShotNumber      int32
+	ItemID          string
+	Note            string
+	CreatedByKind   string
+	CreatedByID     string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
 type CreatorProfile struct {
 	WorkspaceID     ids.WorkspaceID
 	Niche           json.RawMessage
@@ -326,6 +344,7 @@ type Render struct {
 	StartedAt         *time.Time
 	FinishedAt        *time.Time
 	ObjectsPurgedAt   *time.Time
+	Proof             bool
 }
 
 type Shot struct {

@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "2a41a36399f8354c47b6c28c5c810f96a62ea28a3f132540573765821d3720b0",
-  "recorded_at": "2026-11-20T13:34:12Z",
+  "key": "aee471e569515eeaffb7461d88b8f8c236b8b1719e8fa74a33ee63fe90e35798",
+  "recorded_at": "2026-11-20T15:17:24Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,
@@ -37,6 +37,7 @@
       "list_motion_templates",
       "get_timeline",
       "get_comments",
+      "get_clip_feedback",
       "edit_timeline",
       "match_exposure",
       "render_preview",

@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "56da13f31d75ffb476427a48f3670438e42d9f0cff64daf515882c1dc26c3f59",
-  "recorded_at": "2026-11-20T13:34:12Z",
+  "key": "6f729169b89d0b1606ffe81383a26f3f0a0229ba67e68a8d928b8028c9b91da0",
+  "recorded_at": "2026-11-20T15:17:25Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,
@@ -71,42 +71,6 @@
         "blocks": [
           "tool_result"
         ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
       }
     ],
     "tools": [
@@ -121,6 +85,7 @@
       "list_motion_templates",
       "get_timeline",
       "get_comments",
+      "get_clip_feedback",
       "edit_timeline",
       "match_exposure",
       "render_preview",
@@ -157,11 +122,6 @@
         "sha256": "c1a2c1dd9e9b679be49eb3856f237cf0984ba86e667f45e56d1a9934a461dcba",
         "media_type": "image/jpeg",
         "bytes": 4825
-      },
-      {
-        "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
-        "media_type": "image/jpeg",
-        "bytes": 9284
       }
     ]
   },
@@ -172,18 +132,18 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_8",
+        "id": "toolu_ed_5",
         "name": "render_preview",
         "input": {}
       }
     ],
     "usage": {
-      "input_tokens": 400,
+      "input_tokens": 410,
       "cache_write_tokens": 600,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 15000,
+      "cache_read_tokens": 12900,
       "output_tokens": 40
     }
   },
-  "count_tokens": 16000
+  "count_tokens": 13910
 }

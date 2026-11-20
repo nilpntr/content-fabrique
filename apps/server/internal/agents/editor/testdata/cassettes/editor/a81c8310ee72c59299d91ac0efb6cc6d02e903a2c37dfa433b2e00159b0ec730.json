@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "55c74c804e73bed85a6380b9b36f7d26dd90160f672a417c6f1b618ff36839f7",
-  "recorded_at": "2026-11-20T13:34:12Z",
+  "key": "a81c8310ee72c59299d91ac0efb6cc6d02e903a2c37dfa433b2e00159b0ec730",
+  "recorded_at": "2026-11-20T15:17:24Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,
@@ -47,6 +47,18 @@
         "blocks": [
           "tool_result"
         ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
+        ]
       }
     ],
     "tools": [
@@ -61,6 +73,7 @@
       "list_motion_templates",
       "get_timeline",
       "get_comments",
+      "get_clip_feedback",
       "edit_timeline",
       "match_exposure",
       "render_preview",
@@ -107,70 +120,105 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_3",
-        "name": "plan_edit",
+        "id": "toolu_ed_4",
+        "name": "edit_timeline",
         "input": {
-          "content_type": "workout",
-          "format": "tutorial_101",
-          "format_why": "One exercise from two angles, the gym as the closing shot.",
-          "story": "A heavy lat day in six quick cuts, ending on the wide gym.",
-          "hook": "The lat pulldown at full stretch, with the words HEAVY LAT DAY.",
-          "arc": "Hook on the heaviest rep, the cable row, a second look at the pulldown, the wide gym and a last pulldown rep.",
-          "ending": "Back to the cable row, held a little longer.",
-          "playbook": "workout",
-          "target_length_s": 14,
-          "tempo_bpm": 124,
-          "pace": "building",
-          "shots": [
+          "base_version": 0,
+          "ops": [
             {
-              "role": "hook",
-              "what": "Heaviest pulldown rep, first half",
+              "op": "add_clip",
               "asset_id": "ast_01jc000000e00800000000000a",
-              "beats": 3,
-              "effect": "punch_in"
+              "source": {
+                "in_ms": 5000,
+                "out_ms": 6500
+              },
+              "why": "The heaviest rep of the set, half of it, so it opens the video."
             },
             {
-              "role": "build",
-              "what": "Cable row",
+              "op": "add_clip",
               "asset_id": "ast_01jc000000e00800000000000b",
-              "beats": 4
+              "source": {
+                "in_ms": 1000,
+                "out_ms": 3000
+              }
             },
             {
-              "role": "peak",
-              "what": "The first pulldown rep, first half",
+              "op": "add_clip",
               "asset_id": "ast_01jc000000e00800000000000a",
-              "beats": 3
+              "source": {
+                "in_ms": 2000,
+                "out_ms": 3500
+              }
             },
             {
-              "role": "detail",
-              "what": "The wide gym",
+              "op": "add_clip",
               "asset_id": "ast_01jc000000e00800000000000c",
-              "beats": 6,
-              "effect": "flash"
+              "source": {
+                "in_ms": 3000,
+                "out_ms": 6000
+              },
+              "reframe": {
+                "mode": "blur_fill"
+              }
             },
             {
-              "role": "peak",
-              "what": "Last pulldown rep, second half",
+              "op": "add_clip",
               "asset_id": "ast_01jc000000e00800000000000a",
-              "beats": 3
+              "source": {
+                "in_ms": 6500,
+                "out_ms": 8000
+              }
             },
             {
-              "role": "ending",
-              "what": "Cable row, held",
+              "op": "add_clip",
               "asset_id": "ast_01jc000000e00800000000000b",
-              "beats": 6
+              "source": {
+                "in_ms": 4000,
+                "out_ms": 7000
+              }
+            },
+            {
+              "op": "set_transition",
+              "id": "c4",
+              "type": "flash",
+              "duration_ms": 150
+            },
+            {
+              "op": "snap_cuts_to_beats",
+              "grid": {
+                "bpm": 124,
+                "first_beat_ms": 0
+              },
+              "options": {
+                "write_markers": true,
+                "max_shift_ms": 80
+              }
+            },
+            {
+              "op": "set_motion",
+              "id": "c1",
+              "preset": "punch_in",
+              "at_ms": 484
+            },
+            {
+              "op": "add_text",
+              "text": "HEAVY LAT DAY",
+              "style": "title_bold",
+              "at_ms": 0,
+              "duration_ms": 2000,
+              "anchor": "upper_third"
             }
           ]
         }
       }
     ],
     "usage": {
-      "input_tokens": 430,
-      "cache_write_tokens": 700,
+      "input_tokens": 450,
+      "cache_write_tokens": 2100,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 10100,
-      "output_tokens": 210
+      "cache_read_tokens": 10800,
+      "output_tokens": 301
     }
   },
-  "count_tokens": 11230
+  "count_tokens": 13350
 }
