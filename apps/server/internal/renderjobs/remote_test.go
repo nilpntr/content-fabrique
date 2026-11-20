@@ -12,6 +12,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
+	"github.com/nilpntr/content-fabrique/internal/media"
+	"github.com/nilpntr/content-fabrique/internal/render"
 	"github.com/nilpntr/content-fabrique/internal/sandbox"
 	"github.com/nilpntr/content-fabrique/internal/sandbox/sandboxtest"
 	"github.com/nilpntr/content-fabrique/internal/storage"
@@ -51,9 +53,24 @@ func TestRemoteRenderMatchesLocal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The local side runs the host's ffmpeg, as cf-job does here, whatever -docker-image says (the image's ffmpeg encodes other
+	// bytes), and with MOTION_GRAPHICS=off like the remote side.
+	root := filepath.Dir(e.tempDir)
+	localRunner := &media.SandboxRunner{Provider: sandbox.NewLocal(sandbox.Policy{AllowedRoots: []string{root}}), Image: "unused", Limits: render.DefaultLimits()}
+	localPipe, err := New(Config{Store: e.st, Objects: e.objs, Runner: localRunner, TempDir: e.tempDir, Logger: quiet, MotionFallback: true})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	lr, _ := e.request(t, w, p, localVersion, "preview")
-	local, lout := e.runRender(t, w, lr)
+	lout, err := localPipe.Run(context.Background(), w.ID, lr.ID)
+	if err != nil {
+		t.Fatalf("local Run: %v", err)
+	}
+	local, lerr := e.svc.Get(context.Background(), w.ID, lr.ID)
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
 	rr, _ := e.request(t, w, p, remoteVersion, "preview")
 	rout, err := remotePipe.Run(context.Background(), w.ID, rr.ID)
 	if err != nil {

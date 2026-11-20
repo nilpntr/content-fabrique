@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nilpntr/content-fabrique/internal/media"
 	"github.com/nilpntr/content-fabrique/internal/sandbox"
 	"github.com/nilpntr/content-fabrique/internal/sandbox/sandboxtest"
 	"github.com/nilpntr/content-fabrique/internal/storage"
@@ -54,11 +55,21 @@ func TestRemoteRunnerMatchesLocal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Local: the provider every other render test uses.
+	// Local: the local provider over the host's ffmpeg, the one cf-job runs here, whatever -docker-image says (the image's
+	// ffmpeg encodes other bytes).
 	work := t.TempDir()
 	local := filepath.Join(work, "local.mp4")
 	localStem := filepath.Join(work, "local-stem.m4a")
-	if err := Execute(ctx, plan, testRunner(t), ExecuteOptions{Output: local, StemOutput: localStem, FontsDir: fonts}); err != nil {
+	var roots []string
+	for _, d := range []string{dir, os.TempDir()} { // Execute makes its work directory in the temp dir
+		r, err := filepath.EvalSymlinks(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		roots = append(roots, r)
+	}
+	localRunner := &media.SandboxRunner{Provider: sandbox.NewLocal(sandbox.Policy{AllowedRoots: roots}), Limits: DefaultLimits()}
+	if err := Execute(ctx, plan, localRunner, ExecuteOptions{Output: local, StemOutput: localStem, FontsDir: fonts}); err != nil {
 		t.Fatalf("local render: %v", err)
 	}
 

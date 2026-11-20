@@ -38,8 +38,8 @@ type RemoteFiles interface {
 	PutScratch(ctx context.Context, name string, data []byte, contentType string) (string, error)
 	// ScratchURL is the presigned PUT URL the runner uploads the scratch file name to.
 	ScratchURL(ctx context.Context, name, contentType string) (string, error)
-	// GetScratch reads back a scratch file the runner uploaded, refusing one over max bytes.
-	GetScratch(ctx context.Context, name string, max int64) ([]byte, error)
+	// GetScratch reads back a scratch file the runner uploaded, refusing one over limit bytes.
+	GetScratch(ctx context.Context, name string, limit int64) ([]byte, error)
 }
 
 // RemoteStep is a step run after the encode in the same remote job: it reads the video at RemoteVideoPath.
