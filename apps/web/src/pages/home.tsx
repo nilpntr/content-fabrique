@@ -23,7 +23,7 @@ function useNow(): Date | undefined {
 }
 
 /**
- * Home: a greeting, "New video", the projects to pick up again (newest change first) and how many videos the credits still
+ * Home: a greeting, "Make a video", the projects to pick up again (newest change first) and how many videos the credits still
  * make. Everything here is the workspace's own data; a block whose data the API does not have is left out, never made up.
  */
 export function HomePage() {
@@ -160,8 +160,8 @@ function FirstVideo() {
           <CloudUpload aria-hidden />
           Upload clips
         </Link>
-        <Link to="/make" className={buttonVariants({ variant: "secondary", size: "lg" })}>
-          I already have clips
+        <Link to="/projects/new" className={buttonVariants({ variant: "secondary", size: "lg" })}>
+          Pick from my library
         </Link>
       </div>
       <Link
