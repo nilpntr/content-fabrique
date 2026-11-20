@@ -22,6 +22,13 @@ Rules for changing it:
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
 
+## editor.v2.13 (2026-11-20)
+
+Subject-aware reframing, part A (docs/design/ai-video-editor-plan.md, piece 3). The file is `editor.v2.13.md`, a patch of v2.12 with one
+addition to **Framing**: an unset cover focus is centred on the person by the renderer, and `subject_in_crop` in `check_edit` (new,
+only listed when a clip has subject boxes) fails when under 90 % of the person stays in the frame, with the fix by cause. No tool,
+op or schema change.
+
 ## editor.v2.12, talking.v5, tutorial.v5 and unboxing_product.v5 (2026-11-20)
 
 Cutting on speech (docs/design/ai-video-editor-plan.md, piece 1). The editor never read the transcript, so talking, tutorial and
