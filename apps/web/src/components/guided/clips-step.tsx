@@ -54,12 +54,12 @@ function ClipRow({ clip, onRemove, onRetry }: { clip: GuidedClip; onRemove: () =
           {clip.name}
         </p>
         <StateLine state={clip.state} />
+        {clip.state.kind === "problem" && clip.state.retry ? (
+          <Button variant="secondary" size="lg" className="mt-2 h-11" onClick={onRetry}>
+            Try again
+          </Button>
+        ) : null}
       </div>
-      {clip.state.kind === "problem" && clip.state.retry ? (
-        <Button variant="secondary" size="lg" onClick={onRetry}>
-          Try again
-        </Button>
-      ) : null}
       <Button variant="ghost" size="lg" className="size-11 px-0" aria-label={`Remove ${clip.name}`} onClick={onRemove}>
         <X aria-hidden />
       </Button>
@@ -163,7 +163,7 @@ export function ClipsStep({ source, onNext }: { source: GuidedClips; onNext: () 
 
       <p className="text-center text-[14px] text-muted-foreground">
         Already uploaded your clips?{" "}
-        <Link to="/projects/new" className="font-medium text-brand underline-offset-4 hover:underline">
+        <Link to="/projects/new" className="inline-flex min-h-11 items-center font-medium text-brand underline-offset-4 hover:underline">
           Pick from your library
         </Link>
       </p>

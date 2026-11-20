@@ -50,7 +50,7 @@ function SummaryRow({ label, value, onChange }: { label: string; value: string; 
         <p className="text-[13px] text-muted-foreground">{label}</p>
         <p className="truncate text-[16px] font-medium">{value}</p>
       </div>
-      <Button variant="ghost" size="lg" aria-label={`Change ${label.toLowerCase()}`} onClick={onChange}>
+      <Button variant="ghost" size="lg" className="h-11" aria-label={`Change ${label.toLowerCase()}`} onClick={onChange}>
         Change
       </Button>
     </li>

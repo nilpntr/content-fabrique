@@ -46,7 +46,7 @@ export function MakingScreen({
         {MAKING_STEPS.map((step, index) => {
           const state = progress.states[index] as StepState;
           return (
-            <li key={step.id} data-state={state} className={cn("flex items-center gap-3 px-4 py-3.5 text-[16px]", state === "todo" ? "text-subtle-foreground" : state === "now" ? "font-semibold" : "")}>
+            <li key={step.id} data-state={state} className={cn("flex items-center gap-3 px-4 py-3.5 text-[16px]", state === "todo" ? "text-muted-foreground" : state === "now" ? "font-semibold" : "")}>
               <span aria-hidden className={cn("flex size-7 shrink-0 items-center justify-center rounded-full", state === "todo" ? "border-2 border-dashed border-border" : "bg-brand-wash text-brand")}>
                 {state === "done" ? <Check strokeWidth={3} className="size-4" /> : state === "now" ? <Loader2 className="size-4 motion-safe:animate-spin" /> : null}
               </span>
