@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "41508e20f90e474cb7dc9ca50a44d1e027f58a1a6efe42c89d7ccb91ec5f6ab2",
-  "recorded_at": "2026-11-20T14:32:16Z",
+  "key": "6170ed9d0e997793996d0ea45d21eb8d127c61c8c09dc137d9e59c210b0149ac",
+  "recorded_at": "2026-11-20T14:06:25Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,

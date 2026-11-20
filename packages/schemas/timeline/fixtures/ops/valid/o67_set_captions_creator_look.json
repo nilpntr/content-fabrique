@@ -1,0 +1,7 @@
+{
+  "op": "set_captions",
+  "style": "keyword_emphasis",
+  "fill": "#F5F0DC",
+  "accent": "#FFD60A",
+  "keywords": ["protein", "creatine"]
+}

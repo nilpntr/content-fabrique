@@ -889,9 +889,9 @@ export type TrackType2 = "captions";
  */
 export type Source = "transcript";
 /**
- * word_highlight shows a few words and highlights the one being said. chunk shows each group of words at once.
+ * word_highlight shows a few words and highlights the one being said. chunk shows each group of words at once. keyword_emphasis shows each group at once and draws its key words (see keywords) in the accent colour.
  */
-export type Style = "word_highlight" | "chunk";
+export type Style = "word_highlight" | "chunk" | "keyword_emphasis";
 /**
  * True to render the captions. False keeps the settings without rendering them.
  */
@@ -904,6 +904,68 @@ export type Uppercase = boolean;
  * The most words on screen at once, 1 to 4. Default 2.
  */
 export type MaximumWords = number;
+/**
+ * The colour of the caption letters as #RRGGBB, normally the creator's title colour. Without it the style's own colour (white) is used.
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "captionFill".
+ */
+export type CaptionColour = string;
+/**
+ * The colour of the spoken word (word_highlight) or of the key words (keyword_emphasis) as #RRGGBB, normally the creator's accent colour. Without it the style's own accent is used.
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "captionAccent".
+ */
+export type AccentColour = string;
+/**
+ * Words that keyword_emphasis draws in the accent colour (matched whatever the case, ignoring punctuation). Without any, the longest word of each group is emphasised. At most 12.
+ *
+ * @maxItems 12
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "captionKeywords".
+ */
+export type KeyWords =
+  | []
+  | [string]
+  | [string, string]
+  | [string, string, string]
+  | [string, string, string, string]
+  | [string, string, string, string, string]
+  | [string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string, string, string, string, string];
+/**
+ * The position of the word in the asset's transcript, from 0.
+ */
+export type Word = number;
+/**
+ * The word as the transcript had it when the fix was made. If the transcript no longer has this word at that position, the fix is skipped. Optional.
+ */
+export type HeardAs = string;
+/**
+ * What the word is shown as: 1 to 40 characters, no control characters and none of the characters < > { } \ | ^ ~ [ ] $ and the backtick.
+ */
+export type Replacement = string;
+/**
+ * The creator's fixes of misheard words: the word at position `word` (counted from 0) of the transcript of asset `asset_id` is shown as `text`. The timing stays the transcript's. At most 200, one per word.
+ *
+ * @maxItems 200
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "captionCorrections".
+ */
+export type WordCorrections = {
+  asset_id: AssetId;
+  word: Word;
+  was?: HeardAs;
+  text: Replacement;
+}[];
 /**
  * A lowercase id of 1 to 32 characters: a letter, then letters, digits or underscores, such as "c1" or "t3". Ids are unique across the whole spec. The edit ops name items by these ids.
  */
@@ -1182,7 +1244,7 @@ export type FillColour1 = string;
  * This interface was referenced by `GraphicsParams`'s JSON-Schema
  * via the `definition` "accent".
  */
-export type AccentColour = string;
+export type AccentColour1 = string;
 /**
  * The size relative to the style's, 0.6 to 1.4. Default 1.
  *
@@ -1578,6 +1640,10 @@ export interface CaptionsTrack {
   enabled: Enabled;
   uppercase?: Uppercase;
   max_words?: MaximumWords;
+  fill?: CaptionColour;
+  accent?: AccentColour;
+  keywords?: KeyWords;
+  corrections?: WordCorrections;
 }
 /**
  * Music and sound on top of the clips' own audio. Items may overlap, because they are mixed. At most one audio track.
@@ -1726,7 +1792,7 @@ export interface TitlePopParams {
   text: Text1;
   style?: StyleId2;
   fill?: FillColour1;
-  accent?: AccentColour;
+  accent?: AccentColour1;
   scale?: SizeScale1;
   align?: Alignment1;
   shadow?: Shadow1;
@@ -1744,7 +1810,7 @@ export interface BlurInParams {
   text: Text1;
   style?: StyleId2;
   fill?: FillColour1;
-  accent?: AccentColour;
+  accent?: AccentColour1;
   scale?: SizeScale1;
   align?: Alignment1;
   shadow?: Shadow1;
@@ -1762,7 +1828,7 @@ export interface ChapterCardParams {
   text: Text1;
   style?: StyleId2;
   fill?: FillColour1;
-  accent?: AccentColour;
+  accent?: AccentColour1;
   scale?: SizeScale1;
   align?: Alignment1;
   shadow?: Shadow1;
@@ -1782,7 +1848,7 @@ export interface HighlightWordParams {
   text: Text1;
   style?: StyleId2;
   fill?: FillColour1;
-  accent?: AccentColour;
+  accent?: AccentColour1;
   scale?: SizeScale1;
   align?: Alignment1;
   shadow?: Shadow1;
@@ -1801,7 +1867,7 @@ export interface CounterParams {
   text: Text1;
   style?: StyleId2;
   fill?: FillColour1;
-  accent?: AccentColour;
+  accent?: AccentColour1;
   scale?: SizeScale1;
   align?: Alignment1;
   shadow?: Shadow1;
@@ -1822,7 +1888,7 @@ export interface LowerLabelParams {
   text: Text1;
   style?: StyleId2;
   fill?: FillColour1;
-  accent?: AccentColour;
+  accent?: AccentColour1;
   scale?: SizeScale1;
   align?: Alignment1;
   energy?: Energy;
@@ -1838,7 +1904,7 @@ export interface OutroCardParams {
   text: Text1;
   style?: StyleId2;
   fill?: FillColour1;
-  accent?: AccentColour;
+  accent?: AccentColour1;
   scale?: SizeScale1;
   align?: Alignment1;
   shadow?: Shadow1;
