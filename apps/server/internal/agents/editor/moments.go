@@ -11,6 +11,7 @@ import (
 
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/analysis"
+	"github.com/nilpntr/content-fabrique/internal/clipfeedback"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
@@ -114,6 +115,19 @@ func (d Deps) findMoments(ctx context.Context, rc runtime.RunContext, in findMom
 	if err != nil {
 		return runtime.Result{}, fmt.Errorf("find_moments: %w", err)
 	}
+	// A moment inside a range the creator ruled out on an earlier proof is not offered (docs/design/proof-edit-v1.md).
+	rules, err := clipfeedback.LoadRules(ctx, d.Store, ws, assets)
+	if err != nil {
+		return runtime.Result{}, fmt.Errorf("find_moments: %w", err)
+	}
+	hidden := 0
+	moments = slices.DeleteFunc(moments, func(m store.Moment) bool {
+		out := clipfeedback.RuledOut(rules, m.AssetID.String(), int64(m.StartMs), int64(m.EndMs))
+		if out {
+			hidden++
+		}
+		return out
+	})
 	var b strings.Builder
 	if len(moments) == 0 {
 		b.WriteString("No moments match")
@@ -137,6 +151,9 @@ func (d Deps) findMoments(ctx context.Context, rc runtime.RunContext, in findMom
 	}
 	if clamped {
 		fmt.Fprintf(&b, "(limit lowered to %d.) ", maxMoments)
+	}
+	if hidden > 0 {
+		fmt.Fprintf(&b, "%d %s left out: inside a range the creator ruled out on an earlier proof (get_clip_feedback lists them). ", hidden, plural(hidden, "moment", "moments"))
 	}
 	b.WriteString(d.deadTimeNote(ctx, rc, ws, assets))
 	if len(waiting) > 0 {

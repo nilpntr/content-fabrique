@@ -115,6 +115,18 @@ func (r Rule) Touches(s timeline.Shot) bool {
 	return s.AssetID == r.AssetID && Overlap(s.Source.InMs, s.Source.OutMs, r.StartMs, r.EndMs) > ToleranceMs
 }
 
+// RuledOut says playing [startMs, endMs) of the clip would break one of its rules (more than ToleranceMs of a ruled-out range): what
+// find_moments leaves out.
+func RuledOut(rules map[string][]Rule, assetID string, startMs, endMs int64) bool {
+	s := timeline.Shot{AssetID: assetID, Source: timeline.Source{InMs: startMs, OutMs: endMs}}
+	for _, r := range rules[assetID] {
+		if r.Touches(s) {
+			return true
+		}
+	}
+	return false
+}
+
 // Violation is a shot that plays a range the creator ruled out.
 type Violation struct {
 	Shot      timeline.Shot

@@ -87,6 +87,29 @@ func TestGetClipFeedbackTool(t *testing.T) {
 	}
 }
 
+// find_moments does not offer a moment inside a range the creator ruled out, and says how many it left out.
+func TestFindMomentsLeavesOutRuledOutRanges(t *testing.T) {
+	e := newEnv(t)
+	a := e.asset(e.wsA, clip{title: "Row"})
+	prj := e.project(e.wsA, "9:16", "", a)
+	e.saveAnalysis(e.wsA, a, 3) // reps 6-9 s, 9-12 s, 12-15 s
+	rc := e.runCtx(e.wsA, prj, "")
+	before := textOf(e.ok(rc, ToolFindMoments, `{"kind":"rep"}`))
+	if !strings.Contains(before, "6000 to 9000 ms") {
+		t.Fatalf("the first rep is not listed before the feedback:\n%s", before)
+	}
+	if _, err := e.st.SaveClipFeedback(context.Background(), e.wsA.ID, store.NewClipFeedback{
+		Asset: a, Kind: store.ClipNeverUse, StartMs: 6_000, EndMs: 9_000, Project: prj, Version: 1, ShotNumber: 1, ItemID: "c1",
+		CreatedByKind: store.AuthorUser, CreatedByID: "usr_x",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	after := textOf(e.ok(rc, ToolFindMoments, `{"kind":"rep"}`))
+	if strings.Contains(after, "6000 to 9000 ms") || !strings.Contains(after, "9000 to 12000 ms") || !strings.Contains(after, "1 moment left out") {
+		t.Errorf("after the feedback:\n%s", after)
+	}
+}
+
 func TestGetClipFeedbackListsTheRulesAndKeepsTheNotesAsData(t *testing.T) {
 	a, err := ids.ParseAssetID(ids.Encode(ids.PrefixAsset, uuid.Must(uuid.NewV7())))
 	if err != nil {

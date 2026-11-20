@@ -5,7 +5,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Disclosure } from "@/components/ui/disclosure";
 import { Textarea } from "@/components/ui/textarea";
 import { useMe } from "@/lib/api/hooks";
-import { useFinalRender, useStartEdit } from "@/lib/api/project-hooks";
+import { useFinalRender, usePreviewRender, useStartEdit } from "@/lib/api/project-hooks";
 import { creditsLabel, creditsOf } from "@/lib/credits";
 import { cn } from "@/lib/utils";
 import { renderFailureMessage, renderMessage, startEditMessage } from "./errors";
@@ -105,7 +105,10 @@ export function DownloadButton({
   proof?: boolean;
   className?: string;
 }) {
-  const final = useFinalRender(projectId, version);
+  // With proofs, "Make it final" is asked of the version's proof (POST /v1/renders/{id}/final); the query is the review screen's.
+  const shownProof = usePreviewRender(projectId, proof ? version : undefined, true).state;
+  const proofId = proof && shownProof.kind === "ready" ? shownProof.render.id : undefined;
+  const final = useFinalRender(projectId, version, proofId);
   const { state } = final;
   if (state.kind === "unavailable") return null;
   const ask = proof ? "Make it final" : `Download ${versionLabel}`;
