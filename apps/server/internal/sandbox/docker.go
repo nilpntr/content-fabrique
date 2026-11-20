@@ -52,10 +52,19 @@ type Docker struct {
 	// made for the worker's own uid.
 	Rootless *bool
 
-	rootlessMu sync.Mutex
-	rootlessAt time.Time // when the daemon was last asked; zero means never (or the answer is stale)
-	rootless   bool
-	now        func() time.Time
+	now func() time.Time
+}
+
+// rootlessCache holds the answers of `docker info` for the whole process, by daemon (the CLI binary and its DOCKER_HOST and
+// DOCKER_CONTEXT), so every provider value and every job shares one question per daemon per rootlessTTL.
+var rootlessCache = struct {
+	sync.Mutex
+	m map[string]rootlessAnswer
+}{m: map[string]rootlessAnswer{}}
+
+type rootlessAnswer struct {
+	at       time.Time
+	rootless bool
 }
 
 // rootlessTTL is how long an answer of `docker info` about rootless mode is trusted.
@@ -207,24 +216,26 @@ func (d *Docker) isRootless(ctx context.Context) bool {
 	if d.Rootless != nil {
 		return *d.Rootless
 	}
-	d.rootlessMu.Lock()
-	defer d.rootlessMu.Unlock()
 	now := time.Now
 	if d.now != nil {
 		now = d.now
 	}
-	if !d.rootlessAt.IsZero() && now().Sub(d.rootlessAt) < rootlessTTL {
-		return d.rootless
+	key := d.binary() + "\x00" + os.Getenv("DOCKER_HOST") + "\x00" + os.Getenv("DOCKER_CONTEXT")
+	rootlessCache.Lock()
+	defer rootlessCache.Unlock()
+	if a, ok := rootlessCache.m[key]; ok && now().Sub(a.at) < rootlessTTL {
+		return a.rootless
 	}
 	ictx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ictx, d.binary(), "info", "--format", "{{json .SecurityOptions}}").Output() // #nosec G204 -- fixed arguments
 	if err != nil {
-		d.rootless, d.rootlessAt = false, time.Time{}
+		delete(rootlessCache.m, key)
 		return false
 	}
-	d.rootless, d.rootlessAt = rootlessInfo(out), now()
-	return d.rootless
+	a := rootlessAnswer{at: now(), rootless: rootlessInfo(out)}
+	rootlessCache.m[key] = a
+	return a.rootless
 }
 
 // rootlessInfo reads `docker info --format '{{json .SecurityOptions}}'`, for example ["name=seccomp,profile=builtin","name=rootless"].
