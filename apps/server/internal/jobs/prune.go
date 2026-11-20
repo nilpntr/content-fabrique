@@ -77,6 +77,11 @@ var periodicRegistry = []periodic{
 		args:     func() river.JobArgs { return WebhookEventsPruneArgs{} },
 	},
 	{
+		id:       researchSweepID,
+		schedule: dailyAt{hour: researchSweepHour, minute: researchSweepMinute},
+		args:     func() river.JobArgs { return ResearchSweepArgs{} },
+	},
+	{
 		id:       uploadsExpireID,
 		schedule: river.PeriodicInterval(UploadsExpireInterval),
 		args:     func() river.JobArgs { return UploadsExpireArgs{} },

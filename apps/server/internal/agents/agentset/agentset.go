@@ -27,6 +27,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/media"
 	"github.com/nilpntr/content-fabrique/internal/projects"
 	"github.com/nilpntr/content-fabrique/internal/sandbox"
+	"github.com/nilpntr/content-fabrique/internal/spend"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
@@ -76,6 +77,8 @@ type Runtime struct {
 	Frames *editor.FrameService
 	// Credits prices the editor's runs and sets their credits aside (the price list of config/plans over the store).
 	Credits *credits.Service
+	// Ceilings is the per-edit spend ceiling (EDIT_SPEND_CEILING_*), which the Service and the Runner both apply.
+	Ceilings spend.Ceilings
 	// Service starts, answers and cancels runs.
 	Service *runtime.Service
 	// Runner executes runs; nil for a DefinitionOnly runtime.
@@ -103,6 +106,10 @@ func Open(o Options) (*Runtime, error) {
 		return nil, fmt.Errorf("price list: %w", err)
 	}
 	creditsSvc := credits.NewService(o.Store, priceList)
+	ceilings, err := spend.LoadCeilings(o.Getenv)
+	if err != nil {
+		return nil, fmt.Errorf("spend ceiling: %w", err)
+	}
 	router, err := llm.NewRouter(configfiles.Routing(), cmp.Or(settings.RoutingProfile, o.DefaultProfile, "dev-cheap"))
 	if err != nil {
 		return nil, fmt.Errorf("routing: %w", err)
@@ -151,11 +158,12 @@ func Open(o Options) (*Runtime, error) {
 		return nil, err
 	}
 	rt := &Runtime{
-		Settings: settings, Router: router, Factory: factory, Agents: agents, Frames: frames, Credits: creditsSvc,
-		Service: &runtime.Service{Store: o.Store, Enqueuer: o.Enqueuer, Router: router, Factory: factory, Agents: agents, Credits: creditsSvc, Inline: o.Inline},
+		Settings: settings, Router: router, Factory: factory, Agents: agents, Frames: frames, Credits: creditsSvc, Ceilings: ceilings,
+		Service: &runtime.Service{Store: o.Store, Enqueuer: o.Enqueuer, Router: router, Factory: factory, Agents: agents, Credits: creditsSvc, Inline: o.Inline,
+			Ceilings: ceilings},
 	}
 	if !o.DefinitionOnly {
-		if rt.Runner, err = runtime.NewRunner(runtime.Deps{Store: o.Store, Factory: factory, Agents: agents, Logger: o.Logger}); err != nil {
+		if rt.Runner, err = runtime.NewRunner(runtime.Deps{Store: o.Store, Factory: factory, Agents: agents, Logger: o.Logger, Ceilings: ceilings}); err != nil {
 			return nil, err
 		}
 	}

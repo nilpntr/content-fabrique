@@ -47,7 +47,7 @@ args:
   +bitexact
 
 filter_complex:
-  [0:v]trim=end=4.000,setpts=PTS-STARTPTS,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=120,setpts=PTS-STARTPTS,scale=960:540:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=960:540:x='clip(0.5*iw-480,0,iw-960)':y='clip(0.5*ih-270,0,ih-540)',setsar=1,format=yuv420p,setsar=1,fps=30,settb=AVTB[v0];
+  [0:v]trim=end=4.000,setpts=PTS-STARTPTS,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=120,setpts=PTS-STARTPTS,scale=960:540:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=960:540:x='clip(0.5*iw-480,0,iw-960)':y='clip(0.5*ih-270,0,ih-540)',setsar=1,format=yuv420p,setsar=1,fps=30,settb=AVTB,sidedata=mode=delete:type=DISPLAYMATRIX[v0];
   [v0]null[vj];
   [vj]ass=filename=subs.ass:fontsdir=fonts[vout];
   anullsrc=r=48000:cl=stereo:d=4.000[abed];

@@ -19,6 +19,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
+	"github.com/nilpntr/content-fabrique/internal/spend"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/telemetry"
 )
@@ -90,6 +91,9 @@ type Deps struct {
 	Heartbeat time.Duration
 	// Now replaces time.Now (tests).
 	Now func() time.Time
+	// Ceilings is the per-edit spend ceiling, applied again when a run is claimed (the Service applied it when the run was made): a
+	// ceiling lowered since then holds for the rest of the run. The zero value has none.
+	Ceilings spend.Ceilings
 }
 
 // Runner executes agent runs: the agent_run job calls Execute.
@@ -244,6 +248,8 @@ type loop struct {
 	cv     *convo
 	client llm.Client
 	budget *budgetTracker
+	// ceiling is the per-edit spend ceiling when it is what bounds the dollar budget (zero otherwise).
+	ceiling spend.Ceiling
 	// opening is the first user message, built from the run's input.
 	opening []llm.Block
 
@@ -407,7 +413,15 @@ func (l *loop) work(ctx context.Context) (Outcome, error) {
 		spent = want
 	}
 	l.cv.inflight = 0
-	l.budget = newBudgetTracker(run.BudgetMicros - spent)
+	// The per-edit spend ceiling bounds the budget too (it was applied when the run was made; a lower one since then holds from now).
+	ceiling, err := CeilingFor(ctx, l.st, l.r.deps.Ceilings, l.ws)
+	if err != nil {
+		return "", err
+	}
+	if ceilingBinds(ceiling, run.BudgetMicros) {
+		l.ceiling = ceiling
+	}
+	l.budget = newBudgetTracker(ceiling.Apply(run.BudgetMicros) - spent)
 
 	if _, err := l.append(ctx, store.EventStatus, mustJSON(statusPayload{State: stateRunning, Epoch: run.Epoch, Resumed: l.cv.started}), store.EventDelta{}); err != nil {
 		return "", err
@@ -508,7 +522,7 @@ func (l *loop) toolContext(toolUseID string, resumed bool) RunContext {
 		Logger: l.log.With("tool_use_id", toolUseID),
 		Left: BudgetLeft{
 			Known: true, ToolCalls: int(l.run.BudgetToolCalls) - l.toolCalls,
-			Wall: time.Until(l.wallDeadline()), Micros: l.budget.Remaining(),
+			Wall: time.Until(l.wallDeadline()), Micros: l.budget.Remaining(), CeilingMicros: l.ceiling.Micros,
 		},
 	}
 	if toolUseID != "" {
@@ -1085,6 +1099,9 @@ func (l *loop) summary(stopped, limit string) json.RawMessage {
 	switch stopped {
 	case FailBudget:
 		msg = fmt.Sprintf("Stopped before finishing: the %s budget was used up.", strings.ReplaceAll(limit, "_", " "))
+		if limit == LimitDollars && l.ceiling.Micros > 0 {
+			msg = fmt.Sprintf("Stopped before finishing: the dollar budget was used up at the spend ceiling of %s for one run (%s).", spend.USD(l.ceiling.Micros), l.ceiling.Source)
+		}
 	case "cancelled":
 		msg = "Cancelled before finishing."
 	default:
@@ -1096,6 +1113,9 @@ func (l *loop) summary(stopped, limit string) json.RawMessage {
 	}
 	if limit != "" {
 		out["limit"] = limit
+	}
+	if limit == LimitDollars && l.ceiling.Micros > 0 {
+		out["ceiling_micros"], out["ceiling_source"] = l.ceiling.Micros, l.ceiling.Source
 	}
 	if t := l.cv; t != nil {
 		if text := capText(t.lastText(), 2000); text != "" {
@@ -1131,6 +1151,9 @@ func (l *loop) stopBudgetWithUsage(ctx context.Context, limit string, usage llm.
 	}
 	traceLimit(ctx, limit, false)
 	msg := fmt.Sprintf("The run reached its %s limit and was stopped.", strings.ReplaceAll(limit, "_", " "))
+	if limit == LimitDollars && l.ceiling.Micros > 0 {
+		msg = fmt.Sprintf("The run reached its spend ceiling of %s (%s) and was stopped.", spend.USD(l.ceiling.Micros), l.ceiling.Source)
+	}
 	if err := l.recordSpend(ctx, FailBudget, msg, usage, cost); err != nil {
 		return "", err
 	}
@@ -1191,6 +1214,14 @@ func (l *loop) recordSpend(ctx context.Context, code, message string, usage llm.
 
 // crashSignal is what a test panics with to simulate a killed worker; a tool's recover must not swallow it.
 type crashSignal struct{ point string }
+
+// ceilingBinds says the spend ceiling, not the run's own budget, is what a stop at the dollar limit is to be blamed on. Below the run's
+// budget it always is (it was lowered after the run was made). At the budget it is ambiguous, because Create stores the capped budget:
+// a workspace or plan ceiling is someone's deliberate setting and takes the blame, but the default ($2.00) equals the largest budget a
+// plan gives an edit, so a plan's own $2.00 budget running out is not blamed on it.
+func ceilingBinds(c spend.Ceiling, budget int64) bool {
+	return c.Micros > 0 && (c.Micros < budget || (c.Micros == budget && c.Source != spend.SourceDefault))
+}
 
 // ---- the dollar budget ------------------------------------------------------------------------------------------
 

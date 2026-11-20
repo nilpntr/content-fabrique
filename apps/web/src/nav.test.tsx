@@ -70,8 +70,8 @@ test("a lookalike path is not a child", async () => {
   expect(await activeAt("/settingsx")).toBe("none");
 });
 
-test("a nested nav item wins over its parent: /projects/new is New video", async () => {
-  expect(await activeAt("/projects/new")).toBe("New video");
+test("a nested nav item wins over its parent: /projects/new is Advanced", async () => {
+  expect(await activeAt("/projects/new")).toBe("Advanced");
 });
 
 test("the parent of a nested nav item is active on its own page and on its children", async () => {
@@ -84,5 +84,5 @@ test("a project page (/projects/<id>) belongs to Projects", async () => {
 
 test("only pages that do something are in the nav", async () => {
   const { NAV_ITEMS } = await import("./nav");
-  expect(NAV_ITEMS.map((item) => item.title)).toEqual(["Home", "Projects", "New video", "Library", "Settings"]);
+  expect(NAV_ITEMS.map((item) => item.title)).toEqual(["Home", "Make a video", "Projects", "Library", "Advanced", "Settings"]);
 });

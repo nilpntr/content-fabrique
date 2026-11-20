@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/nilpntr/content-fabrique/internal/research"
 	"github.com/nilpntr/content-fabrique/internal/sandbox"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 )
@@ -34,6 +35,9 @@ const DefaultAppBaseURL = "http://localhost:3000"
 
 // Config is the parsed service configuration.
 type Config struct {
+	// ResearchRetention is how long the creator research engine keeps an observation of a public post (RESEARCH_RETENTION_DAYS, default
+	// 12 months; RESEARCH_YOUTUBE_RETENTION_DAYS, default and maximum 30 days). The retention sweeper deletes what is past it.
+	ResearchRetention research.Retention
 	// Env is the environment name (CF_ENV).
 	Env string
 	// APIBaseURL is the public base URL of the API (API_BASE_URL).
@@ -248,6 +252,7 @@ func Load(getenv Getenv) (Config, error) {
 	errs = append(errs, c.loadMedia(getenv)...)
 	errs = append(errs, c.loadTranscribe(getenv)...)
 	errs = append(errs, c.loadSpend(getenv)...)
+	errs = append(errs, c.loadResearch(getenv)...)
 
 	if c.OTLPEndpoint != "" {
 		if u, err := url.Parse(c.OTLPEndpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
