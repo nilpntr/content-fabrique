@@ -130,7 +130,8 @@ func (c *checker) hookScore() Check {
 	if c.in.HookWeights != nil {
 		w = *c.in.HookWeights
 	}
-	v, ev, ok := specOpening(c.in.Spec, openingFacts{Speech: c.in.Speech, Assets: c.in.Assets, Sharp: c.in.Sharpness, Subjects: c.in.Subjects, NoTitle: c.lim.noTitle})
+	// What the clips say is part of the hook only in a video that follows speech (hook_line applies to the same kinds).
+	v, ev, ok := specOpening(c.in.Spec, openingFacts{Speech: c.in.Speech, Assets: c.in.Assets, Sharp: c.in.Sharpness, Subjects: c.in.Subjects, NoTitle: c.lim.noTitle, Silent: !speechLed(c.typ)})
 	if !ok {
 		return c.skip(CheckHookScore, "the edit has no shots")
 	}
@@ -148,23 +149,29 @@ func (c *checker) hookScore() Check {
 	summary := fmt.Sprintf("the opening scores %.2f on the hook rubric, %d of %d criteria pass", card.Total, card.Applied-card.Failed, card.Applied)
 	switch {
 	case card.Total < hooklab.PassTotal:
-		return c.fail(CheckHookScore, "%s (at least %.2f): %s%s", summary, hooklab.PassTotal, strings.Join(failed, "; "), c.hookPickNote(v, card.Total))
+		return c.fail(CheckHookScore, "%s (at least %.2f): %s%s", summary, hooklab.PassTotal, strings.Join(failed, "; "), c.hookPickNote(v, card))
 	case len(failed) > 0:
 		return c.pass(CheckHookScore, "%s; weak: %s", summary, strings.Join(failed, "; "))
 	}
 	return c.pass(CheckHookScore, "%s", summary)
 }
 
-// hookPickNote reminds the editor of the opening its plan's hook lab picked, when the edit opens on another shot that scores clearly
-// lower ("" otherwise).
-func (c *checker) hookPickNote(v hooklab.Variant, total float64) string {
+// shotCriteria are the criteria another first shot can fix; the others are about the text, which the plan's lab never saw.
+var shotCriteria = []string{hooklab.FirstFrame, hooklab.CleanStart, hooklab.NoFillerStart, hooklab.TextOffBody}
+
+// hookPickNote reminds the editor of the opening its plan's hook lab picked, when the edit opens on another shot and fails something a
+// first shot decides ("" otherwise: a text that is too long or too late is not fixed by opening elsewhere). The pick was scored before
+// the text was written, so its score is not compared with the edit's.
+func (c *checker) hookPickNote(v hooklab.Variant, card hooklab.Card) string {
 	if c.in.Plan == nil || c.in.Plan.HookLab == nil {
 		return ""
 	}
 	p := c.in.Plan.HookLab
-	same := p.AssetID == v.AssetID && max(p.InMs-v.InMs, v.InMs-p.InMs) < hooklab.SameShotMs
-	if same || p.Total-total < hooklab.CloseMargin {
+	if hooklab.SameShot(v, hooklab.Variant{AssetID: p.AssetID, InMs: p.InMs}) {
 		return ""
 	}
-	return fmt.Sprintf(". The plan's hook lab picked variant %s (%s from %d ms of the clip), which scored %.2f: open on it", p.Pick, p.AssetID, p.InMs, p.Total)
+	if !slices.ContainsFunc(card.FailedIDs(), func(id string) bool { return slices.Contains(shotCriteria, id) }) {
+		return ""
+	}
+	return fmt.Sprintf(". The plan's hook lab picked variant %s (%s from %d ms of the clip) as the first shot: open on it", p.Pick, p.AssetID, p.InMs)
 }

@@ -159,7 +159,7 @@ func CheckVersionWith(ctx context.Context, projects Projects, src AnalysisSource
 	weights := hooklab.Resolve(opt.HookPlaybook)
 	in.HookWeights = &weights
 	// How sharp the opening is, for hook_score: read when the source lists the moments (a source that cannot leaves it unmeasured).
-	if ml, ok := src.(MomentLister); ok {
+	if ml, ok := src.(MomentLister); ok && plan != nil && plan.HookLab != nil { // hook_score is in the report of such a plan only
 		if main, _, ok := timeline.MainTrack(spec); ok && len(main.Items) > 0 {
 			first := slices.MinFunc(main.Items, func(a, b timeline.VideoItem) int { return cmp.Compare(a.AtMs, b.AtMs) })
 			if aid, err := ids.ParseAssetID(first.AssetID); err == nil {

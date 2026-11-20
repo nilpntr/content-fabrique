@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -15,6 +16,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/hooklab"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/projects"
+	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/styleprofile"
 )
 
@@ -30,6 +32,9 @@ nothing is written, so both commands cost nothing and run the same in LLM_MODE=r
 lab (DEVELOPMENT ONLY, like cfctl eval editor) runs it on a project: the opening of a stored timeline version (variant "current",
 with its real text) next to up to three openings the lab proposes from the footage (the best spoken line, the best moment of the
 picture, the clip the plan opens on), ranked best first, with the criteria each one fails.
+
+What the clips say counts unless the plan of the run that made the version is of a kind that does not follow speech (a workout cut
+to a song: the clips are not heard).
 
   --workspace   a wks_... id or a Clerk org_... id (required)
   --project     the project (prj_...) (required)
@@ -131,25 +136,11 @@ func cmdHooksLab(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 		_, _ = fmt.Fprintf(errOut, "cfctl %s: the style profile: %v\n", name, err)
 		return 1
 	}
-	opt := editor.HookLabOptions{Version: *version, Style: style, Playbook: playbook}
-	// The plan of the run that made the version names the clip it meant to open on: that clip is proposed too.
-	det, perr := svc.Get(ctx, projects.Actor{Workspace: ws.ID}, pid)
-	if perr != nil {
-		_, _ = fmt.Fprintf(errOut, "cfctl %s: %s: %s\n", name, perr.Code, perr.Message)
-		return 1
-	}
-	if v := *version; v > 0 || det.Project.CurrentTimelineVersion != nil {
-		if v == 0 {
-			v = int(*det.Project.CurrentTimelineVersion)
-		}
-		vd, perr := svc.Version(ctx, projects.Actor{Workspace: ws.ID}, pid, v)
-		if perr != nil {
-			_, _ = fmt.Fprintf(errOut, "cfctl %s: version %d: %s: %s\n", name, v, perr.Code, perr.Message)
-			return 1
-		}
-		opt.Version = v
-		opt.Plan, _ = planOfVersion(ctx, st, ws.ID, vd.Version)
-	}
+	// The plan of the run that made the version names the clip it meant to open on (that clip is proposed too) and the kind of video.
+	opt := editor.HookLabOptions{Version: *version, Style: style, Playbook: playbook, PlanOf: func(ctx context.Context, v store.TimelineVersion) *editor.Plan {
+		plan, _ := planOfVersion(ctx, st, ws.ID, v)
+		return plan
+	}}
 	rec, err := editor.HookLabForProject(ctx, svc, st, ws.ID, pid, opt)
 	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "cfctl %s: %v\n", name, err)
@@ -175,6 +166,7 @@ func cmdHooksLab(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 	}
 	facts, lines := editor.HookLabText(rec.Lab)
 	_, _ = fmt.Fprint(out, facts)
+	_, _ = fmt.Fprintln(out, "(a proposal has no text yet: it is judged on the room for a title, the edit as it is on its real text)")
 	if lines != "" {
 		_, _ = fmt.Fprintf(out, "The lines they open on:\n%s\n", lines)
 	}

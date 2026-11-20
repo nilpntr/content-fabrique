@@ -55,7 +55,7 @@ cases:
         b: []
 
   - id: weak-opener
-    title: "A sentence that starts on 'so' is a weaker hook than one that starts on its point"
+    title: "A sentence that starts on 'so' passes, but ranks under one that starts on its point"
     clips:
       - asset: talk
         duration_ms: 5000
@@ -75,8 +75,9 @@ cases:
     expect:
       pick: b
       fails:
-        a: [no_filler_start]
+        a: []
         b: []
+      max_total: {a: 0.95}
 
   - id: word-time-not-certain
     title: "A first word with a low confidence is not judged for a clean start"

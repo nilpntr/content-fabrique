@@ -135,15 +135,8 @@ func openingOf(v Variant, sp *Speech) opening {
 		return op
 	}
 	op.speech = sp
-	// The first word the shot plays: the first that is not left out by the cut (more than the tolerance of it is inside), as
-	// check_edit's hook_line reads it.
-	for i, w := range sp.Words {
-		if w.EndMs-v.InMs > speechcut.CutToleranceMs && w.StartMs < v.OutMs {
-			op.first = i
-			break
-		}
-	}
-	if op.first < 0 {
+	// The first word the shot plays, as check_edit's hook_line reads it.
+	if op.first = speechcut.FirstPlayed(sp.Words, v.InMs, v.OutMs); op.first < 0 {
 		return op
 	}
 	w := sp.Words[op.first]
@@ -156,7 +149,7 @@ func openingOf(v Variant, sp *Speech) opening {
 		}
 		op.sentence = i
 		op.start = speechcut.SentenceStart(sp.Words, sp.Structure, s)
-		op.line = &Line{Sentence: i, StartMs: s.StartMs, EndMs: s.EndMs, Words: s.LastWord - s.FirstWord + 1, Text: s.Text}
+		op.line = &Line{Sentence: i, StartMs: s.StartMs, EndMs: s.EndMs, Words: s.LastWord - s.FirstWord + 1, Text: cutLine(s.Text)}
 		break
 	}
 	return op
@@ -195,6 +188,18 @@ func inFirst2s(v Variant, ev Evidence, op opening) Result {
 		return scored(InFirst2s, 1, "%s (by %d ms is as early as it gets)", what, PromptMs)
 	}
 	return scored(InFirst2s, 1-(1-LateScore)*float64(late-PromptMs)/float64(HookByMs-PromptMs), "%s: inside the first %d ms, but %d ms or earlier is better", what, HookByMs, PromptMs)
+}
+
+// WeakOpenerScore is what no_filler_start gives a line that starts on a weak opener which belongs to its sentence.
+const WeakOpenerScore = 0.7
+
+func fillerAt(fillers []transcribe.Filler, word int) (transcribe.Filler, bool) {
+	for _, f := range fillers {
+		if word >= f.FirstWord && word <= f.LastWord {
+			return f, true
+		}
+	}
+	return transcribe.Filler{}, false
 }
 
 // TextWords counts the words of a text hook.
@@ -338,14 +343,14 @@ func noFillerStart(op opening) Result {
 	case op.first < 0:
 		return na(NoFillerStart, "the first shot has no speech in it")
 	}
-	for _, f := range op.speech.Structure.Fillers {
-		if op.first < f.FirstWord || op.first > f.LastWord {
-			continue
-		}
-		if f.Strength == transcribe.StrengthStrong || f.Kind == transcribe.FillerHesitation {
-			return scored(NoFillerStart, 0, "the first word spoken (%d to %d ms) is a filler: start the shot after it", f.StartMs, f.EndMs)
-		}
-		return scored(NoFillerStart, 0.5, "the first word spoken (%d to %d ms) is a weak opener, a word that adds nothing here: start the shot after it", f.StartMs, f.EndMs)
+	// A filler the speech planner cuts (an um, a "you know", a weak one set off by a pause) fails: the shot starts after it, where
+	// line_starts_clean takes the sentence to start. A weak opener that is part of its sentence ("So today ...") cannot be cut off
+	// cleanly, so it passes, lower than a line that starts on its point.
+	if f, ok := fillerAt(speechcut.Actionable(op.speech.Words, op.speech.Structure), op.first); ok {
+		return scored(NoFillerStart, 0, "the first word spoken (%d to %d ms) is a filler: start the shot after it", f.StartMs, f.EndMs)
+	}
+	if f, ok := fillerAt(op.speech.Structure.Fillers, op.first); ok {
+		return scored(NoFillerStart, WeakOpenerScore, "the first word spoken (%d to %d ms) is a weak opener; a line that starts on its point hooks harder", f.StartMs, f.EndMs)
 	}
 	return scored(NoFillerStart, 1, "the first word spoken is not a filler")
 }

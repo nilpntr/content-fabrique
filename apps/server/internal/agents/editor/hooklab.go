@@ -45,7 +45,8 @@ type HookRecord struct {
 // maxHookClips is how many of a project's clips the lab reads (the first ones, in the creator's order).
 const maxHookClips = 24
 
-// maxHookMoments is how many moments the lab reads over all the clips (the store's own limit).
+// maxHookMoments is how many moments the lab reads of one clip (the store's own limit): each clip is read on its own, so a clip with
+// many reps does not crowd another's out.
 const maxHookMoments = 200
 
 // MomentLister reads the moments of the clip analysis. *store.Store is the real one.
@@ -63,11 +64,15 @@ type HookSource interface {
 // loadMoments reads the moments worth opening on (the reps and the holds, by clip) and how sharp each clip is over time (from the
 // sharpness of its reps, holds and shots).
 func loadMoments(ctx context.Context, ml MomentLister, ws ids.WorkspaceID, assets []ids.AssetID) (map[string][]hooklab.Moment, map[string][]SharpSpan, error) {
-	rows, err := ml.ListMoments(ctx, ws, store.MomentFilter{Assets: assets, Kinds: []string{store.MomentRep, store.MomentHold, store.MomentShot}, Limit: maxHookMoments})
-	if err != nil {
-		return nil, nil, fmt.Errorf("read the moments: %w", err)
-	}
 	moments, sharp := map[string][]hooklab.Moment{}, map[string][]SharpSpan{}
+	var rows []store.Moment
+	for _, a := range assets {
+		got, err := ml.ListMoments(ctx, ws, store.MomentFilter{Assets: []ids.AssetID{a}, Kinds: []string{store.MomentRep, store.MomentHold, store.MomentShot}, Limit: maxHookMoments})
+		if err != nil {
+			return nil, nil, fmt.Errorf("read the moments of %s: %w", a, err)
+		}
+		rows = append(rows, got...)
+	}
 	for _, m := range rows {
 		id := m.AssetID.String()
 		if m.Kind != store.MomentShot {
@@ -91,6 +96,17 @@ type openingFacts struct {
 	Subjects subject.Index
 	// NoTitle says the creator's videos have no title.
 	NoTitle bool
+	// Silent says the video does not follow speech (a workout cut to a song, say: the clips' own sound is not what the viewer hears),
+	// so what the clips say is not part of the hook and no opening is judged on it.
+	Silent bool
+}
+
+// speech is what a clip says, as far as it counts for the hook.
+func (f openingFacts) speech(asset string) *hooklab.Speech {
+	if f.Silent {
+		return nil
+	}
+	return hookSpeech(f.Speech[asset])
 }
 
 // hookFacts is openingFacts for a whole project, with its clips as the proposer reads them.
@@ -100,8 +116,8 @@ type hookFacts struct {
 }
 
 // loadHookFacts reads what the lab needs about a project's video clips. A clip without a transcript, an analysis or subject boxes is
-// simply known less about; a read that fails is an error.
-func loadHookFacts(ctx context.Context, src HookSource, ws ids.WorkspaceID, rows []store.ProjectFootageRow) (*hookFacts, error) {
+// simply known less about; a read that fails is an error. silent is openingFacts.Silent: the transcripts are then not read.
+func loadHookFacts(ctx context.Context, src HookSource, ws ids.WorkspaceID, rows []store.ProjectFootageRow, silent bool) (*hookFacts, error) {
 	var videos []store.ProjectFootageRow
 	var assets []ids.AssetID
 	for _, r := range rows {
@@ -111,7 +127,7 @@ func loadHookFacts(ctx context.Context, src HookSource, ws ids.WorkspaceID, rows
 		videos = append(videos, r)
 		assets = append(assets, r.AssetID)
 	}
-	f := &hookFacts{openingFacts: openingFacts{Speech: map[string]*Speech{}}}
+	f := &hookFacts{openingFacts: openingFacts{Speech: map[string]*Speech{}, Silent: silent}}
 	var err error
 	if f.Assets, err = loadAnalysisOf(ctx, src, ws, assets); err != nil {
 		return nil, err
@@ -132,7 +148,7 @@ func loadHookFacts(ctx context.Context, src HookSource, ws ids.WorkspaceID, rows
 		for _, d := range f.Assets[id].Dead {
 			clip.Dead = append(clip.Dead, hooklab.Span{StartMs: d.StartMs, EndMs: d.EndMs})
 		}
-		if r.HasAudio == nil || *r.HasAudio {
+		if !silent && (r.HasAudio == nil || *r.HasAudio) {
 			t, err := src.GetTranscript(ctx, ws, r.AssetID)
 			switch {
 			case errors.Is(err, store.ErrNotFound):
@@ -177,7 +193,7 @@ func (f *hookFacts) probePlace(format string, v hooklab.Variant) string {
 
 // evidence is what is known about a proposed variant on a project of the given format.
 func (f *hookFacts) evidence(format string, v hooklab.Variant) hooklab.Evidence {
-	ev := hooklab.Evidence{Speech: hookSpeech(f.Speech[v.AssetID]), Picture: hookPicture(f.Assets[v.AssetID], f.Sharp[v.AssetID], v.InMs), NoTitle: f.NoTitle}
+	ev := hooklab.Evidence{Speech: f.speech(v.AssetID), Picture: hookPicture(f.Assets[v.AssetID], f.Sharp[v.AssetID], v.InMs), NoTitle: f.NoTitle}
 	if !f.NoTitle && strings.TrimSpace(v.Text) == "" {
 		ev.TitleProbe, ev.Text = true, f.probePlace(format, v)
 	}
@@ -196,7 +212,7 @@ func specOpening(spec *timeline.Spec, f openingFacts) (hooklab.Variant, hooklab.
 	if !it.HasRamp() {
 		v.Speed = it.SpeedOrDefault()
 	}
-	ev := hooklab.Evidence{Speech: hookSpeech(f.Speech[it.AssetID]), Picture: hookPicture(f.Assets[it.AssetID], f.Sharp[it.AssetID], it.Source.InMs), NoTitle: f.NoTitle}
+	ev := hooklab.Evidence{Speech: f.speech(it.AssetID), Picture: hookPicture(f.Assets[it.AssetID], f.Sharp[it.AssetID], it.Source.InMs), NoTitle: f.NoTitle}
 	if t, ok := hookText(spec); ok {
 		v.Text, v.TextAtMs, v.TextDurationMs = t.Text, t.AtMs, t.DurationMs
 		ev.Text = textPlace(spec, f.Subjects.Lookup, t.TextItem, timeline.TotalDuration(spec))
@@ -218,7 +234,8 @@ func noTitleStyle(style *styleprofile.Profile, set *styleprofile.Resolved) bool 
 // hookLabStep is the hook lab of a plan: the proposed openings, scored and ranked. ok is false when the footage holds no choice of
 // openings, or nothing to score them on.
 func (d Deps) hookLabStep(ctx context.Context, ws ids.WorkspaceID, format string, rows []store.ProjectFootageRow, plan Plan, noTitle bool) (hooklab.Lab, bool, error) {
-	facts, err := loadHookFacts(ctx, d.Store, ws, rows)
+	// Only a video that follows speech opens on a spoken line (as hook_line applies to those kinds only).
+	facts, err := loadHookFacts(ctx, d.Store, ws, rows, !speechLed(plan.ContentType))
 	if err != nil {
 		return hooklab.Lab{}, false, err
 	}
@@ -321,8 +338,10 @@ type HookLabOptions struct {
 	// Version is the timeline version whose opening is scored next to the proposals: 0 takes the current one (none when the project
 	// has no timeline yet).
 	Version int
-	// Plan is the creative plan of the run that made the version, when there is one: the clip it opens on is proposed too.
-	Plan *Plan
+	// PlanOf finds the creative plan of the run that made a version (nil when there is none, and nil for "do not look"): the clip it
+	// opens on is proposed too, and a plan of a kind that does not follow speech keeps the clips' words out of the lab. Without a plan
+	// what the clips say counts.
+	PlanOf func(ctx context.Context, v store.TimelineVersion) *Plan
 	// Style is the creator's style (nil for none), and Playbook the research playbook (nil for the default weights).
 	Style    *styleprofile.Style
 	Playbook hooklab.Playbook
@@ -342,7 +361,8 @@ type HookFootage interface {
 
 // HookLabForProject runs the hook lab on a project: the opening of a stored timeline version (variant "current", with its real text)
 // next to the openings the lab proposes from the footage, ranked. It is what `cfctl hooks lab` prints; nothing is written and no
-// model is called.
+// model is called. The proposals have no text yet, so they are judged on the room for a title and not on a title: "current" can
+// rank under a proposal because of its text alone, which its failing criteria then say.
 func HookLabForProject(ctx context.Context, svc HookProjects, src HookFootage, ws ids.WorkspaceID, pid ids.ProjectID, opt HookLabOptions) (HookRecord, error) {
 	det, perr := svc.Get(ctx, actor(ws), pid)
 	if perr != nil {
@@ -352,43 +372,48 @@ func HookLabForProject(ctx context.Context, svc HookProjects, src HookFootage, w
 	if err != nil {
 		return HookRecord{}, fmt.Errorf("list footage: %w", err)
 	}
-	facts, err := loadHookFacts(ctx, src, ws, rows)
+	format := det.Project.Format
+	rec := HookRecord{RecordVersion: HookRecordVersion}
+
+	// The version whose opening is scored, and the plan of the run that made it.
+	version := opt.Version
+	if version == 0 && det.Project.CurrentTimelineVersion != nil {
+		version = int(*det.Project.CurrentTimelineVersion)
+	}
+	var spec *timeline.Spec
+	var plan *Plan
+	if version > 0 {
+		vd, perr := svc.Version(ctx, actor(ws), pid, version)
+		if perr != nil {
+			return HookRecord{}, projectErr(perr)
+		}
+		if spec, err = timeline.Parse(vd.Version.Spec); err != nil {
+			return HookRecord{}, fmt.Errorf("parse stored spec: %w", err)
+		}
+		if opt.PlanOf != nil {
+			plan = opt.PlanOf(ctx, vd.Version)
+		}
+	}
+	facts, err := loadHookFacts(ctx, src, ws, rows, plan != nil && !speechLed(plan.ContentType))
 	if err != nil {
 		return HookRecord{}, err
 	}
 	facts.NoTitle = noTitleStyle(profileOf(opt.Style), settingsOf(opt.Style))
-	format := det.Project.Format
-	rec := HookRecord{RecordVersion: HookRecordVersion}
 
 	in := hooklab.Input{Clips: facts.clips}
-	if opt.Plan != nil && len(opt.Plan.Shots) > 0 {
-		in.Planned, in.ShotMs = opt.Plan.Shots[0].AssetID, opt.Plan.Shots[0].LengthMs
+	if plan != nil && len(plan.Shots) > 0 {
+		in.Planned, in.ShotMs = plan.Shots[0].AssetID, plan.Shots[0].LengthMs
 	}
 	variants := hooklab.Propose(in)
 	evidence := map[string]hooklab.Evidence{}
 	for _, v := range variants {
 		evidence[v.ID] = facts.evidence(format, v)
 	}
-
-	version := opt.Version
-	if version == 0 && det.Project.CurrentTimelineVersion != nil {
-		version = int(*det.Project.CurrentTimelineVersion)
-	}
-	if version > 0 {
-		vd, perr := svc.Version(ctx, actor(ws), pid, version)
-		if perr != nil {
-			return HookRecord{}, projectErr(perr)
-		}
-		spec, err := timeline.Parse(vd.Version.Spec)
-		if err != nil {
-			return HookRecord{}, fmt.Errorf("parse stored spec: %w", err)
-		}
+	if spec != nil {
 		if cur, ev, ok := specOpening(spec, facts.openingFacts); ok {
 			cur.ID = hooklab.KindCurrent
 			// A proposal that is the shot the edit already opens on says nothing new.
-			variants = slices.DeleteFunc(variants, func(v hooklab.Variant) bool {
-				return v.AssetID == cur.AssetID && max(v.InMs-cur.InMs, cur.InMs-v.InMs) < hooklab.SameShotMs
-			})
+			variants = slices.DeleteFunc(variants, func(v hooklab.Variant) bool { return hooklab.SameShot(v, cur) })
 			variants = append([]hooklab.Variant{cur}, variants...)
 			evidence[cur.ID] = ev
 			rec.Version = version

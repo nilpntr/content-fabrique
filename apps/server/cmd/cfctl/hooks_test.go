@@ -158,7 +158,7 @@ func TestHooksLabOnAProject(t *testing.T) {
 			t.Errorf("%s: exit %d %q", name, code, errOut)
 		}
 	}
-	if code, _, errOut := r.runHooks("lab", "--workspace", r.ws.ID.String(), "--project", pid.String(), "--version", "7"); code != 1 || !strings.Contains(errOut, "version 7") {
+	if code, _, errOut := r.runHooks("lab", "--workspace", r.ws.ID.String(), "--project", pid.String(), "--version", "7"); code != 1 || !strings.Contains(errOut, "timeline version does not exist") {
 		t.Errorf("a missing version: exit %d %q", code, errOut)
 	}
 }

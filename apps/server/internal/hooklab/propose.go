@@ -165,8 +165,8 @@ func lineCandidates(c Clip) []candidate {
 		case words < 3:
 			merit -= 0.3 // "Okay." is not a hook
 		}
-		if start > s.FirstWord {
-			merit -= 0.1 // the sentence is led by a filler that has to be cut off
+		if _, weak := fillerAt(sp.Structure.Fillers, start); weak || start > s.FirstWord {
+			merit -= 0.1 // the sentence is led by a filler that has to be cut off, or opens on a weak word
 		}
 		if bold(s.Text) {
 			merit += 0.3

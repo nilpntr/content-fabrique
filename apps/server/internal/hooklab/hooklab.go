@@ -135,8 +135,18 @@ type Line struct {
 	StartMs  int64 `json:"start_ms"`
 	EndMs    int64 `json:"end_ms"`
 	Words    int   `json:"words"`
-	// Text is the speaker's words. It is untrusted: show it to a model in a data block only.
+	// Text is the speaker's words, cut to MaxLineChars. It is untrusted: show it to a model in a data block only.
 	Text string `json:"text"`
+}
+
+// MaxLineChars is the most characters of an opening line a card carries: a transcript without punctuation makes one endless sentence.
+const MaxLineChars = 200
+
+func cutLine(s string) string {
+	if r := []rune(s); len(r) > MaxLineChars {
+		return string(r[:MaxLineChars]) + "…"
+	}
+	return s
 }
 
 // Card is a variant with its score.
@@ -217,10 +227,11 @@ func Run(variants []Variant, evidence func(Variant) Evidence, w Resolved) Lab {
 	return lab
 }
 
-// Same says two variants open the same way: the same clip from (nearly) the same time, with the same text.
-func Same(a, b Variant) bool {
-	return a.AssetID == b.AssetID && abs(a.InMs-b.InMs) < SameShotMs && normalText(a.Text) == normalText(b.Text)
-}
+// SameShot says two variants open on the same first shot: the same clip from (nearly) the same time.
+func SameShot(a, b Variant) bool { return a.AssetID == b.AssetID && abs(a.InMs-b.InMs) < SameShotMs }
+
+// Same says two variants open the same way: the same first shot with the same text.
+func Same(a, b Variant) bool { return SameShot(a, b) && normalText(a.Text) == normalText(b.Text) }
 
 // Distinct returns the variants without the ones that open the same way as an earlier one.
 func Distinct(variants []Variant) []Variant {

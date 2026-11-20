@@ -21,14 +21,14 @@ Each criterion scores 0 to 1, passes at 0.7, and is "not applicable" when there 
 | `first_frame_alive` | the first second is not dead time, not near black (lit part under 0.04) and not soft (sharpness under 0.4) | 1.5 |
 | `line_starts_clean` | the shot starts on the first word of a sentence, not inside a word (the rule of `hook_line`) | 1.5 |
 | `hook_readable` | the text is at most 7 words and 40 characters and stays up long enough; without text, the spoken line is at most 4 s | 1 |
-| `no_filler_start` | the first word spoken is not a filler (a weak opener such as "so" scores half) | 1 |
+| `no_filler_start` | the first word spoken is not a filler the speech planner would cut; a weak opener that belongs to its sentence ("So today ...") passes at 0.7, under a line that starts on its point | 1 |
 
-Ranking is deterministic: total, then fewer failures, then more criteria that apply, then input order. A lead under 0.05 is called a tie, and the brief decides. A criterion's detail gives times and counts only; it never quotes the transcript or the text.
+What the clips say counts only in a video that follows speech (talking, tutorial, product), as `hook_line` does: in a workout cut to a song the clips are not heard, so no line is proposed or judged. Ranking is deterministic: total, then fewer failures, then more criteria that apply, then input order. A lead under 0.05 is called a tie, and the brief decides. A criterion's detail gives times and counts only; it never quotes the transcript or the text.
 
 ## 4. Where it runs
 
 - **Planner step (`plan_edit`).** After the plan is checked, `hooklab.Propose` makes up to three distinct variants from the footage (the best spoken line, the best moment of the picture, the clip the plan opens on), the rubric ranks them, and the answer lists them with the pick. The lines go in an `untrusted_data` block. The title is not written yet, so the lab judges the **room** for one on each first shot. The whole lab is the run's `hook_lab` artifact; the pick is `Plan.HookLab`. The step never fails a plan, and says nothing when the footage gives no choice.
-- **`check_edit`: `hook_score`.** The opening that was built, with its real text, on the same rubric; it fails under 0.60 and names the lab's pick when the edit opened elsewhere and scored lower. It is in the report only when the plan ran the lab, so the scores of stored versions in the eval suites do not move.
+- **`check_edit`: `hook_score`.** The opening that was built, with its real text, on the same rubric; it fails under 0.60 and names the lab's pick when the edit opened on another shot and fails something a first shot decides. It is in the report only when the plan ran the lab, so the scores of stored versions in the eval suites do not move.
 - **`cfctl hooks lab`** runs it on a project (the current opening next to the proposals). **`cfctl hooks eval`** runs `suites/hook-lab.yaml`: made-up cases with the answer the lab must give, no database, no model, the same in `LLM_MODE=replay`.
 
 ## 5. "What works" weights

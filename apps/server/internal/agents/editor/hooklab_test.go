@@ -49,12 +49,16 @@ func TestHookScoreFailsAWeakOpening(t *testing.T) {
 	dead := []shot{{asset: assetA, in: 0, out: 1500}, {asset: assetA, in: 5000, out: 8000}}
 	r := RunChecks(CheckInput{Spec: specOf(t, dead, nil, nil), Plan: labPlan(TypeWorkout), Assets: map[string]AssetAnalysis{assetA: repsClip()}})
 	c := wantStatus(t, r, CheckHookScore, CheckFail)
-	for _, want := range []string{"scores 0.00", hooklab.InFirst2s, hooklab.FirstFrame, "dead time", "picked variant a", "from 5000 ms", "scored 1.00"} {
+	for _, want := range []string{"scores 0.00", hooklab.InFirst2s, hooklab.FirstFrame, "dead time", "picked variant a", "from 5000 ms"} {
 		if !strings.Contains(c.Detail, want) {
 			t.Errorf("the detail lacks %q: %s", want, c.Detail)
 		}
 	}
-	// The same opening on the pick's own shot is not told to open on the pick.
+	// An opening on live picture whose only fault is the missing title is not sent to another shot, nor is one on the pick's own shot.
+	alive := []shot{{asset: assetA, in: 2000, out: 3500}, {asset: assetA, in: 5000, out: 8000}}
+	if c := wantStatus(t, RunChecks(CheckInput{Spec: specOf(t, alive, nil, nil), Plan: labPlan(TypeWorkout), Assets: map[string]AssetAnalysis{assetA: repsClip()}}), CheckHookScore, CheckFail); strings.Contains(c.Detail, "picked variant") {
+		t.Errorf("a missing title is sent to the pick: %s", c.Detail)
+	}
 	onPick := []shot{{asset: assetA, in: 5100, out: 6600}, {asset: assetA, in: 2000, out: 5000}}
 	c = wantStatus(t, RunChecks(CheckInput{Spec: specOf(t, onPick, nil, nil), Plan: labPlan(TypeWorkout), Assets: map[string]AssetAnalysis{assetA: repsClip()}}), CheckHookScore, CheckFail)
 	if strings.Contains(c.Detail, "picked variant") {
@@ -208,7 +212,13 @@ func TestPlanEditRunsTheHookLab(t *testing.T) {
 		artifacts = append(artifacts, p)
 		return nil
 	})
-	text := textOf(e.ok(rc, ToolPlanEdit, planCall(validPlanArgs(x.set.String()))))
+	// A workout does not follow speech: what a clip says is not offered as an opening, and no transcript is quoted.
+	if workout := textOf(e.ok(e.runCtx(e.wsA, x.prj, ""), ToolPlanEdit, planCall(validPlanArgs(x.set.String())))); !strings.Contains(workout, "Hook lab: ") || strings.Contains(workout, "a spoken line") || strings.Contains(workout, "truth") {
+		t.Errorf("the lab of a workout plan:\n%s", workout[:min(len(workout), 2500)])
+	}
+	talking := validPlanArgs(x.set.String())
+	talking.ContentType, talking.Playbook = TypeTalking, TypeTalking
+	text := textOf(e.ok(rc, ToolPlanEdit, planCall(talking)))
 	for _, want := range []string{
 		"Hook lab: 3 ways to open this video", "weights: defaults",
 		"1. variant a, a spoken line: " + x.talker.String() + " from 320 to 1600 ms", "It opens on the line from 400 to 1520 ms",
@@ -258,7 +268,7 @@ func TestPlanEditRunsTheHookLab(t *testing.T) {
 	// A playbook moves the weights, and the answer says where they come from.
 	e.deps.HookPlaybook = hooklab.StaticPlaybook{Version: "2026-47", Findings: []hooklab.Finding{{ID: "f1", Criterion: hooklab.FirstFrame, Effect: 1.8, Confidence: hooklab.ConfidenceHigh}}}
 	e.rebuild()
-	if text := textOf(e.ok(e.runCtx(e.wsA, x.prj, ""), ToolPlanEdit, planCall(validPlanArgs(x.set.String())))); !strings.Contains(text, "weights: playbook 2026-47") {
+	if text := textOf(e.ok(e.runCtx(e.wsA, x.prj, ""), ToolPlanEdit, planCall(talking))); !strings.Contains(text, "weights: playbook 2026-47") {
 		t.Error("the playbook's weights are not used")
 	}
 }
