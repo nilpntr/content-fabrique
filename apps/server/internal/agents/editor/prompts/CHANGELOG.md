@@ -24,7 +24,7 @@ Rules for changing it:
 
 ## workout.v9 (2026-11-20)
 
-Gino's rules (docs/design/gino-edit-rules.md, rules 1, 4 and 6). The editor prompt stays `editor.v2.12`. The playbook text changes:
+Gino's rules (docs/design/gino-edit-rules.md, rules 1, 4 and 6). The editor prompt stays `editor.v2.12`. The playbook text changes (one section, "When the creator's settings say otherwise", lists what the settings switch off in the Rhythm, Energy and Ending lines):
 
 - The living camera, punch-in and "loop back to the hook" lines now yield to the creator's settings: camera motion off means no
   motion at all, text animation off means texts just appear, and a creator whose style ends on a quiet shot is not asked to loop.

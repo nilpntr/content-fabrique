@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "f7a3c37b46e46c1272438940aee0d51e1db1fbaa8d1ebed1abc20798106aa2f8",
-  "recorded_at": "2026-11-20T14:02:26Z",
+  "key": "e99df84492241c792f4dd45fda5fe1daa29ec50dfb5bcbbcebf6bcaa1e08c249",
+  "recorded_at": "2026-11-20T14:08:37Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,
@@ -22,54 +22,6 @@
           "text",
           "text",
           "text"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
         ]
       },
       {
@@ -186,11 +138,6 @@
         "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
         "media_type": "image/jpeg",
         "bytes": 9284
-      },
-      {
-        "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
-        "media_type": "image/jpeg",
-        "bytes": 9284
       }
     ]
   },
@@ -201,20 +148,18 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_10",
-        "name": "finish",
-        "input": {
-          "summary": "I cut a 12 second video from your three clips. It opens on half of the heaviest lat pulldown rep with the words HEAVY LAT DAY and a punch-in on the beat, then the cable row, the pulldown again, the wide gym with a flash and a last rep. Check the wide shot: I framed it with a blurred fill so nobody is cropped out."
-        }
+        "id": "toolu_ed_6",
+        "name": "check_edit",
+        "input": {}
       }
     ],
     "usage": {
-      "input_tokens": 400,
-      "cache_write_tokens": 650,
+      "input_tokens": 420,
+      "cache_write_tokens": 700,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 16300,
-      "output_tokens": 92
+      "cache_read_tokens": 13500,
+      "output_tokens": 38
     }
   },
-  "count_tokens": 17350
+  "count_tokens": 14620
 }

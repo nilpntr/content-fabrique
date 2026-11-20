@@ -289,8 +289,8 @@ func applyStyle(l limits, p *styleprofile.Profile, set *styleprofile.Resolved) l
 	}
 	l.transitionsOff = r.Transitions == styleprofile.LevelOff
 	l.cameraOff = r.CameraMotion == styleprofile.LevelOff
-	if l.cameraOff {
-		l.minEffects = 0 // nothing but transitions could add effects, and the style has no motion: a flat edit is the style
+	if l.cameraOff && l.transitionsOff {
+		l.minEffects = 0 // the style has neither motion nor transitions: a flat edit is the style
 	}
 	l.effectsLots = r.Transitions == styleprofile.LevelLots || r.CameraMotion == styleprofile.LevelLots
 	if r.Music == styleprofile.MusicNever {
@@ -518,6 +518,9 @@ func (c *checker) shotStats() (minMs, medMs, maxMs int64) {
 func (c *checker) shotPacing() Check {
 	lo, med, hi := c.shotStats()
 	c.m.ShotMinMs, c.m.ShotMedianMs, c.m.ShotMaxMs = lo, med, hi
+	if c.onFixedGrid() {
+		return c.skip(CheckShotPacing, "the cuts follow a fixed 2-beat grid: the beats set the shot length (beat_grid_fixed judges it)")
+	}
 	// With the creator's measured shot lengths, the median aims at theirs (scaled by the vibe and their pace setting), within ±40 %.
 	if p := c.pace; p.Applies && p.FromProfile {
 		switch {
@@ -540,6 +543,9 @@ func (c *checker) shotPacing() Check {
 // longShot fails a shot that runs longer than the pace allows (the creator's measured 90th percentile shot, scaled by the vibe and their
 // setting, or the default). The hook (held to the drop by hook_length) and the ending (held_ending) are left out.
 func (c *checker) longShot() Check {
+	if c.onFixedGrid() {
+		return c.skip(CheckLongShot, "the cuts follow a fixed 2-beat grid: the beats set the shot length (beat_grid_fixed judges it)")
+	}
 	p := c.pace
 	if !p.Applies {
 		return c.skip(CheckLongShot, "no pace target applies (a %s video, or a creator of long takes at the calm vibe)", c.typ)
@@ -563,6 +569,9 @@ func (c *checker) longShot() Check {
 // heldEnding fails an ending held longer than the creator holds theirs (scaled by the vibe), unless it moves: a push (the living camera,
 // push_in or pull_back) with a punch-in on a beat may hold up to 1.6 times as long.
 func (c *checker) heldEnding() Check {
+	if c.onFixedGrid() {
+		return c.skip(CheckHeldEnding, "the cuts follow a fixed 2-beat grid: the ending is 4 beats (beat_grid_fixed judges it)")
+	}
 	p := c.pace
 	if !p.Applies {
 		return c.skip(CheckHeldEnding, "no pace target applies (a %s video, or a creator of long takes at the calm vibe)", c.typ)

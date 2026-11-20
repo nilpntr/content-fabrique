@@ -400,11 +400,11 @@ to the suggestion, the measures or the default.
 
 Gino's hand-tuned edit rules (his `video-edit` skill; `docs/design/gino-edit-rules.md` on `plan/gino-rules`) are mostly personal, so they are
 **style settings and never defaults**. Two new settings, both off unless the creator sets them (the source is `you` or the default, never
-measured or suggested; no API or web field yet, they live in the stored settings JSON):
+measured or suggested). They are in `StyleSettings` of the API (`PUT /v1/style` keeps them) and in `cfctl style set --cut-grid --shot-reuse`; the effective-settings view and the web form do not show them yet):
 
 | Setting | Values | Switches on |
 |---|---|---|
-| `cut_grid` | `free` (default), `fixed_2` | `beat_grid_fixed` (every cut on an even beat, the last shot 4 beats, the total a multiple of 4) and turns `shot_variety` and `pace_builds` off: equal shot lengths in a row are the rhythm |
+| `cut_grid` | `free` (default), `fixed_2` | `beat_grid_fixed` (every cut on an even beat, the last shot 4 beats, the total a multiple of 4) and turns `shot_variety` and `pace_builds` off, with `shot_pacing`, `long_shot` and `held_ending` (the beats set the lengths); it skips for a style with `music never` or cuts off the beat, and when no beat grid is expected: equal shot lengths in a row are the rhythm |
 | `shot_reuse` | `allowed` (default), `once` | `shot_reused` (no source range used twice, a tripod clip gives one shot) |
 
 Both checks report "does not apply" for every other creator, so their results are unchanged. The playbook (`workout.v9`) yields to the

@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "008b7a61d831381bf4a1291f03ad576bfdfff6f27ccdf9ecbe15e702b2077e55",
-  "recorded_at": "2026-11-20T14:02:26Z",
+  "key": "60eca234478e5d4da9e5bfddd86242bad2fcc56ea214ee1d44ee33608c782194",
+  "recorded_at": "2026-11-20T14:08:37Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,
@@ -22,6 +22,18 @@
           "text",
           "text",
           "text"
+        ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
         ]
       },
       {
@@ -148,18 +160,38 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_6",
-        "name": "check_edit",
-        "input": {}
+        "id": "toolu_ed_7",
+        "name": "edit_timeline",
+        "input": {
+          "base_version": 1,
+          "ops": [
+            {
+              "op": "trim_item",
+              "id": "c4",
+              "out_ms": 4500
+            },
+            {
+              "op": "snap_cuts_to_beats",
+              "grid": {
+                "bpm": 124,
+                "first_beat_ms": 0
+              },
+              "options": {
+                "write_markers": true,
+                "max_shift_ms": 60
+              }
+            }
+          ]
+        }
       }
     ],
     "usage": {
-      "input_tokens": 420,
-      "cache_write_tokens": 700,
+      "input_tokens": 440,
+      "cache_write_tokens": 800,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 13500,
-      "output_tokens": 38
+      "cache_read_tokens": 14200,
+      "output_tokens": 120
     }
   },
-  "count_tokens": 14620
+  "count_tokens": 15440
 }
