@@ -396,6 +396,8 @@ It then patches only what is needed. This is the review loop popularised by [Fra
 
 ### 7.3 Research agent and ideation
 
+> The creator research engine (a weekly, creator-centred run that writes `research_*` tables and a playbook) sits next to the daily trend scan below. Its data model and compliance rules are built (tables `research_creators`, `research_posts`, `research_evidence`, `research_annotations`, `research_findings`; [D-41](05-decisions.md#d-41-creator-research-engine-the-compliance-rules-built-first)); the agent loop comes in later phases.
+
 - **Daily trend scan** (River periodic job per audience region). The agent calls provider tools ([D-11](05-decisions.md#d-11-trend-data-sources)) and web search, then writes `trends`, `trend_snapshots` and `concepts` with evidence links. Its output is **shared across workspaces**, so its cost is amortised over all tenants.
 - **Sound metadata** (tempo, beat grid, popular-snippet window) comes from the provider or from our own analysis of audio we are allowed to process ([D-03](05-decisions.md#d-03-music-cue-only-by-default)).
 - **Ideation** is a short structured-output run: creator profile + clip-index summary + trend board → N idea cards, each with a slot → moment mapping (with a `search_moments` tool so ideas only use clips that exist).

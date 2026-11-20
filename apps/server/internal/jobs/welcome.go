@@ -11,6 +11,7 @@ import (
 
 	"github.com/nilpntr/content-fabrique/internal/credits"
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/research"
 	"github.com/nilpntr/content-fabrique/internal/spend"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
@@ -46,6 +47,9 @@ type Deps struct {
 	Meter *spend.ComputeMeter
 	// Credits is the price list the credits jobs grant allowances from. Nil means the embedded one (config/plans, credits.ListFile).
 	Credits *credits.PriceList
+	// Research is how long the creator research engine keeps an observation (config.Config.ResearchRetention). The zero value means
+	// the defaults (12 months, 30 days for YouTube). The sweep uses it to decide when an idle candidate creator is only a handle.
+	Research research.Retention
 	// Now replaces time.Now (tests).
 	Now func() time.Time
 	// Register optionally adds more workers to the bundle (tests, and packages with jobs of their own later).
@@ -130,6 +134,9 @@ func Workers(deps Deps) (*river.Workers, error) {
 		return nil, err
 	}
 	if err := river.AddWorkerSafely(w, &RendersSweepWorker{deps: deps}); err != nil {
+		return nil, err
+	}
+	if err := river.AddWorkerSafely(w, &ResearchSweepWorker{deps: deps}); err != nil {
 		return nil, err
 	}
 	if err := river.AddWorkerSafely(w, &SpendHoldsSweepWorker{deps: deps}); err != nil {

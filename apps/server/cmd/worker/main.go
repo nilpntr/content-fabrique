@@ -116,6 +116,7 @@ func run(args []string) error {
 				Render:     renderer,
 				Transcribe: transcr,
 				Meter:      meter,
+				Research:   cfg.ResearchRetention,
 				Analysis:   analyzer,
 				Register:   runtime.Register(runner),
 				QuickLook:  quickLooker,
