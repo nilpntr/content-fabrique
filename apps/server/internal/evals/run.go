@@ -94,6 +94,9 @@ type Options struct {
 	// Repeat is how many times each live case is run (its samples); 0 or 1 is once. A stored case is scored once: its score is the same
 	// every time.
 	Repeat int
+	// EditCeilingMicros is the highest per-edit spend ceiling an editor run may get (spend.Ceilings.Highest; 0 when some run has none):
+	// a live sample never costs more, whatever its budget_usd, so the worst-case estimate counts the lesser of the two.
+	EditCeilingMicros int64
 	// CodeHash names the code the run scored (baseline.go); it is written with the results.
 	CodeHash string
 	Now      func() time.Time

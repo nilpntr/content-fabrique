@@ -16,6 +16,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/analysis"
 	"github.com/nilpntr/content-fabrique/internal/clipfeedback"
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/spend"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/styleprofile"
 	"github.com/nilpntr/content-fabrique/internal/subject"
@@ -434,7 +435,14 @@ func (d Deps) onLimit(ctx context.Context, rc runtime.RunContext, limit string) 
 		what = "room"
 	}
 	var note strings.Builder
-	fmt.Fprintf(&note, "I ran out of %s before I could finish polishing this video, so this is the version as it stood. It is saved as version %d.", what, v)
+	ceiling := int64(0)
+	if limit == runtime.LimitDollars && rc.Left.CeilingMicros > 0 {
+		// The per-edit spend ceiling, not the plan's budget, is what stopped the run: say so, with the amount.
+		ceiling = rc.Left.CeilingMicros
+		fmt.Fprintf(&note, "I reached the spend ceiling of %s for one edit before I could finish polishing this video, so I stopped and kept the newest version I made. It is saved as version %d.", spend.USD(ceiling), v)
+	} else {
+		fmt.Fprintf(&note, "I ran out of %s before I could finish polishing this video, so this is the version as it stood. It is saved as version %d.", what, v)
+	}
 	switch {
 	case d.previewsOn() && !d.previewOK(ctx, rc, v):
 		note.WriteString(" My last change to it was not previewed, so look at it before you use it.")
@@ -445,7 +453,11 @@ func (d Deps) onLimit(ctx context.Context, rc runtime.RunContext, limit string) 
 			note.WriteString(" The final checks still found something to improve: " + strings.ReplaceAll(strings.Join(failed, ", "), "_", " ") + ".")
 		}
 	}
-	out, _ := json.Marshal(map[string]any{"summary": note.String(), "timeline_version": v, "implicit_finish": true, "limit": limit})
+	o := map[string]any{"summary": note.String(), "timeline_version": v, "implicit_finish": true, "limit": limit}
+	if ceiling > 0 {
+		o["ceiling_micros"] = ceiling
+	}
+	out, _ := json.Marshal(o)
 	return out, true
 }
 

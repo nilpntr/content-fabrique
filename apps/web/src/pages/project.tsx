@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import * as React from "react";
+import { CaptionFixer } from "@/components/project/caption-fixer";
 import { mainItems, markersOf, specDurationMs, textItems } from "@/components/project/review-data";
 import { EditingProgress } from "@/components/project/editing-progress";
 import { chooseRun, isRunId, useRememberedRun } from "@/components/project/last-run";
@@ -190,6 +191,7 @@ export function ProjectPage({
                 {version.loading ? null : (
                   <DownloadButton projectId={projectId} version={version.version} versionLabel={version.version === latest ? "video" : versionName(version.version)} proof={proofs} />
                 )}
+                {version.loading || runActive ? null : <CaptionFixer projectId={projectId} version={version.version} latest={latest} className="border-t border-hairline pt-4" />}
                 <FeedbackBox projectId={projectId} busy={runActive} openComments={openComments} onStarted={onRunStarted} className="border-t border-hairline pt-4" />
               </>
             );

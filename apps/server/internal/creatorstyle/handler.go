@@ -103,6 +103,12 @@ func SettingsOf(in api.StyleSettings) styleprofile.Settings {
 	if in.ProofEdits != nil {
 		s.ProofEdits = string(*in.ProofEdits)
 	}
+	if in.CutGrid != nil {
+		s.CutGrid = string(*in.CutGrid)
+	}
+	if in.ShotReuse != nil {
+		s.ShotReuse = string(*in.ShotReuse)
+	}
 	return s
 }
 
@@ -158,6 +164,12 @@ func apiSettings(s styleprofile.Settings) api.StyleSettings {
 	}
 	if s.ProofEdits != "" {
 		out.ProofEdits = ptr(api.StyleToggle(s.ProofEdits))
+	}
+	if s.CutGrid != "" {
+		out.CutGrid = ptr(api.StyleCutGrid(s.CutGrid))
+	}
+	if s.ShotReuse != "" {
+		out.ShotReuse = ptr(api.StyleShotReuse(s.ShotReuse))
 	}
 	return out
 }

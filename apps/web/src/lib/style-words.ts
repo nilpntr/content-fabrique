@@ -24,7 +24,7 @@ export const vibeLabel = (vibe: EditVibe): string => VIBES.find((v) => v.value =
 // ---- The settings ----------------------------------------------------------------------------------------------------------------
 
 /** The settings with a fixed list of choices (the title colour is a colour, not a list). */
-export type ChoiceSetting = Exclude<keyof StyleSettings, "title_colour" | "vibe" | "title_template">;
+export type ChoiceSetting = Exclude<keyof StyleSettings, "title_colour" | "vibe" | "title_template" | "cut_grid" | "shot_reuse">;
 
 export interface ChoiceWords {
   key: ChoiceSetting;

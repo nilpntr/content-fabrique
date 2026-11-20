@@ -3914,6 +3914,14 @@ components:
       type: string
       description: "`off`, `subtle` (a few, on the strongest moments) or `lots` (on most strong beats)."
       enum: ["off", subtle, lots]
+    StyleCutGrid:
+      type: string
+      description: "`free` (cuts follow the footage and the music) or `fixed_2` (2 beats a shot, cuts on even beats, the last shot 4 beats, the total a multiple of 4). A personal rule, off unless set."
+      enum: [free, fixed_2]
+    StyleShotReuse:
+      type: string
+      description: "`allowed` or `once` (no source moment twice, a tripod clip gives one shot). A personal rule, off unless set."
+      enum: [allowed, once]
     StyleToggle:
       type: string
       enum: ["off", "on"]
@@ -4004,6 +4012,10 @@ components:
           $ref: "#/components/schemas/StyleTextPattern"
         text_position:
           $ref: "#/components/schemas/StyleTextPosition"
+        cut_grid:
+          $ref: "#/components/schemas/StyleCutGrid"
+        shot_reuse:
+          $ref: "#/components/schemas/StyleShotReuse"
         proof_edits:
           allOf:
             - $ref: "#/components/schemas/StyleToggle"

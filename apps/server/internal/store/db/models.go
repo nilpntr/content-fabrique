@@ -180,24 +180,6 @@ type AssetSignal struct {
 	UpdatedAt        time.Time
 }
 
-type ClipFeedback struct {
-	ID              ids.ClipFeedbackID
-	WorkspaceID     ids.WorkspaceID
-	AssetID         ids.AssetID
-	Kind            string
-	StartMs         int64
-	EndMs           int64
-	ProjectID       ids.ProjectID
-	TimelineVersion int32
-	ShotNumber      int32
-	ItemID          string
-	Note            string
-	CreatedByKind   string
-	CreatedByID     string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-}
-
 type CreatorProfile struct {
 	WorkspaceID     ids.WorkspaceID
 	Niche           json.RawMessage
@@ -344,7 +326,85 @@ type Render struct {
 	StartedAt         *time.Time
 	FinishedAt        *time.Time
 	ObjectsPurgedAt   *time.Time
-	Proof             bool
+}
+
+type ResearchAnnotation struct {
+	ID              uuid.UUID
+	PostID          uuid.UUID
+	FormatID        *string
+	HookKind        *string
+	HookTextPattern *string
+	TextPattern     *string
+	CutsEstimate    *int32
+	FirstCutS       *float64
+	CaptionLen      *int32
+	HashtagsN       *int32
+	Cta             *string
+	Topic           *string
+	Annotator       string
+	Confidence      float64
+	CreatedAt       time.Time
+}
+
+type ResearchCreator struct {
+	ID         uuid.UUID
+	Platform   string
+	Handle     string
+	ProfileUrl string
+	WhySimilar string
+	Similarity float64
+	Status     string
+	ApprovedBy *string
+	ApprovedAt *time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+type ResearchEvidence struct {
+	ID          uuid.UUID
+	PostID      pgtype.UUID
+	CreatorID   pgtype.UUID
+	Source      string
+	Method      string
+	ObservedAt  time.Time
+	Observer    string
+	Metrics     json.RawMessage
+	RawRef      *string
+	RetainUntil time.Time
+	RunID       pgtype.UUID
+	CreatedAt   time.Time
+}
+
+type ResearchFinding struct {
+	ID              uuid.UUID
+	PlaybookVersion string
+	Claim           string
+	Dimension       string
+	EffectValue     float64
+	EffectUnit      string
+	NPosts          int32
+	NCreators       int32
+	Confidence      string
+	EvidenceIds     []uuid.UUID
+	CreatedAt       time.Time
+}
+
+type ResearchForgotten struct {
+	Platform   string
+	HandleHash string
+	CreatedAt  time.Time
+}
+
+type ResearchPost struct {
+	ID             uuid.UUID
+	Platform       string
+	Url            string
+	ExternalID     string
+	CreatorID      uuid.UUID
+	PostedAt       *time.Time
+	PostedAtSource *string
+	DurationS      *float64
+	CreatedAt      time.Time
 }
 
 type Shot struct {

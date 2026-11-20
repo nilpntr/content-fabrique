@@ -20,7 +20,7 @@ SET status = 'rendering', progress = 0, stage = 'staging', started_at = now(), f
 FROM projects p
 WHERE renders.workspace_id = $1 AND renders.id = $2 AND renders.status IN ('queued', 'rendering')
   AND p.workspace_id = renders.workspace_id AND p.id = renders.project_id AND p.deleted_at IS NULL
-RETURNING renders.id, renders.workspace_id, renders.project_id, renders.timeline_version, renders.profile, renders.status, renders.progress, renders.stage, renders.mp4_key, renders.contact_sheet_key, renders.time_map_key, renders.duration_ms, renders.width, renders.height, renders.size_bytes, renders.contact_sheet_bytes, renders.time_map_bytes, renders.contact_sheet, renders.sound_cues, renders.cpu_ms, renders.wall_ms, renders.failure_reason, renders.requested_by_kind, renders.requested_by_id, renders.created_at, renders.updated_at, renders.started_at, renders.finished_at, renders.objects_purged_at, renders.proof
+RETURNING renders.id, renders.workspace_id, renders.project_id, renders.timeline_version, renders.profile, renders.status, renders.progress, renders.stage, renders.mp4_key, renders.contact_sheet_key, renders.time_map_key, renders.duration_ms, renders.width, renders.height, renders.size_bytes, renders.contact_sheet_bytes, renders.time_map_bytes, renders.contact_sheet, renders.sound_cues, renders.cpu_ms, renders.wall_ms, renders.failure_reason, renders.requested_by_kind, renders.requested_by_id, renders.created_at, renders.updated_at, renders.started_at, renders.finished_at, renders.objects_purged_at
 `
 
 type ClaimRenderParams struct {
@@ -63,7 +63,6 @@ func (q *Queries) ClaimRender(ctx context.Context, arg ClaimRenderParams) (Rende
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.ObjectsPurgedAt,
-		&i.Proof,
 	)
 	return i, err
 }
@@ -82,9 +81,9 @@ func (q *Queries) CountRendersInFlight(ctx context.Context, workspaceID ids.Work
 }
 
 const createRender = `-- name: CreateRender :one
-INSERT INTO renders (workspace_id, project_id, timeline_version, profile, proof, requested_by_kind, requested_by_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, workspace_id, project_id, timeline_version, profile, status, progress, stage, mp4_key, contact_sheet_key, time_map_key, duration_ms, width, height, size_bytes, contact_sheet_bytes, time_map_bytes, contact_sheet, sound_cues, cpu_ms, wall_ms, failure_reason, requested_by_kind, requested_by_id, created_at, updated_at, started_at, finished_at, objects_purged_at, proof
+INSERT INTO renders (workspace_id, project_id, timeline_version, profile, requested_by_kind, requested_by_id)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, workspace_id, project_id, timeline_version, profile, status, progress, stage, mp4_key, contact_sheet_key, time_map_key, duration_ms, width, height, size_bytes, contact_sheet_bytes, time_map_bytes, contact_sheet, sound_cues, cpu_ms, wall_ms, failure_reason, requested_by_kind, requested_by_id, created_at, updated_at, started_at, finished_at, objects_purged_at
 `
 
 type CreateRenderParams struct {
@@ -92,7 +91,6 @@ type CreateRenderParams struct {
 	ProjectID       ids.ProjectID
 	TimelineVersion int32
 	Profile         string
-	Proof           bool
 	RequestedByKind string
 	RequestedByID   string
 }
@@ -103,7 +101,6 @@ func (q *Queries) CreateRender(ctx context.Context, arg CreateRenderParams) (Ren
 		arg.ProjectID,
 		arg.TimelineVersion,
 		arg.Profile,
-		arg.Proof,
 		arg.RequestedByKind,
 		arg.RequestedByID,
 	)
@@ -138,7 +135,6 @@ func (q *Queries) CreateRender(ctx context.Context, arg CreateRenderParams) (Ren
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.ObjectsPurgedAt,
-		&i.Proof,
 	)
 	return i, err
 }
@@ -148,7 +144,7 @@ UPDATE renders
 SET status = 'failed', stage = NULL, failure_reason = $1::text, finished_at = now(),
     wall_ms = $2, cpu_ms = $3
 WHERE workspace_id = $4 AND id = $5 AND status IN ('queued', 'rendering')
-RETURNING id, workspace_id, project_id, timeline_version, profile, status, progress, stage, mp4_key, contact_sheet_key, time_map_key, duration_ms, width, height, size_bytes, contact_sheet_bytes, time_map_bytes, contact_sheet, sound_cues, cpu_ms, wall_ms, failure_reason, requested_by_kind, requested_by_id, created_at, updated_at, started_at, finished_at, objects_purged_at, proof
+RETURNING id, workspace_id, project_id, timeline_version, profile, status, progress, stage, mp4_key, contact_sheet_key, time_map_key, duration_ms, width, height, size_bytes, contact_sheet_bytes, time_map_bytes, contact_sheet, sound_cues, cpu_ms, wall_ms, failure_reason, requested_by_kind, requested_by_id, created_at, updated_at, started_at, finished_at, objects_purged_at
 `
 
 type FailRenderParams struct {
@@ -199,7 +195,6 @@ func (q *Queries) FailRender(ctx context.Context, arg FailRenderParams) (Render,
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.ObjectsPurgedAt,
-		&i.Proof,
 	)
 	return i, err
 }
@@ -214,7 +209,7 @@ SET status = 'ready', progress = 100, stage = NULL, finished_at = now(), failure
 FROM projects p
 WHERE renders.workspace_id = $14 AND renders.id = $15 AND renders.status = 'rendering'
   AND p.workspace_id = renders.workspace_id AND p.id = renders.project_id AND p.deleted_at IS NULL
-RETURNING renders.id, renders.workspace_id, renders.project_id, renders.timeline_version, renders.profile, renders.status, renders.progress, renders.stage, renders.mp4_key, renders.contact_sheet_key, renders.time_map_key, renders.duration_ms, renders.width, renders.height, renders.size_bytes, renders.contact_sheet_bytes, renders.time_map_bytes, renders.contact_sheet, renders.sound_cues, renders.cpu_ms, renders.wall_ms, renders.failure_reason, renders.requested_by_kind, renders.requested_by_id, renders.created_at, renders.updated_at, renders.started_at, renders.finished_at, renders.objects_purged_at, renders.proof
+RETURNING renders.id, renders.workspace_id, renders.project_id, renders.timeline_version, renders.profile, renders.status, renders.progress, renders.stage, renders.mp4_key, renders.contact_sheet_key, renders.time_map_key, renders.duration_ms, renders.width, renders.height, renders.size_bytes, renders.contact_sheet_bytes, renders.time_map_bytes, renders.contact_sheet, renders.sound_cues, renders.cpu_ms, renders.wall_ms, renders.failure_reason, renders.requested_by_kind, renders.requested_by_id, renders.created_at, renders.updated_at, renders.started_at, renders.finished_at, renders.objects_purged_at
 `
 
 type FinishRenderParams struct {
@@ -285,15 +280,14 @@ func (q *Queries) FinishRender(ctx context.Context, arg FinishRenderParams) (Ren
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.ObjectsPurgedAt,
-		&i.Proof,
 	)
 	return i, err
 }
 
 const getActiveRender = `-- name: GetActiveRender :one
-SELECT id, workspace_id, project_id, timeline_version, profile, status, progress, stage, mp4_key, contact_sheet_key, time_map_key, duration_ms, width, height, size_bytes, contact_sheet_bytes, time_map_bytes, contact_sheet, sound_cues, cpu_ms, wall_ms, failure_reason, requested_by_kind, requested_by_id, created_at, updated_at, started_at, finished_at, objects_purged_at, proof FROM renders
+SELECT id, workspace_id, project_id, timeline_version, profile, status, progress, stage, mp4_key, contact_sheet_key, time_map_key, duration_ms, width, height, size_bytes, contact_sheet_bytes, time_map_bytes, contact_sheet, sound_cues, cpu_ms, wall_ms, failure_reason, requested_by_kind, requested_by_id, created_at, updated_at, started_at, finished_at, objects_purged_at FROM renders
 WHERE workspace_id = $1 AND project_id = $2 AND timeline_version = $3 AND profile = $4
-  AND proof = $5 AND status IN ('queued', 'rendering', 'ready')
+  AND status IN ('queued', 'rendering', 'ready')
 `
 
 type GetActiveRenderParams struct {
@@ -301,17 +295,15 @@ type GetActiveRenderParams struct {
 	ProjectID       ids.ProjectID
 	TimelineVersion int32
 	Profile         string
-	Proof           bool
 }
 
-// The render a new request for the same version, profile and proof reuses: waiting, running or ready.
+// The render a new request for the same version and profile reuses: waiting, running or ready.
 func (q *Queries) GetActiveRender(ctx context.Context, arg GetActiveRenderParams) (Render, error) {
 	row := q.db.QueryRow(ctx, getActiveRender,
 		arg.WorkspaceID,
 		arg.ProjectID,
 		arg.TimelineVersion,
 		arg.Profile,
-		arg.Proof,
 	)
 	var i Render
 	err := row.Scan(
@@ -344,13 +336,12 @@ func (q *Queries) GetActiveRender(ctx context.Context, arg GetActiveRenderParams
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.ObjectsPurgedAt,
-		&i.Proof,
 	)
 	return i, err
 }
 
 const getRender = `-- name: GetRender :one
-SELECT r.id, r.workspace_id, r.project_id, r.timeline_version, r.profile, r.status, r.progress, r.stage, r.mp4_key, r.contact_sheet_key, r.time_map_key, r.duration_ms, r.width, r.height, r.size_bytes, r.contact_sheet_bytes, r.time_map_bytes, r.contact_sheet, r.sound_cues, r.cpu_ms, r.wall_ms, r.failure_reason, r.requested_by_kind, r.requested_by_id, r.created_at, r.updated_at, r.started_at, r.finished_at, r.objects_purged_at, r.proof
+SELECT r.id, r.workspace_id, r.project_id, r.timeline_version, r.profile, r.status, r.progress, r.stage, r.mp4_key, r.contact_sheet_key, r.time_map_key, r.duration_ms, r.width, r.height, r.size_bytes, r.contact_sheet_bytes, r.time_map_bytes, r.contact_sheet, r.sound_cues, r.cpu_ms, r.wall_ms, r.failure_reason, r.requested_by_kind, r.requested_by_id, r.created_at, r.updated_at, r.started_at, r.finished_at, r.objects_purged_at
 FROM renders r
 JOIN projects p ON p.workspace_id = r.workspace_id AND p.id = r.project_id AND p.deleted_at IS NULL
 WHERE r.workspace_id = $1 AND r.id = $2
@@ -394,7 +385,6 @@ func (q *Queries) GetRender(ctx context.Context, arg GetRenderParams) (Render, e
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.ObjectsPurgedAt,
-		&i.Proof,
 	)
 	return i, err
 }
@@ -457,7 +447,7 @@ func (q *Queries) ListRenderInputs(ctx context.Context, arg ListRenderInputsPara
 }
 
 const listRenders = `-- name: ListRenders :many
-SELECT r.id, r.workspace_id, r.project_id, r.timeline_version, r.profile, r.status, r.progress, r.stage, r.mp4_key, r.contact_sheet_key, r.time_map_key, r.duration_ms, r.width, r.height, r.size_bytes, r.contact_sheet_bytes, r.time_map_bytes, r.contact_sheet, r.sound_cues, r.cpu_ms, r.wall_ms, r.failure_reason, r.requested_by_kind, r.requested_by_id, r.created_at, r.updated_at, r.started_at, r.finished_at, r.objects_purged_at, r.proof
+SELECT r.id, r.workspace_id, r.project_id, r.timeline_version, r.profile, r.status, r.progress, r.stage, r.mp4_key, r.contact_sheet_key, r.time_map_key, r.duration_ms, r.width, r.height, r.size_bytes, r.contact_sheet_bytes, r.time_map_bytes, r.contact_sheet, r.sound_cues, r.cpu_ms, r.wall_ms, r.failure_reason, r.requested_by_kind, r.requested_by_id, r.created_at, r.updated_at, r.started_at, r.finished_at, r.objects_purged_at
 FROM renders r
 JOIN projects p ON p.workspace_id = r.workspace_id AND p.id = r.project_id AND p.deleted_at IS NULL
 WHERE r.workspace_id = $1 AND r.project_id = $2
@@ -524,7 +514,6 @@ func (q *Queries) ListRenders(ctx context.Context, arg ListRendersParams) ([]Ren
 			&i.StartedAt,
 			&i.FinishedAt,
 			&i.ObjectsPurgedAt,
-			&i.Proof,
 		); err != nil {
 			return nil, err
 		}
@@ -537,7 +526,7 @@ func (q *Queries) ListRenders(ctx context.Context, arg ListRendersParams) ([]Ren
 }
 
 const listRendersToPurge = `-- name: ListRendersToPurge :many
-SELECT r.id, r.workspace_id, r.project_id, r.timeline_version, r.profile, r.status, r.progress, r.stage, r.mp4_key, r.contact_sheet_key, r.time_map_key, r.duration_ms, r.width, r.height, r.size_bytes, r.contact_sheet_bytes, r.time_map_bytes, r.contact_sheet, r.sound_cues, r.cpu_ms, r.wall_ms, r.failure_reason, r.requested_by_kind, r.requested_by_id, r.created_at, r.updated_at, r.started_at, r.finished_at, r.objects_purged_at, r.proof
+SELECT r.id, r.workspace_id, r.project_id, r.timeline_version, r.profile, r.status, r.progress, r.stage, r.mp4_key, r.contact_sheet_key, r.time_map_key, r.duration_ms, r.width, r.height, r.size_bytes, r.contact_sheet_bytes, r.time_map_bytes, r.contact_sheet, r.sound_cues, r.cpu_ms, r.wall_ms, r.failure_reason, r.requested_by_kind, r.requested_by_id, r.created_at, r.updated_at, r.started_at, r.finished_at, r.objects_purged_at
 FROM renders r
 JOIN projects p ON p.workspace_id = r.workspace_id AND p.id = r.project_id
 WHERE r.objects_purged_at IS NULL AND (r.status = 'failed' OR (r.status = 'ready' AND p.deleted_at IS NOT NULL))
@@ -586,7 +575,6 @@ func (q *Queries) ListRendersToPurge(ctx context.Context, rowLimit int32) ([]Ren
 			&i.StartedAt,
 			&i.FinishedAt,
 			&i.ObjectsPurgedAt,
-			&i.Proof,
 		); err != nil {
 			return nil, err
 		}
@@ -599,7 +587,7 @@ func (q *Queries) ListRendersToPurge(ctx context.Context, rowLimit int32) ([]Ren
 }
 
 const listStaleRenders = `-- name: ListStaleRenders :many
-SELECT id, workspace_id, project_id, timeline_version, profile, status, progress, stage, mp4_key, contact_sheet_key, time_map_key, duration_ms, width, height, size_bytes, contact_sheet_bytes, time_map_bytes, contact_sheet, sound_cues, cpu_ms, wall_ms, failure_reason, requested_by_kind, requested_by_id, created_at, updated_at, started_at, finished_at, objects_purged_at, proof FROM renders
+SELECT id, workspace_id, project_id, timeline_version, profile, status, progress, stage, mp4_key, contact_sheet_key, time_map_key, duration_ms, width, height, size_bytes, contact_sheet_bytes, time_map_bytes, contact_sheet, sound_cues, cpu_ms, wall_ms, failure_reason, requested_by_kind, requested_by_id, created_at, updated_at, started_at, finished_at, objects_purged_at FROM renders
 WHERE status IN ('queued', 'rendering') AND created_at < $1::timestamptz
 ORDER BY id
 LIMIT $2
@@ -650,7 +638,6 @@ func (q *Queries) ListStaleRenders(ctx context.Context, arg ListStaleRendersPara
 			&i.StartedAt,
 			&i.FinishedAt,
 			&i.ObjectsPurgedAt,
-			&i.Proof,
 		); err != nil {
 			return nil, err
 		}

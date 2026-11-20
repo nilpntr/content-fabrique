@@ -69,6 +69,9 @@ func transitionKind(t string) string {
 }
 
 func (c *checker) staticShot() Check {
+	if s := c.in.Settings; s != nil && s.CameraMotion == styleprofile.LevelOff {
+		return c.skip(CheckStaticShot, "the creator's settings turn camera motion off: a still shot is the style")
+	}
 	vibe := VibeOr(c.in.Vibe)
 	if vibe == VibeCalm && c.in.Style != nil && c.in.Style.Firm() && c.in.Style.Camera.Verdict == camshift.Static {
 		return c.skip(CheckStaticShot, "the vibe is calm and the creator's own camera is static")
@@ -162,6 +165,9 @@ func (c *checker) transitionVariety() Check {
 }
 
 func (c *checker) textWithoutEntrance() Check {
+	if s := c.in.Settings; s != nil && s.TextAnimation == styleprofile.LevelOff {
+		return c.skip(CheckTextWithoutEntrance, "the creator's settings turn text animation off: a text that just appears is the style")
+	}
 	if !energetic(c.in.Vibe) {
 		return c.skip(CheckTextWithoutEntrance, "the vibe is calm")
 	}

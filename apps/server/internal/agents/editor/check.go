@@ -293,6 +293,9 @@ func applyStyle(l limits, p *styleprofile.Profile, set *styleprofile.Resolved) l
 	}
 	l.transitionsOff = r.Transitions == styleprofile.LevelOff
 	l.cameraOff = r.CameraMotion == styleprofile.LevelOff
+	if l.cameraOff && l.transitionsOff {
+		l.minEffects = 0 // the style has neither motion nor transitions: a flat edit is the style
+	}
 	l.effectsLots = r.Transitions == styleprofile.LevelLots || r.CameraMotion == styleprofile.LevelLots
 	if r.Music == styleprofile.MusicNever {
 		l.beatGrid, l.gridRequired = false, false // no music: the cuts follow the clips' own sound and action
@@ -410,7 +413,10 @@ func RunChecks(in CheckInput) Report {
 		c.hookLength(), c.hookTitle(), c.shotPacing(), c.longShot(), c.heldEnding(), c.shotVariety(), c.paceBuilds(), c.repBoundaries(), c.deadTime(),
 		c.effectDensity(), c.textSafe(), c.textOverSubject(), c.duration(targetS), c.brightness(), c.crushed(), c.beatSync(), c.styleMatch(), c.titleCopied(),
 		c.offBeatCut(), c.hookMissesDrop(), c.staticShot(), c.transitionsMatch(), c.transitionVariety(), c.textWithoutEntrance(), c.chapterTitles(),
-		c.formatFollowed(),
+		c.formatFollowed(), c.beatGridFixed(), c.shotReused(),
+	}
+	if ck, ok := c.subjectInCrop(); ok { // subject_in_crop (checkreframe.go), only for an edit with a clip that has subject boxes
+		r.Checks = append(r.Checks, ck)
 	}
 	r.Checks = append(r.Checks, c.speechChecks()...) // speech_cut_clean and hook_line, only for a speech-led edit (checkspeech.go)
 	if c.hasClipFeedback() {                         // clip_feedback, only when a clip of the edit has feedback (clipfeedback.go)
@@ -418,6 +424,9 @@ func RunChecks(in CheckInput) Report {
 	}
 	if c.linesOn() { // the text-pattern checks (checktext.go), only for a style told in lines
 		r.Checks = append(r.Checks, c.storyCaptions(), c.captionReadable(), c.textOverFace())
+	}
+	if tr := enabledCaptions(in.Spec); tr != nil { // the captions check (textsubject.go): the speaker's face stays clear of them
+		r.Checks = append(r.Checks, c.captionOverFace(tr))
 	}
 	if len(graphicsOf(in.Spec)) > 0 { // the motion-graphics checks (check_graphics.go), only for an edit that has some
 		r.Checks = append(r.Checks, c.overlayReadable(), c.overlayOverSubject(), c.overlayLegibility(), c.graphicsOverlap())
@@ -522,6 +531,9 @@ func (c *checker) shotStats() (minMs, medMs, maxMs int64) {
 func (c *checker) shotPacing() Check {
 	lo, med, hi := c.shotStats()
 	c.m.ShotMinMs, c.m.ShotMedianMs, c.m.ShotMaxMs = lo, med, hi
+	if c.onFixedGrid() {
+		return c.skip(CheckShotPacing, "the cuts follow a fixed 2-beat grid: the beats set the shot length (beat_grid_fixed judges it)")
+	}
 	// With the creator's measured shot lengths, the median aims at theirs (scaled by the vibe and their pace setting), within ±40 %.
 	if p := c.pace; p.Applies && p.FromProfile {
 		switch {
@@ -544,6 +556,9 @@ func (c *checker) shotPacing() Check {
 // longShot fails a shot that runs longer than the pace allows (the creator's measured 90th percentile shot, scaled by the vibe and their
 // setting, or the default). The hook (held to the drop by hook_length) and the ending (held_ending) are left out.
 func (c *checker) longShot() Check {
+	if c.onFixedGrid() {
+		return c.skip(CheckLongShot, "the cuts follow a fixed 2-beat grid: the beats set the shot length (beat_grid_fixed judges it)")
+	}
 	p := c.pace
 	if !p.Applies {
 		return c.skip(CheckLongShot, "no pace target applies (a %s video, or a creator of long takes at the calm vibe)", c.typ)
@@ -567,6 +582,9 @@ func (c *checker) longShot() Check {
 // heldEnding fails an ending held longer than the creator holds theirs (scaled by the vibe), unless it moves: a push (the living camera,
 // push_in or pull_back) with a punch-in on a beat may hold up to 1.6 times as long.
 func (c *checker) heldEnding() Check {
+	if c.onFixedGrid() {
+		return c.skip(CheckHeldEnding, "the cuts follow a fixed 2-beat grid: the ending is 4 beats (beat_grid_fixed judges it)")
+	}
 	p := c.pace
 	if !p.Applies {
 		return c.skip(CheckHeldEnding, "no pace target applies (a %s video, or a creator of long takes at the calm vibe)", c.typ)
@@ -586,6 +604,10 @@ func (c *checker) heldEnding() Check {
 	if moving {
 		return c.fail(CheckHeldEnding, "the ending (%s) is held %s, longer than %s even with its push and punch-in (from %s). Trim it to about %s: it loops back to the hook",
 			last.ID, secs2(d), secs2(p.EndingMovingMs), p.source(), secs2(p.EndingMs))
+	}
+	if c.lim.cameraOff {
+		return c.fail(CheckHeldEnding, "the ending (%s) is held %s; at most %s (from %s), and the creator's settings turn camera motion off. Trim it to about %s",
+			last.ID, secs2(d), secs2(p.EndingMs), p.source(), secs2(p.EndingMs))
 	}
 	return c.fail(CheckHeldEnding, "the ending (%s) is held %s and sits still; at most %s (from %s). Trim it to about %s, or give it set_motion handheld with at_ms on a beat (a push with a punch-in on the beat) and keep it under %s",
 		last.ID, secs2(d), secs2(p.EndingMs), p.source(), secs2(p.EndingMs), secs2(p.EndingMovingMs))
@@ -635,6 +657,9 @@ func nearlyEqual(a, b int64) bool {
 }
 
 func (c *checker) shotVariety() Check {
+	if c.onFixedGrid() {
+		return c.skip(CheckShotVariety, "the cuts follow a fixed 2-beat grid: shots of the same length in a row are the rhythm (beat_grid_fixed judges it)")
+	}
 	run, best, bestAt := 1, 1, 0
 	for i := 1; i < len(c.durs); i++ {
 		if nearlyEqual(c.durs[i], c.durs[i-1]) {
@@ -676,6 +701,9 @@ func (c *checker) paceBuilds() Check {
 	n := len(c.durs)
 	if !c.lim.paceBuilds {
 		return c.skip(CheckPaceBuilds, "does not apply to a %s video", c.typ)
+	}
+	if c.onFixedGrid() {
+		return c.skip(CheckPaceBuilds, "the cuts follow a fixed 2-beat grid: the shots keep their length")
 	}
 	if n < paceBuildsMinShots {
 		return c.skip(CheckPaceBuilds, "only %d shots", n)

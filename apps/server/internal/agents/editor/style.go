@@ -117,6 +117,26 @@ func styleBlocks(st *styleprofile.Style) []llm.Block {
 	return blocks
 }
 
+// captionsText is the line about the burned-in captions (the captions track): the creator's letter colour and case carry over to them, so
+// a creator with cream, lowercase titles does not get white capitals under them. It is empty when the settings say neither. The creator's
+// settings win over the measured style (D-36), as for the title.
+func captionsText(r styleprofile.Resolved, src styleprofile.Settings) string {
+	var parts []string
+	if r.TitleColour != "" {
+		parts = append(parts, fmt.Sprintf("fill %s (%s)", r.TitleColour, sourceWords(src.TitleColour)))
+	}
+	switch r.TitleCase {
+	case styleprofile.CaseUpper:
+		parts = append(parts, fmt.Sprintf("uppercase true (%s)", sourceWords(src.TitleCase)))
+	case styleprofile.CaseLower:
+		parts = append(parts, fmt.Sprintf("uppercase false (%s)", sourceWords(src.TitleCase)))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "- Captions: when you add captions (set_captions), give them the creator's letters: " + strings.Join(parts, ", ") + ". Use a captions style that fits a talking video (keyword_emphasis puts the key words in an accent colour). Never send corrections: they are the creator's own fixes.\n"
+}
+
 // sourceWords says where a setting came from, in a few words.
 func sourceWords(source string) string {
 	switch source {
@@ -198,6 +218,9 @@ func settingsText(r styleprofile.Resolved, p *styleprofile.Profile) string {
 		title = append(title, fmt.Sprintf("in lowercase (%s)", sourceWords(src.TitleCase)))
 	}
 	b.WriteString("- Title: " + strings.Join(title, ", ") + ".\n")
+	if l := captionsText(r, src); l != "" {
+		b.WriteString(l)
+	}
 	if l := textLinesText(r, p); l != "" {
 		b.WriteString(l)
 	}

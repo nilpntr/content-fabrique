@@ -52,6 +52,9 @@ const (
 	CodeUnsupportedCharacter Code = "unsupported_character"
 	// CodeTextOverlapsCaptions is a text item whose box covers the band where an enabled captions track draws its captions.
 	CodeTextOverlapsCaptions Code = "text_overlaps_captions"
+	// CodeInvalidCaptions is a captions track with a colour that is not #RRGGBB, too many or malformed key words, or word corrections
+	// that are too many, repeated, out of range or not clean text (control or markup characters, too long).
+	CodeInvalidCaptions Code = "invalid_captions"
 	// CodeWrongAssetKind is a video clip on an audio asset, or a licensed_track or creator_audio item on an asset that
 	// is not audio.
 	CodeWrongAssetKind Code = "wrong_asset_kind"

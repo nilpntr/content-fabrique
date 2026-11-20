@@ -31,6 +31,8 @@ export const RENDER_QUERY_KEY = "render";
 export const ANNOTATIONS_QUERY_KEY = "annotations";
 /** The shot list of a version, the numbers its proof shows: `[SHOTS_QUERY_KEY, user, org, projectId, version]`. */
 export const SHOTS_QUERY_KEY = "shots";
+/** The transcript of an asset (the caption editor): `[TRANSCRIPT_QUERY_KEY, user, org, assetId]`. */
+export const TRANSCRIPT_QUERY_KEY = "transcript";
 /** The creator's style (GET /v1/style): `[STYLE_QUERY_KEY, user, org]`. */
 export const STYLE_QUERY_KEY = "style";
 

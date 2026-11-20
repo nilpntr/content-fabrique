@@ -248,7 +248,7 @@ Sections 2 and 3 are the generic craft of a genre. A creator who shows us their 
 
 The planner behind the tool (`internal/speechcut`, pure Go) and the check share one audit, so what the tool proposes always passes. The lines of both give times and never quote the transcript.
 
-**The clip feedback check** (`editor.v2.13`, [proof edits v1](proof-edit-v1.md); only when a clip of the edit has feedback):
+**The clip feedback check** (`editor.v2.14`, [proof edits v1](proof-edit-v1.md); only when a clip of the edit has feedback):
 
 | Check | Fails when |
 |---|---|

@@ -331,7 +331,7 @@ func planNotes(p Plan, style *styleprofile.Profile, set *styleprofile.Resolved) 
 		notes = append(notes, fmt.Sprintf("The plan has %d chapters: give the first shot of each a numbered chapter title (\"1. <EXERCISE>\" in the creator's title style, in the top band above the head) that enters with the shot and leaves before the next chapter; inside a chapter switch the angle every 2 to 5 s at a rep boundary instead of one long take.", len(chapters)))
 	}
 	// The pace targets (pace.go): the shots between the hook and the ending, and the ending, against the creator's measured lengths.
-	if pace := Pace(style, p.ContentType, p.Vibe, paceSetting(set)); pace.Applies && len(p.Shots) >= 3 {
+	if pace := Pace(style, p.ContentType, p.Vibe, paceSetting(set)); pace.Applies && len(p.Shots) >= 3 && (set == nil || set.CutGrid != styleprofile.CutGridFixed2) {
 		var lengths []int64
 		long := 0
 		for _, s := range p.Shots[1 : len(p.Shots)-1] {
@@ -346,7 +346,9 @@ func planNotes(p Plan, style *styleprofile.Profile, set *styleprofile.Resolved) 
 		if long > 0 {
 			notes = append(notes, fmt.Sprintf("%d shots of the plan are longer than %s, the longest the pace allows: cut them at a rep's turning point or switch angle there.", long, secs(pace.MaxShotMs)))
 		}
-		if end := p.Shots[len(p.Shots)-1].LengthMs; end > pace.EndingMs {
+		if end := p.Shots[len(p.Shots)-1].LengthMs; end > pace.EndingMs && applyStyle(limits{}, style, set).cameraOff {
+			notes = append(notes, fmt.Sprintf("The ending is %s; hold it at most %s (the creator's settings turn camera motion off).", secs(end), secs(pace.EndingMs)))
+		} else if end > pace.EndingMs {
 			notes = append(notes, fmt.Sprintf("The ending is %s; hold it at most %s, or up to %s with a push and a punch-in on a beat (set_motion handheld with at_ms on the beat).", secs(end), secs(pace.EndingMs), secs(pace.EndingMovingMs)))
 		}
 	}

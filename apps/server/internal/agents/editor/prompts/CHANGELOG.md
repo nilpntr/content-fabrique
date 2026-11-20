@@ -22,14 +22,33 @@ Rules for changing it:
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
 
-## editor.v2.13 (2026-11-20)
+## editor.v2.14 (2026-11-20)
 
-Proof edits and clip feedback (docs/design/proof-edit-v1.md, the creator's rule 15). The file is `editor.v2.13.md`, a patch of v2.12:
+Proof edits and clip feedback (docs/design/proof-edit-v1.md, the creator's rule 15). The file is `editor.v2.14.md`, a patch of v2.13:
 
 - **How you work**, step 7: when the start of the conversation says the creator left clip feedback on earlier proofs, read it with
   the new `get_clip_feedback` tool before picking the moments, and never play a ruled-out range again. The run context has the line
-  only when there is feedback on the project's clips; `check_edit` gets the `clip_feedback` check, in the report only then too.
+  only when there is feedback on the project's clips; `check_edit` gets the `clip_feedback` check, in the report only then too, and
+  `find_moments` leaves out moments inside a ruled-out range.
 - Cassettes re-recorded against the fake transport (the tool list changed). No live run yet.
+
+## editor.v2.13 (2026-11-20)
+
+Subject-aware reframing, part A (docs/design/ai-video-editor-plan.md, piece 3). The file is `editor.v2.13.md`, a patch of v2.12 with one
+addition to **Framing**: an unset cover focus is centred on the person by the renderer, and `subject_in_crop` in `check_edit` (new,
+only listed when a clip has subject boxes) fails when under 90 % of the person stays in the frame, with the fix by cause. No tool,
+op or schema change.
+
+## workout.v9 (2026-11-20)
+
+Gino's rules (docs/design/gino-edit-rules.md, rules 1, 4 and 6). The editor prompt stays `editor.v2.12`. The playbook text changes (one section, "When the creator's settings say otherwise", lists what the settings switch off in the Rhythm, Energy and Ending lines):
+
+- The living camera, punch-in and "loop back to the hook" lines now yield to the creator's settings: camera motion off means no
+  motion at all, text animation off means texts just appear, and a creator whose style ends on a quiet shot is not asked to loop.
+- A line on the fixed 2-beat grid (every shot 2 beats, cuts on even beats, last shot 4 beats, total a multiple of 4: equal lengths
+  in a row are the rhythm), and one on using every moment once (no source range twice, a tripod clip gives one shot).
+- Matching checks in `check_edit`: `beat_grid_fixed` and `shot_reused` are new; `shot_variety` and `pace_builds` do not apply on a
+  fixed grid; `static_shot`, `text_without_entrance` and the effect minimum do not apply when the settings turn that motion off.
 
 ## editor.v2.12, talking.v5, tutorial.v5 and unboxing_product.v5 (2026-11-20)
 

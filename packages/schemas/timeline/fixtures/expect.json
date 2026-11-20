@@ -338,5 +338,18 @@
     "code": "schema",
     "path": "/tracks/1/items",
     "keyword": "maxItems"
+  },
+  "i86_schema_caption_correction_markup.json": {
+    "code": "schema",
+    "path": "/tracks/1/corrections/0/text",
+    "keyword": "pattern"
+  },
+  "i87_schema_caption_accent_not_hex.json": {
+    "code": "schema",
+    "path": "/tracks/1/accent",
+    "keyword": "pattern"
+  },
+  "i88_caption_correction_twice.json": {
+    "code": "invalid_captions"
   }
 }

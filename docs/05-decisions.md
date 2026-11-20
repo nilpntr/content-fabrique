@@ -12,8 +12,8 @@
 | D-05 | Realtime via SSE from Go; Cloudflare K2 deferred | Accepted |
 | D-06 | Playback via MP4 proxies, sprites and waveforms on R2; no Cloudflare Stream in v1 | Accepted |
 | D-07 | Go-native agent loop on the Claude Messages API; Opus 5.5 edits; cheaper sub-agents for research and bulk work | Accepted (editor on Opus 5.5); sub-agent split tuned by D-17 |
-| D-08 | Sandbox: hardened containers for our media jobs; Cloudflare Sandbox for agent code; all behind one interface | Proposed (validate in P1-03 / P4-08) |
-| D-09 | Hosting: web on Workers; Go API + workers on EU servers behind Cloudflare Tunnel; burst to Cloudflare Containers | Proposed (validate in P0-10) |
+| D-08 | Sandbox: hardened containers for our media jobs; Cloudflare Sandbox for agent code; all behind one interface | Proposed (validate in P1-03 / P4-08). **Amended 2026-11-20 (founder, conditional):** Cloudflare Containers become the primary runtime for media jobs if the Cloudflare spike proves it scales; `hardened` on our own box stays the fallback for jobs over the container limits. See [render-runtime](design/render-runtime.md) |
+| D-09 | Hosting: web on Workers; Go API + workers on EU servers behind Cloudflare Tunnel; burst to Cloudflare Containers | Proposed (validate in P0-10). **Amended 2026-11-20 (founder, conditional):** renders move to Cloudflare Containers once the spike passes; the Go API and the job queue stay on an EU host behind the Tunnel, and the dedicated box serves jobs over the container limits. See [render-runtime](design/render-runtime.md) |
 | D-10 | Video understanding: deterministic signals + small-model frame tagging; video-native model optional | Proposed (validate with eval set #1, P2) |
 | D-11 | Trend data: curation + web search + creator links + licensed music analytics; no Research API, no scraping without legal sign-off | Accepted for MVP |
 | D-12 | Clerk organizations as workspaces | Accepted |
@@ -43,7 +43,8 @@
 | D-36 | The creator's style is three layers (measured, the AI's suggestion, the creator's settings), the creator always wins; reference videos are assets with purpose style_reference | Proposed (director, 2026-10-18; the founder confirms) |
 | D-37 | Plain cuts on the beat by default: no vibe asks for transitions; they come from the creator's setting or their own videos | Proposed (director, from a creator's verdict, 2026-10-18; the founder confirms) |
 | D-38 | The text of a video follows the creator's pattern (one title, story captions, dialogue); lines that the creator puts on the body keep off the face only, titles keep off the whole body | Proposed (director, from a second creator's references, 2026-10-18; the founder confirms) |
-| D-41 | Proof edits: a preview with shot numbers and a shot list, opt-in per creator; feedback on a shot is stored by clip and second (never the number) and holds in every later edit; "make it final" is the final render without numbers | Proposed (engineering, from a creator's rule 15, 2026-11-20; the founder confirms) |
+| D-41 | Creator research engine: public data only, links and our own numbers, a fixed list of sources, retention that deletes, a takedown command; Instagram and YouTube as research sources (learning, not publishing) | Proposed (R1 built; the founder confirms the retention) |
+| D-42 | Proof edits: a preview with shot numbers and a shot list, opt-in per creator; feedback on a shot is stored by clip and second (never the number) and holds in every later edit; "make it final" is the final render without numbers | Proposed (engineering, from a creator's rule 15, 2026-11-20; the founder confirms) |
 
 ---
 
@@ -210,6 +211,8 @@ Daytona is not considered: its open-source repo was reported unmaintained or arc
 4. **Licensed music analytics** (Chartmetric from ~$350/month, or Soundcharts) for trending songs once the beta shows creators use the feature.
 
 **Not used:** the TikTok Research API; automated scraping of Creative Center (especially with logged-in cookies). Unofficial providers (EnsembleData and similar) sit behind `trends.Provider` and are enabled only after a legal review.
+
+**Update (2026-11-20).** The creator research engine ([D-41](#d-41-creator-research-engine-the-compliance-rules-built-first)) adds Instagram and YouTube as sources of what we *learn* from other creators' public posts (not as publishing targets) and fixes the compliance rules for that store. The list above is unchanged: no unofficial providers, no scraping.
 
 **Revisit** if TikTok ships a commercial trends API or Creative Center's song chart returns.
 
@@ -516,7 +519,7 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
   | `tl` | timeline | `ren` | render |
   | `run` | agent run | `exp` | export |
   | `lic` | licence | `upl` | upload |
-  | `evt` | event | `cfb` | clip feedback (D-41) |
+  | `evt` | event | `cfb` | clip feedback (D-42) |
 
   New tables add their prefix to this list.
 - **Clerk's own IDs** (`user_…`, `org_…`) are stored as text next to our keys and never reused as ours.
@@ -652,6 +655,9 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
 - Face and subject detection needs a permissively licensed model ([D-16](#d-16-licensing-policy-for-ml-and-media-components)); MediaPipe face detection (Apache-2.0) is the default candidate.
 - Transcription moves up the queue.
 - **Speech cuts (2026-11-20, [AI video editor plan](design/ai-video-editor-plan.md) piece 1).** The editor reads the transcript: the tool `get_transcript(asset_id, in_ms?, out_ms?)` returns the sentences with their times and the cuts `internal/speechcut` proposes (strong fillers and pauses over 400 ms left out; weak ones such as "like" or "right" only when a pause sets them off, cuts on word gaps with 80 ms of padding, sentences whole; a cut next to a word under 0.35 confidence is not made). The model still writes `add_clip` ops: no new op and no schema change ([D-02](#d-02-edit-representation-declarative-timeline-json--deterministic-renderer)). `check_edit` has `speech_cut_clean` and `hook_line` for talking, tutorial and unboxing_product edits. The transcript reaches the model in data blocks only, and the checks give times, never the words. Prompt `editor.v2.12`; playbooks `talking.v5`, `tutorial.v5`, `unboxing_product.v5`. Speech-led edits keep `audio.mode: full` with the song ducked; the music-only rule ([D-34](#d-34-music-from-the-creator)) is for workout edits.
+- **Subject boxes: model boxes stay, MediaPipe is not adopted (2026-11-20, [AI video editor plan](design/ai-video-editor-plan.md) piece 3). DECIDED FOR YOU, PLEASE CONFIRM.** The line above names MediaPipe as the candidate, but the code never used it: the person's box comes from the Haiku quick look (4 frames per clip, `internal/quicklook`, `internal/subject`), and every consumer (title placement, the living camera, `subject_in_crop`) reads those boxes. This amendment records that the model boxes stay, so the text and the code agree. The boxes are untrusted and bounded (`subject.Clean`), and the reframe only moves a crop, so a wrong box costs a worse crop and `subject_in_crop` still checks it. Switching to MediaPipe needs a [D-16](#d-16-licensing-policy-for-ml-and-media-components) licence check and a sandboxed worker; denser quick-look samples (up to 12 per clip, about $0.20 for 20 clips) are the cheaper first step, and both belong to piece 3 part B. **Revisit** if the evals show the boxes missing a moving subject.
+- **Subject-aware reframing, part A (2026-11-20, piece 3).** A `cover` that leaves `focus` out is centred on the subject: the median centre of the quick-look boxes inside the clip's source range (`subject.WithFocus`, read by the renderer, the title placement and the camera limit alike), only when the clip and the output differ in shape. A focus the model gave is never changed. `check_edit` has `subject_in_crop` for edits whose clips have subject boxes: the person's box mapped through the reframe must stay at least 90 % inside the output frame, and when a crop cannot hold it the fix is `blur_fill`. The output format stays the project's choice (D-25): nothing here crops a clip to another orientation, and nothing changes a clip that already fits. No schema change. Part B (`focus_path`, denser samples) waits for its design note.
+- **The automatic focus is derived at render time, not stored.** The spec keeps `focus` unset; `subject.WithFocus` works it out from the quick-look boxes each time the spec is compiled, checked or placed against (always over the clip's whole source range, from the median sample by centre x, and only from a sample inside or within 1 s of the range). Trade-off: the timeline JSON no longer fully determines the picture, because re-reading a clip's subjects (a new quick look) can move the crop of an old version, so a re-render can differ from the preview. We accept it for part A because the alternative, writing the focus into the spec when the clip is added, needs the subject data inside the ops path. A model or creator who wants a fixed crop sets `focus` explicitly. The check judges static framing only; the camera limit (`render/camera.go`) already keeps pushes off the head.
 
 **Revisit** when a genre's results lag the others in the evals, or when the beta shows which genres creators actually upload.
 
@@ -729,6 +735,9 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
   - **Quality per edit.** `quality: standard | max` on the start-edit request (a first edit or a revision), default `standard`. **Standard is exactly what it was**: effort medium, 24,000 / 12,000 tokens, the 2026-10 credits (6 / 2) and budgets ($0.96 / $0.32 on creator), so nobody's videos per month change. **Max** ("extra careful") runs on new routing entries `editor_max` / `revision_max` (Opus 5.5, effort `max`, 32,000 / 16,000 tokens; a live max-effort edit cost $1.01) with a run budget of $2.00 for a first edit and $0.80 for a revision, priced as their own actions `edit.first.max` (16 credits) and `edit.revision.max` (7), derived so that the profit invariant holds for every plan (`max_cogs_share` stays 0.40). The hold and the charge use the chosen action's credits and the list version.
   - **Who.** The trial cannot use it (`402 quality_not_in_plan`); studio (BYOK) can on its own key; creator and pro can. The new price list is `config/plans/2026-10c.yaml` (not deployed yet, so editable until confirmed; the old file is never edited; `credits.ListFile` is the newest file, a test keeps it so). `GET /v1/me` carries `credits.edit_costs` and `credits_per_video` so the web app shows "Extra careful: uses 16 credits instead of 6" without carrying a number.
   - **General fixes kept:** a video's credits derived from the list (no "1 video = 10 credits" in code), `max_tokens` fitted to the lesser of the run's budget and the per-call cap, the cache-aware reservation, `escalate` validation, a one-off allowance top-up when a list grows an allowance (adds nothing for 2026-10c). Details in [spend control v1, section 3a](design/spend-control-v1.md#3a-update-2026-10c-the-extra-careful-edit-opt-in-per-edit-d-31-pending-founder-confirmation).
+- **Update, 2026-11: the cost guard. PENDING FOUNDER CONFIRMATION of the defaults.** Details in [spend control v1, section 9a](design/spend-control-v1.md#9a-the-cost-guard-as-built-2026-11).
+  - **A per-edit spend ceiling.** Every agent run's budget is capped by a ceiling, set per workspace, per plan or by default (`EDIT_SPEND_CEILING_*`). The default is **$2.00**: the founder's figure, and the largest budget a plan gives an edit, so no paid edit changes. The runtime enforces it mid-run, and the editor ends on its newest version with a note that the ceiling is why.
+  - **The test cap in the tools.** `cfctl spend summary` shows test spend against **$75** (`TEST_SPEND_CAP_MICROS`) by day, run type and model. `cfctl eval suite` and `eval improve` print "this run may cost up to $X" and refuse a run that may pass what is left, unless `--over-test-cap` is given. This turns D-22 rule 4 ("a paid sweep needs the founder's go-ahead") into a check the tools make.
 
 **Alternatives.**
 - Pass-through token pricing to customers: unpredictable for creators, and it exposes our margin.
@@ -915,6 +924,13 @@ caption style in the renderer's library: the existing small clean style with the
 **Consequences.** A title creator's edits and checks are unchanged. A caption creator's lines may cover the chest. The text read sees
 up to fifteen frames, still under its $0.01 budget.
 
+**Amendment (Captions v2, 2026-11-20).** The burned-in captions follow the same rule: keep off the face (the head and shoulders), not the
+body. Each clip's captions sit in the lower band, or in the upper one when the speaker's face is in the lower
+(`subject.CaptionPlaces`, from the same subject boxes as the text); the `caption_over_face` check fails only when the face is in both
+bands. The captions track also takes the creator's letter colour (`fill`) and case (`uppercase`) from their settings, a `keyword_emphasis`
+look with an `accent` colour, and `corrections`: the creator's fixes of misheard words, which the schema, the op and the compiler all
+refuse when they are not clean text. See [timeline v1 section 5](design/timeline-v1.md).
+
 **Revisit** when a third creator's text fits none of the four patterns.
 
 ## D-39 Local traces and evals in Arize Phoenix
@@ -956,7 +972,31 @@ up to fifteen frames, still under its $0.01 budget.
 
 **Revisit** when the `viral_*` examples arrive (new cards), when creators ask to choose the format themselves, or when the judge's novelty and concept scores do not follow the founder's verdicts.
 
-## D-41 Proof edits and feedback stored by clip and second
+## D-41 Creator research engine: the compliance rules, built first
+
+> Status: **Proposed** by engineering (2026-11-20). The plan is the design note `docs/design/creator-research-engine.md` (branch `plan/creator-research`); phase R1 builds only its data model and compliance guardrails. Reversible: the tables are new and shared, nothing else reads them.
+
+**Context.** To learn what works for fitness creators whose videos look like ours, we want to study other creators' public posts on TikTok and Instagram (and YouTube Shorts they cross-post). That is third-party data about named people. [D-11](#d-11-trend-data-sources) allows creator-supplied TikTok links resolved through oEmbed and forbids scraping without a legal review; this decision extends it to a research store, and adds Instagram and YouTube as sources of what we *learn*. D-25 still holds: TikTok stays the only publishing target.
+
+**Decision.** The rules are in code and in the database, and R1 ships them before anything can write data:
+- **Public data only.** Nothing logs in to anyone's account, scrapes or automates against a platform. A person's own viewing (the "watch sheet") is the only source of saves and shares of other people's posts.
+- **Links, metadata, short notes and our own numbers. Never media.** A post is a link to a post page (`research_posts`); no table has a column for a video, a media URL, a thumbnail or a transcript; an observation's `metrics` hold five numbers at most; `raw_ref` is the hash of a response, never the response. Replay fixtures are checked by `research.CheckFixture`, which refuses a media key, a link to a media file, a data URI or a long text.
+- **A fixed allow-list of sources:** `oembed`, `watch_sheet`, `web`, `ig_business_discovery`, `youtube_api`, `creator_oauth`. A source outside the list cannot write evidence (package `research`, a CHECK constraint, tested). Each source has one method (a person for the watch sheet, an API for the platform sources), the platforms it can see and the metrics it gives; anything else is refused. The unofficial TikTok APIs and the Research API are not on the list.
+- **Retention that deletes.** Every observation has a `retain_until`: 12 months by default, 30 days for YouTube (the API terms; the database refuses more). The daily `research_sweep` job deletes what is past it, with the findings that rested on it (the playbook is regenerated from what is left), posts left without any observation, and candidate creators left with nothing. Approved creators stay until `forget`.
+- **A takedown on request:** `cfctl research forget <handle>` deletes the creator, their posts, annotations, evidence and the findings that rested on them, in one transaction, in any environment (production needs `--allow-production --yes`).
+- **Minimal and creator-agnostic.** Handles and public numbers are personal data: we keep the minimum, never sell it or show it to customers by name. An annotation's hook text is a title *form* (`<TOPIC> 101`), never a creator's words; the database refuses a lower-case pattern.
+
+**Decided for you, please confirm** (defaults are the design note's; each is a setting or one line):
+1. **Retention of 12 months** for third-party observations (`RESEARCH_RETENTION_DAYS=365`), and 30 days for YouTube. Legal item P0-12 (the legitimate-interest note) is still open.
+2. **Instagram and YouTube as research sources** next to TikTok, as learning only (D-11 is extended here; no adapter exists yet, R6 is gated on your approval of the API keys).
+3. **Orphans are deleted** a day after their last observation expires (a post), and a candidate or dropped creator with nothing attached is deleted after one retention period; approved creators are never swept.
+
+**Alternatives.** Storing raw responses for replay (more data about third parties, and the platforms' terms): refused, replay uses fixtures of metadata only. A retention per row set by the caller (it can be forgotten): the sweep reads one column the database also constrains.
+
+**Consequences.** Three platforms' handles and counts now live in Postgres, shared across workspaces like trend data, readable only by platform code. The next phases (oEmbed resolver, discovery, aggregation) can only add what these rules allow.
+
+**Revisit** when legal review (P0-12) answers the retention question, or if a platform changes its terms.
+## D-42 Proof edits and feedback stored by clip and second
 
 > Status: **Proposed** by engineering (2026-11-20), from rule 15 of a creator's own edit rules. Reversible: the setting is off by default,
 > the column and the table are additive, and the check is in a report only when there is feedback.

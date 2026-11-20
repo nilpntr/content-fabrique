@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 )
 
 // Font is one vendored font file.
@@ -115,6 +116,9 @@ type Style struct {
 	// then the box's padding.
 	Box  bool
 	Role Role
+	// Keyword marks a caption style that draws the key words of a chunk in the Highlight colour for as long as the chunk is up
+	// (keyword emphasis), instead of lighting the spoken word.
+	Keyword bool
 }
 
 var white = Opaque(255, 255, 255)
@@ -129,6 +133,11 @@ var registry = []Style{
 		ID: "caption_highlight", Description: "Captions that light up the word being spoken in yellow (the word_highlight caption style); bold white with a black outline.",
 		Font: "montserrat-extrabold", EmPct: 5.0, Fill: white, Highlight: yellow, Outline: Opaque(0, 0, 0), Shadow: Colour{0, 0, 0, 140},
 		OutlinePct: 8, ShadowPct: 2, Role: RoleCaption,
+	},
+	{
+		ID: "caption_keyword", Description: "Captions that show each group of words at once and draw its key words in the accent colour (the keyword_emphasis caption style); bold white with a black outline.",
+		Font: "montserrat-extrabold", EmPct: 5.0, Fill: white, Highlight: yellow, Outline: Opaque(0, 0, 0), Shadow: Colour{0, 0, 0, 140},
+		OutlinePct: 8, ShadowPct: 2, Role: RoleCaption, Keyword: true,
 	},
 	{
 		ID: "caption_plain", Description: "Plain captions: bold white with a black outline, no highlight (the chunk caption style); also fine for short on-screen text.",
@@ -220,6 +229,7 @@ func Watermark() Style { return watermark }
 const (
 	CaptionChunk         = "chunk"
 	CaptionWordHighlight = "word_highlight"
+	CaptionKeyword       = "keyword_emphasis"
 )
 
 // CaptionStyle returns the style of a captions track: caption_plain for chunk and caption_highlight for word_highlight.
@@ -229,8 +239,29 @@ func CaptionStyle(kind string) (Style, bool) {
 		return Lookup("caption_plain")
 	case CaptionWordHighlight:
 		return Lookup("caption_highlight")
+	case CaptionKeyword:
+		return Lookup("caption_keyword")
 	}
 	return Style{}, false
+}
+
+// CaptionStyleOf is CaptionStyle with the captions track's colours: fill is the colour of the letters and accent the colour of the
+// spoken word or of the key words (each "#RRGGBB" or empty for the style's own). The result has an id of its own that names them. A
+// colour that is not a hex colour is ignored here; the validator and the schema refuse it.
+func CaptionStyleOf(kind, fill, accent string) (Style, bool) {
+	st, ok := CaptionStyle(kind)
+	if !ok {
+		return Style{}, false
+	}
+	if c, ok := ParseHex(fill); ok {
+		st.Fill = c
+		st.ID += "~f" + strings.ToUpper(fill[1:])
+	}
+	if c, ok := ParseHex(accent); ok && st.Highlight != (Colour{}) {
+		st.Highlight = c
+		st.ID += "~a" + strings.ToUpper(accent[1:])
+	}
+	return st, true
 }
 
 // FontOf returns the style's font.

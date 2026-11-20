@@ -473,10 +473,88 @@
     "captionsStyle": {
       "enum": [
         "word_highlight",
-        "chunk"
+        "chunk",
+        "keyword_emphasis"
       ],
       "title": "Style",
-      "description": "word_highlight shows a few words and highlights the one being said. chunk shows each group of words at once."
+      "description": "word_highlight shows a few words and highlights the one being said. chunk shows each group of words at once. keyword_emphasis shows each group at once and draws its key words (see keywords) in the accent colour."
+    },
+    "captionFill": {
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{6}$",
+      "title": "Caption colour",
+      "description": "The colour of the caption letters as #RRGGBB, normally the creator's title colour. Without it the style's own colour (white) is used."
+    },
+    "captionAccent": {
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{6}$",
+      "title": "Accent colour",
+      "description": "The colour of the spoken word (word_highlight) or of the key words (keyword_emphasis) as #RRGGBB, normally the creator's accent colour. Without it the style's own accent is used."
+    },
+    "captionFillOrClear": {
+      "type": "string",
+      "pattern": "^(#[0-9A-Fa-f]{6})?$",
+      "title": "Caption colour",
+      "description": "The colour of the caption letters as #RRGGBB, normally the creator's title colour. An empty string clears it, back to the style's own colour (white)."
+    },
+    "captionAccentOrClear": {
+      "type": "string",
+      "pattern": "^(#[0-9A-Fa-f]{6})?$",
+      "title": "Accent colour",
+      "description": "The colour of the spoken word (word_highlight) or of the key words (keyword_emphasis) as #RRGGBB, normally the creator's accent colour. An empty string clears it, back to the style's own accent."
+    },
+    "captionKeywords": {
+      "type": "array",
+      "maxItems": 12,
+      "title": "Key words",
+      "description": "Words that keyword_emphasis draws in the accent colour (matched whatever the case, ignoring punctuation). Without any, the longest word of each group is emphasised. At most 12.",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 24,
+        "pattern": "^[^\\x00-\\x1f\\x7f<>{}\\\\|^~\\[\\]$`\\s]+$"
+      }
+    },
+    "captionCorrections": {
+      "type": "array",
+      "maxItems": 200,
+      "title": "Word corrections",
+      "description": "The creator's fixes of misheard words: the word at position `word` (counted from 0) of the transcript of asset `asset_id` is shown as `text`. The timing stays the transcript's. At most 200, one per word.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "asset_id",
+          "word",
+          "text"
+        ],
+        "properties": {
+          "asset_id": {
+            "$ref": "#/$defs/assetId"
+          },
+          "word": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 99999,
+            "title": "Word",
+            "description": "The position of the word in the asset's transcript, from 0."
+          },
+          "was": {
+            "type": "string",
+            "maxLength": 80,
+            "title": "Heard as",
+            "description": "The word as the transcript had it when the fix was made. If the transcript no longer has this word at that position, the fix is skipped. Optional."
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40,
+            "pattern": "^[^\\x00-\\x1f\\x7f<>{}\\\\|^~\\[\\]$`]+$",
+            "title": "Replacement",
+            "description": "What the word is shown as: 1 to 40 characters, no control characters and none of the characters < > { } \\ | ^ ~ [ ] $ and the backtick."
+          }
+        }
+      }
     },
     "maxWords": {
       "type": "integer",
@@ -1616,7 +1694,7 @@
     "set_captions": {
       "type": "object",
       "title": "set_captions",
-      "description": "Create or change the captions track (burned-in captions from the transcript). The fields you leave out stay as they are; on a new captions track style defaults to word_highlight and enabled to true. Give at least one field.",
+      "description": "Create or change the captions track (burned-in captions from the transcript). The fields you leave out stay as they are; on a new captions track style defaults to word_highlight and enabled to true. fill and accent are the creator's colours (title colour and accent from the creator_style block); \"\" clears one. keywords lists the words keyword_emphasis draws in the accent colour. corrections is the creator's own fixes of misheard words: it replaces the whole list ([] clears it), so never send it unless the creator asked for a fix, and keep the ones already in the timeline. Give at least one field.",
       "additionalProperties": false,
       "required": [
         "op"
@@ -1643,6 +1721,18 @@
         },
         "max_words": {
           "$ref": "#/$defs/maxWords"
+        },
+        "fill": {
+          "$ref": "#/$defs/captionFillOrClear"
+        },
+        "accent": {
+          "$ref": "#/$defs/captionAccentOrClear"
+        },
+        "keywords": {
+          "$ref": "#/$defs/captionKeywords"
+        },
+        "corrections": {
+          "$ref": "#/$defs/captionCorrections"
         }
       },
       "anyOf": [
@@ -1652,6 +1742,38 @@
           ],
           "properties": {
             "enabled": {}
+          }
+        },
+        {
+          "required": [
+            "fill"
+          ],
+          "properties": {
+            "fill": {}
+          }
+        },
+        {
+          "required": [
+            "accent"
+          ],
+          "properties": {
+            "accent": {}
+          }
+        },
+        {
+          "required": [
+            "keywords"
+          ],
+          "properties": {
+            "keywords": {}
+          }
+        },
+        {
+          "required": [
+            "corrections"
+          ],
+          "properties": {
+            "corrections": {}
           }
         },
         {
