@@ -133,8 +133,8 @@ var (
 	blurRadiusDiv = [3]float64{50, 30, 18}
 )
 
-// videoGraph returns the statements of the video part of the filter_complex. Its output pad is [vout]: the joined clips, with
-// the ass filter after the join when there is something to draw (text, captions, the preview watermark).
+// videoGraph returns the statements of the video part of the filter_complex. Its output pad is [vout]: the joined clips, then from the
+// bottom up the cutaways, the motion graphics and the ass filter (text, captions, the preview watermark), each when there is one.
 func (c *compiler) videoGraph(subs *Subtitles) ([]string, error) {
 	var stmts []string
 	for _, cl := range c.clips {
@@ -144,11 +144,22 @@ func (c *compiler) videoGraph(subs *Subtitles) ([]string, error) {
 		}
 		stmts = append(stmts, s...)
 	}
-	if subs == nil && c.plan.Motion == nil {
+	if subs == nil && c.plan.Motion == nil && len(c.cutaways) == 0 {
 		return append(stmts, c.joinGraph("vout")...), nil
 	}
 	stmts = append(stmts, c.joinGraph("vj")...)
 	cur := "vj"
+	if len(c.cutaways) > 0 { // the cutaways, over the clips and under the motion graphics and the text (broll.go)
+		next := "vout"
+		if subs != nil || c.plan.Motion != nil {
+			next = "vc"
+		}
+		s, err := c.cutawayGraph(cur, next)
+		if err != nil {
+			return nil, err
+		}
+		stmts, cur = append(stmts, s...), next
+	}
 	if c.plan.Motion != nil { // the motion-graphics overlays, under the text (graphics.go)
 		next := "vout"
 		if subs != nil {
@@ -165,7 +176,33 @@ func (c *compiler) videoGraph(subs *Subtitles) ([]string, error) {
 // clipGraph is the graph of one clip, ending in the pad [v<idx>]: trim on the source, setpts to restart the clock,
 // setpts for the speed, fps, exactly outFrames frames, reframe, look, format and timebase.
 func (c *compiler) clipGraph(cl clip) ([]string, error) {
-	it := cl.item
+	// The camera moves the already-reframed frame (and the zoom above it), before the look.
+	cam, err := c.cameraFor(cl)
+	if err != nil {
+		return nil, err
+	}
+	return c.pictureGraph(picture{
+		item: cl.item, asset: cl.asset, frames: cl.outFrames,
+		in: fmt.Sprintf("%d:v", cl.idx), out: fmt.Sprintf("v%d", cl.idx), pads: fmt.Sprintf("b%d", cl.idx), camera: cam.filters(),
+	})
+}
+
+// picture is one chain of pictureGraph: an item's source, played into exactly `frames` frames of the output, from input pad `in` to
+// pad `out`. pads prefixes the inner pads of a blur_fill; camera are the camera's filters and tail what follows the timebase.
+type picture struct {
+	item    timeline.VideoItem
+	asset   ResolvedAsset
+	frames  int64
+	in, out string
+	pads    string
+	camera  []string
+	tail    []string
+}
+
+// pictureGraph is the chain a clip and a cutaway share: trim, speed, exactly p.frames frames, reframe, zoom, camera, exposure, look,
+// format and timebase.
+func (c *compiler) pictureGraph(p picture) ([]string, error) {
+	it := p.item
 	speed := it.SpeedOrDefault()
 	src := []string{
 		"trim=end=" + secs(it.Source.OutMs-it.Source.InMs),
@@ -186,12 +223,12 @@ func (c *compiler) clipGraph(cl clip) ([]string, error) {
 	src = append(src,
 		fmt.Sprintf("fps=%d", c.fps),
 		"tpad=stop=-1:stop_mode=clone",
-		fmt.Sprintf("trim=end_frame=%d", cl.outFrames),
+		fmt.Sprintf("trim=end_frame=%d", p.frames),
 		"setpts=PTS-STARTPTS",
 	)
 
 	// A cover that leaves the focus out is centred on the subject when the quick look found one (subject.WithFocus).
-	reframe := subject.WithFocus(it.Reframe, cl.asset.Subject, it.Source, c.spec.Output)
+	reframe := subject.WithFocus(it.Reframe, p.asset.Subject, it.Source, c.spec.Output)
 	look := timeline.LookNone
 	if it.Look != nil && it.Look.Preset != "" {
 		look = it.Look.Preset
@@ -210,12 +247,7 @@ func (c *compiler) clipGraph(cl clip) ([]string, error) {
 		cw, ch := even(int(float64(c.w)/z)), even(int(float64(c.h)/z))
 		tail = append(tail, fmt.Sprintf("crop=%d:%d", cw, ch), fmt.Sprintf("scale=%d:%d:flags=bicubic", c.w, c.h))
 	}
-	// The camera moves the already-reframed frame (and the zoom above it), before the look.
-	cam, err := c.cameraFor(cl)
-	if err != nil {
-		return nil, err
-	}
-	tail = append(tail, cam.filters()...)
+	tail = append(tail, p.camera...)
 	// look.match, and the preset auto: correct the clip's exposure by its hint, before the preset.
 	if it.Look != nil && it.Look.AppliesExposure() && it.ExposureEv != nil {
 		ev := *it.ExposureEv
@@ -231,9 +263,9 @@ func (c *compiler) clipGraph(cl clip) ([]string, error) {
 	// sidedata drops the display matrix: ffmpeg turns a phone clip upright on decode but leaves the rotation on its frames, and
 	// after a concat the encoder writes the first frame's into the export, which then plays sideways (ffmpeg 7.1).
 	tail = append(tail, "format=yuv420p", "setsar=1", fmt.Sprintf("fps=%d", c.fps), "settb=AVTB", "sidedata=mode=delete:type=DISPLAYMATRIX")
+	tail = append(tail, p.tail...)
 
-	in := fmt.Sprintf("%d:v", cl.idx)
-	out := fmt.Sprintf("v%d", cl.idx)
+	in, out := p.in, p.out
 	w, h := c.w, c.h
 
 	switch reframe.Mode {
@@ -263,8 +295,7 @@ func (c *compiler) clipGraph(cl clip) ([]string, error) {
 		// A blurred, scaled copy behind a contain. The blur runs on a copy shrunk to a twelfth of the frame, which is
 		// cheap and, scaled back up, as smooth as a large-radius blur.
 		sw, sh := even(w/12), even(h/12)
-		a, b, bg := fmt.Sprintf("b%da", cl.idx), fmt.Sprintf("b%db", cl.idx), fmt.Sprintf("b%dbg", cl.idx)
-		fg := fmt.Sprintf("b%dfg", cl.idx)
+		a, b, bg, fg := p.pads+"a", p.pads+"b", p.pads+"bg", p.pads+"fg"
 		stmts := []string{
 			chain([]string{in}, append(src, "setsar=1", "split=2"), a) + "[" + b + "]",
 			chain([]string{b}, []string{

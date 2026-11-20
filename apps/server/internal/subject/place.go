@@ -44,16 +44,31 @@ func MapBox(x0, y0, x1, y1, aspect float64, rf timeline.Reframe, out timeline.Ou
 	return style.Rect{Left: int(math.Floor(ax)), Top: int(math.Floor(ay)), Right: int(math.Ceil(bx)), Bottom: int(math.Ceil(by))}
 }
 
-// Regions are the subjects of the main-track clips that are on screen between startMs and endMs of the output, in pixels of the output:
-// the head (the head and shoulders) and the body (the whole subject box, a raised arm included, so "above the body" is above the highest
-// hand or the head). ShowsOff says the clip is a pose or physique shot. A clip contributes the samples taken in the part of its source that plays in that
-// window, or its nearest sample. Both regions are widened by the camera while the text is on screen.
+// Regions are the subjects on screen between startMs and endMs of the output, in pixels of the output: the head (the head and shoulders)
+// and the body (the whole subject box, a raised arm included, so "above the body" is above the highest hand or the head). ShowsOff says
+// the clip is a pose or physique shot. A main-track clip contributes the samples taken in the part of its source that plays in that
+// window, or its nearest sample, and both regions are widened by the camera while the text is on screen. Where a cutaway of the b-roll
+// track is on screen it covers the clip under it, so for that time the cutaway's asset contributes instead (docs/design/broll-cutaways.md
+// section 4): the text keeps off the body that is actually in the picture.
 func Regions(spec *timeline.Spec, lookup Lookup, startMs, endMs int64) []timeline.Subject {
 	main, _, ok := timeline.MainTrack(spec)
 	if !ok || lookup == nil {
 		return nil
 	}
 	var out []timeline.Subject
+	add := func(s Sample, tr Track, rf timeline.Reframe, cam camera) {
+		x0, y0, x1, y1 := s.Head()
+		head := MapBox(x0, y0, x1, y1, tr.Aspect, rf, spec.Output)
+		bx0, by0, bx1, by1 := s.Body()
+		body := MapBox(bx0, by0, bx1, by1, tr.Aspect, rf, spec.Output)
+		tx0, ty0, tx1, ty1 := s.Torso()
+		torso := MapBox(tx0, ty0, tx1, ty1, tr.Aspect, rf, spec.Output)
+		out = append(out, timeline.Subject{
+			Head: withCamera(head, cam, spec.Output), Body: withCamera(body, cam, spec.Output), Torso: withCamera(torso, cam, spec.Output),
+			ShowsOff: tr.ShowsOff,
+		})
+	}
+	cuts := timeline.Cutaways(spec)
 	// The clips in time order, so a clip knows the transition into the next one.
 	items := slices.Clone(main.Items)
 	slices.SortStableFunc(items, func(a, b timeline.VideoItem) int { return cmp.Compare(a.AtMs, b.AtMs) })
@@ -67,23 +82,55 @@ func Regions(spec *timeline.Spec, lookup Lookup, startMs, endMs int64) []timelin
 		if !ok {
 			continue
 		}
-		in, outMs := sourceAt(it, os-cs), sourceAt(it, oe-cs)
 		rf := WithFocus(it.Reframe, &tr, it.Source, spec.Output) // the clip's whole range, not the title's window
-		cam := cameraOver(items, i, spec.Output.FPS, os-cs, oe-cs)
-		for _, s := range tr.Near(in, outMs) {
-			x0, y0, x1, y1 := s.Head()
-			head := MapBox(x0, y0, x1, y1, tr.Aspect, rf, spec.Output)
-			bx0, by0, bx1, by1 := s.Body()
-			body := MapBox(bx0, by0, bx1, by1, tr.Aspect, rf, spec.Output)
-			tx0, ty0, tx1, ty1 := s.Torso()
-			torso := MapBox(tx0, ty0, tx1, ty1, tr.Aspect, rf, spec.Output)
-			out = append(out, timeline.Subject{
-				Head: withCamera(head, cam, spec.Output), Body: withCamera(body, cam, spec.Output), Torso: withCamera(torso, cam, spec.Output),
-				ShowsOff: tr.ShowsOff,
-			})
+		for _, w := range uncovered(os, oe, cuts) {
+			in, outMs := sourceAt(it, w[0]-cs), sourceAt(it, w[1]-cs)
+			cam := cameraOver(items, i, spec.Output.FPS, w[0]-cs, w[1]-cs)
+			for _, s := range tr.Near(in, outMs) {
+				add(s, tr, rf, cam)
+			}
+		}
+	}
+	// A cutaway plays at speed 1, has no camera move and is drawn with its own reframe over the whole frame.
+	for _, b := range cuts {
+		os, oe := max(b.AtMs, startMs), min(b.EndMs(), endMs)
+		if oe <= os {
+			continue
+		}
+		tr, ok := lookup(b.AssetID)
+		if !ok {
+			continue
+		}
+		rf := WithFocus(b.Reframe, &tr, b.Source, spec.Output)
+		for _, s := range tr.Near(b.Source.InMs+os-b.AtMs, b.Source.InMs+oe-b.AtMs) {
+			add(s, tr, rf, camera{lo: 1, hi: 1, shake: 1})
 		}
 	}
 	return out
+}
+
+// uncovered splits the window [from, to) of the output into the parts no cutaway covers, in time order. Without cutaways it is the
+// window itself.
+func uncovered(from, to int64, cuts []timeline.BrollItem) [][2]int64 {
+	parts := [][2]int64{{from, to}}
+	for _, b := range cuts {
+		bs, be := b.AtMs, b.EndMs()
+		var next [][2]int64
+		for _, p := range parts {
+			if be <= p[0] || bs >= p[1] {
+				next = append(next, p)
+				continue
+			}
+			if bs > p[0] {
+				next = append(next, [2]int64{p[0], bs})
+			}
+			if be < p[1] {
+				next = append(next, [2]int64{be, p[1]})
+			}
+		}
+		parts = next
+	}
+	return parts
 }
 
 // The shapes of the camera, as the renderer has them (render/camera.go, which this package cannot import): a zoom_through zooms by

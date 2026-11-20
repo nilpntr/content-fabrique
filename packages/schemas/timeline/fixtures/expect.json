@@ -351,5 +351,39 @@
   },
   "i88_caption_correction_twice.json": {
     "code": "invalid_captions"
+  },
+  "i89_schema_broll_item_with_audio.json": {
+    "code": "schema",
+    "path": "/tracks/1/items/0",
+    "keyword": "additionalProperties"
+  },
+  "i90_schema_two_broll_tracks.json": {
+    "code": "schema",
+    "path": "/tracks",
+    "keyword": "contains"
+  },
+  "i91_broll_outside_timeline.json": {
+    "code": "outside_timeline"
+  },
+  "i92_broll_source_out_of_range.json": {
+    "code": "source_out_of_range"
+  },
+  "i93_broll_unknown_asset.json": {
+    "code": "unknown_asset"
+  },
+  "i94_broll_wrong_asset_kind.json": {
+    "code": "wrong_asset_kind"
+  },
+  "i95_broll_shot_too_short.json": {
+    "code": "shot_too_short"
+  },
+  "i96_broll_overlap.json": {
+    "code": "overlap"
+  },
+  "i97_broll_source_reused.json": {
+    "code": "source_reused"
+  },
+  "i98_broll_too_many_cutaways.json": {
+    "code": "too_many_cutaways"
   }
 }

@@ -41,7 +41,7 @@ func goldenWidthFor(p Plan) int {
 
 // finalFixtures are the render fixtures that are also rendered with the final profile: one per kind of work (a cover
 // with a focus point, a transition with a blur, blur_fill, an audio mix and the full edit).
-var finalFixtures = []string{"v01_minimal_9x16", "v10_transition_whip", "v14_reframe_blur_fill", "v26_audio_licensed_track", "v30_full_edit", "v37_motion_9x16"}
+var finalFixtures = []string{"v01_minimal_9x16", "v10_transition_whip", "v14_reframe_blur_fill", "v26_audio_licensed_track", "v30_full_edit", "v37_motion_9x16", "v52_broll_9x16"}
 
 // sample is a frame of the output that the golden test looks at.
 type sample struct {
@@ -88,6 +88,17 @@ func sampleFrames(t testing.TB, p Plan, spec *timeline.Spec) []sample {
 	// The middle of each item, from the time map (which assigns [out_start, out_end) to each main item). A text item is sampled
 	// in the middle of its time as well, after its animation, and up to six caption events in the middle of theirs.
 	for _, e := range p.TimeMap {
+		if e.Track == TrackBroll {
+			// A cutaway: the frames around its cut in and its cut out (one frame early or late shows in one of them) and its middle, whose
+			// next frame must differ (it plays at speed 1).
+			a, b := timeline.Frame(e.OutStartMs, p.FPS), timeline.Frame(e.OutEndMs, p.FPS)
+			add(a-1, "cutaway-1", false)
+			add(a, "cutaway", false)
+			add(b-1, "cutaway-end", false)
+			add(b, "after-cutaway", false)
+			add((a+b)/2, "cutaway-mid", b-a > 4 && (a+b)/2+1 < p.TotalFrames)
+			continue
+		}
 		if e.SourceInMs == nil {
 			a, b := timeline.Frame(e.OutStartMs, p.FPS), timeline.Frame(e.OutEndMs, p.FPS)
 			add((a+b)/2, "text", false)

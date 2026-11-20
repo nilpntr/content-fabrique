@@ -33,6 +33,7 @@ var (
 		string(TrackCaptions): reflect.TypeFor[CaptionsTrack](),
 		string(TrackAudio):    reflect.TypeFor[AudioTrack](),
 		string(TrackGraphics): reflect.TypeFor[GraphicsTrack](),
+		string(TrackBroll):    reflect.TypeFor[BrollTrack](),
 	}
 	audioVariants = map[string]reflect.Type{
 		string(AudioTrendSound):    reflect.TypeFor[TrendSound](),

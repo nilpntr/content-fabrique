@@ -289,7 +289,7 @@ func round(x float64, places int) float64 {
 func cutTimes(timeMap []render.TimeMapEntry) []int64 {
 	var starts []int64
 	for _, e := range timeMap {
-		if e.SourceInMs != nil {
+		if e.IsMain() { // a cutaway changes the picture, not the sound
 			starts = append(starts, e.OutStartMs)
 		}
 	}
