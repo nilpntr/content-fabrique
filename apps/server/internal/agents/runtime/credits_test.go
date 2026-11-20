@@ -212,7 +212,7 @@ func TestARevisionRunsOnTheRevisionEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	rev := start()
-	if rev.MaxTokens != 12_000 || rev.Model != "claude-opus-5-5" || rev.BudgetMicros != 320_000 || rev.Stage != first.Stage {
+	if rev.MaxTokens != 12_000 || rev.Model != "claude-sonnet-5-5" || rev.BudgetMicros != 320_000 || rev.Stage != first.Stage {
 		t.Fatalf("revision: max_tokens %d, model %s, budget %d, stage %s (first edit's stage %s)", rev.MaxTokens, rev.Model, rev.BudgetMicros, rev.Stage, first.Stage)
 	}
 	if rev.MinOutputTokens != 0 {

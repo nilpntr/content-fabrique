@@ -45,7 +45,7 @@ func TestAFirstCallTheBudgetCannotPayForIsSaidPlainly(t *testing.T) {
 	e.execute(run)
 	assertBudgetStop(t, e, run, LimitDollars)
 	out := outputOf(t, e.get(run))
-	if s, _ := out["summary"].(string); !strings.Contains(s, "cannot pay for its first step") || !strings.Contains(s, "Nothing was spent") || out["first_call_refused"] != true {
+	if s, _ := out["summary"].(string); !strings.Contains(s, "cannot pay for the first step") || !strings.Contains(s, "Nothing of its budget was spent") || out["first_call_refused"] != true {
 		t.Fatalf("output %v", out)
 	}
 	if asked {

@@ -1136,8 +1136,12 @@ func (l *loop) summary(stopped, limit string) json.RawMessage {
 // 2026-11-20 (section 4.3) met it as "the dollars budget was used up" with $0.00 spent; it says what happened, in numbers.
 func (l *loop) firstCallRefused(ce *llm.CapError) json.RawMessage {
 	budget := l.run.BudgetMicros
-	msg := fmt.Sprintf("This run's budget of %s cannot pay for its first step on %s: that step can cost up to %s (the whole prompt and the room for the answer), so the run stopped before it started. Nothing was spent.",
-		spend.USD(budget), l.run.Model, spend.USD(ce.EstimateMicros))
+	who := fmt.Sprintf("This run's budget of %s", spend.USD(budget))
+	if l.ceiling.Micros > 0 {
+		who = fmt.Sprintf("The spend ceiling of %s for one run (%s)", spend.USD(l.ceiling.Micros), l.ceiling.Source)
+	}
+	msg := fmt.Sprintf("%s cannot pay for the first step on %s: that step can cost up to %s (the whole prompt and the room for the answer), so the run stopped before it started. Nothing of its budget was spent.",
+		who, l.run.Model, spend.USD(ce.EstimateMicros))
 	return mustJSON(map[string]any{"summary": msg, "first_call_refused": true, "first_call_micros": ce.EstimateMicros, "budget_micros": budget})
 }
 

@@ -13,7 +13,7 @@ import (
 // spent sets what the run has spent so far, as the runtime's events would have.
 func (r *dbRun) spent(t *testing.T, micros int64) {
 	t.Helper()
-	if _, err := r.pool.Exec(context.Background(), `UPDATE agent_runs SET cost_micros = $1 WHERE id = $2`, micros, r.run.ID); err != nil {
+	if _, err := r.pool.Exec(context.Background(), `UPDATE agent_runs SET cost_micros = $1, tool_calls = 10 WHERE id = $2`, micros, r.run.ID); err != nil {
 		t.Fatal(err)
 	}
 }

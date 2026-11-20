@@ -123,13 +123,8 @@ func TestRevisionOnV1StartCompletesAPlanAnEditAndACheck(t *testing.T) {
 	if sent[0] > 12_000 {
 		t.Errorf("the first call asked for %d tokens, over the revision entry's 12,000", sent[0])
 	}
-	shortened := false
-	for _, mt := range sent {
-		shortened = shortened || mt < 12_000
-	}
-	if !shortened {
-		t.Errorf("no call was shortened: %v", sent)
-	}
+	// On Sonnet the revision's budget pays for full-size calls on this small project (on Opus they were cut to fit, and on a real five-clip
+	// project the first call did not fit at all; TestEveryEditCanStartOnItsPlanBudget holds that).
 	if x.artifacts(PlanArtifact) == 0 || x.artifacts(CheckArtifact) == 0 {
 		t.Fatalf("plans %d, checks %d: the revision did not get to a plan and a check", x.artifacts(PlanArtifact), x.artifacts(CheckArtifact))
 	}
