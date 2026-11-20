@@ -98,6 +98,23 @@ func TestLoadCeilingsRefusesNonsense(t *testing.T) {
 	}
 }
 
+func TestCeilingsHighest(t *testing.T) {
+	ws := uuid.Must(uuid.NewV7())
+	for _, c := range []struct {
+		in   Ceilings
+		want int64
+	}{
+		{Ceilings{Default: 2_000_000}, 2_000_000},
+		{Ceilings{Default: 2_000_000, Plans: map[plans.Plan]int64{plans.Pro: 3_000_000}}, 3_000_000},
+		{Ceilings{Default: 2_000_000, Workspaces: map[uuid.UUID]int64{ws: 0}}, 0},
+		{Ceilings{}, 0},
+	} {
+		if got := c.in.Highest(); got != c.want {
+			t.Errorf("Highest(%+v) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
 func TestUSD(t *testing.T) {
 	for in, want := range map[int64]string{0: "$0.00", 1: "$0.0000", 2500: "$0.0025", 2_000_000: "$2.00", 74_950_000: "$74.95"} {
 		if got := USD(in); got != want {

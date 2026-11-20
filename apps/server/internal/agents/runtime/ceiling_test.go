@@ -31,7 +31,7 @@ func TestSpendCeilingCapsTheBudgetOfANewRun(t *testing.T) {
 	}
 
 	// A ceiling the first replayed call cannot fit under: the call is refused before it is sent, and the run says the ceiling stopped it.
-	e.svc.Ceilings = spend.Ceilings{Default: 1}
+	e.svc.Ceilings = spend.Ceilings{Default: 2_000_000, Workspaces: map[uuid.UUID]int64{e.ws.ID.UUID: 1}}
 	e.runner.deps.Ceilings = e.svc.Ceilings
 	tiny := e.create("echo", echoMessage, Budgets{})
 	if tiny.BudgetMicros != 1 {
@@ -40,7 +40,7 @@ func TestSpendCeilingCapsTheBudgetOfANewRun(t *testing.T) {
 	e.execute(tiny)
 	assertBudgetStop(t, e, tiny, LimitDollars)
 	out := outputOf(t, e.get(tiny))
-	if !strings.Contains(fmt.Sprint(out["summary"]), "spend ceiling of $0.0000") || out["ceiling_source"] != "default" || out["ceiling_micros"] != float64(1) {
+	if !strings.Contains(fmt.Sprint(out["summary"]), "spend ceiling of $0.0000") || out["ceiling_source"] != "workspace" || out["ceiling_micros"] != float64(1) {
 		t.Fatalf("the summary does not say the ceiling stopped the run: %v", out)
 	}
 	errs := eventsOf(e.events(tiny), store.EventError)
@@ -49,6 +49,25 @@ func TestSpendCeilingCapsTheBudgetOfANewRun(t *testing.T) {
 	}
 	if e.sink.effects() != 0 {
 		t.Fatalf("effects = %d: a refused call ran a tool", e.sink.effects())
+	}
+}
+
+// Who a stop at the dollar limit is blamed on.
+func TestCeilingBinds(t *testing.T) {
+	for _, c := range []struct {
+		ceiling spend.Ceiling
+		budget  int64
+		want    bool
+	}{
+		{spend.Ceiling{}, 1_000_000, false},
+		{spend.Ceiling{Micros: 500_000, Source: "default"}, 960_000, true},        // lowered after the run was made
+		{spend.Ceiling{Micros: 2_000_000, Source: "default"}, 2_000_000, false},   // a plan's own $2 budget, not the default ceiling
+		{spend.Ceiling{Micros: 800_000, Source: "plan creator"}, 800_000, true},   // a deliberate setting capped it
+		{spend.Ceiling{Micros: 3_000_000, Source: "workspace"}, 2_000_000, false}, // above the budget
+	} {
+		if got := ceilingBinds(c.ceiling, c.budget); got != c.want {
+			t.Errorf("ceilingBinds(%+v, %d) = %v", c.ceiling, c.budget, got)
+		}
 	}
 }
 

@@ -118,9 +118,10 @@ func testCapMicros(vars map[string]string) (int64, error) {
 	if v == "" {
 		return DefaultTestSpendCapMicros, nil
 	}
+	// 0 is refused rather than read as "no cap" or "nothing left": the cap cannot be switched off by accident.
 	n, err := strconv.ParseInt(v, 10, 64)
-	if err != nil || n < 0 {
-		return 0, errors.New("TEST_SPEND_CAP_MICROS: must be micro-dollars, 0 or more (75000000 is $75)")
+	if err != nil || n < 1 {
+		return 0, errors.New("TEST_SPEND_CAP_MICROS: must be micro-dollars, more than 0 (75000000 is $75); there is no setting that switches the cap off")
 	}
 	return n, nil
 }
@@ -135,10 +136,10 @@ func pct(part, whole int64) float64 {
 func printSpendSummary(out io.Writer, sum store.TestSpendSummary, capMicros int64, cfEnv string) {
 	spent := sum.TotalMicros + sum.HeldMicros
 	_, _ = fmt.Fprintf(out, "cfctl spend summary (CF_ENV=%s): test spend, billed_to = test, every workspace\n\n", cfEnv)
-	_, _ = fmt.Fprintf(out, "total     %s of the %s test cap (%.0f %%), %s left\n", spend.USD(sum.TotalMicros), spend.USD(capMicros),
+	_, _ = fmt.Fprintf(out, "total     %s of the %s test cap (%.0f %%), %s left\n", spend.USD(spent), spend.USD(capMicros),
 		pct(spent, capMicros), spend.USD(max(capMicros-spent, 0)))
 	if sum.HeldMicros > 0 {
-		_, _ = fmt.Fprintf(out, "in flight %s reserved by calls that have not settled (counted in what is left)\n", spend.USD(sum.HeldMicros))
+		_, _ = fmt.Fprintf(out, "          of which %s settled in the ledger and %s reserved by calls in flight\n", spend.USD(sum.TotalMicros), spend.USD(sum.HeldMicros))
 	}
 	if spent > capMicros {
 		_, _ = fmt.Fprintf(out, "OVER THE CAP by %s: the eval commands refuse live runs until the cap is raised (TEST_SPEND_CAP_MICROS) or --over-test-cap is given\n",
@@ -187,10 +188,20 @@ func spendJSON(sum store.TestSpendSummary, capMicros int64) map[string]any {
 
 // guardTestCap is the cost guard of a command that may spend on test calls: it prints what the run may cost at most (upTo) next to
 // what is left of the test cap, and refuses it (false) when upTo is more than that, unless override is set. A run billed to anyone
-// but test (staging, production) is not the test cap's business, and a run that may cost nothing passes.
+// but test (staging, production) is not the test cap's business, and a run that may cost nothing passes. It reserves nothing: two runs
+// started at the same moment can both pass against the same room (the cap is a founder's budget for one developer's machine, not a
+// concurrency control; the spend gate's database caps still hold every call).
 func guardTestCap(ctx context.Context, st *store.Store, env *agentEnv, name string, upTo int64, override bool) bool {
-	billing, err := llm.BillingFor(env.vars["CF_ENV"])
-	if err != nil || billing != llm.BilledToTest || upTo <= 0 {
+	if upTo <= 0 {
+		return true
+	}
+	// CF_ENV empty is local, as the model settings read it. An unknown one is refused: the guard cannot tell who would pay.
+	billing, err := llm.BillingFor(cmp.Or(env.vars["CF_ENV"], "local"))
+	if err != nil {
+		_, _ = fmt.Fprintf(env.err, "cfctl %s: refused: CF_ENV must be local, ci, bench, staging or production, so the cost guard knows who pays\n", name)
+		return false
+	}
+	if billing != llm.BilledToTest {
 		return true
 	}
 	capMicros, err := testCapMicros(env.vars)

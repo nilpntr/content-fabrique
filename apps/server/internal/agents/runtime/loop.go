@@ -418,7 +418,7 @@ func (l *loop) work(ctx context.Context) (Outcome, error) {
 	if err != nil {
 		return "", err
 	}
-	if ceiling.Micros > 0 && ceiling.Micros <= run.BudgetMicros {
+	if ceilingBinds(ceiling, run.BudgetMicros) {
 		l.ceiling = ceiling
 	}
 	l.budget = newBudgetTracker(ceiling.Apply(run.BudgetMicros) - spent)
@@ -1214,6 +1214,14 @@ func (l *loop) recordSpend(ctx context.Context, code, message string, usage llm.
 
 // crashSignal is what a test panics with to simulate a killed worker; a tool's recover must not swallow it.
 type crashSignal struct{ point string }
+
+// ceilingBinds says the spend ceiling, not the run's own budget, is what a stop at the dollar limit is to be blamed on. Below the run's
+// budget it always is (it was lowered after the run was made). At the budget it is ambiguous, because Create stores the capped budget:
+// a workspace or plan ceiling is someone's deliberate setting and takes the blame, but the default ($2.00) equals the largest budget a
+// plan gives an edit, so a plan's own $2.00 budget running out is not blamed on it.
+func ceilingBinds(c spend.Ceiling, budget int64) bool {
+	return c.Micros > 0 && (c.Micros < budget || (c.Micros == budget && c.Source != spend.SourceDefault))
+}
 
 // ---- the dollar budget ------------------------------------------------------------------------------------------
 

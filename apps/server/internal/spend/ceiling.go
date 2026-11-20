@@ -60,7 +60,32 @@ func (c Ceilings) For(ws ids.WorkspaceID, plan plans.Plan) Ceiling {
 	if v, ok := c.Plans[plan]; ok && plan != "" {
 		return Ceiling{Micros: v, Source: sourceIf(v, "plan "+string(plan))}
 	}
-	return Ceiling{Micros: c.Default, Source: sourceIf(c.Default, "default")}
+	return Ceiling{Micros: c.Default, Source: sourceIf(c.Default, SourceDefault)}
+}
+
+// SourceDefault is the Source of the default ceiling.
+const SourceDefault = "default"
+
+// Highest is the highest ceiling any run may get: an upper bound for an estimate made without knowing the workspace or the plan. 0 means
+// some run may have none.
+func (c Ceilings) Highest() int64 {
+	if c.Default == 0 {
+		return 0
+	}
+	hi := c.Default
+	for _, v := range c.Workspaces {
+		if v == 0 {
+			return 0
+		}
+		hi = max(hi, v)
+	}
+	for _, v := range c.Plans {
+		if v == 0 {
+			return 0
+		}
+		hi = max(hi, v)
+	}
+	return hi
 }
 
 // NeedsPlan says the answer of For can depend on the plan, so a caller that does not know the plan should read it.

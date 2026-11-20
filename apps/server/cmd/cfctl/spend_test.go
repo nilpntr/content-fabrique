@@ -140,6 +140,17 @@ func TestSpendSummaryAndTheTestCapRefusal(t *testing.T) {
 	}
 }
 
+func TestTestCapMicros(t *testing.T) {
+	if n, err := testCapMicros(map[string]string{}); err != nil || n != DefaultTestSpendCapMicros {
+		t.Errorf("default: %d %v", n, err)
+	}
+	for _, v := range []string{"0", "-1", "x"} {
+		if _, err := testCapMicros(map[string]string{"TEST_SPEND_CAP_MICROS": v}); err == nil {
+			t.Errorf("%q was accepted", v)
+		}
+	}
+}
+
 func TestEstimateUpTo(t *testing.T) {
 	e := evals.Estimate{Micros: 300_000, WorstMicros: 2_400_000}
 	if e.UpTo(1_000_000) != 1_000_000 || e.UpTo(5_000_000) != 2_400_000 || e.UpTo(0) != 0 {

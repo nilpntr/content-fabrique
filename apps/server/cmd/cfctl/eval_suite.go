@@ -405,7 +405,8 @@ func openSuite(name string, f suiteFlags, stdout, stderr io.Writer, lookup looku
 			only = append(only, id)
 		}
 	}
-	se.opts = evals.Options{Live: f.live, MaxMicros: int64(f.maxUSD * 1e6), NoJudge: f.noJudge, Only: only, OutDir: outDir, Label: f.label, Repeat: f.repeats()}
+	se.opts = evals.Options{Live: f.live, MaxMicros: int64(f.maxUSD * 1e6), NoJudge: f.noJudge, Only: only, OutDir: outDir, Label: f.label, Repeat: f.repeats(),
+		EditCeilingMicros: rt.Ceilings.Highest()}
 	key := evals.RunKey{Live: f.live, Repeat: f.repeats(), Judge: !f.noJudge, JudgeProfile: f.judgeProfile, Only: only}
 	if se.opts.CodeHash, err = evals.CodeHash(env.root, suite, key); err != nil {
 		_, _ = fmt.Fprintf(env.err, "cfctl %s: hashing the code: %v\n", name, err)

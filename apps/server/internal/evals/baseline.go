@@ -238,6 +238,9 @@ func EstimateRun(s *Suite, o Options, live bool, history []*RunResult) Estimate 
 		if live && o.Live && c.Calibration == nil && len(c.Missing(true)) == 0 {
 			n = max(o.Repeat, 1)
 			editWorst = int64(c.BudgetUSD * 1e6)
+			if o.EditCeilingMicros > 0 {
+				editWorst = min(editWorst, o.EditCeilingMicros)
+			}
 			if m, ok := meanOf(edit[c.ID]); ok {
 				editEst, src = m, "recent runs"
 			} else {

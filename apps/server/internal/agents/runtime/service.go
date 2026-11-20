@@ -117,8 +117,14 @@ func (s *Service) Create(ctx context.Context, tx *store.Store, p StartParams) (s
 		}
 	}
 	budgets := DefaultBudgets.over(agent.Budgets).over(p.Budgets)
-	ceiling, err := CeilingFor(ctx, tx, s.Ceilings, p.WorkspaceID)
-	if err != nil {
+	// The spend ceiling. An edit's quote has already read the plan (empty when it is not active), so it is not read again.
+	var (
+		ceiling spend.Ceiling
+		err     error
+	)
+	if quote != nil {
+		ceiling = s.Ceilings.For(p.WorkspaceID, quote.Plan)
+	} else if ceiling, err = CeilingFor(ctx, tx, s.Ceilings, p.WorkspaceID); err != nil {
 		return store.AgentRun{}, err
 	}
 	budgets.Micros = ceiling.Apply(budgets.Micros)
