@@ -97,7 +97,7 @@ A `sandbox.Router` (itself a `Provider`) picks per job. It sends a job to `harde
 
 **By hand, the founder**: confirm Workers Paid on the staging and production accounts; create the EU R2 bucket and its S3 token if P0-09 has not; `wrangler secret put GATEWAY_TOKEN`; run `wrangler deploy` with Docker running (it builds and pushes the image); set a billing notification; optionally a route such as `jobs.contentfabrique.app`.
 
-**Dev and VPS path.** `compose.yaml` gets a `runner` profile: service `media-runner` from the media-tools image running `cf-job serve`, read-only root, tmpfs `/work`, no capabilities, `cpus: 4` and `mem_limit: 12g` so the VPS reproduces the Cloudflare limits, network to MinIO only. `MEDIA_SANDBOX_PROVIDER=remote`, `MEDIA_RUNNER_URL=http://localhost:8080`. Refused when `CF_ENV` is staging or production unless the URL is the gateway.
+**Dev and VPS path.** `compose.yaml` gets a `runner` profile: service `media-runner` from the media-tools image running `cf-job serve`, read-only root, tmpfs `/work`, no capabilities, `cpus: 4` and `mem_limit: 12g` so the VPS reproduces the Cloudflare limits, network to MinIO only. `MEDIA_SANDBOX_PROVIDER=remote`, `MEDIA_RUNNER_URL=http://localhost:8090` (built as 8090: 8080 is the API's port). Refused when `CF_ENV` is staging or production unless the URL is the gateway. As built in phase 1: Docker publishes no port from an `internal` network, so the runner's network is a bridge it shares with MinIO alone, and cf-job connects only to `CF_JOB_ALLOWED_HOSTS` (dialled as `minio:9000`); the worker's ingest and render still mount files, so the worker refuses `remote` until they build remote jobs.
 
 | Phase | Slice | Cost |
 |---|---|---|

@@ -38,9 +38,14 @@ ARG GO_IMAGE=golang:1.27.2-trixie@sha256:47667934874913a449b96faa7ef4777fa285d9e
 
 FROM ${GO_IMAGE} AS runner
 COPY motion-runner/ /src/motion-runner/
+COPY job-runner/ /src/job-runner/
+# cf-job (job-runner/, docs/design/render-runtime.md) is the remote sandbox runner: `cf-job serve` downloads a job's inputs from
+# presigned URLs to /in, runs its steps under its limits and uploads its outputs. Standard library only, built statically too.
 RUN set -eux; \
     cd /src/motion-runner; \
     GOWORK=off CGO_ENABLED=0 GOFLAGS=-trimpath go build -ldflags='-s -w -buildid=' -o /out/cf-motion .; \
+    cd /src/job-runner; \
+    GOWORK=off CGO_ENABLED=0 GOFLAGS=-trimpath go build -ldflags='-s -w -buildid=' -o /out/cf-job .; \
     cp /usr/local/go/LICENSE /out/go-LICENSE; \
     go env GOVERSION >/out/go-version
 
@@ -209,12 +214,14 @@ RUN set -eux; \
       cut -f2 "$inv" | grep -qxF "$name" || printf '%s\n' "$row" >>"$inv"; \
     done <"$extra"; \
     cp /runner-out/cf-motion /rootfs/usr/local/bin/cf-motion; \
+    cp /runner-out/cf-job /rootfs/usr/local/bin/cf-job; \
     mkdir -p /rootfs/usr/share/doc/golang-runtime; \
     cp /runner-out/go-LICENSE /rootfs/usr/share/doc/golang-runtime/copyright; \
     goversion=$(cat /runner-out/go-version); \
-    printf 'runtime\tgolang-runtime\t%s\thttps://go.dev/dl/ (the Go runtime and standard library linked into cf-motion)\t\n' "${goversion#go}" >>"$inv"; \
+    printf 'runtime\tgolang-runtime\t%s\thttps://go.dev/dl/ (the Go runtime and standard library linked into cf-motion and cf-job)\t\n' "${goversion#go}" >>"$inv"; \
     chroot /rootfs /opt/chrome/chrome-headless-shell --version; \
     chroot /rootfs /usr/local/bin/cf-motion -version; \
+    chroot /rootfs /usr/local/bin/cf-job -version; \
     chroot /rootfs /usr/local/bin/ffmpeg -hide_banner -version >/dev/null
 
 FROM scratch

@@ -57,6 +57,25 @@ The runner speaks the DevTools protocol over a pipe (no port), refuses any reque
 `/usr/share/fonts/cf` as bytes, and writes transparent PNGs and a `manifest.json` (every frame's SHA-256). The design and the security
 model are in [motion graphics v1](../../docs/design/motion-graphics-v1.md). The image carries the label `org.contentfabrique.motion=1`.
 
+## Remote jobs (cf-job)
+
+`cf-job` (`job-runner/`, Go standard library only, built statically in the `runner` stage) runs one sandbox job inside this image
+for the server's `remote` provider ([render runtime](../../docs/design/render-runtime.md)): it downloads the job's inputs from
+presigned URLs to `/in`, runs its steps in order without a shell in `/work` (each under `RLIMIT_NPROC` from the job's PIDs, a file-size
+cap from its outputs, 1024 open files, no core dumps, and killed with its process group at its timeout), uploads the outputs to
+presigned URLs once every step exited 0, and reports each step's exit code, stdout, stderr (capped), duration and timeout. CPU and
+memory are the container's; one job runs at a time, and its files are removed before the next one starts.
+
+```sh
+CF_JOB_TOKEN=... cf-job serve -addr :8080   # PUT, GET, DELETE /jobs/{id} with a bearer token; GET /healthz
+cf-job run -id job-1 manifest.json          # one job, its status as JSON
+```
+
+`CF_JOB_ALLOWED_HOSTS` limits where the runner connects (host:port list) and `CF_JOB_DIAL` maps a host:port of the URLs to another
+address. Compose's `runner` profile runs it as `media-runner` (`docker compose --profile runner up -d --wait media-runner`): read-only
+root, no capabilities, 4 CPUs, 12 GB, tmpfs `/in`, `/work` and `/tmp`, on a network it shares with MinIO alone. The wire format is
+`job-runner/manifest.go`; `job-runner/testdata` is written by the server's provider tests, so the two sides cannot drift.
+
 ## Contents
 
 - `Dockerfile`: multi-stage; builds ffmpeg and whisper.cpp from checksummed tarballs, then assembles a `FROM scratch` image from the binaries,

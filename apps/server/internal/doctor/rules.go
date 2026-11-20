@@ -21,8 +21,10 @@ var allowedEmpty = map[string]bool{
 	"R2_JURISDICTION":        true,
 	"MEDIA_SANDBOX_PROVIDER": true,
 	"MEDIA_TEMP_DIR":         true,
-	"TRANSCRIBE_LANGUAGE":    true,
-	"WHISPER_MODELS_DIR":     true,
+	// Empty is compose's media-runner on this machine (http://localhost:8080); only MEDIA_SANDBOX_PROVIDER=remote reads it.
+	"MEDIA_RUNNER_URL":    true,
+	"TRANSCRIBE_LANGUAGE": true,
+	"WHISPER_MODELS_DIR":  true,
 	// Only the local provider reads it (a chrome-headless-shell on the host for the motion graphics, D-35).
 	"CF_MOTION_CHROME": true,
 	// Empty is metadata-only spans, the default everywhere; `task dev:obs` sets it to 1 for its own processes (D-39).
@@ -65,7 +67,7 @@ var appServer = map[string]string{
 // Redactor leaves it alone and the report can say "profile dev-cheap".
 var enums = map[string][]string{
 	"CF_ENV":                 {"local", "ci", "bench", "staging", "production"},
-	"MEDIA_SANDBOX_PROVIDER": {"docker", "hardened", "local"},
+	"MEDIA_SANDBOX_PROVIDER": {"docker", "hardened", "local", "remote"},
 	"ROUTING_PROFILE":        {"dev-cheap", "dev-mid", "v1-start"},
 	"LLM_MODE":               {"live", "record", "replay"},
 	"BILLING_PROVIDER":       {"paddle", "stripe"},
@@ -268,6 +270,7 @@ var validators = map[string]validator{
 	"VITE_API_BASE_URL":           urlOf("http", "https"),
 	"ANTHROPIC_BASE_URL":          urlOf("http", "https"),
 	"SANDBOX_GATEWAY_URL":         urlOf("http", "https"),
+	"MEDIA_RUNNER_URL":            urlOf("http", "https"),
 	"OTEL_EXPORTER_OTLP_ENDPOINT": urlOf("http", "https"),
 	"TIKTOK_REDIRECT_URI":         urlOf("http", "https"),
 	"SENTRY_DSN":                  urlOf("http", "https"),

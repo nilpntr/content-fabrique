@@ -54,8 +54,10 @@ jobs:
               # The timeline schema is embedded in the Go package (apps/server/internal/timeline), and its fixtures
               # are read by the Go tests.
               - 'packages/schemas/**'
-              # cf-motion, the motion-graphics runner (D-35), is a Go module of its own in the media-tools image.
+              # cf-motion, the motion-graphics runner (D-35), and cf-job, the remote sandbox runner, are Go modules of their own in
+              # the media-tools image.
               - 'packages/media-tools/motion-runner/**'
+              - 'packages/media-tools/job-runner/**'
               - '.env.example'
               - 'go.work'
               - 'go.work.sum'
@@ -90,6 +92,8 @@ jobs:
               - 'apps/server/internal/transcribe/**'
               - 'apps/server/internal/motion/**'
               - 'apps/server/internal/render/graphics*.go'
+              # The remote render through the image's cf-job and MinIO (docs/design/render-runtime.md).
+              - 'apps/server/internal/render/remote*.go'
               - 'apps/server/cmd/cfctl/media*.go'
               - 'apps/server/cmd/cfctl/transcribe*.go'
               - '.github/workflows/ci.yml'
@@ -147,6 +151,8 @@ jobs:
               - 'apps/server/internal/transcribe/**'
               - 'apps/server/internal/motion/**'
               - 'apps/server/internal/render/graphics*.go'
+              # The remote render through the image's cf-job and MinIO (docs/design/render-runtime.md).
+              - 'apps/server/internal/render/remote*.go'
               - 'apps/server/cmd/cfctl/media*.go'
               - 'apps/server/cmd/cfctl/transcribe*.go'
               - '.github/workflows/ci.yml'
@@ -186,6 +192,16 @@ jobs:
           version: v2.15.0
           working-directory: packages/media-tools/motion-runner
           args: --config ../../../apps/server/.golangci.yml
+      # cf-job, the remote sandbox runner (docs/design/render-runtime.md), its own module, linted the same way.
+      - name: go vet (job runner)
+        working-directory: packages/media-tools/job-runner
+        run: go vet ./...
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          # renovate: datasource=github-releases depName=golangci/golangci-lint
+          version: v2.15.0
+          working-directory: packages/media-tools/job-runner
+          args: --config ../../../apps/server/.golangci.yml
 
   # go test -race over every package. Docker is on the runner, so tests that start containers (testcontainers) run.
   go-test:
@@ -209,6 +225,11 @@ jobs:
       # writes (testdata/job.json, kept equal by internal/motion's TestJobMatchesRunnerContract).
       - name: Motion runner tests
         working-directory: packages/media-tools/motion-runner
+        run: go test -race ./...
+      # cf-job: the manifest, the job contract, the step limits and the upload checks. It parses the manifest and status the
+      # server's remote provider writes (testdata/, kept equal by internal/sandbox's TestRemoteWireMatchesRunnerContract).
+      - name: Job runner tests
+        working-directory: packages/media-tools/job-runner
         run: go test -race ./...
       # internal/timeline embeds a copy of packages/schemas/timeline/v1.schema.json, and internal/timeline/ops one of
       # ops.v1.schema.json; `task gen` refreshes them. A diff means a copy is stale.
@@ -588,7 +609,8 @@ jobs:
         run: go test ./internal/sandbox ./internal/media -run Integration -docker-image media-tools:ci -v
 
       # The renderer through the docker provider and this image: the timeline's full edit, both profiles (the final one with
-      # the two loudness passes), inputs mounted read-only, output and progress in the work directory.
+      # the two loudness passes), inputs mounted read-only, output and progress in the work directory. TestIntegrationRemoteRender
+      # renders a fixture through the remote provider instead: the image's cf-job serve and MinIO, presigned URLs only.
       - name: Render integration test against the image
         working-directory: apps/server
         run: go test ./internal/render -run Integration -docker-image media-tools:ci -v

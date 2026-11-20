@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,6 +65,37 @@ func TestMediaLocalProviderIsRefusedWhereItMatters(t *testing.T) {
 		_, err := Load(mediaEnv(map[string]string{"CF_ENV": env, "MEDIA_SANDBOX_PROVIDER": "local"}))
 		if err == nil || !strings.Contains(err.Error(), "MEDIA_SANDBOX_PROVIDER") || !strings.Contains(err.Error(), "isolates nothing") {
 			t.Errorf("%s: %v", env, err)
+		}
+	}
+}
+
+func TestMediaRemoteProvider(t *testing.T) {
+	const token = "0123456789abcdef0123456789abcdef"
+	c, err := Load(mediaEnv(map[string]string{"MEDIA_SANDBOX_PROVIDER": "remote", "SANDBOX_GATEWAY_TOKEN": token}))
+	if err != nil || c.MediaSandboxProvider != SandboxRemote || c.MediaRunnerURL != DefaultMediaRunnerURL || c.MediaRunnerToken != token {
+		t.Fatalf("%+v %v", c, err)
+	}
+	if strings.Contains(fmt.Sprintf("%+v", c), token) {
+		t.Error("the runner token is printed")
+	}
+	// The token is required, and the URL must be one.
+	for name, env := range map[string]map[string]string{
+		"SANDBOX_GATEWAY_TOKEN": {"MEDIA_SANDBOX_PROVIDER": "remote"},
+		"MEDIA_RUNNER_URL":      {"MEDIA_SANDBOX_PROVIDER": "remote", "SANDBOX_GATEWAY_TOKEN": token, "MEDIA_RUNNER_URL": "localhost:8080"},
+	} {
+		if _, err := Load(mediaEnv(env)); err == nil || !strings.Contains(err.Error(), name) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// Staging and production: only the gateway.
+	for _, env := range []string{EnvStaging, EnvProduction} {
+		base := map[string]string{"CF_ENV": env, "MEDIA_SANDBOX_PROVIDER": "remote", "SANDBOX_GATEWAY_TOKEN": token, "SANDBOX_GATEWAY_URL": "https://jobs.example.com"}
+		if _, err := Load(mediaEnv(base)); err == nil || !strings.Contains(err.Error(), "gateway") {
+			t.Errorf("%s with the compose runner: %v", env, err)
+		}
+		base["MEDIA_RUNNER_URL"] = "https://jobs.example.com"
+		if c, err := Load(mediaEnv(base)); err != nil || c.MediaRunnerURL != "https://jobs.example.com" {
+			t.Errorf("%s with the gateway: %v", env, err)
 		}
 	}
 }

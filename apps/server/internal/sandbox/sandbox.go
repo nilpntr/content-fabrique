@@ -6,9 +6,12 @@
 //   - local:    runs the program directly on the host. For development and tests only; it isolates nothing.
 //   - docker:   docker run with no network, a read-only root, no capabilities and resource limits.
 //   - hardened: the docker provider under the gVisor runtime (runsc). Used for all deterministic media jobs.
+//   - remote:   sends the job to a runner over HTTP (cf-job in the media-tools image, or the gateway Worker in front of a
+//     Cloudflare Container); the job's files travel as presigned URLs instead of mounts (docs/design/render-runtime.md).
 //
-// The isolation rules are properties of the Job type, not options: the network is always off, inputs are read-only,
-// there is at most one writable directory, and a job without limits is refused.
+// The isolation rules are properties of the Job type, not options: the tools' network is always off, inputs are read-only,
+// there is at most one writable directory, and a job without limits is refused. A remote job's runner, not its tools,
+// fetches the inputs and uploads the outputs, and only through the job's own presigned URLs.
 package sandbox
 
 import (
@@ -31,7 +34,7 @@ const (
 
 // Provider runs jobs in a sandbox.
 type Provider interface {
-	// Name is the provider's name as used in configuration: "local", "docker" or "hardened".
+	// Name is the provider's name as used in configuration: "local", "docker", "hardened" or "remote".
 	Name() string
 	// Run executes the job and waits for it. A non-zero exit code is not an error: it is reported in Result. An error
 	// means the job was refused (validation), the sandbox could not be run, the timeout expired (ErrTimeout) or ctx
@@ -48,8 +51,12 @@ var ErrSandbox = errors.New("sandbox: sandbox failure")
 // ErrTimeout is returned (wrapped) when a job exceeded Limits.Timeout and was killed.
 var ErrTimeout = errors.New("sandbox: job timed out")
 
+// ErrFiles is returned (wrapped) by the remote provider when the job's files broke a rule at the runner: the inputs were over
+// MaxInputBytes, or an output was missing, not a regular file, or over its MaxBytes. Retrying the same job does not help.
+var ErrFiles = errors.New("sandbox: job files refused")
+
 // Network is the job's network policy. Only NetworkNone exists: egress is deny-all, and bytes reach a sandbox through
-// mounts (or, later, presigned URLs handled by the caller), never through an open network.
+// mounts, or for a remote job through presigned URLs that the runner (never a tool) fetches; never through an open network.
 type Network string
 
 // NetworkNone is the zero value and the only accepted policy.
@@ -72,6 +79,51 @@ type Job struct {
 	Labels map[string]string
 	// MaxOutputBytes caps each of Stdout and Stderr; the rest is discarded. Zero means DefaultMaxOutputBytes.
 	MaxOutputBytes int
+
+	// The fields below are for the remote provider only, which refuses Mounts; every other provider refuses them.
+	//
+	// ID names the job at the runner: the render id plus the attempt, so a retry of the same attempt never starts a second
+	// job. Required for a remote job.
+	ID string
+	// Inputs are downloaded by the runner before the first step: one-shot Download of architecture section 8.
+	Inputs []Input
+	// Outputs are uploaded by the runner once every step exited 0: one-shot Upload.
+	Outputs []Output
+	// Steps run in order in one sandbox and share WorkDir, so the footage is downloaded once. A job sets either Args (one
+	// step) or Steps. The first step that exits non-zero ends the job.
+	Steps []Step
+	// MaxInputBytes caps the sum of the inputs; zero means the runner's default (8 GiB, renderjobs.MaxInputBytes).
+	MaxInputBytes int64
+}
+
+// Input is a file a remote job reads: the runner GETs URL (presigned, scoped to the job, expiring with it) to Path, a path
+// under InputDir, read-only.
+type Input struct {
+	URL  string
+	Path string
+}
+
+// Output is a file a remote job writes at Path, a path under WorkDir; the runner PUTs it to URL (presigned). The worker
+// checks the object before it trusts it, as it treats every output.
+type Output struct {
+	Path string
+	URL  string
+	// ContentType is sent with the upload; a URL presigned with a content type needs the same one.
+	ContentType string
+	// MaxBytes caps the file (the runner refuses a bigger one and uploads nothing); zero means the runner's default, 4 GiB.
+	MaxBytes int64
+}
+
+// Step is one program run of a multi-step job, without a shell, in WorkDir.
+type Step struct {
+	Args []string
+	// Timeout bounds this step; zero means what is left of Limits.Timeout, which covers the whole job.
+	Timeout time.Duration
+}
+
+// remote reports whether the job uses the remote-only fields.
+func (j Job) remote() bool {
+	return j.ID != "" || len(j.Inputs) > 0 || len(j.Outputs) > 0 || len(j.Steps) > 0 || j.MaxInputBytes != 0
 }
 
 // Mount makes a host file or directory visible inside the sandbox.
@@ -108,6 +160,9 @@ type Result struct {
 	StderrTruncated bool
 	Duration        time.Duration
 	TimedOut        bool
+	// Steps holds one Result per step that ran (remote provider; a job with Args is one step). The fields above are then the last
+	// step's, except Duration, which is the whole job's (downloads and uploads included).
+	Steps []Result
 }
 
 // DefaultMaxOutputBytes caps Stdout and Stderr each when Job.MaxOutputBytes is zero.
@@ -155,6 +210,9 @@ func (p Policy) validate(job Job, needImage bool) (validated, error) {
 	}
 	if v.maxOutput < 0 {
 		return v, errors.New("sandbox: MaxOutputBytes must not be negative")
+	}
+	if job.remote() {
+		return v, errors.New("sandbox: ID, Inputs, Outputs, Steps and MaxInputBytes need the remote provider")
 	}
 	if job.Network != NetworkNone {
 		return v, fmt.Errorf("sandbox: network policy %q is not allowed: the network is always off", job.Network)

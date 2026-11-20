@@ -41,6 +41,11 @@ func newSandboxProvider(cfg config.Config, root string) (sandbox.Provider, error
 			return nil, err
 		}
 		return sandbox.NewLocal(pol), nil
+	case config.SandboxRemote:
+		// The remote provider runs jobs whose files are presigned URLs (sandbox.Job Inputs, Outputs and Steps). The ingest and
+		// render pipelines still stage files and mount them, so they cannot run on it yet; refusing here beats failing every
+		// job (docs/design/render-runtime.md: phase 1 ships cf-job, the provider and compose's runner profile).
+		return nil, fmt.Errorf("MEDIA_SANDBOX_PROVIDER=remote: the ingest and render pipelines do not build remote jobs yet; use docker or hardened for the worker")
 	}
 	return nil, fmt.Errorf("MEDIA_SANDBOX_PROVIDER: unknown provider %q", cfg.MediaSandboxProvider)
 }
@@ -124,7 +129,7 @@ const imageInspectFormat = `{{.Id}} {{index .Config.Labels "` + fontsLabel + `"}
 // sandbox never pulls at job time, so every ingest would fail until the image is built or loaded. It also logs when the image
 // is there but was built before the fonts were added to it (no fonts label), because renders with text would fail then.
 func warnIfImageMissing(ctx context.Context, cfg config.Config, logger *slog.Logger) {
-	if cfg.MediaSandboxProvider == config.SandboxLocal {
+	if cfg.MediaSandboxProvider == config.SandboxLocal || cfg.MediaSandboxProvider == config.SandboxRemote {
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
