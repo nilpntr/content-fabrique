@@ -83,6 +83,13 @@ export type RenderStatus = components["schemas"]["RenderStatus"];
 /** A render of a timeline version. In a list it has no presigned URLs (`files` is null): fetch it with GET /v1/renders/{id}. */
 export type Render = components["schemas"]["Render"];
 
+/** The shot list of a version: the numbers its proof shows at the top right, each shot's clip and second, and the feedback on it. */
+export type ShotList = components["schemas"]["ShotList"];
+export type Shot = components["schemas"]["Shot"];
+/** What the creator said about a shot, kept by clip and second for every later edit. */
+export type ClipFeedback = components["schemas"]["ClipFeedback"];
+export type GiveClipFeedbackRequest = components["schemas"]["GiveClipFeedbackRequest"];
+
 /** A comment on a clip, a render or a version of a timeline (P1-08). */
 export type Annotation = components["schemas"]["Annotation"];
 export type AnnotationKind = components["schemas"]["AnnotationKind"];
@@ -253,6 +260,19 @@ export const fetchRender = async (client: ApiClient, id: string, signal?: AbortS
 /** Queues a render (202), or returns the render that already waits, runs or is ready for that version and profile (200). */
 export const createRender = async (client: ApiClient, id: string, version: number, profile: RenderProfile): Promise<Render> =>
   unwrap(await client.POST("/v1/projects/{id}/renders", { params: { path: { id } }, body: { version, profile } }));
+
+// ── Proof edits and clip feedback ───────────────────────────────────────────
+
+export const fetchShotList = async (client: ApiClient, id: string, version: number, signal?: AbortSignal): Promise<ShotList> =>
+  unwrap(await client.GET("/v1/projects/{id}/timelines/{version}/shots", { params: { path: { id, version } }, signal }));
+
+/** "Never use this shot again" or "start it later": stored by clip and second, never by the number. */
+export const giveClipFeedback = async (client: ApiClient, body: GiveClipFeedbackRequest): Promise<ClipFeedback> =>
+  unwrap(await client.POST("/v1/clip-feedback", { body }));
+
+export const deleteClipFeedback = async (client: ApiClient, id: string): Promise<void> => {
+  unwrap(await client.DELETE("/v1/clip-feedback/{id}", { params: { path: { id } } }));
+};
 
 // ── Annotations ─────────────────────────────────────────────────────────────
 

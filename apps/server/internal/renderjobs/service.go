@@ -21,6 +21,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/render"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
+	"github.com/nilpntr/content-fabrique/internal/styleprofile"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
@@ -128,12 +129,46 @@ func NewService(st *store.Store, objects Objects, enq Enqueuer, logger *slog.Log
 // many requests race, and per project (the project row is locked, as the edit of a timeline does), so two requests for the same
 // version cannot both queue a render; the partial unique index of the table is the backstop. The job is enqueued in the same
 // transaction as the row: the row exists exactly when the job does.
+//
+// A preview is a proof (the shot numbers burned in, docs/design/proof-edit-v1.md) when the creator turned proof_edits on in their
+// style; RequestWith says it explicitly.
 func (s *Service) Request(ctx context.Context, who Caller, project ids.ProjectID, version int, profile string) (r Render, created bool, e *Error) {
+	return s.RequestWith(ctx, who, project, version, profile, ProofAuto)
+}
+
+// Proof says whether a requested preview is a proof.
+type Proof int
+
+// The choices of RequestWith.
+const (
+	// ProofAuto: a preview is a proof when the creator's style has proof_edits on; a final never is.
+	ProofAuto Proof = iota
+	// ProofOn: a proof (a preview only).
+	ProofOn
+	// ProofOff: a plain preview, or a final.
+	ProofOff
+)
+
+// RequestWith is Request with the choice of proof made by the caller.
+func (s *Service) RequestWith(ctx context.Context, who Caller, project ids.ProjectID, version int, profile string, want Proof) (r Render, created bool, e *Error) {
 	if _, err := render.ParseProfile(profile); err != nil {
 		return Render{}, false, invalid("profile must be preview or final")
 	}
 	if version < 1 || version > 1<<30 {
 		return Render{}, false, invalid("version must be a timeline version number")
+	}
+	proof := false
+	switch {
+	case want == ProofOn && profile != store.ProfilePreview:
+		return Render{}, false, invalid("only a preview can be a proof: a final render never has shot numbers")
+	case want == ProofOn:
+		proof = true
+	case want == ProofAuto && profile == store.ProfilePreview:
+		on, err := s.proofsOn(ctx, who.Workspace)
+		if err != nil {
+			return Render{}, false, s.internal(ctx, "read the style settings", err)
+		}
+		proof = on
 	}
 	err := s.store.InTx(ctx, func(tx *store.Store) error {
 		// The requests of one workspace take turns, so the count of renders in flight below is exact; then the project, so the
@@ -151,7 +186,7 @@ func (s *Service) Request(ctx context.Context, who Caller, project ids.ProjectID
 		if err != nil {
 			return err
 		}
-		switch existing, err := tx.GetActiveRender(ctx, who.Workspace, project, version, profile); {
+		switch existing, err := tx.GetActiveRender(ctx, who.Workspace, project, version, profile, proof); {
 		case err == nil:
 			r = existing
 			return nil
@@ -176,7 +211,7 @@ func (s *Service) Request(ctx context.Context, who Caller, project ids.ProjectID
 			return errors.New("renderjobs: a final render needs the credits service, and this service has none")
 		}
 		if r, err = tx.CreateRender(ctx, who.Workspace, store.NewRender{
-			Project: project, Version: version, Profile: profile, RequestedByKind: who.Kind, RequestedByID: who.ID,
+			Project: project, Version: version, Profile: profile, Proof: proof, RequestedByKind: who.Kind, RequestedByID: who.ID,
 		}); err != nil {
 			return err
 		}
@@ -229,6 +264,37 @@ func invalidMessage(errs []timeline.Issue) string {
 		msg += fmt.Sprintf(" (and %d more)", len(errs)-shown)
 	}
 	return msg
+}
+
+// proofsOn says the creator of the workspace turned proof edits on (styleprofile.Settings.ProofEdits). No settings, or settings that
+// cannot be read as settings, are off: proofs are opt-in.
+func (s *Service) proofsOn(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+	row, err := s.store.GetCreatorStyleSettings(ctx, ws)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		return false, nil
+	case err != nil:
+		return false, err
+	}
+	set, err := styleprofile.ParseSettings(row.Settings)
+	if err != nil {
+		s.logger.WarnContext(ctx, "renderjobs: the stored style settings do not parse; previews are not proofs", "workspace_id", ws.String(), "error", err)
+		return false, nil
+	}
+	return set.ProofEdits == styleprofile.LevelOn, nil
+}
+
+// MakeFinal is "make it final" (docs/design/proof-edit-v1.md): the final render of the version a proof (or any preview) was made of,
+// without the shot numbers, by the same rules as Request with the final profile.
+func (s *Service) MakeFinal(ctx context.Context, who Caller, id ids.RenderID) (Render, bool, *Error) {
+	r, e := s.Get(ctx, who.Workspace, id)
+	if e != nil {
+		return Render{}, false, e
+	}
+	if r.Profile != store.ProfilePreview {
+		return Render{}, false, invalid("this render is final already")
+	}
+	return s.RequestWith(ctx, who, r.ProjectID, int(r.TimelineVersion), store.ProfileFinal, ProofOff)
 }
 
 // Get returns one render of the workspace. A render of another workspace, or of a deleted project, is not found.

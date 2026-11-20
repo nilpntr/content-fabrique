@@ -10,6 +10,7 @@ import { ProjectReview } from "@/components/project/project-review";
 import { relativeTime } from "@/components/project/relative-time";
 import { DownloadButton, FeedbackBox, SelfReviewLine, VersionIdea, WhatIMade } from "@/components/project/review-aside";
 import { hasArtifactEvents, runArtifacts } from "@/components/project/run-artifacts";
+import { ShotListCard } from "@/components/project/shot-list";
 import { RunPanel } from "@/components/project/run-panel";
 import { storyboard, versionLabel } from "@/components/project/storyboard";
 import { StoryboardView } from "@/components/project/storyboard-view";
@@ -18,6 +19,7 @@ import { Disclosure } from "@/components/ui/disclosure";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, type Project, type Run } from "@/lib/api/client";
 import { isRunActive, useCancelRun, useProject, useReplyToRun, useRun, useRunArtifacts, useStartEdit, useTimelineSpecs, useTimelineVersions } from "@/lib/api/project-hooks";
+import { useStyle } from "@/lib/api/style-hooks";
 import { type PlainStatus, projectStatusWords, versionName } from "@/lib/words";
 
 function replyErrorMessage(error: unknown): string {
@@ -55,6 +57,8 @@ export function ProjectPage({
   const runId = chooseRun(urlRunId, remembered, newestByRun ? { runId: newestByRun.author_id, createdAt: newestByRun.created_at } : undefined);
   const run = useRun(runId);
   const runActive = isRunActive(run.data?.status);
+  // A creator who asked for proofs sees the shot list next to the video and "Make it final" instead of the download.
+  const proofs = useStyle().data?.effective.proof_edits === "on";
   const stored = useRunArtifacts(runId, { wanted: run.data ? hasArtifactEvents(run.data.events ?? []) : false, status: run.data?.status });
   const artifacts = React.useMemo(() => runArtifacts(run.data?.events ?? [], stored.data), [run.data?.events, stored.data]);
 
@@ -180,7 +184,10 @@ export function ProjectPage({
                 {ideaLabel ? <VersionIdea label={ideaLabel} /> : null}
                 {note ? <WhatIMade text={note} /> : null}
                 {note && review ? <SelfReviewLine summary={review} /> : null}
-                {version.loading ? null : <DownloadButton projectId={projectId} version={version.version} versionLabel={version.version === latest ? "video" : versionName(version.version)} />}
+                {proofs && !version.loading ? <ShotListCard projectId={projectId} version={version.version} /> : null}
+                {version.loading ? null : (
+                  <DownloadButton projectId={projectId} version={version.version} versionLabel={version.version === latest ? "video" : versionName(version.version)} proof={proofs} />
+                )}
                 <FeedbackBox projectId={projectId} busy={runActive} openComments={openComments} onStarted={onRunStarted} className="border-t border-hairline pt-4" />
               </>
             );

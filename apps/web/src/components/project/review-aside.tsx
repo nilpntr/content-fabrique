@@ -91,10 +91,24 @@ export function SelfReviewLine({ summary, className }: { summary: ReviewSummary;
  * Download the version on screen: the full-size video is made on request (it costs no credits), with its progress, and then it is a
  * link to the file. Nothing renders when the API cannot make one.
  */
-export function DownloadButton({ projectId, version, versionLabel, className }: { projectId: string; version: number; versionLabel: string; className?: string }) {
+export function DownloadButton({
+  projectId,
+  version,
+  versionLabel,
+  proof = false,
+  className,
+}: {
+  projectId: string;
+  version: number;
+  versionLabel: string;
+  /** The creator reviews proofs (shot numbers on the preview): the button is "Make it final", the same video without the numbers. */
+  proof?: boolean;
+  className?: string;
+}) {
   const final = useFinalRender(projectId, version);
   const { state } = final;
   if (state.kind === "unavailable") return null;
+  const ask = proof ? "Make it final" : `Download ${versionLabel}`;
   const error = final.requestError ? renderMessage(final.requestError) : state.kind === "failed" ? `The video could not be made: ${renderFailureMessage(state.render.failure_reason)}. Try again.` : undefined;
   return (
     <div className={cn("space-y-1.5", className)} data-testid="download">
@@ -116,7 +130,7 @@ export function DownloadButton({ projectId, version, versionLabel, className }: 
       ) : (
         <Button size="lg" className="w-full" onClick={final.requestRender} disabled={final.requesting || state.kind === "loading"}>
           <Download aria-hidden />
-          {final.requesting ? "Starting…" : `Download ${versionLabel}`}
+          {final.requesting ? "Starting…" : ask}
         </Button>
       )}
       {error ? (
@@ -124,7 +138,9 @@ export function DownloadButton({ projectId, version, versionLabel, className }: 
           {error}
         </p>
       ) : state.kind === "none" ? (
-        <p className="text-[12.5px] text-subtle-foreground">Full quality, ready to post. Free, it doesn't use a video.</p>
+        <p className="text-[12.5px] text-subtle-foreground">
+          {proof ? "The same video without the shot numbers, full quality, ready to post. " : "Full quality, ready to post. "}Free, it doesn't use a video.
+        </p>
       ) : null}
     </div>
   );

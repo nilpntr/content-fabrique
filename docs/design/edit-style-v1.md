@@ -248,6 +248,12 @@ Sections 2 and 3 are the generic craft of a genre. A creator who shows us their 
 
 The planner behind the tool (`internal/speechcut`, pure Go) and the check share one audit, so what the tool proposes always passes. The lines of both give times and never quote the transcript.
 
+**The clip feedback check** (`editor.v2.13`, [proof edits v1](proof-edit-v1.md); only when a clip of the edit has feedback):
+
+| Check | Fails when |
+|---|---|
+| `clip_feedback` | a shot plays more than 100 ms of a range of its clip the creator ruled out on an earlier proof ("never use this shot again", or the part before a "start later") |
+
 **The motion-graphics checks** (P6-07, `editor.v2.8`; a graphics item is a title for `hook_title` and, as a `chapter_card` or a numbered title, for `chapter_titles`):
 
 | Check | Fails when |

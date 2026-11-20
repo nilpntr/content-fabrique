@@ -22,8 +22,8 @@ func TestPrefixesAreValidTypeIDPrefixes(t *testing.T) {
 		}
 		seen[p] = true
 	}
-	if len(Prefixes) != 17 {
-		t.Errorf("D-24 lists 17 prefixes, got %d", len(Prefixes))
+	if len(Prefixes) != 18 {
+		t.Errorf("D-24 lists 18 prefixes, got %d", len(Prefixes))
 	}
 }
 

@@ -59,6 +59,9 @@ type Store interface {
 	ListAssetExposureSeries(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.ExposureSeriesRow, error)
 	// GetTranscript reads a clip's transcript (words and speech structure) for get_transcript and the speech checks; ErrNotFound when it has none.
 	GetTranscript(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (store.Transcript, error)
+	// ListClipFeedback reads what the creator ruled out on earlier proofs (docs/design/proof-edit-v1.md), for get_clip_feedback, the run
+	// context and the clip_feedback check.
+	ListClipFeedback(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID, limit int) ([]store.ClipFeedback, error)
 	// GetCreatorStyle reads the workspace's creator style profile (P6-05); ErrNotFound when it has none.
 	GetCreatorStyle(ctx context.Context, ws ids.WorkspaceID) (store.CreatorStyle, error)
 	// GetAgentRun reads the run's row (what it has spent and how many calls it has made).
@@ -154,6 +157,7 @@ func Tools(d Deps) ([]runtime.Tool, error) {
 		{ToolListMotionTemplates, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.listMotionTemplates) }},
 		{ToolGetTimeline, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getTimeline) }},
 		{ToolGetComments, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getComments) }},
+		{ToolGetClipFeedback, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getClipFeedback) }},
 		{ToolEditTimeline, true, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.editTimeline) }},
 		{ToolMatchExposure, true, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.matchExposure) }},
 		{ToolRenderPreview, true, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.renderPreview) }},

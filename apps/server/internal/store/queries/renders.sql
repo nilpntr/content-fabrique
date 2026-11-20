@@ -9,15 +9,15 @@
 SELECT pg_advisory_xact_lock(hashtextextended('renders:' || @workspace_id::text, 0));
 
 -- name: CreateRender :one
-INSERT INTO renders (workspace_id, project_id, timeline_version, profile, requested_by_kind, requested_by_id)
-VALUES (@workspace_id, @project_id, @timeline_version, @profile, @requested_by_kind, @requested_by_id)
+INSERT INTO renders (workspace_id, project_id, timeline_version, profile, proof, requested_by_kind, requested_by_id)
+VALUES (@workspace_id, @project_id, @timeline_version, @profile, @proof, @requested_by_kind, @requested_by_id)
 RETURNING *;
 
--- The render a new request for the same version and profile reuses: waiting, running or ready.
+-- The render a new request for the same version, profile and proof reuses: waiting, running or ready.
 -- name: GetActiveRender :one
 SELECT * FROM renders
 WHERE workspace_id = @workspace_id AND project_id = @project_id AND timeline_version = @timeline_version AND profile = @profile
-  AND status IN ('queued', 'rendering', 'ready');
+  AND proof = @proof AND status IN ('queued', 'rendering', 'ready');
 
 -- name: GetRender :one
 SELECT r.*

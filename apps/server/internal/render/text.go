@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -104,6 +105,8 @@ func (c *compiler) subtitles() (*Subtitles, error) {
 			}
 		}
 	}
+	// The shot numbers of a proof go below the watermark, which takes the top right corner first.
+	numbersBelow := 0
 	if c.profile.Watermark {
 		zone, ok := out.Zone()
 		if !ok {
@@ -114,10 +117,47 @@ func (c *compiler) subtitles() (*Subtitles, error) {
 		w, h := lay.Box()
 		if box, ok := zone.Fit(style.PlaceWatermark(zone, w, h)); ok {
 			b.addText(layerWatermark, 0, c.total, lay, zone, box, style.AnimNone, style.ExitNone, style.AlignCenter)
+			numbersBelow = box.Bottom - zone.Inner.Top
+		}
+	}
+	if c.profile.ShotNumbers {
+		if err := c.shotNumbers(b, numbersBelow); err != nil {
+			return nil, err
 		}
 	}
 	c.plan.Warnings = append(c.plan.Warnings, b.warnings...)
 	return b.subtitles(), nil
+}
+
+// shotNumbers adds the number of every shot of a proof edit (docs/design/proof-edit-v1.md): 1, 2, 3 ... in the order the clips play
+// (the order of timeline.Shots, which the shot list and the clip feedback use), each from the first frame of its shot to the first frame
+// of the next, small and white with a thin dark outline, at the top right of the safe zone. below is how far down the watermark reaches
+// from the top of the zone (0 without one): the numbers go under it. A number that cannot be put inside the safe zone is left out with a
+// warning, like a text.
+func (c *compiler) shotNumbers(b *builder, below int) error {
+	out := c.spec.Output
+	zone, ok := out.Zone()
+	if !ok {
+		return fmt.Errorf("%w: unknown format %q", ErrInvalidSpec, out.Format)
+	}
+	st := style.ShotNumber()
+	gap := 0
+	if below > 0 {
+		gap = int(math.Round(st.EmPx(out.ShortSide()) / 4))
+	}
+	for i, cl := range c.clips {
+		n := strconv.Itoa(i + 1)
+		lay := style.Measure(st, out.ShortSide(), n, style.MaxBoxWidth(zone, out.Width))
+		w, h := lay.Box()
+		top := zone.Inner.Top + below + gap
+		box, ok := zone.Fit(style.Rect{Left: zone.Inner.Right - w, Top: top, Right: zone.Inner.Right, Bottom: top + h})
+		if !ok {
+			b.warn("shot_number_dropped", "the number of shot %s (%s) is left out: it does not fit inside the %s safe zone", n, cl.item.ID, out.Format)
+			continue
+		}
+		b.addText(layerShotNumber, cl.startFrame, cl.ownedEnd, lay, zone, box, style.AnimNone, style.ExitNone, style.AlignRight)
+	}
+	return nil
 }
 
 // dropUnsupported removes the characters the style's font has no glyph for.

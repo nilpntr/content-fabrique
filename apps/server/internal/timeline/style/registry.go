@@ -179,6 +179,18 @@ var watermark = Style{
 	OutlinePct: 6, Role: RoleWatermark,
 }
 
+// shotNumber is the renderer's own style for the shot numbers of a proof edit (docs/design/proof-edit-v1.md): small white digits with a
+// thin dark outline, about 28 px at 1080 px (1.45 % of 1920), the size of the creator's own proofs. Like the watermark it is the
+// renderer's, never the spec's.
+var shotNumber = Style{
+	ID: "shot_number", Description: "The shot number of a proof edit.",
+	Font: "inter-bold", EmPct: 1.45, Fill: Opaque(255, 255, 255), Outline: Opaque(0, 0, 0),
+	OutlinePct: 6, Role: RoleWatermark,
+}
+
+// ShotNumber returns the style of the shot numbers of a proof edit.
+func ShotNumber() Style { return shotNumber }
+
 // Lookup returns the style with the given id. The preview watermark is not a style the spec can use.
 func Lookup(id string) (Style, bool) {
 	for _, s := range registry {

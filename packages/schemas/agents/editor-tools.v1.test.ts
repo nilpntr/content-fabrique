@@ -45,6 +45,7 @@ describe("editor tools contract", () => {
       "list_motion_templates",
       "get_timeline",
       "get_comments",
+      "get_clip_feedback",
       "edit_timeline",
       "match_exposure",
       "render_preview",

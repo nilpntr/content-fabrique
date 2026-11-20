@@ -52,6 +52,10 @@ type Profile struct {
 	BeatGuide bool `json:"beat_guide"`
 	// Watermark draws a small PREVIEW mark in the corner of the safe zone (part of the ASS script).
 	Watermark bool `json:"watermark"`
+	// ShotNumbers burns a small number into the top right of every shot (1, 2, 3 ... in the order they play): a proof edit
+	// (docs/design/proof-edit-v1.md), so the creator can answer "never use shot 5 again". Only a preview is ever a proof; the final
+	// render ("make it final") never carries numbers.
+	ShotNumbers bool `json:"shot_numbers,omitempty"`
 	// LoudnormPasses is 1 for a single dynamic pass and 2 for measure-then-apply.
 	LoudnormPasses int `json:"loudnorm_passes"`
 	// MotionFallback draws the graphics track as ASS text (each item's words, in its box, with its template's fallback animation)
@@ -85,6 +89,13 @@ var Final = Profile{
 	Faststart:      true,
 	LoudnormPasses: 2,
 }
+
+// Proof is the preview profile with the shot numbers burned in: the proof edit of a creator who asked for proofs.
+var Proof = func() Profile {
+	p := Preview
+	p.ShotNumbers = true
+	return p
+}()
 
 // Profiles lists every profile, in a fixed order.
 func Profiles() []Profile { return []Profile{Preview, Final} }

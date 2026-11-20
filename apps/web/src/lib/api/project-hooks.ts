@@ -7,14 +7,18 @@ import {
   cancelRun,
   createProject,
   createRender,
+  deleteClipFeedback,
   fetchProject,
   fetchProjects,
   fetchRender,
   fetchRenders,
   fetchRun,
   fetchRunArtifacts,
+  fetchShotList,
   fetchTimelineVersion,
   fetchTimelineVersions,
+  type GiveClipFeedbackRequest,
+  giveClipFeedback,
   type Render,
   RUN_EVENTS_PAGE,
   type Run,
@@ -32,7 +36,7 @@ import { useApiClient } from "@/lib/api/provider";
 import { parseTimeMap } from "@/components/project/review-data";
 import type { TimeMapEntry } from "@/components/editor/types";
 import { URL_REFRESH_MIN_MS, useRefreshThrottle } from "@/lib/refresh-throttle";
-import { ANNOTATIONS_QUERY_KEY, ME_QUERY_KEY, PROJECT_QUERY_KEY, PROJECTS_QUERY_KEY, RENDER_QUERY_KEY, RENDERS_QUERY_KEY, RUN_ARTIFACTS_QUERY_KEY, RUN_QUERY_KEY, TIMELINES_QUERY_KEY } from "@/lib/query-client";
+import { ANNOTATIONS_QUERY_KEY, ME_QUERY_KEY, PROJECT_QUERY_KEY, PROJECTS_QUERY_KEY, RENDER_QUERY_KEY, RENDERS_QUERY_KEY, RUN_ARTIFACTS_QUERY_KEY, RUN_QUERY_KEY, SHOTS_QUERY_KEY, TIMELINES_QUERY_KEY } from "@/lib/query-client";
 
 /**
  * The hooks of projects, runs and renders. Keys are `[prefix, userId, orgId, ...ids]`, like the library's, so a workspace
@@ -487,5 +491,33 @@ export function useFinalRender(projectId: string, version: number | undefined) {
     if (version !== undefined) mutate(version);
   }, [mutate, version]);
   return { state, requestRender, requesting: request.isPending && asked, requestError: request.isError && asked ? request.error : undefined };
+}
+
+// ── Proof edits and clip feedback ───────────────────────────────────────────
+
+/** The shot list of a version: the numbers its proof shows, each shot's clip and second, and the feedback already given on it. */
+export function useShotList(projectId: string, version: number | undefined, { enabled = true }: { enabled?: boolean } = {}) {
+  const { userId, orgId, ready } = useScope();
+  const getClient = useApiClient();
+  return useQuery({
+    queryKey: [SHOTS_QUERY_KEY, userId, orgId, projectId, version],
+    queryFn: ({ signal }) => fetchShotList(getClient(), projectId, version as number, signal),
+    enabled: enabled && ready && version !== undefined,
+    retry: retryUnlessClientError,
+  });
+}
+
+/**
+ * Feedback on a shot ("never use it again", "start it later") and taking it back. Either answer changes the shot list of every
+ * version that plays that clip, so all shot lists of the project are fetched again.
+ */
+export function useClipFeedbackActions(projectId: string) {
+  const { userId, orgId } = useScope();
+  const getClient = useApiClient();
+  const queryClient = useQueryClient();
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: [SHOTS_QUERY_KEY, userId, orgId, projectId] });
+  const give = useMutation({ mutationFn: (body: GiveClipFeedbackRequest) => giveClipFeedback(getClient(), body), onSuccess: refresh });
+  const remove = useMutation({ mutationFn: (id: string) => deleteClipFeedback(getClient(), id), onSuccess: refresh });
+  return { give, remove };
 }
 

@@ -36,7 +36,7 @@ func TestTheDefaultsWithNothingSet(t *testing.T) {
 	r := Resolve(nil, nil, Settings{}, "")
 	want := Settings{Vibe: VibeLively, Transitions: LevelOff, TextAnimation: LevelOn, CameraMotion: LevelSubtle, TitlePosition: PositionAuto,
 		TitleCase: CaseAsTyped, Music: MusicAlways, Pace: PaceLikeMine, ChapterTitles: LevelOn, EndingHold: HoldLong, CutTiming: CutsOnFullReps, AngleSwitches: LevelOn,
-		TextPattern: PatternSingleTitle, TextPosition: PositionAuto}
+		TextPattern: PatternSingleTitle, TextPosition: PositionAuto, ProofEdits: LevelOff}
 	if r.Settings != want {
 		t.Fatalf("defaults %+v", r.Settings)
 	}

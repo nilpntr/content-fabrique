@@ -154,7 +154,7 @@ func rendersSuite(t *testing.T, st *store.Store, suffix string) {
 		if _, err := st.CreateRender(ctx, wa.ID, store.NewRender{Project: pa.ID, Version: 1, Profile: store.ProfileFinal, RequestedByKind: store.RenderRequestedByUser, RequestedByID: ua.String()}); !errors.Is(err, store.ErrConflict) {
 			t.Errorf("a second active render of the same version and profile: %v", err)
 		}
-		got, err := st.GetActiveRender(ctx, wa.ID, pa.ID, 1, store.ProfileFinal)
+		got, err := st.GetActiveRender(ctx, wa.ID, pa.ID, 1, store.ProfileFinal, false)
 		if err != nil || got.ID != r.ID {
 			t.Errorf("GetActiveRender = %+v, %v", got, err)
 		}
@@ -162,7 +162,7 @@ func rendersSuite(t *testing.T, st *store.Store, suffix string) {
 		if _, err := st.FailRender(ctx, wa.ID, r.ID, "render_failed", -1, -1); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := st.GetActiveRender(ctx, wa.ID, pa.ID, 1, store.ProfileFinal); !errors.Is(err, store.ErrNotFound) {
+		if _, err := st.GetActiveRender(ctx, wa.ID, pa.ID, 1, store.ProfileFinal, false); !errors.Is(err, store.ErrNotFound) {
 			t.Errorf("GetActiveRender after the failure: %v", err)
 		}
 		if _, err := st.CreateRender(ctx, wa.ID, store.NewRender{Project: pa.ID, Version: 1, Profile: store.ProfileFinal, RequestedByKind: store.RenderRequestedByUser, RequestedByID: ua.String()}); err != nil {
@@ -213,7 +213,7 @@ func rendersSuite(t *testing.T, st *store.Store, suffix string) {
 		if _, err := st.FailRender(ctx, wb.ID, r.ID, "render_failed", -1, -1); !errors.Is(err, store.ErrNotFound) {
 			t.Errorf("FailRender in B: %v", err)
 		}
-		if _, err := st.GetActiveRender(ctx, wb.ID, pa.ID, 2, store.ProfilePreview); !errors.Is(err, store.ErrNotFound) {
+		if _, err := st.GetActiveRender(ctx, wb.ID, pa.ID, 2, store.ProfilePreview, false); !errors.Is(err, store.ErrNotFound) {
 			t.Errorf("GetActiveRender in B: %v", err)
 		}
 		if rows, err := st.ListRenders(ctx, wb.ID, pa.ID, store.RenderFilter{}, 10); err != nil || len(rows) != 0 {

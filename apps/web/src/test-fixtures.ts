@@ -142,6 +142,7 @@ export function render(over: Partial<Render> = {}): Render {
     project_id: projectId(1),
     timeline_version: 1,
     profile: "preview",
+    proof: false,
     status: "queued",
     progress: 0,
     stage: null,
@@ -499,6 +500,7 @@ export function emptyStyle(over: Partial<CreatorStyle> = {}): CreatorStyle {
       angle_switches: "on",
       text_pattern: "single_title",
       text_position: "auto",
+      proof_edits: "off",
       sources: {
         vibe: "default",
         transitions: "default",
@@ -516,6 +518,7 @@ export function emptyStyle(over: Partial<CreatorStyle> = {}): CreatorStyle {
         angle_switches: "default",
         text_pattern: "default",
         text_position: "default",
+        proof_edits: "default",
       },
     },
     references: [],

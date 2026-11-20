@@ -43,6 +43,7 @@
 | D-36 | The creator's style is three layers (measured, the AI's suggestion, the creator's settings), the creator always wins; reference videos are assets with purpose style_reference | Proposed (director, 2026-10-18; the founder confirms) |
 | D-37 | Plain cuts on the beat by default: no vibe asks for transitions; they come from the creator's setting or their own videos | Proposed (director, from a creator's verdict, 2026-10-18; the founder confirms) |
 | D-38 | The text of a video follows the creator's pattern (one title, story captions, dialogue); lines that the creator puts on the body keep off the face only, titles keep off the whole body | Proposed (director, from a second creator's references, 2026-10-18; the founder confirms) |
+| D-41 | Proof edits: a preview with shot numbers and a shot list, opt-in per creator; feedback on a shot is stored by clip and second (never the number) and holds in every later edit; "make it final" is the final render without numbers | Proposed (engineering, from a creator's rule 15, 2026-11-20; the founder confirms) |
 
 ---
 
@@ -515,7 +516,7 @@ Cost of one editor first edit, from [architecture §13](03-architecture.md#13-co
   | `tl` | timeline | `ren` | render |
   | `run` | agent run | `exp` | export |
   | `lic` | licence | `upl` | upload |
-  | `evt` | event | | |
+  | `evt` | event | `cfb` | clip feedback (D-41) |
 
   New tables add their prefix to this list.
 - **Clerk's own IDs** (`user_…`, `org_…`) are stored as text next to our keys and never reused as ours.
@@ -954,3 +955,29 @@ up to fifteen frames, still under its $0.01 budget.
 **Consequences.** Every plan names a format (the strict schema requires it), and a cassette re-recording follows any change to the enum. The editor's context does not grow: the cards come in list_formats' answer, once per run. A creator's go-to formats are only as good as their text read: references read without it show only one-take and montage tags.
 
 **Revisit** when the `viral_*` examples arrive (new cards), when creators ask to choose the format themselves, or when the judge's novelty and concept scores do not follow the founder's verdicts.
+
+## D-41 Proof edits and feedback stored by clip and second
+
+> Status: **Proposed** by engineering (2026-11-20), from rule 15 of a creator's own edit rules. Reversible: the setting is off by default,
+> the column and the table are additive, and the check is in a report only when there is feedback.
+
+**Context.** The creator reviews every new edit as a proof with a small number on each shot and answers by number ("never use shot 5
+again", "shot 6 a few seconds later"). The web numbered shots on the plan card only, comments lived and died with one project, and
+nothing kept "never this shot" for the next video.
+
+**Decision.**
+- **A proof is a preview with the shot numbers burned in** (`renders.proof`, `render.Proof`), numbered in playing order
+  (`timeline.Shots`), with a shot list from `GET /v1/projects/{id}/timelines/{version}/shots`. Per creator: the style setting
+  `proof_edits`, off unless the creator turns it on; with it on, every preview (the editor's own included) is a proof.
+- **Feedback is stored by clip and source range** (`clip_feedback`, prefix `cfb`), never by the number, and holds in every later edit
+  of the workspace: the editor reads it (`get_clip_feedback`, a run-context line) and `check_edit`'s `clip_feedback` check fails a shot
+  that plays a ruled-out range.
+- **"Make it final"** is the final render of the same version, which never has numbers (`POST /v1/renders/{id}/final`).
+- Details in [proof edits v1](design/proof-edit-v1.md).
+
+**Alternatives.** Numbers on every preview for everyone (other creators did not ask, and the numbers sit on their video); feedback as
+comments (they belong to one project and resolve to timeline items, which are gone in the next video); a full-quality proof (a final
+render per round of feedback).
+
+**Consequences.** A version can have two previews (plain and proof). The editor's tool list grew by one (cassettes re-recorded against
+the fake transport). A clip removed from the library takes its feedback with it.

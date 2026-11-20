@@ -423,7 +423,7 @@ func TestEditorRecordedRequests(t *testing.T) {
 		}
 	}
 	first := api.requests[0]
-	if tools, _ := first["tools"].([]any); len(tools) != 16 {
+	if tools, _ := first["tools"].([]any); len(tools) != 17 {
 		t.Errorf("%d tools sent", len(tools))
 	} else {
 		var names []string
@@ -432,10 +432,10 @@ func TestEditorRecordedRequests(t *testing.T) {
 			name, _ := m["name"].(string)
 			names = append(names, name)
 		}
-		if strings.Join(names, ",") != "get_brief,list_footage,view_clip,find_moments,get_transcript,get_music,list_formats,plan_edit,list_motion_templates,get_timeline,get_comments,edit_timeline,match_exposure,render_preview,check_edit,finish" {
+		if strings.Join(names, ",") != "get_brief,list_footage,view_clip,find_moments,get_transcript,get_music,list_formats,plan_edit,list_motion_templates,get_timeline,get_comments,get_clip_feedback,edit_timeline,match_exposure,render_preview,check_edit,finish" {
 			t.Errorf("tools: %v", names)
 		}
-		editTool, _ := tools[11].(map[string]any)
+		editTool, _ := tools[12].(map[string]any)
 		viewTool, _ := tools[2].(map[string]any)
 		if editTool["strict"] == true || viewTool["strict"] != true {
 			t.Errorf("strict flags: edit_timeline %v, view_clip %v", editTool["strict"], viewTool["strict"])

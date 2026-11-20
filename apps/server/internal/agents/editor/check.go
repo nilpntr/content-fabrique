@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/nilpntr/content-fabrique/internal/analysis"
+	"github.com/nilpntr/content-fabrique/internal/clipfeedback"
 	"github.com/nilpntr/content-fabrique/internal/motion"
 	"github.com/nilpntr/content-fabrique/internal/music"
 	"github.com/nilpntr/content-fabrique/internal/styleprofile"
@@ -175,6 +176,9 @@ type CheckInput struct {
 	// PaceSetting is the creator's own pace setting (PaceSettings: "slower", "like_mine", "faster"; "" takes the Settings' pace), which
 	// scales the pace targets after the vibe.
 	PaceSetting string
+	// ClipFeedback is what the creator ruled out on earlier proofs, by asset id (package clipfeedback): the clip_feedback check is in the
+	// report only when a clip of the edit has some.
+	ClipFeedback map[string][]clipfeedback.Rule
 }
 
 // Metrics are the numbers behind the checks, for the run feed and for comparing runs.
@@ -409,7 +413,10 @@ func RunChecks(in CheckInput) Report {
 		c.formatFollowed(),
 	}
 	r.Checks = append(r.Checks, c.speechChecks()...) // speech_cut_clean and hook_line, only for a speech-led edit (checkspeech.go)
-	if c.linesOn() {                                 // the text-pattern checks (checktext.go), only for a style told in lines
+	if c.hasClipFeedback() {                         // clip_feedback, only when a clip of the edit has feedback (clipfeedback.go)
+		r.Checks = append(r.Checks, c.clipFeedbackCheck())
+	}
+	if c.linesOn() { // the text-pattern checks (checktext.go), only for a style told in lines
 		r.Checks = append(r.Checks, c.storyCaptions(), c.captionReadable(), c.textOverFace())
 	}
 	if len(graphicsOf(in.Spec)) > 0 { // the motion-graphics checks (check_graphics.go), only for an edit that has some

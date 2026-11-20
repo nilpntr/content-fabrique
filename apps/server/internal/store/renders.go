@@ -55,6 +55,8 @@ type NewRender struct {
 	Project ids.ProjectID
 	Version int
 	Profile string
+	// Proof burns the shot numbers in (a preview only; docs/design/proof-edit-v1.md).
+	Proof bool
 	// RequestedByKind is RenderRequestedByUser or RenderRequestedByAgent; RequestedByID the user's TypeID or the run id.
 	RequestedByKind string
 	RequestedByID   string
@@ -69,17 +71,17 @@ func (s *Store) CreateRender(ctx context.Context, ws ids.WorkspaceID, in NewRend
 	}
 	r, err := s.q.CreateRender(ctx, db.CreateRenderParams{
 		WorkspaceID: ws, ProjectID: in.Project, TimelineVersion: int32(in.Version), //nolint:gosec // range checked above
-		Profile: in.Profile, RequestedByKind: in.RequestedByKind, RequestedByID: in.RequestedByID,
+		Profile: in.Profile, Proof: in.Proof, RequestedByKind: in.RequestedByKind, RequestedByID: in.RequestedByID,
 	})
 	return r, mapErr(err)
 }
 
-// GetActiveRender returns the waiting, running or ready render of the version and profile, or ErrNotFound.
-func (s *Store) GetActiveRender(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, version int, profile string) (Render, error) {
+// GetActiveRender returns the waiting, running or ready render of the version, profile and proof, or ErrNotFound.
+func (s *Store) GetActiveRender(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, version int, profile string, proof bool) (Render, error) {
 	if version < 1 || version > 1<<30 {
 		return Render{}, ErrNotFound
 	}
-	r, err := s.q.GetActiveRender(ctx, db.GetActiveRenderParams{WorkspaceID: ws, ProjectID: project, TimelineVersion: int32(version), Profile: profile}) //nolint:gosec // range checked
+	r, err := s.q.GetActiveRender(ctx, db.GetActiveRenderParams{WorkspaceID: ws, ProjectID: project, TimelineVersion: int32(version), Profile: profile, Proof: proof}) //nolint:gosec // range checked
 	return r, mapErr(err)
 }
 

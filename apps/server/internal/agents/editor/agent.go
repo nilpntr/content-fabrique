@@ -145,6 +145,11 @@ func (d Deps) runContext(ctx context.Context, rc runtime.RunContext) ([]llm.Bloc
 	if err != nil {
 		return nil, err
 	}
+	// What the creator ruled out on earlier proofs, by clip (a workspace without any has the context it always had).
+	rules, err := d.clipRules(ctx, ws, rows)
+	if err != nil {
+		return nil, err
+	}
 	hint := contentTypeHint(det.Project.Brief, rows, sums)
 	st := d.styleFor(ctx, ws, rc.Input)
 	styleBlk := styleBlocks(st)
@@ -164,6 +169,7 @@ func (d Deps) runContext(ctx context.Context, rc runtime.RunContext) ([]llm.Bloc
 			blocks = append(blocks, llm.TextBlock(hint))
 		}
 		blocks = append(blocks, styleBlk...)
+		blocks = append(blocks, clipFeedbackIntro(rules)...)
 		blocks = append(blocks, commentsIntro(comments, total, now, caps.comments, caps.commentChars)...)
 		if encodedSize(blocks) <= maxContextBytes {
 			// Only the comments this context shows (the rest are for get_comments to list) are the run's to deal with.

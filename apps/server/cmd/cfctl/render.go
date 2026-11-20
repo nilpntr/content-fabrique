@@ -34,6 +34,8 @@ so run it through the validator first if it did not come from one.
                file is used for both profiles: there is no proxy locally.
   -o           the MP4 to write (replaced if it exists)
   --profile    preview (half size, fast, with the beat guide; the default) or final (full size, two-pass loudness)
+  --proof      a proof edit (docs/design/proof-edit-v1.md): the preview with a small number at the top right of every shot,
+               and the shot list (number, clip, second) printed, for feedback by shot (cfctl proof)
   --provider   the sandbox provider ffmpeg runs in: local (default: ffmpeg on this machine, no isolation, development only),
                docker or hardened (the media-tools image)
   --image      the media-tools image for docker and hardened (default media-tools:dev)
@@ -62,6 +64,7 @@ func cmdRender(args []string, stdout, stderr io.Writer) int {
 	assetsArg := flags.String("assets", "", "directory with the assets")
 	outArg := flags.String("o", "", "output MP4")
 	profileArg := flags.String("profile", "preview", "preview or final")
+	proofArg := flags.Bool("proof", false, "a proof: the preview with a number at the top right of every shot, and the shot list")
 	stemArg := flags.String("stem", "", "also write the audio without the preview's beat guide here (an M4A; only a preview with a guide has one)")
 	ffmpegArg := flags.String("ffmpeg", "ffmpeg", "ffmpeg binary")
 	providerArg := flags.String("provider", "local", "local, docker or hardened")
@@ -104,6 +107,13 @@ func cmdRender(args []string, stdout, stderr io.Writer) int {
 	}
 
 	profile.MotionFallback = *motionFallback
+	if *proofArg {
+		if profile.Name != render.ProfilePreview {
+			_, _ = fmt.Fprintln(stderr, "cfctl render: --proof is a preview with shot numbers; a final render never has them")
+			return 2
+		}
+		profile.ShotNumbers = true
+	}
 	data, err := os.ReadFile(positional[0])
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "cfctl render: %v\n", err)
@@ -127,6 +137,13 @@ func cmdRender(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "cfctl render: %v\n", err)
 		return 1
+	}
+	if *proofArg {
+		// The shot list that goes with the proof: number, clip and the second of the clip it starts at.
+		_, _ = fmt.Fprintln(stdout, "Shot list (the numbers at the top right of the proof):")
+		for _, s := range timeline.Shots(spec) {
+			_, _ = fmt.Fprintf(stdout, "  %2d  %s  from %.1f s to %.1f s of the clip\n", s.Number, s.AssetID, float64(s.Source.InMs)/1000, float64(s.Source.OutMs)/1000)
+		}
 	}
 	for _, c := range plan.SoundCues {
 		_, _ = fmt.Fprintf(stderr, "sound cue (not mixed in): %s trend %s at %d ms, offset %d ms\n", c.ItemID, c.TrendID, c.AtMs, c.SourceOffsetMs)
