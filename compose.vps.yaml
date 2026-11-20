@@ -1,0 +1,15 @@
+# Overlay for running the local stack on a shared VPS (docs/06, "Running on a VPS"):
+#   docker compose -f compose.yaml -f compose.vps.yaml up -d --wait postgres minio
+# It caps Postgres and MinIO so other projects on the box keep their CPU and memory. The ports stay on 127.0.0.1 (compose.yaml),
+# so nothing is reachable from outside; use an SSH tunnel to look at MinIO's console. The media sandbox containers the worker
+# starts are capped by the worker itself (each ingest or render up to 2 vCPUs and 3 GB), so set MEDIA_CONCURRENCY=1 and
+# RENDER_CONCURRENCY=1 in the VPS .env as well.
+services:
+  postgres:
+    cpus: 1.5
+    mem_limit: 1g
+    memswap_limit: 1g
+  minio:
+    cpus: 1
+    mem_limit: 1g
+    memswap_limit: 1g
