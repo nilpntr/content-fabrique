@@ -33,7 +33,10 @@ test("/make is 'Make a video' in the sidebar and opens on the clips", async () =
   expect(await screen.findByRole("heading", { name: "Add your clips" }, SLOW)).toBeTruthy();
   expect(sidebarLink("Make a video").getAttribute("href")).toBe("/make");
   expect(sidebarLink("Make a video").hasAttribute("data-active")).toBe(true);
-  expect(sidebarLink("New video").hasAttribute("data-active")).toBe(false);
+  expect(sidebarLink("Advanced").hasAttribute("data-active")).toBe(false);
+  // The old new-project page stays reachable: a nav item and a quiet link at the bottom of the clips screen.
+  expect(sidebarLink("Advanced").getAttribute("href")).toBe("/projects/new");
+  expect(screen.getAllByRole("link", { name: "Advanced" }).map((a) => a.getAttribute("href"))).toEqual(["/projects/new", "/projects/new"]);
 });
 
 test("/make/<id>?run= follows that edit, stays under 'Make a video', and 'Start over' goes back to /make", async () => {

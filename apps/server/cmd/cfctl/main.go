@@ -34,6 +34,7 @@ Commands:
   style      the creator style profile (P6-05): analyse reference videos, show the profile, development only (cfctl style help)
   research   the creator research engine: list the allowed sources, forget a creator on request, sweep expired data (cfctl research help)
   eval       print the check_edit metrics of a stored editor timeline version, no model calls (cfctl eval help)
+  hooks      the hook lab: score the ways a project's video can open, run its eval cases, no model calls (cfctl hooks help)
   agent      run an agent in this process and show a run's events and costs, development only (cfctl agent help)
   spend      summary: the project's test spend against the test cap, by day, run type and model (cfctl spend help)
   llm        check model access for a routing stage: count tokens, or send one tiny message (cfctl llm help)
@@ -93,6 +94,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdResearch(args[1:], stdout, stderr, os.LookupEnv, defaultAgentDeps())
 	case "eval":
 		return cmdEval(args[1:], stdout, stderr, os.LookupEnv, defaultAgentDeps())
+	case "hooks":
+		return cmdHooks(args[1:], stdout, stderr, os.LookupEnv, defaultAgentDeps())
 	case "spend":
 		return cmdSpend(args[1:], stdout, stderr, os.LookupEnv, defaultAgentDeps())
 	case "llm":

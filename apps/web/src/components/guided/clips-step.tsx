@@ -164,8 +164,9 @@ export function ClipsStep({ source, onNext }: { source: GuidedClips; onNext: () 
       <p className="text-center text-[14px] text-muted-foreground">
         Already uploaded your clips?{" "}
         <Link to="/projects/new" className="inline-flex min-h-11 items-center font-medium text-brand underline-offset-4 hover:underline">
-          Pick from your library
-        </Link>
+          Advanced
+        </Link>{" "}
+        lets you pick from your library.
       </p>
     </Screen>
   );
