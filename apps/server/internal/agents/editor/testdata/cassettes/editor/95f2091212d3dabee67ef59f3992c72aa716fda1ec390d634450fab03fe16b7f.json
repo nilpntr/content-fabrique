@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "9aaff397da99b4ff44defb6b37ba42dd97e5b6f7970664f64ae6251794458ae4",
-  "recorded_at": "2026-10-18T09:37:19Z",
+  "key": "95f2091212d3dabee67ef59f3992c72aa716fda1ec390d634450fab03fe16b7f",
+  "recorded_at": "2026-11-20T13:34:12Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,
@@ -83,54 +83,6 @@
         "blocks": [
           "tool_result"
         ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
       }
     ],
     "tools": [
@@ -138,6 +90,7 @@
       "list_footage",
       "view_clip",
       "find_moments",
+      "get_transcript",
       "get_music",
       "list_formats",
       "plan_edit",
@@ -185,11 +138,6 @@
         "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
         "media_type": "image/jpeg",
         "bytes": 9284
-      },
-      {
-        "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
-        "media_type": "image/jpeg",
-        "bytes": 9284
       }
     ]
   },
@@ -200,20 +148,18 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_10",
-        "name": "finish",
-        "input": {
-          "summary": "I cut a 12 second video from your three clips. It opens on half of the heaviest lat pulldown rep with the words HEAVY LAT DAY and a punch-in on the beat, then the cable row, the pulldown again, the wide gym with a flash and a last rep. Check the wide shot: I framed it with a blurred fill so nobody is cropped out."
-        }
+        "id": "toolu_ed_6",
+        "name": "check_edit",
+        "input": {}
       }
     ],
     "usage": {
-      "input_tokens": 400,
-      "cache_write_tokens": 650,
+      "input_tokens": 420,
+      "cache_write_tokens": 700,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 16300,
-      "output_tokens": 92
+      "cache_read_tokens": 13500,
+      "output_tokens": 38
     }
   },
-  "count_tokens": 17350
+  "count_tokens": 14620
 }

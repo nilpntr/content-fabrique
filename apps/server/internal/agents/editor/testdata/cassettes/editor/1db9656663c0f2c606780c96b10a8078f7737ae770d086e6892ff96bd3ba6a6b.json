@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "0b0c7f8231bc4fff282583c0a7ec666e7abd22c311202478c0102952ede33755",
-  "recorded_at": "2026-10-18T09:37:19Z",
+  "key": "1db9656663c0f2c606780c96b10a8078f7737ae770d086e6892ff96bd3ba6a6b",
+  "recorded_at": "2026-11-20T13:34:12Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,
@@ -83,6 +83,42 @@
         "blocks": [
           "tool_result"
         ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
+        ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
+        ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
+        ]
       }
     ],
     "tools": [
@@ -90,6 +126,7 @@
       "list_footage",
       "view_clip",
       "find_moments",
+      "get_transcript",
       "get_music",
       "list_formats",
       "plan_edit",
@@ -137,6 +174,11 @@
         "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
         "media_type": "image/jpeg",
         "bytes": 9284
+      },
+      {
+        "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
+        "media_type": "image/jpeg",
+        "bytes": 9284
       }
     ]
   },
@@ -147,7 +189,7 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_6",
+        "id": "toolu_ed_9",
         "name": "check_edit",
         "input": {}
       }
@@ -156,9 +198,9 @@
       "input_tokens": 420,
       "cache_write_tokens": 700,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 13500,
+      "cache_read_tokens": 15600,
       "output_tokens": 38
     }
   },
-  "count_tokens": 14620
+  "count_tokens": 16720
 }

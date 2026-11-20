@@ -169,6 +169,9 @@ type CheckInput struct {
 	// OverlaySkip says why and overlay_legibility does not apply.
 	Overlay     map[string]RegionLuma
 	OverlaySkip string
+	// Speech is the transcript of the clips the main track plays, by asset id (a clip without speech or without a transcript is not in
+	// it): the speech checks (checkspeech.go) judge the cuts against it.
+	Speech map[string]*Speech
 	// PaceSetting is the creator's own pace setting (PaceSettings: "slower", "like_mine", "faster"; "" takes the Settings' pace), which
 	// scales the pace targets after the vibe.
 	PaceSetting string
@@ -405,7 +408,8 @@ func RunChecks(in CheckInput) Report {
 		c.offBeatCut(), c.hookMissesDrop(), c.staticShot(), c.transitionsMatch(), c.transitionVariety(), c.textWithoutEntrance(), c.chapterTitles(),
 		c.formatFollowed(),
 	}
-	if c.linesOn() { // the text-pattern checks (checktext.go), only for a style told in lines
+	r.Checks = append(r.Checks, c.speechChecks()...) // speech_cut_clean and hook_line, only for a speech-led edit (checkspeech.go)
+	if c.linesOn() {                                 // the text-pattern checks (checktext.go), only for a style told in lines
 		r.Checks = append(r.Checks, c.storyCaptions(), c.captionReadable(), c.textOverFace())
 	}
 	if len(graphicsOf(in.Spec)) > 0 { // the motion-graphics checks (check_graphics.go), only for an edit that has some
