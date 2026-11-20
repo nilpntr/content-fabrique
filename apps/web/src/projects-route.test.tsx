@@ -24,7 +24,7 @@ function renderAt(path: string) {
 
 const sidebarLink = (name: string) => within(document.querySelector('[data-slot="sidebar"]') as HTMLElement).getByRole("link", { name });
 
-test("/projects lists the projects as cards that open the project, and the nav has Projects above New video", async () => {
+test("/projects lists the projects as cards that open the project, and the nav has Projects above Advanced", async () => {
   installApi({
     "GET /v1/me": ME,
     "GET /v1/projects": {
@@ -49,9 +49,9 @@ test("/projects lists the projects as cards that open the project, and the nav h
 
   const links = within(document.querySelector('[data-slot="sidebar"]') as HTMLElement).getAllByRole("link").map((link) => link.textContent);
   expect(links.indexOf("Projects")).toBeGreaterThan(-1);
-  expect(links.indexOf("Projects")).toBeLessThan(links.indexOf("New video"));
+  expect(links.indexOf("Projects")).toBeLessThan(links.indexOf("Advanced"));
   expect(sidebarLink("Projects").hasAttribute("data-active")).toBe(true);
-  expect(sidebarLink("New video").hasAttribute("data-active")).toBe(false);
+  expect(sidebarLink("Advanced").hasAttribute("data-active")).toBe(false);
 });
 
 test("a project card shows a frame of its first clip that is still there", async () => {
@@ -70,7 +70,8 @@ test("/projects with none offers to start the first one", async () => {
   installApi({ "GET /v1/me": ME, "GET /v1/projects": { items: [], next_cursor: null } });
   renderAt("/projects");
   expect(await screen.findByText("No projects yet")).toBeTruthy();
-  expect(screen.getByRole("link", { name: "Make your first video" }).getAttribute("href")).toBe("/projects/new");
+  expect(screen.getByRole("link", { name: "Make your first video" }).getAttribute("href")).toBe("/make");
+  expect(screen.getAllByRole("link", { name: "Make a video" }).every((a) => a.getAttribute("href") === "/make")).toBe(true);
 });
 
 test("/projects pages through the list, and says when it cannot be loaded", async () => {
@@ -100,7 +101,7 @@ test("/projects/new keeps its own nav item and heading, and /projects/<id> belon
   installApi({ "GET /v1/me": ME, "GET /v1/assets": { items: [apiAsset(1)], next_cursor: null } });
   renderAt("/projects/new");
   expect(await screen.findByRole("heading", { name: "New video" })).toBeTruthy();
-  expect(sidebarLink("New video").hasAttribute("data-active")).toBe(true);
+  expect(sidebarLink("Advanced").hasAttribute("data-active")).toBe(true);
   expect(sidebarLink("Projects").hasAttribute("data-active")).toBe(false);
   act(() => root?.unmount());
 
@@ -113,7 +114,7 @@ test("/projects/new keeps its own nav item and heading, and /projects/<id> belon
   renderAt(`/projects/${id}`);
   expect(await screen.findByRole("heading", { name: "Back day" })).toBeTruthy();
   expect(sidebarLink("Projects").hasAttribute("data-active")).toBe(true);
-  expect(sidebarLink("New video").hasAttribute("data-active")).toBe(false);
+  expect(sidebarLink("Advanced").hasAttribute("data-active")).toBe(false);
 });
 
 test("?run= on a project page follows that run; a value that is not a run id is ignored", async () => {

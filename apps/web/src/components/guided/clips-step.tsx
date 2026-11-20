@@ -162,9 +162,9 @@ export function ClipsStep({ source, onNext }: { source: GuidedClips; onNext: () 
       </BigButton>
 
       <p className="text-center text-[14px] text-muted-foreground">
-        Already uploaded your clips?{" "}
+        Want every option?{" "}
         <Link to="/projects/new" className="font-medium text-brand underline-offset-4 hover:underline">
-          Pick from your library
+          Advanced
         </Link>
       </p>
     </Screen>
