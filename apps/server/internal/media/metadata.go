@@ -253,6 +253,28 @@ func (m Metadata) SlowMotion() bool {
 	return in(m.FPS.Value) || (m.BaseFPS != nil && in(m.BaseFPS.Value))
 }
 
+// standardRates are the frame rates cameras record at a constant rate. A phone's variable-rate clip averages something in
+// between (29.13, 58.7), or keeps a base rate a frame or more away from its average.
+var standardRates = []float64{10, 12, 12.5, 15, 20, 23.976, 24, 25, 29.97, 30, 47.952, 48, 50, 59.94, 60, 90, 100, 119.88, 120, 240}
+
+// VariableFrameRate says whether the probe suggests a variable frame rate (common on phones, and on screen recordings,
+// which only write a frame when the screen changes): an average rate that is no standard rate, or a base rate a frame or
+// more away from the average. A slow-motion clip, whose base rate is the rate it was shot at, does not count.
+func (m Metadata) VariableFrameRate() bool {
+	if !m.HasVideo || m.FPS.Value <= 0 || m.SlowMotion() {
+		return false
+	}
+	if m.BaseFPS != nil && m.BaseFPS.Value <= SlowMotionMaxFPS { // above it, a time base (90000/1) that says nothing
+		return true
+	}
+	for _, r := range standardRates {
+		if math.Abs(m.FPS.Value-r) <= 0.05 {
+			return false
+		}
+	}
+	return true
+}
+
 // SlowMotionProbe is SlowMotion of a stored probe (assets.probe, the JSON of a Metadata); false when it cannot be read.
 func SlowMotionProbe(probe []byte) bool {
 	var m Metadata

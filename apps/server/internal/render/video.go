@@ -229,7 +229,9 @@ func (c *compiler) clipGraph(cl clip) ([]string, error) {
 		tail = append(tail, lookFilter)
 	}
 	// fps gives the stream a constant frame rate that xfade and concat can read from the link.
-	tail = append(tail, "format=yuv420p", "setsar=1", fmt.Sprintf("fps=%d", c.fps), "settb=AVTB")
+	// sidedata drops the display matrix: ffmpeg turns a phone clip upright on decode but leaves the rotation on its frames, and
+	// after a concat the encoder writes the first frame's into the export, which then plays sideways (ffmpeg 7.1).
+	tail = append(tail, "format=yuv420p", "setsar=1", fmt.Sprintf("fps=%d", c.fps), "settb=AVTB", "sidedata=mode=delete:type=DISPLAYMATRIX")
 
 	in := fmt.Sprintf("%d:v", cl.idx)
 	out := fmt.Sprintf("v%d", cl.idx)
