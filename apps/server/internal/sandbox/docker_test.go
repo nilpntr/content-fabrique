@@ -244,20 +244,24 @@ func TestUserFor(t *testing.T) {
 	tests := []struct {
 		uid, gid int
 		override string
+		rootless bool
 		want     string
 		chown    bool
 	}{
-		{0, 0, "", "65534:65534", true},
-		{0, 1000, "", "65534:65534", true},
-		{1000, 1000, "", "1000:1000", false},
-		{1000, 0, "", "1000:0", false}, // gid 0 alone is not root: keep the uid
-		{501, 20, "", "501:20", false},
-		{0, 0, "7:8", "7:8", false},
+		{0, 0, "", false, "65534:65534", true},
+		{0, 1000, "", false, "65534:65534", true},
+		{1000, 1000, "", false, "1000:1000", false},
+		{1000, 0, "", false, "1000:0", false}, // gid 0 alone is not root: keep the uid
+		{501, 20, "", false, "501:20", false},
+		{0, 0, "7:8", false, "7:8", false},
+		// Rootless Docker: container root is the daemon's own unprivileged host user, the only uid that owns the job's files.
+		{1000, 1000, "", true, "0:0", false},
+		{1000, 1000, "7:8", true, "7:8", false}, // an explicit user still wins
 	}
 	for _, tc := range tests {
-		got, chown := userFor(tc.uid, tc.gid, tc.override)
+		got, chown := userFor(tc.uid, tc.gid, tc.override, tc.rootless)
 		if got != tc.want || chown != tc.chown {
-			t.Errorf("userFor(%d,%d,%q) = %q,%v want %q,%v", tc.uid, tc.gid, tc.override, got, chown, tc.want, tc.chown)
+			t.Errorf("userFor(%d,%d,%q,%v) = %q,%v want %q,%v", tc.uid, tc.gid, tc.override, tc.rootless, got, chown, tc.want, tc.chown)
 		}
 	}
 }

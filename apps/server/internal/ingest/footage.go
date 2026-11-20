@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/media"
+	"github.com/nilpntr/content-fabrique/internal/sandbox"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
@@ -375,7 +376,8 @@ type CheckOptions struct {
 
 // Check probes the file at path, decodes its picture all the way through and reads its sound, all through runner, and
 // judges it. The error is only for a check that could not run (the sandbox, the disk, a cancelled context, a tool that
-// was killed); a bad file is an Assessment with the verdict Unusable.
+// was killed); a bad file is an Assessment with the verdict Unusable. A sandbox that cannot run the tools, or runs them
+// without access to their files, is an error that sandbox.Unavailable recognises, never a verdict on the file.
 func Check(ctx context.Context, runner media.Runner, path string, o CheckOptions) (Assessment, error) {
 	if !filepath.IsAbs(o.WorkDir) {
 		return Assessment{}, errors.New("ingest: the footage check needs an absolute work directory")
@@ -472,7 +474,13 @@ func measureSound(ctx context.Context, runner media.Runner, dir, path string, m 
 		return err
 	}
 	wav := filepath.Join(out, fileAudio16k)
-	if fi, err := os.Lstat(wav); err != nil || !fi.Mode().IsRegular() || fi.Size() > maxVideoFile {
+	fi, err := os.Lstat(wav)
+	if errors.Is(err, os.ErrNotExist) {
+		// ffmpeg exited 0 but wrote nothing: it always creates its output once it starts, so this is the sandbox (an output
+		// directory it cannot write), not the sound.
+		return &sandbox.UnavailableError{Reason: "the tool in the sandbox exited cleanly but wrote no output (can it write its output directory?)", Err: errNoOutput}
+	}
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() > maxVideoFile {
 		x.SoundUnreadable = true
 		return nil
 	}

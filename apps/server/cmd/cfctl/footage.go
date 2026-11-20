@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/nilpntr/content-fabrique/internal/ingest"
 	"github.com/nilpntr/content-fabrique/internal/media"
@@ -29,7 +30,10 @@ inside the sandbox provider, and never copies or uploads it. Files that are exac
   --image     the media-tools image (default media-tools:dev)
   --docker    the docker CLI (default docker)
 
-The exit code is 0 when every file is usable (with or without a warning), 1 when one is not or could not be checked.
+The exit code is 0 when every file is usable (with or without a warning), 1 when one is not or could not be checked, and
+3 when the sandbox is unavailable (Docker is not running, the image or the gVisor runtime is missing, or the tools cannot
+write their output directory, as under rootless Docker without its setup; see docs/06): then no file was judged, because
+nothing is known about them.
 `
 
 // footageDeps are the things cmdFootage needs from outside, replaced in tests.
@@ -64,7 +68,12 @@ type footageResult struct {
 	File string `json:"file"`
 	ingest.Assessment
 	Error string `json:"error,omitempty"`
+	// SandboxUnavailable says the check could not run because of the sandbox, not the file; Error then says why.
+	SandboxUnavailable bool `json:"sandboxUnavailable,omitempty"`
 }
+
+// exitSandboxUnavailable is the exit code when the sandbox could not run the check.
+const exitSandboxUnavailable = 3
 
 func cmdFootageCheck(args []string, stdout, stderr io.Writer, deps footageDeps) int {
 	fs := flag.NewFlagSet("footage check", flag.ContinueOnError)
@@ -148,14 +157,27 @@ func cmdFootageCheck(args []string, stdout, stderr io.Writer, deps footageDeps) 
 	code := 0
 	results := make([]footageResult, len(files))
 	seen := map[[sha256.Size]byte]string{}
+	unavailable := ""
 	for i, target := range targets {
 		results[i].File = files[i]
+		if unavailable != "" {
+			// The same sandbox would fail the same way on every other file.
+			results[i].Error, results[i].SandboxUnavailable = unavailable, true
+			continue
+		}
 		if resolveErr[i] != nil {
 			results[i].Error = resolveErr[i].Error()
 			code = 1
 			continue
 		}
 		a, err := ingest.Check(ctx, runner, target, ingest.CheckOptions{Use: use, WorkDir: work})
+		if reason, ok := sandbox.Unavailable(err); ok && ctx.Err() == nil {
+			unavailable = sandbox.UnavailableMessage(reason)
+			results[i].Error, results[i].SandboxUnavailable = unavailable, true
+			code = exitSandboxUnavailable
+			_, _ = fmt.Fprintf(stderr, "cfctl footage check: %v\n", err) // the detail, for whoever fixes the setup
+			continue
+		}
 		if err != nil {
 			results[i].Error = err.Error()
 			code = 1
@@ -170,7 +192,7 @@ func cmdFootageCheck(args []string, stdout, stderr io.Writer, deps footageDeps) 
 				}
 			}
 		}
-		if a.Verdict == ingest.Unusable {
+		if a.Verdict == ingest.Unusable && code == 0 {
 			code = 1
 		}
 		results[i].Assessment = a
@@ -195,6 +217,10 @@ func cmdFootageCheck(args []string, stdout, stderr io.Writer, deps footageDeps) 
 
 // writeAssessment prints one file's verdict and reasons, warnings and problems before notes.
 func writeAssessment(w io.Writer, name string, r footageResult) {
+	if r.SandboxUnavailable {
+		_, _ = fmt.Fprintf(w, "%s: could not be checked\n  - %s. This says nothing about the file: fix the setup and check it again.\n", name, strings.ToUpper(r.Error[:1])+r.Error[1:])
+		return
+	}
 	if r.Error != "" {
 		_, _ = fmt.Fprintf(w, "%s: could not be checked\n  - It could not be read (%s). Check that the file is there and try again.\n", name, r.Error)
 		return

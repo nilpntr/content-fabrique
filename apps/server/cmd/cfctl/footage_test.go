@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/nilpntr/content-fabrique/internal/ingest"
+	"github.com/nilpntr/content-fabrique/internal/sandbox"
 )
 
 func runFootage(t *testing.T, deps footageDeps, args ...string) (int, string, string) {
@@ -128,5 +131,59 @@ func TestFootageUsageErrors(t *testing.T) {
 	prod := footageDeps{newProvider: newSandboxProvider, lookupEnv: func(string) (string, bool) { return "production", true }}
 	if code, _, errs := runFootage(t, prod, "check", "x.mov", "--provider", "local"); code != 2 || errs == "" {
 		t.Errorf("the local provider must be refused in production: %d %s", code, errs)
+	}
+}
+
+// downProvider is a sandbox that cannot run anything, as rootless Docker without the gVisor runtime.
+type downProvider struct{ runs *int }
+
+func (downProvider) Name() string { return "hardened" }
+
+func (p downProvider) Run(context.Context, sandbox.Job) (sandbox.Result, error) {
+	*p.runs++
+	return sandbox.Result{ExitCode: 125}, &sandbox.UnavailableError{Reason: "the gVisor runtime (runsc) is not registered with Docker", Err: errors.New("docker run exited 125")}
+}
+
+// A sandbox that cannot run is said to be unavailable, in plain words, with its own exit code; no file is called broken, and the
+// other files are not tried.
+func TestFootageCheckReportsAnUnavailableSandbox(t *testing.T) {
+	dir := t.TempDir()
+	var files []string
+	for _, name := range []string{"row.mov", "song.m4a"} {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("some bytes"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, p)
+	}
+	runs := 0
+	deps := footageDeps{
+		newProvider: func(string, string, ...string) (sandbox.Provider, error) { return downProvider{&runs}, nil },
+		lookupEnv:   func(string) (string, bool) { return "", false },
+	}
+	code, out, errs := runFootage(t, deps, append([]string{"check", "--provider", "hardened"}, files...)...)
+	if code != exitSandboxUnavailable {
+		t.Fatalf("exit %d, want %d: %s %s", code, exitSandboxUnavailable, out, errs)
+	}
+	for _, want := range []string{
+		"row.mov: could not be checked\n  - The sandbox is unavailable: the gVisor runtime (runsc) is not registered with Docker. This says nothing about the file",
+		"song.m4a: could not be checked\n  - The sandbox is unavailable",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	for _, bad := range []string{"not usable", "can't be read", "export"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("the output blames the file (%q):\n%s", bad, out)
+		}
+	}
+	if runs != 1 {
+		t.Errorf("the sandbox was tried %d times; once is enough", runs)
+	}
+	code, out, _ = runFootage(t, deps, "check", "--provider", "hardened", "--json", files[0])
+	var res []footageResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil || len(res) != 1 || !res[0].SandboxUnavailable || res[0].Verdict != "" || code != exitSandboxUnavailable {
+		t.Fatalf("json: %d %v %s", code, err, out)
 	}
 }

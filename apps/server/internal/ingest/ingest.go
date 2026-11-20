@@ -14,7 +14,10 @@
 // Failures are of two kinds. A fileError is the file's fault (not a video, undecodable, too long): the asset is marked
 // failed with a reason code that is safe to show and Run returns normally, so the job ends and is not retried. Anything
 // else (the sandbox is down, storage did not answer, the worker is shutting down) is returned as an error and the job
-// runs again; its last attempt gives up through Fail.
+// runs again; its last attempt gives up through Fail. A sandbox that cannot run at all (sandbox.Unavailable: Docker is down,
+// the gVisor runtime is missing, the tool cannot write its output directory) is never the file's fault either: the asset
+// stays processing with the stage store.StageWaiting, and the job waits for the sandbox (package jobs) without using its
+// attempts.
 //
 // A re-run is safe: derivative names are fixed, so the objects and rows are replaced, and rows of kinds the new run does
 // not produce are removed.
@@ -34,6 +37,7 @@ import (
 
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/media"
+	"github.com/nilpntr/content-fabrique/internal/sandbox"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
@@ -221,6 +225,11 @@ func (p *Pipeline) Run(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) 
 		r.removeUploaded(ctx) // deleted while the job worked: nobody will use what it wrote
 		return Result{}, err
 	case err != nil:
+		if reason, ok := sandbox.Unavailable(err); ok {
+			// Not the file: say so on the asset (the library shows it as waiting), and let the job wait for the sandbox.
+			log.WarnContext(ctx, "asset ingest waits: "+sandbox.UnavailableMessage(reason), "error", err)
+			_ = r.progress(context.WithoutCancel(ctx), r.pct, store.StageWaiting)
+		}
 		return Result{}, err
 	}
 	log.InfoContext(ctx, "asset ingested", "duration", time.Since(start).Round(time.Millisecond), "derivatives", res.Derivatives)
@@ -262,6 +271,8 @@ type run struct {
 	durMs int64
 	// uploaded are the derivative names this run has written to object storage so far.
 	uploaded []string
+	// pct is the progress last recorded.
+	pct int
 }
 
 // derivative is a file the run made and will upload.
@@ -284,6 +295,7 @@ const (
 )
 
 func (r *run) progress(ctx context.Context, pct int, stage string) error {
+	r.pct = pct
 	err := r.p.cfg.Store.SetIngestProgress(ctx, r.ws, r.id, pct, stage)
 	switch {
 	case errors.Is(err, store.ErrNotFound):

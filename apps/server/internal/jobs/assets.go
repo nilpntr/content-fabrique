@@ -77,6 +77,15 @@ const JobRescueAfter = IngestTimeout + 30*time.Minute
 // noIngestSnooze is how long an ingest waits when the worker has no media pipeline (no object storage or no sandbox set up).
 const noIngestSnooze = 5 * time.Minute
 
+// sandboxWaitSnooze is how long a media job waits when the sandbox is unavailable (sandbox.Unavailable): Docker is down, the
+// gVisor runtime or the image is missing, or the tools cannot write their output directory. That is never the file's fault, so
+// the job waits without using an attempt, and the asset stays processing (stage waiting) rather than failed.
+const sandboxWaitSnooze = 2 * time.Minute
+
+// SandboxWaitMax is how long an ingest waits, snoozed, for an unavailable sandbox. After that its attempts count again, and the
+// last one fails the asset as processing_failed (ours, not the file's: the creator can upload it again).
+const SandboxWaitMax = 24 * time.Hour
+
 // AssetIngestWorker works AssetIngestArgs: it runs the pipeline of package ingest, which downloads the original, probes and
 // validates it in the sandbox, makes the derivatives (proxy, poster, sprite, waveform, 16 kHz audio, hover preview),
 // uploads them and moves the asset to `ready`, or to `failed` with a reason when the file cannot be processed.
@@ -90,8 +99,8 @@ func (w *AssetIngestWorker) Timeout(*river.Job[AssetIngestArgs]) time.Duration {
 
 // Work runs one attempt. A worker without the pipeline snoozes the job (no attempt is used), like the jobs that need
 // object storage do, so nothing is lost for a missing setting. An asset that was deleted, failed or never existed in the
-// workspace of the job ends it (cancelled, not retried). Any other error is retried by River; the last attempt marks the
-// asset failed, so it does not stay `processing` for ever.
+// workspace of the job ends it (cancelled, not retried). An unavailable sandbox snoozes the job for up to SandboxWaitMax. Any
+// other error is retried by River; the last attempt marks the asset failed, so it does not stay `processing` for ever.
 func (w *AssetIngestWorker) Work(ctx context.Context, job *river.Job[AssetIngestArgs]) error {
 	if w.deps.Ingest == nil {
 		return river.JobSnooze(noIngestSnooze)
@@ -105,6 +114,12 @@ func (w *AssetIngestWorker) Work(ctx context.Context, job *river.Job[AssetIngest
 		w.deps.logger().InfoContext(ctx, "asset ingest skipped", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "reason", err.Error())
 		return river.JobCancel(err)
 	case err != nil:
+		if reason, ok := sandbox.Unavailable(err); ok && ctx.Err() == nil {
+			if age := w.deps.now().Sub(job.CreatedAt); age < SandboxWaitMax {
+				w.deps.logger().WarnContext(ctx, "asset ingest waits: "+sandbox.UnavailableMessage(reason), "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "retry_in", sandboxWaitSnooze, "age", age.Round(time.Minute), "error", err)
+				return river.JobSnooze(sandboxWaitSnooze)
+			}
+		}
 		w.deps.logger().WarnContext(ctx, "asset ingest attempt failed", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "attempt", job.Attempt, "error", err)
 		if job.Attempt >= job.MaxAttempts {
 			// The last attempt, whatever ended it (even a cancelled or timed-out context: River will not run the job again),
@@ -118,6 +133,12 @@ func (w *AssetIngestWorker) Work(ctx context.Context, job *river.Job[AssetIngest
 		return err
 	}
 	return river.RecordOutput(ctx, res)
+}
+
+// isUnavailable reports whether err is a sandbox that could not run the job (sandbox.Unavailable).
+func isUnavailable(err error) bool {
+	_, ok := sandbox.Unavailable(err)
+	return ok
 }
 
 // giveUpReason is the failure reason of an asset whose last ingest attempt failed with err: a timeout (the job's or a
