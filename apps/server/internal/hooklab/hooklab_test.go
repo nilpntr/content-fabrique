@@ -132,13 +132,13 @@ func TestScoreBoundsAndSpeed(t *testing.T) {
 }
 
 func TestRunRanksAndBreaksTies(t *testing.T) {
-	clear := func(Variant) Evidence { return Evidence{Text: TextClear} }
+	placed := func(Variant) Evidence { return Evidence{Text: TextClear} }
 	vs := []Variant{
 		{ID: "late", AssetID: "x", InMs: 0, OutMs: 2000, Text: "BACK DAY", TextAtMs: 2500},
 		{ID: "one", AssetID: "x", InMs: 3000, OutMs: 5000, Text: "BACK DAY"},
 		{ID: "two", AssetID: "x", InMs: 6000, OutMs: 8000, Text: "BACK DAY"},
 	}
-	lab := Run(vs, clear, Resolve(nil))
+	lab := Run(vs, placed, Resolve(nil))
 	if lab.Pick != "one" || lab.Ranked[1].Variant.ID != "two" || lab.Ranked[2].Variant.ID != "late" {
 		t.Errorf("ranked %v", ids(lab))
 	}
@@ -148,7 +148,7 @@ func TestRunRanksAndBreaksTies(t *testing.T) {
 	if best, ok := lab.Best(); !ok || best.Variant.ID != "one" {
 		t.Errorf("best %+v", best)
 	}
-	if lab := Run(nil, clear, Resolve(nil)); lab.Pick != "" || lab.Close() {
+	if lab := Run(nil, placed, Resolve(nil)); lab.Pick != "" || lab.Close() {
 		t.Errorf("empty lab %+v", lab)
 	}
 	if _, ok := (Lab{}).Best(); ok {
