@@ -438,6 +438,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/projects/{id}/timelines/{version}/shots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The project's TypeID. */
+                id: components["parameters"]["ProjectIdPath"];
+                /** @description The version number, from 1. */
+                version: number;
+            };
+            cookie?: never;
+        };
+        /**
+         * The shot list of a version, the numbers its proof shows, with the feedback on each shot's clip
+         * @description The shots of the version's main track, numbered 1, 2, 3 ... in the order they play: the numbers a proof render of the version
+         *     burns in at the top right. Each shot names its clip (`asset_id`, `asset_title`), where it is on screen and the range of the clip
+         *     it plays, and lists the clip feedback of the workspace on that range (`feedback`), from this or any other project. A number
+         *     belongs to one version; feedback is stored by clip and range, so it holds for every later edit. Every role may read.
+         */
+        get: operations["getShotList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/projects/{id}/edit": {
         parameters: {
             query?: never;
@@ -619,8 +647,9 @@ export interface paths {
          * Render a version of the project's timeline
          * @description Queues a render of `version` with `profile`: `preview` (half size, from the 720p proxies, with the beat guide) or
          *     `final` (full size, from the originals). The answer is the render, usually `queued`; poll `GET /v1/renders/{id}` for
-         *     `progress` and the files. Asking again for a version and profile that has a render waiting, running or ready returns
-         *     that render (`200`) and queues nothing; a failed render does not count, so asking again after a failure starts a new one.
+         *     `progress` and the files. A preview can be a proof (`proof`: the shot numbers burned in), which follows the creator's
+         *     `proof_edits` setting unless the request says. Asking again for a version, profile and proof that has a render waiting,
+         *     running or ready returns that render (`200`) and queues nothing; a failed render does not count, so asking again after a failure starts a new one.
          *     The version must exist and validate against the project's footage as it is now (`422 timeline_invalid` otherwise: an asset
          *     deleted since the edit, say). At most 5 renders per workspace are in flight at once (`429 too_many_renders`). Only
          *     owners and editors may render.
@@ -659,6 +688,33 @@ export interface paths {
         get: operations["getRender"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/renders/{id}/final": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The render's TypeID. */
+                id: components["parameters"]["RenderIdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make it final - render the same edit without the shot numbers
+         * @description "Make it final" on a proof (or any preview): queues the `final` render of the same timeline version, full size from the originals
+         *     and without the shot numbers, exactly as `POST /v1/projects/{id}/renders` with `profile: final` does, with the same rules (`422
+         *     edit_not_charged` or `version_not_charged` for work that was never paid for, `429 too_many_renders`). A final render of that
+         *     version that is waiting, running or ready is returned as it is (`200`). Asking it of a final render is `400`. Only owners and
+         *     editors may.
+         */
+        post: operations["makeRenderFinal"];
         delete?: never;
         options?: never;
         head?: never;
@@ -835,6 +891,61 @@ export interface paths {
         patch: operations["updateAnnotation"];
         trace?: never;
     };
+    "/v1/clip-feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The workspace's clip feedback, newest first
+         * @description Every clip feedback of the workspace, or of one clip with `asset_id`. Every role may read.
+         */
+        get: operations["listClipFeedback"];
+        put?: never;
+        /**
+         * Feedback on a shot of a proof, kept for the clip in every later edit
+         * @description Feedback on shot `shot_number` of version `timeline_version` of the project, as its proof and shot list number it. It is stored
+         *     against the shot's clip and the range of the clip it plays, never against the number (which changes with the next version), and
+         *     every later edit of the workspace honours it: the editor reads it and its checks fail an edit that breaks it.
+         *
+         *     `kind` `never_use`: the range the shot plays is never used again; with `whole_clip`, none of the clip is. `start_later`: the take
+         *     should start `offset_ms` later (500 to 30,000 ms): the part of the clip from the shot's start to the new start is not used again,
+         *     and the rest of the take is fine. `note` is the creator's own words (plain text, at most 500 characters), optional. Saying the same
+         *     thing about the same range again returns the same feedback with the new note. A project or a version of another workspace is `404
+         *     not_found`, and so is a shot number the version does not have. Only owners and editors may give feedback.
+         */
+        post: operations["giveClipFeedback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/clip-feedback/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The clip feedback's TypeID. */
+                id: components["parameters"]["ClipFeedbackIdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Take clip feedback back
+         * @description The clip may be used again as before. Only owners and editors may.
+         */
+        delete: operations["deleteClipFeedback"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -873,6 +984,7 @@ export interface components {
         LicenceId: string;
         UploadId: string;
         EventId: string;
+        ClipFeedbackId: string;
         /**
          * @description The caller's role in the workspace. Clerk's `org:admin` is `owner`, `org:member` is `editor`, any other role is `viewer`.
          * @enum {string}
@@ -1702,6 +1814,12 @@ export interface components {
             /** @description The timeline version to render. */
             version: number;
             profile: components["schemas"]["RenderProfile"];
+            /**
+             * @description A proof: a preview with a small number at the top right of every shot, for feedback by shot (`GET
+             *     /v1/projects/{id}/timelines/{version}/shots` lists them). Only a `preview` can be a proof (`400` for a final). Left out, a
+             *     preview is a proof when the creator turned `proof_edits` on in their style, and a plain preview otherwise.
+             */
+            proof?: boolean;
         };
         RenderFile: {
             /** @description A presigned GET URL. Treat it as a secret until it expires. */
@@ -1770,6 +1888,8 @@ export interface components {
             project_id: components["schemas"]["ProjectId"];
             timeline_version: number;
             profile: components["schemas"]["RenderProfile"];
+            /** @description A proof preview, with the number of each shot burned in at the top right. A final render never is one. */
+            proof: boolean;
             status: components["schemas"]["RenderStatus"];
             progress: number;
             /** @description What a running render is doing: `staging` (fetching the footage), `measuring` (the loudness pass of the final profile), `rendering`, `contact_sheet`, `uploading`. Null otherwise. */
@@ -1897,6 +2017,12 @@ export interface components {
             text_position?: components["schemas"]["StyleTextPosition"];
             cut_grid?: components["schemas"]["StyleCutGrid"];
             shot_reuse?: components["schemas"]["StyleShotReuse"];
+            /**
+             * @description `on`: every new edit and every revision is shown first as a proof, with a small number on each shot and a shot list, so
+             *     feedback can be given by shot ("never use this shot again"); "make it final" then renders it without the numbers. Only the
+             *     creator turns it on; it is `off` otherwise.
+             */
+            proof_edits?: components["schemas"]["StyleToggle"];
         };
         StyleSettingSources: {
             vibe: components["schemas"]["StyleSettingSource"];
@@ -1915,6 +2041,7 @@ export interface components {
             angle_switches: components["schemas"]["StyleSettingSource"];
             text_pattern: components["schemas"]["StyleSettingSource"];
             text_position: components["schemas"]["StyleSettingSource"];
+            proof_edits: components["schemas"]["StyleSettingSource"];
         };
         /**
          * @description What the editor follows. `title_colour` is `null` when nothing decides it (the editor then uses the title style's own), and
@@ -1937,6 +2064,7 @@ export interface components {
             angle_switches: components["schemas"]["StyleToggle"];
             text_pattern: components["schemas"]["StyleTextPattern"];
             text_position: components["schemas"]["StyleTextPosition"];
+            proof_edits: components["schemas"]["StyleToggle"];
             sources: components["schemas"]["StyleSettingSources"];
         };
         /**
@@ -2149,6 +2277,86 @@ export interface components {
             /** @description Pass it as `cursor` for the next page. Null on the last page. */
             next_cursor: string | null;
         };
+        /**
+         * @description `never_use` (the range is never used again) or `start_later` (the take starts later: the range is the part before the new start).
+         * @enum {string}
+         */
+        ClipFeedbackKind: "never_use" | "start_later";
+        /** @description Where the feedback was given, the shot as that version's proof numbered it. For the history only; it is applied by clip and range. */
+        ClipFeedbackOrigin: {
+            project_id: components["schemas"]["ProjectId"];
+            timeline_version: number;
+            shot_number: number;
+            /** @description The id of the shot's clip item in that version. */
+            item_id: string;
+        };
+        ClipFeedback: {
+            id: components["schemas"]["ClipFeedbackId"];
+            asset_id: components["schemas"]["AssetId"];
+            kind: components["schemas"]["ClipFeedbackKind"];
+            /**
+             * Format: int64
+             * @description The start of the range, in the clip's own time.
+             */
+            start_ms: number;
+            /**
+             * Format: int64
+             * @description The end of the range (exclusive), in the clip's own time.
+             */
+            end_ms: number;
+            /** @description The creator's own words, empty when none. */
+            note: string;
+            given_on: components["schemas"]["ClipFeedbackOrigin"];
+            /** Format: date-time */
+            created_at: string;
+        };
+        GiveClipFeedbackRequest: {
+            project_id: components["schemas"]["ProjectId"];
+            timeline_version: number;
+            /** @description The shot's number on that version's proof and shot list. */
+            shot_number: number;
+            kind: components["schemas"]["ClipFeedbackKind"];
+            /** @description For `start_later`, how much later the take should start. Required with it, refused with `never_use`. */
+            offset_ms?: number;
+            /** @description For `never_use`, the whole clip instead of the shot's range. Refused with `start_later`. */
+            whole_clip?: boolean;
+            note?: string;
+        };
+        ListClipFeedbackResponse: {
+            items: components["schemas"]["ClipFeedback"][];
+        };
+        Shot: {
+            /** @description The number the proof shows at the top right of the shot. */
+            number: number;
+            item_id: string;
+            asset_id: components["schemas"]["AssetId"];
+            /** @description The clip's title, null when the clip is no longer in the project. */
+            asset_title: string | null;
+            /**
+             * Format: int64
+             * @description Where the shot starts in the video.
+             */
+            at_ms: number;
+            /**
+             * Format: int64
+             * @description Where the next shot starts (the last shot, where the video ends).
+             */
+            end_ms: number;
+            /**
+             * Format: int64
+             * @description The second of the clip the shot starts at, in milliseconds.
+             */
+            source_in_ms: number;
+            /** Format: int64 */
+            source_out_ms: number;
+            /** @description The workspace's clip feedback on the range this shot plays. */
+            feedback: components["schemas"]["ClipFeedback"][];
+        };
+        ShotList: {
+            project_id: components["schemas"]["ProjectId"];
+            timeline_version: number;
+            shots: components["schemas"]["Shot"][];
+        };
         WebhookResult: {
             /**
              * @description `applied`: the event changed something. `duplicate`: a replay of a delivery already applied. `ignored`: an event
@@ -2257,6 +2465,8 @@ export interface components {
         RenderIdPath: components["schemas"]["RenderId"];
         /** @description The run's TypeID. */
         RunIdPath: components["schemas"]["RunId"];
+        /** @description The clip feedback's TypeID. */
+        ClipFeedbackIdPath: components["schemas"]["ClipFeedbackId"];
         /** @description Only the clips labelled with this body part (a value id of the `body` facet, such as `back`). */
         FacetBody: components["schemas"]["FacetValueId"];
         /** @description Only the clips of this type (a value id of the `type` facet, such as `lift` or `slow_motion`). */
@@ -3050,6 +3260,38 @@ export interface operations {
             503: components["responses"]["Unavailable"];
         };
     };
+    getShotList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The project's TypeID. */
+                id: components["parameters"]["ProjectIdPath"];
+                /** @description The version number, from 1. */
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The shot list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
     startEdit: {
         parameters: {
             query?: never;
@@ -3390,6 +3632,66 @@ export interface operations {
             503: components["responses"]["Unavailable"];
         };
     };
+    makeRenderFinal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The render's TypeID. */
+                id: components["parameters"]["RenderIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The existing final render of that version. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Render"];
+                };
+            };
+            /** @description The final render was queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Render"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /**
+             * @description `timeline_invalid`: the version does not validate against the project's footage now. Or `edit_not_charged` or
+             *     `version_not_charged`: the work was never paid for.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `too_many_renders`: the workspace already has 5 renders waiting or running. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
     getStyle: {
         parameters: {
             query?: never;
@@ -3688,6 +3990,95 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Annotation"];
                 };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    listClipFeedback: {
+        parameters: {
+            query?: {
+                asset_id?: components["schemas"]["AssetId"];
+                /** @description How many to return (default 200). */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The feedback. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListClipFeedbackResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    giveClipFeedback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GiveClipFeedbackRequest"];
+            };
+        };
+        responses: {
+            /** @description The feedback as it is stored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClipFeedback"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["PlanRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    deleteClipFeedback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The clip feedback's TypeID. */
+                id: components["parameters"]["ClipFeedbackIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthenticated"];

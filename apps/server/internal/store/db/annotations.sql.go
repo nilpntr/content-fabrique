@@ -213,7 +213,7 @@ func (q *Queries) GetAnnotationForUpdate(ctx context.Context, arg GetAnnotationF
 }
 
 const getReadyRenderOfVersion = `-- name: GetReadyRenderOfVersion :one
-SELECT r.id, r.workspace_id, r.project_id, r.timeline_version, r.profile, r.status, r.progress, r.stage, r.mp4_key, r.contact_sheet_key, r.time_map_key, r.duration_ms, r.width, r.height, r.size_bytes, r.contact_sheet_bytes, r.time_map_bytes, r.contact_sheet, r.sound_cues, r.cpu_ms, r.wall_ms, r.failure_reason, r.requested_by_kind, r.requested_by_id, r.created_at, r.updated_at, r.started_at, r.finished_at, r.objects_purged_at
+SELECT r.id, r.workspace_id, r.project_id, r.timeline_version, r.profile, r.status, r.progress, r.stage, r.mp4_key, r.contact_sheet_key, r.time_map_key, r.duration_ms, r.width, r.height, r.size_bytes, r.contact_sheet_bytes, r.time_map_bytes, r.contact_sheet, r.sound_cues, r.cpu_ms, r.wall_ms, r.failure_reason, r.requested_by_kind, r.requested_by_id, r.created_at, r.updated_at, r.started_at, r.finished_at, r.objects_purged_at, r.proof
 FROM renders r
 JOIN projects p ON p.workspace_id = r.workspace_id AND p.id = r.project_id AND p.deleted_at IS NULL
 WHERE r.workspace_id = $1 AND r.project_id = $2 AND r.timeline_version = $3 AND r.status = 'ready'
@@ -261,6 +261,7 @@ func (q *Queries) GetReadyRenderOfVersion(ctx context.Context, arg GetReadyRende
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.ObjectsPurgedAt,
+		&i.Proof,
 	)
 	return i, err
 }
