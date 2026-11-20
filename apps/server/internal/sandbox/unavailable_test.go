@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDockerFailureReason(t *testing.T) {
@@ -157,5 +158,93 @@ func TestDockerUnavailableOutcomes(t *testing.T) {
 	res, err := d.Run(context.Background(), Job{Image: "media-tools:dev", Args: []string{"ffprobe"}, Limits: DefaultLimits()})
 	if err != nil || res.ExitCode != 183 {
 		t.Fatalf("a bad file: %+v, %v", res, err)
+	}
+}
+
+// A file can make ffmpeg print "Permission denied" for a mount path. Unless the self-check job (which opens the inputs raw and
+// writes a short silence) fails too, that is the tool's result, not an unavailable sandbox.
+func TestDockerMountFailureNeedsTheSelfCheck(t *testing.T) {
+	no := false
+	root := tmpRoot(t)
+	out := filepath.Join(root, "out")
+	if err := os.Mkdir(out, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	clip := filepath.Join(root, "clip.mov")
+	if err := os.WriteFile(clip, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(root, "selfchecks")
+	denied := `echo "Error opening output /work/audio_16k.wav: Permission denied" >&2; exit 243`
+	for _, tc := range []struct {
+		name, body string
+		wantErr    bool
+	}{
+		// The self-check passes: the sandbox works, the input caused the message.
+		{"crafted input", `case "$*" in *anullsrc*) echo x >> '` + marker + `'; exit 0 ;; esac; ` + denied, false},
+		// The self-check fails the same way: the sandbox cannot use its mounts.
+		{"broken sandbox", `case "$*" in *anullsrc*) echo x >> '` + marker + `' ;; esac; ` + denied, true},
+	} {
+		_ = os.Remove(marker)
+		d := &Docker{Policy: Policy{AllowedRoots: []string{root}}, Binary: fakeDockerScript(t, "[]", tc.body), Rootless: &no}
+		res, err := d.Run(context.Background(), Job{Image: "media-tools:dev", Args: []string{"ffmpeg"}, Limits: DefaultLimits(),
+			Mounts: []Mount{{Host: clip, Container: "/in/0"}, {Host: out, Container: WorkDir, Writable: true}}})
+		if _, ok := Unavailable(err); ok != tc.wantErr {
+			t.Errorf("%s: unavailable %v (%v), want %v", tc.name, ok, err, tc.wantErr)
+		}
+		if res.ExitCode != 243 {
+			t.Errorf("%s: exit %d", tc.name, res.ExitCode)
+		}
+		if b, _ := os.ReadFile(marker); string(b) != "x\n" {
+			t.Errorf("%s: the self-check ran %q", tc.name, b)
+		}
+	}
+}
+
+// The rootless answer is asked again after rootlessTTL: a daemon swapped for a rootful one must not keep getting 0:0 containers.
+func TestDockerRootlessAnswerExpires(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("the worker's own uid is root here")
+	}
+	dir := t.TempDir()
+	infoFile := filepath.Join(dir, "info")
+	write := func(s string) {
+		if err := os.WriteFile(infoFile, []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bin := filepath.Join(dir, "docker")
+	script := "#!/bin/sh\nif [ \"$1\" = info ]; then cat '" + infoFile + "'; exit 0; fi\n" +
+		`prev=; for a in "$@"; do if [ "$prev" = --user ]; then echo "$a"; fi; prev="$a"; done; exit 0` + "\n"
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil { // #nosec G306 -- test script must be executable
+		t.Fatal(err)
+	}
+	clock := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	d := &Docker{Binary: bin, now: func() time.Time { return clock }}
+	user := func() string {
+		res, err := d.Run(context.Background(), Job{Image: "media-tools:dev", Args: []string{"ffmpeg"}, Limits: DefaultLimits()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(string(res.Stdout))
+	}
+	own := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+	write(`["name=seccomp,profile=builtin","name=rootless"]`)
+	if got := user(); got != "0:0" {
+		t.Fatalf("rootless: %q", got)
+	}
+	write(`["name=seccomp,profile=builtin"]`) // the daemon is now rootful
+	clock = clock.Add(rootlessTTL / 2)
+	if got := user(); got != "0:0" {
+		t.Fatalf("within the TTL the answer is cached: %q", got)
+	}
+	clock = clock.Add(rootlessTTL)
+	if got := user(); got != own {
+		t.Fatalf("after the TTL a rootful daemon must get the worker's uid, got %q", got)
+	}
+	write("not json") // a daemon that cannot answer: the safe default
+	clock = clock.Add(2 * rootlessTTL)
+	if got := user(); got != own {
+		t.Fatalf("unknown: %q", got)
 	}
 }

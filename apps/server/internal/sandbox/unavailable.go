@@ -98,9 +98,8 @@ func mountFailure(stderr []byte) bool {
 const mountFailureReason = "the tool in the sandbox cannot read its input or write its output directory (with rootless Docker, the container user maps to another uid; docs/06, Running on a VPS)"
 
 // MountFailure returns an UnavailableError when the program of a job (tool, for the message) exited non-zero saying it could
-// not read its inputs or write its output directory, and nil otherwise. The docker providers check it themselves; a caller that
-// runs a job on another provider (media.SandboxRunner) checks it too, so that no provider's permission problem is ever read as a
-// bad file.
+// not read its inputs or write its output directory, and nil otherwise. The input can steer stderr, so this alone is only a
+// suspicion: the docker providers confirm it with a self-check job before they return it.
 func MountFailure(tool string, res Result) error {
 	if res.ExitCode == 0 || !mountFailure(res.Stderr) {
 		return nil

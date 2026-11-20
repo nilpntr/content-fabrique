@@ -9,6 +9,7 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/sandbox"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
@@ -99,7 +100,14 @@ func (w *AnalyzeWorker) Work(ctx context.Context, job *river.Job[AnalyzeArgs]) e
 	case errors.Is(err, ErrAnalysisNotReady):
 		return w.snooze(ctx, job, notReadySnooze, err.Error())
 	case err != nil && ctx.Err() == nil && isUnavailable(err):
-		return w.snooze(ctx, job, sandboxWait(w.deps.now().Sub(job.CreatedAt)), err.Error()) // err says "the sandbox is unavailable: ..."
+		// The detail (docker's or the tool's output) goes to the log only; the job records the plain reason.
+		reason, _ := sandbox.Unavailable(err)
+		n := snoozes(job.Metadata)
+		w.deps.logger().WarnContext(ctx, "analysis: the sandbox is unavailable", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "waits", n, "error", err)
+		if n >= SandboxWaitsMax {
+			return river.JobCancel(plainUnavailable(reason, n))
+		}
+		return w.snooze(ctx, job, sandboxWait(w.deps.now().Sub(job.CreatedAt)), sandbox.UnavailableMessage(reason))
 	case err != nil:
 		w.deps.logger().WarnContext(ctx, "analysis attempt failed", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "attempt", job.Attempt, "error", err)
 		return err

@@ -63,7 +63,9 @@ func TestCheckDoesNotBlameTheFileForTheSandbox(t *testing.T) {
 		cause string
 	}{
 		{"the output directory is not writable", &scriptedProvider{audio: func(sandbox.Job) (sandbox.Result, error) {
-			return sandbox.Result{ExitCode: 243, Stderr: []byte("[out#0/wav @ 0x55d0] Error opening output /work/audio_16k.wav: Permission denied\nError opening output file /work/audio_16k.wav.\n")}, nil
+			// What the docker provider returns once its self-check confirmed the mount failure.
+			res := sandbox.Result{ExitCode: 243, Stderr: []byte("[out#0/wav @ 0x55d0] Error opening output /work/audio_16k.wav: Permission denied\n")}
+			return res, sandbox.MountFailure("ffmpeg", res)
 		}}, "cannot read its input or write its output directory"},
 		{"docker is not running", &scriptedProvider{down: &sandbox.UnavailableError{Reason: "Docker is not running, or this user cannot reach it"}}, "Docker is not running"},
 		{"the gVisor runtime is missing", &scriptedProvider{down: &sandbox.UnavailableError{Reason: "the gVisor runtime (runsc) is not registered with Docker"}}, "runsc"},

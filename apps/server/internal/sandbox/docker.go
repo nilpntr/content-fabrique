@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,7 +43,8 @@ type Docker struct {
 	User string
 	// TmpSizeMB is the size of the /tmp tmpfs; default 256.
 	TmpSizeMB int
-	// Rootless says whether the Docker daemon runs rootless; nil asks the daemon once, on the first job (docker info). Under
+	// Rootless says whether the Docker daemon runs rootless; nil asks the daemon (docker info), again at most every
+	// rootlessTTL, so a daemon that is swapped for a rootful one never gets containers running as 0:0 for long. Under
 	// rootless Docker the container's uid 0 is the unprivileged user that runs the daemon on the host (the worker's own uid),
 	// and every other container uid is a subordinate uid that owns none of the host's files: a container running as the
 	// worker's uid could not write the job's output directory. So there the container runs as 0:0, which is still
@@ -50,10 +52,17 @@ type Docker struct {
 	// made for the worker's own uid.
 	Rootless *bool
 
-	rootlessMu    sync.Mutex
-	rootlessKnown bool
-	rootless      bool
+	rootlessMu sync.Mutex
+	rootlessAt time.Time // when the daemon was last asked; zero means never (or the answer is stale)
+	rootless   bool
+	now        func() time.Time
 }
+
+// rootlessTTL is how long an answer of `docker info` about rootless mode is trusted.
+const rootlessTTL = time.Minute
+
+// selfCheckTimeout bounds the self-check job that confirms a mount failure.
+const selfCheckTimeout = 30 * time.Second
 
 // NewDocker returns the docker provider.
 func NewDocker(policy Policy) *Docker { return &Docker{Policy: policy} }
@@ -106,6 +115,53 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 	if err := checkAccess(v.mounts, checkAs); err != nil {
 		return Result{}, err
 	}
+	res, err := d.run(ctx, v, user)
+	if err != nil || res.ExitCode == 0 {
+		return res, err
+	}
+	// A tool that says it could not use its own mounts: the sandbox's fault only if a tiny job that touches nothing of the input
+	// fails the same way in the same sandbox. Otherwise the input made the tool print it, and the exit code is the tool's result.
+	if merr := MountFailure(v.Args[0], res); merr != nil && !d.selfCheck(ctx, v, user) {
+		return res, merr
+	}
+	return res, nil
+}
+
+// selfCheck runs, in a sandbox like v's (same image, runtime, user and mounts), an ffmpeg that opens each input with the raw data
+// demuxer (no parsing, no references followed) and writes a short silence into the output directory when there is one. It
+// reports whether that worked: the mounts are usable.
+func (d *Docker) selfCheck(ctx context.Context, v validated, user string) bool {
+	args := []string{"ffmpeg", "-nostdin", "-v", "error"}
+	inputs, writable := 0, ""
+	for _, m := range v.mounts {
+		if m.Writable {
+			writable = m.Host
+			continue
+		}
+		args = append(args, "-f", "data", "-i", m.Container)
+		inputs++
+	}
+	args = append(args, "-f", "lavfi", "-i", "anullsrc=r=8000:cl=mono", "-map", strconv.Itoa(inputs)+":a", "-t", "0.01")
+	if writable != "" {
+		args = append(args, "-y", WorkDir+"/"+selfCheckFile)
+		defer func() { _ = os.Remove(filepath.Join(writable, selfCheckFile)) }()
+	} else {
+		args = append(args, "-f", "null", "-")
+	}
+	c := v
+	c.Args = args
+	c.Labels = nil
+	c.maxOutput = 64 << 10
+	c.Limits.Timeout = min(c.Limits.Timeout, selfCheckTimeout)
+	res, err := d.run(ctx, c, user)
+	return err == nil && res.ExitCode == 0
+}
+
+// selfCheckFile is what the self-check writes into the output directory (and removes).
+const selfCheckFile = ".cf-selfcheck.wav"
+
+// run executes one validated job as user and classifies docker's own failures.
+func (d *Docker) run(ctx context.Context, v validated, user string) (Result, error) {
 	name, err := containerName()
 	if err != nil {
 		return Result{}, err
@@ -140,28 +196,34 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 		return res, &UnavailableError{Reason: dockerFailureReason(res.Stderr),
 			Err: fmt.Errorf("docker run exited %d: %s", res.ExitCode, snippet(res.Stderr))}
 	}
-	// A tool that ran but could not use its own mounts: the sandbox's fault, whatever the file is.
-	return res, MountFailure(v.Args[0], res)
+	return res, nil
 }
 
-// isRootless reports whether the daemon runs rootless: Rootless when set, else what `docker info` says, asked once. A daemon
-// that cannot be asked counts as not rootless, and is asked again on the next job (the job itself then fails with the reason).
+// isRootless reports whether the daemon runs rootless: Rootless when set, else what `docker info` says, asked again once the
+// answer is older than rootlessTTL. The same CLI, environment (DOCKER_HOST, DOCKER_CONTEXT) and binary answer it as run the jobs.
+// A daemon that cannot be asked counts as not rootless (the safe default: the worker's own uid), and is asked again on the next
+// job (the job itself then fails with the reason).
 func (d *Docker) isRootless(ctx context.Context) bool {
 	if d.Rootless != nil {
 		return *d.Rootless
 	}
 	d.rootlessMu.Lock()
 	defer d.rootlessMu.Unlock()
-	if d.rootlessKnown {
+	now := time.Now
+	if d.now != nil {
+		now = d.now
+	}
+	if !d.rootlessAt.IsZero() && now().Sub(d.rootlessAt) < rootlessTTL {
 		return d.rootless
 	}
 	ictx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ictx, d.binary(), "info", "--format", "{{json .SecurityOptions}}").Output() // #nosec G204 -- fixed arguments
 	if err != nil {
+		d.rootless, d.rootlessAt = false, time.Time{}
 		return false
 	}
-	d.rootless, d.rootlessKnown = rootlessInfo(out), true
+	d.rootless, d.rootlessAt = rootlessInfo(out), now()
 	return d.rootless
 }
 

@@ -77,7 +77,8 @@ func (r *SandboxRunner) Run(ctx context.Context, inv Invocation) (sandbox.Result
 	if inv.Timeout > 0 {
 		limits.Timeout = inv.Timeout
 	}
-	res, err := r.Provider.Run(ctx, sandbox.Job{
+	// The docker providers report a tool that could not use its mounts as an UnavailableError, after a self-check.
+	return r.Provider.Run(ctx, sandbox.Job{
 		Image:          r.Image,
 		Args:           inv.Args,
 		Mounts:         mounts,
@@ -85,12 +86,6 @@ func (r *SandboxRunner) Run(ctx context.Context, inv Invocation) (sandbox.Result
 		Labels:         r.Labels,
 		MaxOutputBytes: r.MaxOutputBytes,
 	})
-	if err == nil && len(inv.Args) > 0 {
-		// A tool that could not read /in or write /work failed because of the sandbox, on any provider: never a ToolError,
-		// which callers read as the file's fault.
-		err = sandbox.MountFailure(inv.Args[0], res)
-	}
-	return res, err
 }
 
 // ToolError is a tool that ran and failed.
