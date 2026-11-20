@@ -153,9 +153,17 @@ func textObstacles(spec *timeline.Spec, lookup subject.Lookup, totalMs int64) ([
 			zone, zok := out.Zone()
 			st, sok := style.CaptionStyle(ct.Style)
 			if zok && sok {
-				b := style.CaptionBand(zone, out.Width, out.ShortSide(), st)
 				g := gapPx(out)
-				obs = append(obs, obstacle{id: ct.ID, start: 0, end: totalMs, box: style.Rect{Left: b.Left + g, Top: b.Top + g, Right: b.Right - g, Bottom: b.Bottom - g}})
+				// The band of each clip's captions, as the renderer draws them (the upper band where the face is in the lower one), for
+				// the clip's own time.
+				for _, p := range subject.CaptionPlaces(spec, lookup, st) {
+					b := p.Band
+					obs = append(obs, obstacle{id: ct.ID, start: p.AtMs, end: min(p.EndMs, totalMs), box: style.Rect{Left: b.Left + g, Top: b.Top + g, Right: b.Right - g, Bottom: b.Bottom - g}})
+				}
+				if _, _, ok := timeline.MainTrack(spec); !ok {
+					b := style.CaptionBand(zone, out.Width, out.ShortSide(), st)
+					obs = append(obs, obstacle{id: ct.ID, start: 0, end: totalMs, box: style.Rect{Left: b.Left + g, Top: b.Top + g, Right: b.Right - g, Bottom: b.Bottom - g}})
+				}
 			}
 			continue
 		}

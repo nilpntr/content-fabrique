@@ -42,6 +42,7 @@ func checkSemantics(spec *Spec, assets AssetCatalog) []Issue {
 	}
 	c.checkTotal()
 	c.checkText()
+	c.checkCaptions()
 	c.checkGraphics()
 	c.checkAudio()
 	c.checkMarkers()

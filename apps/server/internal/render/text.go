@@ -45,14 +45,14 @@ func (c *compiler) subtitles() (*Subtitles, error) {
 			subjects[cl.item.AssetID] = *cl.asset.Subject
 		}
 	}
+	var lookup subject.Lookup
+	if len(subjects) > 0 {
+		lookup = subjects.Lookup
+	}
 	for _, t := range c.spec.Tracks {
 		switch tr := t.(type) {
 		case *timeline.TextTrack:
 			for _, it := range tr.Items {
-				var lookup subject.Lookup
-				if len(subjects) > 0 {
-					lookup = subjects.Lookup
-				}
 				// A character the font cannot draw is left out of the text, as the layout never measured it.
 				if pl, err := timeline.PlaceText(out, it); err == nil {
 					if bad := pl.Style.Unsupported(it.Text); len(bad) > 0 {
@@ -98,7 +98,7 @@ func (c *compiler) subtitles() (*Subtitles, error) {
 			}
 		case *timeline.CaptionsTrack:
 			if tr.Enabled {
-				if err := c.captions(b, tr); err != nil {
+				if err := c.captions(b, tr, lookup); err != nil {
 					return nil, err
 				}
 			}
@@ -137,23 +137,51 @@ const captionFloor = 0.7
 // mapped through the time map: a word at source time s of a clip that starts at output time t0 with source in point in and
 // speed v is spoken at t0 + (s - in) / v, and both ends of the word are snapped to frames like every other boundary.
 //
-// A chunk is laid out in the caption style and must fit the caption band (style.CaptionBand: the centre column, three lines).
+// The words are the transcript's, with the creator's corrections in place of the words they fix (the timing stays the transcript's).
+// The captions of a clip are drawn in the lower band, or in the upper one when the speaker's face is in the lower
+// (subject.CaptionPlaces); both bands are inside the safe zone.
+//
+// A chunk is laid out in the caption style and must fit the caption band (style.CaptionBand: the centre column, two lines).
 // One that does not is split in two and each half tried again; a single word that is still too big is shrunk down to
 // captionFloor of the size, and left out with a warning if even that does not fit. So a caption is never drawn outside the zone.
-func (c *compiler) captions(b *builder, tr *timeline.CaptionsTrack) error {
-	st, ok := style.CaptionStyle(tr.Style)
+func (c *compiler) captions(b *builder, tr *timeline.CaptionsTrack, lookup subject.Lookup) error {
+	st, ok := style.CaptionStyleOf(tr.Style, tr.Fill, tr.Accent)
 	if !ok {
 		return fmt.Errorf("%w: captions style %q", ErrInvalidSpec, tr.Style)
+	}
+	// Hostile fields are refused here too: a spec that never went through Validate must not put markup into the script.
+	if bad := timeline.ValidateCaptionFields(tr.Fill, tr.Accent, tr.Keywords, tr.Corrections); len(bad) > 0 {
+		return fmt.Errorf("%w: captions track %s: %s", ErrInvalidSpec, tr.ID, strings.Join(bad, "; "))
 	}
 	out := c.spec.Output
 	zone, ok := out.Zone()
 	if !ok {
 		return fmt.Errorf("%w: unknown format %q", ErrInvalidSpec, out.Format)
 	}
+	fixes := make(map[correctionKey]timeline.CaptionCorrection, len(tr.Corrections))
+	for _, cor := range tr.Corrections {
+		fixes[correctionKey{cor.AssetID, cor.Word}] = cor
+	}
+	c.warnStaleCorrections(b, fixes)
 	upper, maxWords := tr.UppercaseOrDefault(), tr.MaxWordsOrDefault()
-	band := style.CaptionBand(zone, out.Width, out.ShortSide(), st)
+	// The band of each clip's captions, by the clip's id.
+	places := map[string]subject.CaptionPlace{}
+	for _, p := range subject.CaptionPlaces(c.spec, lookup, st) {
+		places[p.ClipID] = p
+		switch {
+		case p.OverFace:
+			b.warn("caption_over_face", "the captions of clip %s cover the speaker's face in both bands (%d to %d ms): reframe the clip or use another shot", p.ClipID, p.AtMs, p.EndMs)
+		case p.Moved:
+			b.warn("captions_moved", "the captions of clip %s are in the upper band, because the speaker's face is in the lower one (%d to %d ms)", p.ClipID, p.AtMs, p.EndMs)
+		}
+	}
+	keys := keywordSet(tr.Keywords)
 	var place func(chunk []mappedWord)
 	place = func(chunk []mappedWord) {
+		pl, ok := places[c.clips[chunk[0].clip].item.ID]
+		if !ok {
+			pl = subject.CaptionPlace{Pos: style.CaptionLower, Band: style.CaptionBand(zone, out.Width, out.ShortSide(), st)}
+		}
 		words := make([]string, 0, len(chunk))
 		kept := make([]capWord, 0, len(chunk))
 		for _, w := range chunk {
@@ -169,8 +197,11 @@ func (c *compiler) captions(b *builder, tr *timeline.CaptionsTrack) error {
 		if len(kept) == 0 {
 			return
 		}
+		if st.Keyword {
+			markKeywords(kept, keys)
+		}
 		text := strings.Join(words, " ")
-		if lay, box, ok := fitCaption(st, zone, band, out, text, 1); ok {
+		if lay, box, ok := fitCaption(st, zone, pl, out, text, 1); ok {
 			b.addCaption(lay, box, kept, text)
 			return
 		}
@@ -180,33 +211,101 @@ func (c *compiler) captions(b *builder, tr *timeline.CaptionsTrack) error {
 			return
 		}
 		for _, scale := range []float64{0.9, 0.8, captionFloor} {
-			if lay, box, ok := fitCaption(st, zone, band, out, text, scale); ok {
+			if lay, box, ok := fitCaption(st, zone, pl, out, text, scale); ok {
 				b.addCaption(lay, box, kept, text)
 				return
 			}
 		}
 		b.warn("caption_dropped", "the caption %q at %d ms is left out: it does not fit the caption band even at %d %% of the size", text, timeline.FrameStartMs(kept[0].startF, c.fps), int(captionFloor*100))
 	}
-	for _, chunk := range chunks(c.mapWords(), maxWords, c.fps) {
+	for _, chunk := range chunks(c.mapWordsOf(nil, fixes), maxWords, c.fps) {
 		place(chunk)
 	}
 	return nil
 }
 
-// fitCaption lays text out in the caption style scaled by scale, and puts it in the zone at the caption position. ok is false
+// fixApplies says a fix still belongs to the word the transcript has there: it remembers the word it was made for (Was), and a
+// transcript that was made again may have another word at that position. A fix without Was always applies.
+func fixApplies(fix timeline.CaptionCorrection, heard string) bool {
+	return fix.Was == "" || cleanWord(fix.Was) == heard
+}
+
+// warnStaleCorrections warns once for the fixes that name a word the transcripts of the clips no longer have (another word, or none).
+func (c *compiler) warnStaleCorrections(b *builder, fixes map[correctionKey]timeline.CaptionCorrection) {
+	seen := map[string]bool{}
+	for _, cl := range c.clips {
+		id := cl.item.AssetID
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		for wi, w := range cl.asset.Transcript {
+			if fix, ok := fixes[correctionKey{id, wi}]; ok && !fixApplies(fix, cleanWord(w.Text)) {
+				b.warn("correction_stale", "the fix of word %d of %s (%q) is left out: the transcript now has %q there, not %q", wi, id, fix.Text, cleanWord(w.Text), fix.Was)
+			}
+		}
+	}
+}
+
+// correctionKey names one word of one asset's transcript.
+type correctionKey struct {
+	assetID string
+	word    int
+}
+
+// keywordSet is the key words of a keyword_emphasis track as a set of lower-case words.
+func keywordSet(words []string) map[string]bool {
+	set := make(map[string]bool, len(words))
+	for _, w := range words {
+		if w = normaliseWord(w); w != "" {
+			set[w] = true
+		}
+	}
+	return set
+}
+
+// normaliseWord lower-cases a word and strips what is not a letter or a digit from its ends, so "Heavy," matches "heavy".
+func normaliseWord(w string) string {
+	return strings.ToLower(strings.TrimFunc(w, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }))
+}
+
+// minKeywordRunes is the shortest word the fallback emphasises when the track names no key words.
+const minKeywordRunes = 5
+
+// markKeywords marks the words of a chunk that keyword emphasis draws in the accent colour: those the track lists, or, when it lists
+// none, the longest word of the chunk (the first of equals) if it has at least minKeywordRunes letters.
+func markKeywords(words []capWord, keys map[string]bool) {
+	if len(keys) > 0 {
+		for i := range words {
+			words[i].emph = keys[normaliseWord(words[i].text)]
+		}
+		return
+	}
+	best, bestLen := -1, minKeywordRunes-1
+	for i, w := range words {
+		if n := len([]rune(normaliseWord(w.text))); n > bestLen {
+			best, bestLen = i, n
+		}
+	}
+	if best >= 0 {
+		words[best].emph = true
+	}
+}
+
+// fitCaption lays text out in the caption style scaled by scale, and puts it in the zone in the band of the place. ok is false
 // when it takes more lines than the band holds or does not fit the zone. A scaled style has its own id (the script needs a Style
 // line for it).
-func fitCaption(st style.Style, zone style.Zone, band style.Rect, out timeline.Output, text string, scale float64) (style.Layout, style.Rect, bool) {
+func fitCaption(st style.Style, zone style.Zone, pl subject.CaptionPlace, out timeline.Output, text string, scale float64) (style.Layout, style.Rect, bool) {
 	if scale != 1 {
 		st.ID = fmt.Sprintf("%s_%d", st.ID, int(scale*100))
 		st.EmPct *= scale
 	}
 	lay := style.Measure(st, out.ShortSide(), text, style.MaxBoxWidth(zone, out.Width))
 	w, h := lay.Box()
-	if h > band.Height() {
+	if h > pl.Band.Height() {
 		return lay, style.Rect{}, false
 	}
-	box, ok := zone.Fit(style.PlaceCaption(zone, out.Width, w, h))
+	box, ok := zone.Fit(style.PlaceCaptionAt(zone, out.Width, w, h, pl.Pos))
 	return lay, box, ok
 }
 
@@ -214,11 +313,11 @@ func fitCaption(st style.Style, zone style.Zone, band style.Rect, out timeline.O
 // that plays: a word that straddles the clip's in or out point keeps the part inside; one entirely outside is dropped. A word
 // is at least one frame long, and a word never overlaps the one before it by a frame: the later word starts where the
 // earlier one ends if the speech overlaps in the transcript.
-func (c *compiler) mapWords() []mappedWord { return c.mapWordsOf(nil) }
 
-// mapWordsOf is mapWords for the clips keep accepts (nil: all of them). The overlap of two words is resolved among the words that
+// mapWordsOf is mapWords for the clips keep accepts (nil: all of them), with the creator's fixes in place of the words they correct
+// (nil: the transcript as it is; only the captions pass fixes, so the timing readers such as the sound effects never see them). The overlap of two words is resolved among the words that
 // are kept, so a clip that is left out does not shorten the words of the others.
-func (c *compiler) mapWordsOf(keep func(clipIndex int) bool) []mappedWord {
+func (c *compiler) mapWordsOf(keep func(clipIndex int) bool, fixes map[correctionKey]timeline.CaptionCorrection) []mappedWord {
 	var all []mappedWord
 	for ci, cl := range c.clips {
 		if keep != nil && !keep(ci) {
@@ -228,8 +327,11 @@ func (c *compiler) mapWordsOf(keep func(clipIndex int) bool) []mappedWord {
 		it := cl.item
 		t0 := timeline.FrameStartMs(cl.startFrame, c.fps)
 		limit := min(cl.endFrame, c.total) // the clip's own audio plays to its end, also through a transition
-		for _, w := range cl.asset.Transcript {
+		for wi, w := range cl.asset.Transcript {
 			text := cleanWord(w.Text)
+			if fix, ok := fixes[correctionKey{cl.item.AssetID, wi}]; ok && fixApplies(fix, text) {
+				text = cleanWord(fix.Text) // the creator's fix of a misheard word; the timing stays the transcript's
+			}
 			if text == "" || w.EndMs <= in || w.StartMs >= out {
 				continue
 			}

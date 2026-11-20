@@ -296,6 +296,21 @@ func (b *builder) addCaption(lay style.Layout, box style.Rect, words []capWord, 
 	head := fmt.Sprintf(`{\an5\pos(%s,%s)}`, num(cx), num(cy))
 	st := lay.Style
 	first, last := words[0].startF, words[len(words)-1].endF
+	if st.Keyword && st.Highlight != (style.Colour{}) {
+		// Keyword emphasis: the whole chunk is one event and its key words stay in the accent colour while it is up.
+		spans := wordSpans(words)
+		on := func(p int) bool {
+			for i, w := range words {
+				if w.emph && p >= spans[i][0] && p < spans[i][1] {
+					return true
+				}
+			}
+			return false
+		}
+		b.add(layerCaption, first, last, st, head+coloured(lay.Lines, text, on, st))
+		b.counts.caption++
+		return
+	}
 	if st.Highlight == (style.Colour{}) {
 		b.add(layerCaption, first, last, st, head+escapeLines(lay.Lines))
 		b.counts.caption++
@@ -316,6 +331,8 @@ func (b *builder) addCaption(lay style.Layout, box style.Rect, words []capWord, 
 type capWord struct {
 	text         string
 	startF, endF int64
+	// emph marks a key word that keyword emphasis draws in the accent colour.
+	emph bool
 }
 
 // wordSpans returns, for each word, the rune range [from, to) it occupies in text (the words joined by single spaces).
@@ -333,8 +350,14 @@ func wordSpans(words []capWord) [][2]int {
 // highlighted writes the lines with word k in the highlight colour. The lines are the wrapped text: they hold the same
 // characters in the same order as text, minus the spaces the wrap swallowed, so the text is walked alongside them.
 func highlighted(lines []string, text string, spans [][2]int, k int, st style.Style) string {
+	return coloured(lines, text, func(p int) bool { return p >= spans[k][0] && p < spans[k][1] }, st)
+}
+
+// coloured writes the lines with the characters at the rune positions of text that on accepts in the highlight colour, the rest in the fill.
+// The lines are the wrapped text: they hold the same characters in the same order as text, minus the spaces the wrap swallowed.
+func coloured(lines []string, text string, on func(pos int) bool, st style.Style) string {
 	runes := []rune(text)
-	on, off := colourRGB(st.Highlight), colourRGB(st.Fill)
+	hi, off := colourRGB(st.Highlight), colourRGB(st.Fill)
 	p := 0
 	var sb strings.Builder
 	for li, l := range lines {
@@ -348,10 +371,10 @@ func highlighted(lines []string, text string, spans [][2]int, k int, st style.St
 		}
 		lit := false
 		for _, r := range lr {
-			in := p >= spans[k][0] && p < spans[k][1]
+			in := on(p)
 			if in != lit {
 				if in {
-					fmt.Fprintf(&sb, `{\1c%s}`, on)
+					fmt.Fprintf(&sb, `{\1c%s}`, hi)
 				} else {
 					fmt.Fprintf(&sb, `{\1c%s}`, off)
 				}
