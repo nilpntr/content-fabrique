@@ -1,0 +1,24 @@
+// cf-spike gateway. deploy.sh writes wrangler.jsonc from this file with the account's registry path (kept out of git).
+// Every resource is named cf-spike-*; teardown.sh deletes them all.
+{
+	"$schema": "../../../node_modules/wrangler/config-schema.json",
+	"name": "cf-spike-gateway",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-11-01",
+	"workers_dev": true,
+	"observability": { "enabled": true },
+	"containers": [
+		{
+			"name": "cf-spike-media-job",
+			"class_name": "MediaJob",
+			// Pushed beforehand (from the VPS, which has Docker): wrangler deploy then needs no Docker.
+			"image": "registry.cloudflare.com/${CLOUDFLARE_ACCOUNT_ID}/cf-spike-media:${IMAGE_TAG}",
+			"instance_type": "standard-4",
+			"max_instances": 4,
+			"constraints": { "jurisdiction": "eu" }
+		}
+	],
+	"durable_objects": { "bindings": [{ "name": "MEDIA_JOB", "class_name": "MediaJob" }] },
+	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["MediaJob"] }],
+	"r2_buckets": [{ "binding": "BUCKET", "bucket_name": "cf-spike-media", "jurisdiction": "eu" }]
+}
