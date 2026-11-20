@@ -12,6 +12,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/annotations"
 	"github.com/nilpntr/content-fabrique/internal/api"
 	"github.com/nilpntr/content-fabrique/internal/assets"
+	"github.com/nilpntr/content-fabrique/internal/clipfeedback"
 	"github.com/nilpntr/content-fabrique/internal/creatorstyle"
 	"github.com/nilpntr/content-fabrique/internal/credits"
 	"github.com/nilpntr/content-fabrique/internal/httpapi"
@@ -24,7 +25,7 @@ import (
 // GetLibrarySummary in entitlements.go, and the assets operations come from the embedded *assets.Handler (package assets,
 // which reads the workspace from the Principal through callerOf), and the projects and timeline operations come from the
 // embedded *projects.API (package projects, the same way), the runs operations (start an editor run, read, cancel and answer a
-// run) from the embedded *runapi.Runs, the renders operations from the embedded *renderjobs.RenderAPI, and the annotations operations from the embedded *annotations.CommentAPI. The Clerk webhook is not here: it reads the raw body and the Svix headers
+// run) from the embedded *runapi.Runs, the renders operations from the embedded *renderjobs.RenderAPI, the annotations operations from the embedded *annotations.CommentAPI, and the shot list and clip feedback operations from the embedded *clipfeedback.FeedbackAPI. The Clerk webhook is not here: it reads the raw body and the Svix headers
 // itself (webhook.go), so the spec documents it and the generator leaves it out.
 type apiServer struct {
 	*assets.Handler
@@ -32,6 +33,7 @@ type apiServer struct {
 	*runapi.Runs
 	*renderjobs.RenderAPI
 	*annotations.CommentAPI
+	*clipfeedback.FeedbackAPI
 	*styleAPI
 	ents EntitlementReader
 	// credits reads the credit balance for GET /v1/me; nil leaves it out.
@@ -55,7 +57,8 @@ func newAPIServer(ents EntitlementReader, logger *slog.Logger) *apiServer {
 	// handler when it is given a service).
 	srv := &apiServer{Handler: assets.NewHandler(nil, callerOf, logger), API: projects.NewAPI(nil, callerOf, logger),
 		Runs: runapi.New(nil, callerOf, logger), RenderAPI: renderjobs.NewAPI(nil, callerOf, logger), CommentAPI: annotations.NewAPI(nil, callerOf, logger),
-		styleAPI: &styleAPI{creatorstyle.NewHandler(nil, callerOf, logger)}, ents: ents, list: list, logger: logger}
+		FeedbackAPI: clipfeedback.NewAPI(nil, callerOf, logger),
+		styleAPI:    &styleAPI{creatorstyle.NewHandler(nil, callerOf, logger)}, ents: ents, list: list, logger: logger}
 	if cr, ok := ents.(CreditReader); ok {
 		srv.credits = cr
 	}

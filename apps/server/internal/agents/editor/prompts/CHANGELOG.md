@@ -22,6 +22,16 @@ Rules for changing it:
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
 
+## editor.v2.14 (2026-11-20)
+
+Proof edits and clip feedback (docs/design/proof-edit-v1.md, the creator's rule 15). The file is `editor.v2.14.md`, a patch of v2.13:
+
+- **How you work**, step 7: when the start of the conversation says the creator left clip feedback on earlier proofs, read it with
+  the new `get_clip_feedback` tool before picking the moments, and never play a ruled-out range again. The run context has the line
+  only when there is feedback on the project's clips; `check_edit` gets the `clip_feedback` check, in the report only then too, and
+  `find_moments` leaves out moments inside a ruled-out range.
+- Cassettes re-recorded against the fake transport (the tool list changed). No live run yet.
+
 ## editor.v2.13 (2026-11-20)
 
 Subject-aware reframing, part A (docs/design/ai-video-editor-plan.md, piece 3). The file is `editor.v2.13.md`, a patch of v2.12 with one

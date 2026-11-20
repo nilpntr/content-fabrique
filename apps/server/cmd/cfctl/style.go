@@ -36,7 +36,8 @@ const styleUsage = `Usage:
                       [--title-case upper|lower|as_typed] [--music always|when_added|never] [--pace slower|like_mine|faster]
                       [--chapter-titles off|on] [--title-template '<TOPIC> <N>'] [--ending-hold short|long] [--cut-timing full_reps|mid_rep]
                       [--angle-switches off|on] [--cut-grid free|fixed_2] [--shot-reuse allowed|once] [--text-pattern single_title|story_captions|dialogue|none]
-                      [--text-position top|upper_third|middle|lower_third|auto] [--clear title_case,transitions,...] [flags]
+                      [--text-position top|upper_third|middle|lower_third|auto] [--proof-edits off|on]
+                      [--clear title_case,transitions,...] [flags]
   cfctl style clear   --workspace <wks_... or org_...> [flags]
   cfctl style formats --measures <measures.json>
 
@@ -422,6 +423,7 @@ func printStyle(out io.Writer, st *styleprofile.Style, asJSON, stored bool) {
 		{"pace", r.Pace, r.Sources.Pace}, {"chapter titles", r.ChapterTitles, r.Sources.ChapterTitles}, {"title form", cmp.Or(r.TitleTemplate, "-"), r.Sources.TitleTemplate},
 		{"ending hold", r.EndingHold, r.Sources.EndingHold}, {"cut timing", r.CutTiming, r.Sources.CutTiming}, {"angle switches", r.AngleSwitches, r.Sources.AngleSwitches},
 		{"text pattern", r.TextPattern, r.Sources.TextPattern}, {"text position", r.TextPosition, r.Sources.TextPosition},
+		{"proof edits", r.ProofEdits, r.Sources.ProofEdits},
 	} {
 		_, _ = fmt.Fprintf(out, "  %-15s %-12s %s\n", l.name, l.value, cmp.Or(l.source, "default"))
 	}
@@ -621,6 +623,7 @@ func cmdStyleSet(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 	flags.StringVar(&in.AngleSwitches, "angle-switches", "", "off or on")
 	flags.StringVar(&in.TextPattern, "text-pattern", "", "single_title, story_captions, dialogue or none")
 	flags.StringVar(&in.TextPosition, "text-position", "", "top, upper_third, middle, lower_third or auto")
+	flags.StringVar(&in.ProofEdits, "proof-edits", "", "off or on: show every new edit first as a proof with shot numbers")
 	flags.StringVar(&in.CutGrid, "cut-grid", "", "free or fixed_2 (2 beats a shot, even beats, last shot 4 beats, total a multiple of 4)")
 	flags.StringVar(&in.ShotReuse, "shot-reuse", "", "allowed or once (every shot once)")
 	clearArg := flags.String("clear", "", "settings to give back to the suggestion, the measures or the default, comma separated (title_case,transitions)")

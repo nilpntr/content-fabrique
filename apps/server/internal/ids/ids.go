@@ -36,13 +36,16 @@ const (
 	PrefixLicence    = "lic"
 	PrefixUpload     = "upl"
 	PrefixEvent      = "evt"
+	// PrefixClipFeedback is what the creator said about a shot of a proof edit, stored by clip and source range
+	// (docs/design/proof-edit-v1.md).
+	PrefixClipFeedback = "cfb"
 )
 
 // Prefixes lists every prefix above.
 var Prefixes = []string{
 	PrefixWorkspace, PrefixUser, PrefixAsset, PrefixMoment, PrefixShot, PrefixAnnotation, PrefixTrend, PrefixConcept,
 	PrefixIdea, PrefixProject, PrefixTimeline, PrefixRender, PrefixRun, PrefixExport, PrefixLicence, PrefixUpload,
-	PrefixEvent,
+	PrefixEvent, PrefixClipFeedback,
 }
 
 // ErrInvalid is wrapped by every parse failure, so callers can map it to a 400 or 404 with errors.Is.
@@ -139,6 +142,7 @@ type (
 	timelineKind   struct{}
 	renderKind     struct{}
 	annotationKind struct{}
+	feedbackKind   struct{}
 )
 
 func (workspaceKind) Prefix() string  { return PrefixWorkspace }
@@ -149,6 +153,7 @@ func (projectKind) Prefix() string    { return PrefixProject }
 func (timelineKind) Prefix() string   { return PrefixTimeline }
 func (renderKind) Prefix() string     { return PrefixRender }
 func (annotationKind) Prefix() string { return PrefixAnnotation }
+func (feedbackKind) Prefix() string   { return PrefixClipFeedback }
 
 type (
 	// WorkspaceID is the key of a workspace (wks_...). Every tenant-owned row carries one.
@@ -167,6 +172,8 @@ type (
 	RenderID = ID[renderKind]
 	// AnnotationID is the key of an annotation (ann_...), a comment on a clip, a render or a timeline version.
 	AnnotationID = ID[annotationKind]
+	// ClipFeedbackID is the key of a row of clip feedback (cfb_...), what the creator said about a shot of a proof edit.
+	ClipFeedbackID = ID[feedbackKind]
 )
 
 // ParseWorkspaceID reads a wks_ TypeID.
@@ -192,3 +199,6 @@ func ParseRenderID(s string) (RenderID, error) { return Parse[renderKind](s) }
 
 // ParseAnnotationID reads an ann_ TypeID.
 func ParseAnnotationID(s string) (AnnotationID, error) { return Parse[annotationKind](s) }
+
+// ParseClipFeedbackID reads a cfb_ TypeID.
+func ParseClipFeedbackID(s string) (ClipFeedbackID, error) { return Parse[feedbackKind](s) }

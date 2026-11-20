@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "b5ce5b1735c6de837568ca085e8567c66953bac65b087cd588725b962595e0e4",
-  "recorded_at": "2026-11-20T15:33:00Z",
+  "key": "a74ebc3ccc3d3bd1aa0f33b688ca618bb714410ece0d065ff000788de2df4a9d",
+  "recorded_at": "2026-11-20T17:15:19Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,
@@ -107,18 +107,6 @@
         "blocks": [
           "tool_result"
         ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
       }
     ],
     "tools": [
@@ -133,6 +121,7 @@
       "list_motion_templates",
       "get_timeline",
       "get_comments",
+      "get_clip_feedback",
       "edit_timeline",
       "match_exposure",
       "render_preview",
@@ -174,11 +163,6 @@
         "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
         "media_type": "image/jpeg",
         "bytes": 9284
-      },
-      {
-        "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
-        "media_type": "image/jpeg",
-        "bytes": 9284
       }
     ]
   },
@@ -189,18 +173,18 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_9",
-        "name": "check_edit",
+        "id": "toolu_ed_8",
+        "name": "render_preview",
         "input": {}
       }
     ],
     "usage": {
-      "input_tokens": 420,
-      "cache_write_tokens": 700,
+      "input_tokens": 400,
+      "cache_write_tokens": 600,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 15600,
-      "output_tokens": 38
+      "cache_read_tokens": 15000,
+      "output_tokens": 40
     }
   },
-  "count_tokens": 16720
+  "count_tokens": 16000
 }

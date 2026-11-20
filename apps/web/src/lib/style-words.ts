@@ -163,6 +163,15 @@ export const SETTINGS: readonly ChoiceWords[] = [
       { value: "faster", label: "Faster" },
     ],
   },
+  {
+    key: "proof_edits",
+    label: "Shot numbers first",
+    explain: "Show every new version with a small number on each shot, so you can say \"never use shot 5 again\". Then make it final without the numbers.",
+    options: [
+      { value: "off", label: "Off" },
+      { value: "on", label: "On" },
+    ],
+  },
 ];
 
 /** A few title colours to pick from, and the creator's own. */

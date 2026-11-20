@@ -416,6 +416,9 @@ func (r *run) execute(ctx context.Context) (finished, error) {
 	if err != nil {
 		return finished{}, fileErr(ReasonInvalidTimeline, err)
 	}
+	if r.render.Proof && profile.Name == render.ProfilePreview { // the row's check keeps proofs to previews
+		profile = render.Proof
+	}
 	profile.MotionFallback = r.p.cfg.MotionFallback
 	inputs, err := st.ListRenderInputs(ctx, r.ws, r.render.ProjectID)
 	if err != nil {

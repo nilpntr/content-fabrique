@@ -16,6 +16,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/analysis"
+	"github.com/nilpntr/content-fabrique/internal/clipfeedback"
 	"github.com/nilpntr/content-fabrique/internal/hooklab"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/spend"
@@ -195,6 +196,15 @@ func CheckVersionWith(ctx context.Context, projects Projects, src AnalysisSource
 			return Report{}, err
 		}
 		in.Speech = sp
+	}
+	// What the creator ruled out on earlier proofs, for clip_feedback: read when the source can (a source that cannot has none). A read
+	// that fails is an error: the check must not quietly pass an edit that plays a ruled-out shot.
+	if rd, ok := src.(clipfeedback.Reader); ok {
+		rules, err := clipfeedback.LoadRules(ctx, rd, ws, clipfeedback.ShotAssets(timeline.Shots(spec)))
+		if err != nil {
+			return Report{}, err
+		}
+		in.ClipFeedback = rules
 	}
 	// Where the person is in the clips, for the title checks: read from the quick look when the source can (a source that cannot has none).
 	if rd, ok := src.(subject.Reader); ok {

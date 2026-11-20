@@ -53,6 +53,8 @@ sql:
             go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "AnnotationID" }
           - column: "annotations.parent_id"
             go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "AnnotationID" }
+          - column: "clip_feedback.id"
+            go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "ClipFeedbackID" }
           - column: "projects.created_by"
             go_type: { import: "github.com/nilpntr/content-fabrique/internal/ids", type: "UserID" }
           - column: "uploads.id"

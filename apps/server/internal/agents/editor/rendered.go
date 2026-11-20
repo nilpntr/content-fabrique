@@ -63,16 +63,17 @@ const (
 	renderStatsTime = 60 * time.Second
 )
 
-// previewOf is the newest ready preview render of a version that still has its files, or ErrNoPreview.
+// previewOf is the newest ready preview render of a version that still has its files, a plain one before a proof (whose shot numbers
+// are not part of the edit), or ErrNoPreview.
 func (m *RenderMeasurer) previewOf(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, version int) (*store.Render, error) {
 	renders, err := m.Store.ListRenders(ctx, ws, project, store.RenderFilter{Version: version, Profile: store.ProfilePreview}, 5)
 	if err != nil {
 		return nil, fmt.Errorf("editor: list renders: %w", err)
 	}
-	for i := range renders { // newest first
-		if renders[i].Status == store.RenderReady && renders[i].Mp4Key != nil && renders[i].ObjectsPurgedAt == nil {
-			return &renders[i], nil
-		}
+	if r := store.PlainFirst(renders, func(r store.Render) bool {
+		return r.Status == store.RenderReady && r.Mp4Key != nil && r.ObjectsPurgedAt == nil
+	}); r != nil {
+		return r, nil
 	}
 	return nil, ErrNoPreview
 }

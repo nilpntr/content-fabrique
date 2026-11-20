@@ -11,6 +11,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/annotations"
 	"github.com/nilpntr/content-fabrique/internal/assets"
+	"github.com/nilpntr/content-fabrique/internal/clipfeedback"
 	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/creatorstyle"
 	"github.com/nilpntr/content-fabrique/internal/credits"
@@ -133,6 +134,11 @@ func Mount(mux *http.ServeMux, d Deps) (*V1, error) {
 		return nil, err
 	}
 	srv.CommentAPI = annotations.NewAPI(annotationsSvc, callerOf, logger)
+	feedbackSvc, err := clipfeedback.NewService(d.Store, logger)
+	if err != nil {
+		return nil, err
+	}
+	srv.FeedbackAPI = clipfeedback.NewAPI(feedbackSvc, callerOf, logger)
 	srv.styleAPI = &styleAPI{creatorstyle.NewHandler(d.Style, callerOf, logger)}
 	for pattern, h := range apiRoutes(srv, logger) {
 		if open[pattern] {

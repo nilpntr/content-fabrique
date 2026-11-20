@@ -70,7 +70,7 @@ func apiFile(f File) api.RenderFile {
 func (h *RenderAPI) renderOf(ctx context.Context, r Render, withFiles bool) (api.Render, *Error) {
 	out := api.Render{
 		Id: r.ID.String(), ProjectId: r.ProjectID.String(), TimelineVersion: int(r.TimelineVersion),
-		Profile: api.RenderProfile(r.Profile), Status: api.RenderStatus(r.Status), Progress: int(r.Progress), Stage: r.Stage,
+		Profile: api.RenderProfile(r.Profile), Proof: r.Proof, Status: api.RenderStatus(r.Status), Progress: int(r.Progress), Stage: r.Stage,
 		DurationMs: r.DurationMs, Width: ptrInt(r.Width), Height: ptrInt(r.Height), SizeBytes: r.SizeBytes,
 		SoundCues: []api.SoundCue{}, FailureReason: r.FailureReason,
 		RequestedBy: api.RequestedBy{Kind: api.AuthorKind(r.RequestedByKind), Id: r.RequestedByID},
@@ -135,7 +135,13 @@ func (h *RenderAPI) CreateRender(ctx context.Context, req api.CreateRenderReques
 		case req.Body == nil:
 			e = invalid("a request body is required")
 		default:
-			r, created, e = h.svc.Request(ctx, UserCaller(who.Workspace, who.User), project, req.Body.Version, string(req.Body.Profile))
+			want := ProofAuto
+			if p := req.Body.Proof; p != nil && *p {
+				want = ProofOn
+			} else if p != nil {
+				want = ProofOff
+			}
+			r, created, e = h.svc.RequestWith(ctx, UserCaller(who.Workspace, who.User), project, req.Body.Version, string(req.Body.Profile), want)
 		}
 	}
 	var out api.Render
@@ -268,4 +274,49 @@ func (h *RenderAPI) GetRender(ctx context.Context, req api.GetRenderRequestObjec
 		return nil, undocumented("getRender", e)
 	}
 	return api.GetRender200JSONResponse(out), nil
+}
+
+// MakeRenderFinal is POST /v1/renders/{id}/final: "make it final" on a proof.
+func (h *RenderAPI) MakeRenderFinal(ctx context.Context, req api.MakeRenderFinalRequestObject) (api.MakeRenderFinalResponseObject, error) {
+	who, e := h.begin(ctx, true)
+	var (
+		r       Render
+		created bool
+		out     api.Render
+	)
+	if e == nil {
+		if id, err := ids.ParseRenderID(req.Id); err != nil {
+			e = invalid("the render id is not valid")
+		} else {
+			r, created, e = h.svc.MakeFinal(ctx, UserCaller(who.Workspace, who.User), id)
+		}
+	}
+	if e == nil {
+		out, e = h.renderOf(ctx, r, true)
+	}
+	if e != nil {
+		switch e.Status {
+		case 400:
+			return api.MakeRenderFinal400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body(e))}, nil
+		case 401:
+			return api.MakeRenderFinal401JSONResponse{UnauthenticatedJSONResponse: api.UnauthenticatedJSONResponse(body(e))}, nil
+		case 403:
+			return api.MakeRenderFinal403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(body(e))}, nil
+		case 404:
+			return api.MakeRenderFinal404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(body(e))}, nil
+		case 422:
+			return api.MakeRenderFinal422JSONResponse(body(e)), nil
+		case 429:
+			return api.MakeRenderFinal429JSONResponse(body(e)), nil
+		case 500:
+			return api.MakeRenderFinal500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(body(e))}, nil
+		case 503:
+			return api.MakeRenderFinal503JSONResponse{UnavailableJSONResponse: api.UnavailableJSONResponse(body(e))}, nil
+		}
+		return nil, undocumented("makeRenderFinal", e)
+	}
+	if created {
+		return api.MakeRenderFinal202JSONResponse(out), nil
+	}
+	return api.MakeRenderFinal200JSONResponse(out), nil
 }

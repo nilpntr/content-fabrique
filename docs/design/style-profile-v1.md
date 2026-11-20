@@ -389,6 +389,9 @@ never a line of theirs) and dialogue. Checks for a style told in lines, and only
 **Verified** with `cfctl style analyze --no-store --workspace` (the reads metered to a local workspace; nothing stored), on a caption
 creator's five videos and the first creator's ten (local only, never committed): see the PR.
 
+**Setting** `proof_edits` (off, on; [proof edits v1](proof-edit-v1.md)): only the creator's own, off by default; no suggestion or
+measure turns it on. With it on, every preview is a proof with shot numbers, and feedback by shot is kept by clip and second.
+
 **Changing one setting.** `PUT /v1/style` replaces all the creator's settings (a setting it leaves out is not set); the web app always
 sends the complete set (`withMySettings`, tested in `pages/style.test.tsx`). `PATCH /v1/style` changes only the settings it is given and
 clears the ones named in `clear`, in one transaction under the workspace's style lock; `cfctl style set` uses it (a live

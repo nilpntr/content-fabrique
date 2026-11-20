@@ -25,6 +25,7 @@ Commands:
   assets     import local media files into a workspace's library, development only (cfctl assets help)
   project    create a project for the editor, show a project's versions, development only (cfctl project help)
   render     render a timeline spec with ffmpeg, for local manual runs (cfctl render --help)
+  proof      proof edits: a version's shot list, feedback by shot kept by clip and second, development only (cfctl proof help)
   audio      listen to a rendered video: loudness, silence, sync, density, defects, with no model, development only (cfctl audio help)
   music      analyse a song (tempo, beats, drop), extract the song of a video, a synthetic test track, development only (cfctl music help)
   sfx        gallery: render every sound effect to a web page to listen to, development only (cfctl sfx help)
@@ -74,6 +75,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdProject(args[1:], stdout, stderr, os.LookupEnv, defaultAgentDeps())
 	case "render":
 		return cmdRender(args[1:], stdout, stderr)
+	case "proof":
+		return cmdProof(args[1:], stdout, stderr, os.LookupEnv, defaultAgentDeps())
 	case "audio":
 		return cmdAudio(args[1:], stdout, stderr, os.LookupEnv, defaultAgentDeps())
 	case "music":

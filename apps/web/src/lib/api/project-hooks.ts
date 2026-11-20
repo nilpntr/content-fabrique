@@ -8,6 +8,7 @@ import {
   cancelRun,
   createProject,
   createRender,
+  deleteClipFeedback,
   fetchAssetTranscript,
   fetchProject,
   fetchProjects,
@@ -15,8 +16,12 @@ import {
   fetchRenders,
   fetchRun,
   fetchRunArtifacts,
+  fetchShotList,
   fetchTimelineVersion,
   fetchTimelineVersions,
+  type GiveClipFeedbackRequest,
+  giveClipFeedback,
+  makeRenderFinal,
   type Render,
   RUN_EVENTS_PAGE,
   type Run,
@@ -34,7 +39,7 @@ import { useApiClient } from "@/lib/api/provider";
 import { parseTimeMap } from "@/components/project/review-data";
 import type { TimeMapEntry } from "@/components/editor/types";
 import { URL_REFRESH_MIN_MS, useRefreshThrottle } from "@/lib/refresh-throttle";
-import { ANNOTATIONS_QUERY_KEY, ME_QUERY_KEY, PROJECT_QUERY_KEY, PROJECTS_QUERY_KEY, RENDER_QUERY_KEY, RENDERS_QUERY_KEY, RUN_ARTIFACTS_QUERY_KEY, RUN_QUERY_KEY, TIMELINES_QUERY_KEY, TRANSCRIPT_QUERY_KEY } from "@/lib/query-client";
+import { ANNOTATIONS_QUERY_KEY, ME_QUERY_KEY, PROJECT_QUERY_KEY, PROJECTS_QUERY_KEY, RENDER_QUERY_KEY, RENDERS_QUERY_KEY, RUN_ARTIFACTS_QUERY_KEY, RUN_QUERY_KEY, SHOTS_QUERY_KEY, TIMELINES_QUERY_KEY, TRANSCRIPT_QUERY_KEY } from "@/lib/query-client";
 
 /**
  * The hooks of projects, runs and renders. Keys are `[prefix, userId, orgId, ...ids]`, like the library's, so a workspace
@@ -362,6 +367,10 @@ export function pickRender(renders: readonly Render[]): Render | undefined {
   return renders.find((render) => render.status === "ready") ?? renders.find((render) => render.status === "queued" || render.status === "rendering") ?? renders[0];
 }
 
+/** The previews that count: only proofs, only plain ones, or (undefined) all of them. */
+export const previewsOf = (renders: readonly Render[], proof: boolean | undefined): Render[] =>
+  renders.filter((render) => proof === undefined || Boolean(render.proof) === proof);
+
 /** An answer that means the API has no such endpoint. */
 const isMissingEndpoint = (error: unknown) => error instanceof ApiError && (error.status === 404 || error.status === 405 || error.status === 501);
 
@@ -370,8 +379,11 @@ const isMissingEndpoint = (error: unknown) => error instanceof ApiError && (erro
  * (polled every 2 s while it works; its presigned URLs are renewed shortly before they expire). `request` queues one when
  * there is none (or the last failed). `refreshUrls` fetches the render again for fresh URLs, at most every 10 s: call it
  * when the video fails to load.
+ *
+ * `proof` is the creator's proof_edits setting once it is known: then only proofs (with shot numbers) or only plain previews count,
+ * and `request` asks for that kind, so the video next to the shot list always has the numbers. Undefined: any preview.
  */
-export function usePreviewRender(projectId: string, version: number | undefined) {
+export function usePreviewRender(projectId: string, version: number | undefined, proof?: boolean) {
   const { userId, orgId, ready } = useScope();
   const getClient = useApiClient();
   const queryClient = useQueryClient();
@@ -382,7 +394,7 @@ export function usePreviewRender(projectId: string, version: number | undefined)
     enabled: ready && version !== undefined,
     retry: (count, error) => !isMissingEndpoint(error) && retryUnlessClientError(count, error),
   });
-  const chosen = useMemo(() => pickRender(list.data ?? []), [list.data]);
+  const chosen = useMemo(() => pickRender(previewsOf(list.data ?? [], proof)), [list.data, proof]);
   const detailKey = [RENDER_QUERY_KEY, userId, orgId, chosen?.id];
   const detail = useQuery({
     queryKey: detailKey,
@@ -403,7 +415,7 @@ export function usePreviewRender(projectId: string, version: number | undefined)
 
   // The variable is the version asked for, so that the state below is the one of the version on screen, not of another that was asked for a moment ago.
   const request = useMutation({
-    mutationFn: (requested: number) => createRender(getClient(), projectId, requested, "preview"),
+    mutationFn: (requested: number) => createRender(getClient(), projectId, requested, "preview", proof),
     onSuccess: (render) => {
       // The render says which version it is of; that may no longer be the one on screen.
       const key = [RENDERS_QUERY_KEY, userId, orgId, projectId, render.timeline_version];
@@ -483,8 +495,11 @@ export type FinalRenderState =
  * The final video of a version (`profile: final`, full size, from the originals): found through the project's render list, followed
  * through GET /v1/renders/{id} every 2 s while it is made. `requestRender` asks for one. An export costs no credits; the API refuses
  * one for work that was never paid for (`edit_not_charged`, `version_not_charged`), and `requestError` then carries why.
+ *
+ * `fromProof` is the id of the version's proof when the creator reviews proofs: then `requestRender` is "make it final" on that proof
+ * (POST /v1/renders/{id}/final), the same edit without the shot numbers.
  */
-export function useFinalRender(projectId: string, version: number | undefined) {
+export function useFinalRender(projectId: string, version: number | undefined, fromProof?: string) {
   const { userId, orgId, ready } = useScope();
   const getClient = useApiClient();
   const queryClient = useQueryClient();
@@ -504,7 +519,7 @@ export function useFinalRender(projectId: string, version: number | undefined) {
     refetchInterval: (q) => (q.state.data?.status === "queued" || q.state.data?.status === "rendering" ? 2000 : false),
   });
   const request = useMutation({
-    mutationFn: (requested: number) => createRender(getClient(), projectId, requested, "final"),
+    mutationFn: (requested: number) => (fromProof ? makeRenderFinal(getClient(), fromProof) : createRender(getClient(), projectId, requested, "final")),
     onSuccess: (render) => {
       queryClient.setQueryData([RENDER_QUERY_KEY, userId, orgId, render.id], render);
       queryClient.setQueryData<Render[]>([RENDERS_QUERY_KEY, userId, orgId, projectId, render.timeline_version, "final"], (old) => [render, ...(old ?? []).filter((candidate) => candidate.id !== render.id)]);
@@ -528,5 +543,33 @@ export function useFinalRender(projectId: string, version: number | undefined) {
     if (version !== undefined) mutate(version);
   }, [mutate, version]);
   return { state, requestRender, requesting: request.isPending && asked, requestError: request.isError && asked ? request.error : undefined };
+}
+
+// ── Proof edits and clip feedback ───────────────────────────────────────────
+
+/** The shot list of a version: the numbers its proof shows, each shot's clip and second, and the feedback already given on it. */
+export function useShotList(projectId: string, version: number | undefined, { enabled = true }: { enabled?: boolean } = {}) {
+  const { userId, orgId, ready } = useScope();
+  const getClient = useApiClient();
+  return useQuery({
+    queryKey: [SHOTS_QUERY_KEY, userId, orgId, projectId, version],
+    queryFn: ({ signal }) => fetchShotList(getClient(), projectId, version as number, signal),
+    enabled: enabled && ready && version !== undefined,
+    retry: retryUnlessClientError,
+  });
+}
+
+/**
+ * Feedback on a shot ("never use it again", "start it later") and taking it back. Feedback holds for the clip in every project, so
+ * either answer changes the shot list of every version, of any project, that plays that clip: all shot lists are fetched again.
+ */
+export function useClipFeedbackActions() {
+  const { userId, orgId } = useScope();
+  const getClient = useApiClient();
+  const queryClient = useQueryClient();
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: [SHOTS_QUERY_KEY, userId, orgId] });
+  const give = useMutation({ mutationFn: (body: GiveClipFeedbackRequest) => giveClipFeedback(getClient(), body), onSuccess: refresh });
+  const remove = useMutation({ mutationFn: (id: string) => deleteClipFeedback(getClient(), id), onSuccess: refresh });
+  return { give, remove };
 }
 

@@ -92,6 +92,7 @@ var settingValues = map[string][]string{
 	"shot_reuse":     {ReuseAllowed, ReuseOnce},
 	"text_pattern":   TextPatterns,
 	"text_position":  {TextTop, TextUpperThird, TextMiddle, TextLowerThird, PositionAuto},
+	"proof_edits":    {LevelOff, LevelOn},
 }
 
 // SettingValues returns the allowed values of a setting (nil for title_colour, a hex code, and for an unknown name).
@@ -122,6 +123,10 @@ type Settings struct {
 	// lines) or none; TextPosition where the lines of story captions and dialogue sit (top, upper_third, middle, lower_third or auto).
 	TextPattern  string `json:"text_pattern,omitempty"`
 	TextPosition string `json:"text_position,omitempty"`
+	// ProofEdits is whether every new edit and every revision is first shown as a proof: the preview with a number on each shot and a
+	// shot list, so the creator can give feedback by shot ("never use shot 5 again"), then made final without the numbers
+	// (docs/design/proof-edit-v1.md). Only the creator turns it on; it is off for everyone else.
+	ProofEdits string `json:"proof_edits,omitempty"`
 	// CutGrid and ShotReuse are the personal rhythm and uniqueness rules (CutGridFixed2, ReuseOnce); empty or free/allowed leaves them off.
 	CutGrid   string `json:"cut_grid,omitempty"`
 	ShotReuse string `json:"shot_reuse,omitempty"`
@@ -140,6 +145,7 @@ func (s *Settings) fields() []struct {
 		{"title_colour", &s.TitleColour}, {"title_position", &s.TitlePosition}, {"title_case", &s.TitleCase}, {"music", &s.Music}, {"pace", &s.Pace},
 		{"chapter_titles", &s.ChapterTitles}, {"title_template", &s.TitleTemplate}, {"ending_hold", &s.EndingHold}, {"cut_timing", &s.CutTiming},
 		{"angle_switches", &s.AngleSwitches}, {"text_pattern", &s.TextPattern}, {"text_position", &s.TextPosition}, {"cut_grid", &s.CutGrid}, {"shot_reuse", &s.ShotReuse},
+		{"proof_edits", &s.ProofEdits},
 	}
 }
 
@@ -415,8 +421,14 @@ func Resolve(p *Profile, suggested *Settings, mine Settings, runVibe string) Res
 	}
 	choose(&r.TextPattern, &r.Sources.TextPattern, cand{mine.TextPattern, SourceYou}, cand{mPattern, SourceMeasured}, cand{PatternSingleTitle, SourceDefault})
 	choose(&r.TextPosition, &r.Sources.TextPosition, cand{mine.TextPosition, SourceYou}, cand{mTextPos, SourceMeasured}, cand{PositionAuto, SourceDefault})
+
+	// Proof edits: only ever the creator's own choice (nothing is measured or suggested about how they review), off by default.
+	choose(&r.ProofEdits, &r.Sources.ProofEdits, cand{mine.ProofEdits, SourceYou}, cand{LevelOff, SourceDefault})
 	return r
 }
+
+// ProofsOn says the creator asked for proof edits (Settings.ProofEdits on).
+func (r Resolved) ProofsOn() bool { return r.ProofEdits == LevelOn }
 
 // Lines says the effective style tells its text in lines over the shots: story captions or dialogue.
 func (r Resolved) Lines() bool {

@@ -35,10 +35,11 @@ type Subtitles struct {
 	FontsDir string   `json:"fonts_dir"`
 	Fonts    []string `json:"fonts"`
 	ASS      string   `json:"ass"`
-	// TextEvents, CaptionEvents and Watermark count the events by kind.
+	// TextEvents, CaptionEvents, Watermark and ShotNumbers count the events by kind.
 	TextEvents    int  `json:"text_events"`
 	CaptionEvents int  `json:"caption_events"`
 	Watermark     bool `json:"watermark"`
+	ShotNumbers   int  `json:"shot_numbers,omitempty"`
 }
 
 // event is one Dialogue line before it is written.
@@ -56,7 +57,7 @@ type builder struct {
 	total     int64
 	used      map[string]style.Style
 	events    []event
-	counts    struct{ text, caption int }
+	counts    struct{ text, caption, shotNumbers int }
 	watermark bool
 	warnings  []Warning
 }
@@ -69,11 +70,12 @@ func newBuilder(w, h, fps int, total int64) *builder {
 	return &builder{w: w, h: h, fps: fps, total: total, used: map[string]style.Style{}}
 }
 
-// Layers: the watermark above the text above the captions.
+// Layers: the shot numbers of a proof above the watermark above the text above the captions.
 const (
-	layerCaption   = 0
-	layerText      = 1
-	layerWatermark = 2
+	layerCaption    = 0
+	layerText       = 1
+	layerWatermark  = 2
+	layerShotNumber = 3
 )
 
 func (b *builder) add(layer int, start, end int64, st style.Style, text string) {
@@ -176,9 +178,12 @@ func (b *builder) addText(layer int, start, end int64, lay style.Layout, zone st
 		fmt.Fprintf(&tags, `\fad(%d,%d)`, fadeIn, fadeOut)
 	}
 	b.add(layer, start, end, st, "{"+tags.String()+"}"+body)
-	if layer == layerWatermark {
+	switch layer {
+	case layerWatermark:
 		b.watermark = true
-	} else {
+	case layerShotNumber:
+		b.counts.shotNumbers++
+	default:
 		b.counts.text++
 	}
 }
@@ -468,7 +473,7 @@ func (b *builder) subtitles() *Subtitles {
 	sort.Strings(files)
 	return &Subtitles{
 		File: subtitleFile, FontsDir: fontsDirName, Fonts: files, ASS: b.render(),
-		TextEvents: b.counts.text, CaptionEvents: b.counts.caption, Watermark: b.watermark,
+		TextEvents: b.counts.text, CaptionEvents: b.counts.caption, Watermark: b.watermark, ShotNumbers: b.counts.shotNumbers,
 	}
 }
 

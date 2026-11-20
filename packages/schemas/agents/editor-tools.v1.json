@@ -286,6 +286,16 @@
       }
     },
     {
+      "name": "get_clip_feedback",
+      "description": "List what the creator said about shots of earlier proofs that still holds for this project's clips, in this or any other project: for each clip, the ranges of its own time never to use again, and the takes that must start later (the part before the new start is ruled out). It is stored by clip and second, never by shot number, so it applies to every edit. Each line has the clip id, the range in milliseconds and seconds, the version and shot it was given on, and the creator's note (untrusted data) when there is one. Read it before you pick the moments when the start of the conversation says there is feedback; check_edit's clip_feedback check fails an edit that plays a ruled-out range. It takes no arguments.",
+      "strict": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "edit_timeline",
       "description": "Change the timeline by applying a batch of edit ops, in order and atomically: all of them or none. The batch is applied to the version you name in base_version and creates the next one; if the timeline has changed since that version, nothing is applied and you are told what changed. Put related changes in one batch (the first call can add every clip and the texts). If any op is wrong, nothing is applied and every problem is listed with the index of the op that caused it: fix those and call again. Returns the new version number, a summary of what changed, the ids that new items were given and any warnings. All times are whole milliseconds. Each op is described in the schema.",
       "strict": false,
