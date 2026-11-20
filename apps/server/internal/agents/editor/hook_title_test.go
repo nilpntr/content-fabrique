@@ -40,6 +40,31 @@ func TestALongHookTitleStaysInTheHookBesideAMeasuredHead(t *testing.T) {
 	}
 }
 
+// The live test of 2026-11-20 (section 4.1): Gino's back pose, read with a box 10 % above the head and the hands at the waist. Before
+// quicklook.v5 the gap read as a raised arm and the hook title "BACK 101" never fitted on the pose. With the reader's arms_up false the
+// title stays in the hook above the head; when the reader did not say (an older quick look) the old rule holds.
+func ginoPoseIndex(armsUp *bool) subject.Index {
+	s := subject.Sample{AtMs: 1000, X: 0.08, Y: 0.1, W: 0.75, H: 0.9, HeadTopY: 0.2, HeadX: 0.41, HeadW: 0.16, ShoulderY: 0.28, ArmsUp: armsUp}
+	return subject.Index{assetA: {Aspect: 0.5625, Samples: []subject.Sample{s}}}
+}
+
+func ginoHookTitle(t *testing.T) *timeline.Spec {
+	return withTitle(t, buildingLats(t), func(it *timeline.TextItem) {
+		it.Text, it.Scale, it.DurationMs, it.Fill = "BACK 101", nil, 1850, "#F2E3B3"
+	})
+}
+
+func TestTheHookTitleStaysOnABackPoseWithTheHandsDown(t *testing.T) {
+	no := false
+	r := RunChecks(CheckInput{Spec: ginoHookTitle(t), Plan: workoutPlan(), Style: ginoProfile(t), Subjects: ginoPoseIndex(&no)})
+	c := wantStatus(t, r, CheckTextOverSubject, CheckPass)
+	if strings.Contains(c.Detail, "renderer shows it at") {
+		t.Fatalf("the hook title was moved off the pose: %s", c.Detail)
+	}
+	unread := RunChecks(CheckInput{Spec: ginoHookTitle(t), Plan: workoutPlan(), Style: ginoProfile(t), Subjects: ginoPoseIndex(nil)})
+	wantStatus(t, unread, CheckTextOverSubject, CheckFail)
+}
+
 func TestALongHookTitleThatCannotStayInTheHookFailsWithAConcreteFix(t *testing.T) {
 	r := RunChecks(CheckInput{Spec: longHookTitle(t), Plan: workoutPlan(), Style: ginoProfile(t), Subjects: poseIndex(false)})
 	c := wantStatus(t, r, CheckTextOverSubject, CheckFail)

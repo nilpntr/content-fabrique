@@ -1,4 +1,4 @@
-# Playbook: workout and fitness (workout.v9)
+# Playbook: workout and fitness (workout.v10)
 
 You chose this playbook because the footage is training: lifts, sets, a pose, a transformation. Target 15 to 35 seconds.
 
@@ -8,8 +8,9 @@ You chose this playbook because the footage is training: lifts, sets, a pose, a 
 
 **When the creator's settings say otherwise.** The settings list in the prompt wins over this playbook, and this is the one place where it does. Where a setting below is on, the lines it names in Rhythm, Energy and Ending do not apply:
 - Camera motion off: no living camera, no punch-in, no push, no speed ramp and no motion on the hook or the ending; the cuts on the beat are the energy. Transitions off: every cut is hard. Text animation off: every text just appears.
-- Cut grid fixed_2: every shot is 2 beats, every cut sits on an even beat (counted from the first shot), the last shot is 4 beats and the total is a multiple of 4; a shorter video is better than a broken rhythm. Equal shot lengths in a row are the rhythm: ignore "vary the length", "never more than two shots of the same length in a row", "the cuts speed up" and the pace targets for shot length.
-- Shot reuse once: every moment of the footage is used once. No source range twice, and a tripod clip (static camera) gives one shot. Ignore "loop back to the same frame the video opened on", which shows a moment twice; end on a different, quiet shot.
+- Cut grid fixed_2: every cut sits on an even beat (counted from the first shot), so every shot is an even number of beats: 2 for a b-roll shot or a pose, and a rep may be held 4, 6 or 8 beats so that its whole lift is in the shot. The last shot is 4 beats and the total is a multiple of 4; a shorter video is better than a broken rhythm. Plan the shot list in those beats before you edit. Equal shot lengths in a row are the rhythm: ignore "vary the length", "never more than two shots of the same length in a row", "the cuts speed up" and the pace targets for shot length.
+- Shot reuse once: every moment of the footage is used once. No source range twice, and a tripod clip (static camera) gives one shot. With few clips, hold each rep longer (4, 6 or 8 beats) instead of coming back to a clip, or make the video shorter. Ignore "loop back to the same frame the video opened on", which shows a moment twice; end on a different, quiet shot.
+- These two are the creator's rules, not advice: beat_grid_fixed and shot_reused in check_edit must pass before you finish, and finish is refused while they fail and there is room to fix them.
 
 **Rhythm.**
 - Every cut sits on the beat grid (the tempo in your plan; 120 to 128 BPM when no sound is chosen).

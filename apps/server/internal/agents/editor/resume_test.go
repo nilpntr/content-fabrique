@@ -177,7 +177,7 @@ func TestBudgetNoteAndGracefulEnd(t *testing.T) {
 
 	// The same after a change of worker: the preview and the failed checks are in the events, so the note still names them.
 	r.newWorker()
-	if v, failed := r.deps.previews.lastCheck(r.run.ID); v != 0 || failed != nil {
+	if c := r.deps.previews.lastCheck(r.run.ID); c.version != 0 || c.failed != nil {
 		t.Fatal("the last check is still in memory")
 	}
 	out, ok = ag.OnLimit(ctx, r.rc, runtime.LimitWallClock)

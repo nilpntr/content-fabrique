@@ -105,12 +105,12 @@ func TestFirstEditOnOpusShrinksCallsAndFinishesAtTheBudget(t *testing.T) {
 	t.Logf("max_tokens sent: %v; cost %d of %d; %d calls", sent, r.CostMicros, r.BudgetMicros, len(sent))
 }
 
-// A $0.32 revision on Opus (the `revision` entry: 12,000 tokens, a quarter of what the editor entry reserves... half): it makes the plan,
-// the edit and a check, the calls are cut to fit, and the cap holds.
-func TestRevisionOnOpusCompletesAPlanAnEditAndACheck(t *testing.T) {
+// A $0.32 revision on v1-start (the `revision` entry: 12,000 tokens, half of what the editor entry reserves, on Sonnet 5.5 since the live
+// test of 2026-11-20, where an Opus revision could not pay for its first call): it makes the plan, the edit and a check, and the cap holds.
+func TestRevisionOnV1StartCompletesAPlanAnEditAndACheck(t *testing.T) {
 	x, api := budgetRun(t, true, 1)
 	r := x.get()
-	if r.BudgetMicros != 320_000 || r.MaxTokens != 12_000 || r.Model != "claude-opus-5-5" || r.Stage != "editor" {
+	if r.BudgetMicros != 320_000 || r.MaxTokens != 12_000 || r.Model != "claude-sonnet-5-5" || r.Stage != "editor" {
 		t.Fatalf("run: budget %d, max_tokens %d, model %s, stage %s; want the revision entry under the editor stage", r.BudgetMicros, r.MaxTokens, r.Model, r.Stage)
 	}
 	if r.Status != store.AgentSucceeded {
@@ -123,13 +123,8 @@ func TestRevisionOnOpusCompletesAPlanAnEditAndACheck(t *testing.T) {
 	if sent[0] > 12_000 {
 		t.Errorf("the first call asked for %d tokens, over the revision entry's 12,000", sent[0])
 	}
-	shortened := false
-	for _, mt := range sent {
-		shortened = shortened || mt < 12_000
-	}
-	if !shortened {
-		t.Errorf("no call was shortened: %v", sent)
-	}
+	// On Sonnet the revision's budget pays for full-size calls on this small project (on Opus they were cut to fit, and on a real five-clip
+	// project the first call did not fit at all; TestEveryEditCanStartOnItsPlanBudget holds that).
 	if x.artifacts(PlanArtifact) == 0 || x.artifacts(CheckArtifact) == 0 {
 		t.Fatalf("plans %d, checks %d: the revision did not get to a plan and a check", x.artifacts(PlanArtifact), x.artifacts(CheckArtifact))
 	}

@@ -55,6 +55,11 @@ type Sample struct {
 	HeadX     float64 `json:"head_x,omitempty"`
 	HeadW     float64 `json:"head_w,omitempty"`
 	ShoulderY float64 `json:"shoulder_y,omitempty"`
+	// ArmsUp says whether a hand or an arm is raised above the top of the head (quicklook.v5). nil means not read (an older quick look):
+	// then a box that starts clearly above the head is taken for a raised arm, as before. A reader pads its box, and a box 10 % above
+	// the head of a back pose with the hands at the waist made the band above the head look like an arm, so no title ever fitted on the
+	// pose (live test 2026-11-20, section 4.1); the reader's own answer settles it.
+	ArmsUp *bool `json:"arms_up,omitempty"`
 }
 
 // Track is the subject of a clip: the aspect of the frames the fractions refer to (width over height) and the samples, by time.
@@ -229,11 +234,24 @@ func (s Sample) Head() (x0, y0, x1, y1 float64) {
 // count as a raised arm or hand: a model's box starts a little above the hair, and that is not a body part.
 const raisedAbove = 0.03
 
+// raised says a hand or an arm is above the head: the reader said so (ArmsUp), or, when it was not asked, the box starts clearly above
+// the head.
+func (s Sample) raised() bool {
+	if s.ArmsUp != nil {
+		return *s.ArmsUp
+	}
+	return s.HeadTopY-s.Y > raisedAbove
+}
+
+// ArmsGuessed says whether the sample's box starts clearly above the head and the reader was not asked whether that is a raised arm (a
+// quick look before quicklook.v5): the gap is then taken for one, which may be only the reader's padding.
+func (s Sample) ArmsGuessed() bool { return s.ArmsUp == nil && s.HeadTopY-s.Y > raisedAbove }
+
 // Body is the whole person as a box of fractions: the subject box, from the top of the head down, or from its own top when a raised arm or
 // hand is clearly above the head. It is the part a title should not cover either.
 func (s Sample) Body() (x0, y0, x1, y1 float64) {
 	top := s.HeadTopY
-	if s.HeadTopY-s.Y > raisedAbove {
+	if s.raised() {
 		top = s.Y
 	}
 	return s.X, top, s.X + s.W, s.Y + s.H
@@ -243,7 +261,7 @@ func (s Sample) Body() (x0, y0, x1, y1 float64) {
 // bottom of Head to the bottom of the box. When an arm or a hand is raised above the head (the box starts clearly above the head top) the
 // torso is the whole body box, because what is beside the head is then an arm or the lift, not the background.
 func (s Sample) Torso() (x0, y0, x1, y1 float64) {
-	if s.HeadTopY-s.Y > raisedAbove {
+	if s.raised() {
 		return s.Body()
 	}
 	_, _, _, hy1 := s.Head()

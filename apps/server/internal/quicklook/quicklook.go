@@ -512,7 +512,7 @@ func subjectTrack(reads []SubjectRead, fr frameSet) *subject.Track {
 		}
 		seen[r.Frame] = true
 		t.Samples = append(t.Samples, subject.Sample{AtMs: fr.at[r.Frame-1], X: r.X, Y: r.Y, W: r.W, H: r.H, HeadTopY: r.HeadTopY,
-			HeadX: r.HeadX, HeadW: r.HeadW, ShoulderY: r.ShoulderY})
+			HeadX: r.HeadX, HeadW: r.HeadW, ShoulderY: r.ShoulderY, ArmsUp: r.ArmsUp})
 	}
 	clean, ok := subject.Clean(t)
 	if !ok {

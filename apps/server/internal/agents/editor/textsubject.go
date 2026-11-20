@@ -210,7 +210,7 @@ func (c *checker) titleFix(it timeline.TextItem, fit subject.Fit) string {
 		}
 	}
 	if c.headUnmeasured(it) {
-		parts = append(parts, "(the clip's head was not measured on its own: cfctl assets quicklook --subjects reads it, and a narrow head leaves room beside it)")
+		parts = append(parts, "(the clip's head or arms were not measured on their own: cfctl assets quicklook --subjects reads them; a narrow head leaves room beside it, and hands that are not above the head leave the band above it free)")
 	}
 	return strings.Join(parts, "; ")
 }
@@ -255,7 +255,8 @@ func (c *checker) itemAt(t int64) int {
 	return -1
 }
 
-// headUnmeasured says a clip under the item has subject boxes whose head was not read on its own (quicklook.v2 or older).
+// headUnmeasured says a clip under the item has subject boxes whose head was not read on its own (quicklook.v2 or older), or whose box
+// starts above the head with no answer on whether the arms are up (quicklook.v4 or older: the gap is taken for a raised arm).
 func (c *checker) headUnmeasured(it timeline.TextItem) bool {
 	for i, v := range c.items {
 		if v.AtMs >= it.AtMs+it.DurationMs || v.AtMs+c.durs[i] <= it.AtMs {
@@ -266,7 +267,7 @@ func (c *checker) headUnmeasured(it timeline.TextItem) bool {
 			continue
 		}
 		for _, s := range tr.Samples {
-			if s.HeadW == 0 {
+			if s.HeadW == 0 || s.ArmsGuessed() {
 				return true
 			}
 		}

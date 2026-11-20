@@ -8,10 +8,14 @@ profile: v1-start
 # too little to make calls with. A turn that is cut off all the same is recovered from by the agent loop (two recoveries a run), and
 # plan_edit's fields are bounded so that the room goes to thinking. dev-mid and dev-cheap use the same number, so a smoke test on
 # them meets the same limit.
-# A revision runs on the `revision` entry (the credits decide first edit or revision) with 12000: its budget on the creator plan is $0.32,
-# so one full call's reservation (12000 x $20/MTok = $0.24 plus the input) fits once. Whatever the entry says, the metered client cuts a
-# call's max_tokens to what the run's budget can still pay for, down to min_output_tokens (2048 unless an entry sets it), and refuses the
-# call below that, which ends the run at its budget (the editor then finishes on its newest previewed version). See spend control v1.
+# A revision runs on the `revision` entry (the credits decide first edit or revision) with 12000 tokens, on Sonnet 5.5 (decided 2026-11-20,
+# pending founder confirmation). On Opus it could not start: the first call of a run has no cache of its own, so its worst case prices the
+# whole prompt as a cache write, and on a five-clip project with a song that prompt is about 61,000 tokens: $0.31 at Opus's $5/MTok before
+# a single token of answer, against a revision budget of $0.32 on creator and $0.26 on pro (live test 2026-11-20, section 4.3). On Sonnet
+# the same prompt is $0.15, which leaves room for the answer; the live test's Sonnet revision cost $0.29 and Sonnet matched Opus on the
+# creator's rules there. TestEveryEditCanStartOnItsPlanBudget (internal/agents/editor) holds every profile and plan to it. Whatever the
+# entry says, the metered client cuts a call's max_tokens to what the run's budget can still pay for, down to min_output_tokens (2048
+# unless an entry sets it), and refuses the call below that, which ends the run at its budget. See spend control v1.
 editor:
   model: claude-opus-5-5
   effort: medium                 # Opus 5.5's default, set explicitly; tuned by D-17
@@ -20,7 +24,7 @@ editor:
   subagents:
     inspector: { enabled: false, model: claude-haiku-5-5 }   # benchmark variant only
 revision:
-  model: claude-opus-5-5
+  model: claude-sonnet-5-5
   effort: medium
   max_tokens: 12000              # a revision's budget is a third of a first edit's ($0.32 on creator); see the note above the profile
 # Extra careful (decision D-31, pending founder confirmation): a creator may choose `quality: max` for one edit. It runs on these two
