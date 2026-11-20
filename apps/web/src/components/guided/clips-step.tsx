@@ -79,6 +79,8 @@ export function ClipsStep({ source, onNext }: { source: GuidedClips; onNext: () 
   const songInput = React.useRef<HTMLInputElement>(null);
   const { clips, song } = source;
   const rows = song ? [...clips, song] : clips;
+  const blocked = rows.some((clip) => clip.state.kind === "problem");
+  const blockedId = React.useId();
 
   const take = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = [...(event.target.files ?? [])];
@@ -156,14 +158,20 @@ export function ClipsStep({ source, onNext }: { source: GuidedClips; onNext: () 
         </Button>
       )}
 
-      <BigButton disabled={clips.length === 0} onClick={onNext}>
+      {/* A clip that cannot be used is dealt with here, not discovered on the last screen. */}
+      {blocked ? (
+        <p id={blockedId} className="text-center text-[15px] font-medium text-pretty">
+          One of your clips didn't work. Try it again or remove it to go on.
+        </p>
+      ) : null}
+      <BigButton disabled={clips.length === 0 || blocked} aria-describedby={blocked ? blockedId : undefined} onClick={onNext}>
         Next
         <ArrowRight aria-hidden />
       </BigButton>
 
       <p className="text-center text-[14px] text-muted-foreground">
         Already uploaded your clips?{" "}
-        <Link to="/projects/new" className="inline-flex min-h-11 items-center font-medium text-brand underline-offset-4 hover:underline">
+        <Link to="/projects/new" className="py-3.5 font-medium text-brand underline-offset-4 hover:underline">
           Advanced
         </Link>{" "}
         lets you pick from your library.

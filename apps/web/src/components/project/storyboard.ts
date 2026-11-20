@@ -88,11 +88,28 @@ export interface ShotWords {
   text?: string;
   /** The video is cut to a beat. */
   musical: boolean;
+  /** Short, everyday lines (the guided flow): no camera moves or transitions, only slow motion and words on screen. */
+  plain?: boolean;
+}
+
+/** The plain lines keep only what anyone sees without knowing editing words. */
+const PLAIN_EFFECTS: Readonly<Record<string, string>> = { speed_ramp: "in slow motion" };
+
+function describePlain(shot: ShotWords, subject: string): string {
+  let line: string;
+  if (shot.place === "first") line = `Opens with ${subject}`;
+  else if (shot.place === "last") line = `Ends with ${subject}`;
+  else if (shot.role === "detail") line = `A close-up of ${subject}`;
+  else line = upperFirst(subject);
+  const effect = shot.effect ? PLAIN_EFFECTS[shot.effect] : undefined;
+  const text = shot.text ? `with “${oneLine(shot.text)}” on screen` : undefined;
+  return [line, effect, text].filter((part) => part !== undefined).join(", ");
 }
 
 /** One line of the storyboard. */
 export function describeShot(shot: ShotWords): string {
   const subject = subjectOf(shot.what);
+  if (shot.plain) return describePlain(shot, subject);
   const extras: string[] = [];
   const effect = shot.effect ? EFFECTS[shot.effect] : undefined;
   let line: string;
@@ -139,7 +156,7 @@ function fold(cards: StoryCard[]): { cards: StoryCard[]; more: number } {
 }
 
 /** The board from the editor's plan. Undefined when a shot has nothing to call it by (a plan known only from a cut-off summary). */
-export function storyboardFromPlan(plan: CreativePlan, assetTitles: ReadonlyMap<string, string>, texts: readonly ScreenText[] = []): Storyboard | undefined {
+export function storyboardFromPlan(plan: CreativePlan, assetTitles: ReadonlyMap<string, string>, texts: readonly ScreenText[] = [], { plain = false }: { plain?: boolean } = {}): Storyboard | undefined {
   if (plan.shots.length === 0) return undefined;
   const named = plan.shots.map((shot) => shot.what ?? (shot.assetId ? assetTitles.get(shot.assetId) : undefined));
   if (named.some((what) => !what)) return undefined;
@@ -154,7 +171,7 @@ export function storyboardFromPlan(plan: CreativePlan, assetTitles: ReadonlyMap<
       key: `${index}`,
       place,
       ...(shot.assetId ? { assetId: shot.assetId } : {}),
-      line: describeShot({ place, role: shot.role, what: named[index] as string, effect: shot.effect, text, musical: Boolean(plan.tempoBpm) }),
+      line: describeShot({ place, role: shot.role, what: named[index] as string, effect: shot.effect, text, musical: Boolean(plan.tempoBpm), plain }),
     };
   });
   const length = lengthWords(plan.estimatedLengthMs ?? (plan.targetLengthS ? plan.targetLengthS * 1000 : undefined));
@@ -190,7 +207,7 @@ function itemEffect(item: VideoItem): string | undefined {
 }
 
 /** The board from the clips of a version, for a cut with no plan (an older edit, or one you made). */
-export function storyboardFromItems(items: readonly VideoItem[], assetTitles: ReadonlyMap<string, string>, texts: readonly ScreenText[] = [], { musical = false, durationMs }: { musical?: boolean; durationMs?: number } = {}): Storyboard | undefined {
+export function storyboardFromItems(items: readonly VideoItem[], assetTitles: ReadonlyMap<string, string>, texts: readonly ScreenText[] = [], { musical = false, durationMs, plain = false }: { musical?: boolean; durationMs?: number; plain?: boolean } = {}): Storyboard | undefined {
   if (items.length === 0) return undefined;
   const cards = items.map((item, index): StoryCard => {
     const next = items[index + 1];
@@ -205,6 +222,7 @@ export function storyboardFromItems(items: readonly VideoItem[], assetTitles: Re
         effect: itemEffect(item),
         text: textIn(texts, index === 0 ? Number.NEGATIVE_INFINITY : item.at_ms, next ? next.at_ms : Number.POSITIVE_INFINITY),
         musical,
+        plain,
       }),
     };
   });
@@ -220,6 +238,7 @@ export function storyboard({
   assetTitles,
   musical = false,
   durationMs,
+  plain = false,
 }: {
   plan?: CreativePlan;
   items?: readonly VideoItem[];
@@ -227,6 +246,8 @@ export function storyboard({
   assetTitles: ReadonlyMap<string, string>;
   musical?: boolean;
   durationMs?: number;
+  /** Short, everyday lines (see `ShotWords.plain`). */
+  plain?: boolean;
 }): Storyboard | undefined {
-  return (plan ? storyboardFromPlan(plan, assetTitles, texts) : undefined) ?? storyboardFromItems(items, assetTitles, texts, { musical, durationMs });
+  return (plan ? storyboardFromPlan(plan, assetTitles, texts, { plain }) : undefined) ?? storyboardFromItems(items, assetTitles, texts, { musical, durationMs, plain });
 }

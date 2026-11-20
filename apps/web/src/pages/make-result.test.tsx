@@ -86,7 +86,7 @@ test("Stop stops the edit", async () => {
     return run({ status: "cancelled" });
   });
   page();
-  fireEvent.click(await screen.findByRole("button", { name: "Stop" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Stop making this video" }));
   await waitFor(() => expect(fake.callsTo("POST /v1/runs/{id}/cancel")).toHaveLength(1));
   expect(await screen.findByRole("heading", { name: "You stopped this one" })).toBeTruthy();
 });
@@ -111,7 +111,7 @@ test("the finished video plays, with a numbered list of what is in it and three 
 
   const shots = await screen.findByTestId("shot-list");
   expect(within(shots).getByRole("heading", { name: "What's in it" })).toBeTruthy();
-  expect(within(shots).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["11.Opens on your row 1", "22.Ends on your row 2"]);
+  expect(within(shots).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["11.Opens with your row 1", "22.Ends with your row 2"]);
 
   expect(within(screen.getByRole("group", { name: "What next?" })).getAllByRole("button").map((button) => button.textContent)).toEqual(["Looks great", "Change something", "Start over"]);
   expect(document.body.textContent).not.toMatch(/Version \d|timeline|render/i);
@@ -129,7 +129,8 @@ test("the shot list follows the editor's plan when the edit that made the video 
   page();
   const shots = await screen.findByTestId("shot-list");
   await waitFor(() => expect(within(shots).getAllByRole("listitem").length).toBeGreaterThan(1));
-  expect(within(shots).getAllByRole("listitem")[0]?.textContent).toMatch(/^11\.Opens on /);
+  expect(within(shots).getAllByRole("listitem")[0]?.textContent).toMatch(/^11\.Opens with /);
+  expect(shots.textContent).not.toMatch(/zoom|swipe|flash|shake|cut on the music/);
 });
 
 test("'Looks great' finishes: the download, and the way to another video", async () => {
@@ -263,6 +264,9 @@ test("what a failed edit left behind is not shown as the video: the first video 
   page();
   const alert = await screen.findByRole("alert");
   expect(alert.textContent).toContain("I couldn't finish your video");
+  // Plain words and the one next step, never "edit".
+  expect(alert.textContent).toContain("There was more in this video than I could finish in one go. It didn't cost you anything. Press Try again and I'll have another go.");
+  expect(alert.textContent).not.toMatch(/\bedit\b/i);
   expect(screen.queryByRole("heading", { name: "Here's your video" })).toBeNull();
   expect(fake.callsTo("GET /v1/projects/{id}/renders")).toHaveLength(0);
 });

@@ -25,6 +25,15 @@ test("the plan reads as a storyboard: how it opens, the middle in the creator's 
     "A closer look at your chalked hands",
     "Ends on your back pose, held, with a flash",
   ]);
+  // The guided flow's plain lines: what is in it, with no editing words (slow motion and on-screen words stay).
+  expect(storyboardFromPlan(plan, TITLES, [{ at_ms: 300, text: "BACK DAY 101" }], { plain: true })?.cards.map((card) => card.line)).toEqual([
+    "Opens with your heaviest lat pulldown lockout, with “BACK DAY 101” on screen",
+    "Your seated row, full rep",
+    "Your cable row, squeeze, in slow motion",
+    "Your pulldown, top of the rep",
+    "A close-up of your chalked hands",
+    "Ends with your back pose, held",
+  ]);
   // Each card knows its clip, for the frame.
   expect(board?.cards.map((card) => card.assetId)).toEqual([assetId(1), assetId(2), assetId(3), assetId(1), assetId(2), assetId(3)]);
   expect(board?.cards.map((card) => card.place)).toEqual(["first", "middle", "middle", "middle", "middle", "last"]);

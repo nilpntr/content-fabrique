@@ -62,9 +62,9 @@ export function MakingScreen({
           I couldn't stop. Try again.
         </p>
       ) : null}
-      <Button variant="secondary" size="lg" className="h-12 rounded-2xl px-5 text-[15px]" onClick={onStop} disabled={stopping}>
+      <Button variant="outline" size="lg" className="h-12 w-full rounded-2xl text-[15px]" onClick={onStop} disabled={stopping}>
         <CircleStop aria-hidden />
-        {stopping ? "Stopping…" : "Stop"}
+        {stopping ? "Stopping…" : "Stop making this video"}
       </Button>
     </Screen>
   );
