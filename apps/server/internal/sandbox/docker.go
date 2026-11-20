@@ -4,12 +4,15 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -34,12 +37,41 @@ type Docker struct {
 	// ProviderName is what Name returns; default "docker".
 	ProviderName string
 	// User is "uid:gid" for the container process; default is the worker's own uid:gid (so it can read the files it
-	// staged and files written to the output directory belong to it), or 65534:65534 when the worker runs as root. A job
-	// whose mounts that user cannot access is refused with ErrInputUnreadable before docker starts.
+	// staged and files written to the output directory belong to it), or 65534:65534 when the worker runs as root, or 0:0
+	// under rootless Docker (see Rootless). A job whose mounts that user cannot access is refused with ErrInputUnreadable
+	// before docker starts.
 	User string
 	// TmpSizeMB is the size of the /tmp tmpfs; default 256.
 	TmpSizeMB int
+	// Rootless says whether the Docker daemon runs rootless; nil asks the daemon (docker info), again at most every
+	// rootlessTTL, so a daemon that is swapped for a rootful one never gets containers running as 0:0 for long. Under
+	// rootless Docker the container's uid 0 is the unprivileged user that runs the daemon on the host (the worker's own uid),
+	// and every other container uid is a subordinate uid that owns none of the host's files: a container running as the
+	// worker's uid could not write the job's output directory. So there the container runs as 0:0, which is still
+	// unprivileged on the host, with every capability dropped and no-new-privileges, and the host-side access check is
+	// made for the worker's own uid.
+	Rootless *bool
+
+	now func() time.Time
 }
+
+// rootlessCache holds the answers of `docker info` for the whole process, by daemon (the CLI binary and its DOCKER_HOST and
+// DOCKER_CONTEXT), so every provider value and every job shares one question per daemon per rootlessTTL.
+var rootlessCache = struct {
+	sync.Mutex
+	m map[string]rootlessAnswer
+}{m: map[string]rootlessAnswer{}}
+
+type rootlessAnswer struct {
+	at       time.Time
+	rootless bool
+}
+
+// rootlessTTL is how long an answer of `docker info` about rootless mode is trusted.
+const rootlessTTL = time.Minute
+
+// selfCheckTimeout bounds the self-check job that confirms a mount failure.
+const selfCheckTimeout = 30 * time.Second
 
 // NewDocker returns the docker provider.
 func NewDocker(policy Policy) *Docker { return &Docker{Policy: policy} }
@@ -72,7 +104,8 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 		return Result{}, err
 	}
 	uid, gid := os.Getuid(), os.Getgid()
-	user, chown := userFor(uid, gid, d.User)
+	rootless := d.User == "" && d.isRootless(ctx)
+	user, chown := userFor(uid, gid, d.User, rootless)
 	if chown {
 		for _, m := range v.mounts {
 			if m.Writable {
@@ -82,9 +115,62 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 			}
 		}
 	}
-	if err := checkAccess(v.mounts, user); err != nil {
+	checkAs := user
+	if rootless {
+		// Container root is the daemon's own host user: the worker's uid, for a rootless daemon the worker runs itself (one of
+		// another user, through DOCKER_HOST, is not supported; its jobs fail as mount failures).
+		checkAs = fmt.Sprintf("%d:%d", uid, gid)
+	}
+	if err := checkAccess(v.mounts, checkAs); err != nil {
 		return Result{}, err
 	}
+	res, err := d.run(ctx, v, user)
+	if err != nil || res.ExitCode == 0 {
+		return res, err
+	}
+	// A tool that says it could not use its own mounts: the sandbox's fault only if a tiny job that touches nothing of the input
+	// fails the same way in the same sandbox. Otherwise the input made the tool print it, and the exit code is the tool's result.
+	if merr := MountFailure(v.Args[0], res); merr != nil && !d.selfCheck(ctx, v, user) {
+		return res, merr
+	}
+	return res, nil
+}
+
+// selfCheck runs, in a sandbox like v's (same image, runtime, user and mounts), an ffmpeg that opens each input with the raw data
+// demuxer (no parsing, no references followed) and writes a short silence into the output directory when there is one. It
+// reports whether that worked: the mounts are usable.
+func (d *Docker) selfCheck(ctx context.Context, v validated, user string) bool {
+	args := []string{"ffmpeg", "-nostdin", "-v", "error"}
+	inputs, writable := 0, ""
+	for _, m := range v.mounts {
+		if m.Writable {
+			writable = m.Host
+			continue
+		}
+		args = append(args, "-f", "data", "-i", m.Container)
+		inputs++
+	}
+	args = append(args, "-f", "lavfi", "-i", "anullsrc=r=8000:cl=mono", "-map", strconv.Itoa(inputs)+":a", "-t", "0.01")
+	if writable != "" {
+		args = append(args, "-y", WorkDir+"/"+selfCheckFile)
+		defer func() { _ = os.Remove(filepath.Join(writable, selfCheckFile)) }()
+	} else {
+		args = append(args, "-f", "null", "-")
+	}
+	c := v
+	c.Args = args
+	c.Labels = nil
+	c.maxOutput = 64 << 10
+	c.Limits.Timeout = min(c.Limits.Timeout, selfCheckTimeout)
+	res, err := d.run(ctx, c, user)
+	return err == nil && res.ExitCode == 0
+}
+
+// selfCheckFile is what the self-check writes into the output directory (and removes).
+const selfCheckFile = ".cf-selfcheck.wav"
+
+// run executes one validated job as user and classifies docker's own failures.
+func (d *Docker) run(ctx context.Context, v validated, user string) (Result, error) {
 	name, err := containerName()
 	if err != nil {
 		return Result{}, err
@@ -114,10 +200,58 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 	}
 	switch res.ExitCode {
 	case 125, 126, 127:
-		// `docker run` itself failed (daemon error, missing image or runtime) or could not start the program.
-		return res, fmt.Errorf("%w: docker run exited %d: %s", ErrSandbox, res.ExitCode, snippet(res.Stderr))
+		// `docker run` itself failed (daemon error, missing image or runtime, limits it cannot apply) or could not start the
+		// program.
+		return res, &UnavailableError{Reason: dockerFailureReason(res.Stderr),
+			Err: fmt.Errorf("docker run exited %d: %s", res.ExitCode, snippet(res.Stderr))}
 	}
 	return res, nil
+}
+
+// isRootless reports whether the daemon runs rootless: Rootless when set, else what `docker info` says, asked again once the
+// answer is older than rootlessTTL. The same CLI, environment (DOCKER_HOST, DOCKER_CONTEXT) and binary answer it as run the jobs.
+// A daemon that cannot be asked counts as not rootless (the safe default: the worker's own uid), and is asked again on the next
+// job (the job itself then fails with the reason).
+func (d *Docker) isRootless(ctx context.Context) bool {
+	if d.Rootless != nil {
+		return *d.Rootless
+	}
+	now := time.Now
+	if d.now != nil {
+		now = d.now
+	}
+	key := d.binary() + "\x00" + os.Getenv("DOCKER_HOST") + "\x00" + os.Getenv("DOCKER_CONTEXT")
+	rootlessCache.Lock()
+	defer rootlessCache.Unlock()
+	if a, ok := rootlessCache.m[key]; ok && now().Sub(a.at) < rootlessTTL {
+		return a.rootless
+	}
+	ictx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ictx, d.binary(), "info", "--format", "{{json .SecurityOptions}}").Output() // #nosec G204 -- fixed arguments
+	if err != nil {
+		delete(rootlessCache.m, key)
+		return false
+	}
+	a := rootlessAnswer{at: now(), rootless: rootlessInfo(out)}
+	rootlessCache.m[key] = a
+	return a.rootless
+}
+
+// rootlessInfo reads `docker info --format '{{json .SecurityOptions}}'`, for example ["name=seccomp,profile=builtin","name=rootless"].
+func rootlessInfo(out []byte) bool {
+	var opts []string
+	if err := json.Unmarshal(out, &opts); err != nil {
+		return false
+	}
+	for _, o := range opts {
+		for _, kv := range strings.Split(o, ",") {
+			if strings.TrimSpace(kv) == "name=rootless" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // snippet is the start of a tool's stderr for an error message.
@@ -144,12 +278,16 @@ func (d *Docker) kill(name string) {
 	}
 }
 
-// userFor returns the container user for a worker running as uid:gid. An explicit override wins. Only a worker that is
-// really root (uid 0) switches to the unprivileged nobody, and then the output directory must be chowned to it; a worker
-// with a non-zero uid keeps its own uid and gid, even gid 0, because uid is what grants root's powers.
-func userFor(uid, gid int, override string) (user string, chown bool) {
+// userFor returns the container user for a worker running as uid:gid. An explicit override wins. Under rootless Docker the
+// container runs as 0:0, which the daemon maps to its own unprivileged host user (Docker.Rootless). Otherwise only a worker
+// that is really root (uid 0) switches to the unprivileged nobody, and then the output directory must be chowned to it; a
+// worker with a non-zero uid keeps its own uid and gid, even gid 0, because uid is what grants root's powers.
+func userFor(uid, gid int, override string, rootless bool) (user string, chown bool) {
 	if override != "" {
 		return override, false
+	}
+	if rootless {
+		return "0:0", false
 	}
 	if uid == 0 {
 		return fmt.Sprintf("%d:%d", nobody, nobody), true

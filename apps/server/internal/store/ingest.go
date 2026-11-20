@@ -52,6 +52,9 @@ const (
 	StageProxy       = "proxy"
 	StageDerivatives = "derivatives"
 	StageUploading   = "uploading"
+	// StageWaiting: the media sandbox is unavailable (an infrastructure problem, never the file's); the ingest runs again
+	// once it is back.
+	StageWaiting = "waiting"
 )
 
 // NewDerivative is a derivative the ingest wrote to object storage.

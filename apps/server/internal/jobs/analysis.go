@@ -9,6 +9,7 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/nilpntr/content-fabrique/internal/ids"
+	"github.com/nilpntr/content-fabrique/internal/sandbox"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
@@ -84,8 +85,9 @@ type AnalyzeWorker struct {
 // Timeout implements river.Worker.
 func (w *AnalyzeWorker) Timeout(*river.Job[AnalyzeArgs]) time.Duration { return AnalysisTimeout }
 
-// Work runs one attempt. An asset that is gone ends the job; a worker without a sandbox or an asset that is being ingested
-// again snoozes it (no attempt is used) for at most AnalysisMaxAge; any other error is retried by River.
+// Work runs one attempt. An asset that is gone ends the job; a worker without a sandbox, a sandbox that is unavailable
+// (sandbox.Unavailable: never the clip's fault) or an asset that is being ingested again snoozes it (no attempt is used) for
+// at most AnalysisMaxAge; any other error is retried by River.
 func (w *AnalyzeWorker) Work(ctx context.Context, job *river.Job[AnalyzeArgs]) error {
 	ws, id := job.Args.WorkspaceID, job.Args.AssetID
 	if w.deps.Analysis == nil {
@@ -97,6 +99,15 @@ func (w *AnalyzeWorker) Work(ctx context.Context, job *river.Job[AnalyzeArgs]) e
 	switch {
 	case errors.Is(err, ErrAnalysisNotReady):
 		return w.snooze(ctx, job, notReadySnooze, err.Error())
+	case err != nil && ctx.Err() == nil && isUnavailable(err):
+		// The detail (docker's or the tool's output) goes to the log only; the job records the plain reason.
+		reason, _ := sandbox.Unavailable(err)
+		n := snoozes(job.Metadata)
+		w.deps.logger().WarnContext(ctx, "analysis: the sandbox is unavailable", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "waits", n, "error", err)
+		if n >= SandboxWaitsMax {
+			return river.JobCancel(plainUnavailable(reason, n))
+		}
+		return w.snooze(ctx, job, sandboxWait(w.deps.now().Sub(job.CreatedAt)), sandbox.UnavailableMessage(reason))
 	case err != nil:
 		w.deps.logger().WarnContext(ctx, "analysis attempt failed", "workspace_id", ws.String(), "asset_id", id.String(), "job_id", job.ID, "attempt", job.Attempt, "error", err)
 		return err

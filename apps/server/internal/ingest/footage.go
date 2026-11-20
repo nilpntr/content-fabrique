@@ -375,7 +375,8 @@ type CheckOptions struct {
 
 // Check probes the file at path, decodes its picture all the way through and reads its sound, all through runner, and
 // judges it. The error is only for a check that could not run (the sandbox, the disk, a cancelled context, a tool that
-// was killed); a bad file is an Assessment with the verdict Unusable.
+// was killed); a bad file is an Assessment with the verdict Unusable. A sandbox that cannot run the tools, or runs them
+// without access to their files, is an error that sandbox.Unavailable recognises, never a verdict on the file.
 func Check(ctx context.Context, runner media.Runner, path string, o CheckOptions) (Assessment, error) {
 	if !filepath.IsAbs(o.WorkDir) {
 		return Assessment{}, errors.New("ingest: the footage check needs an absolute work directory")

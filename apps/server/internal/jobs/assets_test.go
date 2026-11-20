@@ -329,6 +329,24 @@ func TestAssetIngestJobGivesUpOnTheLastAttempt(t *testing.T) {
 	}
 }
 
+// An unavailable sandbox (rootless Docker, a missing runtime) is never the file's fault: even on its last attempt the ingest
+// waits, snoozed, and the asset is not marked failed.
+func TestAssetIngestWaitsForAnUnavailableSandbox(t *testing.T) {
+	e := newAssetsEnv(t)
+	w := e.newWorkspace(t, "org_ingest_sandbox_down")
+	a := e.newUploadedAsset(t, w, store.AssetKindVideo, "x.mp4", []byte("x"))
+	down := &sandbox.UnavailableError{Reason: "Docker is not running", Err: errors.New("docker run exited 125")}
+	ing := failingIngester{err: fmt.Errorf("ffprobe: %w", down), failed: make(chan string, 4)}
+	e.startWorker(t, jobs.WorkerOptions{Objects: e.objs, Ingest: ing})
+	e.enqueueIngest(t, a, &river.InsertOpts{MaxAttempts: 1})
+	eventually(t, "the ingest job to be snoozed", e.jobIs(t, a, "scheduled"))
+	select {
+	case got := <-ing.failed:
+		t.Fatalf("an unavailable sandbox failed the asset: %s", got)
+	default:
+	}
+}
+
 // River must not hand a running ingest to a second worker: the job's own timeout ends it first, and the rescue comes later.
 func TestIngestIsNeverRescuedWhileItRuns(t *testing.T) {
 	if jobs.JobRescueAfter <= jobs.IngestTimeout {

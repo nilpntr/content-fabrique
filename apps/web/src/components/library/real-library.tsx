@@ -44,6 +44,8 @@ const STAGES: Readonly<Record<string, string>> = {
   proxy: "Making the preview video",
   derivatives: "Making thumbnails",
   uploading: "Saving the results",
+  // The media sandbox is down (never the file's fault); the ingest runs again once it is back.
+  waiting: "Waiting for the video processor",
 };
 
 /** What the library needs to know of this browser's upload of an asset: no more, so that it renders when a percent changes and not on every byte. */

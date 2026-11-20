@@ -77,6 +77,7 @@ func (r *SandboxRunner) Run(ctx context.Context, inv Invocation) (sandbox.Result
 	if inv.Timeout > 0 {
 		limits.Timeout = inv.Timeout
 	}
+	// The docker providers report a tool that could not use its mounts as an UnavailableError, after a self-check.
 	return r.Provider.Run(ctx, sandbox.Job{
 		Image:          r.Image,
 		Args:           inv.Args,

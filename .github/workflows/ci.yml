@@ -472,7 +472,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.render == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       FFMPEG_URL: https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz
       FFMPEG_SHA256: 97ce978979194b5cf7e06a5e68020dbdaa7a4f3294c5452b6a1bc347100dbb79
@@ -510,7 +510,9 @@ jobs:
       - name: Golden renders
         env:
           CF_RENDER_REQUIRE_FFMPEG: n8.
-        run: go test -race -count=1 -v ./internal/render/...
+        # The suite takes 8 to 10 minutes under -race on a hosted runner (it grew with #193), past go test's default timeout of
+        # 10 minutes: main's render job timed out from #193 on, in TestRemoteRunnerMatchesLocal or wherever the clock ran out.
+        run: go test -race -count=1 -timeout 25m -v ./internal/render/...
       # The sound check and the cfctl commands that use ffmpeg (the sound effects gallery, audio check) generate their fixtures with it.
       - name: Audio check and the ffmpeg commands of cfctl
         env:
