@@ -193,7 +193,7 @@ func (c *compiler) speechSpans() [][2]int64 {
 		a := cl.item.Audio
 		return timeline.ClipAudioMode(a) == timeline.AudioModeFull && cl.asset.HasAudio && !cl.item.HasRamp() && a.GainDBOrDefault() > duckMinClipGainDB
 	}
-	for _, w := range c.mapWordsOf(audible) {
+	for _, w := range c.mapWordsOf(audible, nil) {
 		start, end := timeline.FrameStartMs(w.startF, c.fps), timeline.FrameStartMs(w.endF, c.fps)
 		if n := len(spans); n > 0 && start-spans[n-1][1] <= speechGapMs {
 			spans[n-1][1] = max(spans[n-1][1], end)

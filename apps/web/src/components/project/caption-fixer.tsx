@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api/client";
 import { useApplyTimelineOps, useAssetTranscript, useTimelineSpec } from "@/lib/api/project-hooks";
 import { cn } from "@/lib/utils";
-import { type CaptionCorrection, captionsOf, cleanCorrection, clipAssetIds, correctionsOf, setCaptionsOp, withCorrection } from "./caption-corrections";
+import { atLimit, captionsOf, cleanCorrection, clipAssetIds, correctionsOf, MAX_CORRECTIONS, sameCorrections, setCaptionsOp, withCorrection } from "./caption-corrections";
 
 /** What the editor shows of a transcript word. */
 export interface CaptionWord {
@@ -132,7 +132,7 @@ export function CaptionWordEditor({
 export function captionFixMessage(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.code === "version_conflict") return "The video changed while you were editing. Reload the page and fix the word again.";
-    if (error.status === 422) return "That word could not be saved. Use letters, numbers and ordinary punctuation, up to 40 characters.";
+    if (error.status === 422) return "That word could not be saved. Take out symbols like < > { } | $ and keep it to 40 characters.";
   }
   return "That word could not be saved. Try again.";
 }
@@ -141,7 +141,7 @@ export function captionFixMessage(error: unknown): string {
  * "Fix a caption": the words of the video's captions, so a misheard one can be corrected. A fix is saved as an edit of the timeline (no model,
  * no credits): it makes the next version, whose preview shows the corrected word. Nothing is shown for a video without captions.
  */
-export function CaptionFixer({ projectId, version, className }: { projectId: string; version: number; className?: string }) {
+export function CaptionFixer({ projectId, version, latest, className }: { projectId: string; version: number; /** The newest version: a fix is an edit of it, so an older version cannot be fixed. */ latest: number; className?: string }) {
   const spec = useTimelineSpec(projectId, version);
   const captions = captionsOf(spec.data?.spec);
   const assets = React.useMemo(() => clipAssetIds(spec.data?.spec), [spec.data]);
@@ -152,9 +152,24 @@ export function CaptionFixer({ projectId, version, className }: { projectId: str
   const [error, setError] = React.useState<string | undefined>(undefined);
 
   if (!captions || !assetId) return null;
+  if (version !== latest) {
+    return (
+      <p data-testid="caption-fixer-old" className={cn("text-[12.5px] text-subtle-foreground", className)}>
+        Open the latest version to fix a caption.
+      </p>
+    );
+  }
   const words = transcript.data?.words ?? [];
-  const save = (next: CaptionCorrection[]) => {
+  const save = (word: number, text: string | null) => {
     setError(undefined);
+    const next = withCorrection(captions.corrections, assetId, word, text, words[word]?.text ?? "");
+    if (sameCorrections(next, captions.corrections)) {
+      // Nothing to save: the word is back to what was heard already, or the list is full.
+      if (text !== null && atLimit(captions.corrections, assetId, word) && text !== (words[word]?.text ?? "").trim()) {
+        setError(`A video holds up to ${MAX_CORRECTIONS} fixes. Put a word back to what was heard to make room.`);
+      }
+      return;
+    }
     apply.mutate({ projectId, baseVersion: version, ops: [setCaptionsOp(next)] }, { onError: (e) => setError(captionFixMessage(e)) });
   };
 
@@ -183,7 +198,7 @@ export function CaptionFixer({ projectId, version, className }: { projectId: str
           words={words}
           fixes={correctionsOf(captions.corrections, assetId)}
           busy={apply.isPending}
-          onFix={(word, text) => save(withCorrection(captions.corrections, assetId, word, text, words[word]?.text ?? ""))}
+          onFix={save}
         />
       )}
       {error ? (

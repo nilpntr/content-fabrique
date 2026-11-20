@@ -107,3 +107,23 @@ func wantCodesNamed(t *testing.T, name string, res Result, want ...Code) {
 	t.Helper()
 	t.Run(name, func(t *testing.T) { wantCodes(t, res, want...) })
 }
+
+// Punctuation at the ends is part of a transcript word: "Dr.", "yes," and "..." are fine. Private-use and unpaired characters are not.
+func TestCorrectionsMayEndInPunctuation(t *testing.T) {
+	for _, text := range []string{"Dr.", "yes,", "...", "-hello-"} {
+		c := captionsWith(func(c *CaptionsTrack) {
+			c.Corrections = []CaptionCorrection{{AssetID: assetVideo60, Word: 1, Text: text, Was: "heard"}}
+		})
+		wantCodesNamed(t, text, validateSpec(t, addTrack(baseSpec(), c)))
+	}
+	for name, text := range map[string]string{"private use": "a" + string(rune(0xE000)), "replacement": "a" + string(rune(0xFFFD))} {
+		c := captionsWith(func(c *CaptionsTrack) {
+			c.Corrections = []CaptionCorrection{{AssetID: assetVideo60, Word: 1, Text: text}}
+		})
+		wantCodesNamed(t, name, validateSpec(t, addTrack(baseSpec(), c)), CodeInvalidCaptions)
+	}
+	long := captionsWith(func(c *CaptionsTrack) {
+		c.Corrections = []CaptionCorrection{{AssetID: assetVideo60, Word: 1, Text: "x", Was: strings.Repeat("w", 81)}}
+	})
+	wantCodes(t, validateSpec(t, addTrack(baseSpec(), long)), CodeSchema)
+}

@@ -408,8 +408,8 @@ func RunChecks(in CheckInput) Report {
 	if c.linesOn() { // the text-pattern checks (checktext.go), only for a style told in lines
 		r.Checks = append(r.Checks, c.storyCaptions(), c.captionReadable(), c.textOverFace())
 	}
-	if captionsOn(in.Spec) { // the captions check (textsubject.go): the speaker's face stays clear of them
-		r.Checks = append(r.Checks, c.captionOverFace())
+	if tr := enabledCaptions(in.Spec); tr != nil { // the captions check (textsubject.go): the speaker's face stays clear of them
+		r.Checks = append(r.Checks, c.captionOverFace(tr))
 	}
 	if len(graphicsOf(in.Spec)) > 0 { // the motion-graphics checks (check_graphics.go), only for an edit that has some
 		r.Checks = append(r.Checks, c.overlayReadable(), c.overlayOverSubject(), c.overlayLegibility(), c.graphicsOverlap())

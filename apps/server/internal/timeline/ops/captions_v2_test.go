@@ -47,8 +47,8 @@ func TestSetCaptionsRefusesHostileCorrections(t *testing.T) {
 		"empty":         fix(vid60, 1, ""),
 		"word":          fix(vid60, 100000, "x"),
 		"unknown asset": fix("ast_01jz6b8v83t2vr2qa03wpcnhnd", 1, "x"),
-		"fill":          {Fill: "red"},
-		"accent":        {Accent: `#FFFFFF}{\fs9`},
+		"fill":          {Fill: ptrTo("red")},
+		"accent":        {Accent: ptrTo(`#FFFFFF}{\fs9`)},
 		"keyword":       {Keywords: &[]string{"{\\an8}"}},
 	} {
 		_, res := Apply(base, []Op{op}, cat)
@@ -65,5 +65,21 @@ func TestSetCaptionsRefusesHostileCorrections(t *testing.T) {
 		if _, res := ParseBatch([]byte(raw)); res.OK() {
 			t.Errorf("parsed %s", raw)
 		}
+	}
+}
+
+func ptrTo[T any](v T) *T { return &v }
+
+// A colour is cleared with the empty string, and a correction may end in punctuation ("Dr.", "yes,", "...").
+func TestSetCaptionsClearsColoursAndKeepsPunctuation(t *testing.T) {
+	out := mustApply(t, baseSpec(t), `[{"op":"set_captions","fill":"#F5F0DC","accent":"#FFD60A"}]`)
+	out = mustApply(t, out, `[{"op":"set_captions","fill":"","corrections":[{"asset_id":"`+vid60+`","word":1,"text":"Dr."},{"asset_id":"`+vid60+`","word":2,"text":"yes,","was":"yes"},{"asset_id":"`+vid60+`","word":3,"text":"..."}]}]`)
+	ct := lastCaptions(t, out)
+	if ct.Fill != "" || ct.Accent != "#FFD60A" || len(ct.Corrections) != 3 || ct.Corrections[1].Was != "yes" {
+		t.Fatalf("captions: %+v", ct)
+	}
+	out = mustApply(t, out, `[{"op":"set_captions","accent":""}]`)
+	if ct := lastCaptions(t, out); ct.Accent != "" {
+		t.Fatalf("accent not cleared: %+v", ct)
 	}
 }

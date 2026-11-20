@@ -14,21 +14,23 @@ export interface CaptionCorrection {
   asset_id: string;
   word: number;
   text: string;
+  /** The word as the transcript had it: the server skips the fix when the transcript no longer has this word there. */
+  was?: string;
 }
 
-// Control characters; the characters that matter in markup, templates and scripts; and the invisible ones (right-to-left overrides,
-// zero-width characters, line separators, byte-order mark).
+// The server's rule (timeline.CleanCorrection): no control, format (right-to-left overrides, zero width), line or paragraph separator,
+// private-use or surrogate character, no replacement character, and none of the characters that matter in markup, templates and scripts.
+// Punctuation at the ends is fine: "Dr.", "yes," and "..." are transcript words.
 const MARKUP = "<>{}\\|^~[]$`";
-const isBadCharacter = (ch: string): boolean => {
-  const c = ch.codePointAt(0) ?? 0;
-  return c < 0x20 || (c >= 0x7f && c <= 0x9f) || MARKUP.includes(ch) || (c >= 0x200b && c <= 0x200f) || (c >= 0x2028 && c <= 0x202e) || (c >= 0x2060 && c <= 0x2069) || c === 0xfeff;
-};
+const INVISIBLE = /[\p{Cc}\p{Cf}\p{Co}\p{Cs}\p{Zl}\p{Zp}]/u;
+const REPLACEMENT = String.fromCodePoint(0xfffd);
+const isBadCharacter = (ch: string): boolean => MARKUP.includes(ch) || ch === REPLACEMENT || INVISIBLE.test(ch);
 
 export type CleanedCorrection = { ok: true; text: string } | { ok: false; reason: string };
 
 /** Cleans what the creator typed: white space becomes single spaces, the ends are trimmed, and a text the server would refuse is explained. */
 export function cleanCorrection(raw: string): CleanedCorrection {
-  const text = raw.replace(/\s+/gu, " ").trim();
+  const text = raw.normalize("NFC").replace(/\s+/gu, " ").trim();
   if (text === "") return { ok: false, reason: "Type the word as it should read." };
   if ([...text].length > MAX_CORRECTION_LENGTH) return { ok: false, reason: `Keep it to ${MAX_CORRECTION_LENGTH} characters.` };
   if ([...text].some(isBadCharacter)) return { ok: false, reason: "Use letters, numbers and ordinary punctuation only." };
@@ -46,7 +48,7 @@ export function captionsOf(spec: unknown): { corrections: CaptionCorrection[] } 
   if (Array.isArray(track.corrections)) {
     for (const c of track.corrections) {
       if (isRecord(c) && typeof c.asset_id === "string" && typeof c.text === "string" && typeof c.word === "number" && Number.isInteger(c.word)) {
-        corrections.push({ asset_id: c.asset_id, word: c.word, text: c.text });
+        corrections.push({ asset_id: c.asset_id, word: c.word, text: c.text, ...(typeof c.was === "string" ? { was: c.was } : {}) });
       }
     }
   }
@@ -78,7 +80,21 @@ export function withCorrection(list: readonly CaptionCorrection[], assetId: stri
   const rest = list.filter((c) => !(c.asset_id === assetId && c.word === word));
   if (text === null || text === original.trim()) return rest;
   if (rest.length >= MAX_CORRECTIONS) return [...list];
-  return [...rest, { asset_id: assetId, word, text }].sort((a, b) => a.asset_id.localeCompare(b.asset_id) || a.word - b.word);
+  const fix: CaptionCorrection = { asset_id: assetId, word, text, ...([...original].length <= MAX_WAS_LENGTH ? { was: original } : {}) };
+  return [...rest, fix].sort((a, b) => a.asset_id.localeCompare(b.asset_id) || a.word - b.word);
+}
+
+/** The longest transcript word a fix remembers (the schema's `was`). */
+export const MAX_WAS_LENGTH = 80;
+
+/** Whether two lists hold the same fixes: a save of an unchanged list is not sent. */
+export function sameCorrections(a: readonly CaptionCorrection[], b: readonly CaptionCorrection[]): boolean {
+  return a.length === b.length && a.every((c, i) => c.asset_id === b[i]?.asset_id && c.word === b[i]?.word && c.text === b[i]?.text && c.was === b[i]?.was);
+}
+
+/** Whether a new fix would be the one past the most the video holds (a fix of a word that already has one replaces it). */
+export function atLimit(list: readonly CaptionCorrection[], assetId: string, word: number): boolean {
+  return list.length >= MAX_CORRECTIONS && !list.some((c) => c.asset_id === assetId && c.word === word);
 }
 
 /** The op that saves the list: it replaces every fix the captions track has. */

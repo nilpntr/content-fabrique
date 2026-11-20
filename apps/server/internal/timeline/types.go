@@ -245,6 +245,9 @@ type CaptionCorrection struct {
 	AssetID string `json:"asset_id"`
 	Word    int    `json:"word"`
 	Text    string `json:"text"`
+	// Was is the word as the transcript had it when the fix was made. A fix whose Was no longer matches the transcript (it was
+	// transcribed again) is skipped by the renderer, so it never lands on another word. Empty: no check.
+	Was string `json:"was,omitempty"`
 }
 
 // AudioTrack holds the music and sound items.

@@ -158,10 +158,11 @@ func (c *compiler) captions(b *builder, tr *timeline.CaptionsTrack, lookup subje
 	if !ok {
 		return fmt.Errorf("%w: unknown format %q", ErrInvalidSpec, out.Format)
 	}
-	c.corrections = make(map[correctionKey]string, len(tr.Corrections))
+	fixes := make(map[correctionKey]timeline.CaptionCorrection, len(tr.Corrections))
 	for _, cor := range tr.Corrections {
-		c.corrections[correctionKey{cor.AssetID, cor.Word}] = cor.Text
+		fixes[correctionKey{cor.AssetID, cor.Word}] = cor
 	}
+	c.warnStaleCorrections(b, fixes)
 	upper, maxWords := tr.UppercaseOrDefault(), tr.MaxWordsOrDefault()
 	// The band of each clip's captions, by the clip's id.
 	places := map[string]subject.CaptionPlace{}
@@ -217,10 +218,33 @@ func (c *compiler) captions(b *builder, tr *timeline.CaptionsTrack, lookup subje
 		}
 		b.warn("caption_dropped", "the caption %q at %d ms is left out: it does not fit the caption band even at %d %% of the size", text, timeline.FrameStartMs(kept[0].startF, c.fps), int(captionFloor*100))
 	}
-	for _, chunk := range chunks(c.mapWords(), maxWords, c.fps) {
+	for _, chunk := range chunks(c.mapWordsOf(nil, fixes), maxWords, c.fps) {
 		place(chunk)
 	}
 	return nil
+}
+
+// fixApplies says a fix still belongs to the word the transcript has there: it remembers the word it was made for (Was), and a
+// transcript that was made again may have another word at that position. A fix without Was always applies.
+func fixApplies(fix timeline.CaptionCorrection, heard string) bool {
+	return fix.Was == "" || cleanWord(fix.Was) == heard
+}
+
+// warnStaleCorrections warns once for the fixes that name a word the transcripts of the clips no longer have (another word, or none).
+func (c *compiler) warnStaleCorrections(b *builder, fixes map[correctionKey]timeline.CaptionCorrection) {
+	seen := map[string]bool{}
+	for _, cl := range c.clips {
+		id := cl.item.AssetID
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		for wi, w := range cl.asset.Transcript {
+			if fix, ok := fixes[correctionKey{id, wi}]; ok && !fixApplies(fix, cleanWord(w.Text)) {
+				b.warn("correction_stale", "the fix of word %d of %s (%q) is left out: the transcript now has %q there, not %q", wi, id, fix.Text, cleanWord(w.Text), fix.Was)
+			}
+		}
+	}
 }
 
 // correctionKey names one word of one asset's transcript.
@@ -289,11 +313,11 @@ func fitCaption(st style.Style, zone style.Zone, pl subject.CaptionPlace, out ti
 // that plays: a word that straddles the clip's in or out point keeps the part inside; one entirely outside is dropped. A word
 // is at least one frame long, and a word never overlaps the one before it by a frame: the later word starts where the
 // earlier one ends if the speech overlaps in the transcript.
-func (c *compiler) mapWords() []mappedWord { return c.mapWordsOf(nil) }
 
-// mapWordsOf is mapWords for the clips keep accepts (nil: all of them). The overlap of two words is resolved among the words that
+// mapWordsOf is mapWords for the clips keep accepts (nil: all of them), with the creator's fixes in place of the words they correct
+// (nil: the transcript as it is; only the captions pass fixes, so the timing readers such as the sound effects never see them). The overlap of two words is resolved among the words that
 // are kept, so a clip that is left out does not shorten the words of the others.
-func (c *compiler) mapWordsOf(keep func(clipIndex int) bool) []mappedWord {
+func (c *compiler) mapWordsOf(keep func(clipIndex int) bool, fixes map[correctionKey]timeline.CaptionCorrection) []mappedWord {
 	var all []mappedWord
 	for ci, cl := range c.clips {
 		if keep != nil && !keep(ci) {
@@ -305,8 +329,8 @@ func (c *compiler) mapWordsOf(keep func(clipIndex int) bool) []mappedWord {
 		limit := min(cl.endFrame, c.total) // the clip's own audio plays to its end, also through a transition
 		for wi, w := range cl.asset.Transcript {
 			text := cleanWord(w.Text)
-			if fix, ok := c.corrections[correctionKey{cl.item.AssetID, wi}]; ok {
-				text = cleanWord(fix) // the creator's fix of a misheard word; the timing stays the transcript's
+			if fix, ok := fixes[correctionKey{cl.item.AssetID, wi}]; ok && fixApplies(fix, text) {
+				text = cleanWord(fix.Text) // the creator's fix of a misheard word; the timing stays the transcript's
 			}
 			if text == "" || w.EndMs <= in || w.StartMs >= out {
 				continue

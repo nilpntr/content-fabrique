@@ -22,12 +22,15 @@ const (
 	MaxKeywordRunes    = 24
 	// MaxCorrectionWord is the highest word position a correction may name.
 	MaxCorrectionWord = 99999
+	// MaxWasRunes is the longest transcript word a correction remembers.
+	MaxWasRunes = 80
 )
 
 // CleanCorrection checks the replacement text of a correction and returns it. A text is refused, never silently changed, when it
 // is empty, too long, not valid UTF-8, or holds a control, format (bidirectional override, zero width), private-use or surrogate
 // character, or one of the characters that matter in markup, templates and scripts (< > ` { } \ | ^ ~ [ ] $), or runs of white
-// space: textclean.Model would remove or change them, so a text it changes is a text that was not clean.
+// space or a text that is not in NFC: textclean.User would remove or change them, so a text it changes is a text that was not clean.
+// Punctuation at the ends is fine ("Dr.", "yes,", "..."): it is part of a transcript word.
 func CleanCorrection(text string) (string, error) {
 	if text == "" {
 		return "", errors.New("is empty")
@@ -35,12 +38,18 @@ func CleanCorrection(text string) (string, error) {
 	if n := len([]rune(text)); n > MaxCorrectionRunes {
 		return "", fmt.Errorf("has %d characters, at most %d", n, MaxCorrectionRunes)
 	}
-	clean, ok := textclean.Model(text, MaxCorrectionRunes)
+	if i := strings.IndexAny(text, correctionMarkup); i >= 0 {
+		return "", errors.New("holds one of the characters < > { } \\ | ^ ~ [ ] $ `")
+	}
+	clean, ok := textclean.User(text, MaxCorrectionRunes)
 	if !ok || clean != text {
-		return "", errors.New("holds control, invisible or markup characters (< > { } \\ | ^ ~ [ ] $ `) or extra white space")
+		return "", errors.New("holds control, invisible, private-use or unpaired characters, extra white space or is not normalised text")
 	}
 	return clean, nil
 }
+
+// correctionMarkup are the characters that matter in markup, templates and scripts, which a correction never holds.
+const correctionMarkup = "<>`{}\\|^~[]$"
 
 // ValidateCaptionFields checks what a captions track or a set_captions op carries besides the style: the colours, the key words and
 // the corrections. It returns one message per problem, each naming the field.
@@ -84,6 +93,9 @@ func ValidateCaptionFields(fill, accent string, keywords []string, corrections [
 		}
 		if _, err := CleanCorrection(c.Text); err != nil {
 			bad = append(bad, fmt.Sprintf("corrections[%d] text %q %v", i, c.Text, err))
+		}
+		if n := len([]rune(c.Was)); n > MaxWasRunes {
+			bad = append(bad, fmt.Sprintf("corrections[%d] was has %d characters, at most %d", i, n, MaxWasRunes))
 		}
 		k := key{c.AssetID, c.Word}
 		if seen[k] {

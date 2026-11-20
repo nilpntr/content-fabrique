@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { cleanCorrection, correctionsOf, MAX_CORRECTIONS, setCaptionsOp, withCorrection } from "./caption-corrections";
+import { atLimit, cleanCorrection, correctionsOf, MAX_CORRECTIONS, sameCorrections, setCaptionsOp, withCorrection } from "./caption-corrections";
 
 const A = "ast_01j3er3kwcgrasdgd4aznmxxe0";
 const B = "ast_01jex6xx15ayjx8epfhfjj9s11";
@@ -21,11 +21,11 @@ test("a fix replaces the one before it, and a text equal to the transcript's wor
   list = withCorrection(list, B, 1, "Whey", "way");
   list = withCorrection(list, A, 4, "Creatine", "creating");
   expect(list).toEqual([
-    { asset_id: A, word: 4, text: "Creatine" },
-    { asset_id: B, word: 1, text: "Whey" },
+    { asset_id: A, word: 4, text: "Creatine", was: "creating" },
+    { asset_id: B, word: 1, text: "Whey", was: "way" },
   ]);
-  expect(withCorrection(list, A, 4, "creating", "creating")).toEqual([{ asset_id: B, word: 1, text: "Whey" }]);
-  expect(withCorrection(list, B, 1, null, "way")).toEqual([{ asset_id: A, word: 4, text: "Creatine" }]);
+  expect(withCorrection(list, A, 4, "creating", "creating")).toEqual([{ asset_id: B, word: 1, text: "Whey", was: "way" }]);
+  expect(withCorrection(list, B, 1, null, "way")).toEqual([{ asset_id: A, word: 4, text: "Creatine", was: "creating" }]);
   expect(correctionsOf(list, A).get(4)).toBe("Creatine");
   expect(correctionsOf(list, B).has(4)).toBe(false);
 });
@@ -39,4 +39,19 @@ test("the list stops at the most the schema holds", () => {
 test("the op replaces the whole list", () => {
   expect(setCaptionsOp([{ asset_id: A, word: 4, text: "creatine" }])).toEqual({ op: "set_captions", corrections: [{ asset_id: A, word: 4, text: "creatine" }] });
   expect(setCaptionsOp([])).toEqual({ op: "set_captions", corrections: [] });
+});
+
+test("punctuation at the ends is part of a word and is kept", () => {
+  for (const word of ["Dr.", "yes,", "...", "-ok-", "(ok)"]) expect(cleanCorrection(word)).toEqual({ ok: true, text: word });
+  const decomposed = "Cafe\u0301";
+  expect(cleanCorrection(decomposed)).toEqual({ ok: true, text: "Caf\u00e9" });
+  for (const hostile of ["a" + String.fromCodePoint(0xe000), "a" + String.fromCodePoint(0xfffd), "a\ud800"]) expect(cleanCorrection(hostile).ok, hostile).toBe(false);
+});
+
+test("a save that changes nothing is recognised, and so is the full list", () => {
+  const full = Array.from({ length: MAX_CORRECTIONS }, (_, word) => ({ asset_id: A, word, text: "x", was: "y" }));
+  expect(sameCorrections(withCorrection(full, A, 999, "q", "z"), full)).toBe(true);
+  expect(atLimit(full, A, 999)).toBe(true);
+  expect(atLimit(full, A, 3)).toBe(false);
+  expect(sameCorrections(withCorrection([], A, 1, "same", "same"), [])).toBe(true);
 });

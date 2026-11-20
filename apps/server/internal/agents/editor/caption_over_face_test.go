@@ -40,8 +40,15 @@ func TestCaptionOverFace(t *testing.T) {
 	if !strings.Contains(c.Detail, "clear of the face") {
 		t.Errorf("clear: %s", c.Detail)
 	}
-	// The face is where the lower band is: the renderer moves the captions up, which passes, with a note.
-	c = wantStatus(t, run(withCaptions(t, true), speakerRows(assetA, 0.52, 0.72)), CheckCaptionOverFace, CheckPass)
+	// The face is where the lower band is: the renderer moves the captions up. A title at the top is then on them: a failure that says so.
+	c = wantStatus(t, run(withCaptions(t, true), speakerRows(assetA, 0.52, 0.72)), CheckCaptionOverFace, CheckFail)
+	if !strings.Contains(c.Detail, "t1 on c1") || !strings.Contains(c.Detail, "upper one") {
+		t.Errorf("title on the moved captions: %s", c.Detail)
+	}
+	// With the title in the lower third the moved captions pass, with a note.
+	low := withCaptions(t, true)
+	withTitle(t, low, func(it *timeline.TextItem) { it.Anchor = timeline.AnchorLowerThird })
+	c = wantStatus(t, run(low, speakerRows(assetA, 0.52, 0.72)), CheckCaptionOverFace, CheckPass)
 	if !strings.Contains(c.Detail, "upper band") {
 		t.Errorf("moved: %s", c.Detail)
 	}

@@ -182,7 +182,7 @@ export function ProjectPage({
                 {note ? <WhatIMade text={note} /> : null}
                 {note && review ? <SelfReviewLine summary={review} /> : null}
                 {version.loading ? null : <DownloadButton projectId={projectId} version={version.version} versionLabel={version.version === latest ? "video" : versionName(version.version)} />}
-                {version.loading || runActive ? null : <CaptionFixer projectId={projectId} version={version.version} className="border-t border-hairline pt-4" />}
+                {version.loading || runActive ? null : <CaptionFixer projectId={projectId} version={version.version} latest={latest} className="border-t border-hairline pt-4" />}
                 <FeedbackBox projectId={projectId} busy={runActive} openComments={openComments} onStarted={onRunStarted} className="border-t border-hairline pt-4" />
               </>
             );

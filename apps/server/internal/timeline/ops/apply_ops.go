@@ -650,7 +650,7 @@ func (a *applier) removeSound(o *RemoveSound) bool {
 }
 
 func (a *applier) setCaptions(o *SetCaptions) bool {
-	if o.Enabled == nil && o.Style == "" && o.Uppercase == nil && o.MaxWords == nil && o.Fill == "" && o.Accent == "" && o.Keywords == nil && o.Corrections == nil {
+	if o.Enabled == nil && o.Style == "" && o.Uppercase == nil && o.MaxWords == nil && o.Fill == nil && o.Accent == nil && o.Keywords == nil && o.Corrections == nil {
 		return a.errf(CodeBadArgument, "give at least one of enabled, style, uppercase, max_words, fill, accent, keywords and corrections")
 	}
 	// Corrections and key words are text the creator typed: refused here, whatever the schema said, when they are not clean text.
@@ -662,7 +662,14 @@ func (a *applier) setCaptions(o *SetCaptions) bool {
 	if o.Corrections != nil {
 		cor = *o.Corrections
 	}
-	if bad := timeline.ValidateCaptionFields(o.Fill, o.Accent, kw, cor); len(bad) > 0 {
+	fill, accent := "", ""
+	if o.Fill != nil {
+		fill = *o.Fill
+	}
+	if o.Accent != nil {
+		accent = *o.Accent
+	}
+	if bad := timeline.ValidateCaptionFields(fill, accent, kw, cor); len(bad) > 0 {
 		return a.errf(CodeBadArgument, "%s", strings.Join(bad, "; "))
 	}
 	for i, c := range cor {
@@ -688,11 +695,11 @@ func (a *applier) setCaptions(o *SetCaptions) bool {
 	if o.MaxWords != nil {
 		ct.MaxWords = copyPtr(o.MaxWords)
 	}
-	if o.Fill != "" {
-		ct.Fill = o.Fill
+	if o.Fill != nil {
+		ct.Fill = fill
 	}
-	if o.Accent != "" {
-		ct.Accent = o.Accent
+	if o.Accent != nil {
+		ct.Accent = accent
 	}
 	if o.Keywords != nil {
 		ct.Keywords = slices.Clone(kw)

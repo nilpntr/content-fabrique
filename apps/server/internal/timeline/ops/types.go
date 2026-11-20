@@ -247,8 +247,9 @@ type SetCaptions struct {
 	Uppercase *bool  `json:"uppercase,omitempty"`
 	MaxWords  *int   `json:"max_words,omitempty"`
 	// Fill and Accent are #RRGGBB colours; Keywords the words keyword_emphasis colours.
-	Fill     string    `json:"fill,omitempty"`
-	Accent   string    `json:"accent,omitempty"`
+	// A pointer to the empty string clears the colour (back to the style's own).
+	Fill     *string   `json:"fill,omitempty"`
+	Accent   *string   `json:"accent,omitempty"`
 	Keywords *[]string `json:"keywords,omitempty"`
 	// Corrections replaces the whole list of the creator's word fixes; a non-nil empty list clears it.
 	Corrections *[]timeline.CaptionCorrection `json:"corrections,omitempty"`
