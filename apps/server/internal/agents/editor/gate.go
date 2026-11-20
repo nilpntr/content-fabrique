@@ -299,16 +299,26 @@ func (d Deps) endTurn(ctx context.Context, rc runtime.RunContext, text string, n
 	case !d.previewsOn():
 		return runtime.EndTurn{Nudge: nudgeNoFinish}, nil
 	}
-	// Looked at and checked: the text is the message.
-	return runtime.EndTurn{Output: implicitFinish(text, v)}, nil
+	// Looked at and checked: the text is the message. The creator's rules hold here as in finish: while they fail and there is room, the
+	// model is asked once more (a nudge, so the run goes on).
+	if nudges == 0 {
+		if msg := d.ruleGate(ctx, rc, v); msg != "" {
+			return runtime.EndTurn{Nudge: "You ended your turn without calling finish, and " + strings.TrimPrefix(msg, "you cannot finish yet: ")}, nil
+		}
+	}
+	return runtime.EndTurn{Output: implicitFinish(text, v, d.unresolvedChecks(ctx, rc, v))}, nil
 }
 
 // implicitFinish is the run's output for a turn that ended in text after an edit: the same shape finish writes.
-func implicitFinish(text string, version int) json.RawMessage {
+func implicitFinish(text string, version int, unresolved []string) json.RawMessage {
 	summary := cutRunes(strings.TrimSpace(strings.ReplaceAll(text, "\x00", "")), maxSummaryChars)
 	if summary == "" {
 		summary = "I finished the edit; open the new version to see it."
 	}
-	out, _ := json.Marshal(map[string]any{"summary": summary, "timeline_version": version, "implicit_finish": true})
+	o := map[string]any{"summary": withUnresolved(summary, unresolved), "timeline_version": version, "implicit_finish": true}
+	if len(unresolved) > 0 {
+		o["unresolved_checks"] = unresolved
+	}
+	out, _ := json.Marshal(o)
 	return out
 }

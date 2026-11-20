@@ -318,9 +318,17 @@ func (d Deps) checkEdit(ctx context.Context, rc runtime.RunContext, _ noArgs) (r
 	perCall := d.callCostMicros(ctx, rc)
 	low := budgetLow(rc.Left, perCall)
 	traceBudgetLow(ctx, rc.Left, perCall)
+	rules := creatorRulesFailed(report.Failed())
 	switch {
 	case fail == 0:
 		b.WriteString("All the checks that apply pass. Call finish.")
+	case len(rules) > 0 && !low && nth < maxRuleChecks:
+		// The creator's own rules (their settings) are not advice: the run keeps fixing them while it has room, and finish is refused
+		// until they pass (ruleGate) or the room is gone.
+		fmt.Fprintf(&b, "%s %s the creator's own rule%s (their settings), not advice: fix %s first, in one batch with the other failing checks, then render_preview and check_edit again. finish is refused while %s and you have room to fix %s. On a fixed 2-beat grid every cut is on an even beat and a rep may be held 4, 6 or 8 beats; with every shot used once, hold the reps longer or make the video shorter instead of repeating a clip.",
+			strings.Join(rules, " and "), plural(len(rules), "is", "are"), plural(len(rules), "", "s"), plural(len(rules), "it", "them"), plural(len(rules), "fails", "fail"), plural(len(rules), "it", "them"))
+	case len(rules) > 0:
+		fmt.Fprintf(&b, "%s still %s, and there is no room left for another pass. Call finish now and say in your message, plainly, which of the creator's rules the video does not keep and why.", strings.Join(rules, " and "), plural(len(rules), "fails", "fail"))
 	case nth == 1 && low:
 		b.WriteString("Some checks fail, but you are close to your limits: do not start a revision. Call finish now and say in your message what is not as good as it should be.")
 	case nth == 1:
@@ -330,6 +338,85 @@ func (d Deps) checkEdit(ctx context.Context, rc runtime.RunContext, _ noArgs) (r
 	}
 	b.WriteString(budgetNote(rc.Left, perCall))
 	return runtime.Result{Content: []llm.Block{llm.TextBlock(b.String())}}, nil
+}
+
+// creatorRuleChecks are the checks of the creator's own rules: they apply only when the creator's settings ask for them (cut_grid fixed_2,
+// shot_reuse once), so a failure is a broken rule and not a preference. The live test of 2026-11-20 (section 4.4) finished edits with
+// both failing, because every check was advice; these keep the run fixing (check_edit asks for another pass, finish is refused) while it
+// has room, and a run that ends with one failing says so in its output (unresolved_checks) and in the message to the creator.
+var creatorRuleChecks = []string{CheckBeatGridFixed, CheckShotReused}
+
+// maxRuleChecks is how many check_edit calls a run may make while the creator's rules fail: the first check, the revision pass and one
+// more pass for the rules alone. After it, finish is let through with the rules named as not kept.
+const maxRuleChecks = 3
+
+// creatorRulesFailed is the creator's rule checks among the failed ones.
+func creatorRulesFailed(failed []string) []string {
+	var out []string
+	for _, id := range failed {
+		if slices.Contains(creatorRuleChecks, id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// ruleGate returns the refusal for finish when the newest check of version found one of the creator's rules broken and the run still has
+// room to fix it (fewer than maxRuleChecks checks, and not short of budget), or "" when it may finish.
+func (d Deps) ruleGate(ctx context.Context, rc runtime.RunContext, version int) string {
+	cv, failed := d.lastCheckOf(ctx, rc)
+	rules := creatorRulesFailed(failed)
+	if cv != version || len(rules) == 0 {
+		return ""
+	}
+	if _, calls := d.previews.checkState(rc.RunID); calls >= maxRuleChecks || budgetLow(rc.Left, d.callCostMicros(ctx, rc)) {
+		return ""
+	}
+	return fmt.Sprintf("you cannot finish yet: %s %s on version %d, and %s the creator's own rule%s (their settings), not advice. Fix %s with edit_timeline, render_preview and check_edit again, then finish.",
+		strings.Join(rules, " and "), plural(len(rules), "fails", "fail"), version, plural(len(rules), "is", "are"), plural(len(rules), "", "s"), plural(len(rules), "it", "them"))
+}
+
+// unresolvedChecks is the checks that still fail on version in the run's newest check of it (nil when the newest check is of another
+// version or everything passed): what a run that ends now did not fix.
+func (d Deps) unresolvedChecks(ctx context.Context, rc runtime.RunContext, version int) []string {
+	cv, failed := d.lastCheckOf(ctx, rc)
+	if cv != version {
+		return nil
+	}
+	return failed
+}
+
+// withUnresolved adds the unresolved note to a message for the creator, kept within maxSummaryChars (the message is cut to make room).
+func withUnresolved(summary string, failed []string) string {
+	note := unresolvedNote(failed)
+	if note == "" {
+		return summary
+	}
+	room := maxSummaryChars - len([]rune(note)) - 2 // a space, and the ellipsis cutRunes adds
+	return strings.TrimSpace(cutRunes(summary, max(room, 0)) + " " + note)
+}
+
+// unresolvedNote is the plain line for the creator about the checks a finished edit still fails, the creator's rules first, or "".
+func unresolvedNote(failed []string) string {
+	if len(failed) == 0 {
+		return ""
+	}
+	rules := creatorRulesFailed(failed)
+	var other []string
+	for _, id := range failed {
+		if !slices.Contains(rules, id) {
+			other = append(other, id)
+		}
+	}
+	words := func(ids []string) string { return strings.ReplaceAll(strings.Join(ids, ", "), "_", " ") }
+	var parts []string
+	if len(rules) > 0 {
+		parts = append(parts, "Your own rules this version does not keep yet: "+words(rules)+".")
+	}
+	if len(other) > 0 {
+		parts = append(parts, "Checks that still fail: "+words(other)+".")
+	}
+	return strings.Join(parts, " ")
 }
 
 const (
@@ -488,6 +575,9 @@ func (d Deps) onLimit(ctx context.Context, rc runtime.RunContext, limit string) 
 		}
 	}
 	o := map[string]any{"summary": note.String(), "timeline_version": v, "implicit_finish": true, "limit": limit}
+	if failed := d.unresolvedChecks(ctx, rc, v); len(failed) > 0 {
+		o["unresolved_checks"] = failed
+	}
 	if ceiling > 0 {
 		o["ceiling_micros"] = ceiling
 	}

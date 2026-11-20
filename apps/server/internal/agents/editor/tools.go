@@ -641,7 +641,8 @@ func (d Deps) finish(ctx context.Context, rc runtime.RunContext, in finishArgs) 
 	}
 	// A run ends by having edited the timeline, or by saying that there was nothing to edit. The versions this run made have its
 	// TypeID as their author.
-	var version any // the version number the run finished on, null when it made none
+	var version any         // the version number the run finished on, null when it made none
+	var unresolved []string // the checks the newest check of that version still failed
 	made, err := d.Store.GetTimelineVersionByAuthor(ctx, ws, pid, string(ops.AuthorAgent), ids.Encode(ids.PrefixRun, rc.RunID))
 	switch {
 	case err == nil:
@@ -652,6 +653,10 @@ func (d Deps) finish(ctx context.Context, rc runtime.RunContext, in finishArgs) 
 		if msg := d.checkGate(ctx, rc, int(made.Version)); msg != "" {
 			return runtime.Errorf("%s", msg), nil
 		}
+		if msg := d.ruleGate(ctx, rc, int(made.Version)); msg != "" {
+			return runtime.Errorf("%s", msg), nil
+		}
+		unresolved = d.unresolvedChecks(ctx, rc, int(made.Version))
 	case !errors.Is(err, store.ErrNotFound):
 		return runtime.Result{}, fmt.Errorf("look for the run's versions: %w", err)
 	case det.Project.CurrentTimelineVersion == nil:
@@ -659,9 +664,13 @@ func (d Deps) finish(ctx context.Context, rc runtime.RunContext, in finishArgs) 
 	case !in.NoEditNeeded:
 		return runtime.Errorf("you cannot finish yet: this run has not changed the timeline. Make your edit with edit_timeline first. If the timeline already does what the creator asked and nothing needs to change, call finish again with no_edit_needed set to true"), nil
 	}
-	summary = cutRunes(summary, maxSummaryChars)
+	summary = withUnresolved(cutRunes(summary, maxSummaryChars), unresolved)
 	// no_edit_needed marks a run that changed nothing because there was nothing to change: its credits are not charged.
-	out, _ := json.Marshal(map[string]any{"summary": summary, "timeline_version": version, "no_edit_needed": version == nil})
+	o := map[string]any{"summary": summary, "timeline_version": version, "no_edit_needed": version == nil}
+	if len(unresolved) > 0 {
+		o["unresolved_checks"] = unresolved
+	}
+	out, _ := json.Marshal(o)
 	res := runtime.Text(summary)
 	res.Final, res.Output = true, out
 	return res, nil
