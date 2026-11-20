@@ -25,7 +25,9 @@ const evalImproveUsage = `Usage:
 
 DEVELOPMENT ONLY. The improvement loop (docs/design/observability-v1.md section 8):
   0. estimates the cost (the baseline unless it is cached, and per iteration the improver plus a candidate run, from the recent
-     runs' costs) and refuses to start when it is over --max-usd;
+     runs' costs) and refuses to start when it is over --max-usd; then prints what the loop may cost at most (every run at its whole
+     budget, never more than --max-usd) and refuses to start when that is more than the test cap has left (TEST_SPEND_CAP_MICROS,
+     default $75; cfctl spend summary), unless --over-test-cap is given;
   1. runs the suite on the current code: the baseline. A run of the same code (a hash of the editor, renderer, timeline, style,
      scoring and routing code, the suite files and the run options) younger than --baseline-max-age is reused instead;
   2. shows the lowest-scoring cases (failing checks, the judge's rationales, failed human feedback) to the improver (improve_edit,
@@ -55,7 +57,8 @@ suite run an experiment. Nothing is spent beyond --max-usd (improver calls, judg
   --low             how many low cases the improver sees; default 2
   --proposal        a change of your own to try instead of asking the improver: a JSON file {"title", "rationale", "expected_effect",
                     "edits": [{"path", "old", "new"}]} with the same rules (one file of the allowlist, each old text once)
-  and the flags of cfctl eval suite (--suite, --local, --live, --no-judge, --judge-profile, --cases, --out, --phoenix, --env-file, --yes)
+  and the flags of cfctl eval suite (--suite, --local, --live, --no-judge, --judge-profile, --cases, --out, --phoenix, --env-file, --yes,
+  --over-test-cap)
 `
 
 func cmdEvalImprove(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps agentDeps) int {
@@ -127,15 +130,21 @@ func cmdEvalImprove(args []string, stdout, stderr io.Writer, lookup lookupEnv, d
 		improverMicros = 0 // your own change: no improver call
 	}
 	total := int64(*iterations) * (improverMicros + run.Micros)
+	worst := int64(*iterations) * (improverMicros + run.WorstMicros)
 	if cached {
 		lines = append(lines, "baseline: a run of the same code from "+cachedBase.RunID+" is reused: $0")
 	} else {
 		total += run.Micros
+		worst += run.WorstMicros
 		lines = append(lines, fmt.Sprintf("baseline: $%.2f", float64(run.Micros)/1e6))
 	}
 	lines = append(lines, fmt.Sprintf("per iteration: improver up to $%.2f + candidate run $%.2f, × %d", float64(improverMicros)/1e6, float64(run.Micros)/1e6, *iterations))
 	lines = append(lines, run.Lines...)
 	if !guardCost(out, errOut, name, total, f.maxUSD, lines) {
+		return 2
+	}
+	// The whole loop against the test cap, once: the candidate runs below are part of this total, so they skip the check themselves.
+	if !guardTestCap(ctx, se.st, se.env, name, evals.Estimate{WorstMicros: worst}.UpTo(maxMicros), f.overTestCap) {
 		return 2
 	}
 	if f.live {
@@ -250,6 +259,9 @@ func evaluateIn(ctx context.Context, se *suiteEnv, f suiteFlags, dir, label stri
 	if live {
 		args = append(args, "--live", "--yes")
 	}
+	// The loop's total was checked against the test cap before it started, and left is within it: the candidate's own check would count
+	// the baseline's spend a second time against its share.
+	args = append(args, "--over-test-cap")
 	if f.judgeProfile != "" {
 		args = append(args, "--judge-profile", f.judgeProfile)
 	}

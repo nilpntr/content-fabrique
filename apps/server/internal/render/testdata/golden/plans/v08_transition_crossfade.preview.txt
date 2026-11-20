@@ -65,9 +65,9 @@ args:
   +bitexact
 
 filter_complex:
-  [0:v]trim=end=3.000,setpts=PTS-STARTPTS,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=90,setpts=PTS-STARTPTS,scale=540:960:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=540:960:x='clip(0.5*iw-270,0,iw-540)':y='clip(0.5*ih-480,0,ih-960)',setsar=1,format=yuv420p,setsar=1,fps=30,settb=AVTB[v0];
-  [1:v]trim=end=3.000,setpts=PTS-STARTPTS,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=90,setpts=PTS-STARTPTS,scale=540:960:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=540:960:x='clip(0.5*iw-270,0,iw-540)':y='clip(0.5*ih-480,0,ih-960)',setsar=1,format=yuv420p,setsar=1,fps=30,settb=AVTB[v1];
-  [2:v]trim=end=3.000,setpts=PTS-STARTPTS,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=90,setpts=PTS-STARTPTS,scale=540:960:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=540:960:x='clip(0.5*iw-270,0,iw-540)':y='clip(0.5*ih-480,0,ih-960)',setsar=1,format=yuv420p,setsar=1,fps=30,settb=AVTB[v2];
+  [0:v]trim=end=3.000,setpts=PTS-STARTPTS,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=90,setpts=PTS-STARTPTS,scale=540:960:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=540:960:x='clip(0.5*iw-270,0,iw-540)':y='clip(0.5*ih-480,0,ih-960)',setsar=1,format=yuv420p,setsar=1,fps=30,settb=AVTB,sidedata=mode=delete:type=DISPLAYMATRIX[v0];
+  [1:v]trim=end=3.000,setpts=PTS-STARTPTS,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=90,setpts=PTS-STARTPTS,scale=540:960:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=540:960:x='clip(0.5*iw-270,0,iw-540)':y='clip(0.5*ih-480,0,ih-960)',setsar=1,format=yuv420p,setsar=1,fps=30,settb=AVTB,sidedata=mode=delete:type=DISPLAYMATRIX[v1];
+  [2:v]trim=end=3.000,setpts=PTS-STARTPTS,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=90,setpts=PTS-STARTPTS,scale=540:960:force_original_aspect_ratio=increase:force_divisible_by=2:flags=bicubic,crop=540:960:x='clip(0.5*iw-270,0,iw-540)':y='clip(0.5*ih-480,0,ih-960)',setsar=1,format=yuv420p,setsar=1,fps=30,settb=AVTB,sidedata=mode=delete:type=DISPLAYMATRIX[v2];
   [v0][v1]xfade=transition=fade:duration=0.400000:offset=2.600000[j1];
   [j1][v2]concat=n=2:v=1:a=0[vj];
   [vj]ass=filename=subs.ass:fontsdir=fonts[vout];

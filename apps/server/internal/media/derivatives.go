@@ -106,6 +106,36 @@ func DecodeCheckArgs(input string, m Metadata) ([]string, error) {
 	return append(a, "-i", input, "-map", "0:"+strconv.Itoa(m.VideoIndex), "-frames:v", "3", "-an", "-f", "null", "-"), nil
 }
 
+// FullDecodeArgs decodes the whole video stream and throws the frames away, printing ffmpeg's progress (key=value lines,
+// the last out_time_us of which is how much of the picture decoded) to stdout and every decode error to stderr. It is the
+// footage check's damage test: a file cut off part way through probes fine and decodes its first frames, but stops early
+// here. The progress period is long so a long clip does not flood the captured output; the final block is always written.
+func FullDecodeArgs(input string, m Metadata) ([]string, error) {
+	if !m.HasVideo {
+		return nil, errors.New("media: full decode needs a video stream")
+	}
+	a := append(common(), inputOptions()...)
+	return append(a, "-i", input, "-map", "0:"+strconv.Itoa(m.VideoIndex), "-an", "-sn", "-dn",
+		"-nostats", "-stats_period", "30", "-progress", "pipe:1", "-f", "null", "-"), nil
+}
+
+// DecodedMs reads how much FullDecodeArgs decoded from its progress output: the last out_time_us (or out_time_ms, which
+// ffmpeg also prints in microseconds), in milliseconds. ok is false when the output has none.
+func DecodedMs(progress []byte) (ms int64, ok bool) {
+	for _, line := range strings.Split(string(progress), "\n") {
+		k, v, found := strings.Cut(strings.TrimSpace(line), "=")
+		if !found || (k != "out_time_us" && k != "out_time_ms") {
+			continue
+		}
+		us, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		if err != nil || us < 0 {
+			continue // "N/A" before the first frame
+		}
+		ms, ok = us/1000, true
+	}
+	return ms, ok
+}
+
 // ---- Proxy -------------------------------------------------------------------------------------------------------------
 
 // colourTags are put on every picture derivative: the proxy is always SDR BT.709, limited range.
@@ -277,11 +307,13 @@ func (g SpriteGrid) Width() int  { return g.Cols * g.TileW }
 func (g SpriteGrid) Height() int { return g.Rows * g.TileH }
 
 // SpriteArgs makes sprite.jpg from the proxy: one frame every g.IntervalSec seconds, scaled to a tile, laid out as a grid.
+// The fps filter rounds up, so a clip shorter than half an interval still gives its first frame (rounding to the nearest
+// gives none, and the sheet is never written) and the number of frames is the grid's Count, which also rounds up.
 func SpriteArgs(input, output string, g SpriteGrid) ([]string, error) {
 	if g.IntervalSec < 1 || g.Count < 1 || g.Cols < 1 || g.Rows < 1 || g.TileW < 2 || g.TileH < 2 {
 		return nil, fmt.Errorf("media: invalid sprite grid %+v", g)
 	}
-	vf := "fps=1/" + strconv.Itoa(g.IntervalSec) + ",scale=" + strconv.Itoa(g.TileW) + ":" + strconv.Itoa(g.TileH) +
+	vf := "fps=1/" + strconv.Itoa(g.IntervalSec) + ":round=up,scale=" + strconv.Itoa(g.TileW) + ":" + strconv.Itoa(g.TileH) +
 		":flags=bicubic,tile=" + strconv.Itoa(g.Cols) + "x" + strconv.Itoa(g.Rows)
 	a := append(common(), inputOptions()...)
 	return append(a, "-i", input, "-map", "0:v:0", "-an", "-vf", vf, "-frames:v", "1", "-update", "1", "-q:v", "5", output), nil

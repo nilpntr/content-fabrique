@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/nilpntr/content-fabrique/internal/media"
+	"github.com/nilpntr/content-fabrique/internal/sandbox"
 	"github.com/nilpntr/content-fabrique/internal/storage"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
@@ -39,25 +40,32 @@ var errNoOutput = errors.New("the tool produced no output")
 // that was killed (the out-of-memory killer, a stopping container) or timed out, a sandbox that could not run it and a
 // cancelled context are other errors, which the job retries: they say nothing about the file.
 func (r *run) exec(ctx context.Context, timeout time.Duration, args []string, inputs ...string) (string, error) {
-	out, err := os.MkdirTemp(r.dir, "out-")
+	out, _, err := execTool(ctx, r.runner, r.dir, timeout, args, inputs...)
+	return out, err
+}
+
+// execTool is run.exec for any runner and parent directory; it also returns the tool's result (stdout and stderr) when it
+// ran.
+func execTool(ctx context.Context, runner media.Runner, parent string, timeout time.Duration, args []string, inputs ...string) (string, sandbox.Result, error) {
+	out, err := os.MkdirTemp(parent, "out-")
 	if err != nil {
-		return "", err
+		return "", sandbox.Result{}, err
 	}
 	ins := make([]media.Input, len(inputs))
 	for i, p := range inputs {
 		ins[i] = media.Input{Host: p, Container: media.InputPath(i)}
 	}
-	res, err := r.runner.Run(ctx, media.Invocation{Args: args, Inputs: ins, OutputDir: out, Timeout: timeout})
+	res, err := runner.Run(ctx, media.Invocation{Args: args, Inputs: ins, OutputDir: out, Timeout: timeout})
 	if err != nil {
-		return out, fmt.Errorf("%s: %w", args[0], err)
+		return out, res, fmt.Errorf("%s: %w", args[0], err)
 	}
 	switch {
 	case killedExit(res.ExitCode):
-		return out, fmt.Errorf("%s: %w (exit code %d): %s", args[0], errKilled, res.ExitCode, media.StderrSnippet(res.Stderr))
+		return out, res, fmt.Errorf("%s: %w (exit code %d): %s", args[0], errKilled, res.ExitCode, media.StderrSnippet(res.Stderr))
 	case res.ExitCode != 0:
-		return out, &media.ToolError{Tool: args[0], ExitCode: res.ExitCode, Stderr: media.StderrSnippet(res.Stderr)}
+		return out, res, &media.ToolError{Tool: args[0], ExitCode: res.ExitCode, Stderr: media.StderrSnippet(res.Stderr)}
 	}
-	return out, nil
+	return out, res, nil
 }
 
 // heavy and light are the tool timeouts for this clip; see HeavyTimeout and LightTimeout.
@@ -162,16 +170,30 @@ func (r *run) video(ctx context.Context, original string, meta media.Metadata) (
 		}
 	}
 
+	if pm := playableMs(meta.DurationMs, dur); pm != meta.DurationMs {
+		r.log.WarnContext(ctx, "the clip is cut off: only part of it plays; recording the playable length", "probed_ms", meta.DurationMs, "playable_ms", pm)
+	}
 	// The asset has audio when the proxy does: the selected track was decodable and encoded. (meta.SelectedAudio is cleared
 	// by makeProxy when it was not.)
 	res := store.IngestResult{
-		DurationMs: meta.DurationMs, Width: meta.Width, Height: meta.Height, FPS: meta.FPS.Value, Rotation: meta.ClockwiseDegrees(),
+		DurationMs: playableMs(meta.DurationMs, dur), Width: meta.Width, Height: meta.Height, FPS: meta.FPS.Value, Rotation: meta.ClockwiseDegrees(),
 		VideoCodec: meta.Codecs.Video, HasAudio: proxy.HasAudio, HDR: meta.HDR,
 	}
 	if proxy.HasAudio {
 		res.AudioCodec = selectedCodec(meta)
 	}
 	return ingested{result: res}, nil
+}
+
+// playableMs is the length to record for a clip: the probed length, unless the proxy came out clearly shorter (more than
+// a second and more than 5 % short). That is a file cut off part way (a copy or an upload that stopped) whose index still
+// claims the full length; recording the claim would let the editor pick moments past the end, which would render as a
+// frozen last frame.
+func playableMs(probedMs, proxyMs int64) int64 {
+	if proxyMs > 0 && proxyMs < probedMs-1000 && proxyMs*100 < probedMs*95 {
+		return proxyMs
+	}
+	return probedMs
 }
 
 // makeProxy runs the transcode. A file whose audio track will not encode is retried without audio, so a damaged audio track
@@ -221,7 +243,8 @@ func (r *run) checkedProxy(ctx context.Context, out string, src media.Metadata) 
 }
 
 // checkProxy verifies what the sandbox made: an upright H.264 video of the size we asked for with nothing left to rotate,
-// at least half as long as the source.
+// with some length: a clip cut off part way gives a shorter one (video records the length that plays, see playableMs), but
+// one of which under TooShortMs plays is damaged, not a clip.
 func checkProxy(proxy, src media.Metadata) error {
 	w, h := media.ScaledSize(src.Width, src.Height, media.ProxyShortSide)
 	switch {
@@ -229,8 +252,8 @@ func checkProxy(proxy, src media.Metadata) error {
 		return errors.New("the proxy has no H.264 video")
 	case proxy.Width != w || proxy.Height != h || proxy.Rotation != 0:
 		return fmt.Errorf("the proxy is %dx%d (rotation %d), want %dx%d upright", proxy.Width, proxy.Height, proxy.Rotation, w, h)
-	case proxy.DurationMs <= 0 || proxy.DurationMs*2 < src.DurationMs:
-		return fmt.Errorf("the proxy is %d ms long, the source %d ms", proxy.DurationMs, src.DurationMs)
+	case proxy.DurationMs <= 0 || (proxy.DurationMs < TooShortMs && src.DurationMs >= TooShortMs):
+		return fmt.Errorf("the proxy is %d ms long, the source %d ms: almost nothing of it plays", proxy.DurationMs, src.DurationMs)
 	}
 	return nil
 }

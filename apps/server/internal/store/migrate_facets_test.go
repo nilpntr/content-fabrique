@@ -68,7 +68,7 @@ func TestTheMigrationLabelsTheOldClips(t *testing.T) {
 		idOf[name] = id
 	}
 
-	if _, err := m.Up(ctx); err != nil {
+	if _, err := m.UpTo(ctx, store.FacetBackfillVersion); err != nil {
 		t.Fatal(err)
 	}
 	type labels struct {
