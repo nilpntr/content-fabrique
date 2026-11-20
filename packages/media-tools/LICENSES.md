@@ -44,7 +44,7 @@ To review a version bump, `--print-shas` prints each component's current copyrig
 | ffmpeg | 8.1.3 release tarball, SHA-256 `7138d28c96d9d3e3af4ee3d8cad72741f8ffb40da90c1112235dea3ecd3178a3` |
 | whisper.cpp | v1.9.5 source tarball (GitHub), SHA-256 `ff1a9053feb509ff9d7729703355541ae9690073a6b1c40eb692c962e0dc1720` (`WHISPER_VERSION`, `WHISPER_SHA256` in the Dockerfile) |
 | chrome-headless-shell | Chrome for Testing 155.0.8059.84, SHA-256 of the archive: linux64 `a5d71b91aa996fef00517cd212b2dfb816b43055edefbe727e6fd562d4ae1f9c`, linux-arm64 `0c83c2520b513835c712590781adbdbcab4c14ca04d4809be5055ff2c8937a51` (`CHROME_*` in the Dockerfile) |
-| Go (for cf-motion) | `golang:1.27.2-trixie@sha256:47667934874913a449b96faa7ef4777fa285d9ec29126ee80ed61c45b7cccf0e` (`GO_IMAGE`) |
+| Go (for cf-motion and cf-job) | `golang:1.27.2-trixie@sha256:47667934874913a449b96faa7ef4777fa285d9ec29126ee80ed61c45b7cccf0e` (`GO_IMAGE`) |
 
 ## Notes for reviewers
 
@@ -72,8 +72,8 @@ To review a version bump, `--print-shas` prints each component's current copyrig
   server-side is on the P0-12 legal list, and Debian's `chromium-headless-shell` is the drop-in alternative. The libraries it loads add
   MIT X11 and graphics libraries, LGPL-2.1+ ones (ALSA, ATK, AT-SPI, systemd's libudev, util-linux's libblkid and libmount, loaded
   through GLib) and MPL-2.0 NSS and NSPR, each with its reason in `policy.json`. `libatk-bridge2.0-0t64` is loaded by the x86-64 build
-  only, so the table below (the amd64 image CI checks) lists it and an arm64 build warns that its entry matches nothing. `cf-motion` is
-  our code; the Go runtime linked into it (BSD-3-Clause) is the `golang-runtime` row.
+  only, so the table below (the amd64 image CI checks) lists it and an arm64 build warns that its entry matches nothing. `cf-motion` and `cf-job` are
+  our code; the Go runtime linked into them (BSD-3-Clause) is the `golang-runtime` row.
 - The sandbox, not the licence, is what contains ffmpeg's attack surface: see `apps/server/internal/sandbox`.
 
 ## Generated inventory

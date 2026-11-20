@@ -1,0 +1,43 @@
+{
+  "inputs": [
+    {
+      "url": "https://objects.example/b/src.mp4?X-Amz-Signature=abc",
+      "path": "/in/0"
+    }
+  ],
+  "steps": [
+    {
+      "args": [
+        "ffmpeg",
+        "-i",
+        "/in/0",
+        "/work/out.mp4"
+      ]
+    },
+    {
+      "args": [
+        "ffprobe",
+        "/work/out.mp4"
+      ],
+      "timeout_ms": 60000
+    }
+  ],
+  "outputs": [
+    {
+      "path": "/work/out.mp4",
+      "url": "https://objects.example/b/out.mp4?X-Amz-Signature=def",
+      "content_type": "video/mp4",
+      "max_bytes": 1073741824
+    }
+  ],
+  "limits": {
+    "cpu": 4,
+    "memory_mb": 4096,
+    "timeout_ms": 1800000,
+    "pids": 1024
+  },
+  "max_output_bytes": 1048576,
+  "labels": {
+    "kind": "render"
+  }
+}

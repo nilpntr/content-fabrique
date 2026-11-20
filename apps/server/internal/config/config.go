@@ -89,8 +89,15 @@ type Config struct {
 	//
 	// MediaSandboxProvider is MEDIA_SANDBOX_PROVIDER: "docker" (the default on a developer machine and in CI), "hardened"
 	// (docker under gVisor; the default in staging and production) or "local" (no isolation at all; refused in staging and
-	// production).
+	// production) or "remote" (a runner over HTTP: cf-job serve in compose's runner profile, or the sandbox gateway; in staging
+	// and production only the gateway, docs/design/render-runtime.md).
 	MediaSandboxProvider string
+	// MediaRunnerURL is MEDIA_RUNNER_URL, the runner of the remote provider; default DefaultMediaRunnerURL. Its bearer token is
+	// MediaRunnerToken (SANDBOX_GATEWAY_TOKEN, shared with the gateway Worker) and SandboxGatewayURL is SANDBOX_GATEWAY_URL.
+	// Only read with MEDIA_SANDBOX_PROVIDER=remote. The token is never logged.
+	MediaRunnerURL    string
+	MediaRunnerToken  string
+	SandboxGatewayURL string
 	// MediaToolsImage is MEDIA_TOOLS_IMAGE, the media-tools image (packages/media-tools). It is never pulled at job time.
 	MediaToolsImage string
 	// MediaTempDir is MEDIA_TEMP_DIR: an absolute directory the worker may write to and the sandbox may mount from.
@@ -134,7 +141,12 @@ const (
 	SandboxDocker   = "docker"
 	SandboxHardened = "hardened"
 	SandboxLocal    = "local"
+	SandboxRemote   = "remote"
 )
+
+// DefaultMediaRunnerURL is the default of MEDIA_RUNNER_URL: compose's media-runner (the runner profile) on this machine. Not
+// 8080, which is the API's (API_BASE_URL).
+const DefaultMediaRunnerURL = "http://localhost:8090"
 
 // Defaults of the media settings.
 const (
@@ -182,6 +194,9 @@ func Load(getenv Getenv) (Config, error) {
 		MediaSandboxProvider: strings.ToLower(strings.TrimSpace(getenv("MEDIA_SANDBOX_PROVIDER"))),
 		MediaToolsImage:      strings.TrimSpace(getenv("MEDIA_TOOLS_IMAGE")),
 		MediaTempDir:         strings.TrimSpace(getenv("MEDIA_TEMP_DIR")),
+		MediaRunnerURL:       strings.TrimSpace(getenv("MEDIA_RUNNER_URL")),
+		MediaRunnerToken:     strings.TrimSpace(getenv("SANDBOX_GATEWAY_TOKEN")),
+		SandboxGatewayURL:    strings.TrimSpace(getenv("SANDBOX_GATEWAY_URL")),
 	}
 
 	if c.Env == "" {
@@ -288,8 +303,17 @@ func (c *Config) loadMedia(getenv Getenv) []error {
 		if err := sandbox.CheckLocalAllowed(c.Env); err != nil {
 			errs = append(errs, fmt.Errorf("MEDIA_SANDBOX_PROVIDER: %w", err))
 		}
+	case SandboxRemote:
+		if c.MediaRunnerURL == "" {
+			c.MediaRunnerURL = DefaultMediaRunnerURL
+		}
+		if _, err := sandbox.NewRemote(c.MediaRunnerURL, c.MediaRunnerToken); err != nil {
+			errs = append(errs, fmt.Errorf("MEDIA_RUNNER_URL, SANDBOX_GATEWAY_TOKEN: %w", err))
+		} else if err := sandbox.CheckRemoteAllowed(c.Env, c.MediaRunnerURL, c.SandboxGatewayURL); err != nil {
+			errs = append(errs, fmt.Errorf("MEDIA_RUNNER_URL: %w", err))
+		}
 	default:
-		errs = append(errs, fmt.Errorf("MEDIA_SANDBOX_PROVIDER: %q is not one of docker, hardened, local", c.MediaSandboxProvider))
+		errs = append(errs, fmt.Errorf("MEDIA_SANDBOX_PROVIDER: %q is not one of docker, hardened, local, remote", c.MediaSandboxProvider))
 	}
 	if c.MediaToolsImage == "" {
 		c.MediaToolsImage = DefaultMediaToolsImage
