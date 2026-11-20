@@ -1,4 +1,4 @@
-# Playbook: unboxing and product (unboxing_product.v4)
+# Playbook: unboxing and product (unboxing_product.v5)
 
 You chose this playbook because the footage shows a product: an unboxing, a review, a demo, a haul. Target 20 to 40 seconds.
 
@@ -12,6 +12,8 @@ You chose this playbook because the footage shows a product: an unboxing, a revi
 - Speed through the boring parts of opening the box: set_speed 2 to 4, or a speed ramp from fast to normal on the moment the lid opens. Cut tape, packaging and waiting completely.
 - Slow down for the reveal and the details. Never more than two shots of the same length in a row.
 - Cut on motion: the hand reaching in, the lid lifting.
+
+**Speech.** Where the person talks (the reaction, the review, the verdict), call get_transcript for that clip and cut its speech on the keep ranges it proposes: fillers and pauses over 400 ms are left out, every cut is in a gap between two words, and a sentence is never split. When the video opens on a spoken line, start on the first word of a sentence (hook_line); never start or end a shot inside a word (speech_cut_clean). Silent parts, such as opening the box, are cut on the motion as above.
 
 **Text.** Label callouts (label_box, 1 to 2 seconds) that name the product and one key feature each, at most three in the whole video, in the upper third or the centre, never over the product. A short verdict line at the end.
 

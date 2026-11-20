@@ -42,7 +42,7 @@ func TestRegisteredToolsAreTheContract(t *testing.T) {
 	if len(got) != len(defs) {
 		t.Fatalf("the agent registers %d tools, the contract lists %d", len(got), len(defs))
 	}
-	wantNames := []string{"get_brief", "list_footage", "view_clip", "find_moments", "get_music", "list_formats", "plan_edit", "list_motion_templates", "get_timeline", "get_comments", "edit_timeline", "match_exposure", "render_preview", "check_edit", "finish"}
+	wantNames := []string{"get_brief", "list_footage", "view_clip", "find_moments", "get_transcript", "get_music", "list_formats", "plan_edit", "list_motion_templates", "get_timeline", "get_comments", "edit_timeline", "match_exposure", "render_preview", "check_edit", "finish"}
 	for i, d := range defs {
 		g := got[i]
 		if g.Name != d.Name || g.Description != d.Description || g.Strict != d.Strict {
@@ -248,6 +248,9 @@ func TestToolSchemasAcceptAndRefuse(t *testing.T) {
 		{ToolFindMoments,
 			[]string{`{}`, `{"asset_id":"` + asset + `"}`, `{"kind":"rep"}`, `{"kind":"hold","min_score":0.7,"limit":5}`, `{"kind":"any","asset_id":"` + asset + `","min_score":0,"limit":20}`},
 			[]string{`{"kind":"pose"}`, `{"asset_id":1}`, `{"min_score":"high"}`, `{"limit":1.5}`, `{"limit":"5"}`, `{"query":"row"}`}},
+		{ToolGetTranscript,
+			[]string{`{"asset_id":"` + asset + `"}`, `{"asset_id":"` + asset + `","in_ms":0,"out_ms":9000}`},
+			[]string{`{}`, `{"in_ms":0}`, `{"asset_id":1}`, `{"asset_id":"` + asset + `","in_ms":"0"}`, `{"asset_id":"` + asset + `","out_ms":1.5}`, `{"asset_id":"` + asset + `","extra":1}`}},
 		{ToolFinish, []string{`{"summary":"Done."}`, `{"summary":"Done.","no_edit_needed":true}`}, []string{`{}`, `{"summary":3}`, `{"summary":"x","open_questions":[]}`, `{"summary":"x","no_edit_needed":"yes"}`}},
 	}
 	for _, c := range cases {
@@ -362,7 +365,7 @@ func TestNewAgentChecksItsTools(t *testing.T) {
 	}
 	sorted := slices.Clone(names)
 	sort.Strings(sorted)
-	if len(names) != 15 {
+	if len(names) != 16 {
 		t.Fatalf("tools: %v", names)
 	}
 	if _, err := runtime.NewAgents(a); err != nil {

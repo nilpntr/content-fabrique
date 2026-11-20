@@ -37,7 +37,7 @@ func TestBuildPlanComputesTheBeatArithmetic(t *testing.T) {
 	in := validPlanArgs(asset)
 	in.TempoBPM, in.Playbook, in.ContentType = 0, "", "talking"
 	p, err = BuildPlan(in, map[string]bool{asset: true}, AvailableFeatures(), nil)
-	if err != nil || p.BeatMs != 500 || p.Playbook != "talking" || p.PlaybookVersion != "talking.v4" {
+	if err != nil || p.BeatMs != 500 || p.Playbook != "talking" || p.PlaybookVersion != "talking.v5" {
 		t.Errorf("no tempo: %+v %v", p, err)
 	}
 	if BeatMs(120) != 500 || BeatMs(128) != 469 || BeatMs(124) != 484 {

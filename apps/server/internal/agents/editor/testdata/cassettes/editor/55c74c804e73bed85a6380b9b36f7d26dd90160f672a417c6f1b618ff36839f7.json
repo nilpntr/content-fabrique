@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "f9b02bd1c4674298d91ba0e8ad8c1b2b96071540598112babf6c7cb60584e166",
-  "recorded_at": "2026-10-18T09:37:19Z",
+  "key": "55c74c804e73bed85a6380b9b36f7d26dd90160f672a417c6f1b618ff36839f7",
+  "recorded_at": "2026-11-20T13:34:12Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,
@@ -47,54 +47,6 @@
         "blocks": [
           "tool_result"
         ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
       }
     ],
     "tools": [
@@ -102,6 +54,7 @@
       "list_footage",
       "view_clip",
       "find_moments",
+      "get_transcript",
       "get_music",
       "list_formats",
       "plan_edit",
@@ -144,11 +97,6 @@
         "sha256": "c1a2c1dd9e9b679be49eb3856f237cf0984ba86e667f45e56d1a9934a461dcba",
         "media_type": "image/jpeg",
         "bytes": 4825
-      },
-      {
-        "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
-        "media_type": "image/jpeg",
-        "bytes": 9284
       }
     ]
   },
@@ -159,38 +107,70 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_7",
-        "name": "edit_timeline",
+        "id": "toolu_ed_3",
+        "name": "plan_edit",
         "input": {
-          "base_version": 1,
-          "ops": [
+          "content_type": "workout",
+          "format": "tutorial_101",
+          "format_why": "One exercise from two angles, the gym as the closing shot.",
+          "story": "A heavy lat day in six quick cuts, ending on the wide gym.",
+          "hook": "The lat pulldown at full stretch, with the words HEAVY LAT DAY.",
+          "arc": "Hook on the heaviest rep, the cable row, a second look at the pulldown, the wide gym and a last pulldown rep.",
+          "ending": "Back to the cable row, held a little longer.",
+          "playbook": "workout",
+          "target_length_s": 14,
+          "tempo_bpm": 124,
+          "pace": "building",
+          "shots": [
             {
-              "op": "trim_item",
-              "id": "c4",
-              "out_ms": 4500
+              "role": "hook",
+              "what": "Heaviest pulldown rep, first half",
+              "asset_id": "ast_01jc000000e00800000000000a",
+              "beats": 3,
+              "effect": "punch_in"
             },
             {
-              "op": "snap_cuts_to_beats",
-              "grid": {
-                "bpm": 124,
-                "first_beat_ms": 0
-              },
-              "options": {
-                "write_markers": true,
-                "max_shift_ms": 60
-              }
+              "role": "build",
+              "what": "Cable row",
+              "asset_id": "ast_01jc000000e00800000000000b",
+              "beats": 4
+            },
+            {
+              "role": "peak",
+              "what": "The first pulldown rep, first half",
+              "asset_id": "ast_01jc000000e00800000000000a",
+              "beats": 3
+            },
+            {
+              "role": "detail",
+              "what": "The wide gym",
+              "asset_id": "ast_01jc000000e00800000000000c",
+              "beats": 6,
+              "effect": "flash"
+            },
+            {
+              "role": "peak",
+              "what": "Last pulldown rep, second half",
+              "asset_id": "ast_01jc000000e00800000000000a",
+              "beats": 3
+            },
+            {
+              "role": "ending",
+              "what": "Cable row, held",
+              "asset_id": "ast_01jc000000e00800000000000b",
+              "beats": 6
             }
           ]
         }
       }
     ],
     "usage": {
-      "input_tokens": 440,
-      "cache_write_tokens": 800,
+      "input_tokens": 430,
+      "cache_write_tokens": 700,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 14200,
-      "output_tokens": 120
+      "cache_read_tokens": 10100,
+      "output_tokens": 210
     }
   },
-  "count_tokens": 15440
+  "count_tokens": 11230
 }

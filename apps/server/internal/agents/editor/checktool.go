@@ -153,6 +153,12 @@ func CheckVersion(ctx context.Context, projects Projects, src AnalysisSource, ws
 			slog.WarnContext(ctx, "editor: the song's analysis could not be read; the music checks do not apply", "error", err)
 		}
 	}
+	// What the clips say, for the speech checks: read when the source can (a source that cannot has none).
+	if sp, err := LoadSpeech(ctx, src, ws, spec); err == nil {
+		in.Speech = sp
+	} else {
+		slog.WarnContext(ctx, "editor: the transcripts could not be read; the speech checks do not apply", "error", err)
+	}
 	// Where the person is in the clips, for the title checks: read from the quick look when the source can (a source that cannot has none).
 	if rd, ok := src.(subject.Reader); ok {
 		if ix, err := subject.LoadForSpec(ctx, rd, ws, spec); err == nil {

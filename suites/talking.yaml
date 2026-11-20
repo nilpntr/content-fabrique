@@ -1,0 +1,42 @@
+# The talking suite (docs/design/ai-video-editor-plan.md piece 1, cutting on speech): `cfctl eval suite --suite ../../suites/talking.yaml`
+# from apps/server. It is separate from the back-day suite so that suite's cases and mean stay what they were. The ids are placeholders
+# until a consented talking clip exists (FOUNDER-PLAN section 1): put the real ones in suites/talking.local.yaml (gitignored, same shape,
+# overrides by case id), for example:
+#
+#   defaults:
+#     workspace: wks_...
+#   cases:
+#     - id: talking-take
+#       footage: [ast_...]
+#       stored: {project: prj_..., version: 2}
+#
+# The objective half of this case is check_edit's speech_cut_clean and hook_line (no pause over 400 ms kept, no filler kept, no cut
+# inside a word, the edit opens on the first word of a sentence); the expectations below are what the AI judge reads on top.
+suite: talking
+description: "A person talking to the camera: jump cuts on the transcript, a spoken hook."
+feedback: feedback.yaml
+defaults:
+  workspace: wks_PLACEHOLDER
+  profile: v1-start
+  vibe: calm
+  budget_usd: 1.00
+cases:
+  - id: talking-take
+    title: "One talking take, cut on the speech"
+    footage: [ast_PLACEHOLDER_talking_take]
+    brief: "A 20-30 second talking-head short: lead with the strongest line, cut out the ums and the pauses, keep the sentences whole, captions on."
+    vibe: calm
+    stored: {project: prj_PLACEHOLDER_talking, version: 1}
+    expectations:
+      - id: no-dead-air
+        text: "The speaker never waits: no pause longer than about 400 ms, and no filler word (um, uh, you know) is left in."
+        weight: 2
+      - id: whole-sentences
+        text: "Every cut falls between words and every sentence is complete: no shot starts or ends in the middle of a word or of a sentence."
+        weight: 2
+      - id: spoken-hook
+        text: "The video opens on a whole sentence, the strongest line of the take, within the first two seconds."
+        weight: 2
+      - id: speech-stays-full
+        text: "The speaker's own audio is heard throughout (any song is quiet underneath it), and the captions follow the words."
+        weight: 1

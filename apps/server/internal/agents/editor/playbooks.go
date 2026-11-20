@@ -38,11 +38,11 @@ var ContentTypes = []string{TypeTalking, TypeUnboxing, TypeWorkout, TypeVlog, Ty
 
 // playbookVersions maps a playbook to its current version, which is also the name of its file.
 var playbookVersions = map[string]string{
-	TypeTalking:  "talking.v4",
-	TypeUnboxing: "unboxing_product.v4",
+	TypeTalking:  "talking.v5",
+	TypeUnboxing: "unboxing_product.v5",
 	TypeWorkout:  "workout.v8",
 	TypeVlog:     "vlog.v4",
-	TypeTutorial: "tutorial.v4",
+	TypeTutorial: "tutorial.v5",
 	TypeGeneral:  "general.v4",
 }
 

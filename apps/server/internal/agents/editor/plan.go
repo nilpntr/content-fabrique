@@ -255,6 +255,9 @@ var transitionEffects = map[string]bool{"whip": true, "zoom_through": true, "fla
 // effective settings (nil for the defaults).
 func planNotes(p Plan, style *styleprofile.Profile, set *styleprofile.Resolved) []string {
 	var notes []string
+	if speechLed(p.ContentType) {
+		notes = append(notes, "This video follows speech. Call get_transcript for each clip with a person talking and cut on the keep ranges it proposes (fillers and pauses over 400 ms are left out, every cut is in a gap between words); open the edit on the first word of a sentence, ideally the boldest line. check_edit's speech_cut_clean and hook_line measure it.")
+	}
 	target := int64(p.TargetLengthS) * 1000
 	if p.EstimatedLengthMs < target*durationLoPct/100 || p.EstimatedLengthMs > target*durationHiPct/100 {
 		notes = append(notes, fmt.Sprintf("The shot list adds up to %s but your target is %d s. Change one of them so they agree (a short video: fewer, shorter shots; too short: more shots).", secs(p.EstimatedLengthMs), p.TargetLengthS))
