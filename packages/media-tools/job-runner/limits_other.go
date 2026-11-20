@@ -7,6 +7,9 @@ import (
 	"syscall"
 )
 
+// protectSelf has nothing to do on a development machine.
+func protectSelf() error { return nil }
+
 // setLimits on a development machine: the file-size, open-file and core limits only. The image runs on Linux, where
 // limits_linux.go also bounds the processes.
 func setLimits(_, fsize uint64) error {

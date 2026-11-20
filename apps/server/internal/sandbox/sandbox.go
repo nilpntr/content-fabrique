@@ -220,24 +220,14 @@ func (p Policy) validate(job Job, needImage bool) (validated, error) {
 	if needImage && !imageRE.MatchString(job.Image) {
 		return v, fmt.Errorf("sandbox: invalid image reference %q", job.Image)
 	}
-	if len(job.Args) == 0 || job.Args[0] == "" {
-		return v, errors.New("sandbox: Args needs a program")
-	}
-	if strings.HasPrefix(job.Args[0], "-") {
-		return v, fmt.Errorf("sandbox: program %q must not start with '-'", job.Args[0])
-	}
-	for _, a := range job.Args {
-		if strings.ContainsRune(a, 0) {
-			return v, errors.New("sandbox: argument contains a NUL byte")
-		}
+	if err := checkArgs(job.Args); err != nil {
+		return v, fmt.Errorf("sandbox: %w", err)
 	}
 	if err := validateLimits(job.Limits); err != nil {
 		return v, err
 	}
-	for k, val := range job.Labels {
-		if !labelRE.MatchString(k) || !labelRE.MatchString(val) {
-			return v, fmt.Errorf("sandbox: label %q=%q uses characters outside [a-zA-Z0-9._/-]", k, val)
-		}
+	if err := checkLabels(job.Labels); err != nil {
+		return v, err
 	}
 	mounts, err := p.resolveMounts(job.Mounts)
 	if err != nil {
@@ -245,6 +235,31 @@ func (p Policy) validate(job Job, needImage bool) (validated, error) {
 	}
 	v.mounts = mounts
 	return v, nil
+}
+
+// checkArgs checks a program and its arguments: a program, not a flag, and no NUL byte anywhere.
+func checkArgs(args []string) error {
+	if len(args) == 0 || args[0] == "" {
+		return errors.New("no program in Args")
+	}
+	if strings.HasPrefix(args[0], "-") {
+		return fmt.Errorf("program %q must not start with '-'", args[0])
+	}
+	for _, a := range args {
+		if strings.ContainsRune(a, 0) {
+			return errors.New("argument contains a NUL byte")
+		}
+	}
+	return nil
+}
+
+func checkLabels(labels map[string]string) error {
+	for k, val := range labels {
+		if !labelRE.MatchString(k) || !labelRE.MatchString(val) {
+			return fmt.Errorf("sandbox: label %q=%q uses characters outside [a-zA-Z0-9._/-]", k, val)
+		}
+	}
+	return nil
 }
 
 func validateLimits(l Limits) error {

@@ -127,6 +127,11 @@ services:
     image: ${MEDIA_TOOLS_IMAGE:-media-tools:dev}
     pull_policy: never
     command: ["cf-job", "serve", "-addr", ":8080"]
+    # An init as PID 1 reaps whatever a killed tool leaves behind (cf-job reaps between steps too).
+    init: true
+    # A user of its own: RLIMIT_NPROC (the job's PIDs) counts every process of the user on the host, so it must not share
+    # the image's default 10001 with other media-tools containers.
+    user: "10091:10091"
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
@@ -136,15 +141,18 @@ services:
     pids_limit: 4096
     ulimits:
       core: 0
+    # tmpfs pages count against mem_limit: 6 GiB of inputs, 1.5 GiB of work files and 256 MiB of temporary files leave the
+    # 4 GiB CF_JOB_MEMORY_MB promises to a job (a render's limit, render.DefaultLimits), within the 12 GB. A Cloudflare
+    # instance has its disk apart from its memory; here footage over 6 GiB fails the download (ENOSPC).
     tmpfs:
-      - /in:rw,noexec,nosuid,nodev,size=8g,mode=1777
-      - /work:rw,noexec,nosuid,nodev,size=4g,mode=1777
-      - /tmp:rw,noexec,nosuid,nodev,size=512m,mode=1777
+      - /in:rw,noexec,nosuid,nodev,size=6g,mode=1777
+      - /work:rw,noexec,nosuid,nodev,size=1536m,mode=1777
+      - /tmp:rw,noexec,nosuid,nodev,size=256m,mode=1777
     environment:
       # Not required here, so `task up` works without it; cf-job refuses to start without a token (run task env:init).
       CF_JOB_TOKEN: ${SANDBOX_GATEWAY_TOKEN:-}
       CF_JOB_CPUS: "4"
-      CF_JOB_MEMORY_MB: "12288"
+      CF_JOB_MEMORY_MB: "4096"
       # The worker signs URLs for R2_ENDPOINT (http://localhost:9000): from in here that host is minio:9000.
       CF_JOB_ALLOWED_HOSTS: localhost:9000,127.0.0.1:9000
       CF_JOB_DIAL: localhost:9000=minio:9000,127.0.0.1:9000=minio:9000

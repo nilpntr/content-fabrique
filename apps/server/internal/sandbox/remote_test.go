@@ -92,7 +92,7 @@ func TestRemoteValidation(t *testing.T) {
 		{"no id", func(j *Job) { j.ID = "" }, "ID"},
 		{"id with a slash", func(j *Job) { j.ID = "a/b" }, "ID"},
 		{"args and steps", func(j *Job) { j.Args = []string{"ffmpeg"} }, "not both"},
-		{"no program", func(j *Job) { j.Steps = nil }, "needs a program"},
+		{"no program", func(j *Job) { j.Steps = nil }, "no program"},
 		{"flag as program", func(j *Job) { j.Steps[0].Args = []string{"-x"} }, "start with '-'"},
 		{"NUL", func(j *Job) { j.Steps[0].Args = []string{"ffmpeg", "a\x00b"} }, "NUL"},
 		{"step timeout over the job's", func(j *Job) { j.Steps[1].Timeout = time.Hour }, "Timeout"},
@@ -334,6 +334,10 @@ func TestRemoteStartAnswers(t *testing.T) {
 		_, err := newFakeRunner(t, f).Run(context.Background(), remoteJob())
 		if err == nil || errors.Is(err, ErrSandbox) != c.sandbox || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("PUT %d: %v", c.code, err)
+		}
+		// A PUT that may have started the job is followed by a DELETE; a refusal started nothing.
+		if want := map[bool]int32{true: 1, false: 0}[c.sandbox]; f.deletes.Load() != want {
+			t.Errorf("PUT %d: %d deletes, want %d", c.code, f.deletes.Load(), want)
 		}
 	}
 	t.Run("the job vanished", func(t *testing.T) {

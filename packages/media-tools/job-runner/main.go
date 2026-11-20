@@ -155,10 +155,17 @@ func serveMain(ctx context.Context, args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "cf-job serve: CF_JOB_TOKEN must hold the bearer token (16 characters or more)")
 		return 2
 	}
+	// The steps run as the runner's user: the token leaves the environment, and the runner's /proc entries (where the initial
+	// environment stays readable) are closed to them.
+	_ = os.Unsetenv("CF_JOB_TOKEN")
 	r, hosts, err := rf.runner()
 	if err != nil {
 		fmt.Fprintf(stderr, "cf-job serve: %v\n", err)
 		return 2
+	}
+	if err := protectSelf(); err != nil {
+		fmt.Fprintf(stderr, "cf-job serve: protect the runner from its steps: %v\n", err)
+		return 1
 	}
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {

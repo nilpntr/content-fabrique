@@ -98,18 +98,21 @@ func (r *Remote) Run(ctx context.Context, job Job) (Result, error) {
 		return Result{}, fmt.Errorf("sandbox: remote manifest: %w", err)
 	}
 	limit := int64(maxOut)*3*int64(len(m.Steps)) + 1<<20 // two base64 streams per step, and the rest
-	runCtx, cancel := context.WithTimeout(ctx, job.Limits.Timeout+orDefault(r.Grace, defaultGrace))
-	defer cancel()
 
 	start := time.Now()
-	st, err := r.start(runCtx, job.ID, body, limit)
+	st, err := r.start(ctx, job.ID, body, limit)
 	if err != nil {
-		if runCtx.Err() != nil {
-			r.forget(job.ID) // the PUT may have reached the runner
-			return Result{ExitCode: -1}, r.stopped(ctx, job)
+		// The PUT may have reached the runner and started the job although its answer was lost: stop it, or it holds the
+		// runner for its whole timeout. A refusal (400, 409) started nothing, and a 409 names another manifest's job.
+		if ctx.Err() != nil || errors.Is(err, ErrSandbox) {
+			r.forget(job.ID)
 		}
 		return Result{ExitCode: -1}, err
 	}
+	// The runner's clock starts when it accepts the job, so this one does too (time spent waiting for a busy runner is not
+	// the job's).
+	runCtx, cancel := context.WithTimeout(ctx, job.Limits.Timeout+orDefault(r.Grace, defaultGrace))
+	defer cancel()
 	failures := 0
 	tick := time.NewTicker(orDefault(r.PollInterval, defaultPollInterval))
 	defer tick.Stop()
@@ -435,10 +438,8 @@ func remoteManifest(job Job) (remoteManifestJSON, int, error) {
 		}
 		m.Steps = append(m.Steps, remoteStep{Args: s.Args, TimeoutMs: s.Timeout.Milliseconds()})
 	}
-	for k, val := range job.Labels {
-		if !labelRE.MatchString(k) || !labelRE.MatchString(val) {
-			return m, 0, fmt.Errorf("sandbox: label %q=%q uses characters outside [a-zA-Z0-9._/-]", k, val)
-		}
+	if err := checkLabels(job.Labels); err != nil {
+		return m, 0, err
 	}
 	m.Inputs = []remoteInput{}
 	seen := map[string]bool{}
@@ -481,21 +482,6 @@ func remoteManifest(job Job) (remoteManifestJSON, int, error) {
 	m.MaxInputBytes = job.MaxInputBytes
 	m.Labels = job.Labels
 	return m, maxOut, nil
-}
-
-func checkArgs(args []string) error {
-	if len(args) == 0 || args[0] == "" {
-		return errors.New("args needs a program")
-	}
-	if strings.HasPrefix(args[0], "-") {
-		return fmt.Errorf("program %q must not start with '-'", args[0])
-	}
-	for _, a := range args {
-		if strings.ContainsRune(a, 0) {
-			return errors.New("an argument contains a NUL byte")
-		}
-	}
-	return nil
 }
 
 // checkObjectURL accepts an absolute http or https URL: a presigned object URL. The URL is never put in an error message,

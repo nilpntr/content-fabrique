@@ -347,6 +347,12 @@ func (r *Runner) runStep(ctx context.Context, s Step, m Manifest, tmp string) (S
 
 	start := time.Now()
 	runErr := cmd.Run()
+	if cmd.Process != nil {
+		// Whatever the tool left running in its process group goes with it, so nothing of this step lives on into the next
+		// step or job; then the runner reaps what was reparented to it (it is PID 1 when the container has no init).
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		reapOrphans()
+	}
 	res.DurationMs = time.Since(start).Milliseconds()
 	res.Stdout, res.StdoutTruncated = stdout.snapshot()
 	res.Stderr, res.StderrTruncated = stderr.snapshot()
@@ -374,14 +380,26 @@ func (r *Runner) runStep(ctx context.Context, s Step, m Manifest, tmp string) (S
 	}
 }
 
-// fileCap is RLIMIT_FSIZE for the steps: the largest output cap, so a tool cannot write a file the upload would refuse.
+// reapOrphans collects every exited child the runner has. It runs only between steps, when the step's own process has been
+// waited for and no other child exists, so it cannot take an exit status os/exec is waiting for. Without it, the helpers of a
+// killed tool (reparented to the runner when it is PID 1) would stay zombies and count against the process limits.
+func reapOrphans() {
+	for {
+		var ws syscall.WaitStatus
+		pid, err := syscall.Wait4(-1, &ws, syscall.WNOHANG, nil)
+		if pid <= 0 || err != nil {
+			return
+		}
+	}
+}
+
+// fileCap is RLIMIT_FSIZE for the steps: no file a step writes (an output, an intermediate in /work, a cache in /tmp) may be
+// bigger than the largest output cap, or DefaultMaxFileBytes when that is larger. Each output's own cap is checked before
+// the upload.
 func fileCap(m Manifest) int64 {
 	c := int64(DefaultMaxFileBytes)
-	if len(m.Outputs) > 0 {
-		c = 0
-		for _, o := range m.Outputs {
-			c = max(c, o.maxBytes())
-		}
+	for _, o := range m.Outputs {
+		c = max(c, o.maxBytes())
 	}
 	return c
 }
@@ -407,7 +425,8 @@ func (r *Runner) upload(ctx context.Context, m Manifest) ([]OutputInfo, error) {
 		}
 	}()
 	for i, o := range m.Outputs {
-		f, err := root.OpenFile(rel(o.Path, WorkDir), os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+		// O_NONBLOCK: a FIFO left at an output path must not block the open (it is refused just below).
+		f, err := root.OpenFile(rel(o.Path, WorkDir), os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			return nil, filesErr("output %s is missing", o.Path)

@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -76,6 +78,20 @@ func tool(args []string) int {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
+		return 0
+	case "fifo": // fifo path
+		if err := syscall.Mkfifo(args[1], 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return 0
+	case "linger": // linger d: a child in the same process group that outlives the step
+		cmd := exec.Command(os.Args[0], "__tool", "sleep", args[1]) // #nosec G204 -- test
+		if err := cmd.Start(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		fmt.Println(cmd.Process.Pid)
 		return 0
 	case "spam": // spam n: n bytes on stdout
 		n, _ := strconv.Atoi(args[1])
@@ -372,6 +388,9 @@ func TestFailuresAndTheirKinds(t *testing.T) {
 		{"an output that is a symlink out of /work", func(f *fixture) Manifest {
 			return Manifest{Steps: []Step{f.step("symlink", "/etc/hosts", work(f, "o"))}, Outputs: []Output{{Path: "/work/o", URL: f.st.url("o")}}, Limits: limits()}
 		}, StateError, KindFiles, 0, false, 1},
+		{"an output that is a FIFO", func(f *fixture) Manifest {
+			return Manifest{Steps: []Step{f.step("fifo", work(f, "o"))}, Outputs: []Output{{Path: "/work/o", URL: f.st.url("o")}}, Limits: limits()}
+		}, StateError, KindFiles, 0, false, 1},
 		{"an output over its cap", func(f *fixture) Manifest {
 			return Manifest{Steps: []Step{f.step("write", work(f, "o"), "100")}, Outputs: []Output{{Path: "/work/o", URL: f.st.url("o"), MaxBytes: 99}, {Path: "/work/p", URL: f.st.url("p"), MaxBytes: 1000}}, Limits: limits()}
 		}, StateError, KindFiles, 0, false, 1},
@@ -431,6 +450,32 @@ func TestStepEnvironmentAndOutputCap(t *testing.T) {
 	}
 	if s := st.Steps[1]; len(s.Stdout) != 20000 || !s.StdoutTruncated {
 		t.Errorf("stdout %d bytes, truncated %v", len(s.Stdout), s.StdoutTruncated)
+	}
+}
+
+// A process a step leaves running in its group does not outlive the step.
+func TestStepLeavesNothingRunning(t *testing.T) {
+	f := newFixture(t)
+	m := Manifest{Steps: []Step{f.step("linger", "30s")}, Limits: limits()}
+	if code, _, raw := f.do(t, http.MethodPut, "l-1", m, testToken); code != http.StatusCreated {
+		t.Fatalf("PUT %d %s", code, raw)
+	}
+	st := f.wait(t, "l-1")
+	if st.State != StateSucceeded {
+		t.Fatalf("%+v", st)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(st.Steps[0].Stdout)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Signal 0 checks for the process. The runner killed it; whoever it was reparented to reaps it (here the system's init, so
+	// allow a moment for that).
+	deadline := time.Now().Add(5 * time.Second)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			t.Fatalf("the step's child %d is still running", pid)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
