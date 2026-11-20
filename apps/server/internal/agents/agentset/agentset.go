@@ -207,7 +207,7 @@ func NewFrameRunner(provider, image, tempRoot, cfEnv string) (media.Runner, stri
 		}
 		p = sandbox.NewLocal(pol)
 	default:
-		return nil, "", fmt.Errorf("MEDIA_SANDBOX_PROVIDER: unknown provider %q", provider)
+		return nil, "", fmt.Errorf("MEDIA_SANDBOX_PROVIDER: the editor's frames need a provider that mounts files (docker, hardened or local; with remote, MEDIA_SANDBOX_MOUNT_PROVIDER), not %q", provider)
 	}
 	dir := filepath.Join(root, "frames")
 	if err := os.MkdirAll(dir, 0o750); err != nil {

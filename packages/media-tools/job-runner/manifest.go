@@ -37,7 +37,8 @@ type Manifest struct {
 	Labels map[string]string `json:"labels,omitempty"`
 }
 
-// Input is a file the steps read: a presigned GET URL downloaded to Path (under /in) before the first step.
+// Input is a file the steps read: a presigned GET URL downloaded to Path before the first step. Path is under /in, or under
+// /work for a file a tool reads by a name relative to its working directory (the subtitles script of a render).
 type Input struct {
 	URL  string `json:"url"`
 	Path string `json:"path"`
@@ -222,7 +223,7 @@ func (m Manifest) validate() error {
 	}
 	seen := map[string]bool{}
 	for i, in := range m.Inputs {
-		if err := validFilePath(in.Path, InputDir); err != nil {
+		if err := validFilePath(in.Path, inputDir(in.Path)); err != nil {
 			return fmt.Errorf("manifest: input %d: %w", i, err)
 		}
 		if err := validURL(in.URL); err != nil {
@@ -235,7 +236,7 @@ func (m Manifest) validate() error {
 	}
 	// An input that is a directory of another (/in/a and /in/a/b) cannot both be files.
 	for p := range seen {
-		for dir := path.Dir(p); dir != InputDir && dir != "/"; dir = path.Dir(dir) {
+		for dir := path.Dir(p); dir != InputDir && dir != WorkDir && dir != "/"; dir = path.Dir(dir) {
 			if seen[dir] {
 				return fmt.Errorf("manifest: input %q is inside input %q", p, dir)
 			}
@@ -302,6 +303,15 @@ func validURL(raw string) error {
 		return errors.New("url must be an absolute http or https URL without user info")
 	}
 	return nil
+}
+
+// inputDir is the directory an input path is downloaded under: WorkDir for a path under /work/, InputDir for any other (which
+// validFilePath then checks).
+func inputDir(p string) string {
+	if strings.HasPrefix(p, WorkDir+"/") {
+		return WorkDir
+	}
+	return InputDir
 }
 
 // rel is p relative to dir (p is valid under dir).

@@ -42,6 +42,29 @@ func TestCFEnvMustMatchEnv(t *testing.T) {
 	}
 }
 
+// MEDIA_SANDBOX_PROVIDER=remote runs the render job only: the doctor wants the mount provider and MOTION_GRAPHICS=off with it, as
+// the worker does, and the mount provider only with remote.
+func TestRemoteSandboxNeedsTheMountProvider(t *testing.T) {
+	for _, tc := range []struct {
+		provider, mount, motion string
+		field, want             string
+	}{
+		{"remote", "", "off", "MEDIA_SANDBOX_PROVIDER", "MEDIA_SANDBOX_MOUNT_PROVIDER"},
+		{"remote", "docker", "on", "MEDIA_SANDBOX_PROVIDER", "MOTION_GRAPHICS=off"},
+		{"remote", "docker", "off", "MEDIA_SANDBOX_PROVIDER", ""},
+		{"remote", "docker", "off", "MEDIA_SANDBOX_MOUNT_PROVIDER", ""},
+		{"docker", "docker", "on", "MEDIA_SANDBOX_MOUNT_PROVIDER", "only used with"},
+	} {
+		vars := goodVars(t)
+		vars["MEDIA_SANDBOX_PROVIDER"], vars["MEDIA_SANDBOX_MOUNT_PROVIDER"], vars["MOTION_GRAPHICS"] = tc.provider, tc.mount, tc.motion
+		vars["SANDBOX_GATEWAY_TOKEN"] = "0123456789abcdef0123456789abcdef"
+		r := find(t, runDoctor(t, "local", 0, vars, Endpoints{Anthropic: "http://127.0.0.1:1", Clerk: "http://127.0.0.1:1"}), tc.field)
+		if (tc.want == "" && r.Status == Invalid) || (tc.want != "" && (r.Status != Invalid || !strings.Contains(r.Reason, tc.want))) {
+			t.Errorf("%+v: %s (%s)", tc, r.Status, r.Reason)
+		}
+	}
+}
+
 // POSTGRES_USER, POSTGRES_PASSWORD and POSTGRES_DB configure the local Docker Postgres only.
 func TestPostgresContainerVarsOnlyForLocalCIBench(t *testing.T) {
 	names := []string{"POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"}

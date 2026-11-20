@@ -100,6 +100,33 @@ func TestMediaRemoteProvider(t *testing.T) {
 	}
 }
 
+// MEDIA_SANDBOX_MOUNT_PROVIDER names the provider of the jobs that still mount files when MEDIA_SANDBOX_PROVIDER=remote.
+func TestMediaMountProvider(t *testing.T) {
+	const token = "0123456789abcdef0123456789abcdef"
+	remote := map[string]string{"MEDIA_SANDBOX_PROVIDER": "remote", "SANDBOX_GATEWAY_TOKEN": token, "MEDIA_SANDBOX_MOUNT_PROVIDER": "Docker"}
+	c, err := Load(mediaEnv(remote))
+	if err != nil || c.MountSandboxProvider() != SandboxDocker {
+		t.Fatalf("%q %v", c.MountSandboxProvider(), err)
+	}
+	// Unset is the worker's refusal to make (cmd/worker), not the configuration's.
+	delete(remote, "MEDIA_SANDBOX_MOUNT_PROVIDER")
+	if c, err := Load(mediaEnv(remote)); err != nil || c.MountSandboxProvider() != "" {
+		t.Fatalf("%q %v", c.MountSandboxProvider(), err)
+	}
+	if c, err := Load(mediaEnv(map[string]string{"MEDIA_SANDBOX_PROVIDER": "hardened"})); err != nil || c.MountSandboxProvider() != SandboxHardened {
+		t.Fatalf("%q %v", c.MountSandboxProvider(), err)
+	}
+	for want, env := range map[string]map[string]string{
+		"only used with":   {"MEDIA_SANDBOX_PROVIDER": "docker", "MEDIA_SANDBOX_MOUNT_PROVIDER": "docker"},
+		"is not one of":    {"MEDIA_SANDBOX_PROVIDER": "remote", "SANDBOX_GATEWAY_TOKEN": token, "MEDIA_SANDBOX_MOUNT_PROVIDER": "remote"},
+		"isolates nothing": {"CF_ENV": EnvStaging, "MEDIA_SANDBOX_PROVIDER": "remote", "SANDBOX_GATEWAY_TOKEN": token, "SANDBOX_GATEWAY_URL": "https://g.example", "MEDIA_RUNNER_URL": "https://g.example", "MEDIA_SANDBOX_MOUNT_PROVIDER": "local"},
+	} {
+		if _, err := Load(mediaEnv(env)); err == nil || !strings.Contains(err.Error(), "MEDIA_SANDBOX_MOUNT_PROVIDER") || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v", want, err)
+		}
+	}
+}
+
 func TestMediaInvalidSettings(t *testing.T) {
 	for name, env := range map[string]map[string]string{
 		"MEDIA_SANDBOX_PROVIDER": {"MEDIA_SANDBOX_PROVIDER": "firecracker"},

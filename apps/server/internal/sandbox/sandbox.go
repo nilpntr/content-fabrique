@@ -96,8 +96,9 @@ type Job struct {
 	MaxInputBytes int64
 }
 
-// Input is a file a remote job reads: the runner GETs URL (presigned, scoped to the job, expiring with it) to Path, a path
-// under InputDir, read-only.
+// Input is a file a remote job reads: the runner GETs URL (presigned, scoped to the job, expiring with it) to Path, read-only.
+// Path is under InputDir, or under WorkDir for a file a tool reads by a name relative to its working directory (a render's
+// subtitles script, which the ass filter names relative to /work).
 type Input struct {
 	URL  string
 	Path string

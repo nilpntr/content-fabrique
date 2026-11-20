@@ -136,6 +136,16 @@ func loadAgentEnv(name, envFileArg string, stdout, stderr io.Writer, lookup look
 
 func (a *agentEnv) get(k string) string { return a.vars[k] }
 
+// mountProvider is the sandbox provider of the jobs that mount files (the editor's frames): MEDIA_SANDBOX_PROVIDER (empty is
+// docker), or MEDIA_SANDBOX_MOUNT_PROVIDER when that is remote, as config.Config.MountSandboxProvider has it.
+func (a *agentEnv) mountProvider() string {
+	p := cmp.Or(strings.ToLower(strings.TrimSpace(a.get("MEDIA_SANDBOX_PROVIDER"))), config.SandboxDocker)
+	if p == config.SandboxRemote {
+		return strings.ToLower(strings.TrimSpace(a.get("MEDIA_SANDBOX_MOUNT_PROVIDER")))
+	}
+	return p
+}
+
 // openDB checks DATABASE_URL and opens the store.
 func (a *agentEnv) openDB(ctx context.Context, name string, deps agentDeps) (*store.Store, int) {
 	dsn := a.vars["DATABASE_URL"]
@@ -293,7 +303,7 @@ func cmdAgentRun(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 			_, _ = fmt.Fprintf(errOut, "cfctl agent run: preview renderer: %v\n", err)
 			return 1
 		}
-		provider := cmp.Or(env.get("MEDIA_SANDBOX_PROVIDER"), config.SandboxDocker)
+		provider := env.mountProvider()
 		tempDir := cmp.Or(env.get("MEDIA_TEMP_DIR"), filepath.Join(os.TempDir(), "cf-media"))
 		if opts.Frames, opts.TempDir, err = agentset.NewFrameRunner(provider, env.get("MEDIA_TOOLS_IMAGE"), tempDir, env.get("CF_ENV")); err != nil {
 			_, _ = fmt.Fprintf(errOut, "cfctl agent run: the sandbox for the editor's frames: %v\n", err)

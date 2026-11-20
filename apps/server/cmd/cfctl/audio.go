@@ -336,7 +336,7 @@ func loadProjectRender(ctx context.Context, name, projectArg, workspaceArg, rend
 		_, _ = fmt.Fprintf(env.err, "cfctl %s: object storage: %v\n", name, err)
 		return "", nil, nil, nil, nil, "", nil, 0, 1
 	}
-	runnerOut, root, err := agentset.NewFrameRunner(cfg.MediaSandboxProvider, cfg.MediaToolsImage, cmp.Or(cfg.MediaTempDir, filepath.Join(os.TempDir(), "cf-media")), cfg.Env)
+	runnerOut, root, err := agentset.NewFrameRunner(cfg.MountSandboxProvider(), cfg.MediaToolsImage, cmp.Or(cfg.MediaTempDir, filepath.Join(os.TempDir(), "cf-media")), cfg.Env)
 	if err != nil {
 		_, _ = fmt.Fprintf(env.err, "cfctl %s: the sandbox: %v\n", name, err)
 		return "", nil, nil, nil, nil, "", nil, 0, 2

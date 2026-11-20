@@ -92,6 +92,11 @@ type Config struct {
 	// production) or "remote" (a runner over HTTP: cf-job serve in compose's runner profile, or the sandbox gateway; in staging
 	// and production only the gateway, docs/design/render-runtime.md).
 	MediaSandboxProvider string
+	// MediaSandboxMountProvider is MEDIA_SANDBOX_MOUNT_PROVIDER, required with MEDIA_SANDBOX_PROVIDER=remote (the worker refuses
+	// remote without it) and refused with any other provider: the provider (docker, hardened or local) of the media jobs that still mount files (ingest, clip analysis,
+	// transcription, style references, the editor's frames). Only the render job runs on the remote provider so far. Use
+	// MountSandboxProvider, which is MEDIA_SANDBOX_PROVIDER for every other provider.
+	MediaSandboxMountProvider string
 	// MediaRunnerURL is MEDIA_RUNNER_URL, the runner of the remote provider; default DefaultMediaRunnerURL. Its bearer token is
 	// MediaRunnerToken (SANDBOX_GATEWAY_TOKEN, shared with the gateway Worker) and SandboxGatewayURL is SANDBOX_GATEWAY_URL.
 	// Only read with MEDIA_SANDBOX_PROVIDER=remote. The token is never logged.
@@ -144,6 +149,15 @@ const (
 	SandboxRemote   = "remote"
 )
 
+// MountSandboxProvider is the sandbox provider of the media jobs whose files are mounts: MEDIA_SANDBOX_MOUNT_PROVIDER with
+// MEDIA_SANDBOX_PROVIDER=remote (which runs only the render job), MEDIA_SANDBOX_PROVIDER otherwise.
+func (c Config) MountSandboxProvider() string {
+	if c.MediaSandboxProvider == SandboxRemote {
+		return c.MediaSandboxMountProvider
+	}
+	return c.MediaSandboxProvider
+}
+
 // DefaultMediaRunnerURL is the default of MEDIA_RUNNER_URL: compose's media-runner (the runner profile) on this machine. Not
 // 8080, which is the API's (API_BASE_URL).
 const DefaultMediaRunnerURL = "http://localhost:8090"
@@ -191,12 +205,13 @@ func Load(getenv Getenv) (Config, error) {
 		R2SecretAccessKey: strings.TrimSpace(getenv("R2_SECRET_ACCESS_KEY")),
 		R2Jurisdiction:    strings.ToLower(strings.TrimSpace(getenv("R2_JURISDICTION"))),
 
-		MediaSandboxProvider: strings.ToLower(strings.TrimSpace(getenv("MEDIA_SANDBOX_PROVIDER"))),
-		MediaToolsImage:      strings.TrimSpace(getenv("MEDIA_TOOLS_IMAGE")),
-		MediaTempDir:         strings.TrimSpace(getenv("MEDIA_TEMP_DIR")),
-		MediaRunnerURL:       strings.TrimSpace(getenv("MEDIA_RUNNER_URL")),
-		MediaRunnerToken:     strings.TrimSpace(getenv("SANDBOX_GATEWAY_TOKEN")),
-		SandboxGatewayURL:    strings.TrimSpace(getenv("SANDBOX_GATEWAY_URL")),
+		MediaSandboxProvider:      strings.ToLower(strings.TrimSpace(getenv("MEDIA_SANDBOX_PROVIDER"))),
+		MediaSandboxMountProvider: strings.ToLower(strings.TrimSpace(getenv("MEDIA_SANDBOX_MOUNT_PROVIDER"))),
+		MediaToolsImage:           strings.TrimSpace(getenv("MEDIA_TOOLS_IMAGE")),
+		MediaTempDir:              strings.TrimSpace(getenv("MEDIA_TEMP_DIR")),
+		MediaRunnerURL:            strings.TrimSpace(getenv("MEDIA_RUNNER_URL")),
+		MediaRunnerToken:          strings.TrimSpace(getenv("SANDBOX_GATEWAY_TOKEN")),
+		SandboxGatewayURL:         strings.TrimSpace(getenv("SANDBOX_GATEWAY_URL")),
 	}
 
 	if c.Env == "" {
@@ -348,6 +363,19 @@ func (c *Config) loadMedia(getenv Getenv) []error {
 		c.MotionGraphics = false
 	default:
 		errs = append(errs, fmt.Errorf("MOTION_GRAPHICS: %q is not on or off", raw))
+	}
+	// The worker refuses remote without a mount provider (cmd/worker); here only the value is checked.
+	switch m := c.MediaSandboxMountProvider; {
+	case m == "":
+	case c.MediaSandboxProvider != SandboxRemote:
+		errs = append(errs, fmt.Errorf("MEDIA_SANDBOX_MOUNT_PROVIDER: only used with MEDIA_SANDBOX_PROVIDER=remote (the provider is %s)", c.MediaSandboxProvider))
+	case m == SandboxDocker || m == SandboxHardened:
+	case m == SandboxLocal:
+		if err := sandbox.CheckLocalAllowed(c.Env); err != nil {
+			errs = append(errs, fmt.Errorf("MEDIA_SANDBOX_MOUNT_PROVIDER: %w", err))
+		}
+	default:
+		errs = append(errs, fmt.Errorf("MEDIA_SANDBOX_MOUNT_PROVIDER: %q is not one of docker, hardened, local", m))
 	}
 	return errs
 }

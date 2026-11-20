@@ -1,7 +1,6 @@
 package sandbox
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -18,6 +17,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/nilpntr/content-fabrique/internal/sandbox/sandboxtest"
 )
 
 var updateContract = flag.Bool("update-contract", false, "rewrite the runner's testdata/manifest.json and status.json")
@@ -390,24 +391,9 @@ func TestRemoteCancelAndDeadlineDeleteTheJob(t *testing.T) {
 // a stand-in for the bucket. The steps are plain host programs (cp, false); the Docker integration test in internal/render
 // runs the image's cf-job with ffmpeg and MinIO.
 func TestRemoteAgainstCFJob(t *testing.T) {
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("go is not on PATH to build cf-job")
-	}
 	for _, p := range []string{"cp", "false"} {
 		if _, err := exec.LookPath(p); err != nil {
 			t.Skipf("%s is not on PATH", p)
-		}
-	}
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "cf-job")
-	build := exec.Command("go", "build", "-o", bin, ".") // #nosec G204 -- test
-	build.Dir = filepath.Join("..", "..", "..", "..", "packages", "media-tools", "job-runner")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build cf-job: %v\n%s", err, out)
-	}
-	for _, d := range []string{"in", "work", "tmp"} {
-		if err := os.Mkdir(filepath.Join(dir, d), 0o755); err != nil {
-			t.Fatal(err)
 		}
 	}
 	var mu sync.Mutex
@@ -430,43 +416,16 @@ func TestRemoteAgainstCFJob(t *testing.T) {
 	defer bucket.Close()
 
 	const token = "cf-job-test-token-0123"
-	cmd := exec.Command(bin, "serve", "-addr", "127.0.0.1:0", "-in", filepath.Join(dir, "in"), "-work", filepath.Join(dir, "work"), // #nosec G204 -- test
-		"-tmp", filepath.Join(dir, "tmp"), "-cpus", "4", "-memory-mb", "8192")
-	cmd.Env = append(os.Environ(), "CF_JOB_TOKEN="+token)
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-	addr := make(chan string, 1)
-	go func() {
-		sc := bufio.NewScanner(stderr)
-		for sc.Scan() {
-			if _, rest, ok := strings.Cut(sc.Text(), "listening on "); ok {
-				addr <- strings.Fields(rest)[0]
-			}
-		}
-	}()
-	var base string
-	select {
-	case a := <-addr:
-		base = "http://" + a
-	case <-time.After(30 * time.Second):
-		t.Fatal("cf-job serve did not start")
-	}
+	base := sandboxtest.StartCFJob(t, token)
 	r, err := NewRemote(base, token)
 	if err != nil {
 		t.Fatal(err)
 	}
 	r.PollInterval = 20 * time.Millisecond
-	in, work := filepath.Join(dir, "in"), filepath.Join(dir, "work")
 	job := Job{
 		ID:      "rnd_test-1",
 		Inputs:  []Input{{URL: bucket.URL + "/b/src", Path: "/in/0"}},
-		Steps:   []Step{{Args: []string{"cp", filepath.Join(in, "0"), filepath.Join(work, "a")}}, {Args: []string{"cp", filepath.Join(work, "a"), filepath.Join(work, "b")}}},
+		Steps:   []Step{{Args: []string{"cp", "/in/0", "/work/a"}}, {Args: []string{"cp", "/work/a", "/work/b"}}},
 		Outputs: []Output{{Path: "/work/b", URL: bucket.URL + "/b/out"}},
 		Limits:  Limits{CPU: 1, MemoryMB: 256, Timeout: time.Minute, PIDs: 64},
 	}
@@ -487,7 +446,7 @@ func TestRemoteAgainstCFJob(t *testing.T) {
 		t.Fatalf("failing step: %+v %v", res, err)
 	}
 	// An output the steps did not write is ErrFiles.
-	job.ID, job.Steps, job.Outputs = "rnd_test-3", []Step{{Args: []string{"cp", filepath.Join(in, "0"), filepath.Join(work, "x")}}}, []Output{{Path: "/work/y", URL: bucket.URL + "/b/y"}}
+	job.ID, job.Steps, job.Outputs = "rnd_test-3", []Step{{Args: []string{"cp", "/in/0", "/work/x"}}}, []Output{{Path: "/work/y", URL: bucket.URL + "/b/y"}}
 	if _, err := r.Run(context.Background(), job); !errors.Is(err, ErrFiles) {
 		t.Fatalf("missing output: %v", err)
 	}

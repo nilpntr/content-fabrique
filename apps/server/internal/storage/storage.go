@@ -202,6 +202,21 @@ func RenderKey(ws ids.WorkspaceID, project ids.ProjectID, render ids.RenderID, n
 	return "", fmt.Errorf("storage: %q is not a file of a render", name)
 }
 
+// RenderScratchPrefix is where a remote render keeps the files it passes between the worker and the runner (the subtitles
+// script, the bed's meter files, the contact sheet's frames): ws/{workspace}/projects/{project}/renders/{render}/scratch/. It is
+// under the render's prefix, so the purge of a render that did not finish removes it too; a finished render removes it itself.
+func RenderScratchPrefix(ws ids.WorkspaceID, project ids.ProjectID, render ids.RenderID) string {
+	return RenderPrefix(ws, project, render) + "scratch/"
+}
+
+// RenderScratchKey is the key of one scratch file of a render. name is a plain file name (ValidDerivativeName).
+func RenderScratchKey(ws ids.WorkspaceID, project ids.ProjectID, render ids.RenderID, name string) (string, error) {
+	if !ValidDerivativeName(name) {
+		return "", fmt.Errorf("storage: %q is not a valid scratch file name", name)
+	}
+	return RenderScratchPrefix(ws, project, render) + name, nil
+}
+
 // Part is one uploaded part of a multipart upload.
 type Part struct {
 	Number int
@@ -406,6 +421,11 @@ func (c *Client) DeletePrefix(ctx context.Context, prefix string) (int, error) {
 // how many it deleted. The prefix is built from the three ids, so it can never reach another render, project or workspace.
 func (c *Client) DeleteRenderObjects(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, render ids.RenderID) (int, error) {
 	return c.deletePrefix(ctx, RenderPrefix(ws, project, render))
+}
+
+// DeleteRenderScratch deletes the scratch files of one render (RenderScratchPrefix) and returns how many it deleted.
+func (c *Client) DeleteRenderScratch(ctx context.Context, ws ids.WorkspaceID, project ids.ProjectID, render ids.RenderID) (int, error) {
+	return c.deletePrefix(ctx, RenderScratchPrefix(ws, project, render))
 }
 
 func (c *Client) deletePrefix(ctx context.Context, prefix string) (int, error) {

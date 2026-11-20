@@ -217,7 +217,7 @@ func analysisRunner(cfg config.Config) (media.Runner, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("MEDIA_TEMP_DIR: %w", err)
 	}
-	provider, err := newMediaProvider(cfg.MediaSandboxProvider, "docker", root)
+	provider, err := newMediaProvider(cfg.MountSandboxProvider(), "docker", root)
 	if err != nil {
 		return nil, "", err
 	}

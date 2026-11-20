@@ -58,7 +58,7 @@ func Build(cfg config.Config, prices *llm.PriceTable) (Parts, error) {
 	}
 	pol := sandbox.Policy{AllowedRoots: []string{root, models}}
 	var provider sandbox.Provider
-	switch cfg.MediaSandboxProvider {
+	switch cfg.MountSandboxProvider() {
 	case config.SandboxDocker:
 		provider = sandbox.NewDocker(pol)
 	case config.SandboxHardened:
@@ -69,7 +69,7 @@ func Build(cfg config.Config, prices *llm.PriceTable) (Parts, error) {
 		}
 		provider = sandbox.NewLocal(pol)
 	default:
-		return Parts{}, fmt.Errorf("MEDIA_SANDBOX_PROVIDER: unknown provider %q", cfg.MediaSandboxProvider)
+		return Parts{}, fmt.Errorf("MEDIA_SANDBOX_PROVIDER: the transcription needs a provider that mounts files (docker, hardened or local; with remote, MEDIA_SANDBOX_MOUNT_PROVIDER), not %q", cfg.MountSandboxProvider())
 	}
 	spec, ok := transcribe.SpeechModel(cfg.TranscribeModel)
 	if !ok {

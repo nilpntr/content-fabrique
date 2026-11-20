@@ -272,6 +272,48 @@ func TestJobDownloadsRunsStepsAndUploads(t *testing.T) {
 	}
 }
 
+// An input may land in /work, where a tool reads it by a relative name; and the steps' /in and /work arguments name the
+// runner's own directories when it was started with -in and -work (the image's are /in and /work themselves).
+func TestWorkInputsAndContainerPathArguments(t *testing.T) {
+	f := newFixture(t)
+	f.st.put("src", []byte("footage"))
+	f.st.put("subs", []byte("script"))
+	m := Manifest{
+		Inputs: []Input{{URL: f.st.url("src"), Path: "/in/0"}, {URL: f.st.url("subs"), Path: "/work/sub/subs.ass"}},
+		Steps: []Step{
+			f.step("copy", "/in/0", "/work/out.txt"),
+			f.step("copy", "sub/subs.ass", "/work/subs.txt"),
+		},
+		Outputs: []Output{{Path: "/work/out.txt", URL: f.st.url("out")}, {Path: "/work/subs.txt", URL: f.st.url("subs-out")}},
+		Limits:  limits(),
+	}
+	if code, _, raw := f.do(t, http.MethodPut, "w-1", m, testToken); code != http.StatusCreated {
+		t.Fatalf("PUT: %d %s", code, raw)
+	}
+	if st := f.wait(t, "w-1"); st.State != StateSucceeded {
+		t.Fatalf("status %+v", st)
+	}
+	if b, _ := f.st.get("out"); string(b) != "FOOTAGE" {
+		t.Errorf("/in/0 -> /work/out.txt uploaded %q", b)
+	}
+	if b, _ := f.st.get("subs-out"); string(b) != "SCRIPT" {
+		t.Errorf("the /work input uploaded %q", b)
+	}
+	got := (&Runner{InDir: "/x/in", WorkDir: "/x/work"}).hostArgs([]string{"-i", "/in/0", "/work/a.mp4", "/work", "/input", "ass=filename=/in/s.ass", "/work/../../etc/x"})
+	want := []string{"-i", "/x/in/0", "/x/work/a.mp4", "/x/work", "/input", "ass=filename=/in/s.ass", "/work/../../etc/x"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("hostArgs %q, want %q", got, want)
+	}
+	same := []string{"/in/0"}
+	if got := (&Runner{InDir: InputDir, WorkDir: WorkDir}).hostArgs(same); got[0] != "/in/0" {
+		t.Errorf("the image's own directories rewrote %q", got)
+	}
+	// A /work input is still a clean path inside /work.
+	if _, err := parseManifest([]byte(`{"inputs":[{"url":"http://h/x","path":"/work/../etc/x"}],"steps":[{"args":["x"]}],"outputs":[],"limits":{"cpu":1,"memory_mb":1,"timeout_ms":1,"pids":1}}`)); err == nil {
+		t.Error("a /work input outside /work was accepted")
+	}
+}
+
 func TestPutIsIdempotentAndOneJobRunsAtATime(t *testing.T) {
 	f := newFixture(t)
 	m := Manifest{Steps: []Step{f.step("sleep", "10s")}, Limits: limits()}

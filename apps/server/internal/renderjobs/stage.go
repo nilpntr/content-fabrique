@@ -19,7 +19,8 @@ import (
 
 // stager is the render.AssetResolver of a render job. The sandbox has no network, so the footage is downloaded into the job
 // directory before ffmpeg runs; the compiler asks for each asset it plays (once per asset and variant), and the stager fetches
-// it then: only the footage the timeline uses is downloaded, and a file is fetched once however many clips use it.
+// it then: only the footage the timeline uses is downloaded, and a file is fetched once however many clips use it. A remote render
+// (remote.go) downloads nothing here: the object is checked and the runner fetches it from a presigned URL.
 //
 // What it may read is exactly the project's ready footage (the inputs the job listed with the workspace and project of the
 // render). A preview reads each video's 720p proxy (an audio file has none and is read as it is), the final profile reads the
@@ -33,7 +34,9 @@ type stager struct {
 	ctx    context.Context
 	inputs map[ids.AssetID]store.RenderInput
 	cache  map[string]render.ResolvedAsset
-	total  int64
+	// keys maps each staged location to the object key it holds (a remote render presigns the key).
+	keys  map[string]string
+	total int64
 	// captions says whether the timeline has an enabled captions track: only then does a clip need the transcript of its asset.
 	captions bool
 	// subjects are the subject boxes of the project's footage, read once (subjectsRead says it was tried).
@@ -51,7 +54,7 @@ func newStager(ctx context.Context, r *run, in []store.RenderInput, captions, su
 	for _, i := range in {
 		m[i.AssetID] = i
 	}
-	return &stager{r: r, ctx: ctx, inputs: m, cache: map[string]render.ResolvedAsset{}, captions: captions, wantSubjects: subjects}
+	return &stager{r: r, ctx: ctx, inputs: m, cache: map[string]render.ResolvedAsset{}, keys: map[string]string{}, captions: captions, wantSubjects: subjects}
 }
 
 // Resolve implements render.AssetResolver.
@@ -123,7 +126,13 @@ func (s *stager) stage(assetID string, variant render.Variant) (render.ResolvedA
 	}
 
 	dest := filepath.Join(s.r.dir, "in", strconv.Itoa(len(s.cache)))
-	if err := s.r.download(ctx, key, dest, size); err != nil {
+	fetch := s.r.download
+	if s.r.p.cfg.Remote != nil {
+		// A remote render's runner downloads the file from a presigned URL (remote.go): the location stays a name for it, and
+		// only the object is checked here.
+		fetch = s.r.checkRemote
+	}
+	if err := fetch(ctx, key, dest, size); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			return s.refuse(ReasonSourceUnavailable, fmt.Errorf("the file of asset %s is missing from storage", assetID))
 		}
@@ -134,6 +143,7 @@ func (s *stager) stage(assetID string, variant render.Variant) (render.ResolvedA
 		s.infra = perr // the render is gone: the job ends
 		return render.ResolvedAsset{}, perr
 	}
+	s.keys[dest] = key
 	ra := render.ResolvedAsset{Location: dest, HasAudio: in.HasAudio != nil && *in.HasAudio}
 	if t, ok := s.subjects[assetID]; ok {
 		ra.Subject = &t

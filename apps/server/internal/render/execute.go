@@ -145,17 +145,8 @@ func Execute(ctx context.Context, plan Plan, runner media.Runner, opts ExecuteOp
 	if inImage {
 		args = useImageFonts(args, plan.Subtitles)
 	}
-	full := append(ffmpegPrefix("error", "progress-render.txt"), containerArgs(args, inputs)...)
-	full = append(full, "-y", media.OutputPath(outName))
 	withStem := plan.StemLabel != "" && opts.StemOutput != ""
-	switch {
-	case withStem:
-		// The audio mix without the beat guide, as a second output of the same run.
-		full = append(full, "-map", "["+plan.StemLabel+"]", "-vn", "-c:a", "aac", "-b:a", "128k", "-ar", strconv.Itoa(AudioSampleRate), "-ac", "2",
-			"-map_metadata", "-1", "-fflags", "+bitexact", "-flags:a", "+bitexact", media.OutputPath(stemName))
-	case plan.StemLabel != "":
-		full = append(full, plan.unusedStemArgs()...) // the pad is in the graph, so something must read it
-	}
+	full := encodeArgs(plan, args, inputs, withStem)
 	if _, err := runFFmpeg(ctx, runner, full, inputs, work, plan, "render", "progress-render.txt", opts.Progress); err != nil {
 		return err
 	}
@@ -165,6 +156,21 @@ func Execute(ctx context.Context, plan Plan, runner media.Runner, opts ExecuteOp
 		}
 	}
 	return moveFile(filepath.Join(work, outName), opts.Output)
+}
+
+// encodeArgs is the whole encode command over args (the plan's, after the measured values were swapped in): the video to
+// /work/out.mp4 and, when withStem, the audio mix without the beat guide to /work/stem.m4a as a second output of the same run.
+func encodeArgs(plan Plan, args []string, inputs []media.Input, withStem bool) []string {
+	full := append(ffmpegPrefix("error", "progress-render.txt"), containerArgs(args, inputs)...)
+	full = append(full, "-y", media.OutputPath(outName))
+	switch {
+	case withStem:
+		full = append(full, "-map", "["+plan.StemLabel+"]", "-vn", "-c:a", "aac", "-b:a", "128k", "-ar", strconv.Itoa(AudioSampleRate), "-ac", "2",
+			"-map_metadata", "-1", "-fflags", "+bitexact", "-flags:a", "+bitexact", media.OutputPath(stemName))
+	case plan.StemLabel != "":
+		full = append(full, plan.unusedStemArgs()...) // the pad is in the graph, so something must read it
+	}
+	return full
 }
 
 // ffmpegPrefix is the start of every ffmpeg command: no stdin, quiet, no stats, and a -progress file in the work
@@ -344,14 +350,17 @@ func measureLoudness(ctx context.Context, plan Plan, runner media.Runner, inputs
 	if len(ln.Pass1Args) == 0 {
 		return "", errors.New("render: two-pass loudnorm without pass 1 arguments")
 	}
-	// The measuring pass opens only the inputs whose audio it uses.
-	args := append(ffmpegPrefix("info", "progress-measure.txt"), containerArgs(ln.Pass1Args, inputs)...)
-	args = append(args, "-f", "null", "-")
-	stderr, err := runFFmpeg(ctx, runner, args, inputs, work, plan, "measure", "progress-measure.txt", opts.Progress)
+	stderr, err := runFFmpeg(ctx, runner, loudnessArgs(ln, inputs), inputs, work, plan, "measure", "progress-measure.txt", opts.Progress)
 	if err != nil {
 		return "", err
 	}
 	return measuredFilter(ln.Filter, string(stderr))
+}
+
+// loudnessArgs is the command of the loudness measuring pass, which opens only the inputs whose audio it uses.
+func loudnessArgs(ln *LoudnormPlan, inputs []media.Input) []string {
+	args := append(ffmpegPrefix("info", "progress-measure.txt"), containerArgs(ln.Pass1Args, inputs)...)
+	return append(args, "-f", "null", "-")
 }
 
 // measuredFilter reads the loudnorm JSON out of ffmpeg's log and builds the second-pass filter.
@@ -399,18 +408,28 @@ func applySwaps(args []string, swaps map[string]string) []string {
 // Bed.BelowLU under the median of the speech clips when there are any); a clip too quiet to measure keeps the nominal gain.
 func measureBed(ctx context.Context, plan Plan, runner media.Runner, inputs []media.Input, work string, opts ExecuteOptions) (map[string]string, error) {
 	bed := plan.Bed
-	args := append(ffmpegPrefix("error", "progress-bed.txt"), containerArgs(bed.MeterArgs, inputs)...)
-	args = append(args, "-f", "null", "-")
+	args := bedArgs(bed, inputs)
 	for _, bc := range bed.Clips {
 		_ = os.Remove(filepath.Join(work, bc.MeterFile))
 	}
 	if _, err := runFFmpeg(ctx, runner, args, inputs, work, plan, "measure", "progress-bed.txt", opts.Progress); err != nil {
 		return nil, err
 	}
+	return bedSwaps(bed, func(bc BedClip) (float64, bool) { return readMeterFile(filepath.Join(work, bc.MeterFile)) }), nil
+}
+
+// bedArgs is the command of the evening pass.
+func bedArgs(bed *BedPlan, inputs []media.Input) []string {
+	args := append(ffmpegPrefix("error", "progress-bed.txt"), containerArgs(bed.MeterArgs, inputs)...)
+	return append(args, "-f", "null", "-")
+}
+
+// bedSwaps computes the swaps of the evening from each clip's measured loudness (lufsOf reads what the pass wrote for it).
+func bedSwaps(bed *BedPlan, lufsOf func(BedClip) (float64, bool)) map[string]string {
 	measured := map[string]float64{}
 	var refs []float64
 	for _, bc := range bed.Clips {
-		lufs, ok := readMeterFile(filepath.Join(work, bc.MeterFile))
+		lufs, ok := lufsOf(bc)
 		if !ok || lufs < bedSilentLUFS {
 			continue
 		}
@@ -436,7 +455,7 @@ func measureBed(ctx context.Context, plan Plan, runner media.Runner, inputs []me
 		name, _, _ := strings.Cut(bc.Filter, "=")
 		swaps[bc.Filter] = name + "=" + num(math.Round(gain*10)/10) + "dB"
 	}
-	return swaps, nil
+	return swaps
 }
 
 // readMeterFile reads the last integrated loudness out of an ebur128 metadata file the evening pass wrote.
@@ -449,6 +468,11 @@ func readMeterFile(path string) (float64, bool) {
 	if err != nil {
 		return 0, false
 	}
+	return parseMeter(data)
+}
+
+// parseMeter reads the last integrated loudness out of the content of an ebur128 metadata file.
+func parseMeter(data []byte) (float64, bool) {
 	s := string(data)
 	i := strings.LastIndex(s, "lavfi.r128.I=")
 	if i < 0 {

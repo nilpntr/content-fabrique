@@ -22,9 +22,11 @@ var allowedEmpty = map[string]bool{
 	"MEDIA_SANDBOX_PROVIDER": true,
 	"MEDIA_TEMP_DIR":         true,
 	// Empty is compose's media-runner on this machine (http://localhost:8080); only MEDIA_SANDBOX_PROVIDER=remote reads it.
-	"MEDIA_RUNNER_URL":    true,
-	"TRANSCRIBE_LANGUAGE": true,
-	"WHISPER_MODELS_DIR":  true,
+	"MEDIA_RUNNER_URL": true,
+	// Only MEDIA_SANDBOX_PROVIDER=remote reads it (the provider of the jobs that still mount files).
+	"MEDIA_SANDBOX_MOUNT_PROVIDER": true,
+	"TRANSCRIBE_LANGUAGE":          true,
+	"WHISPER_MODELS_DIR":           true,
 	// Only the local provider reads it (a chrome-headless-shell on the host for the motion graphics, D-35).
 	"CF_MOTION_CHROME": true,
 	// Empty is metadata-only spans, the default everywhere; `task dev:obs` sets it to 1 for its own processes (D-39).
@@ -66,16 +68,17 @@ var appServer = map[string]string{
 // enums are the variables with a fixed set of documented values. A value inside the set is not secret, so the
 // Redactor leaves it alone and the report can say "profile dev-cheap".
 var enums = map[string][]string{
-	"CF_ENV":                 {"local", "ci", "bench", "staging", "production"},
-	"MEDIA_SANDBOX_PROVIDER": {"docker", "hardened", "local", "remote"},
-	"ROUTING_PROFILE":        {"dev-cheap", "dev-mid", "v1-start"},
-	"LLM_MODE":               {"live", "record", "replay"},
-	"BILLING_PROVIDER":       {"paddle", "stripe"},
-	"PADDLE_ENVIRONMENT":     {"sandbox", "production"},
-	"R2_JURISDICTION":        {"", "eu"},
-	"TRANSCRIBE_PROVIDER":    {"whispercpp", "workersai"},
-	"TRANSCRIBE_MODEL":       {"large-v3-turbo-q5_0", "tiny.en"},
-	"MOTION_GRAPHICS":        {"on", "off"},
+	"CF_ENV":                       {"local", "ci", "bench", "staging", "production"},
+	"MEDIA_SANDBOX_PROVIDER":       {"docker", "hardened", "local", "remote"},
+	"MEDIA_SANDBOX_MOUNT_PROVIDER": {"docker", "hardened", "local"},
+	"ROUTING_PROFILE":              {"dev-cheap", "dev-mid", "v1-start"},
+	"LLM_MODE":                     {"live", "record", "replay"},
+	"BILLING_PROVIDER":             {"paddle", "stripe"},
+	"PADDLE_ENVIRONMENT":           {"sandbox", "production"},
+	"R2_JURISDICTION":              {"", "eu"},
+	"TRANSCRIBE_PROVIDER":          {"whispercpp", "workersai"},
+	"TRANSCRIBE_MODEL":             {"large-v3-turbo-q5_0", "tiny.en"},
+	"MOTION_GRAPHICS":              {"on", "off"},
 }
 
 // A validator returns "" when the value is well formed, else a short reason. Reasons never contain the value.
@@ -240,6 +243,25 @@ var validators = map[string]validator{
 	"MEDIA_SANDBOX_PROVIDER": func(r *run, val string) string {
 		if why := oneOf("MEDIA_SANDBOX_PROVIDER")(r, val); why != "" {
 			return why
+		}
+		if val == "local" && (r.opts.Env == "staging" || r.opts.Env == "production") {
+			return "local isolates nothing and is not allowed in " + r.opts.Env + " (use hardened)"
+		}
+		// remote runs the render job only; the worker refuses it without these two (cmd/worker).
+		if val == "remote" && strings.TrimSpace(r.vars["MEDIA_SANDBOX_MOUNT_PROVIDER"]) == "" {
+			return "remote runs the render job only: set MEDIA_SANDBOX_MOUNT_PROVIDER (docker or hardened) for the jobs that mount files"
+		}
+		if val == "remote" && strings.ToLower(strings.TrimSpace(r.vars["MOTION_GRAPHICS"])) != "off" {
+			return "remote does not render motion graphics yet: set MOTION_GRAPHICS=off"
+		}
+		return ""
+	},
+	"MEDIA_SANDBOX_MOUNT_PROVIDER": func(r *run, val string) string {
+		if why := oneOf("MEDIA_SANDBOX_MOUNT_PROVIDER")(r, val); why != "" {
+			return why
+		}
+		if p := strings.ToLower(strings.TrimSpace(r.vars["MEDIA_SANDBOX_PROVIDER"])); p != "remote" {
+			return "only used with MEDIA_SANDBOX_PROVIDER=remote (leave it empty)"
 		}
 		if val == "local" && (r.opts.Env == "staging" || r.opts.Env == "production") {
 			return "local isolates nothing and is not allowed in " + r.opts.Env + " (use hardened)"

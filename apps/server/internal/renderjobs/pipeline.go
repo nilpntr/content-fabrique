@@ -55,6 +55,9 @@ type Config struct {
 	Logger *slog.Logger
 	// MotionFallback draws the graphics track as ASS text instead of motion-graphics overlays (MOTION_GRAPHICS=off, D-35).
 	MotionFallback bool
+	// Remote, when set, renders through the remote sandbox provider (MEDIA_SANDBOX_PROVIDER=remote, remote.go): the footage is
+	// not staged on disk, the runner fetches it and uploads the video itself. Runner is then unused.
+	Remote *Remote
 
 	// subjects replaces the read of the subject boxes (a test makes it fail); nil reads them from the store.
 	subjects func(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) (subject.Index, error)
@@ -71,6 +74,8 @@ func (p *Pipeline) loadSubjects(ctx context.Context, ws ids.WorkspaceID, assets 
 // Pipeline renders. It holds no per-job state, so one Pipeline serves all the workers. It implements jobs.Renderer.
 type Pipeline struct {
 	cfg Config
+	// remote is cfg.Objects as RemoteObjects, for a remote render (cfg.Remote).
+	remote RemoteObjects
 }
 
 var _ jobs.Renderer = (*Pipeline)(nil)
@@ -78,10 +83,18 @@ var _ jobs.Renderer = (*Pipeline)(nil)
 // New returns a Pipeline.
 func New(cfg Config) (*Pipeline, error) {
 	switch {
-	case cfg.Store == nil || cfg.Objects == nil || cfg.Runner == nil:
+	case cfg.Store == nil || cfg.Objects == nil || (cfg.Runner == nil && cfg.Remote == nil):
 		return nil, errors.New("renderjobs: a store, object storage and a runner are required")
+	case cfg.Remote != nil && cfg.Remote.Provider == nil:
+		return nil, errors.New("renderjobs: a remote render needs the remote provider")
+	case cfg.Remote != nil && !cfg.MotionFallback:
+		return nil, render.ErrRemoteMotion
 	case !filepath.IsAbs(cfg.TempDir) || filepath.Clean(cfg.TempDir) != cfg.TempDir:
 		return nil, fmt.Errorf("renderjobs: the temp dir %q must be an absolute, clean path", cfg.TempDir)
+	}
+	remote, ok := cfg.Objects.(RemoteObjects)
+	if cfg.Remote != nil && !ok {
+		return nil, errors.New("renderjobs: a remote render needs object storage that presigns URLs (RemoteObjects)")
 	}
 	if worst := WorstCase(); worst > jobs.RenderTimeout {
 		return nil, fmt.Errorf("renderjobs: a render needs up to %v, more than the job timeout of %v", worst, jobs.RenderTimeout)
@@ -95,7 +108,7 @@ func New(cfg Config) (*Pipeline, error) {
 	if err := os.MkdirAll(cfg.TempDir, 0o750); err != nil {
 		return nil, fmt.Errorf("renderjobs: temp dir: %w", err)
 	}
-	p := &Pipeline{cfg: cfg}
+	p := &Pipeline{cfg: cfg, remote: remote}
 	p.sweepStale(time.Now())
 	return p, nil
 }
@@ -442,26 +455,12 @@ func (r *run) execute(ctx context.Context) (finished, error) {
 		return finished{}, fileErr(ReasonRenderFailed, cerr)
 	}
 
-	mp4, err := r.renderVideo(ctx, plan)
-	if err != nil {
-		return finished{}, err
+	var out rendered
+	if r.p.cfg.Remote != nil {
+		out, err = r.renderRemote(ctx, plan, stager.keys)
+	} else {
+		out, err = r.renderLocal(ctx, plan)
 	}
-	fi, err := os.Lstat(mp4)
-	if err != nil {
-		return finished{}, fileErr(ReasonRenderFailed, fmt.Errorf("the render wrote no video: %w", err))
-	}
-	if !fi.Mode().IsRegular() || fi.Size() < 1 || fi.Size() > MaxOutputBytes {
-		return finished{}, fileErr(ReasonRenderFailed, fmt.Errorf("the rendered video is %d bytes, which is not acceptable", fi.Size()))
-	}
-
-	if err := r.progress(ctx, pctRendered, store.RenderStageContactSheet); err != nil {
-		return finished{}, err
-	}
-	t0 := time.Now()
-	sheetCtx, sheetSpan := stageSpan(ctx, "render.contact_sheet")
-	sheet, layout, err := r.makeSheet(sheetCtx, plan, mp4)
-	r.sandbox += time.Since(t0)
-	sheetSpan.End()
 	if err != nil {
 		return finished{}, err
 	}
@@ -477,7 +476,7 @@ func (r *run) execute(ctx context.Context) (finished, error) {
 	if err != nil {
 		return finished{}, err
 	}
-	layoutJSON, err := json.Marshal(layout)
+	layoutJSON, err := json.Marshal(out.layout)
 	if err != nil {
 		return finished{}, err
 	}
@@ -485,21 +484,25 @@ func (r *run) execute(ctx context.Context) (finished, error) {
 	if err := r.progress(ctx, pctUploading, store.RenderStageUploading); err != nil {
 		return finished{}, err
 	}
-	f, err := os.Open(mp4) //nolint:gosec // the render's own output in our job directory
-	if err != nil {
-		return finished{}, err
-	}
-	defer f.Close() //nolint:errcheck // read-only
-	keys := map[string]string{}
-	for _, up := range []struct {
+	keys := map[string]string{storage.RenderMP4Name: out.mp4Key}
+	type upload struct {
 		name, contentType string
 		body              io.ReadSeeker
 		size              int64
-	}{
-		{storage.RenderMP4Name, "video/mp4", f, fi.Size()},
-		{storage.RenderContactSheetName, "image/jpeg", bytes.NewReader(sheet), int64(len(sheet))},
-		{storage.RenderTimeMapName, "application/json", bytes.NewReader(timeMap), int64(len(timeMap))},
-	} {
+	}
+	var uploads []upload
+	if out.mp4Path != "" {
+		f, err := os.Open(out.mp4Path) //nolint:gosec // the render's own output in our job directory
+		if err != nil {
+			return finished{}, err
+		}
+		defer f.Close() //nolint:errcheck // read-only
+		uploads = append(uploads, upload{storage.RenderMP4Name, "video/mp4", f, out.size})
+	}
+	uploads = append(uploads,
+		upload{storage.RenderContactSheetName, "image/jpeg", bytes.NewReader(out.sheet), int64(len(out.sheet))},
+		upload{storage.RenderTimeMapName, "application/json", bytes.NewReader(timeMap), int64(len(timeMap))})
+	for _, up := range uploads {
 		key, err := r.put(ctx, up.name, up.body, up.size, up.contentType)
 		if err != nil {
 			return finished{}, fmt.Errorf("upload %s: %w", up.name, err)
@@ -508,8 +511,8 @@ func (r *run) execute(ctx context.Context) (finished, error) {
 	}
 
 	// The audio stem of a preview with a beat guide (the audio without the guide, for the audio check). It is optional: a render without
-	// one is ready all the same, and the check then measures the video's own sound.
-	if plan.StemLabel != "" {
+	// one is ready all the same, and the check then measures the video's own sound. A remote render's runner uploaded it already.
+	if plan.StemLabel != "" && out.mp4Path != "" {
 		if err := r.putStem(ctx); err != nil {
 			// The stem is a measurement aid: a failed upload must not fail a render whose video, sheet and time map are in storage.
 			// The editor's audio checks then say the preview has no stem.
@@ -520,7 +523,7 @@ func (r *run) execute(ctx context.Context) (finished, error) {
 	_, err = st.FinishRender(ctx, r.ws, r.render.ID, store.RenderResult{
 		MP4Key: keys[storage.RenderMP4Name], ContactSheetKey: keys[storage.RenderContactSheetName], TimeMapKey: keys[storage.RenderTimeMapName],
 		DurationMs: plan.DurationMs, Width: plan.OutputSize.Width, Height: plan.OutputSize.Height,
-		SizeBytes: fi.Size(), ContactSheetBytes: int64(len(sheet)), TimeMapBytes: int64(len(timeMap)),
+		SizeBytes: out.size, ContactSheetBytes: int64(len(out.sheet)), TimeMapBytes: int64(len(timeMap)),
 		ContactSheet: layoutJSON, SoundCues: cueJSON, CPUMs: r.cpuMs(), WallMs: time.Since(r.began).Milliseconds(),
 	})
 	if errors.Is(err, store.ErrNotFound) {
@@ -529,7 +532,81 @@ func (r *run) execute(ctx context.Context) (finished, error) {
 	if err != nil {
 		return finished{}, fmt.Errorf("finish render: %w", err)
 	}
-	return finished{durationMs: plan.DurationMs, sizeBytes: fi.Size()}, nil
+	if r.p.cfg.Remote != nil {
+		r.removeScratch(ctx)
+	}
+	return finished{durationMs: plan.DurationMs, sizeBytes: out.size}, nil
+}
+
+// rendered is the video and contact sheet of a run: the MP4 on disk (mp4Path, local providers) or already in object storage
+// (mp4Key, the remote provider).
+type rendered struct {
+	mp4Path, mp4Key string
+	size            int64
+	sheet           []byte
+	layout          SheetLayout
+}
+
+// renderLocal renders through the runner, with the footage staged in the job directory, and makes the contact sheet.
+func (r *run) renderLocal(ctx context.Context, plan render.Plan) (rendered, error) {
+	mp4, err := r.renderVideo(ctx, plan)
+	if err != nil {
+		return rendered{}, err
+	}
+	fi, err := os.Lstat(mp4)
+	if err != nil {
+		return rendered{}, fileErr(ReasonRenderFailed, fmt.Errorf("the render wrote no video: %w", err))
+	}
+	if !fi.Mode().IsRegular() || fi.Size() < 1 || fi.Size() > MaxOutputBytes {
+		return rendered{}, fileErr(ReasonRenderFailed, fmt.Errorf("the rendered video is %d bytes, which is not acceptable", fi.Size()))
+	}
+
+	if err := r.progress(ctx, pctRendered, store.RenderStageContactSheet); err != nil {
+		return rendered{}, err
+	}
+	t0 := time.Now()
+	sheetCtx, sheetSpan := stageSpan(ctx, "render.contact_sheet")
+	sheet, layout, err := r.makeSheet(sheetCtx, plan, mp4)
+	r.sandbox += time.Since(t0)
+	sheetSpan.End()
+	if err != nil {
+		return rendered{}, err
+	}
+	return rendered{mp4Path: mp4, size: fi.Size(), sheet: sheet, layout: layout}, nil
+}
+
+// onProgress maps the render's progress events to the progress bar; cancel stops the encode when the render is gone.
+func (r *run) onProgress(ctx context.Context, plan render.Plan, cancel context.CancelCauseFunc) func(render.Progress) {
+	twoPass := plan.Loudnorm != nil && plan.Loudnorm.TwoPass
+	return func(p render.Progress) {
+		lo, hi, stage := pctStaged, pctRendered, store.RenderStageRendering
+		if twoPass {
+			if p.Stage == "measure" {
+				hi, stage = pctMeasured, store.RenderStageMeasuring
+			} else {
+				lo = pctMeasured
+			}
+		}
+		pct := lo + int(float64(hi-lo)*p.Fraction)
+		if err := r.progress(ctx, pct, stage); err != nil {
+			cancel(err) // the render was deleted or failed: stop the encode
+		}
+	}
+}
+
+// renderError maps an error of render.Execute or ExecuteRemote to the pipeline's: a tool that failed, the footage, or ours.
+func renderError(execCtx context.Context, err error) error {
+	if cause := context.Cause(execCtx); errors.Is(cause, jobs.ErrRenderGone) {
+		return jobs.ErrRenderGone
+	}
+	var te *media.ToolError
+	switch {
+	case errors.As(err, &te):
+		return toolFailure(te.Tool, te.ExitCode, []byte(te.Stderr))
+	case errors.Is(err, render.ErrRemoteInput):
+		return fileErr(ReasonRenderFailed, err)
+	}
+	return err // the sandbox, a timeout or the context: not the timeline's fault
 }
 
 // renderVideo runs the plan through the sandbox and returns the path of the MP4.
@@ -542,24 +619,10 @@ func (r *run) renderVideo(ctx context.Context, plan render.Plan) (string, error)
 
 	execCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
-	onProgress := func(p render.Progress) {
-		lo, hi, stage := pctStaged, pctRendered, store.RenderStageRendering
-		if twoPass {
-			if p.Stage == "measure" {
-				hi, stage = pctMeasured, store.RenderStageMeasuring
-			} else {
-				lo = pctMeasured
-			}
-		}
-		pct := lo + int(float64(hi-lo)*p.Fraction)
-		if err := r.progress(execCtx, pct, stage); err != nil {
-			cancel(err) // the render was deleted or failed: stop the encode
-		}
-	}
 	t0 := time.Now()
 	execCtx, encode := stageSpan(execCtx, "render.ffmpeg")
 	err := render.Execute(execCtx, plan, r.runner, render.ExecuteOptions{
-		Output: out, WorkDir: filepath.Join(r.dir, "work"), Progress: onProgress,
+		Output: out, WorkDir: filepath.Join(r.dir, "work"), Progress: r.onProgress(execCtx, plan, cancel),
 		StemOutput: filepath.Join(r.dir, "out", storage.RenderAudioStemName),
 	})
 	r.sandbox += time.Since(t0)
@@ -569,17 +632,7 @@ func (r *run) renderVideo(ctx context.Context, plan render.Plan) (string, error)
 	}
 	encode.End()
 	if err != nil {
-		if cause := context.Cause(execCtx); errors.Is(cause, jobs.ErrRenderGone) {
-			return "", jobs.ErrRenderGone
-		}
-		var te *media.ToolError
-		switch {
-		case errors.As(err, &te):
-			return "", toolFailure(te.Tool, te.ExitCode, []byte(te.Stderr))
-		case errors.Is(err, render.ErrRemoteInput):
-			return "", fileErr(ReasonRenderFailed, err)
-		}
-		return "", err // the sandbox, a timeout or the context: not the timeline's fault
+		return "", renderError(execCtx, err)
 	}
 	return out, nil
 }
