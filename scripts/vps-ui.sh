@@ -28,9 +28,11 @@ UNITS=(cf-ui-api cf-ui-worker cf-ui-web)
 
 eval "$(sed -n '/^load_env() {/,/^}/p' "$ROOT/scripts/dev.sh")"
 
+# bun and Go from the home directory. Node is the system one: Vite 8 needs 20.19+ or 22.12+, and the box's ~/node22
+# is 22.11 (another project's).
 tools_path() {
 	local p
-	for p in "$HOME/node22/bin" "$HOME/.bun/bin" "$HOME/go/bin" /usr/local/go/bin; do
+	for p in "$HOME/.bun/bin" "$HOME/go/bin" /usr/local/go/bin; do
 		[ -d "$p" ] && PATH="$p:$PATH"
 	done
 	export PATH
