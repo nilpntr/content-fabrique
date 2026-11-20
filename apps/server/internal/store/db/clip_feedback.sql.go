@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 )
 
@@ -65,19 +66,27 @@ const listClipFeedback = `-- name: ListClipFeedback :many
 SELECT id, workspace_id, asset_id, kind, start_ms, end_ms, project_id, timeline_version, shot_number, item_id, note, created_by_kind, created_by_id, created_at, updated_at FROM clip_feedback
 WHERE workspace_id = $1
   AND (cardinality($2::uuid[]) = 0 OR asset_id = ANY ($2::uuid[]))
+  AND ($3::uuid IS NULL OR id < $3::uuid)
 ORDER BY id DESC
-LIMIT $3
+LIMIT $4
 `
 
 type ListClipFeedbackParams struct {
 	WorkspaceID ids.WorkspaceID
 	AssetIds    []uuid.UUID
+	Before      pgtype.UUID
 	RowLimit    int32
 }
 
-// The workspace's feedback, newest first, optionally on some clips only (an empty list: every clip).
+// The workspace's feedback, newest first (by when it was first given), optionally on some clips only (an empty list: every clip),
+// after the cursor when there is one.
 func (q *Queries) ListClipFeedback(ctx context.Context, arg ListClipFeedbackParams) ([]ClipFeedback, error) {
-	rows, err := q.db.Query(ctx, listClipFeedback, arg.WorkspaceID, arg.AssetIds, arg.RowLimit)
+	rows, err := q.db.Query(ctx, listClipFeedback,
+		arg.WorkspaceID,
+		arg.AssetIds,
+		arg.Before,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +129,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
         $11, $12)
 ON CONFLICT (workspace_id, asset_id, kind, start_ms, end_ms) DO UPDATE
 SET note = EXCLUDED.note, project_id = EXCLUDED.project_id, timeline_version = EXCLUDED.timeline_version,
-    shot_number = EXCLUDED.shot_number, item_id = EXCLUDED.item_id
+    shot_number = EXCLUDED.shot_number, item_id = EXCLUDED.item_id,
+    created_by_kind = EXCLUDED.created_by_kind, created_by_id = EXCLUDED.created_by_id
 RETURNING id, workspace_id, asset_id, kind, start_ms, end_ms, project_id, timeline_version, shot_number, item_id, note, created_by_kind, created_by_id, created_at, updated_at
 `
 
@@ -141,8 +151,8 @@ type UpsertClipFeedbackParams struct {
 
 // Clip feedback (docs/design/proof-edit-v1.md): what the creator said about a shot of a proof, stored by clip and source range. EVERY
 // query filters by workspace_id: a row of another workspace is never returned or changed.
-// Saying the same thing about the same range again keeps one row: the note and where it was said are updated. The composite foreign
-// keys refuse a clip or a project of another workspace.
+// Saying the same thing about the same range again keeps one row (and its id): the note, where it was said and who said it last are
+// updated (updated_at says when). The composite foreign keys refuse a clip or a project of another workspace.
 func (q *Queries) UpsertClipFeedback(ctx context.Context, arg UpsertClipFeedbackParams) (ClipFeedback, error) {
 	row := q.db.QueryRow(ctx, upsertClipFeedback,
 		arg.WorkspaceID,
