@@ -58,13 +58,20 @@ editor runs and judge calls together. --max-usd 0 (the default) spends nothing: 
   --repeat        how many times each live case is run; its score is the mean ± sd of its samples, and a failed run scores 0.
                   Default 2 with --live (a live edit is not deterministic), 1 otherwise; a stored case is always scored once
   --json          print the summary as JSON
+  --over-test-cap run although the run may pass the test cap (see below)
   --env-file, --yes  as for cfctl agent run (--yes is needed with --live outside plain local development)
+
+The cost guard: before a run that may spend on test calls (CF_ENV local, ci or bench), it prints what the run may cost at most (every
+live sample spending its whole budget and every judge call its $0.10, never more than --max-usd) and what is left of the test cap
+(TEST_SPEND_CAP_MICROS, default $75, against the usage ledger's test spend: cfctl spend summary). It refuses the run when the first is
+more than the second, unless --over-test-cap is given. Each editor run is also held to the per-edit spend ceiling
+(EDIT_SPEND_CEILING_MICROS, default $2.00), whatever the case's budget_usd says.
 `
 
 // suiteFlags are the flags of eval suite, also used by eval improve.
 type suiteFlags struct {
 	suite, local, cases, out, phoenix, label, judgeProfile, envFile string
-	live, noJudge, noPhoenix, asJSON, yes                           bool
+	live, noJudge, noPhoenix, asJSON, yes, overTestCap              bool
 	maxUSD                                                          float64
 	repeat                                                          int
 }
@@ -100,6 +107,7 @@ func (f *suiteFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.envFile, "env-file", "", "env file")
 	fs.BoolVar(&f.yes, "yes", false, "confirm outside plain local development")
 	fs.IntVar(&f.repeat, "repeat", 0, "samples of each live case")
+	fs.BoolVar(&f.overTestCap, "over-test-cap", false, "run although the run may pass the test cap")
 }
 
 func cmdEvalSuite(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps agentDeps) int {
@@ -166,6 +174,9 @@ func runSuite(name string, f suiteFlags, stdout, stderr io.Writer, lookup lookup
 	if f.maxUSD > 0 {
 		est := evals.EstimateRun(se.suite, se.opts, se.deps.Edit != nil, evals.RecentRuns(se.opts.OutDir, se.suite.Name, 10))
 		if !guardCost(out, se.env.err, name, est.Micros, f.maxUSD, est.Lines) {
+			return nil, se.suite, 2
+		}
+		if !guardTestCap(ctx, se.st, se.env, name, est.UpTo(se.opts.MaxMicros), f.overTestCap) {
 			return nil, se.suite, 2
 		}
 		if f.live {
@@ -394,7 +405,8 @@ func openSuite(name string, f suiteFlags, stdout, stderr io.Writer, lookup looku
 			only = append(only, id)
 		}
 	}
-	se.opts = evals.Options{Live: f.live, MaxMicros: int64(f.maxUSD * 1e6), NoJudge: f.noJudge, Only: only, OutDir: outDir, Label: f.label, Repeat: f.repeats()}
+	se.opts = evals.Options{Live: f.live, MaxMicros: int64(f.maxUSD * 1e6), NoJudge: f.noJudge, Only: only, OutDir: outDir, Label: f.label, Repeat: f.repeats(),
+		EditCeilingMicros: rt.Ceilings.Highest()}
 	key := evals.RunKey{Live: f.live, Repeat: f.repeats(), Judge: !f.noJudge, JudgeProfile: f.judgeProfile, Only: only}
 	if se.opts.CodeHash, err = evals.CodeHash(env.root, suite, key); err != nil {
 		_, _ = fmt.Fprintf(env.err, "cfctl %s: hashing the code: %v\n", name, err)

@@ -88,6 +88,9 @@ type BudgetLeft struct {
 	ToolCalls int
 	Wall      time.Duration
 	Micros    int64
+	// CeilingMicros is the per-edit spend ceiling (spend.Ceilings) when it is what bounds the run's dollar budget (it is at or below the
+	// budget the run was given), else 0: an agent that ends at the dollar limit can then say the ceiling is why.
+	CeilingMicros int64
 }
 
 // WithArtifacts returns a RunContext whose Artifact calls go to sink instead of the run's events. It is for tests of tools,
