@@ -395,3 +395,24 @@ clears the ones named in `clear`, in one transaction under the workspace's style
 `set --chapter-titles on` had reset every earlier choice), and takes `suggested` as a value or `--clear name,...` to give a setting back
 to the suggestion, the measures or the default.
 
+
+## 14. Personal rhythm rules: `cut_grid` and `shot_reuse`
+
+Gino's hand-tuned edit rules (his `video-edit` skill; `docs/design/gino-edit-rules.md` on `plan/gino-rules`) are mostly personal, so they are
+**style settings and never defaults**. Two new settings, both off unless the creator sets them (the source is `you` or the default, never
+measured or suggested). They are in `StyleSettings` of the API (`PUT /v1/style` keeps them) and in `cfctl style set --cut-grid --shot-reuse`; the effective-settings view and the web form do not show them yet):
+
+| Setting | Values | Switches on |
+|---|---|---|
+| `cut_grid` | `free` (default), `fixed_2` | `beat_grid_fixed` (every cut on an even beat, the last shot 4 beats, the total a multiple of 4) and turns `shot_variety` and `pace_builds` off, with `shot_pacing`, `long_shot` and `held_ending` (the beats set the lengths); it skips for a style with `music never` or cuts off the beat, and when no beat grid is expected: equal shot lengths in a row are the rhythm |
+| `shot_reuse` | `allowed` (default), `once` | `shot_reused` (no source range used twice, a tripod clip gives one shot) |
+
+Both checks report "does not apply" for every other creator, so their results are unchanged. The playbook (`workout.v9`) yields to the
+settings: with `camera_motion` off the editor adds no motion, and `check_edit` stops asking for it. Which rules are which:
+
+- **Per style (settings):** the fixed grid, every shot once, hard cuts only (`transitions` off), no motion (`camera_motion` off, now also
+  turning off `static_shot`, the effect minimum and the "moving ending" advice), texts without an entrance (`text_animation` off turns off
+  `text_without_entrance`). Gino's values: `transitions off, camera_motion off, text_animation off, cut_grid fixed_2, shot_reuse once`
+  (the fixture `ginoStyle()` in `agents/editor/checkgrid_test.go`).
+- **Global, unchanged:** nothing in this change is a new global rule. The `workout.v9` playbook lines on "every moment once" and the
+  grid are conditional on the settings. Rules 5 to 9 and 11 of the plan stay universal candidates for later work.

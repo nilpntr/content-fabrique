@@ -65,6 +65,13 @@ const (
 
 	CutsOnFullReps = "full_reps"
 	CutsMidRep     = "mid_rep"
+
+	// CutGrid: free (cuts follow the footage and the music) or fixed_2 (2 beats a shot, cuts on even beats, the last shot 4 beats, the total a
+	// multiple of 4). ShotReuse: allowed, or once (no source moment twice, a tripod clip gives one shot). Both are personal rules, off by default.
+	CutGridFree   = "free"
+	CutGridFixed2 = "fixed_2"
+	ReuseAllowed  = "allowed"
+	ReuseOnce     = "once"
 )
 
 // The allowed values of each setting, by its JSON name.
@@ -81,6 +88,8 @@ var settingValues = map[string][]string{
 	"ending_hold":    {HoldShort, HoldLong},
 	"cut_timing":     {CutsOnFullReps, CutsMidRep},
 	"angle_switches": {LevelOff, LevelOn},
+	"cut_grid":       {CutGridFree, CutGridFixed2},
+	"shot_reuse":     {ReuseAllowed, ReuseOnce},
 	"text_pattern":   TextPatterns,
 	"text_position":  {TextTop, TextUpperThird, TextMiddle, TextLowerThird, PositionAuto},
 }
@@ -113,6 +122,9 @@ type Settings struct {
 	// lines) or none; TextPosition where the lines of story captions and dialogue sit (top, upper_third, middle, lower_third or auto).
 	TextPattern  string `json:"text_pattern,omitempty"`
 	TextPosition string `json:"text_position,omitempty"`
+	// CutGrid and ShotReuse are the personal rhythm and uniqueness rules (CutGridFixed2, ReuseOnce); empty or free/allowed leaves them off.
+	CutGrid   string `json:"cut_grid,omitempty"`
+	ShotReuse string `json:"shot_reuse,omitempty"`
 }
 
 // fields lists the settings with their JSON names, for validation and resolution.
@@ -127,7 +139,7 @@ func (s *Settings) fields() []struct {
 		{"vibe", &s.Vibe}, {"transitions", &s.Transitions}, {"text_animation", &s.TextAnimation}, {"camera_motion", &s.CameraMotion},
 		{"title_colour", &s.TitleColour}, {"title_position", &s.TitlePosition}, {"title_case", &s.TitleCase}, {"music", &s.Music}, {"pace", &s.Pace},
 		{"chapter_titles", &s.ChapterTitles}, {"title_template", &s.TitleTemplate}, {"ending_hold", &s.EndingHold}, {"cut_timing", &s.CutTiming},
-		{"angle_switches", &s.AngleSwitches}, {"text_pattern", &s.TextPattern}, {"text_position", &s.TextPosition},
+		{"angle_switches", &s.AngleSwitches}, {"text_pattern", &s.TextPattern}, {"text_position", &s.TextPosition}, {"cut_grid", &s.CutGrid}, {"shot_reuse", &s.ShotReuse},
 	}
 }
 
@@ -390,6 +402,8 @@ func Resolve(p *Profile, suggested *Settings, mine Settings, runVibe string) Res
 	choose(&r.EndingHold, &r.Sources.EndingHold, cand{mine.EndingHold, SourceYou}, cand{sug.EndingHold, SourceSuggested}, cand{mHold, SourceMeasured}, cand{HoldLong, SourceDefault})
 	choose(&r.CutTiming, &r.Sources.CutTiming, cand{mine.CutTiming, SourceYou}, cand{sug.CutTiming, SourceSuggested}, cand{mTiming, SourceMeasured}, cand{CutsOnFullReps, SourceDefault})
 	choose(&r.AngleSwitches, &r.Sources.AngleSwitches, cand{mine.AngleSwitches, SourceYou}, cand{sug.AngleSwitches, SourceSuggested}, cand{mAngles, SourceMeasured}, cand{LevelOn, SourceDefault})
+	choose(&r.CutGrid, &r.Sources.CutGrid, cand{mine.CutGrid, SourceYou}, cand{CutGridFree, SourceDefault})
+	choose(&r.ShotReuse, &r.Sources.ShotReuse, cand{mine.ShotReuse, SourceYou}, cand{ReuseAllowed, SourceDefault})
 
 	// The text pattern and where its lines sit (P6-05d): measured from the text of every shot.
 	var mPattern, mTextPos string

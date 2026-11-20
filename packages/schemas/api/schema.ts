@@ -1812,6 +1812,16 @@ export interface components {
          * @enum {string}
          */
         StyleLevel: "off" | "subtle" | "lots";
+        /**
+         * @description `free` (cuts follow the footage and the music) or `fixed_2` (2 beats a shot, cuts on even beats, the last shot 4 beats, the total a multiple of 4). A personal rule, off unless set.
+         * @enum {string}
+         */
+        StyleCutGrid: "free" | "fixed_2";
+        /**
+         * @description `allowed` or `once` (no source moment twice, a tripod clip gives one shot). A personal rule, off unless set.
+         * @enum {string}
+         */
+        StyleShotReuse: "allowed" | "once";
         /** @enum {string} */
         StyleToggle: "off" | "on";
         /**
@@ -1885,6 +1895,8 @@ export interface components {
             angle_switches?: components["schemas"]["StyleToggle"];
             text_pattern?: components["schemas"]["StyleTextPattern"];
             text_position?: components["schemas"]["StyleTextPosition"];
+            cut_grid?: components["schemas"]["StyleCutGrid"];
+            shot_reuse?: components["schemas"]["StyleShotReuse"];
         };
         StyleSettingSources: {
             vibe: components["schemas"]["StyleSettingSource"];
