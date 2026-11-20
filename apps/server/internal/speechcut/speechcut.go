@@ -11,7 +11,9 @@
 package speechcut
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/nilpntr/content-fabrique/internal/transcribe"
@@ -132,8 +134,8 @@ func Compute(words []transcribe.Word, st transcribe.Structure, opt Options) Plan
 
 	// Which words are cut out. A filler goes unless it, or a word next to it, has a time that cannot be trusted.
 	drop := make([]bool, len(words))
-	for _, f := range st.Fillers {
-		if f.FirstWord < 0 || f.LastWord >= len(words) || f.FirstWord > f.LastWord || !inside(f.FirstWord) || !inside(f.LastWord) {
+	for _, f := range Actionable(words, st) {
+		if !inside(f.FirstWord) || !inside(f.LastWord) {
 			continue
 		}
 		r := Removal{Kind: KindFiller, StartMs: words[f.FirstWord].StartMs, EndMs: words[f.LastWord].EndMs, Text: f.Text}
@@ -163,6 +165,8 @@ func Compute(words []transcribe.Word, st transcribe.Structure, opt Options) Plan
 		}
 		plan.Removed = append(plan.Removed, r)
 	}
+
+	slices.SortStableFunc(plan.Removed, func(a, b Removal) int { return cmp.Compare(a.StartMs, b.StartMs) })
 
 	// Runs of kept words that follow each other without a cut or a removed word between them, each padded into the gaps around it.
 	runStart, last := -1, -1

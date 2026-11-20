@@ -56,26 +56,28 @@ func TestSpeechOfUsesTheStoredStructureOrComputesIt(t *testing.T) {
 	st := transcribe.Analyse(words, "en")
 	rawSt, _ := json.Marshal(st)
 
-	sp, ok := speechOf(store.Transcript{Speech: true, Language: "en", Words: raw, Structure: rawSt})
+	sp, ok, _ := speechOf(store.Transcript{Speech: true, Language: "en", Words: raw, Structure: rawSt})
 	if !ok || len(sp.Structure.Sentences) != 2 {
 		t.Fatalf("stored structure: %+v %v", sp, ok)
 	}
 	// A structure that points past the words is not used.
 	bad := transcribe.Structure{Sentences: []transcribe.Sentence{{FirstWord: 0, LastWord: 9}}}
 	rawBad, _ := json.Marshal(bad)
-	sp, ok = speechOf(store.Transcript{Speech: true, Language: "en", Words: raw, Structure: rawBad})
+	sp, ok, _ = speechOf(store.Transcript{Speech: true, Language: "en", Words: raw, Structure: rawBad})
 	if !ok || len(sp.Structure.Sentences) != 2 || sp.Structure.Sentences[0].LastWord != 1 {
 		t.Fatalf("bad structure: %+v %v", sp, ok)
 	}
-	// No speech, no words, words that overlap: nothing to cut on.
+	// No speech is silence; Speech=true with words that cannot be used is a data defect.
+	if _, ok, defect := speechOf(store.Transcript{Speech: false, Words: raw}); ok || defect {
+		t.Errorf("no speech: ok %v defect %v", ok, defect)
+	}
 	for name, tr := range map[string]store.Transcript{
-		"no speech": {Speech: false, Words: raw},
-		"no words":  {Speech: true},
-		"garbage":   {Speech: true, Words: json.RawMessage(`{"x":1}`)},
-		"overlap":   {Speech: true, Words: json.RawMessage(`[{"text":"a","start_ms":0,"end_ms":500},{"text":"b","start_ms":100,"end_ms":200}]`)},
+		"no words": {Speech: true},
+		"garbage":  {Speech: true, Words: json.RawMessage(`{"x":1}`)},
+		"overlap":  {Speech: true, Words: json.RawMessage(`[{"text":"a","start_ms":0,"end_ms":500},{"text":"b","start_ms":100,"end_ms":200}]`)},
 	} {
-		if _, ok := speechOf(tr); ok {
-			t.Errorf("%s: speechOf = ok", name)
+		if _, ok, defect := speechOf(tr); ok || !defect {
+			t.Errorf("%s: ok %v defect %v, want a defect", name, ok, defect)
 		}
 	}
 }
@@ -89,6 +91,18 @@ func (f fakeTranscripts) GetTranscript(_ context.Context, _ ids.WorkspaceID, id 
 	return store.Transcript{}, store.ErrNotFound
 }
 
+type failingTranscripts struct {
+	fakeTranscripts
+	fail ids.AssetID
+}
+
+func (f failingTranscripts) GetTranscript(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (store.Transcript, error) {
+	if id == f.fail {
+		return store.Transcript{}, fmt.Errorf("database down")
+	}
+	return f.fakeTranscripts.GetTranscript(ctx, ws, id)
+}
+
 func TestLoadSpeech(t *testing.T) {
 	a := ids.AssetID{UUID: uuid.MustParse("01930000-0000-7000-8000-00000000000a")}
 	b := ids.AssetID{UUID: uuid.MustParse("01930000-0000-7000-8000-00000000000b")}
@@ -98,9 +112,14 @@ func TestLoadSpeech(t *testing.T) {
 	if err != nil || len(got) != 1 || got[a.String()] == nil || len(got[a.String()].Structure.Sentences) != 3 {
 		t.Fatalf("LoadSpeech = %v, %v", got, err)
 	}
-	// A source that cannot read transcripts has none, and that is not an error.
-	if got, err := LoadSpeech(context.Background(), struct{}{}, ids.WorkspaceID{}, spec); err != nil || got != nil {
-		t.Errorf("no reader: %v, %v", got, err)
+	// One read that fails fails the load; it does not drop the other clips quietly.
+	if got, err := LoadSpeech(context.Background(), failingTranscripts{fakeTranscripts{a: {Speech: true, Language: "en", Words: raw}}, b}, ids.WorkspaceID{}, spec); err == nil || got != nil {
+		t.Errorf("failed read: %v, %v", got, err)
+	}
+	// An unreadable transcript is skipped (and logged), the others are kept.
+	bad := fakeTranscripts{a: {Speech: true, Language: "en", Words: raw}, b: {Speech: true, Words: json.RawMessage(`{}`)}}
+	if got, err := LoadSpeech(context.Background(), bad, ids.WorkspaceID{}, spec); err != nil || len(got) != 1 {
+		t.Errorf("unreadable: %v, %v", got, err)
 	}
 }
 
@@ -241,5 +260,88 @@ func TestLowConfidenceWordsAreNotHeldAgainstTheEdit(t *testing.T) {
 	c := wantStatus(t, RunChecks(talkingInput(t, sp, shots)), CheckSpeechCutClean, CheckPass)
 	if !strings.Contains(c.Detail, "low confidence") {
 		t.Errorf("detail = %s", c.Detail)
+	}
+}
+
+// A sentence that starts with a filler: the planner's first range starts on the first real word, and hook_line accepts it.
+func TestHookLineTreatsTheFirstNonFillerWordAsTheSentenceStart(t *testing.T) {
+	sp := speechFor(talk("Um,:0", "here:60", "is:40", "the:40", "truth.:40", "Always:900", "warm:40", "up.:40"))
+	if len(sp.Structure.Fillers) == 0 || sp.Structure.Sentences[0].FirstWord != 0 {
+		t.Fatalf("fixture: %+v", sp.Structure)
+	}
+	plan := speechcut.Compute(sp.Words, sp.Structure, speechcut.Options{})
+	if plan.Keep[0].FirstWord != 1 {
+		t.Fatalf("keep = %+v", plan.Keep)
+	}
+	k := plan.Keep
+	r := RunChecks(talkingInput(t, sp, []shot{{asset: assetA, in: k[0].StartMs, out: k[0].EndMs}, {asset: assetA, in: k[1].StartMs, out: k[1].EndMs}}))
+	wantStatus(t, r, CheckHookLine, CheckPass)
+	wantStatus(t, r, CheckSpeechCutClean, CheckPass)
+	// Opening on the filler itself passes hook_line (it starts the sentence) and fails speech_cut_clean.
+	r = RunChecks(talkingInput(t, sp, []shot{{asset: assetA, in: sp.Words[0].StartMs - 40, out: k[0].EndMs}}))
+	wantStatus(t, r, CheckHookLine, CheckPass)
+	wantStatus(t, r, CheckSpeechCutClean, CheckFail)
+}
+
+// Weak fillers are cut only when a pause sets them off; "that's right" and "things like this" stay.
+func TestWeakFillersStayUnlessSetOffByAPause(t *testing.T) {
+	keep := func(spec ...string) (speechcut.Plan, *Speech) {
+		sp := speechFor(talk(spec...))
+		return speechcut.Compute(sp.Words, sp.Structure, speechcut.Options{}), sp
+	}
+	for _, spec := range [][]string{
+		{"That's:0", "right,:60", "you:60", "see.:40"},
+		{"Things:0", "like,:150", "this:60", "matter.:40"},
+		{"It:0", "is:40", "actually:200", "fine.:40"},
+	} {
+		p, sp := keep(spec...)
+		if len(p.Keep) != 1 || p.Keep[0].FirstWord != 0 || p.Keep[0].LastWord != len(sp.Words)-1 {
+			t.Errorf("%v: keep = %+v", spec, p.Keep)
+		}
+		in := talkingInput(t, sp, []shot{{asset: assetA, in: p.Keep[0].StartMs, out: p.Keep[0].EndMs}})
+		wantStatus(t, RunChecks(in), CheckSpeechCutClean, CheckPass)
+	}
+	// Set off by a pause over 400 ms, the weak filler goes.
+	p, sp := keep("It:0", "is:40", "actually:500", "fine.:40")
+	if len(sp.Structure.Fillers) == 0 {
+		t.Fatal("fixture has no filler")
+	}
+	for _, k := range p.Keep {
+		if k.FirstWord <= 2 && k.LastWord >= 2 {
+			t.Errorf("the set-off weak filler is kept: %+v", p.Keep)
+		}
+	}
+}
+
+func TestCutListIsInTimeOrderAndSaysWhenCapped(t *testing.T) {
+	var spec []string
+	for i := 0; i < 30; i++ {
+		spec = append(spec, "word:0", "um:100", "end.:700")
+	}
+	text := transcriptText(assetA, speechFor(talk(spec...)), 0, 0)
+	if !strings.Contains(text, "in time order, the first 40 shown") {
+		t.Errorf("no cap note:\n%.1500s", text)
+	}
+	i := strings.Index(text, "Cut out")
+	var last int64 = -1
+	for _, ln := range strings.Split(text[i:], "\n")[1:] {
+		var a, b int64
+		if n, _ := fmt.Sscanf(ln, "filler %d-%d ms", &a, &b); n < 2 {
+			if n, _ = fmt.Sscanf(ln, "pause %d-%d ms", &a, &b); n < 2 {
+				continue
+			}
+		}
+		if a < last {
+			t.Fatalf("cut list out of order at %q", ln)
+		}
+		last = a
+	}
+}
+
+func TestPartialSentencesAreMarked(t *testing.T) {
+	sp := talkingClip()
+	win := transcriptText(assetA, sp, sp.Words[1].StartMs, sp.Words[7].EndMs)
+	if !strings.Contains(win, "(partial)") {
+		t.Errorf("no partial sentence:\n%s", win)
 	}
 }

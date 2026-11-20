@@ -154,10 +154,12 @@ func CheckVersion(ctx context.Context, projects Projects, src AnalysisSource, ws
 		}
 	}
 	// What the clips say, for the speech checks: read when the source can (a source that cannot has none).
-	if sp, err := LoadSpeech(ctx, src, ws, spec); err == nil {
+	if rd, ok := src.(TranscriptReader); ok {
+		sp, err := LoadSpeech(ctx, rd, ws, spec)
+		if err != nil {
+			return Report{}, err
+		}
 		in.Speech = sp
-	} else {
-		slog.WarnContext(ctx, "editor: the transcripts could not be read; the speech checks do not apply", "error", err)
 	}
 	// Where the person is in the clips, for the title checks: read from the quick look when the source can (a source that cannot has none).
 	if rd, ok := src.(subject.Reader); ok {

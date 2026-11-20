@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 
@@ -34,24 +35,25 @@ type Speech struct {
 	Language  string
 }
 
-// speechOf decodes a stored transcript. ok is false for a clip without speech or whose words cannot be read. The stored structure is
-// used when it is there, else it is computed from the words (it is a pure function of them).
-func speechOf(t store.Transcript) (Speech, bool) {
-	if !t.Speech || len(t.Words) == 0 {
-		return Speech{}, false
+// speechOf decodes a stored transcript. ok is false for a clip without speech or whose words cannot be read; defect is true for the
+// second: a transcript marked as speech whose words do not decode or are not valid is a data defect, not silence. The stored structure
+// is used when it is there, else it is computed from the words (it is a pure function of them).
+func speechOf(t store.Transcript) (sp Speech, ok, defect bool) {
+	if !t.Speech {
+		return Speech{}, false, false
 	}
 	var words []transcribe.Word
 	if err := json.Unmarshal(t.Words, &words); err != nil || len(words) == 0 || !speechcut.Valid(words) {
-		return Speech{}, false
+		return Speech{}, false, true
 	}
-	sp := Speech{Words: words, Language: t.Language}
+	sp = Speech{Words: words, Language: t.Language}
 	var st transcribe.Structure
 	if len(t.Structure) > 0 && json.Unmarshal(t.Structure, &st) == nil && len(st.Sentences) > 0 && structureFits(st, len(words)) {
 		sp.Structure = st
 	} else {
 		sp.Structure = transcribe.Analyse(words, t.Language)
 	}
-	return sp, true
+	return sp, true, false
 }
 
 // structureFits reports whether every index in a stored structure points at one of n words.
@@ -80,12 +82,9 @@ type TranscriptReader interface {
 }
 
 // LoadSpeech reads the transcripts of the clips the main track of a spec plays. A clip without speech, or without a transcript, is
-// left out; so is every clip when the source cannot read transcripts.
-func LoadSpeech(ctx context.Context, src any, ws ids.WorkspaceID, spec *timeline.Spec) (map[string]*Speech, error) {
-	rd, ok := src.(TranscriptReader)
-	if !ok {
-		return nil, nil
-	}
+// left out, and so is one whose stored words are unreadable (logged). A read that fails is an error: check_edit must not quietly
+// skip the speech checks.
+func LoadSpeech(ctx context.Context, rd TranscriptReader, ws ids.WorkspaceID, spec *timeline.Spec) (map[string]*Speech, error) {
 	main, _, ok := timeline.MainTrack(spec)
 	if !ok {
 		return nil, nil
@@ -108,7 +107,11 @@ func LoadSpeech(ctx context.Context, src any, ws ids.WorkspaceID, spec *timeline
 		case err != nil:
 			return nil, fmt.Errorf("read the transcript of %s: %w", it.AssetID, err)
 		}
-		if sp, ok := speechOf(t); ok {
+		sp, ok, defect := speechOf(t)
+		if defect {
+			slog.WarnContext(ctx, "editor: a transcript marked as speech is unreadable; the speech checks skip the clip", "asset_id", it.AssetID)
+		}
+		if ok {
 			out[it.AssetID] = &sp
 		}
 	}
@@ -156,7 +159,11 @@ func (d Deps) getTranscript(ctx context.Context, rc runtime.RunContext, in getTr
 	case err != nil:
 		return runtime.Result{}, fmt.Errorf("get_transcript: %w", err)
 	}
-	sp, ok := speechOf(t)
+	sp, ok, defect := speechOf(t)
+	if defect {
+		logOf(rc).WarnContext(ctx, "get_transcript: a transcript marked as speech is unreadable", "asset_id", aid.String())
+		return runtime.Text(fmt.Sprintf("The transcript of %s is unreadable (a fault on our side, not silence). Cut it on its picture, prefer fewer, longer cuts to cuts in the middle of words, and say so in finish.", in.AssetID)), nil
+	}
 	if !ok {
 		return runtime.Text(fmt.Sprintf("%s has no speech to cut on (the transcript found none). Cut it on its picture.", in.AssetID)), nil
 	}
@@ -177,18 +184,22 @@ func transcriptText(asset string, sp *Speech, inMs, outMs int64) string {
 	var sent strings.Builder
 	shown, total := 0, 0
 	for _, s := range sp.Structure.Sentences {
-		if s.StartMs < inMs || s.EndMs > end {
+		if s.EndMs <= inMs || s.StartMs >= end {
 			continue
+		}
+		partial := ""
+		if s.StartMs < inMs || s.EndMs > end {
+			partial = " (partial)"
 		}
 		total++
 		if shown == maxTranscriptSentences {
 			continue
 		}
 		shown++
-		fmt.Fprintf(&sent, "%d-%d ms: %s\n", s.StartMs, s.EndMs, s.Text)
+		fmt.Fprintf(&sent, "%d-%d ms%s: %s\n", s.StartMs, s.EndMs, partial, s.Text)
 	}
 	if total == 0 {
-		b.WriteString("No whole sentence lies inside this range.\n")
+		b.WriteString("No sentence lies in this range.\n")
 	} else {
 		fmt.Fprintf(&b, "Sentences (%d", total)
 		if total > shown {
@@ -234,7 +245,11 @@ func transcriptText(asset string, sp *Speech, inMs, outMs int64) string {
 		}
 	}
 	if n > 0 {
-		fmt.Fprintf(&b, "Cut out (%d): fillers and pauses over %d ms.\n", n, speechcut.MaxPauseMs)
+		fmt.Fprintf(&b, "Cut out (%d, in time order", n)
+		if n > maxTranscriptRemovals {
+			fmt.Fprintf(&b, ", the first %d shown", maxTranscriptRemovals)
+		}
+		fmt.Fprintf(&b, "): fillers and pauses over %d ms.\n", speechcut.MaxPauseMs)
 		b.WriteString(runtime.Untrusted("transcript", strings.TrimRight(cut.String(), "\n")))
 		b.WriteString("\n")
 	}

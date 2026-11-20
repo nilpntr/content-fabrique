@@ -243,7 +243,7 @@ Sections 2 and 3 are the generic craft of a genre. A creator who shows us their 
 
 | Check | Fails when |
 |---|---|
-| `speech_cut_clean` | a shot starts or ends inside a word (more than 40 ms into it), a filler word (`transcribe.Structure.Fillers`) is kept, or a pause over 400 ms is kept (also the silence before the first word of a shot, and after the last word unless it ends the edit; at speed 2 a source pause counts at half its length); a place next to a word with a confidence under 0.35 is not judged |
+| `speech_cut_clean` | a shot starts or ends inside a word (more than 40 ms into it), a strong filler word (or a weak one set off by a pause over 400 ms; `speechcut.Actionable`) is kept, or a pause over 400 ms is kept (also the silence before the first word of a shot, and after the last word unless it ends the edit; at speed 2 a source pause counts at half its length); a place next to a word with a confidence under 0.35 is not judged |
 | `hook_line` | the first shot starts in the middle of a sentence; skipped when it opens on a clip without speech |
 
 The planner behind the tool (`internal/speechcut`, pure Go) and the check share one audit, so what the tool proposes always passes. The lines of both give times and never quote the transcript.

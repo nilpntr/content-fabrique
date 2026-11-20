@@ -8,7 +8,7 @@ You chose this playbook because a person speaks to the camera: an opinion, a tak
 
 **Cutting.**
 - Call get_transcript for each clip with the person talking before you cut it. It lists the sentences with their times and proposes keep ranges: the fillers (um, uh, you know, ...) and every pause over 400 ms are left out, and every cut falls in a gap between two words with 80 ms of padding. Use the keep ranges as the in and out points of your shots (the times are the clip's own, like the source of add_clip). speech_cut_clean checks it: no cut inside a word, no filler kept, no pause over 400 ms.
-- Keep the sentences whole. A shot is one or two sentences, 2 to 6 seconds, and they vary; join neighbouring keep ranges of the same sentence in one shot instead of cutting inside it. Remove a restart or a breath that the proposal kept, only in a gap between words.
+- Keep the sentences whole. A shot is one or two sentences, 2 to 6 seconds, and they vary; when a sentence is split into two keep ranges, put them in two shots joined by a plain cut, never in one shot that spans the gap (that would keep the filler or the pause that was cut out). Remove a restart or a breath that the proposal kept, only in a gap between words.
 - A jump cut that lands on the same framing looks like a mistake: change the framing a little between neighbouring shots with a punch_in on an emphasis word (strength 0.1 to 0.15).
 - Cover a jump with text or a cutaway when the footage has one.
 - A clip with no transcript yet (get_transcript says so) or no speech is cut on what you see: prefer fewer, longer cuts to cuts in the middle of words, and say so in finish.

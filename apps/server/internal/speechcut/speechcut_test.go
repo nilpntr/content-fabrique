@@ -214,7 +214,7 @@ func TestComputeProperties(t *testing.T) {
 		p := Compute(words, st, Options{PadMs: int64(60 + rng.Intn(41))})
 
 		fillerWord := map[int]bool{}
-		for _, f := range st.Fillers {
+		for _, f := range Actionable(words, st) {
 			for i := f.FirstWord; i <= f.LastWord; i++ {
 				fillerWord[i] = true
 			}

@@ -93,12 +93,16 @@ func (c *checker) hookLine() Check {
 		return c.skip(CheckHookLine, "the opening shot has no speech in it")
 	}
 	for _, s := range sp.Structure.Sentences {
-		if s.FirstWord == first {
-			return c.pass(CheckHookLine, "the edit opens on the first word of a sentence (%d ms of the clip)", s.StartMs)
+		if first < s.FirstWord || first > s.LastWord {
+			continue
 		}
-		if first > s.FirstWord && first <= s.LastWord {
-			return c.fail(CheckHookLine, "the edit opens at %d ms of the clip, in the middle of the sentence that runs from %d to %d ms. Start the first shot at its first word (get_transcript lists the sentences), or open on another sentence", it.Source.InMs, s.StartMs, s.EndMs)
+		// A sentence starts at its first word that is not a filler: a leading "um" is for speech_cut_clean to flag, not a mid-sentence
+		// opening.
+		start := speechcut.SentenceStart(sp.Words, sp.Structure, s)
+		if first <= start {
+			return c.pass(CheckHookLine, "the edit opens on the first word of a sentence (%d ms of the clip)", sp.Words[start].StartMs)
 		}
+		return c.fail(CheckHookLine, "the edit opens at %d ms of the clip, in the middle of the sentence that runs from %d to %d ms. Start the first shot at its first word (get_transcript lists the sentences), or open on another sentence", it.Source.InMs, s.StartMs, s.EndMs)
 	}
 	return c.skip(CheckHookLine, "the transcript has no sentence at the opening word")
 }

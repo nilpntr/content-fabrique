@@ -75,10 +75,7 @@ func Audit(words []transcribe.Word, st transcribe.Structure, r Range) (findings 
 	inRange := func(i int) bool { // the word is played (more than the tolerance of it is inside the range)
 		return i >= 0 && i < len(words) && words[i].EndMs-r.InMs > CutToleranceMs && r.OutMs-words[i].StartMs > CutToleranceMs
 	}
-	for _, f := range st.Fillers {
-		if f.FirstWord < 0 || f.LastWord >= len(words) || f.FirstWord > f.LastWord {
-			continue
-		}
+	for _, f := range Actionable(words, st) {
 		played := true
 		for i := f.FirstWord; i <= f.LastWord; i++ {
 			played = played && inRange(i)
@@ -108,10 +105,18 @@ func Audit(words []transcribe.Word, st transcribe.Structure, r Range) (findings 
 		}
 	}
 	if lead := words[first].StartMs - r.InMs; lead > longest && inRange(first) {
-		findings = append(findings, Finding{Kind: FindingPause, AtMs: r.InMs, Detail: fmt.Sprintf("%d ms of silence before the first word, at %d ms", int64(float64(lead)/speed), r.InMs)})
+		if Low(words, first) {
+			uncertain++
+		} else {
+			findings = append(findings, Finding{Kind: FindingPause, AtMs: r.InMs, Detail: fmt.Sprintf("%d ms of silence before the first word, at %d ms", int64(float64(lead)/speed), r.InMs)})
+		}
 	}
 	if tail := r.OutMs - words[last].EndMs; tail > longest && !r.LastOfEdit && inRange(last) {
-		findings = append(findings, Finding{Kind: FindingPause, AtMs: words[last].EndMs, Detail: fmt.Sprintf("%d ms of silence after the last word, at %d ms", int64(float64(tail)/speed), words[last].EndMs)})
+		if Low(words, last) {
+			uncertain++
+		} else {
+			findings = append(findings, Finding{Kind: FindingPause, AtMs: words[last].EndMs, Detail: fmt.Sprintf("%d ms of silence after the last word, at %d ms", int64(float64(tail)/speed), words[last].EndMs)})
+		}
 	}
 	return findings, uncertain
 }
