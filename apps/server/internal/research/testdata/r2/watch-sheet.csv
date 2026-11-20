@@ -1,0 +1,32 @@
+# Synthetic watch sheet for tests: 30 posts by 5 made-up creators. No real account, no real post.
+url,handle,observer,watched_at,posted_at,length,format,hook_kind,hook_text,caption_pattern,cta,topic,cuts,first_cut_s,views,likes,comments,saves,shares,notes
+https://www.tiktok.com/@synthetic_lifter_a/video/7657610837863983488,,sam,2026-07-06,2026-07-01,0:36,one_take,set_first,<TOPIC> 101,single_title,save,body:back,4,3.6,177.1K,14.8K,442,2951,590,"long take, title over the set"
+https://www.tiktok.com/@synthetic_lifter_a/video/7660907826756941319,,sam,2026-07-15,,0:58,tutorial_101,title_first,<N> MISTAKES,single_title,follow,body:legs,6,2.5,405.2K,33.8K,1012,6752,1350,
+https://www.tiktok.com/@synthetic_lifter_a/video/7664218476544963435,,sam,2026-07-24,,0:13,story_captions,question,WHY <TOPIC>?,story_captions,comment,movement:squat,3,3.8,883.1K,73.6K,2207,14.7K,2943,"long take, title over the set"
+https://www.tiktok.com/@synthetic_lifter_a/video/7667512885343577259,,sam,2026-08-02,2026-07-28,0:28,form_check,set_first,,none,none,body:chest,5,2.9,178.6K,14.9K,446,2977,595,
+https://www.tiktok.com/@synthetic_lifter_a/video/7670796218041684598,,sam,2026-08-11,,0:14,numbered_listicle,pov,POV: <SITUATION>,single_title,save,movement:hinge,3,3.5,619.3K,51.6K,1548,10.3K,2064,"long take, title over the set"
+https://www.tiktok.com/@synthetic_lifter_a/video/7674212520678833028,,sam,2026-08-20,,0:58,myth_fact,title_first,<TOPIC> MYTH,story_captions,follow,body:shoulders,3,0.9,380.7K,31.7K,951,6345,1269,
+https://www.tiktok.com/@synthetic_lifter_b/video/7662245794204068597,,sam,2026-07-19,2026-07-14,0:56,tutorial_101,question,WHY <TOPIC>?,story_captions,save,body:legs,1,0.7,153.6K,12.8K,383,2559,511,"long take, title over the set"
+https://www.tiktok.com/@synthetic_lifter_b/video/7665741985720943328,,sam,2026-07-28,,0:50,story_captions,set_first,,none,follow,movement:squat,4,1.1,30.3K,2528,75,505,101,
+https://www.tiktok.com/@synthetic_lifter_b/video/7668943882893297880,,sam,2026-08-06,,0:18,form_check,pov,POV: <SITUATION>,single_title,comment,body:chest,5,0.8,156.0K,13.0K,389,2599,519,"long take, title over the set"
+https://www.tiktok.com/@synthetic_lifter_b/video/7672274115739213754,,sam,2026-08-15,2026-08-10,0:37,numbered_listicle,title_first,<TOPIC> MYTH,story_captions,none,movement:hinge,1,0.6,520.2K,43.4K,1300,8670,1734,
+https://www.tiktok.com/@synthetic_lifter_b/video/7675665936461518070,,sam,2026-08-24,,0:37,myth_fact,set_first,<TOPIC> 101,single_title,save,body:shoulders,3,2.4,766.6K,63.9K,1916,12.8K,2555,"long take, title over the set"
+https://www.tiktok.com/@synthetic_lifter_b/video/7679075279652852792,,sam,2026-09-02,,0:53,one_take,title_first,<N> MISTAKES,single_title,follow,body:back,3,1.6,17.9K,1495,44,299,59,
+https://www.tiktok.com/@synthetic_lifter_c/video/7667356719245406019,,sam,2026-08-02,2026-07-28,0:14,story_captions,pov,POV: <SITUATION>,single_title,save,movement:squat,5,3.5,754.0K,62.8K,1884,12.6K,2513,"long take, title over the set"
+https://www.tiktok.com/@synthetic_lifter_c/video/7670465075723204652,,sam,2026-08-10,,0:38,form_check,title_first,<TOPIC> MYTH,story_captions,follow,body:chest,5,3.0,136.9K,11.4K,342,2280,456,
+https://www.tiktok.com/@synthetic_lifter_c/video/7673788348861394307,,sam,2026-08-19,,0:50,numbered_listicle,set_first,<TOPIC> 101,single_title,comment,movement:hinge,6,0.8,441.7K,36.8K,1104,7361,1472,"long take, title over the set"
+https://www.tiktok.com/@synthetic_lifter_c/video/7677199239695869087,,sam,2026-08-28,2026-08-23,0:58,myth_fact,title_first,<N> MISTAKES,single_title,none,body:shoulders,3,2.9,383.8K,32.0K,959,6397,1279,
+https://www.tiktok.com/@synthetic_lifter_c/video/7680641054742425101,,sam,2026-09-06,,0:54,one_take,question,WHY <TOPIC>?,story_captions,save,body:back,2,2.4,90.0K,7502,225,1500,300,"long take, title over the set"
+https://www.tiktok.com/@synthetic_lifter_c/video/7683879545670418918,,sam,2026-09-15,,0:32,tutorial_101,set_first,,none,follow,body:legs,6,3.7,741.2K,61.8K,1853,12.4K,2470,
+https://www.tiktok.com/@synthetic_lifter_d/video/7672090635718303072,,sam,2026-08-14,2026-08-09,0:40,form_check,set_first,<TOPIC> 101,single_title,save,body:chest,5,0.8,312.1K,26.0K,780,5200,1040,"long take, title over the set"
+https://www.tiktok.com/@synthetic_lifter_d/video/7675497400894376489,,sam,2026-08-24,,0:26,numbered_listicle,title_first,<N> MISTAKES,single_title,follow,movement:hinge,1,2.1,35.5K,2960,88,592,118,
+https://www.tiktok.com/@synthetic_lifter_d/video/7678681005776874622,,sam,2026-09-01,,0:47,myth_fact,question,WHY <TOPIC>?,story_captions,comment,body:shoulders,4,2.7,251.7K,21.0K,629,4195,839,"long take, title over the set"
+https://www.tiktok.com/@synthetic_lifter_d/video/7682148844552391548,,sam,2026-09-10,2026-09-05,0:36,one_take,set_first,,none,none,body:back,5,3.0,242.5K,20.2K,606,4041,808,
+https://www.tiktok.com/@synthetic_lifter_d/video/7685477532759947320,,sam,2026-09-19,,0:24,tutorial_101,pov,POV: <SITUATION>,single_title,save,body:legs,4,3.2,750.7K,62.6K,1876,12.5K,2502,"long take, title over the set"
+https://www.tiktok.com/@synthetic_lifter_d/video/7688782253057038163,,sam,2026-09-28,,0:34,story_captions,title_first,<TOPIC> MYTH,story_captions,follow,movement:squat,0,1.1,287.2K,23.9K,717,4785,957,
+https://www.tiktok.com/@synthetic_lifter_e/video/7676788467802511279,,sam,2026-08-27,2026-08-22,0:45,numbered_listicle,question,WHY <TOPIC>?,story_captions,save,movement:hinge,5,3.7,540.9K,45.1K,1352,9015,1803,"long take, title over the set"
+https://www.tiktok.com/@synthetic_lifter_e/video/7680268941020710598,,sam,2026-09-05,,0:16,myth_fact,set_first,,none,follow,body:shoulders,0,2.3,824.8K,68.7K,2061,13.7K,2749,
+https://www.tiktok.com/@synthetic_lifter_e/video/7683569278540560521,,sam,2026-09-14,,0:31,one_take,pov,POV: <SITUATION>,single_title,comment,body:back,2,1.0,421.7K,35.1K,1054,7028,1405,"long take, title over the set"
+https://www.tiktok.com/@synthetic_lifter_e/video/7686931205203741969,,sam,2026-09-23,2026-09-18,0:19,tutorial_101,title_first,<TOPIC> MYTH,story_captions,none,body:legs,6,3.0,872.8K,72.7K,2182,14.5K,2909,
+https://www.tiktok.com/@synthetic_lifter_e/video/7690281280435793387,,sam,2026-10-02,,0:43,story_captions,set_first,<TOPIC> 101,single_title,save,movement:squat,5,3.5,839.2K,69.9K,2098,14.0K,2797,"long take, title over the set"
+https://www.tiktok.com/@synthetic_lifter_e/video/7693469778543470118,,sam,2026-10-11,,0:40,form_check,title_first,<N> MISTAKES,single_title,follow,body:chest,1,2.2,626.0K,52.2K,1565,10.4K,2086,

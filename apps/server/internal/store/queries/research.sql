@@ -68,13 +68,13 @@ RETURNING *;
 SELECT * FROM research_evidence WHERE post_id = @post_id ORDER BY observed_at, id;
 
 -- name: UpsertResearchAnnotation :one
-INSERT INTO research_annotations (post_id, format_id, hook_kind, hook_text_pattern, text_pattern, cuts_estimate, first_cut_s, caption_len, hashtags_n, cta, topic, annotator, confidence)
-VALUES (@post_id, @format_id, @hook_kind, @hook_text_pattern, @text_pattern, @cuts_estimate, @first_cut_s, @caption_len, @hashtags_n, @cta, @topic, @annotator, @confidence)
+INSERT INTO research_annotations (post_id, format_id, hook_kind, hook_text_pattern, text_pattern, cuts_estimate, first_cut_s, caption_len, hashtags_n, cta, topic, notes, annotator, confidence)
+VALUES (@post_id, @format_id, @hook_kind, @hook_text_pattern, @text_pattern, @cuts_estimate, @first_cut_s, @caption_len, @hashtags_n, @cta, @topic, @notes, @annotator, @confidence)
 ON CONFLICT (post_id, annotator) DO UPDATE
 SET format_id = EXCLUDED.format_id, hook_kind = EXCLUDED.hook_kind, hook_text_pattern = EXCLUDED.hook_text_pattern,
     text_pattern = EXCLUDED.text_pattern, cuts_estimate = EXCLUDED.cuts_estimate, first_cut_s = EXCLUDED.first_cut_s,
     caption_len = EXCLUDED.caption_len, hashtags_n = EXCLUDED.hashtags_n, cta = EXCLUDED.cta, topic = EXCLUDED.topic,
-    confidence = EXCLUDED.confidence
+    notes = EXCLUDED.notes, confidence = EXCLUDED.confidence
 RETURNING *;
 
 -- name: ListResearchAnnotationsForPost :many

@@ -1,0 +1,16 @@
+{
+  "request_url": "https://www.tiktok.com/@synthetic_lifter_e/video/7676788467802511279",
+  "response": {
+    "version": "1.0",
+    "type": "video",
+    "title": "Shoulders for people who sit all day #mobility #gym",
+    "author_name": "Synthetic Lifter E",
+    "author_unique_id": "synthetic_lifter_e",
+    "author_url": "https://www.tiktok.com/@synthetic_lifter_e",
+    "provider_name": "TikTok",
+    "thumbnail_url": "https://p16-sign-va.tiktokcdn.com/obj/synthetic-7676788467802511279~tplv-noop.image",
+    "thumbnail_width": 576,
+    "thumbnail_height": 1024,
+    "embed_product_id": "7676788467802511279"
+  }
+}

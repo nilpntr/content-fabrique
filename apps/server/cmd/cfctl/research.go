@@ -15,6 +15,13 @@ const researchUsage = `Usage:
   cfctl research sources [--env-file <path>]
   cfctl research forget <handle> [--platform tiktok|instagram|youtube] [--undo] [--yes] [--allow-production] [--env-file <path>]
   cfctl research sweep [--yes] [--allow-production] [--env-file <path>]
+  cfctl research template > watch-sheet.csv
+  cfctl research import <sheet.csv|sheet.json> [--observer <name>] [--dry-run] [--replay <dir> | --record <dir> | --no-resolve]
+                        [--yes] [--allow-production] [--env-file <path>]
+  cfctl research add-post <post link> [--observer <name>] [--handle h] [--watched d] [--posted d] [--length 0:42] [--format id]
+                        [--hook-kind k] [--hook-text "<TOPIC> 101"] [--caption-pattern p] [--cta c] [--topic facet:value] [--cuts n]
+                        [--first-cut s] [--views n] [--likes n] [--comments n] [--saves n] [--shares n] [--notes "..."]
+                        [--dry-run] [--replay <dir> | --record <dir> | --no-resolve] [--yes] [--allow-production] [--env-file <path>]
 
 The creator research engine (docs/05-decisions.md D-41) keeps links, metadata, short notes and our own derived numbers about other
 people's PUBLIC posts. Never a video file. Handles and public numbers are personal data, so the engine can forget a person and deletes
@@ -28,6 +35,21 @@ everything on a timer.
             back. Run it on request, in any environment: production needs --allow-production and --yes.
   sweep     delete now what the daily research_sweep job would delete: observations past their retain_until, the findings, posts and idle
             candidate creators left without evidence. Safe to run twice.
+  template  print the empty watch sheet with an explanation of every column (internal/research/watch-sheet.template.csv).
+  import    import a watch sheet: what a PERSON saw while watching public posts (the counts, the hook, the form, a short note in their
+            own words). Every row is checked first (post links only, no media anywhere, format ids and tag values that exist, title
+            forms, never the creator's words) and nothing is stored when one row is wrong. Each TikTok link is then resolved through
+            TikTok's public oEmbed endpoint (caption, author, thumbnail link; metadata only, never a video or a picture) at one request
+            a second at most, and its post time is read from its id and checked against the date the sheet shows. A forgotten creator
+            is refused before any call; a 429 from TikTok stops the import. Importing the same sheet twice stores nothing twice.
+  add-post  the same for one post, from flags.
+
+  --observer          who watched, for rows without an observer column
+  --dry-run           check the rows (and the shown dates against the TikTok ids) only: no database, no network
+  --replay <dir>      resolve TikTok links from recorded oEmbed fixtures only; no network call. A missing fixture fails the row
+  --record <dir>      call oEmbed and record each answer (metadata only) as a fixture in the directory; fixtures already there are
+                      used instead of a call (the cache)
+  --no-resolve        no oEmbed call; the post time still comes from the TikTok id
 
   --platform          limit forget to one platform
   --undo              with forget: remove the tombstone, so the creator may be ingested again (no data comes back)
@@ -51,6 +73,12 @@ func cmdResearch(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps
 		return cmdResearchForget(args[1:], stdout, stderr, lookup, deps)
 	case "sweep":
 		return cmdResearchSweep(args[1:], stdout, stderr, lookup, deps)
+	case "template":
+		return cmdResearchTemplate(args[1:], stdout, stderr)
+	case "import":
+		return cmdResearchImport(args[1:], stdout, stderr, lookup, deps)
+	case "add-post":
+		return cmdResearchAddPost(args[1:], stdout, stderr, lookup, deps)
 	}
 	_, _ = fmt.Fprintf(stderr, "cfctl research: unknown command %q\n\n%s", args[0], researchUsage)
 	return 2
