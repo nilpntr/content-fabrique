@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Clapperboard, PlusIcon } from "lucide-react";
+import { Clapperboard, SparklesIcon } from "lucide-react";
 import { PageHeader } from "@/components/page";
 import { PROJECT_GRID, ProjectCard, usePosters } from "@/components/project/project-card";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -20,9 +20,9 @@ export function ProjectsPage() {
         title="Projects"
         description="Every video you've started. Open one to watch it, change it or download it."
         actions={
-          <Link to="/projects/new" className={buttonVariants({ size: "md" })}>
-            <PlusIcon aria-hidden />
-            New video
+          <Link to="/make" className={buttonVariants({ size: "md" })}>
+            <SparklesIcon aria-hidden />
+            Make a video
           </Link>
         }
       />
@@ -50,7 +50,7 @@ export function ProjectsPage() {
           </span>
           <p className="font-medium">No projects yet</p>
           <p className="max-w-sm text-muted-foreground text-pretty">Pick a few of your clips and I'll make the first cut. You can change anything afterwards.</p>
-          <Link to="/projects/new" className={buttonVariants({ size: "md" })}>
+          <Link to="/make" className={buttonVariants({ size: "md" })}>
             Make your first video
           </Link>
         </div>

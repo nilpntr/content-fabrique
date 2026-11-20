@@ -26,7 +26,7 @@ Routes: `/make` (screens 1 to 3) and `/make/$projectId` (screens 4 and 5). Sideb
 | Song | **Add a song** (optional). After one is added: *Song: name* with **Remove** |
 | Each clip | name, then one of: **Uploading 40%** · **Getting it ready** · **Ready** · **Needs a look** (with **Try again** or **Remove**) |
 | Main button | **Next** (works as soon as one clip is added; uploads carry on in the background) |
-| Other way in | Already uploaded your clips? **Pick from your library** (the existing new-video page) |
+| Other way in | Already uploaded your clips? **Advanced** lets you pick from your library (the existing new-video page, also a quiet item in the nav) |
 
 Empty: only the drop zone and its line. Problems: *"Photos can't be used yet. Add video clips."*, *"That file can't be used. Add a video (MP4 or MOV) or a song (MP3, M4A, WAV)."*, *"A video can use up to 49 clips. I've left the rest out."*, *"This one didn't upload. Try again."*, *"I couldn't read this one. Remove it and add another."*, *"This one is no longer uploading. Remove it and add it again."*
 
@@ -100,4 +100,3 @@ The kind of video, the length and the song are sent as sentences in the instruct
 - "Looks great" marking the video as approved on the server (today it only leads to the download).
 - Remembering the answers across a page reload. (The picked style is kept in the browser per video, so "Try again" on a first video keeps it; the API stores the words on the project but not the style.)
 - The upload queue telling which uploads it made for the files it was given (today a clip is matched to its upload by name and size, so removing a clip that another page is also uploading stops that upload).
-- Making this the default: Home's "New video" button and the old "New video" sidebar item still open the detailed page.
