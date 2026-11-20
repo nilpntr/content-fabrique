@@ -10,7 +10,7 @@ import (
 
 // The research commands that need no database: the allow-list, and the refusals that come before any connection.
 func TestResearchCommands(t *testing.T) {
-	lookup := func(k string) (string, bool) { return "", false }
+	lookup := func(string) (string, bool) { return "", false }
 	var out, errb bytes.Buffer
 	if code := cmdResearch([]string{"sources"}, &out, &errb, lookup, defaultAgentDeps()); code != 0 {
 		t.Fatalf("sources = %d, %s", code, errb.String())

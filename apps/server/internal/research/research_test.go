@@ -39,7 +39,12 @@ func TestCheckObservation(t *testing.T) {
 	m := func(kv ...any) map[string]float64 {
 		out := map[string]float64{}
 		for i := 0; i < len(kv); i += 2 {
-			out[kv[i].(string)] = float64(kv[i+1].(int))
+			name, ok := kv[i].(string)
+			n, ok2 := kv[i+1].(int)
+			if !ok || !ok2 {
+				t.Fatalf("m(%v, %v): want a name and an int", kv[i], kv[i+1])
+			}
+			out[name] = float64(n)
 		}
 		return out
 	}
