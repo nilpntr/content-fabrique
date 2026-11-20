@@ -68,10 +68,7 @@ func Regions(spec *timeline.Spec, lookup Lookup, startMs, endMs int64) []timelin
 			continue
 		}
 		in, outMs := sourceAt(it, os-cs), sourceAt(it, oe-cs)
-		rf := timeline.Reframe{Mode: timeline.DefaultReframe}
-		if it.Reframe != nil {
-			rf = *it.Reframe
-		}
+		rf := WithFocus(it.Reframe, &tr, in, outMs, spec.Output)
 		cam := cameraOver(items, i, spec.Output.FPS, os-cs, oe-cs)
 		for _, s := range tr.Near(in, outMs) {
 			x0, y0, x1, y1 := s.Head()
