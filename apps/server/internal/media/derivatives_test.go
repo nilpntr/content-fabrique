@@ -143,7 +143,7 @@ func TestSpriteGridAndVTT(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := join(a), prefix+inOpts+" -i /in/0 -map 0:v:0 -an -vf fps=1/1,scale=160:284:flags=bicubic,tile=10x9 -frames:v 1 -update 1 -q:v 5 /work/sprite.jpg"; got != want {
+	if got, want := join(a), prefix+inOpts+" -i /in/0 -map 0:v:0 -an -vf fps=1/1:round=up,scale=160:284:flags=bicubic,tile=10x9 -frames:v 1 -update 1 -q:v 5 /work/sprite.jpg"; got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}
 	vtt := SpriteVTT(g, 87135, "sprite.jpg")

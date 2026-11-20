@@ -30,6 +30,7 @@ Commands:
   sfx        gallery: render every sound effect to a web page to listen to, development only (cfctl sfx help)
   transcribe transcribe a 16 kHz WAV file with whisper.cpp, fetch the models (cfctl transcribe help)
   media      probe a file's metadata, benchmark the sandbox providers (cfctl media help)
+  footage    check whether a clip or a song can be used in an edit, in plain words (cfctl footage help)
   style      the creator style profile (P6-05): analyse reference videos, show the profile, development only (cfctl style help)
   research   the creator research engine: list the allowed sources, forget a creator on request, sweep expired data (cfctl research help)
   eval       print the check_edit metrics of a stored editor timeline version, no model calls (cfctl eval help)
@@ -80,6 +81,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdSFX(args[1:], stdout, stderr)
 	case "media":
 		return cmdMedia(args[1:], stdout, stderr, defaultMediaDeps())
+	case "footage":
+		return cmdFootage(args[1:], stdout, stderr, defaultFootageDeps())
 	case "transcribe":
 		return cmdTranscribe(args[1:], stdout, stderr, os.LookupEnv)
 	case "agent":
