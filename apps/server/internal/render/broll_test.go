@@ -116,7 +116,7 @@ func TestCutawaysLeaveTheAudioPlanAlone(t *testing.T) {
 				}
 				for _, in := range with.Inputs {
 					if (in.Role == RoleBroll) != (in.Index < len(opened) && opened[in.Index] == in.Index) {
-						t.Errorf("%s: input %d (%s) is opened with -an: %v, want %v", name, in.Index, in.Role, !(in.Role == RoleBroll), in.Role == RoleBroll)
+						t.Errorf("%s: input %d (%s) is opened with -an: %v, want %v", name, in.Index, in.Role, in.Role != RoleBroll, in.Role == RoleBroll)
 					}
 					if in.Role == RoleBroll && strings.Contains(with.FilterComplex, fmt.Sprintf("[%d:a]", in.Index)) {
 						t.Errorf("%s: the graph reads the audio of cutaway input %d", name, in.Index)
