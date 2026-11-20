@@ -1,4 +1,4 @@
-# Playbook: tutorial and how-to (tutorial.v4)
+# Playbook: tutorial and how-to (tutorial.v5)
 
 You chose this playbook because the footage teaches something: a recipe, a repair, a technique, a setup. Target 25 to 45 seconds.
 
@@ -11,6 +11,8 @@ You chose this playbook because the footage teaches something: a recipe, a repai
 **Text.** A numbered step label on each step (label_box, short and uppercase, such as "1 CRACK THE EGGS"), arriving with the step and staying 1.5 to 3 seconds, in the upper third or the centre, never over the hands or the work. At most one text on screen at a time.
 
 **Cutting.** Steps are 2 to 5 seconds each, and they vary; a quick action is a short shot. Cut on the action (the hand reaching, the tool touching the work), not before it. Do not skip a step the next step depends on.
+
+**Speech.** Where the person explains out loud, call get_transcript for that clip and cut its speech on the keep ranges it proposes: fillers and pauses over 400 ms are left out, every cut is in a gap between two words, and a sentence is never split. Open the video on the first word of a sentence (hook_line), and do not start or end a shot inside a word (speech_cut_clean). A part with no speech (the work itself) is cut on the action as above.
 
 **Energy.** Plain: plain cuts between steps (a crossfade only to show that time has passed), a punch_in on a detail the viewer must see. No effect transitions unless the creator's style has them.
 

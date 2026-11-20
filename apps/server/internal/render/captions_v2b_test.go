@@ -39,7 +39,10 @@ func TestAStaleCorrectionIsSkipped(t *testing.T) {
 // Captions never span a cut: each clip's captions use that clip's band, so a face in the lower band of one clip moves only its captions.
 func TestCaptionBandsFollowTheClip(t *testing.T) {
 	spec := talkingSpec(timeline.Format9x16, &timeline.CaptionsTrack{Style: "chunk"})
-	main := spec.Tracks[0].(*timeline.VideoTrack)
+	main, ok := spec.Tracks[0].(*timeline.VideoTrack)
+	if !ok {
+		t.Fatal("no main track")
+	}
 	main.Items = []timeline.VideoItem{
 		{ID: "c1", AssetID: captionAsset, Source: timeline.Source{InMs: 0, OutMs: 3000}, AtMs: 0},
 		{ID: "c2", AssetID: "ast_01jex6xx15ayjx8epfhfjj9s11", Source: timeline.Source{InMs: 0, OutMs: 3000}, AtMs: 3000},

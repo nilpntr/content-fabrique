@@ -182,10 +182,15 @@ func TestPlaybooks(t *testing.T) {
 	if !strings.Contains(on, "gym_moody") || !strings.Contains(on, "add_sfx") || strings.Contains(off, "gym_moody") || strings.Contains(off, "add_sfx") {
 		t.Error("the workout playbook does not follow the features")
 	}
-	// The talking playbook says where the transcript read path is missing.
-	talking, _ := Playbook(TypeTalking, AvailableFeatures())
-	if !strings.Contains(talking, "TODO") {
-		t.Error("the talking playbook has no note about transcripts")
+	// The speech playbooks send the editor to get_transcript, and the talking one has no TODO left about it.
+	for _, typ := range []string{TypeTalking, TypeTutorial, TypeUnboxing} {
+		book, _ := Playbook(typ, AvailableFeatures())
+		if !strings.Contains(book, "get_transcript") || strings.Contains(book, "TODO") {
+			t.Errorf("the %s playbook does not use get_transcript, or still has a TODO", typ)
+		}
+	}
+	if sys := SystemPrompt(); !strings.Contains(sys, "get_transcript") {
+		t.Error("the system prompt does not mention get_transcript")
 	}
 }
 

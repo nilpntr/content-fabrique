@@ -37,6 +37,20 @@ func write(t *testing.T, dir, name, body string) string {
 	return p
 }
 
+// The talking suite (cutting on speech) loads, and its case waits for the local file like the others.
+func TestRepoTalkingSuiteLoads(t *testing.T) {
+	s, err := LoadSuite("../../../../suites/talking.yaml", os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Name != "talking" || len(s.Cases) != 1 || len(s.Cases[0].Expectations) < 3 {
+		t.Fatalf("suite %s: %d cases", s.Name, len(s.Cases))
+	}
+	if c := s.Resolved(s.Cases[0]); len(c.Missing(false)) == 0 {
+		t.Error("the talking case runs without the local file: the checked-in ids must be placeholders")
+	}
+}
+
 // The checked-in suite and feedback files load, with placeholders that keep every case from running until the local file fills them.
 func TestRepoSuiteLoads(t *testing.T) {
 	s, err := LoadSuite("../../../../suites/back-day.yaml", os.DevNull)

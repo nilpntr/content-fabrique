@@ -57,6 +57,8 @@ type Store interface {
 	// ListAssetSpans and ListAssetExposureSeries are what check_edit judges the edit against (the reps, the dead time, the luma).
 	ListAssetSpans(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.AssetSpanRow, error)
 	ListAssetExposureSeries(ctx context.Context, ws ids.WorkspaceID, assets []ids.AssetID) ([]store.ExposureSeriesRow, error)
+	// GetTranscript reads a clip's transcript (words and speech structure) for get_transcript and the speech checks; ErrNotFound when it has none.
+	GetTranscript(ctx context.Context, ws ids.WorkspaceID, id ids.AssetID) (store.Transcript, error)
 	// GetCreatorStyle reads the workspace's creator style profile (P6-05); ErrNotFound when it has none.
 	GetCreatorStyle(ctx context.Context, ws ids.WorkspaceID) (store.CreatorStyle, error)
 	// GetAgentRun reads the run's row (what it has spent and how many calls it has made).
@@ -116,6 +118,7 @@ const (
 	ToolListFootage   = "list_footage"
 	ToolViewClip      = "view_clip"
 	ToolFindMoments   = "find_moments"
+	ToolGetTranscript = "get_transcript"
 	ToolGetMusic      = "get_music"
 	ToolPlanEdit      = "plan_edit"
 	ToolGetTimeline   = "get_timeline"
@@ -144,6 +147,7 @@ func Tools(d Deps) ([]runtime.Tool, error) {
 		{ToolListFootage, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.listFootage) }},
 		{ToolViewClip, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.viewClip) }},
 		{ToolFindMoments, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.findMoments) }},
+		{ToolGetTranscript, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getTranscript) }},
 		{ToolGetMusic, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.getMusic) }},
 		{ToolListFormats, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.listFormats) }},
 		{ToolPlanEdit, false, func(def ToolDef, m bool) runtime.Tool { return typed(def, m, d.planEdit) }},

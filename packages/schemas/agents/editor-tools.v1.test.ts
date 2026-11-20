@@ -38,6 +38,7 @@ describe("editor tools contract", () => {
       "list_footage",
       "view_clip",
       "find_moments",
+      "get_transcript",
       "get_music",
       "list_formats",
       "plan_edit",
@@ -121,6 +122,16 @@ describe("tool arguments", () => {
     expect(check("view_clip", { asset_id: ASSET, at_ms: ["1"] })).toBe(false);
     expect(check("view_clip", { asset_id: ASSET, at_ms: [1.5] })).toBe(false);
     expect(check("view_clip", { asset_id: ASSET, other: true })).toBe(false);
+  });
+
+  it("get_transcript takes a clip and an optional window", () => {
+    expect(check("get_transcript", { asset_id: ASSET })).toBe(true);
+    expect(check("get_transcript", { asset_id: ASSET, in_ms: 0, out_ms: 9000 })).toBe(true);
+    expect(check("get_transcript", {})).toBe(false);
+    expect(check("get_transcript", { in_ms: 0 })).toBe(false);
+    expect(check("get_transcript", { asset_id: ASSET, in_ms: "0" })).toBe(false);
+    expect(check("get_transcript", { asset_id: ASSET, out_ms: 1.5 })).toBe(false);
+    expect(check("get_transcript", { asset_id: ASSET, extra: 1 })).toBe(false);
   });
 
   it("find_moments takes optional filters and nothing else", () => {

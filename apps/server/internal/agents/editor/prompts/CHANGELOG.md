@@ -22,6 +22,22 @@ Rules for changing it:
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
 
+## editor.v2.12, talking.v5, tutorial.v5 and unboxing_product.v5 (2026-11-20)
+
+Cutting on speech (docs/design/ai-video-editor-plan.md, piece 1). The editor never read the transcript, so talking, tutorial and
+product videos were cut by eye. The file is `editor.v2.12.md`, a patch of v2.11:
+
+- **How you work**, step 2: for a clip where a person talks, call the new `get_transcript` tool. It gives the sentences with their
+  times (the speaker's words in data blocks) and the keep ranges that `internal/speechcut` proposes: fillers and pauses over 400 ms
+  left out, every cut in a gap between two words with 80 ms of padding, sentences whole. A speech-led edit keeps the speaker's audio
+  at full; the music-only rule of workout edits does not apply to it.
+- **Checks**: `speech_cut_clean` (no cut inside a word, no filler kept, no pause over 400 ms kept; a place next to a word of low
+  confidence is not judged) and `hook_line` (the edit opens on the first word of a sentence). Both apply to talking, tutorial and
+  unboxing_product edits; their lines give times and never quote the transcript.
+- `plan_edit` adds a note for those content types to call `get_transcript`.
+- `talking.v5` replaces the TODO in "Cutting" with the transcript workflow and the hook with "the boldest whole sentence";
+  `tutorial.v5` and `unboxing_product.v5` get a "Speech" paragraph. No new op and no schema change (D-02).
+
 ## editor.v2.11, workout.v8 and the other playbooks v4 (2026-10-18)
 
 Formats: pick the idea first, then edit (docs/design/formats-v1.md). The founder asked for an editor that also comes up with new ideas;
