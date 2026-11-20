@@ -250,6 +250,9 @@ type loop struct {
 	budget *budgetTracker
 	// ceiling is the per-edit spend ceiling when it is what bounds the dollar budget (zero otherwise).
 	ceiling spend.Ceiling
+	// firstCallNote is the stop note of a run whose first model call its budget could not pay for (firstCallRefused): it replaces the
+	// agent's own note, which would blame work that never started.
+	firstCallNote json.RawMessage
 	// opening is the first user message, built from the run's input.
 	opening []llm.Block
 
@@ -816,6 +819,9 @@ func (l *loop) modelFailed(ctx context.Context, err error, wallExpired bool, usa
 	case errors.As(err, &capErr):
 		switch capErr.Kind {
 		case llm.CapRun:
+			if len(l.cv.turns) == 0 && l.costMicro == 0 {
+				l.firstCallNote = l.firstCallRefused(capErr)
+			}
 			return l.stopBudgetWithUsage(ctx, LimitDollars, usage, cost)
 		case llm.CapDaily:
 			return l.failWithUsage(ctx, FailDailyCap, err.Error(), usage, cost)
@@ -1125,6 +1131,40 @@ func (l *loop) summary(stopped, limit string) json.RawMessage {
 	return mustJSON(out)
 }
 
+// firstCallRefused is the stop note of a run whose budget cannot pay for its first model call: the prompt alone (written to the cache at
+// its dearest) and the smallest answer allowed cost more than the whole budget, so the run stops before it starts. The live test of
+// 2026-11-20 (section 4.3) met it as "the dollars budget was used up" with $0.00 spent; it says what happened, in numbers.
+func (l *loop) firstCallRefused(ce *llm.CapError) json.RawMessage {
+	budget := l.run.BudgetMicros
+	msg := fmt.Sprintf("This run's budget of %s cannot pay for its first step on %s: that step can cost up to %s (the whole prompt and the room for the answer), so the run stopped before it started. Nothing was spent.",
+		spend.USD(budget), l.run.Model, spend.USD(ce.EstimateMicros))
+	return mustJSON(map[string]any{"summary": msg, "first_call_refused": true, "first_call_micros": ce.EstimateMicros, "budget_micros": budget})
+}
+
+// withNote adds the members of an agent's stop note (a JSON object) to the runtime's summary of a failed run; the agent's summary text
+// replaces the generic one, and the runtime's own figures (stopped, limit, cost, tokens) are kept. A note that is not an object is ignored.
+func withNote(summary, note json.RawMessage) json.RawMessage {
+	if len(note) == 0 {
+		return summary
+	}
+	var add map[string]json.RawMessage
+	if json.Unmarshal(note, &add) != nil || len(add) == 0 {
+		return summary
+	}
+	var out map[string]json.RawMessage
+	if json.Unmarshal(summary, &out) != nil {
+		return summary
+	}
+	for k, v := range add {
+		switch k {
+		case "stopped", "limit", "tool_calls", "cost_micros", "tokens", "elapsed_ms", "ceiling_micros", "ceiling_source":
+			continue // the runtime's figures
+		}
+		out[k] = v
+	}
+	return mustJSON(out)
+}
+
 // stopBudget fails the run, cleanly, because it reached a limit: an error event, a summary as the output, status failed with
 // reason budget.
 func (l *loop) stopBudget(ctx context.Context, limit string) (Outcome, error) {
@@ -1132,9 +1172,17 @@ func (l *loop) stopBudget(ctx context.Context, limit string) (Outcome, error) {
 }
 
 func (l *loop) stopBudgetWithUsage(ctx context.Context, limit string, usage llm.Usage, cost int64) (Outcome, error) {
-	// An agent whose work is in a usable state may end the run gracefully instead of failing it for the limit.
-	if l.agent.OnLimit != nil {
-		if output, ok := l.agent.OnLimit(ctx, l.toolContext("", false), limit); ok && len(output) > 0 {
+	// An agent whose work is in a usable state may end the run gracefully instead of failing it for the limit. One whose work is not may
+	// still say why in plain words (ok false with an output): its fields are added to the failed run's summary, so the run never ends with
+	// only "the budget was used up" (live test 2026-11-20, section 4.2).
+	// A run whose first call could not be paid for did no work: its own note says so, and the agent is not asked.
+	stopNote := l.firstCallNote
+	if l.agent.OnLimit != nil && stopNote == nil {
+		output, ok := l.agent.OnLimit(ctx, l.toolContext("", false), limit)
+		if !ok {
+			stopNote = output
+		}
+		if ok && len(output) > 0 {
 			traceLimit(ctx, limit, true)
 			if err := l.recordGraceful(ctx, limit, usage, cost); err != nil {
 				return "", err
@@ -1158,7 +1206,7 @@ func (l *loop) stopBudgetWithUsage(ctx context.Context, limit string, usage llm.
 		return "", err
 	}
 	_, err := l.end(ctx, store.RunEnd{
-		Status: store.AgentFailed, FailureReason: FailBudget, Output: l.summary(FailBudget, limit),
+		Status: store.AgentFailed, FailureReason: FailBudget, Output: withNote(l.summary(FailBudget, limit), stopNote),
 		Event: mustJSON(statusPayload{State: stateFailed, Reason: FailBudget, Limit: limit}), ActiveMs: l.takeActive(),
 	})
 	if err != nil {

@@ -537,23 +537,27 @@ func (d Deps) lastCheckOf(ctx context.Context, rc runtime.RunContext) (int, []st
 
 // onLimit ends a run that reached a limit gracefully when its work is usable: it made a version, and a version of it was previewed (or
 // there is no renderer to preview with). The output is the one finish writes, with a plain note for the creator of what was not done,
-// so the run succeeds instead of failing with "budget". A run that made no version, or never previewed one, fails as before.
+// so the run succeeds instead of failing with "budget". A run that made no version, or never previewed one, fails as before, and says so
+// plainly (noVersionStop): the output the runtime stores with the failure, never an empty result.
 func (d Deps) onLimit(ctx context.Context, rc runtime.RunContext, limit string) (json.RawMessage, bool) {
 	pid, ws, err := project(rc)
 	if err != nil {
 		return nil, false
 	}
+	what := map[string]string{"tool_calls": "steps", "wall_clock": "time", "dollars": "budget", "tokens": "budget"}[limit]
+	if what == "" {
+		what = "room"
+	}
 	made, err := d.Store.GetTimelineVersionByAuthor(ctx, ws, pid, string(ops.AuthorAgent), ids.Encode(ids.PrefixRun, rc.RunID))
-	if err != nil {
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		return d.noVersionStop(ctx, rc, pid, ws, what, limit, 0), false
+	case err != nil:
 		return nil, false
 	}
 	v := int(made.Version)
 	if d.previewsOn() && !d.anyPreview(ctx, rc) && !d.previewOK(ctx, rc, v) {
-		return nil, false
-	}
-	what := map[string]string{"tool_calls": "steps", "wall_clock": "time", "dollars": "budget", "tokens": "budget"}[limit]
-	if what == "" {
-		what = "room"
+		return d.noVersionStop(ctx, rc, pid, ws, what, limit, v), false
 	}
 	var note strings.Builder
 	ceiling := int64(0)
@@ -583,6 +587,41 @@ func (d Deps) onLimit(ctx context.Context, rc runtime.RunContext, limit string) 
 	}
 	out, _ := json.Marshal(o)
 	return out, true
+}
+
+// noVersionStop is the output of a run that reached a limit with nothing to stand behind: no version, or (unpreviewed, a version) one that
+// was never looked at. It says in plain words why it stopped and what the project holds now, so a failed run never ends with an empty
+// result: the version the creator had stays the current one, and nothing is charged for the run (credits release a failed edit).
+func (d Deps) noVersionStop(ctx context.Context, rc runtime.RunContext, pid ids.ProjectID, ws ids.WorkspaceID, what, limit string, unpreviewed int) json.RawMessage {
+	var note strings.Builder
+	switch {
+	case limit == runtime.LimitDollars && rc.Left.CeilingMicros > 0:
+		fmt.Fprintf(&note, "I reached the spend ceiling of %s for one edit", spend.USD(rc.Left.CeilingMicros))
+	default:
+		fmt.Fprintf(&note, "I ran out of %s", what)
+	}
+	if unpreviewed > 0 {
+		fmt.Fprintf(&note, " right after I made version %d, before I could look at it, so I am not handing it to you as finished. It is saved, and you can open it, but check it before you use it.", unpreviewed)
+	} else {
+		note.WriteString(" while I was still studying the clips, before I made a version, so nothing changed.")
+	}
+	current := 0
+	if det, perr := d.Projects.Get(ctx, actor(ws), pid); perr == nil && det.Project.CurrentTimelineVersion != nil {
+		current = int(*det.Project.CurrentTimelineVersion)
+	}
+	if current > 0 && current != unpreviewed {
+		fmt.Fprintf(&note, " Version %d is still the current one.", current)
+	}
+	note.WriteString(" This edit is not charged.")
+	o := map[string]any{"summary": note.String(), "made_version": unpreviewed > 0, "limit": limit}
+	if unpreviewed > 0 {
+		o["unpreviewed_version"] = unpreviewed
+	}
+	if current > 0 {
+		o["current_version"] = current
+	}
+	out, _ := json.Marshal(o)
+	return out
 }
 
 // checkNth is which check of the run this call is, and whether the call has been through before (a call that is run again after a
