@@ -68,7 +68,7 @@ func (f *fakeDB) UpsertResearchPost(_ context.Context, in store.NewResearchPost)
 	if err := research.CheckPostTime(in.PostedAt, in.PostedAtSource, time.Now()); err != nil {
 		return store.ResearchPost{}, err
 	}
-	p, ok := f.posts[ref.URL]
+	p, ok := f.posts[string(ref.Platform)+":"+ref.ExternalID]
 	if !ok {
 		p = store.ResearchPost{ID: uuid.New(), Platform: string(ref.Platform), Url: ref.URL, ExternalID: ref.ExternalID, CreatorID: in.CreatorID}
 	}
@@ -79,7 +79,7 @@ func (f *fakeDB) UpsertResearchPost(_ context.Context, in store.NewResearchPost)
 	if in.DurationS != nil {
 		p.DurationS = in.DurationS
 	}
-	f.posts[ref.URL] = p
+	f.posts[string(ref.Platform)+":"+ref.ExternalID] = p
 	return p, nil
 }
 
@@ -111,6 +111,38 @@ func (f *fakeDB) SaveResearchAnnotation(_ context.Context, postID uuid.UUID, a r
 	}
 	f.annotations[postID.String()+":"+a.Annotator] = a
 	return store.ResearchAnnotation{}, nil
+}
+
+func (f *fakeDB) ResearchCreatorForgotten(_ context.Context, p research.Platform, handle string) (bool, error) {
+	return f.forgotten[string(p)+":"+handle], nil
+}
+
+func (f *fakeDB) ListResearchAnnotationsForPost(_ context.Context, postID uuid.UUID) ([]store.ResearchAnnotation, error) {
+	var out []store.ResearchAnnotation
+	for key, a := range f.annotations {
+		if !strings.HasPrefix(key, postID.String()+":") {
+			continue
+		}
+		str := func(v string) *string {
+			if v == "" {
+				return nil
+			}
+			return &v
+		}
+		i32 := func(v *int) *int32 {
+			if v == nil {
+				return nil
+			}
+			n := int32(*v) //nolint:gosec // small test values
+			return &n
+		}
+		out = append(out, store.ResearchAnnotation{
+			PostID: postID, FormatID: str(a.FormatID), HookKind: str(a.HookKind), HookTextPattern: str(a.HookTextPattern),
+			TextPattern: str(a.TextPattern), CutsEstimate: i32(a.CutsEstimate), FirstCutS: a.FirstCutS, CaptionLen: i32(a.CaptionLen),
+			HashtagsN: i32(a.HashtagsN), Cta: str(a.CTA), Topic: str(a.Topic), Notes: str(a.Notes), Annotator: a.Annotator, Confidence: a.Confidence,
+		})
+	}
+	return out, nil
 }
 
 func (f *fakeDB) observations() int {
@@ -184,7 +216,7 @@ func TestImportTheRecordedSheet(t *testing.T) {
 		t.Fatalf("observations %d (%d stored), annotations %d (%d stored)", rep.Observations, db.observations(), rep.Annotations, len(db.annotations))
 	}
 	for _, row := range rows {
-		p := db.posts[row.Post.URL]
+		p := db.posts["tiktok:"+row.Post.ExternalID]
 		want, _ := research.TikTokPostTime(row.Post.ExternalID)
 		if p.PostedAt == nil || !p.PostedAt.Equal(want) || *p.PostedAtSource != "id" || p.DurationS == nil {
 			t.Fatalf("post %s: %+v", row.Post.URL, p)
@@ -271,7 +303,7 @@ func TestImportWithoutOEmbedAndOtherPlatforms(t *testing.T) {
 	if err != nil || rep.Imported != 2 || rep.Resolved != 0 || rep.Observations != 2 || rep.Annotations != 0 {
 		t.Fatalf("report %+v %v", rep, err)
 	}
-	ig := db.posts["https://www.instagram.com/reel/AbCdEf123/"]
+	ig := db.posts["instagram:AbCdEf123"]
 	if ig.PostedAt == nil || *ig.PostedAtSource != "manual" {
 		t.Fatalf("instagram post: %+v", ig)
 	}

@@ -126,19 +126,21 @@ type Result struct {
 	Title string
 	// ThumbnailURL is the link TikTok gives for the post's picture. It is metadata only: never fetched, never stored in the database.
 	ThumbnailURL string
-	// RawRef is the hex SHA-256 of TikTok's response body: what research_evidence.raw_ref keeps instead of the response.
+	// RawRef is what research_evidence.raw_ref keeps instead of the response: the hex SHA-256 of the answer's stable metadata (the
+	// post id, the author, the caption). The thumbnail link is left out: TikTok signs it with an expiry, so it changes on every request,
+	// and the same answer must give the same RawRef for a second import to store nothing twice.
 	RawRef string
 	// Cached says the answer came from the memory cache or a fixture, not from the network.
 	Cached bool
+
+	externalID string // the cache key: the post id
 }
 
 // Fixture is what is recorded for one post: the request and the metadata fields of the answer. The embed HTML and every field not
 // listed are dropped.
 type Fixture struct {
-	RequestURL string `json:"request_url"`
-	// RawSHA256 is the hash of the original response body.
-	RawSHA256 string   `json:"raw_sha256"`
-	Response  Response `json:"response"`
+	RequestURL string   `json:"request_url"`
+	Response   Response `json:"response"`
 }
 
 // Response holds the oEmbed fields kept.
@@ -247,7 +249,7 @@ func (c *Client) Resolve(ctx context.Context, link string) (Result, error) {
 		return Result{}, fmt.Errorf("oembed: only TikTok links are resolved, not %s", ref.Platform)
 	}
 	c.mu.Lock()
-	if r, ok := c.cache[ref.URL]; ok {
+	if r, ok := c.cache[ref.ExternalID]; ok {
 		c.mu.Unlock()
 		r.Cached = true
 		return r, nil
@@ -266,9 +268,6 @@ func (c *Client) Resolve(ctx context.Context, link string) (Result, error) {
 		case c.cfg.Mode == Replay:
 			return Result{}, fmt.Errorf("%w: %s", ErrNoFixture, FixtureName(ref))
 		}
-	}
-	if c.cfg.Mode == Replay {
-		return Result{}, ErrNoFixture
 	}
 	fx, err := c.fetch(ctx, ref)
 	if err != nil {
@@ -294,7 +293,7 @@ func (c *Client) Resolve(ctx context.Context, link string) (Result, error) {
 func (c *Client) remember(r Result) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.cache[r.URL] = r
+	c.cache[r.externalID] = r
 }
 
 // wait holds the caller until the interval since the last request has passed.
@@ -349,21 +348,15 @@ func (c *Client) fetch(ctx context.Context, ref research.PostRef) (Fixture, erro
 	if err := json.Unmarshal(body, &full); err != nil {
 		return Fixture{}, fmt.Errorf("oembed: the answer is not oEmbed JSON: %w", err)
 	}
-	sum := sha256.Sum256(body)
 	// Only the fields of Response survive: the embed HTML (with its script) and anything else TikTok adds are dropped here.
-	return Fixture{RequestURL: ref.URL, RawSHA256: hex.EncodeToString(sum[:]), Response: full}, nil
+	return Fixture{RequestURL: ref.URL, Response: full}, nil
 }
 
-// toResult checks a fixture's answer against the link: a video, by the creator in the link, with a hash.
+// toResult checks a fixture's answer against the link: the same post (by its id: a handle's case in a link does not make another post),
+// a video, by the creator in the link.
 func toResult(ref research.PostRef, fx Fixture) (Result, error) {
-	if fx.RequestURL != ref.URL {
+	if req, err := research.ParsePostURL(fx.RequestURL); err != nil || req.Platform != ref.Platform || req.ExternalID != ref.ExternalID {
 		return Result{}, fmt.Errorf("oembed: the fixture is for %s, not %s", fx.RequestURL, ref.URL)
-	}
-	if len(fx.RawSHA256) != 64 {
-		return Result{}, errors.New("oembed: the fixture has no raw_sha256")
-	}
-	if _, err := hex.DecodeString(fx.RawSHA256); err != nil {
-		return Result{}, errors.New("oembed: raw_sha256 is not hex")
 	}
 	r := fx.Response
 	if r.Type != "" && r.Type != "video" {
@@ -382,8 +375,11 @@ func toResult(ref research.PostRef, fx Fixture) (Result, error) {
 	if h != ref.Handle {
 		return Result{}, fmt.Errorf("oembed: the post is by @%s, but the link names @%s", h, ref.Handle)
 	}
+	stable, _ := json.Marshal([]string{string(ref.Platform), ref.ExternalID, h, r.AuthorName, r.Title})
+	sum := sha256.Sum256(stable)
 	return Result{
-		URL: ref.URL, Handle: h, AuthorName: r.AuthorName, Title: r.Title, ThumbnailURL: r.ThumbnailURL, RawRef: fx.RawSHA256,
+		URL: ref.URL, Handle: h, AuthorName: r.AuthorName, Title: r.Title, ThumbnailURL: r.ThumbnailURL, RawRef: hex.EncodeToString(sum[:]),
+		externalID: ref.ExternalID,
 	}, nil
 }
 

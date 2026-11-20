@@ -25,6 +25,10 @@ func TestResearchWatchSheetCommands(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "30 row(s) checked: 30 post(s) by 5 creator(s)") || !strings.Contains(out, "10 of 10 shown date(s) agree") {
 		t.Fatalf("dry run = %d\n%s%s", code, out, errOut)
 	}
+	// Flags before and after the file are both read.
+	if code, out, errOut := run("import", "--dry-run", sheet, "--observer", "ana"); code != 0 || !strings.Contains(out, "30 row(s) checked") {
+		t.Fatalf("flags around the file = %d\n%s%s", code, out, errOut)
+	}
 	code, out, errOut = run("add-post", "https://www.tiktok.com/@synthetic_lifter_a/video/7657610837863983488", "--observer", "sam",
 		"--saves", "1.2K", "--hook-text", "<TOPIC> 101", "--format", "one_take", "--posted", "2026-07-01", "--dry-run")
 	if code != 0 || !strings.Contains(out, "1 row(s) checked") || !strings.Contains(out, "1 of 1 shown date(s) agree") {

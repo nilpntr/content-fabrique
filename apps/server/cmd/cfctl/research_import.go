@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/nilpntr/content-fabrique/internal/research"
 	"github.com/nilpntr/content-fabrique/internal/research/ingest"
@@ -36,29 +35,31 @@ func addIngestFlags(flags *flag.FlagSet) ingestFlags {
 	}
 }
 
-// splitPositional takes the one positional argument, before or after the flags.
+// splitPositional takes the one positional argument, anywhere among the flags (flags before and after it are both read). It returns -1
+// for --help.
 func splitPositional(name string, flags *flag.FlagSet, args []string, stderr io.Writer, what string) (string, int) {
-	var pos string
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		pos, args = args[0], args[1:]
-	}
-	if err := flags.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return "", -1
+	var pos []string
+	for {
+		if err := flags.Parse(args); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return "", -1
+			}
+			return "", 2
 		}
-		return "", 2
+		if flags.NArg() == 0 {
+			break
+		}
+		pos, args = append(pos, flags.Arg(0)), flags.Args()[1:]
 	}
-	if pos == "" && flags.NArg() == 1 {
-		pos = flags.Arg(0)
-	} else if flags.NArg() > 0 {
-		_, _ = fmt.Fprintf(stderr, "cfctl %s: give exactly one %s\n", name, what)
-		return "", 2
-	}
-	if pos == "" {
+	switch len(pos) {
+	case 0:
 		_, _ = fmt.Fprintf(stderr, "cfctl %s: name the %s\n", name, what)
 		return "", 2
+	case 1:
+		return pos[0], 0
 	}
-	return pos, 0
+	_, _ = fmt.Fprintf(stderr, "cfctl %s: give exactly one %s\n", name, what)
+	return "", 2
 }
 
 func cmdResearchImport(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps agentDeps) int {
@@ -228,18 +229,15 @@ func researchDryRun(rows []research.SheetRow, stdout io.Writer) int {
 	checks, matches := 0, 0
 	for _, r := range rows {
 		creators[string(r.Post.Platform)+":"+r.Handle] = true
-		if r.Post.Platform != research.TikTok || r.PostedAt == nil {
-			continue
-		}
-		t, err := research.TikTokPostTime(r.Post.ExternalID)
-		if err != nil {
+		checked, matched, warning := r.TimeCheck()
+		if !checked {
 			continue
 		}
 		checks++
-		if research.ShownDateMatches(t, *r.PostedAt, r.PostedDateOnly) {
+		if matched {
 			matches++
 		} else {
-			_, _ = fmt.Fprintf(stdout, "  warning: line %d: the post id says %s UTC\n", r.Line, t.Format("2006-01-02 15:04"))
+			_, _ = fmt.Fprintf(stdout, "  warning: %s\n", warning)
 		}
 	}
 	_, _ = fmt.Fprintf(stdout, "%d row(s) checked: %d post(s) by %d creator(s); nothing stored, no network call\n", len(rows), len(rows), len(creators))

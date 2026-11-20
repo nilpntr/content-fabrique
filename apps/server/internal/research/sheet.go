@@ -12,6 +12,7 @@ import (
 	"io"
 	"math"
 	"path"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -57,7 +58,9 @@ type SheetRow struct {
 	// PostedAt is the date (or time) the post shows, nil when not noted. PostedDateOnly says it was a date without a time.
 	PostedAt       *time.Time
 	PostedDateOnly bool
-	DurationS      *float64
+	// IDTime is when a TikTok post was published, read from its id (nil for the other platforms).
+	IDTime    *time.Time
+	DurationS *float64
 	// Metrics are the counts as seen (only the five names of Metrics()).
 	Metrics map[string]float64
 	// Annotation is what the person noted about the hook and form; its Annotator is the observer.
@@ -65,6 +68,26 @@ type SheetRow struct {
 	// RawRef is the hex SHA-256 of the row as written (canonical link, observer and the non-empty cells): the same row imported twice
 	// has the same RawRef, so it is stored once.
 	RawRef string
+}
+
+// ReservedObserver is the annotator name of the caption statistics read from oEmbed: a person cannot use it.
+const ReservedObserver = "oembed"
+
+// TimeCheck compares the date the sheet shows with the time in a TikTok post's id. checked is false when there is nothing to compare;
+// warning explains a mismatch (the id's time is the one kept).
+func (r SheetRow) TimeCheck() (checked, matched bool, warning string) {
+	if r.IDTime == nil || r.PostedAt == nil {
+		return false, false, ""
+	}
+	if ShownDateMatches(*r.IDTime, *r.PostedAt, r.PostedDateOnly) {
+		return true, true, ""
+	}
+	shown := r.PostedAt.Format(time.RFC3339)
+	if r.PostedDateOnly {
+		shown = r.PostedAt.Format(time.DateOnly)
+	}
+	return true, false, fmt.Sprintf("line %d: the post id says it was posted %s UTC, the sheet says %s; the id's time is kept",
+		r.Line, r.IDTime.Format("2006-01-02 15:04"), shown)
 }
 
 // HasAnnotation says whether the row notes anything about the post's form (so an annotation is worth storing).
@@ -132,11 +155,12 @@ func ParseWatchSheet(name string, data []byte, opts SheetOptions) ([]SheetRow, e
 			continue
 		}
 		row.Line = lines[i]
-		if first, dup := seen[row.Post.URL]; dup {
+		key := string(row.Post.Platform) + ":" + row.Post.ExternalID
+		if first, dup := seen[key]; dup {
 			errs = append(errs, fmt.Errorf("line %d: the same post as line %d (one row per post in a sheet)", row.Line, first))
 			continue
 		}
-		seen[row.Post.URL] = row.Line
+		seen[key] = row.Line
 		rows = append(rows, row)
 	}
 	if len(errs) > 0 {
@@ -163,6 +187,7 @@ func readSheetCSV(data []byte) ([]map[string]string, []int, error) {
 	r := csv.NewReader(bytes.NewReader(data))
 	r.Comment = '#'
 	r.TrimLeadingSpace = true
+	r.FieldsPerRecord = -1 // a hand-typed row may leave out its trailing empty cells
 	header, err := r.Read()
 	if errors.Is(err, io.EOF) {
 		return nil, nil, errors.New("research: the sheet is empty: it needs the header row of the template")
@@ -173,6 +198,9 @@ func readSheetCSV(data []byte) ([]map[string]string, []int, error) {
 	var errs []error
 	for i, h := range header {
 		header[i] = strings.ToLower(strings.TrimSpace(h))
+		if header[i] == "" { // a spreadsheet export's empty column; a value under it is refused below
+			continue
+		}
 		if err := checkHeader(header[i]); err != nil {
 			errs = append(errs, err)
 		}
@@ -201,9 +229,13 @@ func readSheetCSV(data []byte) ([]map[string]string, []int, error) {
 		line, _ := r.FieldPos(0)
 		row := map[string]string{}
 		for i, v := range rec {
-			if v = strings.TrimSpace(v); v != "" {
-				row[header[i]] = v
+			if v = strings.TrimSpace(v); v == "" {
+				continue
 			}
+			if i >= len(header) || header[i] == "" {
+				return nil, nil, fmt.Errorf("research: line %d: a value in column %d, which has no name in the header", line, i+1)
+			}
+			row[header[i]] = v
 		}
 		if len(row) == 0 { // a spreadsheet's empty row: ",,,,"
 			continue
@@ -274,10 +306,10 @@ func parseSheetRow(c map[string]string, opts SheetOptions) (SheetRow, error) {
 	)
 	bad := func(format string, a ...any) { errs = append(errs, fmt.Errorf(format, a...)) }
 
-	ref, err := ParsePostURL(c["url"])
 	if c["url"] == "" {
 		return row, errors.New("url is empty")
 	}
+	ref, err := ParsePostURL(c["url"])
 	if err != nil {
 		return row, err
 	}
@@ -303,6 +335,16 @@ func parseSheetRow(c map[string]string, opts SheetOptions) (SheetRow, error) {
 	}
 	if row.Observer == "" || len(row.Observer) > 80 {
 		bad("observer: who watched, 1 to 80 characters (a cell, or --observer)")
+	} else if strings.EqualFold(row.Observer, ReservedObserver) {
+		bad("observer %q is reserved for the caption statistics", row.Observer)
+	}
+	if ref.Platform == TikTok {
+		t, err := TikTokPostTime(ref.ExternalID)
+		if err != nil {
+			errs = append(errs, err)
+		} else {
+			row.IDTime = &t
+		}
 	}
 
 	if s := c["watched_at"]; s != "" {
@@ -390,7 +432,8 @@ func parseSheetRow(c map[string]string, opts SheetOptions) (SheetRow, error) {
 	for k, v := range c {
 		canon[k] = v
 	}
-	canon["url"], canon["observer"] = ref.URL, row.Observer
+	// The post is named by its platform and id: the handle's case in a link does not make another post.
+	canon["url"], canon["observer"] = string(ref.Platform)+":"+ref.ExternalID, row.Observer
 	b, _ := json.Marshal(canon) // map keys are sorted
 	sum := sha256.Sum256(b)
 	row.RawRef = hex.EncodeToString(sum[:])
@@ -431,9 +474,13 @@ func parseLength(s string) (float64, error) {
 	return v, nil
 }
 
-// parseCount reads a count as a platform shows it: 987, 12,345, 1.2K, 3.4M or 1B. The result is a whole number.
+// wholeCount is a whole number, with or without thousands commas: 987, 12345 or 12,345.
+var wholeCount = regexp.MustCompile(`^(\d+|\d{1,3}(,\d{3})+)$`)
+
+// parseCount reads a count as a platform shows it: 987, 12,345, 1.2K (or 1,2K, as a phone set to Dutch shows it), 3.4M or 1B. The result
+// is a whole number. A count without a suffix but with a decimal point or a lone comma (1.234, 1,2) is refused: it is ambiguous.
 func parseCount(s string) (float64, error) {
-	t := strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(s), ",", ""), " ", "")
+	t := strings.ReplaceAll(strings.TrimSpace(s), " ", "")
 	mult := 1.0
 	if n := len(t); n > 0 {
 		switch t[n-1] {
@@ -445,8 +492,13 @@ func parseCount(s string) (float64, error) {
 			mult, t = 1e9, t[:n-1]
 		}
 	}
-	if mult == 1 && strings.Contains(t, ".") {
-		return 0, fmt.Errorf("%q: a whole number, or a shown count such as 1.2K", clip(s))
+	if mult == 1 {
+		if !wholeCount.MatchString(t) {
+			return 0, fmt.Errorf("%q: a whole number (1234 or 1,234), or a shown count such as 1.2K", clip(s))
+		}
+		t = strings.ReplaceAll(t, ",", "")
+	} else {
+		t = strings.Replace(t, ",", ".", 1) // an abbreviated count has no thousands separator: its comma is a decimal comma
 	}
 	f, err := strconv.ParseFloat(t, 64)
 	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f < 0 {

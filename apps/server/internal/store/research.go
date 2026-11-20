@@ -50,6 +50,12 @@ func (s *Store) forgotten(ctx context.Context, p research.Platform, handle strin
 	return ok, mapErr(err)
 }
 
+// ResearchCreatorForgotten says whether a creator was forgotten on request (has a tombstone), without writing anything: an import asks it
+// before it calls a platform about the creator's post.
+func (s *Store) ResearchCreatorForgotten(ctx context.Context, p research.Platform, handle string) (bool, error) {
+	return s.forgotten(ctx, p, handle)
+}
+
 func invalidf(format string, a ...any) error {
 	return fmt.Errorf("%w: "+format, append([]any{ErrInvalid}, a...)...)
 }

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -24,12 +25,14 @@ import (
 
 // Writer is the part of the store an import writes with.
 type Writer interface {
+	ResearchCreatorForgotten(ctx context.Context, p research.Platform, handle string) (bool, error)
 	GetResearchCreator(ctx context.Context, p research.Platform, handle string) (store.ResearchCreator, error)
 	UpsertResearchCreator(ctx context.Context, in store.NewResearchCreator) (store.ResearchCreator, error)
 	UpsertResearchPost(ctx context.Context, in store.NewResearchPost) (store.ResearchPost, error)
 	ListResearchEvidenceForPost(ctx context.Context, postID uuid.UUID) ([]store.ResearchEvidence, error)
 	AddResearchEvidence(ctx context.Context, in store.NewResearchEvidence) (store.ResearchEvidence, error)
 	SaveResearchAnnotation(ctx context.Context, postID uuid.UUID, a research.Annotation) (store.ResearchAnnotation, error)
+	ListResearchAnnotationsForPost(ctx context.Context, postID uuid.UUID) ([]store.ResearchAnnotation, error)
 }
 
 // DB is a Writer that can run a function in a transaction.
@@ -53,7 +56,7 @@ type Resolver interface {
 }
 
 // OEmbedAnnotator is the annotator of the caption statistics read from oEmbed. A person cannot use it as their name.
-const OEmbedAnnotator = "oembed"
+const OEmbedAnnotator = research.ReservedObserver
 
 // Options configure an import.
 type Options struct {
@@ -119,26 +122,25 @@ func Import(ctx context.Context, db DB, rows []research.SheetRow, opts Options) 
 }
 
 func importRow(ctx context.Context, db DB, row research.SheetRow, opts Options, rep *Report, creators map[string]bool) error {
-	if row.Observer == OEmbedAnnotator {
-		return fmt.Errorf("observer %q is reserved for the caption statistics", OEmbedAnnotator)
+	if strings.EqualFold(row.Observer, OEmbedAnnotator) {
+		return fmt.Errorf("observer %q is reserved for the caption statistics", row.Observer)
 	}
-	// The creator first: it checks the tombstones, so a forgotten creator is refused before TikTok is asked anything.
-	creator, err := db.GetResearchCreator(ctx, row.Post.Platform, row.Handle)
-	if errors.Is(err, store.ErrNotFound) {
-		creator, err = db.UpsertResearchCreator(ctx, store.NewResearchCreator{Platform: row.Post.Platform, Handle: row.Handle})
-		if err == nil {
-			key := string(row.Post.Platform) + ":" + row.Handle
-			if !creators[key] {
-				creators[key] = true
-				rep.NewCreators++
-			}
+	// The creator is checked before TikTok is asked anything: a forgotten creator is refused and a dropped one is not sampled. Nothing is
+	// written yet, so a row that fails later leaves no creator behind.
+	existing, err := db.GetResearchCreator(ctx, row.Post.Platform, row.Handle)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		gone, err := db.ResearchCreatorForgotten(ctx, row.Post.Platform, row.Handle)
+		if err != nil {
+			return err
 		}
-	}
-	if err != nil {
+		if gone {
+			return store.ErrForgotten
+		}
+	case err != nil:
 		return err
-	}
-	if creator.Status == store.ResearchDropped {
-		return fmt.Errorf("@%s was dropped from the research; approve them again to add posts", creator.Handle)
+	case existing.Status == store.ResearchDropped:
+		return fmt.Errorf("@%s was dropped from the research; approve them again to add posts", existing.Handle)
 	}
 
 	var resolved *oembed.Result
@@ -148,26 +150,15 @@ func importRow(ctx context.Context, db DB, row research.SheetRow, opts Options, 
 			return err
 		}
 		resolved = &r
-		rep.Resolved++
 	}
 
-	post := store.NewResearchPost{URL: row.Post.URL, CreatorID: creator.ID, DurationS: row.DurationS}
-	if row.Post.Platform == research.TikTok {
-		t, err := research.TikTokPostTime(row.Post.ExternalID)
-		if err != nil {
-			return err
-		}
-		post.PostedAt, post.PostedAtSource = &t, "id"
-		if row.PostedAt != nil {
-			rep.TimeChecks++
-			if research.ShownDateMatches(t, *row.PostedAt, row.PostedDateOnly) {
-				rep.TimeMatches++
-			} else {
-				rep.Warnings = append(rep.Warnings, fmt.Sprintf("line %d: the post id says it was posted %s UTC, the sheet says %s; the id's time is kept",
-					row.Line, t.Format("2006-01-02 15:04"), shown(*row.PostedAt, row.PostedDateOnly)))
-			}
-		}
-	} else if row.PostedAt != nil {
+	post := store.NewResearchPost{URL: row.Post.URL, DurationS: row.DurationS}
+	switch {
+	case row.IDTime != nil:
+		post.PostedAt, post.PostedAtSource = row.IDTime, "id"
+	case row.Post.Platform == research.TikTok:
+		return errors.New("the TikTok post id carries no post time") // ParseWatchSheet refuses such a row; a hand-built row is checked here
+	case row.PostedAt != nil:
 		post.PostedAt, post.PostedAtSource = row.PostedAt, "manual"
 	}
 
@@ -176,8 +167,18 @@ func importRow(ctx context.Context, db DB, row research.SheetRow, opts Options, 
 		watched = opts.Now()
 	}
 	var added, dups, notes int
+	var created bool
 	err = db.InTx(ctx, func(tx Writer) error {
-		added, dups, notes = 0, 0, 0
+		added, dups, notes, created = 0, 0, 0, false
+		creator, err := tx.GetResearchCreator(ctx, row.Post.Platform, row.Handle)
+		if errors.Is(err, store.ErrNotFound) {
+			creator, err = tx.UpsertResearchCreator(ctx, store.NewResearchCreator{Platform: row.Post.Platform, Handle: row.Handle})
+			created = err == nil
+		}
+		if err != nil {
+			return err
+		}
+		post.CreatorID = creator.ID
 		p, err := tx.UpsertResearchPost(ctx, post)
 		if err != nil {
 			return err
@@ -211,7 +212,11 @@ func importRow(ctx context.Context, db DB, row research.SheetRow, opts Options, 
 			return err
 		}
 		if row.HasAnnotation() {
-			if _, err := tx.SaveResearchAnnotation(ctx, p.ID, row.Annotation); err != nil {
+			prev, err := tx.ListResearchAnnotationsForPost(ctx, p.ID)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.SaveResearchAnnotation(ctx, p.ID, merge(row.Annotation, prev)); err != nil {
 				return err
 			}
 			notes++
@@ -237,17 +242,64 @@ func importRow(ctx context.Context, db DB, row research.SheetRow, opts Options, 
 	if err != nil {
 		return err
 	}
+	if resolved != nil {
+		rep.Resolved++
+	}
+	if checked, matched, warning := row.TimeCheck(); checked {
+		rep.TimeChecks++
+		if matched {
+			rep.TimeMatches++
+		} else {
+			rep.Warnings = append(rep.Warnings, warning)
+		}
+	}
+	if key := string(row.Post.Platform) + ":" + row.Handle; created && !creators[key] {
+		creators[key] = true
+		rep.NewCreators++
+	}
 	rep.Observations += added
 	rep.Duplicates += dups
 	rep.Annotations += notes
 	return nil
 }
 
-func shown(t time.Time, dateOnly bool) string {
-	if dateOnly {
-		return t.Format(time.DateOnly)
+// merge fills what a row leaves empty from the annotation the same person stored before: a later watch that only adds the counts or the
+// cuts keeps the format, the hook and the note noted earlier. A value in the row always wins.
+func merge(a research.Annotation, prev []store.ResearchAnnotation) research.Annotation {
+	for _, p := range prev {
+		if p.Annotator != a.Annotator {
+			continue
+		}
+		str := func(dst *string, src *string) {
+			if *dst == "" && src != nil {
+				*dst = *src
+			}
+		}
+		str(&a.FormatID, p.FormatID)
+		str(&a.HookKind, p.HookKind)
+		str(&a.HookTextPattern, p.HookTextPattern)
+		str(&a.TextPattern, p.TextPattern)
+		str(&a.CTA, p.Cta)
+		str(&a.Topic, p.Topic)
+		str(&a.Notes, p.Notes)
+		if a.CutsEstimate == nil && p.CutsEstimate != nil {
+			n := int(*p.CutsEstimate)
+			a.CutsEstimate = &n
+		}
+		if a.FirstCutS == nil && p.FirstCutS != nil {
+			f := *p.FirstCutS
+			a.FirstCutS = &f
+		}
+		if a.CaptionLen == nil && p.CaptionLen != nil {
+			n := int(*p.CaptionLen)
+			a.CaptionLen = &n
+		}
+		if a.HashtagsN == nil && p.HashtagsN != nil {
+			n := int(*p.HashtagsN)
+			a.HashtagsN = &n
+		}
 	}
-	return t.Format(time.RFC3339)
+	return a
 }
 
 var hashtagRe = regexp.MustCompile(`#[\p{L}\p{N}_]+`)
