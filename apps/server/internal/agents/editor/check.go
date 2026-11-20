@@ -411,6 +411,9 @@ func RunChecks(in CheckInput) Report {
 		c.offBeatCut(), c.hookMissesDrop(), c.staticShot(), c.transitionsMatch(), c.transitionVariety(), c.textWithoutEntrance(), c.chapterTitles(),
 		c.formatFollowed(), c.beatGridFixed(), c.shotReused(),
 	}
+	if ck, ok := c.subjectInCrop(); ok { // subject_in_crop (checkreframe.go), only for an edit with a clip that has subject boxes
+		r.Checks = append(r.Checks, ck)
+	}
 	r.Checks = append(r.Checks, c.speechChecks()...) // speech_cut_clean and hook_line, only for a speech-led edit (checkspeech.go)
 	if c.linesOn() {                                 // the text-pattern checks (checktext.go), only for a style told in lines
 		r.Checks = append(r.Checks, c.storyCaptions(), c.captionReadable(), c.textOverFace())

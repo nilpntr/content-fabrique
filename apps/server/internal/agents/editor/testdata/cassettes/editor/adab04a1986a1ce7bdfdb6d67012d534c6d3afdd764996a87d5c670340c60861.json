@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "65d663d451a6fe8410f68f19edcf773431282ae6a3e99a97e2be0a827e3f522c",
-  "recorded_at": "2026-11-20T14:47:41Z",
+  "key": "adab04a1986a1ce7bdfdb6d67012d534c6d3afdd764996a87d5c670340c60861",
+  "recorded_at": "2026-11-20T15:15:54Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,
@@ -22,6 +22,30 @@
           "text",
           "text",
           "text"
+        ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
+        ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
         ]
       },
       {
@@ -150,6 +174,11 @@
         "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
         "media_type": "image/jpeg",
         "bytes": 9284
+      },
+      {
+        "sha256": "522427a1687376d0c295e2f88c830523959c3581c87951e4bc3e3663e153bb8e",
+        "media_type": "image/jpeg",
+        "bytes": 9284
       }
     ]
   },
@@ -160,38 +189,18 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_7",
-        "name": "edit_timeline",
-        "input": {
-          "base_version": 1,
-          "ops": [
-            {
-              "op": "trim_item",
-              "id": "c4",
-              "out_ms": 4500
-            },
-            {
-              "op": "snap_cuts_to_beats",
-              "grid": {
-                "bpm": 124,
-                "first_beat_ms": 0
-              },
-              "options": {
-                "write_markers": true,
-                "max_shift_ms": 60
-              }
-            }
-          ]
-        }
+        "id": "toolu_ed_9",
+        "name": "check_edit",
+        "input": {}
       }
     ],
     "usage": {
-      "input_tokens": 440,
-      "cache_write_tokens": 800,
+      "input_tokens": 420,
+      "cache_write_tokens": 700,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 14200,
-      "output_tokens": 120
+      "cache_read_tokens": 15600,
+      "output_tokens": 38
     }
   },
-  "count_tokens": 15440
+  "count_tokens": 16720
 }
