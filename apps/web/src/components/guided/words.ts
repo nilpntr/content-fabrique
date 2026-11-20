@@ -145,6 +145,27 @@ export function makingProgress(run: Pick<Run, "status" | "events">): MakingProgr
   return { headline, states };
 }
 
+// ---- When it stopped ------------------------------------------------------------------------------------------------------------
+
+/** The guided flow's own words where the shared ones speak of "edits". */
+const GUIDED_STOPPED: Readonly<Record<string, string>> = {
+  budget: "There was more in this video than I could finish in one go.",
+};
+
+const whyStopped = (reason: string | null | undefined, stopped: string): string => (reason ? GUIDED_STOPPED[reason] : undefined) ?? stopped;
+
+/**
+ * Why a video was not finished, that it cost nothing, and the one thing to do next: "Try again" when that can help, else "Start
+ * over". `stopped` is the shared sentence (`stoppedMessage`), used when the flow has no words of its own for the reason.
+ */
+export function failedWords(reason: string | null | undefined, stopped: string, retryable: boolean): string {
+  const next = retryable ? "Press Try again and I'll have another go." : "Press Start over to make a new one.";
+  return `${whyStopped(reason, stopped)} It didn't cost you anything. ${next}`;
+}
+
+/** A change that did not go through: why, and that the video is as it was. */
+export const failedChangeWords = (reason: string | null | undefined, stopped: string): string => `${whyStopped(reason, stopped)} It didn't cost you anything, and your video is as it was.`;
+
 // ---- The result screen ---------------------------------------------------------------------------------------------------------
 
 /** The quick changes: a tap adds the sentence to what the editor is asked. "More energy" also asks for the hype vibe. */

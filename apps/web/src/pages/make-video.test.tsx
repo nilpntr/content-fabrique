@@ -334,11 +334,26 @@ test("an upload that was removed from the uploads list says so", async () => {
   await waitFor(() => expect(within(row("squat.mp4")).getByText("This one is no longer uploading. Remove it and add it again.")).toBeTruthy());
 });
 
-test("a clip that cannot be used stops the start and sends the creator back to the clips", async () => {
-  const api = readyApi();
+test("Next waits while a clip has a problem, and says why in a sentence", () => {
+  readyApi();
   const uploads = fakeUploads([upload("squat.mp4", 4, { status: "done", assetId: assetId(1) }), upload("row.mp4", 5, { status: "failed" })]);
   page(uploads);
+  choose([video("squat.mp4", 4), video("row.mp4", 5)]);
+  const next = screen.getByRole("button", { name: /^Next/ }) as HTMLButtonElement;
+  expect(next.disabled).toBe(true);
+  expect(next.getAttribute("aria-describedby")).toBeTruthy();
+  expect(document.getElementById(next.getAttribute("aria-describedby") as string)?.textContent).toBe("One of your clips didn't work. Try it again or remove it to go on.");
+  fireEvent.click(screen.getByRole("button", { name: "Remove row.mp4" }));
+  expect((screen.getByRole("button", { name: /^Next/ }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+test("a clip that fails behind the questions stops the start and sends the creator back to the clips", async () => {
+  const api = readyApi();
+  const uploads = fakeUploads([upload("squat.mp4", 4, { status: "done", assetId: assetId(1) }), upload("row.mp4", 5, { progress: 0.2 })]);
+  page(uploads);
   await answerAll();
+  uploads.set([upload("squat.mp4", 4, { status: "done", assetId: assetId(1) }), upload("row.mp4", 5, { status: "failed" })]);
+  await screen.findByRole("alert");
   expect(screen.getByRole("alert").textContent).toContain("One of your clips needs a look");
   expect(screen.queryByRole("button", { name: "Make my video" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Back to your clips" }));

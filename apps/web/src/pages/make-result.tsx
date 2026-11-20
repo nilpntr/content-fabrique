@@ -5,6 +5,7 @@ import { MakingScreen } from "@/components/guided/making-screen";
 import { ResultScreen } from "@/components/guided/result-screen";
 import { BigButton, Problem, Screen } from "@/components/guided/ui";
 import { recallVibe } from "@/components/guided/vibe-memory";
+import { failedChangeWords, failedWords } from "@/components/guided/words";
 import { startEditMessage } from "@/components/project/errors";
 import { chooseRun, isRunId, useRememberedRun } from "@/components/project/last-run";
 import { canRetry, stoppedMessage } from "@/components/project/plain-words";
@@ -142,7 +143,7 @@ export function MakeResultPage({
     const retryable = !failed || canRetry(reason);
     const title = failed ? "I couldn't finish your video" : status === "cancelled" ? "You stopped this one" : "No video yet";
     const message = failed
-      ? `${stoppedMessage(reason)} It didn't cost you anything.`
+      ? failedWords(reason, stoppedMessage(reason), retryable)
       : status === "cancelled"
         ? "Your clips are still here. Press the button and I'll start again."
         : "Your clips are in. Press the button and I'll make your video.";
@@ -186,13 +187,14 @@ export function MakeResultPage({
     assetTitles,
     musical: spec ? markersOf(spec).length > 0 : false,
     durationMs: items.length > 0 ? specDurationMs(items) : undefined,
+    plain: true,
   });
   // A long video's list is cut short: its first shots, then how many more there are (the ending among them).
   const folded = (board?.more ?? 0) > 0;
   const shots = folded ? (board?.cards.slice(0, -1) ?? []) : (board?.cards ?? []);
   // A change that did not go through (an edit that failed after this video was made) leaves the video as it was, and says so.
   const failedChange = failed && run.data !== undefined && Date.parse(run.data.created_at) > Date.parse(shown.created_at);
-  const notice = failedChange ? { title: "I couldn't make that change.", message: `${stoppedMessage(reason)} It didn't cost you anything, and your video is as it was.` } : undefined;
+  const notice = failedChange ? { title: "I couldn't make that change.", message: failedChangeWords(reason, stoppedMessage(reason)) } : undefined;
 
   return (
     <ResultScreen
