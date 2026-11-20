@@ -397,7 +397,7 @@ func (q *Queries) IsResearchForgotten(ctx context.Context, arg IsResearchForgott
 }
 
 const listResearchAnnotationsForPost = `-- name: ListResearchAnnotationsForPost :many
-SELECT id, post_id, format_id, hook_kind, hook_text_pattern, text_pattern, cuts_estimate, first_cut_s, caption_len, hashtags_n, cta, topic, annotator, confidence, created_at FROM research_annotations WHERE post_id = $1 ORDER BY annotator
+SELECT id, post_id, format_id, hook_kind, hook_text_pattern, text_pattern, cuts_estimate, first_cut_s, caption_len, hashtags_n, cta, topic, annotator, confidence, created_at, notes FROM research_annotations WHERE post_id = $1 ORDER BY annotator
 `
 
 func (q *Queries) ListResearchAnnotationsForPost(ctx context.Context, postID uuid.UUID) ([]ResearchAnnotation, error) {
@@ -425,6 +425,7 @@ func (q *Queries) ListResearchAnnotationsForPost(ctx context.Context, postID uui
 			&i.Annotator,
 			&i.Confidence,
 			&i.CreatedAt,
+			&i.Notes,
 		); err != nil {
 			return nil, err
 		}
@@ -648,14 +649,14 @@ func (q *Queries) SetResearchCreatorStatus(ctx context.Context, arg SetResearchC
 }
 
 const upsertResearchAnnotation = `-- name: UpsertResearchAnnotation :one
-INSERT INTO research_annotations (post_id, format_id, hook_kind, hook_text_pattern, text_pattern, cuts_estimate, first_cut_s, caption_len, hashtags_n, cta, topic, annotator, confidence)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+INSERT INTO research_annotations (post_id, format_id, hook_kind, hook_text_pattern, text_pattern, cuts_estimate, first_cut_s, caption_len, hashtags_n, cta, topic, notes, annotator, confidence)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT (post_id, annotator) DO UPDATE
 SET format_id = EXCLUDED.format_id, hook_kind = EXCLUDED.hook_kind, hook_text_pattern = EXCLUDED.hook_text_pattern,
     text_pattern = EXCLUDED.text_pattern, cuts_estimate = EXCLUDED.cuts_estimate, first_cut_s = EXCLUDED.first_cut_s,
     caption_len = EXCLUDED.caption_len, hashtags_n = EXCLUDED.hashtags_n, cta = EXCLUDED.cta, topic = EXCLUDED.topic,
-    confidence = EXCLUDED.confidence
-RETURNING id, post_id, format_id, hook_kind, hook_text_pattern, text_pattern, cuts_estimate, first_cut_s, caption_len, hashtags_n, cta, topic, annotator, confidence, created_at
+    notes = EXCLUDED.notes, confidence = EXCLUDED.confidence
+RETURNING id, post_id, format_id, hook_kind, hook_text_pattern, text_pattern, cuts_estimate, first_cut_s, caption_len, hashtags_n, cta, topic, annotator, confidence, created_at, notes
 `
 
 type UpsertResearchAnnotationParams struct {
@@ -670,6 +671,7 @@ type UpsertResearchAnnotationParams struct {
 	HashtagsN       *int32
 	Cta             *string
 	Topic           *string
+	Notes           *string
 	Annotator       string
 	Confidence      float64
 }
@@ -687,6 +689,7 @@ func (q *Queries) UpsertResearchAnnotation(ctx context.Context, arg UpsertResear
 		arg.HashtagsN,
 		arg.Cta,
 		arg.Topic,
+		arg.Notes,
 		arg.Annotator,
 		arg.Confidence,
 	)
@@ -707,6 +710,7 @@ func (q *Queries) UpsertResearchAnnotation(ctx context.Context, arg UpsertResear
 		&i.Annotator,
 		&i.Confidence,
 		&i.CreatedAt,
+		&i.Notes,
 	)
 	return i, err
 }

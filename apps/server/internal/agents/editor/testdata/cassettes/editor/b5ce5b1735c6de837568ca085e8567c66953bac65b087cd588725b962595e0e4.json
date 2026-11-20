@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "5c7e8e3bc316ddc09ffa82d9fba9caac46ab4daea5882714b3c41ce4d2654960",
-  "recorded_at": "2026-11-20T16:03:14Z",
+  "key": "b5ce5b1735c6de837568ca085e8567c66953bac65b087cd588725b962595e0e4",
+  "recorded_at": "2026-11-20T15:33:00Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,
@@ -119,18 +119,6 @@
         "blocks": [
           "tool_result"
         ]
-      },
-      {
-        "role": "assistant",
-        "blocks": [
-          "tool_use"
-        ]
-      },
-      {
-        "role": "user",
-        "blocks": [
-          "tool_result"
-        ]
       }
     ],
     "tools": [
@@ -145,7 +133,6 @@
       "list_motion_templates",
       "get_timeline",
       "get_comments",
-      "get_clip_feedback",
       "edit_timeline",
       "match_exposure",
       "render_preview",
@@ -202,20 +189,18 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_10",
-        "name": "finish",
-        "input": {
-          "summary": "I cut a 12 second video from your three clips. It opens on half of the heaviest lat pulldown rep with the words HEAVY LAT DAY and a punch-in on the beat, then the cable row, the pulldown again, the wide gym with a flash and a last rep. Check the wide shot: I framed it with a blurred fill so nobody is cropped out."
-        }
+        "id": "toolu_ed_9",
+        "name": "check_edit",
+        "input": {}
       }
     ],
     "usage": {
-      "input_tokens": 400,
-      "cache_write_tokens": 650,
+      "input_tokens": 420,
+      "cache_write_tokens": 700,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 16300,
-      "output_tokens": 92
+      "cache_read_tokens": 15600,
+      "output_tokens": 38
     }
   },
-  "count_tokens": 17350
+  "count_tokens": 16720
 }

@@ -88,6 +88,9 @@ func TestMigrateCLI(t *testing.T) {
 	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00029_proof_edit.sql") {
 		t.Fatalf("down one (00029) = %d %s", code, out)
 	}
+	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00028_research_notes.sql") {
+		t.Fatalf("down one (00028) = %d %s", code, out)
+	}
 	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00027_research.sql") {
 		t.Fatalf("down one (00027) = %d %s", code, out)
 	}

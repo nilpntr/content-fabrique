@@ -10,6 +10,7 @@ import (
 
 	"github.com/nilpntr/content-fabrique/internal/analysis"
 	"github.com/nilpntr/content-fabrique/internal/clipfeedback"
+	"github.com/nilpntr/content-fabrique/internal/hooklab"
 	"github.com/nilpntr/content-fabrique/internal/motion"
 	"github.com/nilpntr/content-fabrique/internal/music"
 	"github.com/nilpntr/content-fabrique/internal/styleprofile"
@@ -173,6 +174,10 @@ type CheckInput struct {
 	// Speech is the transcript of the clips the main track plays, by asset id (a clip without speech or without a transcript is not in
 	// it): the speech checks (checkspeech.go) judge the cuts against it.
 	Speech map[string]*Speech
+	// HookWeights are the weights hook_score scores the opening with (checkhook.go); nil takes the hook lab's defaults. Sharpness is
+	// how sharp the clips are over time, by asset id, from the moments of the clip analysis; a clip without an entry is not judged on it.
+	HookWeights *hooklab.Resolved
+	Sharpness   map[string][]SharpSpan
 	// PaceSetting is the creator's own pace setting (PaceSettings: "slower", "like_mine", "faster"; "" takes the Settings' pace), which
 	// scales the pace targets after the vibe.
 	PaceSetting string
@@ -209,6 +214,8 @@ type Metrics struct {
 	RenderedKept float64 `json:"rendered_kept"`
 	// StyleScore is the share of the style dimensions that are in the creator's range (0 when there is no profile).
 	StyleScore float64 `json:"style_score,omitempty"`
+	// HookScore is the opening's total on the hook lab's rubric (0 to 1), 0 when nothing of it could be measured.
+	HookScore float64 `json:"hook_score,omitempty"`
 	// PaceMedianMs and PaceMaxShotMs are the pace targets the shots were held to (0 when none applies).
 	PaceMedianMs  int64 `json:"pace_median_ms,omitempty"`
 	PaceMaxShotMs int64 `json:"pace_max_shot_ms,omitempty"`
@@ -414,6 +421,9 @@ func RunChecks(in CheckInput) Report {
 		c.effectDensity(), c.textSafe(), c.textOverSubject(), c.duration(targetS), c.brightness(), c.crushed(), c.beatSync(), c.styleMatch(), c.titleCopied(),
 		c.offBeatCut(), c.hookMissesDrop(), c.staticShot(), c.transitionsMatch(), c.transitionVariety(), c.textWithoutEntrance(), c.chapterTitles(),
 		c.formatFollowed(), c.beatGridFixed(), c.shotReused(),
+	}
+	if in.Plan != nil && in.Plan.HookLab != nil { // the opening against the hook lab's rubric (checkhook.go), only for a plan that ran the lab
+		r.Checks = append(r.Checks, c.hookScore())
 	}
 	if ck, ok := c.subjectInCrop(); ok { // subject_in_crop (checkreframe.go), only for an edit with a clip that has subject boxes
 		r.Checks = append(r.Checks, ck)

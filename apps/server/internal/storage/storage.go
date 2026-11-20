@@ -374,6 +374,24 @@ func (c *Client) PresignGet(ctx context.Context, key string, expires time.Durati
 	return req.URL, nil
 }
 
+// PresignPut returns a URL that writes the object in one PUT for the given time: the Upload of a remote sandbox job
+// (sandbox.Output), whose runner holds no credentials. A non-empty contentType is signed, so the PUT must send that
+// Content-Type. As with every output, the caller checks the object (Head) before it trusts it.
+func (c *Client) PresignPut(ctx context.Context, key, contentType string, expires time.Duration) (string, error) {
+	if expires <= 0 || expires > 7*24*time.Hour {
+		return "", fmt.Errorf("presign put: expiry %v is outside (0, 7 days]", expires)
+	}
+	in := &s3.PutObjectInput{Bucket: aws.String(c.bucket), Key: aws.String(key)}
+	if contentType != "" {
+		in.ContentType = aws.String(contentType)
+	}
+	req, err := c.presign.PresignPutObject(ctx, in, s3.WithPresignExpires(expires))
+	if err != nil {
+		return "", fmt.Errorf("presign put: %w", mapError(err))
+	}
+	return req.URL, nil
+}
+
 // DeletePrefix deletes every object of one asset and returns how many it deleted. The prefix must be exactly
 // ws/{workspace}/assets/{asset}/ with valid ids (ParseAssetPrefix), so a bug can never empty a bucket, a workspace or a
 // path that merely starts like one.

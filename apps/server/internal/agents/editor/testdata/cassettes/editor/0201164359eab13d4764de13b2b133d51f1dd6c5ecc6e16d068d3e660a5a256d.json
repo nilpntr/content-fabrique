@@ -1,8 +1,8 @@
 {
   "version": 1,
   "stage": "editor",
-  "key": "1083e16989ab65b594a05fe3dd7652f8e99ac27504ae1d481b87217d2fd2d0ad",
-  "recorded_at": "2026-11-20T16:03:14Z",
+  "key": "0201164359eab13d4764de13b2b133d51f1dd6c5ecc6e16d068d3e660a5a256d",
+  "recorded_at": "2026-11-20T15:33:00Z",
   "request": {
     "model": "claude-haiku-5-5",
     "max_tokens": 24000,
@@ -83,6 +83,18 @@
         "blocks": [
           "tool_result"
         ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          "tool_use"
+        ]
+      },
+      {
+        "role": "user",
+        "blocks": [
+          "tool_result"
+        ]
       }
     ],
     "tools": [
@@ -97,7 +109,6 @@
       "list_motion_templates",
       "get_timeline",
       "get_comments",
-      "get_clip_feedback",
       "edit_timeline",
       "match_exposure",
       "render_preview",
@@ -149,18 +160,38 @@
     "content": [
       {
         "type": "tool_use",
-        "id": "toolu_ed_6",
-        "name": "check_edit",
-        "input": {}
+        "id": "toolu_ed_7",
+        "name": "edit_timeline",
+        "input": {
+          "base_version": 1,
+          "ops": [
+            {
+              "op": "trim_item",
+              "id": "c4",
+              "out_ms": 4500
+            },
+            {
+              "op": "snap_cuts_to_beats",
+              "grid": {
+                "bpm": 124,
+                "first_beat_ms": 0
+              },
+              "options": {
+                "write_markers": true,
+                "max_shift_ms": 60
+              }
+            }
+          ]
+        }
       }
     ],
     "usage": {
-      "input_tokens": 420,
-      "cache_write_tokens": 700,
+      "input_tokens": 440,
+      "cache_write_tokens": 800,
       "cache_write_1h_tokens": 0,
-      "cache_read_tokens": 13500,
-      "output_tokens": 38
+      "cache_read_tokens": 14200,
+      "output_tokens": 120
     }
   },
-  "count_tokens": 14620
+  "count_tokens": 15440
 }

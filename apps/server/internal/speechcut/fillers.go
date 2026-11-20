@@ -26,6 +26,17 @@ func setOffByPause(words []transcribe.Word, f transcribe.Filler) bool {
 	return f.LastWord+1 < len(words) && words[f.LastWord+1].StartMs-words[f.LastWord].EndMs > MaxPauseMs
 }
 
+// FirstPlayed is the index of the first word a shot from inMs to outMs plays: the first that is not left out by the cut (more than
+// CutToleranceMs of it is inside). -1 when the shot plays none.
+func FirstPlayed(words []transcribe.Word, inMs, outMs int64) int {
+	for i, w := range words {
+		if w.EndMs-inMs > CutToleranceMs && w.StartMs < outMs {
+			return i
+		}
+	}
+	return -1
+}
+
 // SentenceStart is the first word of a sentence that is not a leading filler: where a shot that opens on the sentence starts. A
 // sentence made of fillers alone starts at its first word.
 func SentenceStart(words []transcribe.Word, st transcribe.Structure, s transcribe.Sentence) int {

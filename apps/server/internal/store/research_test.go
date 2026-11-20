@@ -325,6 +325,27 @@ func researchSuite(t *testing.T, st *store.Store, suffix string) {
 		}
 	})
 
+	t.Run("a watch-sheet note is short, one line and has no link (R2)", func(t *testing.T) {
+		c := newCreator(t, research.TikTok, "gym_n")
+		p := tiktokPost(t, c, 8)
+		a, err := st.SaveResearchAnnotation(ctx, p.ID, research.Annotation{Notes: "long take, title over the set", Annotator: "sam", Confidence: 1})
+		if err != nil || a.Notes == nil || *a.Notes != "long take, title over the set" {
+			t.Fatalf("note: %+v %v", a, err)
+		}
+		for name, note := range map[string]string{
+			"link":      "see https://example.com/x",
+			"too long":  strings.Repeat("a", research.MaxNotes+1),
+			"two lines": "one\ntwo",
+		} {
+			if _, err := st.SaveResearchAnnotation(ctx, p.ID, research.Annotation{Notes: note, Annotator: "sam", Confidence: 1}); !errors.Is(err, store.ErrInvalid) {
+				t.Errorf("%s: err = %v, want ErrInvalid", name, err)
+			}
+			if _, err := st.Pool().Exec(ctx, `INSERT INTO research_annotations (post_id, notes, annotator) VALUES ($1, $2, 'raw')`, p.ID, note); err == nil {
+				t.Errorf("the database accepted a note with a %s", name)
+			}
+		}
+	})
+
 	t.Run("findings need evidence", func(t *testing.T) {
 		c := newCreator(t, research.TikTok, "gym_f")
 		p := tiktokPost(t, c, 3)

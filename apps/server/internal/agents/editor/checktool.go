@@ -1,11 +1,13 @@
 package editor
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
 	"github.com/nilpntr/content-fabrique/internal/analysis"
 	"github.com/nilpntr/content-fabrique/internal/clipfeedback"
+	"github.com/nilpntr/content-fabrique/internal/hooklab"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/spend"
 	"github.com/nilpntr/content-fabrique/internal/store"
@@ -72,6 +75,11 @@ func LoadAssetAnalysis(ctx context.Context, src AnalysisSource, ws ids.Workspace
 		}
 		assets = append(assets, aid)
 	}
+	return loadAnalysisOf(ctx, src, ws, assets)
+}
+
+// loadAnalysisOf reads the stored analysis of the given clips (LoadAssetAnalysis for a spec's clips; the hook lab for a project's).
+func loadAnalysisOf(ctx context.Context, src AnalysisSource, ws ids.WorkspaceID, assets []ids.AssetID) (map[string]AssetAnalysis, error) {
 	out := make(map[string]AssetAnalysis, len(assets))
 	series, err := src.ListAssetExposureSeries(ctx, ws, assets)
 	if err != nil {
@@ -126,6 +134,17 @@ func LoadAssetAnalysis(ctx context.Context, src AnalysisSource, ws ids.Workspace
 // sampler measures the version's preview render for the checks that look at the rendered picture; nil, or a version with no preview,
 // leaves those checks "not applicable".
 func CheckVersion(ctx context.Context, projects Projects, src AnalysisSource, ws ids.WorkspaceID, pid ids.ProjectID, version int, plan *Plan, sampler RenderSampler, style *styleprofile.Style) (Report, error) {
+	return CheckVersionWith(ctx, projects, src, ws, pid, version, plan, sampler, style, CheckOptions{})
+}
+
+// CheckOptions are the parts of a check that have a default.
+type CheckOptions struct {
+	// HookPlaybook is the research playbook hook_score takes its weights from; nil is none (the default weights).
+	HookPlaybook hooklab.Playbook
+}
+
+// CheckVersionWith is CheckVersion with options.
+func CheckVersionWith(ctx context.Context, projects Projects, src AnalysisSource, ws ids.WorkspaceID, pid ids.ProjectID, version int, plan *Plan, sampler RenderSampler, style *styleprofile.Style, opt CheckOptions) (Report, error) {
 	vd, perr := projects.Version(ctx, actor(ws), pid, version)
 	if perr != nil {
 		return Report{}, projectErr(perr)
@@ -139,6 +158,21 @@ func CheckVersion(ctx context.Context, projects Projects, src AnalysisSource, ws
 		return Report{}, err
 	}
 	in := CheckInput{Version: version, Spec: spec, Plan: plan, Assets: assets, Issues: vd.Issues, Style: profileOf(style), Settings: settingsOf(style)}
+	weights := hooklab.Resolve(opt.HookPlaybook)
+	in.HookWeights = &weights
+	// How sharp the opening is, for hook_score: read when the source lists the moments (a source that cannot leaves it unmeasured).
+	if ml, ok := src.(MomentLister); ok && plan != nil && plan.HookLab != nil { // hook_score is in the report of such a plan only
+		if main, _, ok := timeline.MainTrack(spec); ok && len(main.Items) > 0 {
+			first := slices.MinFunc(main.Items, func(a, b timeline.VideoItem) int { return cmp.Compare(a.AtMs, b.AtMs) })
+			if aid, err := ids.ParseAssetID(first.AssetID); err == nil {
+				if _, sharp, err := loadMoments(ctx, ml, ws, []ids.AssetID{aid}); err == nil {
+					in.Sharpness = sharp
+				} else {
+					slog.WarnContext(ctx, "editor: the moments of the opening clip could not be read; hook_score does not judge its sharpness", "error", err)
+				}
+			}
+		}
+	}
 	// The song, when the edit has one and the source can read its analysis (P6-06).
 	if mr, ok := src.(MusicReader); ok {
 		var songs []ids.AssetID
@@ -262,7 +296,7 @@ func (d Deps) checkEdit(ctx context.Context, rc runtime.RunContext, _ noArgs) (r
 	if d.previewsOn() && !d.previewOK(ctx, rc, v) {
 		return runtime.Result{}, runtime.UserErrorf("version %d has not been previewed. Call render_preview first, then check_edit: the checks measure the rendered picture (a look can crush the footage), not only the timeline", v)
 	}
-	report, err := CheckVersion(ctx, d.Projects, d.Store, ws, pid, v, plan, d.Rendered, d.styleFor(ctx, ws, rc.Input))
+	report, err := CheckVersionWith(ctx, d.Projects, d.Store, ws, pid, v, plan, d.Rendered, d.styleFor(ctx, ws, rc.Input), CheckOptions{HookPlaybook: d.HookPlaybook})
 	if err != nil {
 		return runtime.Result{}, err
 	}

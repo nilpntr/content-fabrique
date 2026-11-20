@@ -1,6 +1,6 @@
 import { useUser } from "@clerk/tanstack-react-start";
 import { Link } from "@tanstack/react-router";
-import { ArrowRight, CloudUpload, Film, Palette, PlusIcon, Sparkles, ThumbsUp } from "lucide-react";
+import { ArrowRight, CloudUpload, Film, Palette, Sparkles, ThumbsUp } from "lucide-react";
 import * as React from "react";
 import { PageHeader } from "@/components/page";
 import { PROJECT_GRID, ProjectCard, usePosters } from "@/components/project/project-card";
@@ -23,7 +23,7 @@ function useNow(): Date | undefined {
 }
 
 /**
- * Home: a greeting, "New video", the projects to pick up again (newest change first) and how many videos the credits still
+ * Home: a greeting, "Make a video", the projects to pick up again (newest change first) and how many videos the credits still
  * make. Everything here is the workspace's own data; a block whose data the API does not have is left out, never made up.
  */
 export function HomePage() {
@@ -41,9 +41,9 @@ export function HomePage() {
         title={greeting(now ?? new Date(2000, 0, 1, 9), first)}
         description={items.length > 0 ? "Pick up where you left off, or start something new." : "Let's make your first video."}
         actions={
-          <Link to="/projects/new" className={buttonVariants({ size: "lg" })}>
-            <PlusIcon aria-hidden />
-            New video
+          <Link to="/make" className={buttonVariants({ size: "lg" })}>
+            <Sparkles aria-hidden />
+            Make a video
           </Link>
         }
       />
@@ -161,7 +161,7 @@ function FirstVideo() {
           Upload clips
         </Link>
         <Link to="/projects/new" className={buttonVariants({ variant: "secondary", size: "lg" })}>
-          I already have clips
+          Pick from my library
         </Link>
       </div>
       <Link

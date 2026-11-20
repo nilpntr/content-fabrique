@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nilpntr/content-fabrique/internal/formats"
 	"github.com/nilpntr/content-fabrique/internal/taxonomy"
@@ -168,7 +169,9 @@ type Annotation struct {
 	HashtagsN       *int
 	CTA             string
 	// Topic is a value of the clip vocabulary (config/tags) as "facet:value", such as "body:back".
-	Topic      string
+	Topic string
+	// Notes is a short note in the annotator's own words (at most MaxNotes characters, no links): never the creator's caption or lines.
+	Notes      string
 	Annotator  string
 	Confidence float64
 }
@@ -227,7 +230,31 @@ func (v Vocabulary) CheckAnnotation(a Annotation) error {
 	if a.FirstCutS != nil && *a.FirstCutS < 0 {
 		errs = append(errs, errors.New("first_cut_s must not be negative"))
 	}
+	if err := CheckNotes(a.Notes); err != nil {
+		errs = append(errs, err)
+	}
 	return errors.Join(errs...)
+}
+
+// MaxNotes is the longest note, in characters: a short note in our own words, not a transcript or a copied caption.
+const MaxNotes = 280
+
+// linkRe finds a link in a note. The database refuses the same (migration 00028).
+var linkRe = regexp.MustCompile(`(?i)(https?://|www\.)`)
+
+// CheckNotes validates a note: at most MaxNotes characters, one line, no link (a link could point to a media file, and the post's own
+// link is already stored).
+func CheckNotes(n string) error {
+	if utf8.RuneCountInString(n) > MaxNotes {
+		return fmt.Errorf("notes: at most %d characters (a short note in your own words)", MaxNotes)
+	}
+	if linkRe.MatchString(n) {
+		return errors.New("notes: no links (the post's link is stored already)")
+	}
+	if strings.ContainsAny(n, "\r\n") {
+		return errors.New("notes: one line")
+	}
+	return nil
 }
 
 // CheckTitleForm validates a hook text pattern: a title FORM such as "<TOPIC> 101": slots (<TOPIC>, <N>), capital letters, digits and

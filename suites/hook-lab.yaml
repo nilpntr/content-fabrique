@@ -1,0 +1,296 @@
+# The hook lab's eval cases (docs/design/hook-lab.md): `cfctl hooks eval` from apps/server, and the tests of internal/hooklab.
+#
+# Every case is made up: the words, the times and the clips are written here, so the file holds no creator's footage, no ids and
+# nothing to fill in locally. The lab is computed in Go, so the set needs no database and no model and runs the same in replay mode
+# as anywhere else. A case gives the clips (their words as [text, start_ms, end_ms] with an optional confidence, their dead time,
+# their moments), the variants to score (or `propose`, to have the lab make them) and what the lab must answer: the pick, the order,
+# and exactly which criteria fail for a variant. Add a case when the rubric gets something wrong; never loosen one to make it pass.
+suite: hook-lab
+description: "The hook rubric on made-up openings: where the hook lands, how long it is, where the text sits, the first frame, the first word."
+cases:
+  - id: clean-line-wins
+    title: "A whole sentence beats a filler and a start in the middle of a sentence"
+    clips:
+      - asset: talk
+        duration_ms: 6000
+        words: &talk
+          - ["Um,", 0, 200]
+          - ["so", 260, 400]
+          - ["today", 460, 760]
+          - ["we", 800, 900]
+          - ["train", 940, 1240]
+          - ["back.", 1280, 1600]
+          - ["Stop", 2100, 2400]
+          - ["skipping", 2440, 2900]
+          - ["your", 2940, 3080]
+          - ["warm-up!", 3120, 3700]
+          - ["It", 4300, 4400]
+          - ["costs", 4440, 4760]
+          - ["you", 4800, 4920]
+          - ["reps.", 4960, 5400]
+    variants:
+      - {id: a, asset_id: talk, in_ms: 0, out_ms: 1680}
+      - {id: b, asset_id: talk, in_ms: 2020, out_ms: 3780}
+      - {id: c, asset_id: talk, in_ms: 2420, out_ms: 3780}
+    expect:
+      pick: b
+      order: [b, a, c]
+      fails:
+        a: [no_filler_start]
+        b: []
+        c: [line_starts_clean]
+      min_total: {b: 1}
+
+  - id: cut-inside-a-word
+    title: "A shot that starts inside a word does not start cleanly"
+    clips:
+      - {asset: talk, duration_ms: 6000, words: *talk}
+    variants:
+      - {id: a, asset_id: talk, in_ms: 2250, out_ms: 3780}
+      - {id: b, asset_id: talk, in_ms: 4220, out_ms: 5480}
+    expect:
+      pick: b
+      fails:
+        a: [line_starts_clean]
+        b: []
+
+  - id: weak-opener
+    title: "A sentence that starts on 'so' passes, but ranks under one that starts on its point"
+    clips:
+      - asset: talk
+        duration_ms: 5000
+        words:
+          - ["So", 100, 300]
+          - ["today", 340, 640]
+          - ["we", 680, 780]
+          - ["train", 820, 1100]
+          - ["back.", 1140, 1500]
+          - ["Three", 2000, 2300]
+          - ["moves,", 2340, 2700]
+          - ["no", 2740, 2860]
+          - ["machines.", 2900, 3500]
+    variants:
+      - {id: a, asset_id: talk, in_ms: 20, out_ms: 1580}
+      - {id: b, asset_id: talk, in_ms: 1920, out_ms: 3580}
+    expect:
+      pick: b
+      fails:
+        a: []
+        b: []
+      max_total: {a: 0.95}
+
+  - id: word-time-not-certain
+    title: "A first word with a low confidence is not judged for a clean start"
+    clips:
+      - asset: talk
+        duration_ms: 3000
+        words:
+          - ["Lift", 500, 800, 0.2]
+          - ["heavy", 840, 1200, 0.9]
+          - ["today.", 1240, 1700, 0.9]
+    variants:
+      - {id: a, asset_id: talk, in_ms: 420, out_ms: 1780}
+    expect:
+      pick: a
+      fails: {a: []}
+      not_applicable: {a: [line_starts_clean, text_off_body, first_frame_alive]}
+
+  - id: silence-before-the-line
+    title: "A line that begins after the first two seconds is not a hook"
+    clips:
+      - asset: talk
+        duration_ms: 8000
+        words:
+          - ["Here", 2600, 2800]
+          - ["is", 2840, 2940]
+          - ["the", 2980, 3080]
+          - ["trick.", 3120, 3600]
+    variants:
+      - {id: a, asset_id: talk, in_ms: 0, out_ms: 3680}
+      - {id: b, asset_id: talk, in_ms: 1400, out_ms: 3680}
+      - {id: c, asset_id: talk, in_ms: 2520, out_ms: 3680}
+    expect:
+      order: [c, b, a]
+      fails:
+        a: [hook_in_first_2s]
+        b: []
+        c: []
+
+  - id: text-comes-late
+    title: "A title that comes on after two seconds fails; one at the start is best"
+    clips:
+      - {asset: gym, duration_ms: 9000, analysed: true}
+    variants:
+      - {id: a, asset_id: gym, in_ms: 0, out_ms: 2000, text: "BACK DAY", text_at_ms: 0, text_duration_ms: 2000, text_place: clear}
+      - {id: b, asset_id: gym, in_ms: 3000, out_ms: 5000, text: "BACK DAY", text_at_ms: 1200, text_duration_ms: 2000, text_place: clear}
+      - {id: c, asset_id: gym, in_ms: 6000, out_ms: 8000, text: "BACK DAY", text_at_ms: 2600, text_duration_ms: 2000, text_place: clear}
+    expect:
+      order: [a, b, c]
+      fails:
+        a: []
+        b: []
+        c: [hook_in_first_2s]
+
+  - id: text-on-the-body
+    title: "Text never on the body: a title that is clear wins, one that would be left out fails"
+    clips:
+      - {asset: gym, duration_ms: 9000, analysed: true}
+    variants:
+      - {id: a, asset_id: gym, in_ms: 0, out_ms: 2000, text: "LEG DAY 101", text_duration_ms: 2000, text_place: dropped}
+      - {id: b, asset_id: gym, in_ms: 3000, out_ms: 5000, text: "LEG DAY 101", text_duration_ms: 2000, text_place: adjusted}
+      - {id: c, asset_id: gym, in_ms: 6000, out_ms: 8000, text: "LEG DAY 101", text_duration_ms: 2000, text_place: clear}
+      - {id: d, asset_id: gym, in_ms: 1000, out_ms: 3000, text: "LEG DAY 101", text_duration_ms: 2000, text_place: on_face}
+    expect:
+      pick: c
+      fails:
+        a: [text_off_body]
+        b: []
+        c: []
+        d: [text_off_body]
+
+  - id: text-too-long-or-too-brief
+    title: "A hook is a few words, on screen long enough to read"
+    clips:
+      - {asset: gym, duration_ms: 9000, analysed: true}
+    variants:
+      - {id: a, asset_id: gym, in_ms: 0, out_ms: 2000, text: "The three back exercises nobody at your gym does right", text_duration_ms: 3000, text_place: clear}
+      - {id: b, asset_id: gym, in_ms: 3000, out_ms: 5000, text: "BACK DAY 101", text_duration_ms: 600, text_place: clear}
+      - {id: c, asset_id: gym, in_ms: 6000, out_ms: 8000, text: "BACK DAY 101", text_duration_ms: 1800, text_place: clear}
+    expect:
+      pick: c
+      fails:
+        a: [hook_readable]
+        b: [hook_readable]
+        c: []
+
+  - id: first-frame-dead-or-dark
+    title: "The video does not open on dead time or on a black frame"
+    clips:
+      - asset: set
+        duration_ms: 12000
+        dead: [{start_ms: 0, end_ms: 2000}, {start_ms: 8000, end_ms: 12000}]
+        lit: 0.4
+      - asset: dark
+        duration_ms: 6000
+        analysed: true
+        lit: 0.03
+      - asset: soft
+        duration_ms: 6000
+        analysed: true
+        lit: 0.5
+        sharpness: 0.2
+    no_title: true
+    variants:
+      - {id: a, asset_id: set, in_ms: 0, out_ms: 2000}
+      - {id: b, asset_id: set, in_ms: 1700, out_ms: 3700}
+      - {id: c, asset_id: set, in_ms: 2000, out_ms: 4000}
+      - {id: d, asset_id: dark, in_ms: 0, out_ms: 2000}
+      - {id: e, asset_id: soft, in_ms: 0, out_ms: 2000}
+    expect:
+      pick: c
+      order: [c, b, e, a, d]
+      fails:
+        a: [first_frame_alive]
+        b: [first_frame_alive]
+        c: []
+        d: [first_frame_alive]
+        e: [first_frame_alive]
+      not_applicable:
+        c: [hook_in_first_2s, hook_readable, text_off_body, line_starts_clean, no_filler_start]
+
+  - id: nothing-hooks
+    title: "Without text and without speech nothing hooks, unless the creator's videos have no title"
+    clips:
+      - {asset: gym, duration_ms: 9000, analysed: true}
+    variants:
+      - {id: a, asset_id: gym, in_ms: 0, out_ms: 2000}
+      - {id: b, asset_id: gym, in_ms: 3000, out_ms: 5000, text: "BACK DAY", text_duration_ms: 2000, text_place: clear}
+    expect:
+      pick: b
+      fails:
+        a: [hook_in_first_2s]
+        b: []
+
+  - id: proposes-three-kinds
+    title: "From a talking clip, a set and a wide shot the lab proposes a line, a moment and the planned clip"
+    clips:
+      - {asset: talk, duration_ms: 6000, words: *talk}
+      - asset: set
+        duration_ms: 12000
+        dead: [{start_ms: 0, end_ms: 2000}, {start_ms: 8000, end_ms: 12000}]
+        moments: [{start_ms: 2000, end_ms: 5000, score: 0.81}, {start_ms: 5000, end_ms: 8000, score: 0.88}]
+      - {asset: wide, duration_ms: 15000}
+    propose: {planned: wide, shot_ms: 1500}
+    expect:
+      count: 3
+      kinds: [spoken_line, best_moment, planned]
+      pick: a
+      fails:
+        a: []
+        b: [hook_in_first_2s]
+        c: [hook_in_first_2s]
+      min_total: {a: 1}
+
+  - id: proposes-before-the-title-is-written
+    title: "At plan time the title is not written: the room for one is judged, and a missing title is not held against a shot"
+    clips:
+      - asset: set
+        duration_ms: 12000
+        dead: [{start_ms: 0, end_ms: 2000}, {start_ms: 8000, end_ms: 12000}]
+        moments: [{start_ms: 2000, end_ms: 5000, score: 0.81}, {start_ms: 5000, end_ms: 8000, score: 0.88}]
+    propose: {planned: set, shot_ms: 1500, probe: true, text_place: moved}
+    expect:
+      count: 2
+      kinds: [best_moment, planned]
+      fails:
+        a: [text_off_body]
+        b: [text_off_body]
+      not_applicable:
+        a: [hook_in_first_2s, hook_readable]
+
+  - id: proposes-what-there-is
+    title: "One clip with nothing measured gives one opening, not three made-up ones"
+    clips:
+      - {asset: wide, duration_ms: 15000}
+    propose: {shot_ms: 2000}
+    expect:
+      count: 1
+      kinds: [clip_start]
+
+  - id: weights-default
+    title: "By default a long title loses to a title the renderer has to shrink"
+    clips:
+      - {asset: gym, duration_ms: 9000, analysed: true}
+    variants: &weighted
+      - {id: a, asset_id: gym, in_ms: 0, out_ms: 2000, text: "Eight words that take a moment to read", text_place: clear}
+      - {id: b, asset_id: gym, in_ms: 3000, out_ms: 5000, text: "BACK DAY", text_place: adjusted}
+    expect:
+      pick: b
+      weights_from: defaults
+
+  - id: weights-from-the-playbook
+    title: "A playbook finding that text off the body works doubles its weight, within bounds, and moves the pick"
+    clips:
+      - {asset: gym, duration_ms: 9000, analysed: true}
+    variants: *weighted
+    playbook:
+      playbook_version: 2026-47
+      findings:
+        - {id: fnd_text_clear, dimension: hook, criterion: text_off_body, effect: 3.4, confidence: high}
+        - {id: fnd_other, dimension: length, criterion: hook_readable, effect: 0.1, confidence: high}
+    expect:
+      pick: a
+      weights_from: "playbook 2026-47"
+
+  - id: weights-low-confidence-is-a-hint
+    title: "A low-confidence finding changes no weight"
+    clips:
+      - {asset: gym, duration_ms: 9000, analysed: true}
+    variants: *weighted
+    playbook:
+      playbook_version: 2026-47
+      findings:
+        - {id: fnd_text_clear, dimension: hook, criterion: text_off_body, effect: 3.4, confidence: low}
+    expect:
+      pick: b
+      weights_from: defaults

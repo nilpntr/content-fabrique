@@ -2,5 +2,6 @@ go 1.27.2
 
 use (
 	./apps/server
+	./packages/media-tools/job-runner
 	./packages/media-tools/motion-runner
 )

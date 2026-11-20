@@ -1,0 +1,33 @@
+{
+  "id": "rnd_01HZ-1",
+  "state": "succeeded",
+  "exit_code": 0,
+  "duration_ms": 1234,
+  "timed_out": false,
+  "steps": [
+    {
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": "ZnJhbWU9MQo=",
+      "stdout_truncated": false,
+      "stderr_truncated": false,
+      "duration_ms": 1000,
+      "timed_out": false
+    },
+    {
+      "exit_code": 0,
+      "stdout": "e30=",
+      "stderr": "",
+      "stdout_truncated": false,
+      "stderr_truncated": true,
+      "duration_ms": 30,
+      "timed_out": false
+    }
+  ],
+  "outputs": [
+    {
+      "path": "/work/out.mp4",
+      "bytes": 4096
+    }
+  ]
+}

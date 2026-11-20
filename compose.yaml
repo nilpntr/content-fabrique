@@ -43,6 +43,10 @@ services:
       - "127.0.0.1:9001:9001" # web console, log in with the same R2_* credentials
     volumes:
       - minio-data:/data
+    # media-runner is the network the runner profile's media-runner shares with MinIO alone.
+    networks:
+      - default
+      - media-runner
     # The image has no curl or wget, so the probe is a bash /dev/tcp request to MinIO's readiness endpoint.
     healthcheck:
       test:
@@ -106,6 +110,69 @@ services:
       timeout: 5s
       retries: 40
       start_period: 5s
+
+  # The remote sandbox runner (docs/design/render-runtime.md, section 10): `cf-job serve` from the media-tools image, under the
+  # `runner` profile so `task up` and `task dev` never start it: `docker compose --profile runner up -d --wait media-runner` (build
+  # the image first: task media:build). It reproduces a Cloudflare standard-4 container: 4 CPUs and 12 GB, a read-only root, no
+  # capabilities, one job at a time, and tmpfs (noexec) for /in, /work and /tmp, which count against the 12 GB. The worker reaches it
+  # at MEDIA_RUNNER_URL (http://localhost:8090; 8080 is the API) with SANDBOX_GATEWAY_TOKEN.
+  #
+  # Network: its only network is media-runner, which it shares with MinIO alone (never Postgres or anything else here). Docker does
+  # not publish ports from an `internal` network, and the worker on the host must reach the runner, so that network is a plain
+  # bridge; what keeps the runner on MinIO is cf-job itself: it connects to CF_JOB_ALLOWED_HOSTS only (the R2_ENDPOINT host the
+  # worker signs URLs for) and dials that as minio:9000 (CF_JOB_DIAL). The tools have no network of their own to use: ffmpeg is
+  # built --disable-network and cf-motion refuses every request outside the template bundle.
+  media-runner:
+    profiles: ["runner"]
+    image: ${MEDIA_TOOLS_IMAGE:-media-tools:dev}
+    pull_policy: never
+    command: ["cf-job", "serve", "-addr", ":8080"]
+    # An init as PID 1 reaps whatever a killed tool leaves behind (cf-job reaps between steps too).
+    init: true
+    # A user of its own: RLIMIT_NPROC (the job's PIDs) counts every process of the user on the host, so it must not share
+    # the image's default 10001 with other media-tools containers.
+    user: "10091:10091"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    cpus: 4
+    mem_limit: 12g
+    memswap_limit: 12g
+    pids_limit: 4096
+    ulimits:
+      core: 0
+    # tmpfs pages count against mem_limit: 6 GiB of inputs, 1.5 GiB of work files and 256 MiB of temporary files leave the
+    # 4 GiB CF_JOB_MEMORY_MB promises to a job (a render's limit, render.DefaultLimits), within the 12 GB. A Cloudflare
+    # instance has its disk apart from its memory; here footage over 6 GiB fails the download (ENOSPC).
+    tmpfs:
+      - /in:rw,noexec,nosuid,nodev,size=6g,mode=1777
+      - /work:rw,noexec,nosuid,nodev,size=1536m,mode=1777
+      - /tmp:rw,noexec,nosuid,nodev,size=256m,mode=1777
+    environment:
+      # Not required here, so `task up` works without it; cf-job refuses to start without a token (run task env:init).
+      CF_JOB_TOKEN: ${SANDBOX_GATEWAY_TOKEN:-}
+      CF_JOB_CPUS: "4"
+      CF_JOB_MEMORY_MB: "4096"
+      # The worker signs URLs for R2_ENDPOINT (http://localhost:9000): from in here that host is minio:9000.
+      CF_JOB_ALLOWED_HOSTS: localhost:9000,127.0.0.1:9000
+      CF_JOB_DIAL: localhost:9000=minio:9000,127.0.0.1:9000=minio:9000
+    ports:
+      - "127.0.0.1:8090:8080"
+    networks:
+      - media-runner
+    depends_on:
+      minio:
+        condition: service_healthy
+    # The image has no shell, curl or wget; cf-job checks its own health endpoint.
+    healthcheck:
+      test: ["CMD", "cf-job", "health", "http://127.0.0.1:8080/healthz"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 2s
+
+networks:
+  media-runner:
 
 volumes:
   postgres18-data:

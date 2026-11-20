@@ -363,6 +363,7 @@ type ResearchAnnotation struct {
 	Annotator       string
 	Confidence      float64
 	CreatedAt       time.Time
+	Notes           *string
 }
 
 type ResearchCreator struct {

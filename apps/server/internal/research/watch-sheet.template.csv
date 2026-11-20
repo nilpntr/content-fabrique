@@ -1,0 +1,22 @@
+# Watch sheet: one row per PUBLIC post you watched as a normal viewer (docs/design/creator-research-engine.md, "The watch sheet").
+# Lines that start with # are ignored. Keep the header row. Only url is required; leave a cell empty when you did not note it.
+# Never paste a video, a download link, a thumbnail or the creator's caption or lines. Notes are in YOUR words, one line, no links.
+#
+# url              the post page: https://www.tiktok.com/@handle/video/<id>, an Instagram /p/ or /reel/ link, or a YouTube Shorts link
+# handle           the creator's handle; needed for Instagram and YouTube links (a TikTok link carries it)
+# observer         who watched (your first name); may be given once with --observer instead
+# watched_at       when you watched: 2026-11-20 or 2026-11-20T14:05:00+01:00 (empty = the time of the import)
+# posted_at        the date the post shows: 2026-11-02 (a TikTok link's own time is used for the post and this date is checked against it)
+# length           the video length: 42, 42s or 0:42
+# format           a format id of config/formats: form_check, loop_ending, meme_dialogue, montage, myth_fact, numbered_listicle,
+#                  one_take, pov, quote_reveal, rep_counter, story_captions, transformation, tutorial_101
+# hook_kind        what the first second does, in lower-case words with underscores: set_first, title_first, question, ...
+# hook_text        the FORM of the opening title in capitals and slots, never the words: <TOPIC> 101, <N> MISTAKES, POV: <SITUATION>
+# caption_pattern  the on-screen text pattern: single_title, story_captions, dialogue or none
+# cta              the caption's call to action: save, follow, comment or none
+# topic            a value of config/tags as facet:value, such as body:back or movement:squat
+# cuts             about how many cuts you counted
+# first_cut_s      the second of the first cut
+# views, likes, comments, saves, shares   the counts as shown: 1234, 1,234, 1.2K or 3.4M
+# notes            a short note in your own words (at most 280 characters, no links)
+url,handle,observer,watched_at,posted_at,length,format,hook_kind,hook_text,caption_pattern,cta,topic,cuts,first_cut_s,views,likes,comments,saves,shares,notes
