@@ -12,8 +12,8 @@
 | D-05 | Realtime via SSE from Go; Cloudflare K2 deferred | Accepted |
 | D-06 | Playback via MP4 proxies, sprites and waveforms on R2; no Cloudflare Stream in v1 | Accepted |
 | D-07 | Go-native agent loop on the Claude Messages API; Opus 5.5 edits; cheaper sub-agents for research and bulk work | Accepted (editor on Opus 5.5); sub-agent split tuned by D-17 |
-| D-08 | Sandbox: hardened containers for our media jobs; Cloudflare Sandbox for agent code; all behind one interface | Proposed (validate in P1-03 / P4-08) |
-| D-09 | Hosting: web on Workers; Go API + workers on EU servers behind Cloudflare Tunnel; burst to Cloudflare Containers | Proposed (validate in P0-10) |
+| D-08 | Sandbox: hardened containers for our media jobs; Cloudflare Sandbox for agent code; all behind one interface | Proposed (validate in P1-03 / P4-08). **Amended 2026-11-20 (founder, conditional):** Cloudflare Containers become the primary runtime for media jobs if the Cloudflare spike proves it scales; `hardened` on our own box stays the fallback for jobs over the container limits. See [render-runtime](design/render-runtime.md) |
+| D-09 | Hosting: web on Workers; Go API + workers on EU servers behind Cloudflare Tunnel; burst to Cloudflare Containers | Proposed (validate in P0-10). **Amended 2026-11-20 (founder, conditional):** renders move to Cloudflare Containers once the spike passes; the Go API and the job queue stay on an EU host behind the Tunnel, and the dedicated box serves jobs over the container limits. See [render-runtime](design/render-runtime.md) |
 | D-10 | Video understanding: deterministic signals + small-model frame tagging; video-native model optional | Proposed (validate with eval set #1, P2) |
 | D-11 | Trend data: curation + web search + creator links + licensed music analytics; no Research API, no scraping without legal sign-off | Accepted for MVP |
 | D-12 | Clerk organizations as workspaces | Accepted |
