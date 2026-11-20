@@ -15,8 +15,9 @@ const Stage = "quicklook"
 
 // PromptVersion names the prompt and tool below. It is stored with the result, and a change to either needs a new cassette
 // (the test that checks the committed one says so). v4: the free-form tags gave way to the facets of the vocabulary (package taxonomy)
-// and one exercise name.
-const PromptVersion = "quicklook.v4"
+// and one exercise name. v5: arms_up per subject, whether a hand or an arm is raised above the head (a padded box above the head of a back
+// pose read as a raised arm, so no title fitted above the head; live test 2026-11-20, section 4.1).
+const PromptVersion = "quicklook.v5"
 
 // ToolName is the one tool the model is made to call; its arguments are the answer.
 const ToolName = "describe_clip"
@@ -63,7 +64,7 @@ Labels: answer each from its list only. Say "unsure" (or [] for a list) when the
 ` + facets.String() + `
 Name the exercise from the movement across the four frames, not from one frame or the machine alone. A lat pulldown: seated under a thigh pad, the bar comes down from above toward the upper chest. A seated row: the handle comes toward the stomach, level with the floor, the torso upright. A back extension (hyperextension): the hips rest on a pad, the feet are locked, the torso bends down and comes back up, and the hands pull nothing. A curl: the forearm bends at the elbow, the upper arm still. If the frames could be two of these, leave exercise "" and movement "unsure".
 
-subjects: one entry for each frame, in order, saying where the person who is the subject of the frame is. frame: the number of the frame (1 to 4). present: true when a person is the subject of the frame, false when nobody is. x, y, w, h: the box around the whole person, raised arms and hands included, as fractions of the frame: x and y are the left and top edges (0 to 1) and w and h the width and the height (each at most 1). head_top_y: the top of the head as a fraction of the frame's height, from the top (0 is the top edge, 1 the bottom), between y and y + h. head_x and head_w: the left edge and the width of the head alone (hair and ears, not the shoulders or the arms), as fractions of the frame width, inside the box. shoulder_y: the top of the shoulders (where the neck meets the trapezius), as a fraction of the frame height, below head_top_y. Give 0 for head_x, head_w and shoulder_y when you cannot see them (the head is turned away and hidden, or cut off). When nobody is present, give 0 for every number.
+subjects: one entry for each frame, in order, saying where the person who is the subject of the frame is. frame: the number of the frame (1 to 4). present: true when a person is the subject of the frame, false when nobody is. x, y, w, h: the box around the whole person, raised arms and hands included, as fractions of the frame: x and y are the left and top edges (0 to 1) and w and h the width and the height (each at most 1). head_top_y: the top of the head as a fraction of the frame's height, from the top (0 is the top edge, 1 the bottom), between y and y + h. head_x and head_w: the left edge and the width of the head alone (hair and ears, not the shoulders or the arms), as fractions of the frame width, inside the box. shoulder_y: the top of the shoulders (where the neck meets the trapezius), as a fraction of the frame height, below head_top_y. Give 0 for head_x, head_w and shoulder_y when you cannot see them (the head is turned away and hidden, or cut off). arms_up: true only when a hand, an arm or something held is above the top of the head (an overhead press, a pull-up bar in the hands, a double biceps with the fists at or above the head); false when the hands are lower (at the sides, the waist, on a handle in front). When nobody is present, give 0 for every number and false for arms_up.
 
 Rules:
 - Describe only what is visible, in your own words. Never write placeholder text ("placeholder", "unknown", "n/a"): a title and a description are always about the frames.
@@ -118,8 +119,9 @@ func inputSchema(tax *taxonomy.Taxonomy) json.RawMessage {
 				"head_x":     obj{"type": "number", "description": "Left edge of the head alone (not the shoulders), 0 to 1 of the frame width; 0 when not visible."},
 				"head_w":     obj{"type": "number", "description": "Width of the head alone, as a fraction of the frame width; 0 when not visible."},
 				"shoulder_y": obj{"type": "number", "description": "Top of the shoulders, 0 to 1 of the frame height, below head_top_y; 0 when not visible."},
+				"arms_up":    obj{"type": "boolean", "description": "True only when a hand, an arm or something held is above the top of the head."},
 			},
-			"required":             []string{"frame", "present", "x", "y", "w", "h", "head_top_y", "head_x", "head_w", "shoulder_y"},
+			"required":             []string{"frame", "present", "x", "y", "w", "h", "head_top_y", "head_x", "head_w", "shoulder_y", "arms_up"},
 			"additionalProperties": false,
 		},
 	}
