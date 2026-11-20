@@ -230,6 +230,21 @@ type CaptionsTrack struct {
 	Enabled   bool   `json:"enabled"`
 	Uppercase *bool  `json:"uppercase,omitempty"`
 	MaxWords  *int   `json:"max_words,omitempty"`
+	// Fill is the colour of the caption letters as #RRGGBB (the creator's title colour); empty is the style's own.
+	Fill string `json:"fill,omitempty"`
+	// Accent is the colour of the spoken word (word_highlight) or of the key words (keyword_emphasis) as #RRGGBB; empty is the style's own.
+	Accent string `json:"accent,omitempty"`
+	// Keywords are the words keyword_emphasis draws in the accent colour; without any, the longest word of each chunk.
+	Keywords []string `json:"keywords,omitempty"`
+	// Corrections are the creator's fixes of misheard words. They change the text shown, never the timing.
+	Corrections []CaptionCorrection `json:"corrections,omitempty"`
+}
+
+// CaptionCorrection replaces one word of an asset's transcript: Word counts from 0 in the asset's own list of words.
+type CaptionCorrection struct {
+	AssetID string `json:"asset_id"`
+	Word    int    `json:"word"`
+	Text    string `json:"text"`
 }
 
 // AudioTrack holds the music and sound items.

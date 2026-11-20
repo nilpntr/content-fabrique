@@ -913,6 +913,13 @@ caption style in the renderer's library: the existing small clean style with the
 **Consequences.** A title creator's edits and checks are unchanged. A caption creator's lines may cover the chest. The text read sees
 up to fifteen frames, still under its $0.01 budget.
 
+**Amendment (Captions v2, 2026-11-20).** The burned-in captions follow the same rule: keep off the face (the head and shoulders), not the
+body. Each clip's captions sit in the lower band, or in the upper one when the speaker's face is in the lower
+(`subject.CaptionPlaces`, from the same subject boxes as the text); the `caption_over_face` check fails only when the face is in both
+bands. The captions track also takes the creator's letter colour (`fill`) and case (`uppercase`) from their settings, a `keyword_emphasis`
+look with an `accent` colour, and `corrections`: the creator's fixes of misheard words, which the schema, the op and the compiler all
+refuse when they are not clean text. See [timeline v1 section 5](design/timeline-v1.md).
+
 **Revisit** when a third creator's text fits none of the four patterns.
 
 ## D-39 Local traces and evals in Arize Phoenix

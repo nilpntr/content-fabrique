@@ -54,6 +54,8 @@ type compiler struct {
 	plan   Plan
 	// sfxBoostDB is added to the level of every sound effect (SoundReadyEffectGainDB in a sound-ready edit, otherwise 0).
 	sfxBoostDB float64
+	// corrections are the creator's word fixes of the captions track (the words the transcript got wrong), set while captions are built.
+	corrections map[correctionKey]string
 }
 
 // Compile builds the Plan for rendering spec with profile. It is pure and deterministic: no process is started and

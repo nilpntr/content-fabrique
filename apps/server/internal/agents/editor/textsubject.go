@@ -119,6 +119,60 @@ func (c *checker) textOverSubject() Check {
 	return c.pass(CheckTextOverSubject, "%d texts, none on the person", texts)
 }
 
+// captionsOn says the spec has an enabled captions track.
+func captionsOn(spec *timeline.Spec) bool {
+	for _, t := range spec.Tracks {
+		if ct, ok := t.(*timeline.CaptionsTrack); ok && ct.Enabled {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckCaptionOverFace is the check for captions drawn over the speaker's face (Captions v2).
+const CheckCaptionOverFace = "caption_over_face"
+
+// captionOverFace fails when the captions of a clip cover the speaker's face (the head and shoulders) in the band the renderer puts them
+// in: the renderer moves a clip's captions to the upper band when the lower one is on the face (subject.CaptionPlaces, the same function),
+// so the check fails only when both bands are, and the fix is on the picture, not in the captions. A moved band is a note.
+func (c *checker) captionOverFace() Check {
+	if len(c.in.Subjects) == 0 {
+		return c.skip(CheckCaptionOverFace, "the clips have no subject boxes (the quick look reads them: run cfctl assets quicklook --subjects for older clips)")
+	}
+	var tr *timeline.CaptionsTrack
+	for _, t := range c.in.Spec.Tracks {
+		if ct, ok := t.(*timeline.CaptionsTrack); ok && ct.Enabled {
+			tr = ct
+		}
+	}
+	if tr == nil {
+		return c.skip(CheckCaptionOverFace, "no captions")
+	}
+	st, ok := style.CaptionStyleOf(tr.Style, tr.Fill, tr.Accent)
+	if !ok {
+		return c.skip(CheckCaptionOverFace, "unknown captions style")
+	}
+	var bad, moved []string
+	n := 0
+	for _, p := range subject.CaptionPlaces(c.in.Spec, c.in.Subjects.Lookup, st) {
+		n++
+		switch {
+		case p.OverFace:
+			bad = append(bad, fmt.Sprintf("%s (%d-%d ms)", p.ClipID, p.AtMs, p.EndMs))
+		case p.Moved:
+			moved = append(moved, p.ClipID)
+		}
+	}
+	if len(bad) > 0 {
+		return c.fail(CheckCaptionOverFace, "the captions of %s cover the speaker's face in the lower and in the upper band: the face fills the frame there; reframe the clip (set_reframe: a wider crop or contain) or use another shot",
+			strings.Join(bad[:min(3, len(bad))], ", "))
+	}
+	if len(moved) > 0 {
+		return c.pass(CheckCaptionOverFace, "%d clips, captions in the upper band on %s because the face is in the lower one", n, strings.Join(moved[:min(3, len(moved))], ", "))
+	}
+	return c.pass(CheckCaptionOverFace, "%d clips, the captions are clear of the face", n)
+}
+
 // titleFix is the fix for a hook or chapter title that has no place clear of the person at its own time: what the placement tried, the
 // room it found (in pixels) and what would fit there, in numbers: the longest line of whole words that fits beside the head at the smallest
 // legible scale, a shot where the title fits, and, when the clip's head was not measured on its own, the command that measures it.

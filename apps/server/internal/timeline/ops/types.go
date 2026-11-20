@@ -246,6 +246,12 @@ type SetCaptions struct {
 	Style     string `json:"style,omitempty"`
 	Uppercase *bool  `json:"uppercase,omitempty"`
 	MaxWords  *int   `json:"max_words,omitempty"`
+	// Fill and Accent are #RRGGBB colours; Keywords the words keyword_emphasis colours.
+	Fill     string    `json:"fill,omitempty"`
+	Accent   string    `json:"accent,omitempty"`
+	Keywords *[]string `json:"keywords,omitempty"`
+	// Corrections replaces the whole list of the creator's word fixes; a non-nil empty list clears it.
+	Corrections *[]timeline.CaptionCorrection `json:"corrections,omitempty"`
 }
 
 // SetClipAudio sets whether a clip's own sound plays and how loud. The fields that are set change.
