@@ -2,6 +2,8 @@
 package main
 
 import (
+	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -24,9 +26,24 @@ import (
 )
 
 func main() {
+	fs := flag.NewFlagSet("api", flag.ContinueOnError)
+	// Empty: the port of API_BASE_URL on every interface. On a shared box, bind loopback only (127.0.0.1:8080).
+	listen := fs.String("addr", "", "listen address, such as 127.0.0.1:8080 (empty: the port of API_BASE_URL on every interface)")
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return // usage was already printed
+		}
+		fmt.Fprintln(os.Stderr, "api:", err)
+		os.Exit(2)
+	}
 	err := app.Run(app.Options{
 		Service: telemetry.ServiceAPI,
-		Addr:    func(c config.Config) string { return c.APIListenAddr },
+		Addr: func(c config.Config) string {
+			if *listen != "" {
+				return *listen
+			}
+			return c.APIListenAddr
+		},
 		// app.Run registers the Postgres readiness check. The health endpoints stay unauthenticated; everything under
 		// /v1 sits behind the Clerk middleware and the paywall, except the Svix-signed webhook and the allowlist in
 		// internal/auth/routes.go. A new endpoint goes in the OpenAPI spec first (packages/schemas/openapi.yaml, `task gen:api`) and is paid-only until

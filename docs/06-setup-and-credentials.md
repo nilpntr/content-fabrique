@@ -295,6 +295,35 @@ Live editor tests can run on a shared Linux box instead of a laptop: Postgres an
 9. **Edits.** `cfctl project create ... --assets ...` then `cfctl agent run --agent editor --workspace wks_... --project prj_... --profile dev-cheap --events`. The budget it prints first is the most the run can cost; check `cfctl spend summary` before each run. Renders are in MinIO under `renders.mp4_key`; download them with the AWS CLI image (`amazon/aws-cli`, the digest in `compose.yaml`, `--network host`, the `R2_*` values from `.env` passed as environment variables) and make contact sheets with `ffmpeg -vf fps=2,scale=180:-2,tile=10x5`.
 10. **Stop.** `pkill -TERM -x worker`, then `docker compose -f compose.yaml -f compose.vps.yaml stop`. The data stays in the volumes; `down --volumes` deletes it.
 
+### Running the web UI on the VPS
+
+The whole app (web, api, worker) can run on the same box, so the founder uses the web UI, `/make` included, from the Mac without Docker there. Everything listens on `127.0.0.1` only; the Mac reaches it through an SSH tunnel. First done on 2026-11-20 on `director-evolvix-bot`. `scripts/vps-ui.sh` does all of it.
+
+**Why a tunnel to `localhost`.** The Clerk development instance accepts the origin `http://localhost:3000` only, and the api accepts a session token only when its `azp` is the origin of `APP_BASE_URL` (the same value). So the browser must load the app from `http://localhost:3000`, and the values in `.env` stay the local defaults: `APP_BASE_URL=http://localhost:3000`, `VITE_API_BASE_URL=http://localhost:8080`, `R2_ENDPOINT=http://localhost:9000`. The browser calls three ports: the web app (3000; Vite's hot reload uses the same port), the api (8080) and MinIO (9000, the presigned upload and download URLs). A presigned URL is signed for the host `localhost:9000`; the tunnel does not change the `Host` header, so it stays valid, and MinIO's CORS already allows `APP_BASE_URL`. No public endpoint setting is needed.
+
+1. **A second checkout.** Do not switch the branch of the live-test checkout while someone may be running edits from it; add a worktree next to it instead: `cd ~/content-fabrique-test/content-fabrique && git fetch && git worktree add --detach ~/content-fabrique-test/ui origin/main`, then `cp .env ../ui/.env && chmod 600 ../ui/.env`. It shares Postgres and MinIO with the first checkout, so the two must have the same migrations (`git diff --stat <a> <b> -- apps/server/internal/store/migrations` is empty). To update later: `cd ~/content-fabrique-test/ui && git fetch && git checkout --detach origin/main`, then stop and start.
+2. **Tools.** Go, bun in `~/.bun` (`curl -fsSL https://bun.sh/install | bash` when missing) and Node 20.19+ or 22.12+ (Vite 8 refuses 22.11; the system Node 20.19 works). `workerd`, which runs the web app's server code in `vite dev`, runs on this box as it is (Ubuntu, glibc x86-64); no alternative was needed.
+3. **Start.** `~/content-fabrique-test/ui/scripts/vps-ui.sh start`. It starts Postgres and MinIO with the capped overlay only when they are not already listening (with `--no-recreate` and the compose project `content-fabrique`, so it never restarts the first checkout's containers), builds the api, worker and cfctl into `~/content-fabrique-test/ui-run/bin` (2 CPUs, nice), runs `bun install --frozen-lockfile` and `cfctl migrate up`, and starts three systemd user services, each with a memory and CPU cap and nice 5, logging to `~/content-fabrique-test/ui-run/logs/`:
+
+   | Service | Listens on | Cap | Uses (idle) |
+   |---|---|---|---|
+   | `cf-ui-web` (`vite dev --host 127.0.0.1`, workerd inside) | 127.0.0.1:3000 | 2 GB, 2 CPUs | about 0.8 to 1.1 GB |
+   | `cf-ui-api` (`api -addr 127.0.0.1:8080`) | 127.0.0.1:8080 | 512 MB, 1 CPU | about 20 MB |
+   | `cf-ui-worker` (`worker -health-addr 127.0.0.1:8083`) | 127.0.0.1:8083 | 1 GB, 2 CPUs | about 20 MB |
+
+   The api binds every interface by default (the port of `API_BASE_URL`); `-addr` keeps it on loopback. The worker uses 8083, not 8081, so the live-test worker (`run-worker.sh`) can still start; it has its own `MEDIA_TEMP_DIR` (`ui-run/media-tmp`, because a worker clears leftover job directories in its temp directory at start) and reuses the whisper models in `/tmp/cf-media/whisper-models`. The media sandbox containers it starts are capped by the worker (2 vCPUs and 3 GB each, `MEDIA_CONCURRENCY=1`). Vite's debugger moves to 9230 when another project holds 9229; that is expected.
+4. **Check.** `scripts/vps-ui.sh status` prints each service's memory, both `/readyz` answers and the web app's status (307 to `/sign-in` when signed out). `scripts/vps-ui.sh logs web` (or `api`, `worker`) follows a log. `ss -ltnp` must show 3000, 8080 and 8083 on `127.0.0.1` only.
+5. **From the Mac.** With nothing on the Mac's ports 3000, 8080 and 9000:
+
+   ```bash
+   ssh -N -L 3000:127.0.0.1:3000 -L 8080:127.0.0.1:8080 -L 9000:127.0.0.1:9000 deploy@director-evolvix-bot
+   ```
+
+   then open http://localhost:3000 (Ctrl-C closes the tunnel; the services keep running). Add `-L 9001:127.0.0.1:9001` for MinIO's console.
+6. **Plan.** Sign in once (that creates the person's user and workspace through the api's just-in-time sync; Clerk's webhook cannot reach the box), then on the VPS: `cd ~/content-fabrique-test/ui && ../ui-run/bin/cfctl plan grant --user <email> --plan creator`. Without a plan the app shows the paywall.
+7. **Cost.** `.env` has `LLM_MODE=live`, so an edit started from the UI makes real model calls on the founder's key; `TEST_SPEND_CAP_MICROS` and `cfctl spend summary` apply as in the live tests.
+8. **Stop.** `~/content-fabrique-test/ui/scripts/vps-ui.sh stop` stops the three services and leaves Postgres and MinIO running (the live-test checkout may use them; stop those with step 10 above when nobody does).
+
 ### Rootless Docker and the sandbox
 
 What the media sandbox (`internal/sandbox`, D-08) does on a box with rootless Docker, and what to check. Never change a shared box's Docker setup for this; other projects run on it.

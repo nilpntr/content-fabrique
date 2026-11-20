@@ -59,6 +59,8 @@ type SubjectRead struct {
 	X, Y, W, H, HeadTopY float64
 	// HeadX, HeadW and ShoulderY are the head alone and the shoulder line (quicklook.v3); 0 when the model did not give them.
 	HeadX, HeadW, ShoulderY float64
+	// ArmsUp is whether a hand or an arm is above the head (quicklook.v5); nil when the model did not say.
+	ArmsUp *bool
 }
 
 // subjectIn is one subject entry of the answer, every member a pointer so that a missing one is told from a zero.
@@ -74,6 +76,8 @@ type subjectIn struct {
 	HeadX     *float64 `json:"head_x"`
 	HeadW     *float64 `json:"head_w"`
 	ShoulderY *float64 `json:"shoulder_y"`
+	// arms_up is optional too (quicklook.v5): a missing one is not read.
+	ArmsUp *bool `json:"arms_up"`
 }
 
 // MaxSubjects is the most subject entries read: one per frame, with room.
@@ -251,6 +255,10 @@ func readSubjects(raw json.RawMessage) ([]SubjectRead, error) {
 		}
 		if s.ShoulderY != nil {
 			r.ShoulderY = *s.ShoulderY
+		}
+		if s.ArmsUp != nil {
+			up := *s.ArmsUp
+			r.ArmsUp = &up
 		}
 		subjects = append(subjects, r)
 	}
