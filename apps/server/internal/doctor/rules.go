@@ -29,6 +29,9 @@ var allowedEmpty = map[string]bool{
 	"WHISPER_MODELS_DIR":           true,
 	// Only the local provider reads it (a chrome-headless-shell on the host for the motion graphics, D-35).
 	"CF_MOTION_CHROME": true,
+	// The docker CLI's own settings; empty is its default daemon and context. Set only to pin the daemon the media sandbox uses.
+	"DOCKER_HOST":    true,
+	"DOCKER_CONTEXT": true,
 	// Empty is metadata-only spans, the default everywhere; `task dev:obs` sets it to 1 for its own processes (D-39).
 	"OTEL_TRACE_CONTENT": true,
 }
