@@ -267,7 +267,7 @@ func (c *compiler) handheldLimit(cl clip, strength, punch float64) (s, base, p f
 		return s, base, p
 	}
 	out := c.spec.Output
-	rf := subject.WithFocus(cl.item.Reframe, tr, cl.item.Source.InMs, cl.item.Source.OutMs, out)
+	rf := subject.WithFocus(cl.item.Reframe, tr, cl.item.Source, out)
 	w, hgt := float64(out.Width), float64(out.Height)
 	src := cl.item.Source
 	maxZ := math.Inf(1)

@@ -191,7 +191,7 @@ func (c *compiler) clipGraph(cl clip) ([]string, error) {
 	)
 
 	// A cover that leaves the focus out is centred on the subject when the quick look found one (subject.WithFocus).
-	reframe := subject.WithFocus(it.Reframe, cl.asset.Subject, it.Source.InMs, it.Source.OutMs, c.spec.Output)
+	reframe := subject.WithFocus(it.Reframe, cl.asset.Subject, it.Source, c.spec.Output)
 	look := timeline.LookNone
 	if it.Look != nil && it.Look.Preset != "" {
 		look = it.Look.Preset
