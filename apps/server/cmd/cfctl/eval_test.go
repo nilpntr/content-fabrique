@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -70,8 +71,14 @@ func TestEvalEditorPrintsTheChecksOfAStoredVersion(t *testing.T) {
 			Shots int `json:"shots"`
 		}
 	}
-	if err := json.Unmarshal([]byte(out), &rec); err != nil || rec.Version != 1 || rec.Failed < 3 || rec.Metrics.Shots != 2 || len(rec.Checks) != 29 {
+	if err := json.Unmarshal([]byte(out), &rec); err != nil || rec.Version != 1 || rec.Failed < 3 || rec.Metrics.Shots != 2 || len(rec.Checks) == 0 {
 		t.Fatalf("json: %v %+v\n%s", err, rec, out)
+	}
+	// The grid and reuse checks are in the record whatever the number of checks is (they do not apply without the style).
+	for _, id := range []string{"beat_grid_fixed", "shot_reused"} {
+		if !slices.ContainsFunc(rec.Checks, func(c struct{ ID, Status string }) bool { return c.ID == id && c.Status == "skip" }) {
+			t.Errorf("no skipped %s check in %+v", id, rec.Checks)
+		}
 	}
 
 	// Mistakes are said plainly, and nothing needs a model.

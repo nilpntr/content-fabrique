@@ -1,10 +1,15 @@
-# Playbook: workout and fitness (workout.v8)
+# Playbook: workout and fitness (workout.v9)
 
 You chose this playbook because the footage is training: lifts, sets, a pose, a transformation. Target 15 to 35 seconds.
 
 **The format.** The format you chose in plan_edit (from list_formats) sets the structure: its hook, its middle, its payoff and its text pattern, timed against the song's drop. This playbook is the craft of the genre inside that structure. Where they differ on structure (how long the hook runs, where the payoff lands, which text the video has), the format wins; on craft (the cuts, the rhythm, the movement, the sound), this playbook does. The creator's style and settings still decide the look.
 
 **Hook (0 to the drop).** The most striking frame first: a peak flex, the heaviest lockout, the best rep, the back pose. With a song the hook runs until its drop (2 to 4.5 s in) and the first cut lands on the drop, a plain cut on the hit with a punch-in on it: the reveal. Without one the first shot is 1 to 2 seconds long. A big title (in the creator's style when there is one; else title_bold or title_outline, 2 to 4 words{{if .Has "op:add_graphic"}}; at lively or hype a title_pop whose words land on the first beats{{end}}) pops in by 0.5 s, in the top band above the head, and leaves before the drop. It stays in the hook: when the head is high, a short title stacks beside it, so keep its words few and short. Nothing sits still before the drop: the hook shot has the living camera or a punch_in on the first beat.
+
+**When the creator's settings say otherwise.** The settings list in the prompt wins over this playbook, and this is the one place where it does. Where a setting below is on, the lines it names in Rhythm, Energy and Ending do not apply:
+- Camera motion off: no living camera, no punch-in, no push, no speed ramp and no motion on the hook or the ending; the cuts on the beat are the energy. Transitions off: every cut is hard. Text animation off: every text just appears.
+- Cut grid fixed_2: every shot is 2 beats, every cut sits on an even beat (counted from the first shot), the last shot is 4 beats and the total is a multiple of 4; a shorter video is better than a broken rhythm. Equal shot lengths in a row are the rhythm: ignore "vary the length", "never more than two shots of the same length in a row", "the cuts speed up" and the pace targets for shot length.
+- Shot reuse once: every moment of the footage is used once. No source range twice, and a tripod clip (static camera) gives one shot. Ignore "loop back to the same frame the video opened on", which shows a moment twice; end on a different, quiet shot.
 
 **Rhythm.**
 - Every cut sits on the beat grid (the tempo in your plan; 120 to 128 BPM when no sound is chosen).

@@ -100,6 +100,12 @@ func SettingsOf(in api.StyleSettings) styleprofile.Settings {
 	if in.TextPosition != nil {
 		s.TextPosition = string(*in.TextPosition)
 	}
+	if in.CutGrid != nil {
+		s.CutGrid = string(*in.CutGrid)
+	}
+	if in.ShotReuse != nil {
+		s.ShotReuse = string(*in.ShotReuse)
+	}
 	return s
 }
 
@@ -152,6 +158,12 @@ func apiSettings(s styleprofile.Settings) api.StyleSettings {
 	}
 	if s.TextPosition != "" {
 		out.TextPosition = ptr(api.StyleTextPosition(s.TextPosition))
+	}
+	if s.CutGrid != "" {
+		out.CutGrid = ptr(api.StyleCutGrid(s.CutGrid))
+	}
+	if s.ShotReuse != "" {
+		out.ShotReuse = ptr(api.StyleShotReuse(s.ShotReuse))
 	}
 	return out
 }
