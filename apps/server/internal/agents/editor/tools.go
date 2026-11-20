@@ -29,6 +29,7 @@ import (
 
 	"github.com/nilpntr/content-fabrique/internal/agents/llm"
 	"github.com/nilpntr/content-fabrique/internal/agents/runtime"
+	"github.com/nilpntr/content-fabrique/internal/hooklab"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/projects"
 	"github.com/nilpntr/content-fabrique/internal/store"
@@ -82,6 +83,10 @@ type Deps struct {
 	Rendered RenderSampler
 	// Comments is where the creator's open comments come from (and where the end of a run reports to); nil means a run has none.
 	Comments CommentSource
+
+	// HookPlaybook is the research playbook the hook lab takes its "what works" weights from (docs/design/hook-lab.md); nil means none,
+	// and the lab's default weights apply.
+	HookPlaybook hooklab.Playbook
 
 	// Features is what the build offers (looks, sound effects, ...), which the plan is checked against; nil means the features of the
 	// embedded op schema (AvailableFeatures). Tests of the gating set it.
