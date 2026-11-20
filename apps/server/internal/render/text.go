@@ -40,16 +40,7 @@ func (c *compiler) subtitles() (*Subtitles, error) {
 	b := newBuilder(c.spec.Output.Width, c.spec.Output.Height, c.fps, c.total)
 	out := c.spec.Output
 	// The subject of each asset the clips play, for keeping titles off the head.
-	subjects := subject.Index{}
-	for _, cl := range c.clips {
-		if cl.asset.Subject != nil {
-			subjects[cl.item.AssetID] = *cl.asset.Subject
-		}
-	}
-	var lookup subject.Lookup
-	if len(subjects) > 0 {
-		lookup = subjects.Lookup
-	}
+	lookup := c.subjectLookup()
 	for _, t := range c.spec.Tracks {
 		switch tr := t.(type) {
 		case *timeline.TextTrack:
@@ -446,4 +437,24 @@ func chunks(words []mappedWord, maxWords, fps int) [][]mappedWord {
 // endsSentence reports whether a word ends with sentence punctuation.
 func endsSentence(w string) bool {
 	return strings.HasSuffix(w, ".") || strings.HasSuffix(w, "!") || strings.HasSuffix(w, "?") || strings.HasSuffix(w, "…")
+}
+
+// subjectLookup is the subject of every asset on screen, the clips' and the cutaways' (a cutaway covers the clip under it, and
+// subject.Regions reads its asset there), or nil when no asset has one.
+func (c *compiler) subjectLookup() subject.Lookup {
+	subjects := subject.Index{}
+	for _, cl := range c.clips {
+		if cl.asset.Subject != nil {
+			subjects[cl.item.AssetID] = *cl.asset.Subject
+		}
+	}
+	for _, cw := range c.cutaways {
+		if cw.asset.Subject != nil {
+			subjects[cw.item.AssetID] = *cw.asset.Subject
+		}
+	}
+	if len(subjects) == 0 {
+		return nil
+	}
+	return subjects.Lookup
 }

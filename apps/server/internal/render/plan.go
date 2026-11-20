@@ -68,7 +68,7 @@ type Size struct {
 // Input is one ffmpeg input: a window of an asset.
 type Input struct {
 	Index   int    `json:"index"`
-	Role    string `json:"role"` // RoleClip or RoleAudio
+	Role    string `json:"role"` // RoleClip, RoleAudio or RoleBroll
 	ItemID  string `json:"item_id"`
 	AssetID string `json:"asset_id"`
 	// Location is what the resolver returned: an absolute local path.
@@ -110,7 +110,13 @@ type TimeMapEntry struct {
 	SourceInMs *int64                `json:"source_in_ms,omitempty"`
 	Speed      *float64              `json:"speed,omitempty"`
 	SpeedRamp  []timeline.SpeedPoint `json:"speed_ramp,omitempty"`
+	// Track is "broll" for a cutaway (broll.go), which carries its asset, source in point and speed 1 like a main item and is on screen
+	// over the main item that owns the same time. Empty for every other entry, so a main entry is one with a source and no track.
+	Track string `json:"track,omitempty"`
 }
+
+// IsMain reports whether the entry is a main-track item's: a source and no track. Every output time is inside exactly one.
+func (e TimeMapEntry) IsMain() bool { return e.Track == "" && e.SourceInMs != nil }
 
 // SourceAtMs is the time inside the item's asset that is on screen at output time outMs (milliseconds on the timeline):
 // source_in_ms + (outMs - out_start_ms) * speed, or along the speed ramp. The result is a float, so a caller can round it
@@ -248,7 +254,7 @@ func (p Plan) TimeMapJSON() ([]byte, error) {
 // source_in_ms + (t - out_start_ms) * speed. It returns false for a time outside the output.
 func (p Plan) SourceTimeMs(outMs int64) (entry TimeMapEntry, sourceMs int64, ok bool) {
 	for _, e := range p.TimeMap {
-		if e.SourceInMs == nil || e.Speed == nil {
+		if !e.IsMain() || e.Speed == nil {
 			continue
 		}
 		if outMs >= e.OutStartMs && outMs < e.OutEndMs {

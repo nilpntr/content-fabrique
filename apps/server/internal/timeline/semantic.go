@@ -44,6 +44,7 @@ func checkSemantics(spec *Spec, assets AssetCatalog) []Issue {
 	c.checkText()
 	c.checkCaptions()
 	c.checkGraphics()
+	c.checkBroll()
 	c.checkAudio()
 	c.checkMarkers()
 	return c.issues
@@ -89,6 +90,10 @@ func (c *checker) checkDuplicateIDs() {
 				use(it.ID, fmt.Sprintf("%s/items/%d", tp, i))
 			}
 		case *GraphicsTrack:
+			for i, it := range t.Items {
+				use(it.ID, fmt.Sprintf("%s/items/%d", tp, i))
+			}
+		case *BrollTrack:
 			for i, it := range t.Items {
 				use(it.ID, fmt.Sprintf("%s/items/%d", tp, i))
 			}

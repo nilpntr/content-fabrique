@@ -40,7 +40,8 @@ func Load(ctx context.Context, st Reader, ws ids.WorkspaceID, assets []ids.Asset
 	return ix, nil
 }
 
-// LoadForSpec reads the subject tracks of the assets the main track of a spec plays.
+// LoadForSpec reads the subject tracks of the assets the main track of a spec plays, and of its cutaways (they cover the clips under
+// them, see Regions).
 func LoadForSpec(ctx context.Context, st Reader, ws ids.WorkspaceID, spec *timeline.Spec) (Index, error) {
 	main, _, ok := timeline.MainTrack(spec)
 	if !ok {
@@ -48,11 +49,17 @@ func LoadForSpec(ctx context.Context, st Reader, ws ids.WorkspaceID, spec *timel
 	}
 	seen := map[string]bool{}
 	var list []ids.AssetID
-	for _, it := range main.Items {
-		if aid, err := ids.ParseAssetID(it.AssetID); err == nil && !seen[it.AssetID] {
-			seen[it.AssetID] = true
+	use := func(assetID string) {
+		if aid, err := ids.ParseAssetID(assetID); err == nil && !seen[assetID] {
+			seen[assetID] = true
 			list = append(list, aid)
 		}
+	}
+	for _, it := range main.Items {
+		use(it.AssetID)
+	}
+	for _, b := range timeline.Cutaways(spec) {
+		use(b.AssetID)
 	}
 	return Load(ctx, st, ws, list)
 }

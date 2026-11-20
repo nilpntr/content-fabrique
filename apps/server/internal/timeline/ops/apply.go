@@ -140,6 +140,10 @@ func (a *applier) scanIDs() {
 			for i := range t.Items {
 				a.register(t.Items[i].ID, kindGraphic)
 			}
+		case *timeline.BrollTrack:
+			for i := range t.Items {
+				a.register(t.Items[i].ID, kindCutaway)
+			}
 		case *timeline.AudioTrack:
 			for _, it := range t.Items {
 				a.register(it.Common().ID, kindSound)
@@ -154,6 +158,9 @@ const (
 	kindText  = "text"
 	kindSound = "sound"
 	kindTrack = "track"
+	// kindCutaway is an item of the b-roll track. No op takes one yet (docs/design/broll-cutaways.md, slice 2); its id is taken all
+	// the same, and an op that names it gets wrong_item_kind.
+	kindCutaway = "cutaway"
 )
 
 // register records that id is in use for something of the kind.
@@ -438,6 +445,8 @@ func (a *applier) hintFor(got, want string) string {
 		return "use update_graphic (at_ms, duration_ms, place, template and params) or remove_graphic for graphics items"
 	case "clip":
 		return "clips are on the main track and have ops of their own (trim_item, set_speed, ...)"
+	case kindCutaway:
+		return "no op changes a b-roll cutaway yet"
 	}
 	return fmt.Sprintf("an op for a %s needs the id of a %s", want, want)
 }
@@ -545,6 +554,10 @@ func (a *applier) attribute(spec *timeline.Spec, path string) int {
 				id = t.Items[ii].ID
 			}
 		case *timeline.GraphicsTrack:
+			if ii < len(t.Items) {
+				id = t.Items[ii].ID
+			}
+		case *timeline.BrollTrack:
 			if ii < len(t.Items) {
 				id = t.Items[ii].ID
 			}

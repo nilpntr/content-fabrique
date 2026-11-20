@@ -3,7 +3,7 @@
   "$id": "https://contentfabrique.app/schemas/timeline/v1.json",
   "title": "Timeline",
   "description": "A Content Fabrique edit: the declarative timeline (an EDL in JSON) that agents and users change through edit ops and that the Go compiler turns into one ffmpeg invocation. Every time is an integer number of milliseconds.",
-  "$comment": "Structure only. The Go layer (apps/server/internal/timeline, docs/design/timeline-v1.md section 3) checks what a schema cannot: unique ids across the spec (duplicate_id), contiguity of the main track including the first item starting at 0 (gap, overlap), source ranges inside the asset, for video and audio, with in < out (source_out_of_range), output duration of an item >= 300 ms (shot_too_short), total duration 1 s to 180 s (duration_out_of_range), every text item, audio item and marker inside the total duration (outside_timeline), text inside the format safe zone (unsafe_text), asset ids that exist in the catalog (unknown_asset), transitions shorter than both items they join (transition_too_long), audio assets that are licensed or attested (unlicensed_audio), fades that fit the sound (fade_too_long), assets of the right kind (wrong_asset_kind), no transition on the first clip in time (first_transition) text styles that exist in the style registry (unknown_style), motion presets on clips of at least 400 ms with an at_ms inside the clip (invalid_motion), and speed ramps that are sorted, inside the source range and not combined with speed (invalid_speed_ramp; a ramp with use_source also raises the warning ramp_audio_muted). The schema is closed: no property is allowed outside the ones listed, at any level.",
+  "$comment": "Structure only. The Go layer (apps/server/internal/timeline, docs/design/timeline-v1.md section 3) checks what a schema cannot: unique ids across the spec (duplicate_id), contiguity of the main track including the first item starting at 0 (gap, overlap), source ranges inside the asset, for video and audio, with in < out (source_out_of_range), output duration of an item >= 300 ms (shot_too_short), total duration 1 s to 180 s (duration_out_of_range), every text item, audio item and marker inside the total duration (outside_timeline), text inside the format safe zone (unsafe_text), asset ids that exist in the catalog (unknown_asset), transitions shorter than both items they join (transition_too_long), audio assets that are licensed or attested (unlicensed_audio), fades that fit the sound (fade_too_long), assets of the right kind (wrong_asset_kind), no transition on the first clip in time (first_transition) text styles that exist in the style registry (unknown_style), motion presets on clips of at least 400 ms with an at_ms inside the clip (invalid_motion), and speed ramps that are sorted, inside the source range and not combined with speed (invalid_speed_ramp; a ramp with use_source also raises the warning ramp_audio_muted). On the b-roll track: cutaways inside the total duration (outside_timeline), source ranges inside a video asset (source_out_of_range, unknown_asset, wrong_asset_kind), at least 300 ms in frames (shot_too_short), no two sharing a frame (overlap), no source range used twice for the same asset across main and broll (source_reused), at most 12 (too_many_cutaways), and the warning cutaway_over_silence for one with no main clip in audio mode full under it. The schema is closed: no property is allowed outside the ones listed, at any level.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "output", "tracks", "markers"],
@@ -17,7 +17,7 @@
     "tracks": {
       "type": "array",
       "title": "Tracks",
-      "description": "Exactly one video track (its id is \"main\"), at most one text track, at most one captions track, at most one audio track and at most one graphics track, in any order.",
+      "description": "Exactly one video track (its id is \"main\"), at most one b-roll track (its id is \"broll\"), at most one text track, at most one captions track, at most one audio track and at most one graphics track, in any order.",
       "items": { "$ref": "#/$defs/track" },
       "allOf": [
         {
@@ -42,6 +42,11 @@
         },
         {
           "contains": { "type": "object", "properties": { "type": { "const": "graphics" } }, "required": ["type"] },
+          "minContains": 0,
+          "maxContains": 1
+        },
+        {
+          "contains": { "type": "object", "properties": { "type": { "const": "broll" } }, "required": ["type"] },
           "minContains": 0,
           "maxContains": 1
         }
@@ -183,9 +188,10 @@
 
     "track": {
       "title": "Track",
-      "description": "A track, told apart by its \"type\": video, text, captions, audio or graphics.",
+      "description": "A track, told apart by its \"type\": video, broll, text, captions, audio or graphics.",
       "oneOf": [
         { "$ref": "#/$defs/videoTrack" },
+        { "$ref": "#/$defs/brollTrack" },
         { "$ref": "#/$defs/textTrack" },
         { "$ref": "#/$defs/captionsTrack" },
         { "$ref": "#/$defs/audioTrack" },
@@ -270,6 +276,60 @@
           "maxLength": 280,
           "title": "Why",
           "description": "Why the editor picked this clip, 280 characters at most. Shown to the creator in the UI and never rendered."
+        }
+      }
+    },
+
+    "brollTrack": {
+      "type": "object",
+      "title": "B-roll track",
+      "description": "Cutaways: full-frame pictures from other footage shown over the main track while its sound keeps playing (docs/design/broll-cutaways.md). At most one b-roll track, and its id is \"broll\". The main track stays the only video track: the picture of a cutaway covers the clip under it, the audio, the captions and the timing of the edit still come from main.",
+      "additionalProperties": false,
+      "required": ["id", "type", "items"],
+      "properties": {
+        "id": { "const": "broll", "title": "Track id", "description": "Always \"broll\" for the b-roll track." },
+        "type": { "const": "broll", "title": "Track type", "description": "\"broll\"." },
+        "items": {
+          "type": "array",
+          "title": "Cutaways",
+          "description": "The cutaways, at most 12 (checked by the Go layer, too_many_cutaways). Two cutaways never share a frame, and each sits inside the total duration.",
+          "items": { "$ref": "#/$defs/brollItem" }
+        }
+      }
+    },
+
+    "brollItem": {
+      "type": "object",
+      "title": "Cutaway",
+      "description": "A part of another video asset shown full frame over the main track, from at_ms for as long as its source range (out_ms - in_ms), at normal speed. It cuts in and out: it has no transition, no speed, no motion and no sound of its own (the main track's sound plays under it). Its source range may not overlap the range of any other item of the same asset (source_reused).",
+      "additionalProperties": false,
+      "required": ["id", "asset_id", "source", "at_ms"],
+      "properties": {
+        "id": { "$ref": "#/$defs/itemId" },
+        "asset_id": { "$ref": "#/$defs/assetId" },
+        "source": {
+          "type": "object",
+          "title": "Source range",
+          "description": "The part of the asset to show, in the asset's own time. in_ms must be below out_ms and out_ms within the asset's duration (checked by the Go layer). The cutaway is on screen for out_ms - in_ms, at least 300 ms.",
+          "additionalProperties": false,
+          "required": ["in_ms", "out_ms"],
+          "properties": {
+            "in_ms": { "$ref": "#/$defs/ms", "title": "In point", "description": "Where the cutaway starts in the asset, in ms." },
+            "out_ms": { "$ref": "#/$defs/ms", "title": "Out point", "description": "Where the cutaway ends in the asset, in ms. Exclusive." }
+          }
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms",
+          "title": "Start on the timeline",
+          "description": "When the cutaway comes on screen, in ms of the output."
+        },
+        "reframe": { "$ref": "#/$defs/reframe" },
+        "look": { "$ref": "#/$defs/look" },
+        "why": {
+          "type": "string",
+          "maxLength": 280,
+          "title": "Why",
+          "description": "Why the editor picked this cutaway, 280 characters at most. Shown to the creator in the UI and never rendered."
         }
       }
     },

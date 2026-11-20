@@ -188,6 +188,43 @@ describe("look and sound effect fixtures (P3-10 part B)", () => {
   });
 });
 
+describe("b-roll fixtures (docs/design/broll-cutaways.md, slice 1)", () => {
+  const listed = readFileSync(join(fixtures, "render-broll.txt"), "utf8").split("\n").filter(Boolean);
+  const specs = listed.map((f) => readJson(join(fixtures, "valid", f)));
+  const broll = (s: Json) => s.tracks.find((t: Json) => t.type === "broll");
+
+  it("has a valid fixture per format, each with cutaways over speech and main as the only video track", () => {
+    expect(new Set(specs.map((s) => s.output.format))).toEqual(new Set(["9:16", "1:1", "4:5", "16:9"]));
+    for (const s of specs) {
+      expect(broll(s).id).toBe("broll");
+      expect(broll(s).items.length).toBeGreaterThan(0);
+      expect(s.tracks.filter((t: Json) => t.type === "video").length).toBe(1);
+      for (const c of s.tracks.find((t: Json) => t.type === "video").items) expect(c.audio?.mode).toBe("full");
+    }
+  });
+
+  it("refuses a cutaway with a clip's own fields, a second b-roll track and another id", () => {
+    for (const [field, value] of Object.entries({
+      audio: { mode: "full" },
+      speed: 2,
+      speed_ramp: [{ at_ms: 0, speed: 1 }, { at_ms: 500, speed: 2 }],
+      motion: { preset: "push_in" },
+      transition_in: { type: "cut" },
+      exposure_ev: 0.3,
+    })) {
+      const s = structuredClone(specs[0]);
+      broll(s).items[0][field] = value;
+      expect(validate(s), field).toBe(false);
+    }
+    const two = structuredClone(specs[0]);
+    two.tracks.push({ id: "broll", type: "broll", items: [] });
+    expect(validate(two)).toBe(false);
+    const renamed = structuredClone(specs[0]);
+    broll(renamed).id = "cutaways";
+    expect(validate(renamed)).toBe(false);
+  });
+});
+
 describe("the schema", () => {
   const base = () => structuredClone(readJson(join(fixtures, "valid", "v30_full_edit.json")));
   const main = (s: Json) => s.tracks.find((t: Json) => t.type === "video");

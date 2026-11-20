@@ -47,9 +47,11 @@ type compiler struct {
 	w, h    int
 	fps     int
 	clips   []clip
-	total   int64
-	totalMs int64
-	// inputs are the ffmpeg inputs: one per clip, then one per audio track item.
+	// cutaways are the b-roll items in time order (broll.go).
+	cutaways []cutaway
+	total    int64
+	totalMs  int64
+	// inputs are the ffmpeg inputs: one per clip, then one per audio track item, then one per cutaway.
 	inputs []Input
 	plan   Plan
 	// sfxBoostDB is added to the level of every sound effect (SoundReadyEffectGainDB in a sound-ready edit, otherwise 0).
@@ -81,6 +83,9 @@ func Compile(spec *timeline.Spec, profile Profile, resolver AssetResolver) (Plan
 	if err := c.layout(resolver); err != nil {
 		return Plan{}, err
 	}
+	if err := c.layoutCutaways(resolver); err != nil {
+		return Plan{}, err
+	}
 
 	// The graphics track (D-35): motion-graphics overlays, or their ASS fallback as text items (graphics.go).
 	if err := c.graphics(); err != nil {
@@ -100,6 +105,8 @@ func Compile(spec *timeline.Spec, profile Profile, resolver AssetResolver) (Plan
 	if err != nil {
 		return Plan{}, err
 	}
+	// The cutaways' inputs come after the audio inputs, so the audio graph is the same with and without them (broll.go).
+	c.cutawayInputs()
 	video, err := c.videoGraph(subs)
 	if err != nil {
 		return Plan{}, err
@@ -316,7 +323,11 @@ func (c *compiler) inputArgs(only []int) []string {
 		if in.SeekMs > 0 {
 			args = append(args, "-ss", secs(in.SeekMs))
 		}
-		args = append(args, "-t", secs(in.DurationMs), "-i", in.Location)
+		args = append(args, "-t", secs(in.DurationMs))
+		if in.Role == RoleBroll {
+			args = append(args, "-an") // a cutaway is a picture: its sound is never read
+		}
+		args = append(args, "-i", in.Location)
 	}
 	return args
 }
@@ -353,6 +364,7 @@ func (c *compiler) collectMaps() {
 			SpeedRamp:  slices.Clone(cl.item.SpeedRamp),
 		})
 	}
+	p.TimeMap = append(p.TimeMap, c.cutawayTimeMap()...)
 
 	for _, t := range c.spec.Tracks {
 		tr, ok := t.(*timeline.TextTrack)

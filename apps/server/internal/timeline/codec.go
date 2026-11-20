@@ -160,6 +160,12 @@ func decodeTrack(raw json.RawMessage) (Track, error) {
 			return nil, err
 		}
 		return t, nil
+	case TrackBroll:
+		t := &BrollTrack{ID: a.ID}
+		if err := decodeItems(a.Items, &t.Items); err != nil {
+			return nil, err
+		}
+		return t, nil
 	case TrackGraphics:
 		t := &GraphicsTrack{ID: a.ID}
 		if err := decodeItems(a.Items, &t.Items); err != nil {

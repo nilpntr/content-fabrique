@@ -57,16 +57,16 @@ export type FrameRate = 24 | 25 | 30 | 60;
  */
 export type Background = string;
 /**
- * Exactly one video track (its id is "main"), at most one text track, at most one captions track, at most one audio track and at most one graphics track, in any order.
+ * Exactly one video track (its id is "main"), at most one b-roll track (its id is "broll"), at most one text track, at most one captions track, at most one audio track and at most one graphics track, in any order.
  */
 export type Tracks = Track[];
 /**
- * A track, told apart by its "type": video, text, captions, audio or graphics.
+ * A track, told apart by its "type": video, broll, text, captions, audio or graphics.
  *
  * This interface was referenced by `Timeline`'s JSON-Schema
  * via the `definition` "track".
  */
-export type Track = VideoTrack | TextTrack | CaptionsTrack | AudioTrack | GraphicsTrack;
+export type Track = VideoTrack | BRollTrack | TextTrack | CaptionsTrack | AudioTrack | GraphicsTrack;
 /**
  * Always "main" for the video track.
  */
@@ -788,13 +788,41 @@ export type Why = string;
  */
 export type Clips = VideoClip[];
 /**
+ * Always "broll" for the b-roll track.
+ */
+export type TrackId1 = "broll";
+/**
+ * "broll".
+ */
+export type TrackType1 = "broll";
+/**
+ * Where the cutaway starts in the asset, in ms.
+ */
+export type InPoint1 = number;
+/**
+ * Where the cutaway ends in the asset, in ms. Exclusive.
+ */
+export type OutPoint1 = number;
+/**
+ * When the cutaway comes on screen, in ms of the output.
+ */
+export type StartOnTheTimeline1 = number;
+/**
+ * Why the editor picked this cutaway, 280 characters at most. Shown to the creator in the UI and never rendered.
+ */
+export type Why1 = string;
+/**
+ * The cutaways, at most 12 (checked by the Go layer, too_many_cutaways). Two cutaways never share a frame, and each sits inside the total duration.
+ */
+export type Cutaways = Cutaway[];
+/**
  * A lowercase id of 1 to 32 characters: a letter, then letters, digits or underscores, such as "c1" or "t3". Ids are unique across the whole spec. The edit ops name items by these ids.
  */
 export type ItemId1 = string;
 /**
  * "text".
  */
-export type TrackType1 = "text";
+export type TrackType2 = "text";
 /**
  * A piece of text shown for a while. Give it exactly one of anchor or position.
  *
@@ -883,7 +911,7 @@ export type ItemId2 = string;
 /**
  * "captions".
  */
-export type TrackType2 = "captions";
+export type TrackType3 = "captions";
 /**
  * "transcript": the words come from the transcript of the clips' audio.
  */
@@ -973,7 +1001,7 @@ export type ItemId3 = string;
 /**
  * "audio".
  */
-export type TrackType3 = "audio";
+export type TrackType4 = "audio";
 /**
  * A sound in the mix, told apart by its "kind": trend_sound (cue-only, never reproduced by us), licensed_track (from the licensed library), creator_audio (the creator's own upload) or sfx (a sound effect the renderer synthesises: no asset, always in the export).
  *
@@ -1120,7 +1148,7 @@ export type ItemId4 = string;
 /**
  * "graphics".
  */
-export type TrackType4 = "graphics";
+export type TrackType5 = "graphics";
 /**
  * A motion-graphics overlay: a template from the library with its params, rendered as animated frames over the video (an animated title, a chapter card, a counter, a label). Give it exactly one of anchor or position. Its box is laid out like a text item's and kept inside the safe zone and off the subject.
  *
@@ -1592,6 +1620,39 @@ export interface ClipAudio {
   gain_db?: Gain;
 }
 /**
+ * Cutaways: full-frame pictures from other footage shown over the main track while its sound keeps playing (docs/design/broll-cutaways.md). At most one b-roll track, and its id is "broll". The main track stays the only video track: the picture of a cutaway covers the clip under it, the audio, the captions and the timing of the edit still come from main.
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "brollTrack".
+ */
+export interface BRollTrack {
+  id: TrackId1;
+  type: TrackType1;
+  items: Cutaways;
+}
+/**
+ * A part of another video asset shown full frame over the main track, from at_ms for as long as its source range (out_ms - in_ms), at normal speed. It cuts in and out: it has no transition, no speed, no motion and no sound of its own (the main track's sound plays under it). Its source range may not overlap the range of any other item of the same asset (source_reused).
+ *
+ * This interface was referenced by `Timeline`'s JSON-Schema
+ * via the `definition` "brollItem".
+ */
+export interface Cutaway {
+  id: ItemId;
+  asset_id: AssetId;
+  source: SourceRange1;
+  at_ms: StartOnTheTimeline1;
+  reframe?: Reframe;
+  look?: Look;
+  why?: Why1;
+}
+/**
+ * The part of the asset to show, in the asset's own time. in_ms must be below out_ms and out_ms within the asset's duration (checked by the Go layer). The cutaway is on screen for out_ms - in_ms, at least 300 ms.
+ */
+export interface SourceRange1 {
+  in_ms: InPoint1;
+  out_ms: OutPoint1;
+}
+/**
  * Titles and captions that are written by hand. They are rendered as styled, animated text. At most one text track.
  *
  * This interface was referenced by `Timeline`'s JSON-Schema
@@ -1599,7 +1660,7 @@ export interface ClipAudio {
  */
 export interface TextTrack {
   id: ItemId1;
-  type: TrackType1;
+  type: TrackType2;
   items: TextItems;
 }
 export interface TextItem2 {
@@ -1634,7 +1695,7 @@ export interface Position {
  */
 export interface CaptionsTrack {
   id: ItemId2;
-  type: TrackType2;
+  type: TrackType3;
   from: Source;
   style: Style;
   enabled: Enabled;
@@ -1653,7 +1714,7 @@ export interface CaptionsTrack {
  */
 export interface AudioTrack {
   id: ItemId3;
-  type: TrackType3;
+  type: TrackType4;
   items: AudioItems;
 }
 /**
@@ -1728,7 +1789,7 @@ export interface SfxSound {
  */
 export interface GraphicsTrack {
   id: ItemId4;
-  type: TrackType4;
+  type: TrackType5;
   items: GraphicsItems;
 }
 export interface GraphicsItem2 {

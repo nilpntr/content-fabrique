@@ -111,16 +111,7 @@ func (c *compiler) graphics() error {
 			return fmt.Errorf("%w: graphics item %s: %s: %w", ErrInvalidSpec, it.ID, field, err)
 		}
 	}
-	subjects := subject.Index{}
-	for _, cl := range c.clips {
-		if cl.asset.Subject != nil {
-			subjects[cl.item.AssetID] = *cl.asset.Subject
-		}
-	}
-	var lookup subject.Lookup
-	if len(subjects) > 0 {
-		lookup = subjects.Lookup
-	}
+	lookup := c.subjectLookup()
 	laid, err := motion.Layout(c.spec, lookup, c.totalMs)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidSpec, err)

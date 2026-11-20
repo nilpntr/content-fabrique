@@ -78,7 +78,7 @@ func PlanTiles(plan render.Plan) ([]SheetTile, error) {
 	}
 	var main []render.TimeMapEntry
 	for _, e := range plan.TimeMap {
-		if e.SourceInMs != nil {
+		if e.IsMain() { // a cutaway is not a shot of its own here (its tile is slice 2 of docs/design/broll-cutaways.md)
 			main = append(main, e)
 		}
 	}

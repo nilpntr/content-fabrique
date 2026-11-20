@@ -73,6 +73,14 @@ const (
 	// outside the item or out of order, a highlighted word that is not one of the text's words, a chapter card without a number, a
 	// counter without its values (D-35).
 	CodeInvalidGraphic Code = "invalid_graphic"
+	// CodeSourceReused is a cutaway whose source range overlaps the range of another item (on main or broll) of the same asset: a
+	// shot is shown once. Only cutaways raise it; main clips may still share footage (docs/design/broll-cutaways.md, flag 4).
+	CodeSourceReused Code = "source_reused"
+	// CodeTooManyCutaways is a b-roll track with more than MaxCutaways items.
+	CodeTooManyCutaways Code = "too_many_cutaways"
+	// CodeCutawayOverSilence is a warning: a cutaway with no main clip in audio mode full under it. A cutaway covers the speaker while
+	// the speech goes on; with no speech under it, it is a clip that belongs on main.
+	CodeCutawayOverSilence Code = "cutaway_over_silence"
 	// CodeRampAudioMuted is a warning: a clip with a speed ramp and use_source on. Its own audio cannot follow the ramp and
 	// is left out of the mix (P3-10).
 	CodeRampAudioMuted Code = "ramp_audio_muted"

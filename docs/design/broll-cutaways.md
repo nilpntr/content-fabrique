@@ -1,6 +1,8 @@
 # Design note: b-roll cutaways on a second video track
 
 > Status: **proposed** · 2026-11-20 · checked against `main` at f2ddb38. Piece 4 of the [AI video editor plan](https://github.com/nilpntr/content-fabrique/blob/plan/ai-video-editor/docs/design/ai-video-editor-plan.md). Amends [timeline v1](timeline-v1.md) §2 and §8 (the first change to "exactly one video track"); the PR that ships the schema edits that note too. Decisions are in [05-decisions](../05-decisions.md): D-02, D-22, D-28, D-34, D-37, D-38.
+>
+> **Slice 1 built** (render core): `timeline.BrollTrack`, `broll_check.go`, `render/broll.go`, fixtures `v52`-`v55` (one per format, `render-broll.txt`) and `i89`-`i98`. Found on the way: the rendered PCM of an edit with a song ducked under speech is not reproducible run to run on ffmpeg 7.1 even without cutaways (multi-threaded filter graph), so its proof is the byte-identical audio plan; the four b-roll fixtures are speech-only, and their PCM hash is equal with and without the track in both profiles.
 
 **Goal.** Show another picture over a speech clip while the speech keeps playing, so jump cuts from P1 can be covered and words illustrated. Full-frame cutaways only; picture-in-picture is not in this note (section 9).
 

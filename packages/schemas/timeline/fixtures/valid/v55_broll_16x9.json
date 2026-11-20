@@ -1,0 +1,79 @@
+{
+  "schema": "contentfabrique.timeline/v1",
+  "output": {
+    "format": "16:9",
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "background": "#000000"
+  },
+  "tracks": [
+    {
+      "id": "main",
+      "type": "video",
+      "items": [
+        {
+          "id": "c1",
+          "asset_id": "ast_01jex6xx15ayjx8epfhfjj9s11",
+          "source": {
+            "in_ms": 1000,
+            "out_ms": 4000
+          },
+          "at_ms": 0,
+          "audio": {
+            "mode": "full"
+          }
+        },
+        {
+          "id": "c2",
+          "asset_id": "ast_01jex6xx15ayjx8epfhfjj9s11",
+          "source": {
+            "in_ms": 20000,
+            "out_ms": 23000
+          },
+          "at_ms": 3000,
+          "audio": {
+            "mode": "full"
+          }
+        }
+      ]
+    },
+    {
+      "id": "broll",
+      "type": "broll",
+      "items": [
+        {
+          "id": "b1",
+          "asset_id": "ast_01jex6xx15ayjx8epfhfjj9s11",
+          "source": {
+            "in_ms": 8000,
+            "out_ms": 9000
+          },
+          "at_ms": 1000
+        },
+        {
+          "id": "b2",
+          "asset_id": "ast_01jdsx72atvnb7ssgbc57zbxj9",
+          "source": {
+            "in_ms": 100000,
+            "out_ms": 101500
+          },
+          "at_ms": 3200,
+          "look": {
+            "preset": "bw"
+          }
+        },
+        {
+          "id": "b3",
+          "asset_id": "ast_01jfbemsc6way7dnfebdf8tf3g",
+          "source": {
+            "in_ms": 12000,
+            "out_ms": 12600
+          },
+          "at_ms": 5000
+        }
+      ]
+    }
+  ],
+  "markers": []
+}
