@@ -267,7 +267,7 @@ func (c *checker) headUnmeasured(it timeline.TextItem) bool {
 			continue
 		}
 		for _, s := range tr.Samples {
-			if s.HeadW == 0 || (s.ArmsUp == nil && s.HeadTopY > s.Y) {
+			if s.HeadW == 0 || s.ArmsGuessed() {
 				return true
 			}
 		}

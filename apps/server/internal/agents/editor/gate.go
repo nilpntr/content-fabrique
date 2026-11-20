@@ -43,9 +43,9 @@ type previewState struct {
 	plan       *Plan // the run's latest creative plan
 	checked    int   // the newest version check_edit ran on, 0 for none
 	checkCalls int   // how many times check_edit ran in this run
-	// lastCheckVersion and lastCheckFailed are what the latest check_edit found: the version, and the checks that failed.
-	lastCheckVersion int
-	lastCheckFailed  []string
+	// last is what the latest check_edit found: the version, the checks that failed, and whether it asked for a pass for the creator's
+	// rules.
+	last lastCheck
 	// checkByCall is the nth check each check_edit call (by tool_use_id) was, so a call that is run again gets the same answer.
 	checkByCall map[string]int
 }
@@ -144,22 +144,31 @@ func (l *previewLog) checkRun(run uuid.UUID, version, n int, toolUseID string) {
 	}
 }
 
-// checkOutcome records which checks failed in the latest check_edit, of version.
-func (l *previewLog) checkOutcome(run uuid.UUID, version int, failed []string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	s := l.state(run)
-	s.lastCheckVersion, s.lastCheckFailed = version, slices.Clone(failed)
+// lastCheck is what a check_edit found: the version it checked, the checks that failed, and whether it asked for another pass for the
+// creator's rules (CheckRecord.RulePass).
+type lastCheck struct {
+	version  int
+	failed   []string
+	rulePass bool
 }
 
-// lastCheck returns the version of the latest check_edit and the checks that failed in it (0 and nil for none).
-func (l *previewLog) lastCheck(run uuid.UUID) (int, []string) {
+// checkOutcome records what the latest check_edit, of version, found.
+func (l *previewLog) checkOutcome(run uuid.UUID, version int, failed []string, rulePass bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.state(run).last = lastCheck{version: version, failed: slices.Clone(failed), rulePass: rulePass}
+}
+
+// lastCheck returns what the latest check_edit found (the zero lastCheck for none).
+func (l *previewLog) lastCheck(run uuid.UUID) lastCheck {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if s := l.runs[run]; s != nil {
-		return s.lastCheckVersion, slices.Clone(s.lastCheckFailed)
+		c := s.last
+		c.failed = slices.Clone(c.failed)
+		return c
 	}
-	return 0, nil
+	return lastCheck{}
 }
 
 // previewedVersion is the newest version this worker has seen a preview of, 0 for none.

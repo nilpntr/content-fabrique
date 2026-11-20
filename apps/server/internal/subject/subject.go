@@ -243,6 +243,10 @@ func (s Sample) raised() bool {
 	return s.HeadTopY-s.Y > raisedAbove
 }
 
+// ArmsGuessed says whether the sample's box starts clearly above the head and the reader was not asked whether that is a raised arm (a
+// quick look before quicklook.v5): the gap is then taken for one, which may be only the reader's padding.
+func (s Sample) ArmsGuessed() bool { return s.ArmsUp == nil && s.HeadTopY-s.Y > raisedAbove }
+
 // Body is the whole person as a box of fractions: the subject box, from the top of the head down, or from its own top when a raised arm or
 // hand is clearly above the head. It is the part a title should not cover either.
 func (s Sample) Body() (x0, y0, x1, y1 float64) {

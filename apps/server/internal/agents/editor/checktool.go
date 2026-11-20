@@ -47,6 +47,9 @@ type CheckRecord struct {
 	// Nth is how many times check_edit has run in the run, this one included. The editor revises after the first and finishes after
 	// the second.
 	Nth int `json:"nth"`
+	// RulePass says this check asked for another pass because one of the creator's own rules failed and there was room for it: finish is
+	// refused until a later check of a newer version (ruleGate). It is decided once, here, so finish never contradicts the check.
+	RulePass bool `json:"rule_pass,omitempty"`
 }
 
 // AnalysisSource is what loading the analysis of a timeline's clips reads. *store.Store is the real one.
@@ -302,27 +305,28 @@ func (d Deps) checkEdit(ctx context.Context, rc runtime.RunContext, _ noArgs) (r
 	}
 	nth, seen := d.checkNth(ctx, rc)
 	pass, fail, skip := report.Counts()
+	perCall := d.callCostMicros(ctx, rc)
+	low := budgetLow(rc.Left, perCall)
+	rules := creatorRulesFailed(report.Failed())
+	rulePass := len(rules) > 0 && !low && nth < maxRuleChecks
 	if !seen { // a call that is run again after a restart has its event already
-		rec := CheckRecord{RecordVersion: CheckRecordVersion, Report: report, Passed: pass, Failed: fail, Skipped: skip, Nth: nth}
+		rec := CheckRecord{RecordVersion: CheckRecordVersion, Report: report, Passed: pass, Failed: fail, Skipped: skip, Nth: nth, RulePass: rulePass}
 		if err := rc.Artifact(ctx, CheckArtifact, rec); err != nil {
 			return runtime.Result{}, fmt.Errorf("record the check: %w", err)
 		}
 	}
 	d.previews.checkRun(rc.RunID, v, nth, rc.ToolUseID)
-	d.previews.checkOutcome(rc.RunID, v, report.Failed())
+	d.previews.checkOutcome(rc.RunID, v, report.Failed(), rulePass)
 	traceChecks(ctx, report, nth)
 
 	var b strings.Builder
 	b.WriteString(report.Text())
 	b.WriteString("\n\n")
-	perCall := d.callCostMicros(ctx, rc)
-	low := budgetLow(rc.Left, perCall)
 	traceBudgetLow(ctx, rc.Left, perCall)
-	rules := creatorRulesFailed(report.Failed())
 	switch {
 	case fail == 0:
 		b.WriteString("All the checks that apply pass. Call finish.")
-	case len(rules) > 0 && !low && nth < maxRuleChecks:
+	case rulePass:
 		// The creator's own rules (their settings) are not advice: the run keeps fixing them while it has room, and finish is refused
 		// until they pass (ruleGate) or the room is gone.
 		fmt.Fprintf(&b, "%s %s the creator's own rule%s (their settings), not advice: fix %s first, in one batch with the other failing checks, then render_preview and check_edit again. finish is refused while %s and you have room to fix %s. On a fixed 2-beat grid every cut is on an even beat and a rep may be held 4, 6 or 8 beats; with every shot used once, hold the reps longer or make the video shorter instead of repeating a clip.",
@@ -361,15 +365,13 @@ func creatorRulesFailed(failed []string) []string {
 	return out
 }
 
-// ruleGate returns the refusal for finish when the newest check of version found one of the creator's rules broken and the run still has
-// room to fix it (fewer than maxRuleChecks checks, and not short of budget), or "" when it may finish.
+// ruleGate returns the refusal for finish when the newest check of version asked for another pass for one of the creator's rules (its
+// RulePass, decided by check_edit with the room it had then: fewer than maxRuleChecks checks, not short of budget), or "" when it may
+// finish.
 func (d Deps) ruleGate(ctx context.Context, rc runtime.RunContext, version int) string {
-	cv, failed := d.lastCheckOf(ctx, rc)
-	rules := creatorRulesFailed(failed)
-	if cv != version || len(rules) == 0 {
-		return ""
-	}
-	if _, calls := d.previews.checkState(rc.RunID); calls >= maxRuleChecks || budgetLow(rc.Left, d.callCostMicros(ctx, rc)) {
+	last := d.lastCheckOf(ctx, rc)
+	rules := creatorRulesFailed(last.failed)
+	if last.version != version || !last.rulePass || len(rules) == 0 {
 		return ""
 	}
 	return fmt.Sprintf("you cannot finish yet: %s %s on version %d, and %s the creator's own rule%s (their settings), not advice. Fix %s with edit_timeline, render_preview and check_edit again, then finish.",
@@ -379,44 +381,33 @@ func (d Deps) ruleGate(ctx context.Context, rc runtime.RunContext, version int) 
 // unresolvedChecks is the checks that still fail on version in the run's newest check of it (nil when the newest check is of another
 // version or everything passed): what a run that ends now did not fix.
 func (d Deps) unresolvedChecks(ctx context.Context, rc runtime.RunContext, version int) []string {
-	cv, failed := d.lastCheckOf(ctx, rc)
-	if cv != version {
-		return nil
+	if last := d.lastCheckOf(ctx, rc); last.version == version {
+		return last.failed
 	}
-	return failed
+	return nil
 }
 
-// withUnresolved adds the unresolved note to a message for the creator, kept within maxSummaryChars (the message is cut to make room).
+// withUnresolved adds a plain line for the creator about the creator's own rules a finished edit does not keep (the other failing checks
+// are for the model to explain in its own words, as check_edit asks; they are listed in the output's unresolved_checks), kept within
+// maxSummaryChars (the message is cut to make room).
 func withUnresolved(summary string, failed []string) string {
-	note := unresolvedNote(failed)
-	if note == "" {
+	rules := creatorRulesFailed(failed)
+	if len(rules) == 0 {
 		return summary
 	}
+	var names []string
+	for _, id := range rules {
+		names = append(names, ruleNames[id])
+	}
+	note := "Not kept yet from your settings: " + strings.Join(names, " and ") + "."
 	room := maxSummaryChars - len([]rune(note)) - 2 // a space, and the ellipsis cutRunes adds
 	return strings.TrimSpace(cutRunes(summary, max(room, 0)) + " " + note)
 }
 
-// unresolvedNote is the plain line for the creator about the checks a finished edit still fails, the creator's rules first, or "".
-func unresolvedNote(failed []string) string {
-	if len(failed) == 0 {
-		return ""
-	}
-	rules := creatorRulesFailed(failed)
-	var other []string
-	for _, id := range failed {
-		if !slices.Contains(rules, id) {
-			other = append(other, id)
-		}
-	}
-	words := func(ids []string) string { return strings.ReplaceAll(strings.Join(ids, ", "), "_", " ") }
-	var parts []string
-	if len(rules) > 0 {
-		parts = append(parts, "Your own rules this version does not keep yet: "+words(rules)+".")
-	}
-	if len(other) > 0 {
-		parts = append(parts, "Checks that still fail: "+words(other)+".")
-	}
-	return strings.Join(parts, " ")
+// ruleNames are the creator's rules in the words of their settings.
+var ruleNames = map[string]string{
+	CheckBeatGridFixed: "every cut on the 2-beat grid with a 4-beat ending",
+	CheckShotReused:    "every shot used once",
 }
 
 const (
@@ -523,16 +514,15 @@ func (d Deps) callCostMicros(ctx context.Context, rc runtime.RunContext) int64 {
 // lastCheckOf is the version of the run's newest check_edit and the checks that failed in it. The newest edit_check event is the
 // truth (another worker may have made later checks than this one remembers); this worker's record answers when the events cannot be
 // read.
-func (d Deps) lastCheckOf(ctx context.Context, rc runtime.RunContext) (int, []string) {
-	memV, memFailed := d.previews.lastCheck(rc.RunID)
-	best, bestFailed := memV, memFailed
+func (d Deps) lastCheckOf(ctx context.Context, rc runtime.RunContext) lastCheck {
+	best := d.previews.lastCheck(rc.RunID)
 	for _, art := range runArtifacts(ctx, d.Store, rc.WorkspaceID, rc.RunID, CheckArtifact) {
 		var rec CheckRecord
-		if json.Unmarshal(art.Data, &rec) == nil && rec.Version >= best && rec.Version > 0 {
-			best, bestFailed = rec.Version, rec.Report.Failed()
+		if json.Unmarshal(art.Data, &rec) == nil && rec.Version >= best.version && rec.Version > 0 {
+			best = lastCheck{version: rec.Version, failed: rec.Report.Failed(), rulePass: rec.RulePass}
 		}
 	}
-	return best, bestFailed
+	return best
 }
 
 // onLimit ends a run that reached a limit gracefully when its work is usable: it made a version, and a version of it was previewed (or
@@ -562,11 +552,13 @@ func (d Deps) onLimit(ctx context.Context, rc runtime.RunContext, limit string) 
 	var note strings.Builder
 	ceiling := int64(0)
 	if limit == runtime.LimitDollars && rc.Left.CeilingMicros > 0 {
-		// The per-edit spend ceiling, not the plan's budget, is what stopped the run: say so, with the amount.
 		ceiling = rc.Left.CeilingMicros
-		fmt.Fprintf(&note, "I reached the spend ceiling of %s for one edit before I could finish polishing this video, so I stopped and kept the newest version I made. It is saved as version %d.", spend.USD(ceiling), v)
+	}
+	note.WriteString(stoppedBy(rc, limit, what))
+	if ceiling > 0 {
+		fmt.Fprintf(&note, " before I could finish polishing this video, so I stopped and kept the newest version I made. It is saved as version %d.", v)
 	} else {
-		fmt.Fprintf(&note, "I ran out of %s before I could finish polishing this video, so this is the version as it stood. It is saved as version %d.", what, v)
+		fmt.Fprintf(&note, " before I could finish polishing this video, so this is the version as it stood. It is saved as version %d.", v)
 	}
 	switch {
 	case d.previewsOn() && !d.previewOK(ctx, rc, v):
@@ -574,8 +566,8 @@ func (d Deps) onLimit(ctx context.Context, rc runtime.RunContext, limit string) 
 	case !d.noCheckGate && !d.checked(ctx, rc, v):
 		note.WriteString(" I did not get to the final checks of it.")
 	default:
-		if cv, failed := d.lastCheckOf(ctx, rc); cv == v && len(failed) > 0 {
-			note.WriteString(" The final checks still found something to improve: " + strings.ReplaceAll(strings.Join(failed, ", "), "_", " ") + ".")
+		if last := d.lastCheckOf(ctx, rc); last.version == v && len(last.failed) > 0 {
+			note.WriteString(" The final checks still found something to improve: " + strings.ReplaceAll(strings.Join(last.failed, ", "), "_", " ") + ".")
 		}
 	}
 	o := map[string]any{"summary": note.String(), "timeline_version": v, "implicit_finish": true, "limit": limit}
@@ -589,17 +581,21 @@ func (d Deps) onLimit(ctx context.Context, rc runtime.RunContext, limit string) 
 	return out, true
 }
 
+// stoppedBy is the start of the note of a run that reached a limit: the per-edit spend ceiling, with its amount, when that is what bound
+// the dollars, else the kind of room that ran out.
+func stoppedBy(rc runtime.RunContext, limit, what string) string {
+	if limit == runtime.LimitDollars && rc.Left.CeilingMicros > 0 {
+		return fmt.Sprintf("I reached the spend ceiling of %s for one edit", spend.USD(rc.Left.CeilingMicros))
+	}
+	return "I ran out of " + what
+}
+
 // noVersionStop is the output of a run that reached a limit with nothing to stand behind: no version, or (unpreviewed, a version) one that
 // was never looked at. It says in plain words why it stopped and what the project holds now, so a failed run never ends with an empty
 // result: the version the creator had stays the current one, and nothing is charged for the run (credits release a failed edit).
 func (d Deps) noVersionStop(ctx context.Context, rc runtime.RunContext, pid ids.ProjectID, ws ids.WorkspaceID, what, limit string, unpreviewed int) json.RawMessage {
 	var note strings.Builder
-	switch {
-	case limit == runtime.LimitDollars && rc.Left.CeilingMicros > 0:
-		fmt.Fprintf(&note, "I reached the spend ceiling of %s for one edit", spend.USD(rc.Left.CeilingMicros))
-	default:
-		fmt.Fprintf(&note, "I ran out of %s", what)
-	}
+	note.WriteString(stoppedBy(rc, limit, what))
 	if unpreviewed > 0 {
 		fmt.Fprintf(&note, " right after I made version %d, before I could look at it, so I am not handing it to you as finished. It is saved, and you can open it, but check it before you use it.", unpreviewed)
 	} else {

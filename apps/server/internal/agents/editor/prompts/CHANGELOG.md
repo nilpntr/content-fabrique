@@ -22,25 +22,28 @@ Rules for changing it:
   the hit rate of the run (cache read tokens over all prompt tokens); `GET /v1/runs/{id}` returns the same totals.
 - The benchmark (P4-05) and the live runs on the founder's footage decide whether a version stays; note the outcome here.
 
-## workout.v10, and the editor's tool answers (2026-11-20, live test fixes)
+## editor.v2.15 and workout.v10 (2026-11-20, live test fixes)
 
-The live test on the VPS (docs/design/live-test-2026-11-20.md on `docs/live-test-1`) found four editor problems. The editor prompt stays
-`editor.v2.14` (its text did not change); the workout playbook is `workout.v10`, and the answers of the tools changed:
+The live test on the VPS (docs/design/live-test-2026-11-20.md on `docs/live-test-1`) found four editor problems. The file is
+`editor.v2.15.md`, a patch of v2.14 (step 6 of **How you work**: the creator's rules are the exception to "revise once", and draft before
+half the budget is gone); the workout playbook is `workout.v10`; and the answers of the tools changed:
 
 - **The creator's rules (section 4.4).** workout.v10: on the fixed 2-beat grid a rep may be held 4, 6 or 8 beats (every cut still on an
   even beat), with every shot used once the reps are held longer instead of reusing a clip, and `beat_grid_fixed` and `shot_reused` must
-  pass before finish. check_edit asks for another pass while one of them fails (up to three checks), finish and a plain end of turn are
-  refused while there is room, and a run that ends with any check failing says so in its output (`unresolved_checks`) and in a plain line
-  for the creator.
-- **Draft first (section 4.2).** Once a run with no version has spent half its dollar budget, or has less left than three calls like its
-  recent ones, the tools that only look (the brief, footage, clips, moments, transcript, music, formats, templates, timeline, comments and
-  clip feedback) answer with a refusal that says to draft now. A run that reaches its limit with no version, or with one it never previewed,
-  fails as before but says why and what the project holds (`summary`, `current_version`); a run whose budget cannot pay for its first call
-  says that, with the numbers (`first_call_refused`).
+  pass before finish. check_edit asks for another pass while one of them fails and there is room (fewer than three checks, budget not low;
+  the decision is stored with the check as `rule_pass`), finish and a plain end of turn are refused after such a check, and a run that ends
+  with a check failing lists it in its output (`unresolved_checks`); a broken rule also gets a plain line for the creator.
+- **Draft first (section 4.2).** Once a run with no version has spent half of what it had after its first call, the tools that study the
+  footage (view_clip, find_moments, get_transcript) answer with a refusal that says to draft now; the cheap reads stay open. A run that
+  reaches its limit with no version, or with one it never previewed, fails as before but says why and what the project holds (`summary`,
+  `current_version`); a run whose budget cannot pay for its first call says that, with the numbers (`first_call_refused`).
 - **Revisions on v1-start run on Sonnet 5.5 (section 4.3)**, so they can start on the creator and pro budgets (config/routing/v1-start.yaml).
 - **The hook title on the pose (section 4.1)** is quicklook.v5 (`arms_up`), not an editor change; check_edit's fix line says to read the
   subjects again when a box starts above the head and the reader was not asked about the arms.
-- Cassettes re-recorded against the fake transport (the playbook changed). Live: see the PR.
+- Cassettes re-recorded against the fake transport. Live, on the VPS with Gino's back-day clips: an extra careful (effort max) first edit
+  with his brief cost $1.49 of $2.00 and made a version that passes 20 of 20 checks, with BACK 101 above the head on the pose
+  (`text_over_subject`, `hook_title`, `hook_score`, `beat_grid_fixed` and `shot_reused` pass). It came out 10.3 s against a 15 to 20 s
+  brief, and said so.
 
 ## editor.v2.14 (2026-11-20)
 

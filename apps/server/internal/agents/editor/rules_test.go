@@ -55,7 +55,7 @@ func TestTheCreatorsRulesKeepTheRunFixingThenAreNamed(t *testing.T) {
 		Summary    string   `json:"summary"`
 		Unresolved []string `json:"unresolved_checks"`
 	}
-	if err := json.Unmarshal(res.Output, &out); err != nil || !slices.Contains(out.Unresolved, CheckShotReused) || !strings.Contains(out.Summary, "Your own rules this version does not keep yet: shot reused") {
+	if err := json.Unmarshal(res.Output, &out); err != nil || !slices.Contains(out.Unresolved, CheckShotReused) || !strings.Contains(out.Summary, "Not kept yet from your settings: every shot used once.") {
 		t.Fatalf("the output does not name the broken rule: %v %s", err, res.Output)
 	}
 }
@@ -66,10 +66,11 @@ func TestUnresolvedNoteKeepsTheMessageInBounds(t *testing.T) {
 	if n := len([]rune(got)); n > maxSummaryChars {
 		t.Errorf("%d runes, over %d", n, maxSummaryChars)
 	}
-	if !strings.HasSuffix(got, "Your own rules this version does not keep yet: beat grid fixed. Checks that still fail: hook title.") {
+	if !strings.HasSuffix(got, "Not kept yet from your settings: every cut on the 2-beat grid with a 4-beat ending.") {
 		t.Errorf("the note: %q", got[len(got)-120:])
 	}
-	if withUnresolved("Done.", nil) != "Done." {
-		t.Error("a note with nothing unresolved")
+	// Advice the model explains in its own words is not repeated to the creator.
+	if withUnresolved("Done.", []string{"hook_title"}) != "Done." || withUnresolved("Done.", nil) != "Done." {
+		t.Error("a note for checks that are not the creator's rules")
 	}
 }
