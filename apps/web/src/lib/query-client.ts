@@ -29,6 +29,8 @@ export const RENDERS_QUERY_KEY = "renders";
 export const RENDER_QUERY_KEY = "render";
 /** The comments of a project: `[ANNOTATIONS_QUERY_KEY, user, org, projectId]`. */
 export const ANNOTATIONS_QUERY_KEY = "annotations";
+/** The transcript of an asset (the caption editor): `[TRANSCRIPT_QUERY_KEY, user, org, assetId]`. */
+export const TRANSCRIPT_QUERY_KEY = "transcript";
 /** The creator's style (GET /v1/style): `[STYLE_QUERY_KEY, user, org]`. */
 export const STYLE_QUERY_KEY = "style";
 

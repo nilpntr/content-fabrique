@@ -164,13 +164,40 @@ func PlacePosition(outW, outH int, x, y float64, w, h int) Rect {
 	return Rect{Left: left, Top: top, Right: left + w, Bottom: top + h}
 }
 
-// captionCentre is where the centre of a caption box sits: this share of the way down the safe zone.
-const captionCentre = 0.62
+// The two places a caption band can sit: the lower one (the default, above the lower third where titles sit) and the upper one, near the
+// top of the safe zone, where the renderer moves a clip's captions when the lower band is on the speaker's face.
+const (
+	CaptionLower = "lower"
+	CaptionUpper = "upper"
+)
 
-// PlaceCaption returns the box of a w x h caption: centred on the vertical centre line at 62 % of the safe zone's height, above
-// the lower third where titles sit.
-func PlaceCaption(z Zone, outW, w, h int) Rect {
-	cy := z.Inner.Top + int(math.Floor(captionCentre*float64(z.Inner.Height())+0.5))
+// captionCentre and captionCentreUpper are where the centre of a caption box sits: this share of the way down the safe zone.
+const (
+	captionCentre      = 0.62
+	captionCentreUpper = 0.17
+)
+
+// captionCentreY is the y of the centre of a caption box h px tall in a band position (anything but CaptionUpper is the lower one). The
+// upper band is kept inside the safe zone: a box that would start above its top sits against it.
+func captionCentreY(z Zone, pos string, h int) int {
+	share := captionCentre
+	if pos == CaptionUpper {
+		share = captionCentreUpper
+	}
+	cy := z.Inner.Top + int(math.Floor(share*float64(z.Inner.Height())+0.5))
+	if pos == CaptionUpper {
+		cy = max(cy, z.Inner.Top+h/2)
+	}
+	return cy
+}
+
+// PlaceCaption returns the box of a w x h caption in the lower band: centred on the vertical centre line at 62 % of the safe zone's
+// height, above the lower third where titles sit.
+func PlaceCaption(z Zone, outW, w, h int) Rect { return PlaceCaptionAt(z, outW, w, h, CaptionLower) }
+
+// PlaceCaptionAt returns the box of a w x h caption in the band at pos (CaptionLower or CaptionUpper).
+func PlaceCaptionAt(z Zone, outW, w, h int, pos string) Rect {
+	cy := captionCentreY(z, pos, h)
 	left, top := (outW-w)/2, cy-h/2
 	return Rect{Left: left, Top: top, Right: left + w, Bottom: top + h}
 }

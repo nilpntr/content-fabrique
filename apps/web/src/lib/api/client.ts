@@ -214,6 +214,19 @@ export const fetchTimelineVersions = async (client: ApiClient, id: string, signa
 export const fetchTimelineVersion = async (client: ApiClient, id: string, version: number, signal?: AbortSignal): Promise<TimelineVersion> =>
   unwrap(await client.GET("/v1/projects/{id}/timelines/{version}", { params: { path: { id, version } }, signal }));
 
+/** The result of applying edit ops: the new version of the timeline. */
+export type ApplyTimelineOpsResponse = components["schemas"]["ApplyTimelineOpsResponse"];
+/** An asset's transcript (words with their times, for the caption editor). */
+export type Transcript = components["schemas"]["Transcript"];
+
+/** POST /v1/projects/{id}/timelines: a batch of edit ops on `baseVersion`, stored as the next version (a manual tweak, no model call). */
+export const applyTimelineOps = async (client: ApiClient, id: string, baseVersion: number, ops: Record<string, unknown>[]): Promise<ApplyTimelineOpsResponse> =>
+  unwrap(await client.POST("/v1/projects/{id}/timelines", { params: { path: { id } }, body: { base_version: baseVersion, ops } }));
+
+/** GET /v1/assets/{id}/transcript. */
+export const fetchAssetTranscript = async (client: ApiClient, id: string, signal?: AbortSignal): Promise<Transcript> =>
+  unwrap(await client.GET("/v1/assets/{id}/transcript", { params: { path: { id } }, signal }));
+
 // ── Runs ────────────────────────────────────────────────────────────────────
 
 /** POST /v1/projects/{id}/edit: starts the editor agent. The answer is the run, `queued`. */

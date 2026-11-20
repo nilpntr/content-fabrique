@@ -4,9 +4,11 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   type ApiClient,
   ApiError,
+  applyTimelineOps,
   cancelRun,
   createProject,
   createRender,
+  fetchAssetTranscript,
   fetchProject,
   fetchProjects,
   fetchRender,
@@ -32,7 +34,7 @@ import { useApiClient } from "@/lib/api/provider";
 import { parseTimeMap } from "@/components/project/review-data";
 import type { TimeMapEntry } from "@/components/editor/types";
 import { URL_REFRESH_MIN_MS, useRefreshThrottle } from "@/lib/refresh-throttle";
-import { ANNOTATIONS_QUERY_KEY, ME_QUERY_KEY, PROJECT_QUERY_KEY, PROJECTS_QUERY_KEY, RENDER_QUERY_KEY, RENDERS_QUERY_KEY, RUN_ARTIFACTS_QUERY_KEY, RUN_QUERY_KEY, TIMELINES_QUERY_KEY } from "@/lib/query-client";
+import { ANNOTATIONS_QUERY_KEY, ME_QUERY_KEY, PROJECT_QUERY_KEY, PROJECTS_QUERY_KEY, RENDER_QUERY_KEY, RENDERS_QUERY_KEY, RUN_ARTIFACTS_QUERY_KEY, RUN_QUERY_KEY, TIMELINES_QUERY_KEY, TRANSCRIPT_QUERY_KEY } from "@/lib/query-client";
 
 /**
  * The hooks of projects, runs and renders. Keys are `[prefix, userId, orgId, ...ids]`, like the library's, so a workspace
@@ -101,6 +103,19 @@ export function useTimelineSpecs(projectId: string, versions: readonly TimelineV
   });
 }
 
+/** One version's spec (the same cache entry as {@link useTimelineSpecs}). */
+export function useTimelineSpec(projectId: string, version: number | undefined) {
+  const { userId, orgId, ready } = useScope();
+  const getClient = useApiClient();
+  return useQuery({
+    queryKey: [TIMELINES_QUERY_KEY, userId, orgId, projectId, version],
+    queryFn: ({ signal }) => fetchTimelineVersion(getClient(), projectId, version as number, signal),
+    enabled: ready && version !== undefined,
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: retryUnlessClientError,
+  });
+}
+
 /** Everything a project's page shows is fetched again: after an edit run starts or ends, or when the project changes. */
 export function invalidateProject(queryClient: QueryClient) {
   void queryClient.invalidateQueries({ queryKey: [PROJECT_QUERY_KEY] });
@@ -109,6 +124,32 @@ export function invalidateProject(queryClient: QueryClient) {
   void queryClient.invalidateQueries({ queryKey: [PROJECTS_QUERY_KEY] });
   // A finished run marks the comments it dealt with as applied, and answers under them.
   void queryClient.invalidateQueries({ queryKey: [ANNOTATIONS_QUERY_KEY] });
+}
+
+/** The transcript of an asset (the words of the caption editor). A transcript does not change once made, so it is kept. */
+export function useAssetTranscript(assetId: string | undefined) {
+  const { userId, orgId, ready } = useScope();
+  const getClient = useApiClient();
+  return useQuery({
+    queryKey: [TRANSCRIPT_QUERY_KEY, userId, orgId, assetId],
+    queryFn: ({ signal }) => fetchAssetTranscript(getClient(), assetId as string, signal),
+    enabled: ready && Boolean(assetId),
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: retryUnlessClientError,
+  });
+}
+
+/**
+ * Applies edit ops to a version of the project's timeline: the result is the next version (a manual tweak: no model, no credits), and the
+ * project's lists are fetched again so that it shows. A `version_conflict` (the timeline moved on) comes back as an ApiError.
+ */
+export function useApplyTimelineOps() {
+  const getClient = useApiClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId, baseVersion, ops }: { projectId: string; baseVersion: number; ops: Record<string, unknown>[] }) => applyTimelineOps(getClient(), projectId, baseVersion, ops),
+    onSuccess: () => invalidateProject(queryClient),
+  });
 }
 
 export function useCreateProject() {
