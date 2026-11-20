@@ -1,7 +1,6 @@
 package style
 
 import (
-	"math"
 	"slices"
 )
 
@@ -44,10 +43,15 @@ const CaptionLines = 2
 // CaptionBand is the rectangle captions are confined to: the zone's centre column, CaptionLines lines of the caption style
 // tall, centred at the caption position. Text items stay out of it while captions are on (text_overlaps_captions).
 func CaptionBand(z Zone, outW, shortSide int, st Style) Rect {
+	return CaptionBandAt(z, outW, shortSide, st, CaptionLower)
+}
+
+// CaptionBandAt is CaptionBand for the band at pos (CaptionLower or CaptionUpper).
+func CaptionBandAt(z Zone, outW, shortSide int, st Style, pos string) Rect {
 	size := st.FontSizePx(shortSide)
 	h := CaptionLines*size + 2*st.Pad(size)
 	col := z.Column(outW)
-	cy := z.Inner.Top + int(math.Floor(captionCentre*float64(z.Inner.Height())+0.5))
+	cy := captionCentreY(z, pos, h)
 	top := cy - h/2
 	return Rect{Left: col.Left, Top: top, Right: col.Right, Bottom: top + h}
 }

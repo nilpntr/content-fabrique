@@ -112,6 +112,11 @@ type trackAux struct {
 	Enabled   *bool           `json:"enabled"`
 	Uppercase *bool           `json:"uppercase"`
 	MaxWords  *int            `json:"max_words"`
+	// Fill, Accent, Keywords and Corrections are the captions track's own (the creator's colours, the emphasised words, the fixes).
+	Fill        *string              `json:"fill"`
+	Accent      *string              `json:"accent"`
+	Keywords    *[]string            `json:"keywords"`
+	Corrections *[]CaptionCorrection `json:"corrections"`
 }
 
 func (a *trackAux) captionsField() string {
@@ -126,6 +131,14 @@ func (a *trackAux) captionsField() string {
 		return "uppercase"
 	case a.MaxWords != nil:
 		return "max_words"
+	case a.Fill != nil:
+		return "fill"
+	case a.Accent != nil:
+		return "accent"
+	case a.Keywords != nil:
+		return "keywords"
+	case a.Corrections != nil:
+		return "corrections"
 	}
 	return ""
 }
@@ -180,6 +193,18 @@ func decodeTrack(raw json.RawMessage) (Track, error) {
 		}
 		if a.Enabled != nil {
 			t.Enabled = *a.Enabled
+		}
+		if a.Fill != nil {
+			t.Fill = *a.Fill
+		}
+		if a.Accent != nil {
+			t.Accent = *a.Accent
+		}
+		if a.Keywords != nil {
+			t.Keywords = *a.Keywords
+		}
+		if a.Corrections != nil {
+			t.Corrections = *a.Corrections
 		}
 		return t, nil
 	}
