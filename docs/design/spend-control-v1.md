@@ -413,6 +413,28 @@ API (OpenAPI, paid guard as usual):
 
   Drift over 3 % raises an alert. It is built and tested against a fake server, and does nothing while the key is unset.
 
+### 9a. The cost guard (as built, 2026-11)
+
+Three guards that keep test spend inside the founder's test cap ($75 since 2026-10-18) and any one edit inside a ceiling.
+
+- **The per-edit spend ceiling** (`spend.Ceilings`, `internal/spend/ceiling.go`). The most one agent run may spend, on top of its budget: an edit is one editor run, so this is the most one edit may cost.
+  - **Settings**, the most specific winning: `EDIT_SPEND_CEILING_WORKSPACES` (`wks_...=micros,...`), then `EDIT_SPEND_CEILING_PLANS` (`creator=micros,...`, the plan read from the workspace's entitlements, an inactive plan counting as none), then `EDIT_SPEND_CEILING_MICROS`.
+  - **The default is $2.00.** That is the founder's "about $2 for an edit is fine", and the largest budget any plan gives an edit (an extra careful first edit). So it never cuts a plan's paid edit short, but it does cap a development run, an eval run or an API run that asks for more (`budget_usd` allows $5). 0 switches the ceiling off at that level, and a value above $50 is refused as a typo.
+  - **Where it is enforced.** `runtime.Service.Create` lowers the run's `budget_micros` to it, so the API's run shows the real budget. The `Runner` applies it again when it claims a run, so a ceiling lowered since then (a deploy, a takeover after a dead worker) holds for the rest of the run.
+  - **How a run stops.** The dollar budget is enforced as before: each model call reserves its worst case, and a call that cannot fit is shortened or refused before it is sent. So a run stops at the ceiling mid-run, never after it. The editor then ends gracefully on its newest version (`OnLimit`) with a note: "I reached the spend ceiling of $X for one edit before I could finish polishing this video, so I stopped and kept the newest version I made. It is saved as version N." Its output carries `ceiling_micros`.
+  - **A run that cannot end gracefully** (no version made or previewed) fails with reason `budget`, limit `dollars`. Its summary and its error event name the ceiling and where it came from (`ceiling_micros`, `ceiling_source`).
+  - The limit name stays `dollars`, so the web app and the API contract are unchanged.
+- **`cfctl spend summary [--cap-usd N] [--days N] [--json]`.** The project's test spend: every `billed_to = test` ledger row, across every workspace in the database, for all time. It shows the total against `TEST_SPEND_CAP_MICROS` (default $75), what calls in flight have reserved (live test holds, counted as spent), and the spend by UTC day, by run type and by model. Run type is the ledger's stage, with the kind in front for a cost that is not a model call. It is read-only. Its hand-written queries are in `store/test_spend.go`, which needs no sqlc change.
+- **The up-front estimate in `cfctl eval suite` and `cfctl eval improve`.**
+  - **The estimate.** Before a run that may spend on test calls (`CF_ENV` local, ci or bench), the command prints "this run may cost up to $X". X is the worst case: every live sample spends its whole budget and every judge call its $0.10, cached or not (`Estimate.WorstMicros`). It is never more than `--max-usd`, the hard total the run is held to. The command also prints the test spend so far and what is left of the cap.
+  - **The refusal.** The run is refused (exit 2) when X is more than what is left, unless `--over-test-cap` is given. A run that can spend nothing (`--max-usd 0`, or `--no-judge` on stored versions) is never refused.
+  - **eval improve** checks the whole loop once, then gives its candidate runs `--over-test-cap`. Their share is inside the total it checked, and checking them again would count the baseline's spend twice.
+- **Tests (replay mode, no model calls).**
+  - `runtime/ceiling_test.go`: the budget is capped at creation, a call that cannot fit under the ceiling is refused, and a run taken over by a worker with a lower workspace ceiling stops before its next model call. The tool's effect is not repeated, and the summary names the ceiling.
+  - `editor/ceiling_e2e_test.go`: the committed editor cassettes are replayed until the worker stops before the 7th call. A worker with a lower plan ceiling takes over, and the run ends succeeded on its newest version with the ceiling note.
+  - `cmd/cfctl/spend_test.go`: the summary on a seeded ledger (platform rows excluded), the refusal at $74.95 of $75 with a $0.10 judge call, and the override.
+- **Known limit, found while building this.** A recorded call that the budget shortened (a smaller `max_tokens`) cannot be replayed. In replay the layer asks for the token count of the unshortened request, and no cassette holds that request. So a replay test cannot start a run with a ceiling below the cassettes' recorded budget, and the editor test lowers the ceiling at a takeover instead.
+
 ## 10. Correctness and security rules
 
 - **Money and types:**

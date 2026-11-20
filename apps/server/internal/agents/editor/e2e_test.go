@@ -24,6 +24,7 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/plans"
 	"github.com/nilpntr/content-fabrique/internal/projects"
+	"github.com/nilpntr/content-fabrique/internal/spend"
 	"github.com/nilpntr/content-fabrique/internal/spend/spendtest"
 	"github.com/nilpntr/content-fabrique/internal/store"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
@@ -204,7 +205,9 @@ type e2e struct {
 	prj    ids.ProjectID
 	run    store.AgentRun
 	runner *runtime.Runner
-	api    *fakeAnthropic
+	// rdeps are the runner's dependencies, for a test that takes the run over with another runner.
+	rdeps runtime.Deps
+	api   *fakeAnthropic
 }
 
 // e2eOption changes how newE2E starts the run.
@@ -219,6 +222,10 @@ type e2eConfig struct {
 	charged bool
 	// quality is the quality of the run (credits.Standard when empty).
 	quality credits.Quality
+	// ceilings is the per-edit spend ceiling of the service and the runner (none when zero).
+	ceilings spend.Ceilings
+	// wrap, when set, wraps the model client factory (a test that stops the worker at a model call).
+	wrap func(llm.ClientFactory) llm.ClientFactory
 }
 
 // newE2E seeds the project and builds the runtime over the real llm layer in the mode the variables name.
@@ -271,9 +278,13 @@ func newE2E(t *testing.T, vars map[string]string, api *fakeAnthropic, options ..
 	if api != nil {
 		opts.HTTPClient, opts.Ledger = api.client(), &spendtest.Memory{}
 	}
-	factory, err := llm.NewFactory(opts)
+	llmFactory, err := llm.NewFactory(opts)
 	if err != nil {
 		t.Fatal(err)
+	}
+	var factory llm.ClientFactory = llmFactory
+	if cfg.wrap != nil {
+		factory = cfg.wrap(factory)
 	}
 	e.deps.noPlanGate, e.deps.noCheckGate = false, false // the real run: a plan before the first edit, a check before finish
 	ag, err := NewAgent(e.deps)
@@ -288,7 +299,8 @@ func newE2E(t *testing.T, vars map[string]string, api *fakeAnthropic, options ..
 	if err != nil {
 		t.Fatal(err)
 	}
-	if x.runner, err = runtime.NewRunner(runtime.Deps{Store: e.st, Factory: factory, Agents: agents, Logger: quiet}); err != nil {
+	x.rdeps = runtime.Deps{Store: e.st, Factory: factory, Agents: agents, Logger: quiet, Ceilings: cfg.ceilings}
+	if x.runner, err = runtime.NewRunner(x.rdeps); err != nil {
 		t.Fatal(err)
 	}
 	// An editor run is never started without a hold: the workspace has a plan and credits, as it would in production.
@@ -301,7 +313,7 @@ func newE2E(t *testing.T, vars map[string]string, api *fakeAnthropic, options ..
 			l.Plans[plans.Creator].COGSBudgetMicros[credits.EditFirst] = cassetteRunBudget
 		}
 	})
-	svc := &runtime.Service{Store: e.st, Router: router, Factory: factory, Agents: agents, Inline: true, Credits: creditsSvc}
+	svc := &runtime.Service{Store: e.st, Router: router, Factory: factory, Agents: agents, Inline: true, Credits: creditsSvc, Ceilings: cfg.ceilings}
 	if cfg.charged {
 		// An earlier edit of the project that was charged (a zero-credit hold, settled), so that this run is the project's revision.
 		earlier := uuid.Must(uuid.NewV7())

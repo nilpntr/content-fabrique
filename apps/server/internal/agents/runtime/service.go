@@ -15,6 +15,8 @@ import (
 	"github.com/nilpntr/content-fabrique/internal/credits"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/jobs"
+	"github.com/nilpntr/content-fabrique/internal/plans"
+	"github.com/nilpntr/content-fabrique/internal/spend"
 	"github.com/nilpntr/content-fabrique/internal/store"
 )
 
@@ -31,6 +33,9 @@ type Service struct {
 	Credits *credits.Service
 	// Inline is for the dev CLI, which runs the loop itself: Reply then does not enqueue a job.
 	Inline bool
+	// Ceilings is the per-edit spend ceiling: a run's dollar budget is never above it, whatever its plan or its caller says. The
+	// zero value has none.
+	Ceilings spend.Ceilings
 }
 
 // StartParams describe a run to start.
@@ -112,6 +117,11 @@ func (s *Service) Create(ctx context.Context, tx *store.Store, p StartParams) (s
 		}
 	}
 	budgets := DefaultBudgets.over(agent.Budgets).over(p.Budgets)
+	ceiling, err := CeilingFor(ctx, tx, s.Ceilings, p.WorkspaceID)
+	if err != nil {
+		return store.AgentRun{}, err
+	}
+	budgets.Micros = ceiling.Apply(budgets.Micros)
 	if err := budgets.validate(); err != nil {
 		return store.AgentRun{}, fmt.Errorf("%w: %w", ErrInvalidInput, err)
 	}
@@ -271,4 +281,20 @@ func (s *Service) Cancel(ctx context.Context, ws ids.WorkspaceID, id uuid.UUID) 
 	return s.Store.RequestAgentRunCancel(ctx, ws, id,
 		mustJSON(map[string]any{"stopped": "cancelled", "summary": "Cancelled before finishing."}),
 		mustJSON(statusPayload{State: stateCancelled}))
+}
+
+// CeilingFor is the per-edit spend ceiling of a workspace's runs. The plan is read only when a plan has its own ceiling; a workspace whose
+// plan is not active counts as having none.
+func CeilingFor(ctx context.Context, st *store.Store, c spend.Ceilings, ws ids.WorkspaceID) (spend.Ceiling, error) {
+	var plan plans.Plan
+	if c.NeedsPlan() {
+		ent, err := st.GetEntitlements(ctx, ws)
+		if err != nil {
+			return spend.Ceiling{}, fmt.Errorf("read the plan for the spend ceiling: %w", err)
+		}
+		if ent.Active {
+			plan = ent.Plan
+		}
+	}
+	return c.For(ws, plan), nil
 }

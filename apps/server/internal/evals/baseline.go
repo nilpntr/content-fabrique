@@ -195,8 +195,15 @@ func RecentRuns(outDir, suite string, n int) []*RunResult {
 // Estimate is the expected cost of a suite run.
 type Estimate struct {
 	Micros int64
-	Lines  []string
+	// WorstMicros is what the run may cost at most, before --max-usd: every live sample spends its whole editor budget and every judge
+	// call its whole budget (MaxJudgeMicros), cached or not. The cost guard compares the lesser of it and the run's hard total with what
+	// is left of the test cap.
+	WorstMicros int64
+	Lines       []string
 }
+
+// UpTo is the most the run may cost: its worst case, never more than the hard total maxMicros the run is held to (0 spends nothing).
+func (e Estimate) UpTo(maxMicros int64) int64 { return max(min(e.WorstMicros, maxMicros), 0) }
 
 // EstimateRun is what a run of the suite with these options is expected to cost: per sample, the case's mean editor cost in the recent
 // runs (its budget when there is none) for a live case and the mean judge cost (the judge's budget when there is none), times the
@@ -227,9 +234,10 @@ func EstimateRun(s *Suite, o Options, live bool, history []*RunResult) Estimate 
 			continue
 		}
 		c := s.Resolved(raw)
-		n, editEst, src := 1, int64(0), ""
+		n, editEst, editWorst, src := 1, int64(0), int64(0), ""
 		if live && o.Live && c.Calibration == nil && len(c.Missing(true)) == 0 {
 			n = max(o.Repeat, 1)
+			editWorst = int64(c.BudgetUSD * 1e6)
 			if m, ok := meanOf(edit[c.ID]); ok {
 				editEst, src = m, "recent runs"
 			} else {
@@ -238,8 +246,9 @@ func EstimateRun(s *Suite, o Options, live bool, history []*RunResult) Estimate 
 		} else if len(c.Missing(false)) > 0 {
 			continue
 		}
-		var judgeEst int64
+		var judgeEst, judgeWorst int64
 		if !o.NoJudge {
+			judgeWorst = MaxJudgeMicros
 			if m, ok := meanOf(judge[c.ID]); ok {
 				judgeEst = m
 			} else if m, ok := meanOf(allJudge); ok {
@@ -250,6 +259,7 @@ func EstimateRun(s *Suite, o Options, live bool, history []*RunResult) Estimate 
 		}
 		cost := int64(n) * (editEst + judgeEst)
 		e.Micros += cost
+		e.WorstMicros += int64(n) * (max(editWorst, editEst) + max(judgeWorst, judgeEst))
 		line := fmt.Sprintf("%s: %d × (", c.ID, n)
 		if editEst > 0 {
 			line += fmt.Sprintf("edit $%.3f from %s + ", float64(editEst)/1e6, src)
