@@ -84,5 +84,5 @@ test("a project page (/projects/<id>) belongs to Projects", async () => {
 
 test("only pages that do something are in the nav", async () => {
   const { NAV_ITEMS } = await import("./nav");
-  expect(NAV_ITEMS.map((item) => item.title)).toEqual(["Home", "Projects", "New video", "Library", "Settings"]);
+  expect(NAV_ITEMS.map((item) => item.title)).toEqual(["Home", "Make a video", "Projects", "New video", "Library", "Settings"]);
 });

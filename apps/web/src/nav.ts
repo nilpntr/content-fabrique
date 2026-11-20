@@ -1,5 +1,5 @@
 import { useLocation, useMatches } from "@tanstack/react-router";
-import { FilmIcon, FolderOpenIcon, HouseIcon, type LucideIcon, PlusIcon, SettingsIcon } from "lucide-react";
+import { FilmIcon, FolderOpenIcon, HouseIcon, type LucideIcon, PlusIcon, SettingsIcon, SparklesIcon } from "lucide-react";
 import type { FileRouteTypes } from "@/routeTree.gen";
 
 export interface NavItem {
@@ -12,6 +12,7 @@ export interface NavItem {
 /** Only pages that do something. A new page earns a place here once it shows real data. */
 export const NAV_ITEMS: readonly NavItem[] = [
   { title: "Home", to: "/", icon: HouseIcon },
+  { title: "Make a video", to: "/make", icon: SparklesIcon },
   { title: "Projects", to: "/projects", icon: FolderOpenIcon },
   { title: "New video", to: "/projects/new", icon: PlusIcon },
   { title: "Library", to: "/library", icon: FilmIcon },

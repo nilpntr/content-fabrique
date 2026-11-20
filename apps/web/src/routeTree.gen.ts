@@ -12,6 +12,8 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LibraryRouteImport } from './routes/library'
 import { Route as WorkspaceRouteImport } from './routes/workspace'
+import { Route as MakeIndexRouteImport } from './routes/make.index'
+import { Route as MakeProjectIdRouteImport } from './routes/make.$projectId'
 import { Route as ProjectsIndexRouteImport } from './routes/projects.index'
 import { Route as ProjectsProjectIdRouteImport } from './routes/projects.$projectId'
 import { Route as ProjectsNewRouteImport } from './routes/projects.new'
@@ -34,6 +36,16 @@ const LibraryRoute = LibraryRouteImport.update({
 const WorkspaceRoute = WorkspaceRouteImport.update({
   id: '/workspace',
   path: '/workspace',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MakeIndexRoute = MakeIndexRouteImport.update({
+  id: '/make/',
+  path: '/make/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MakeProjectIdRoute = MakeProjectIdRouteImport.update({
+  id: '/make/$projectId',
+  path: '/make/$projectId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
@@ -81,12 +93,14 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/library': typeof LibraryRoute
   '/workspace': typeof WorkspaceRoute
+  '/make/$projectId': typeof MakeProjectIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/projects/new': typeof ProjectsNewRoute
   '/settings/style': typeof SettingsStyleRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/welcome/style': typeof WelcomeStyleRoute
+  '/make/': typeof MakeIndexRoute
   '/projects/': typeof ProjectsIndexRoute
   '/settings/': typeof SettingsIndexRoute
 }
@@ -94,12 +108,14 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/library': typeof LibraryRoute
   '/workspace': typeof WorkspaceRoute
+  '/make/$projectId': typeof MakeProjectIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/projects/new': typeof ProjectsNewRoute
   '/settings/style': typeof SettingsStyleRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/welcome/style': typeof WelcomeStyleRoute
+  '/make': typeof MakeIndexRoute
   '/projects': typeof ProjectsIndexRoute
   '/settings': typeof SettingsIndexRoute
 }
@@ -108,12 +124,14 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/library': typeof LibraryRoute
   '/workspace': typeof WorkspaceRoute
+  '/make/$projectId': typeof MakeProjectIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/projects/new': typeof ProjectsNewRoute
   '/settings/style': typeof SettingsStyleRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/welcome/style': typeof WelcomeStyleRoute
+  '/make/': typeof MakeIndexRoute
   '/projects/': typeof ProjectsIndexRoute
   '/settings/': typeof SettingsIndexRoute
 }
@@ -123,12 +141,14 @@ export interface FileRouteTypes {
     | '/'
     | '/library'
     | '/workspace'
+    | '/make/$projectId'
     | '/projects/$projectId'
     | '/projects/new'
     | '/settings/style'
     | '/sign-in/$'
     | '/sign-up/$'
     | '/welcome/style'
+    | '/make/'
     | '/projects/'
     | '/settings/'
   fileRoutesByTo: FileRoutesByTo
@@ -136,12 +156,14 @@ export interface FileRouteTypes {
     | '/'
     | '/library'
     | '/workspace'
+    | '/make/$projectId'
     | '/projects/$projectId'
     | '/projects/new'
     | '/settings/style'
     | '/sign-in/$'
     | '/sign-up/$'
     | '/welcome/style'
+    | '/make'
     | '/projects'
     | '/settings'
   id:
@@ -149,12 +171,14 @@ export interface FileRouteTypes {
     | '/'
     | '/library'
     | '/workspace'
+    | '/make/$projectId'
     | '/projects/$projectId'
     | '/projects/new'
     | '/settings/style'
     | '/sign-in/$'
     | '/sign-up/$'
     | '/welcome/style'
+    | '/make/'
     | '/projects/'
     | '/settings/'
   fileRoutesById: FileRoutesById
@@ -163,12 +187,14 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LibraryRoute: typeof LibraryRoute
   WorkspaceRoute: typeof WorkspaceRoute
+  MakeProjectIdRoute: typeof MakeProjectIdRoute
   ProjectsProjectIdRoute: typeof ProjectsProjectIdRoute
   ProjectsNewRoute: typeof ProjectsNewRoute
   SettingsStyleRoute: typeof SettingsStyleRoute
   SignInSplatRoute: typeof SignInSplatRoute
   SignUpSplatRoute: typeof SignUpSplatRoute
   WelcomeStyleRoute: typeof WelcomeStyleRoute
+  MakeIndexRoute: typeof MakeIndexRoute
   ProjectsIndexRoute: typeof ProjectsIndexRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
 }
@@ -194,6 +220,20 @@ declare module '@tanstack/react-router' {
       path: '/workspace'
       fullPath: '/workspace'
       preLoaderRoute: typeof WorkspaceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/make/': {
+      id: '/make/'
+      path: '/make'
+      fullPath: '/make/'
+      preLoaderRoute: typeof MakeIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/make/$projectId': {
+      id: '/make/$projectId'
+      path: '/make/$projectId'
+      fullPath: '/make/$projectId'
+      preLoaderRoute: typeof MakeProjectIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/projects/': {
@@ -259,12 +299,14 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LibraryRoute: LibraryRoute,
   WorkspaceRoute: WorkspaceRoute,
+  MakeProjectIdRoute: MakeProjectIdRoute,
   ProjectsProjectIdRoute: ProjectsProjectIdRoute,
   ProjectsNewRoute: ProjectsNewRoute,
   SettingsStyleRoute: SettingsStyleRoute,
   SignInSplatRoute: SignInSplatRoute,
   SignUpSplatRoute: SignUpSplatRoute,
   WelcomeStyleRoute: WelcomeStyleRoute,
+  MakeIndexRoute: MakeIndexRoute,
   ProjectsIndexRoute: ProjectsIndexRoute,
   SettingsIndexRoute: SettingsIndexRoute,
 }
