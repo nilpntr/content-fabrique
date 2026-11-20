@@ -328,6 +328,79 @@ type Render struct {
 	ObjectsPurgedAt   *time.Time
 }
 
+type ResearchAnnotation struct {
+	ID              uuid.UUID
+	PostID          uuid.UUID
+	FormatID        *string
+	HookKind        *string
+	HookTextPattern *string
+	TextPattern     *string
+	CutsEstimate    *int32
+	FirstCutS       *float64
+	CaptionLen      *int32
+	HashtagsN       *int32
+	Cta             *string
+	Topic           *string
+	Annotator       string
+	Confidence      float64
+	CreatedAt       time.Time
+}
+
+type ResearchCreator struct {
+	ID         uuid.UUID
+	Platform   string
+	Handle     string
+	ProfileUrl string
+	WhySimilar string
+	Similarity float64
+	Status     string
+	ApprovedBy *string
+	ApprovedAt *time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+type ResearchEvidence struct {
+	ID          uuid.UUID
+	PostID      pgtype.UUID
+	CreatorID   pgtype.UUID
+	Source      string
+	Method      string
+	ObservedAt  time.Time
+	Observer    string
+	Metrics     json.RawMessage
+	RawRef      *string
+	RetainUntil time.Time
+	RunID       pgtype.UUID
+	CreatedAt   time.Time
+}
+
+type ResearchFinding struct {
+	ID              uuid.UUID
+	PlaybookVersion string
+	Claim           string
+	Dimension       string
+	EffectValue     float64
+	EffectUnit      string
+	NPosts          int32
+	NCreators       int32
+	Confidence      string
+	EvidenceIds     []uuid.UUID
+	CreatedAt       time.Time
+}
+
+type ResearchPost struct {
+	ID             uuid.UUID
+	Platform       string
+	Url            string
+	ExternalID     string
+	CreatorID      uuid.UUID
+	PostedAt       *time.Time
+	PostedAtSource *string
+	DurationS      *float64
+	CreatedAt      time.Time
+}
+
 type Shot struct {
 	ID          uuid.UUID
 	WorkspaceID ids.WorkspaceID

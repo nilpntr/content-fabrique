@@ -1,0 +1,201 @@
+package main
+
+import (
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"strings"
+	"time"
+
+	"github.com/nilpntr/content-fabrique/internal/research"
+	"github.com/nilpntr/content-fabrique/internal/store"
+)
+
+const researchUsage = `Usage:
+  cfctl research sources
+  cfctl research forget <handle> [--platform tiktok|instagram|youtube] [--yes] [--allow-production] [--env-file <path>]
+  cfctl research sweep [--yes] [--allow-production] [--env-file <path>]
+
+The creator research engine (docs/05-decisions.md D-41) keeps links, metadata, short notes and our own derived numbers about other
+people's PUBLIC posts. Never a video file. Handles and public numbers are personal data, so the engine can forget a person and deletes
+everything on a timer.
+
+  sources   print the allow-list of sources (each with the methods, metrics and platforms it may use) and the retention in force
+            (RESEARCH_RETENTION_DAYS, default 365; RESEARCH_YOUTUBE_RETENTION_DAYS, default and maximum 30). No database.
+  forget    the takedown: delete the creator with this handle (on one platform, or on every platform without --platform), their posts,
+            annotations and evidence, and the findings that rested on that evidence. It cannot be undone. Exit 1 when no creator has the
+            handle. Run it on request, in any environment: production needs --allow-production and --yes.
+  sweep     delete now what the daily research_sweep job would delete: observations past their retain_until, the findings, posts and idle
+            candidate creators left without evidence. Safe to run twice.
+
+  --platform          limit forget to one platform
+  --yes               needed unless CF_ENV is local or ci and the database is on this machine
+  --allow-production  needed in addition to --yes when CF_ENV=production
+  --env-file          the env file; default .env at the repository root
+`
+
+func cmdResearch(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps agentDeps) int {
+	if len(args) == 0 {
+		_, _ = fmt.Fprint(stderr, researchUsage)
+		return 2
+	}
+	switch args[0] {
+	case "help", "-h", "--help", "-help":
+		_, _ = fmt.Fprint(stdout, researchUsage)
+		return 0
+	case "sources":
+		return cmdResearchSources(stdout, stderr, lookup)
+	case "forget":
+		return cmdResearchForget(args[1:], stdout, stderr, lookup, deps)
+	case "sweep":
+		return cmdResearchSweep(args[1:], stdout, stderr, lookup, deps)
+	}
+	_, _ = fmt.Fprintf(stderr, "cfctl research: unknown command %q\n\n%s", args[0], researchUsage)
+	return 2
+}
+
+func cmdResearchSources(stdout, stderr io.Writer, lookup lookupEnv) int {
+	ret, err := research.LoadRetention(func(k string) string { v, _ := lookup(k); return v })
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "cfctl research sources: %v\n", err)
+		return 2
+	}
+	_, _ = fmt.Fprintln(stdout, "Allowed sources (a source that is not listed cannot write evidence):")
+	for _, s := range research.Sources() {
+		methods := make([]string, 0, 2)
+		for _, m := range s.Methods() {
+			methods = append(methods, string(m))
+		}
+		platforms := make([]string, 0, 3)
+		for _, p := range s.Platforms() {
+			platforms = append(platforms, string(p))
+		}
+		metrics := strings.Join(s.Metrics(), ", ")
+		if metrics == "" {
+			metrics = "none"
+		}
+		_, _ = fmt.Fprintf(stdout, "  %-22s method %-10s platforms %-24s metrics %s; kept %d days\n",
+			s, strings.Join(methods, "|"), strings.Join(platforms, ","), metrics, int(ret.For(s)/research.Day))
+	}
+	return 0
+}
+
+func cmdResearchForget(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps agentDeps) int {
+	const name = "research forget"
+	flags := flag.NewFlagSet(name, flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	flags.Usage = func() { _, _ = fmt.Fprint(stderr, researchUsage) }
+	platformArg := flags.String("platform", "", "limit to one platform")
+	envFileArg := flags.String("env-file", "", "env file")
+	yes := flags.Bool("yes", false, "confirm outside plain local development")
+	allowProd := flags.Bool("allow-production", false, "allow CF_ENV=production")
+	var handle string
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		handle, args = args[0], args[1:]
+	}
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if handle == "" && flags.NArg() == 1 {
+		handle = flags.Arg(0)
+	} else if flags.NArg() > 0 {
+		_, _ = fmt.Fprintf(stderr, "cfctl %s: give exactly one handle\n", name)
+		return 2
+	}
+	if handle == "" {
+		_, _ = fmt.Fprintf(stderr, "cfctl %s: name the creator's handle\n", name)
+		return 2
+	}
+	h, err := research.NormalizeHandle(handle)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "cfctl %s: %v\n", name, err)
+		return 2
+	}
+	var platform research.Platform
+	if *platformArg != "" {
+		if platform, err = research.ParsePlatform(*platformArg); err != nil {
+			_, _ = fmt.Fprintf(stderr, "cfctl %s: %v\n", name, err)
+			return 2
+		}
+	}
+	env, code := loadAgentEnv(name, *envFileArg, stdout, stderr, lookup)
+	if code != 0 {
+		return code
+	}
+	if msg := mutationRefusal(name, "it deletes a creator and all their research data, for good", "DATABASE_URL", env.vars["CF_ENV"],
+		sourceOf("CF_ENV", env.file, lookup), sourceOf("DATABASE_URL", env.file, lookup), env.vars["DATABASE_URL"], *yes, *allowProd); msg != "" {
+		_, _ = fmt.Fprintf(env.err, "cfctl %s: %s (env file %s)\n", name, msg, displayPath(env.root, env.path))
+		return 2
+	}
+	ctx, stop := signalContext()
+	defer stop()
+	st, code := env.openDB(ctx, name, deps)
+	if code != 0 {
+		return code
+	}
+	defer st.Close()
+	res, err := st.ForgetResearchCreator(ctx, platform, h)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		_, _ = fmt.Fprintf(env.err, "cfctl %s: no creator with the handle %q\n", name, h)
+		return 1
+	case err != nil:
+		_, _ = fmt.Fprintf(env.err, "cfctl %s: %v\n", name, err)
+		return 1
+	}
+	_, _ = fmt.Fprintf(env.out, "forgot %q: %d creator(s), %d post(s), %d annotation(s), %d observation(s), %d finding(s)\n",
+		h, res.Creators, res.Posts, res.Annotations, res.Evidence, res.Findings)
+	return 0
+}
+
+func cmdResearchSweep(args []string, stdout, stderr io.Writer, lookup lookupEnv, deps agentDeps) int {
+	const name = "research sweep"
+	flags := flag.NewFlagSet(name, flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	flags.Usage = func() { _, _ = fmt.Fprint(stderr, researchUsage) }
+	envFileArg := flags.String("env-file", "", "env file")
+	yes := flags.Bool("yes", false, "confirm outside plain local development")
+	allowProd := flags.Bool("allow-production", false, "allow CF_ENV=production")
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if flags.NArg() > 0 {
+		_, _ = fmt.Fprintf(stderr, "cfctl %s: takes no arguments\n", name)
+		return 2
+	}
+	env, code := loadAgentEnv(name, *envFileArg, stdout, stderr, lookup)
+	if code != 0 {
+		return code
+	}
+	ret, err := research.LoadRetention(env.get)
+	if err != nil {
+		_, _ = fmt.Fprintf(env.err, "cfctl %s: %v\n", name, err)
+		return 2
+	}
+	if msg := mutationRefusal(name, "it deletes research data past its retention", "DATABASE_URL", env.vars["CF_ENV"],
+		sourceOf("CF_ENV", env.file, lookup), sourceOf("DATABASE_URL", env.file, lookup), env.vars["DATABASE_URL"], *yes, *allowProd); msg != "" {
+		_, _ = fmt.Fprintf(env.err, "cfctl %s: %s (env file %s)\n", name, msg, displayPath(env.root, env.path))
+		return 2
+	}
+	ctx, stop := signalContext()
+	defer stop()
+	st, code := env.openDB(ctx, name, deps)
+	if code != 0 {
+		return code
+	}
+	defer st.Close()
+	res, err := st.SweepResearch(ctx, time.Now(), ret.Default)
+	if err != nil {
+		_, _ = fmt.Fprintf(env.err, "cfctl %s: %v\n", name, err)
+		return 1
+	}
+	_, _ = fmt.Fprintf(env.out, "swept: %d observation(s), %d finding(s), %d post(s), %d idle creator(s)\n", res.Evidence, res.Findings, res.Posts, res.Creators)
+	return 0
+}
