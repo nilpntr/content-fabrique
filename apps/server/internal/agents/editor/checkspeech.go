@@ -81,14 +81,8 @@ func (c *checker) hookLine() Check {
 	if sp == nil {
 		return c.skip(CheckHookLine, "the edit opens on a clip with no transcript with speech")
 	}
-	// The first word the opening shot plays: the first that is not left out by the cut (more than the tolerance of it is inside).
-	first := -1
-	for i, w := range sp.Words {
-		if w.EndMs-it.Source.InMs > speechcut.CutToleranceMs && w.StartMs < it.Source.OutMs {
-			first = i
-			break
-		}
-	}
+	// The first word the opening shot plays (the hook lab's line_starts_clean reads the same one).
+	first := speechcut.FirstPlayed(sp.Words, it.Source.InMs, it.Source.OutMs)
 	if first < 0 {
 		return c.skip(CheckHookLine, "the opening shot has no speech in it")
 	}

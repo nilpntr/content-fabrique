@@ -97,7 +97,7 @@ func (d Deps) formatFits(ctx context.Context, rc runtime.RunContext) ([]formats.
 		return nil, nil, err
 	}
 	st := d.styleFor(ctx, ws, rc.Input)
-	fc := &formatContext{input: in, creatorKnown: false}
+	fc := &formatContext{input: in, creatorKnown: false, output: det.Project.Format}
 	opts := formats.RankOptions{ContentType: LikelyContentType(contentWords(det.Project.Brief, rows, sums)), Novel: 2}
 	if st != nil {
 		opts.Vibe = st.Resolved.Vibe
@@ -122,6 +122,8 @@ type formatContext struct {
 	input        Input
 	creatorKnown bool
 	references   int
+	// output is the project's output format ("9:16", ...), for the hook lab's title probe.
+	output string
 }
 
 // listFormats is the list_formats tool.

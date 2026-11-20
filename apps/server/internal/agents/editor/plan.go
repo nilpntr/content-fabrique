@@ -114,8 +114,28 @@ type Plan struct {
 	Vibe string `json:"vibe,omitempty"`
 	// Format is the format (the concept) of the video and why (docs/design/formats-v1.md); nil for a plan from before formats.
 	Format *PlanFormat `json:"format,omitempty"`
+	// HookLab is the pick of the plan's hook lab (hooklab.go); nil for a plan from before the lab, and for footage that gave the lab no
+	// choice of openings. check_edit adds hook_score for a plan that has it.
+	HookLab *PlanHookLab `json:"hook_lab,omitempty"`
 	// PromptVersion is the editor prompt the plan was written under.
 	PromptVersion string `json:"prompt_version"`
+}
+
+// PlanHookLab is what a plan keeps of its hook lab: the variant it picked, where that opens and what it scored. The whole lab (every
+// variant with its criteria) is the run's hook_lab artifact.
+type PlanHookLab struct {
+	// Pick is the id of the picked variant and Kind where it comes from (hooklab's Kind constants).
+	Pick string `json:"pick"`
+	Kind string `json:"kind,omitempty"`
+	// AssetID, InMs and OutMs are the first shot of the pick, in the clip's own milliseconds.
+	AssetID string `json:"asset_id"`
+	InMs    int64  `json:"in_ms"`
+	OutMs   int64  `json:"out_ms"`
+	// Total is the pick's score on the rubric (0 to 1), Variants how many openings were scored, and WeightsFrom where the weights came
+	// from ("defaults", or the research playbook's version).
+	Total       float64 `json:"total"`
+	Variants    int     `json:"variants"`
+	WeightsFrom string  `json:"weights_from"`
 }
 
 type planArgs struct {
@@ -426,6 +446,11 @@ func (d Deps) planEdit(ctx context.Context, rc runtime.RunContext, in planArgs) 
 	if err != nil {
 		return runtime.Result{}, err
 	}
+	// The hook lab (hooklab.go): three ways to open, scored and ranked. Its pick is part of the plan, so it runs before the plan is
+	// recorded.
+	set := settingsOf(st)
+	var hookNote string
+	plan.HookLab, hookNote = d.hookLabNote(ctx, rc, ws, fc.output, videos, plan, noTitleStyle(style, set))
 	if err := rc.Artifact(ctx, PlanArtifact, plan); err != nil {
 		return runtime.Result{}, fmt.Errorf("record the plan: %w", err)
 	}
@@ -439,13 +464,13 @@ func (d Deps) planEdit(ctx context.Context, rc runtime.RunContext, in planArgs) 
 	for _, n := range formatNotes {
 		b.WriteString("Note: " + n + "\n")
 	}
-	set := settingsOf(st)
 	if d := Pace(firmStyle(style), plan.ContentType, plan.Vibe, paceSetting(set)).Describe(); d != "" {
 		b.WriteString(d + "\n")
 	}
 	for _, n := range planNotes(plan, firmStyle(style), set) {
 		b.WriteString("Note: " + n + "\n")
 	}
+	b.WriteString(hookNote)
 	b.WriteString("\nThe playbook for this kind of video. Follow it; it is the craft of the genre, and check_edit will measure your edit against it.\n\n")
 	// The profile block itself is in the run context already; the note carries the points that decide the plan.
 	return runtime.Result{Content: []llm.Block{llm.TextBlock(b.String() + book + styleNote(st))}}, nil
