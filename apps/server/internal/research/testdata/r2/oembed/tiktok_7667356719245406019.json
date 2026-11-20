@@ -1,0 +1,17 @@
+{
+  "request_url": "https://www.tiktok.com/@synthetic_lifter_c/video/7667356719245406019",
+  "raw_sha256": "11026e6a44d4edbb3a32ee237a8be6a94ac65b261caf28dd4ca6ae8c25ed1967",
+  "response": {
+    "version": "1.0",
+    "type": "video",
+    "title": "Chest work without the ego #gymtok",
+    "author_name": "Synthetic Lifter C",
+    "author_unique_id": "synthetic_lifter_c",
+    "author_url": "https://www.tiktok.com/@synthetic_lifter_c",
+    "provider_name": "TikTok",
+    "thumbnail_url": "https://p16-sign-va.tiktokcdn.com/obj/synthetic-7667356719245406019~tplv-noop.image",
+    "thumbnail_width": 576,
+    "thumbnail_height": 1024,
+    "embed_product_id": "7667356719245406019"
+  }
+}

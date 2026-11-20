@@ -295,7 +295,7 @@ func (s *Store) SaveResearchAnnotation(ctx context.Context, postID uuid.UUID, a 
 	r, err := s.q.UpsertResearchAnnotation(ctx, db.UpsertResearchAnnotationParams{
 		PostID: postID, FormatID: str(a.FormatID), HookKind: str(a.HookKind), HookTextPattern: str(a.HookTextPattern),
 		TextPattern: str(a.TextPattern), CutsEstimate: i32(a.CutsEstimate), FirstCutS: a.FirstCutS, CaptionLen: i32(a.CaptionLen),
-		HashtagsN: i32(a.HashtagsN), Cta: str(a.CTA), Topic: str(a.Topic), Annotator: strings.TrimSpace(a.Annotator), Confidence: a.Confidence,
+		HashtagsN: i32(a.HashtagsN), Cta: str(a.CTA), Topic: str(a.Topic), Notes: str(a.Notes), Annotator: strings.TrimSpace(a.Annotator), Confidence: a.Confidence,
 	})
 	return r, mapErr(err)
 }

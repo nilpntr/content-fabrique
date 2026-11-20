@@ -1,0 +1,17 @@
+{
+  "request_url": "https://www.tiktok.com/@synthetic_lifter_b/video/7662245794204068597",
+  "raw_sha256": "c136919a1d177f1388de452380bf4c901939cac5edb51ea4e6e0acfdea847739",
+  "response": {
+    "version": "1.0",
+    "type": "video",
+    "title": "Three cues for a cleaner squat #legday #fitness",
+    "author_name": "Synthetic Lifter B",
+    "author_unique_id": "synthetic_lifter_b",
+    "author_url": "https://www.tiktok.com/@synthetic_lifter_b",
+    "provider_name": "TikTok",
+    "thumbnail_url": "https://p16-sign-va.tiktokcdn.com/obj/synthetic-7662245794204068597~tplv-noop.image",
+    "thumbnail_width": 576,
+    "thumbnail_height": 1024,
+    "embed_product_id": "7662245794204068597"
+  }
+}

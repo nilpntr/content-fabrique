@@ -1,0 +1,17 @@
+{
+  "request_url": "https://www.tiktok.com/@synthetic_lifter_b/video/7679075279652852792",
+  "raw_sha256": "7f7105554858a45b5966fa9166b71435406db8ffa38c370996232d0b1696b28c",
+  "response": {
+    "version": "1.0",
+    "type": "video",
+    "title": "Back day the slow way #gym #backday",
+    "author_name": "Synthetic Lifter B",
+    "author_unique_id": "synthetic_lifter_b",
+    "author_url": "https://www.tiktok.com/@synthetic_lifter_b",
+    "provider_name": "TikTok",
+    "thumbnail_url": "https://p16-sign-va.tiktokcdn.com/obj/synthetic-7679075279652852792~tplv-noop.image",
+    "thumbnail_width": 576,
+    "thumbnail_height": 1024,
+    "embed_product_id": "7679075279652852792"
+  }
+}

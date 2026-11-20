@@ -43,7 +43,7 @@
 | D-36 | The creator's style is three layers (measured, the AI's suggestion, the creator's settings), the creator always wins; reference videos are assets with purpose style_reference | Proposed (director, 2026-10-18; the founder confirms) |
 | D-37 | Plain cuts on the beat by default: no vibe asks for transitions; they come from the creator's setting or their own videos | Proposed (director, from a creator's verdict, 2026-10-18; the founder confirms) |
 | D-38 | The text of a video follows the creator's pattern (one title, story captions, dialogue); lines that the creator puts on the body keep off the face only, titles keep off the whole body | Proposed (director, from a second creator's references, 2026-10-18; the founder confirms) |
-| D-41 | Creator research engine: public data only, links and our own numbers, a fixed list of sources, retention that deletes, a takedown command; Instagram and YouTube as research sources (learning, not publishing) | Proposed (R1 built; the founder confirms the retention) |
+| D-41 | Creator research engine: public data only, links and our own numbers, a fixed list of sources, retention that deletes, a takedown command; Instagram and YouTube as research sources (learning, not publishing) | Proposed (R1 and R2 built; the founder confirms the retention) |
 
 ---
 

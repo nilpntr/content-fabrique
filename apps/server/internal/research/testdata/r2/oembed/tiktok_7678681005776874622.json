@@ -1,0 +1,17 @@
+{
+  "request_url": "https://www.tiktok.com/@synthetic_lifter_d/video/7678681005776874622",
+  "raw_sha256": "14924e95aca80495d08f975fdb89895c040520197d3dbe239f14cfd9e203deac",
+  "response": {
+    "version": "1.0",
+    "type": "video",
+    "title": "One set, full focus #training",
+    "author_name": "Synthetic Lifter D",
+    "author_unique_id": "synthetic_lifter_d",
+    "author_url": "https://www.tiktok.com/@synthetic_lifter_d",
+    "provider_name": "TikTok",
+    "thumbnail_url": "https://p16-sign-va.tiktokcdn.com/obj/synthetic-7678681005776874622~tplv-noop.image",
+    "thumbnail_width": 576,
+    "thumbnail_height": 1024,
+    "embed_product_id": "7678681005776874622"
+  }
+}

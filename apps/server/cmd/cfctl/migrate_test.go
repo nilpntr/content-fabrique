@@ -85,6 +85,9 @@ func TestMigrateCLI(t *testing.T) {
 		t.Fatal("up after up --to 2 must migrate River")
 	}
 	// A down that does not reach 0 keeps River; the one that does removes it after the app schema.
+	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00028_research_notes.sql") {
+		t.Fatalf("down one (00028) = %d %s", code, out)
+	}
 	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00027_research.sql") {
 		t.Fatalf("down one (00027) = %d %s", code, out)
 	}
@@ -166,7 +169,7 @@ func TestMigrateCLI(t *testing.T) {
 	if code, _, _ := migrateCLI(t, url, "up"); code != 0 {
 		t.Fatal("up")
 	}
-	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00027_research.sql") {
+	if code, out, _ := migrateCLI(t, url, "down", "--yes"); code != 0 || !strings.Contains(out, "00028_research_notes.sql") {
 		t.Fatalf("down one = %d %s", code, out)
 	}
 }
