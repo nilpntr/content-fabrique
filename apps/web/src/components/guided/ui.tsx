@@ -36,7 +36,7 @@ export function BigButton({ className, ...props }: ButtonProps) {
 
 export function BackButton({ onClick, children = "Back" }: { onClick: () => void; children?: React.ReactNode }) {
   return (
-    <Button variant="ghost" size="lg" className="-ml-3 text-[15px]" onClick={onClick}>
+    <Button variant="ghost" size="lg" className="-ml-3 h-11 text-[15px]" onClick={onClick}>
       <ArrowLeft aria-hidden />
       {children}
     </Button>
