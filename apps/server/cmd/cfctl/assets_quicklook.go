@@ -212,7 +212,7 @@ func runAssetsQuickLook(name string, retag bool, args []string, stdout, stderr i
 		_, _ = fmt.Fprintf(errOut, "cfctl %s: the R2_* settings (R2_ENDPOINT, R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY) are not set in %s or the environment\n", name, displayPath(env.root, env.path))
 		return 2
 	}
-	frames, framesDir, err := agentset.NewFrameRunner(cfg.MediaSandboxProvider, cfg.MediaToolsImage, cfg.MediaTempDir, cfg.Env)
+	frames, framesDir, err := agentset.NewFrameRunner(cfg.MountSandboxProvider(), cfg.MediaToolsImage, cfg.MediaTempDir, cfg.Env)
 	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "cfctl %s: %v\n", name, err)
 		return 2

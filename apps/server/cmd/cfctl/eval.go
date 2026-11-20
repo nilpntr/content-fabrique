@@ -14,7 +14,6 @@ import (
 
 	"github.com/nilpntr/content-fabrique/internal/agents/agentset"
 	"github.com/nilpntr/content-fabrique/internal/agents/editor"
-	"github.com/nilpntr/content-fabrique/internal/config"
 	"github.com/nilpntr/content-fabrique/internal/ids"
 	"github.com/nilpntr/content-fabrique/internal/projects"
 	"github.com/nilpntr/content-fabrique/internal/storage"
@@ -210,7 +209,7 @@ func renderSamplerFor(env *agentEnv, st *store.Store) (editor.RenderSampler, str
 	if err != nil {
 		return nil, fmt.Sprintf("note: object storage: %v; the rendered-brightness checks do not apply", err)
 	}
-	provider := cmp.Or(env.get("MEDIA_SANDBOX_PROVIDER"), config.SandboxDocker)
+	provider := env.mountProvider()
 	tempDir := cmp.Or(env.get("MEDIA_TEMP_DIR"), filepath.Join(os.TempDir(), "cf-media"))
 	runner, dir, err := agentset.NewFrameRunner(provider, env.get("MEDIA_TOOLS_IMAGE"), tempDir, env.get("CF_ENV"))
 	if err != nil {

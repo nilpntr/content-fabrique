@@ -23,7 +23,7 @@ func newAgentRuntime(cfg config.Config, st *store.Store, objects *storage.Client
 	opts := agentset.Options{Store: st, Logger: logger, Getenv: os.Getenv, Objects: objects, RequireStorage: true}
 	if objects != nil {
 		var err error
-		if opts.Frames, opts.TempDir, err = agentset.NewFrameRunner(cfg.MediaSandboxProvider, cfg.MediaToolsImage, cfg.MediaTempDir, cfg.Env); err != nil {
+		if opts.Frames, opts.TempDir, err = agentset.NewFrameRunner(cfg.MountSandboxProvider(), cfg.MediaToolsImage, cfg.MediaTempDir, cfg.Env); err != nil {
 			logger.Warn("agent runs and quick looks are off: the sandbox for frames cannot be set up", "error", err)
 			return nil
 		}

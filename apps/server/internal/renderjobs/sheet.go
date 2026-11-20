@@ -126,8 +126,9 @@ func tileSize(out render.Size, tiles int) (w, h int) {
 }
 
 // extractArgs is the ffmpeg command that writes the unique frames, in ascending order, as tile_001.png, tile_002.png ...,
-// scaled to w x h. The input is the rendered MP4 (an untrusted file by the usual rules, whatever made it).
-func extractArgs(frames []int64, w, h int) []string {
+// scaled to w x h, from the video at input (a container path). The input is the rendered MP4 (an untrusted file by the usual
+// rules, whatever made it).
+func extractArgs(input string, frames []int64, w, h int) []string {
 	var sel strings.Builder
 	for i, f := range frames {
 		if i > 0 {
@@ -138,19 +139,21 @@ func extractArgs(frames []int64, w, h int) []string {
 	return []string{
 		"ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error",
 		"-protocol_whitelist", "file", "-format_whitelist", media.UntrustedFormats,
-		"-i", media.InputPath(0),
+		"-i", input,
 		"-vf", fmt.Sprintf("select='%s',scale=%d:%d:flags=area,format=rgb24", sel.String(), w, h),
 		"-fps_mode", "passthrough", "-frames:v", strconv.Itoa(len(frames)),
 		media.OutputPath("tile_%03d.png"),
 	}
 }
 
-// makeSheet runs the frame extraction in the sandbox over mp4 and builds the sheet. dir is the job directory (for the
-// extraction's output directory). A frame the video does not have means the render is not what its plan said: a fileError.
-func (r *run) makeSheet(ctx context.Context, plan render.Plan, mp4 string) ([]byte, SheetLayout, error) {
+// tileName is the file the extraction writes the i-th unique frame to (from 0).
+func tileName(i int) string { return fmt.Sprintf("tile_%03d.png", i+1) }
+
+// sheetPlan is what the contact sheet of plan is made of: its layout and the unique frames to extract, ascending.
+func sheetPlan(plan render.Plan) (SheetLayout, []int64, error) {
 	tiles, err := PlanTiles(plan)
 	if err != nil {
-		return nil, SheetLayout{}, fileErr(ReasonInvalidTimeline, err)
+		return SheetLayout{}, nil, fileErr(ReasonInvalidTimeline, err)
 	}
 	w, h := tileSize(plan.OutputSize, len(tiles))
 	frames := make([]int64, len(tiles))
@@ -159,13 +162,22 @@ func (r *run) makeSheet(ctx context.Context, plan render.Plan, mp4 string) ([]by
 	}
 	slices.Sort(frames)
 	frames = slices.Compact(frames)
+	return SheetLayout{Columns: SheetColumns, TileWidth: w, TileHeight: h, Tiles: tiles}, frames, nil
+}
 
+// makeSheet runs the frame extraction in the sandbox over mp4 and builds the sheet. dir is the job directory (for the
+// extraction's output directory). A frame the video does not have means the render is not what its plan said: a fileError.
+func (r *run) makeSheet(ctx context.Context, plan render.Plan, mp4 string) ([]byte, SheetLayout, error) {
+	layout, frames, err := sheetPlan(plan)
+	if err != nil {
+		return nil, SheetLayout{}, err
+	}
 	out, err := os.MkdirTemp(r.dir, "sheet-")
 	if err != nil {
 		return nil, SheetLayout{}, err
 	}
 	defer func() { _ = os.RemoveAll(out) }()
-	args := extractArgs(frames, w, h)
+	args := extractArgs(media.InputPath(0), frames, layout.TileWidth, layout.TileHeight)
 	res, err := r.runner.Run(ctx, media.Invocation{
 		Args: args, Inputs: []media.Input{{Host: mp4, Container: media.InputPath(0)}}, OutputDir: out, Timeout: SheetTimeout,
 	})
@@ -175,19 +187,30 @@ func (r *run) makeSheet(ctx context.Context, plan render.Plan, mp4 string) ([]by
 	if res.ExitCode != 0 {
 		return nil, SheetLayout{}, toolFailure("contact sheet", res.ExitCode, res.Stderr)
 	}
+	return buildSheet(plan, layout, frames, func(i int) ([]byte, error) { return readTileFile(filepath.Join(out, tileName(i))) })
+}
 
+// buildSheet decodes the extracted frames (read returns the i-th tile file's bytes, os.ErrNotExist when the extraction did not
+// write it) and draws the sheet.
+func buildSheet(plan render.Plan, layout SheetLayout, frames []int64, read func(i int) ([]byte, error)) ([]byte, SheetLayout, error) {
 	byFrame := make(map[int64]image.Image, len(frames))
 	for i, f := range frames {
-		img, err := readTile(filepath.Join(out, fmt.Sprintf("tile_%03d.png", i+1)), w, h)
-		if errors.Is(err, os.ErrNotExist) {
+		b, err := read(i)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
 			return nil, SheetLayout{}, fileErr(ReasonRenderFailed, fmt.Errorf("the rendered video has no frame %d, but its plan has %d frames", f, plan.TotalFrames))
+		case errors.Is(err, errBadTile):
+			return nil, SheetLayout{}, fileErr(ReasonRenderFailed, fmt.Errorf("contact sheet frame %d: %w", f, err))
+		case err != nil:
+			// Reading it failed (the disk, object storage): ours, and retried.
+			return nil, SheetLayout{}, fmt.Errorf("contact sheet frame %d: %w", f, err)
 		}
+		img, err := decodeTile(b, layout.TileWidth, layout.TileHeight)
 		if err != nil {
 			return nil, SheetLayout{}, fileErr(ReasonRenderFailed, fmt.Errorf("contact sheet frame %d: %w", f, err))
 		}
 		byFrame[f] = img
 	}
-	layout := SheetLayout{Columns: SheetColumns, TileWidth: w, TileHeight: h, Tiles: tiles}
 	canvas := compose(layout, byFrame)
 	data, err := encodeSheet(canvas)
 	if err != nil {
@@ -196,18 +219,25 @@ func (r *run) makeSheet(ctx context.Context, plan render.Plan, mp4 string) ([]by
 	return data, layout, nil
 }
 
-// readTile reads one PNG the sandbox wrote: a regular file of reasonable size whose dimensions are the tile's.
-func readTile(path string, w, h int) (image.Image, error) {
+// errBadTile is a frame file the extraction should not have written: not a regular file, or too big. The render's fault.
+var errBadTile = errors.New("the frame is not a regular file of reasonable size")
+
+// readTileFile reads one PNG the sandbox wrote: a regular file of reasonable size.
+func readTileFile(path string) ([]byte, error) {
 	fi, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
 	}
 	if !fi.Mode().IsRegular() || fi.Size() > maxTilePNG {
-		return nil, errors.New("the frame is not a regular file of reasonable size")
+		return nil, errBadTile
 	}
-	b, err := os.ReadFile(path) //nolint:gosec // a file in our job directory, size checked above
-	if err != nil {
-		return nil, err
+	return os.ReadFile(path) //nolint:gosec // a file in our job directory, size checked above
+}
+
+// decodeTile decodes one tile PNG whose dimensions must be the tile's; they are read before the picture is decoded.
+func decodeTile(b []byte, w, h int) (image.Image, error) {
+	if len(b) > maxTilePNG {
+		return nil, errBadTile
 	}
 	cfg, err := png.DecodeConfig(bytes.NewReader(b))
 	if err != nil {

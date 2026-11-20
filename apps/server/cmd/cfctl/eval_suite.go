@@ -374,7 +374,7 @@ func openSuite(name string, f suiteFlags, stdout, stderr io.Writer, lookup looku
 			se.close()
 			return nil, 1
 		}
-		provider := cmp.Or(env.get("MEDIA_SANDBOX_PROVIDER"), config.SandboxDocker)
+		provider := env.mountProvider()
 		root := cmp.Or(env.get("MEDIA_TEMP_DIR"), filepath.Join(os.TempDir(), "cf-media"))
 		if runner, tempDir, err = agentset.NewFrameRunner(provider, cmp.Or(env.get("MEDIA_TOOLS_IMAGE"), config.DefaultMediaToolsImage), root, env.get("CF_ENV")); err != nil {
 			_, _ = fmt.Fprintf(env.err, "cfctl %s: the media sandbox: %v\n", name, err)

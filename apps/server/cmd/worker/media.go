@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -27,11 +28,13 @@ func ingestLimits() sandbox.Limits {
 	return sandbox.Limits{CPU: 2, MemoryMB: 3072, Timeout: ingest.ProbeTimeout, PIDs: 512}
 }
 
-// newSandboxProvider builds the provider MEDIA_SANDBOX_PROVIDER names, rooted at the job directory. The local provider
-// isolates nothing, so it is refused in staging and production here too (config.Load already refuses it).
+// newSandboxProvider builds the provider of the media jobs that mount files (everything but a remote render), rooted at the job
+// directory: MEDIA_SANDBOX_PROVIDER, or MEDIA_SANDBOX_MOUNT_PROVIDER when that is remote. The local provider isolates nothing, so
+// it is refused in staging and production here too (config.Load already refuses it).
 func newSandboxProvider(cfg config.Config, root string) (sandbox.Provider, error) {
 	pol := sandbox.Policy{AllowedRoots: []string{root}}
-	switch cfg.MediaSandboxProvider {
+	name := cfg.MountSandboxProvider()
+	switch name {
 	case config.SandboxDocker:
 		return sandbox.NewDocker(pol), nil
 	case config.SandboxHardened:
@@ -41,14 +44,32 @@ func newSandboxProvider(cfg config.Config, root string) (sandbox.Provider, error
 			return nil, err
 		}
 		return sandbox.NewLocal(pol), nil
-	case config.SandboxRemote:
-		// The remote provider runs jobs whose files are presigned URLs (sandbox.Job Inputs, Outputs and Steps). The ingest and
-		// render pipelines still stage files and mount them, so they cannot run on it yet; refusing here beats failing every
-		// job (docs/design/render-runtime.md: phase 1 ships cf-job, the provider and compose's runner profile).
-		return nil, fmt.Errorf("MEDIA_SANDBOX_PROVIDER=remote: the ingest and render pipelines do not build remote jobs yet; use docker or hardened for the worker")
+	case "":
+		// MEDIA_SANDBOX_PROVIDER=remote without a mount provider. The remote provider runs jobs whose files are presigned URLs
+		// (sandbox.Job Inputs, Outputs and Steps); only the render job builds them so far (docs/design/render-runtime.md).
+		return nil, errors.New("MEDIA_SANDBOX_PROVIDER=remote runs the render job only: the ingest, clip analysis, transcription, style references and the editor's frames still mount files and do not build remote jobs yet; set MEDIA_SANDBOX_MOUNT_PROVIDER=docker (or hardened) for them")
 	}
-	return nil, fmt.Errorf("MEDIA_SANDBOX_PROVIDER: unknown provider %q", cfg.MediaSandboxProvider)
+	return nil, fmt.Errorf("MEDIA_SANDBOX_PROVIDER: unknown provider %q", name)
 }
+
+// newRemoteProvider builds the remote provider of the render job (MEDIA_SANDBOX_PROVIDER=remote). config.Load checked the URL,
+// the token and, in staging and production, that the runner is the gateway.
+func newRemoteProvider(cfg config.Config) (sandbox.Provider, error) {
+	if err := sandbox.CheckRemoteAllowed(cfg.Env, cfg.MediaRunnerURL, cfg.SandboxGatewayURL); err != nil {
+		return nil, err
+	}
+	r, err := sandbox.NewRemote(cfg.MediaRunnerURL, cfg.MediaRunnerToken)
+	if err != nil {
+		return nil, err
+	}
+	// compose's runner runs one job at a time and a render sends one job per pass: a render waits this long for another's pass
+	// before its attempt fails (ErrSandbox, retried), rather than the provider's two minutes.
+	r.BusyWait = remoteBusyWait
+	return r, nil
+}
+
+// remoteBusyWait is how long a remote render waits for a busy runner.
+const remoteBusyWait = 10 * time.Minute
 
 // newIngestPipeline builds the media pipeline for the asset_ingest job: the sandbox provider, the media-tools image, the
 // job directory (created and resolved, so the sandbox's allowed root has no symlinks in it) and the real store and storage.
@@ -84,22 +105,35 @@ func newRenderPipeline(cfg config.Config, st *store.Store, objects *storage.Clie
 	if err != nil {
 		return nil, fmt.Errorf("MEDIA_TEMP_DIR: %w", err)
 	}
-	provider, err := newSandboxProvider(cfg, root)
-	if err != nil {
-		return nil, err
-	}
 	limits := render.DefaultLimits()
-	return renderjobs.New(renderjobs.Config{
+	rc := renderjobs.Config{
 		Store:   st,
 		Objects: objects,
-		Runner:  &media.SandboxRunner{Provider: provider, Image: cfg.MediaToolsImage, Limits: limits},
 		TempDir: filepath.Join(root, "render"),
 		CPUs:    limits.CPU,
 		Meter:   meter,
 		Logger:  logger,
 		// MOTION_GRAPHICS=off draws the graphics track as ASS text (D-35).
 		MotionFallback: !cfg.MotionGraphics,
-	})
+	}
+	if cfg.MediaSandboxProvider == config.SandboxRemote {
+		// The render job builds remote jobs: the runner fetches the footage and uploads the video through presigned URLs.
+		if cfg.MotionGraphics {
+			return nil, errors.New("MEDIA_SANDBOX_PROVIDER=remote does not render motion graphics yet (the template bundle is a directory, which a remote job cannot take): set MOTION_GRAPHICS=off, which draws the graphics as text, or use docker or hardened")
+		}
+		remote, err := newRemoteProvider(cfg)
+		if err != nil {
+			return nil, err
+		}
+		rc.Remote = &renderjobs.Remote{Provider: remote, Limits: limits}
+		return renderjobs.New(rc)
+	}
+	provider, err := newSandboxProvider(cfg, root)
+	if err != nil {
+		return nil, err
+	}
+	rc.Runner = &media.SandboxRunner{Provider: provider, Image: cfg.MediaToolsImage, Limits: limits}
+	return renderjobs.New(rc)
 }
 
 // fontsLabel is the label the media-tools Dockerfile sets when the image holds the title and caption fonts (/usr/share/fonts/cf).
@@ -129,7 +163,7 @@ const imageInspectFormat = `{{.Id}} {{index .Config.Labels "` + fontsLabel + `"}
 // sandbox never pulls at job time, so every ingest would fail until the image is built or loaded. It also logs when the image
 // is there but was built before the fonts were added to it (no fonts label), because renders with text would fail then.
 func warnIfImageMissing(ctx context.Context, cfg config.Config, logger *slog.Logger) {
-	if cfg.MediaSandboxProvider == config.SandboxLocal || cfg.MediaSandboxProvider == config.SandboxRemote {
+	if p := cfg.MountSandboxProvider(); p == config.SandboxLocal || p == "" {
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -137,7 +171,7 @@ func warnIfImageMissing(ctx context.Context, cfg config.Config, logger *slog.Log
 	out, err := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", imageInspectFormat, cfg.MediaToolsImage).Output() // #nosec G204 -- the image name is configuration
 	if err != nil {
 		logger.Warn("the media-tools image is not available to Docker; asset ingests will fail until it is built (task media:build, or docker build -t media-tools:dev packages/media-tools) or MEDIA_TOOLS_IMAGE names an image that exists",
-			"image", cfg.MediaToolsImage, "provider", cfg.MediaSandboxProvider, "error", err)
+			"image", cfg.MediaToolsImage, "provider", cfg.MountSandboxProvider(), "error", err)
 		return
 	}
 	if !imageHasFonts(string(out)) {

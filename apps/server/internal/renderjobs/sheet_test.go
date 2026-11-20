@@ -196,7 +196,7 @@ func TestEncodeSheetFitsTheTarget(t *testing.T) {
 }
 
 func TestExtractArgs(t *testing.T) {
-	args := extractArgs([]int64{3, 63, 299}, 216, 384)
+	args := extractArgs(media.InputPath(0), []int64{3, 63, 299}, 216, 384)
 	j := strings.Join(args, " ")
 	for _, want := range []string{
 		"-protocol_whitelist file -format_whitelist " + media.UntrustedFormats + " -i /in/0",

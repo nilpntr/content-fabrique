@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/nilpntr/content-fabrique/internal/media"
 )
@@ -64,11 +63,7 @@ func useImageFonts(args []string, s *Subtitles) []string {
 	if s == nil {
 		return args
 	}
-	out := make([]string, len(args))
-	for i, a := range args {
-		out[i] = strings.ReplaceAll(a, "fontsdir="+s.FontsDir, "fontsdir="+ImageFontsDir)
-	}
-	return out
+	return withFontsDir(args, s, ImageFontsDir)
 }
 
 // findFontsDir returns the first candidate directory that holds every font file in names: the explicit one, then

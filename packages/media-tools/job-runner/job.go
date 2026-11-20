@@ -253,16 +253,21 @@ func makeWritable(root *os.Root, name string) {
 	}
 }
 
-// download fetches every input to its path, read-only, within MaxInputBytes in total.
+// download fetches every input to its path (under /in, or /work), read-only, within MaxInputBytes in total.
 func (r *Runner) download(ctx context.Context, m Manifest) error {
-	root, err := os.OpenRoot(r.InDir)
-	if err != nil {
-		return sandboxErr("open %s: %v", r.InDir, err)
+	roots := map[string]*os.Root{}
+	for dir, host := range map[string]string{InputDir: r.InDir, WorkDir: r.WorkDir} {
+		root, err := os.OpenRoot(host)
+		if err != nil {
+			return sandboxErr("open %s: %v", host, err)
+		}
+		defer func() { _ = root.Close() }()
+		roots[dir] = root
 	}
-	defer func() { _ = root.Close() }()
 	remaining := m.maxInput()
 	for _, in := range m.Inputs {
-		n, err := r.fetch(ctx, root, in, remaining)
+		dir := inputDir(in.Path)
+		n, err := r.fetch(ctx, roots[dir], dir, in, remaining)
 		if err != nil {
 			return err
 		}
@@ -271,7 +276,7 @@ func (r *Runner) download(ctx context.Context, m Manifest) error {
 	return nil
 }
 
-func (r *Runner) fetch(ctx context.Context, root *os.Root, in Input, remaining int64) (int64, error) {
+func (r *Runner) fetch(ctx context.Context, root *os.Root, dir string, in Input, remaining int64) (int64, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, in.URL, nil)
 	if err != nil {
 		return 0, sandboxErr("input %s: %v", in.Path, err)
@@ -287,9 +292,9 @@ func (r *Runner) fetch(ctx context.Context, root *os.Root, in Input, remaining i
 	if resp.ContentLength > remaining {
 		return 0, filesErr("input %s: %d bytes is over what is left of max_input_bytes (%d)", in.Path, resp.ContentLength, remaining)
 	}
-	name := rel(in.Path, InputDir)
-	if dir := filepath.Dir(name); dir != "." {
-		if err := root.MkdirAll(dir, 0o755); err != nil {
+	name := rel(in.Path, dir)
+	if sub := filepath.Dir(name); sub != "." {
+		if err := root.MkdirAll(sub, 0o755); err != nil {
 			return 0, sandboxErr("input %s: %v", in.Path, err)
 		}
 	}
@@ -334,7 +339,7 @@ func (r *Runner) runStep(ctx context.Context, s Step, m Manifest, tmp string) (S
 	if err != nil {
 		return res, sandboxErr("program %q: %v", s.Args[0], err)
 	}
-	argv := append([]string{execCommand, strconv.Itoa(m.Limits.PIDs + pidHeadroom), strconv.FormatInt(fileCap(m), 10), prog}, s.Args...)
+	argv := append([]string{execCommand, strconv.Itoa(m.Limits.PIDs + pidHeadroom), strconv.FormatInt(fileCap(m), 10), prog, s.Args[0]}, r.hostArgs(s.Args[1:])...)
 	cmd := exec.CommandContext(stepCtx, r.Self, argv...) // #nosec G204 -- no shell; the program is looked up by name, the runner is this binary
 	cmd.Dir = r.WorkDir
 	// Exactly these: no token or other variable of the runner reaches a tool.
@@ -378,6 +383,31 @@ func (r *Runner) runStep(ctx context.Context, s Step, m Manifest, tmp string) (S
 	default:
 		return res, sandboxErr("start %q: %v", s.Args[0], runErr)
 	}
+}
+
+// hostArgs maps the arguments that are /in or /work paths (the whole argument: "/in/0", "/work/out.mp4") to the runner's
+// directories, when they are not the image's own: a runner started with -in and -work on a development machine or in a test
+// runs the same manifests as the image. In the image the directories are /in and /work and nothing changes. A path inside a
+// longer argument (a filter's file= option) is not rewritten; such a file is named relative to /work, the working directory.
+func (r *Runner) hostArgs(args []string) []string {
+	if r.InDir == InputDir && r.WorkDir == WorkDir {
+		return args
+	}
+	out := make([]string, len(args))
+	for i, a := range args {
+		out[i] = a
+		for dir, host := range map[string]string{InputDir: r.InDir, WorkDir: r.WorkDir} {
+			if a == dir {
+				out[i] = host
+			} else if strings.HasPrefix(a, dir+"/") {
+				// A ".." that climbs out of the directory is left alone, and names nothing on this machine's side.
+				if p := filepath.Join(host, filepath.FromSlash(a[len(dir)+1:])); p == host || strings.HasPrefix(p, host+string(filepath.Separator)) {
+					out[i] = p
+				}
+			}
+		}
+	}
+	return out
 }
 
 // reapOrphans collects every exited child the runner has. It runs only between steps, when the step's own process has been

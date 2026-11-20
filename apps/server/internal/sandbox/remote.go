@@ -444,8 +444,8 @@ func remoteManifest(job Job) (remoteManifestJSON, int, error) {
 	m.Inputs = []remoteInput{}
 	seen := map[string]bool{}
 	for i, in := range job.Inputs {
-		if !containerPathOK(in.Path) || !strings.HasPrefix(in.Path, InputDir+"/") {
-			return m, 0, fmt.Errorf("sandbox: input %d: path %q must be a plain path under %s/", i, in.Path, InputDir)
+		if !containerPathOK(in.Path) || (!strings.HasPrefix(in.Path, InputDir+"/") && !strings.HasPrefix(in.Path, WorkDir+"/")) {
+			return m, 0, fmt.Errorf("sandbox: input %d: path %q must be a plain path under %s/ or %s/", i, in.Path, InputDir, WorkDir)
 		}
 		if err := checkObjectURL(in.URL); err != nil {
 			return m, 0, fmt.Errorf("sandbox: input %d: %w", i, err)
