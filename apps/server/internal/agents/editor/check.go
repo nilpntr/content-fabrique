@@ -421,6 +421,9 @@ func RunChecks(in CheckInput) Report {
 	if in.Plan != nil && in.Plan.HookLab != nil { // the opening against the hook lab's rubric (checkhook.go), only for a plan that ran the lab
 		r.Checks = append(r.Checks, c.hookScore())
 	}
+	if ck, ok := c.subjectInCrop(); ok { // subject_in_crop (checkreframe.go), only for an edit with a clip that has subject boxes
+		r.Checks = append(r.Checks, ck)
+	}
 	r.Checks = append(r.Checks, c.speechChecks()...) // speech_cut_clean and hook_line, only for a speech-led edit (checkspeech.go)
 	if c.linesOn() {                                 // the text-pattern checks (checktext.go), only for a style told in lines
 		r.Checks = append(r.Checks, c.storyCaptions(), c.captionReadable(), c.textOverFace())

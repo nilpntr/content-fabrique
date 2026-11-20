@@ -266,11 +266,8 @@ func (c *compiler) handheldLimit(cl clip, strength, punch float64) (s, base, p f
 	if tr == nil {
 		return s, base, p
 	}
-	rf := timeline.Reframe{Mode: timeline.DefaultReframe}
-	if cl.item.Reframe != nil {
-		rf = *cl.item.Reframe
-	}
 	out := c.spec.Output
+	rf := subject.WithFocus(cl.item.Reframe, tr, cl.item.Source, out)
 	w, hgt := float64(out.Width), float64(out.Height)
 	src := cl.item.Source
 	maxZ := math.Inf(1)

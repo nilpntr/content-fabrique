@@ -5,6 +5,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/nilpntr/content-fabrique/internal/subject"
 	"github.com/nilpntr/content-fabrique/internal/timeline"
 )
 
@@ -189,10 +190,8 @@ func (c *compiler) clipGraph(cl clip) ([]string, error) {
 		"setpts=PTS-STARTPTS",
 	)
 
-	reframe := timeline.Reframe{Mode: timeline.DefaultReframe}
-	if it.Reframe != nil {
-		reframe = *it.Reframe
-	}
+	// A cover that leaves the focus out is centred on the subject when the quick look found one (subject.WithFocus).
+	reframe := subject.WithFocus(it.Reframe, cl.asset.Subject, it.Source, c.spec.Output)
 	look := timeline.LookNone
 	if it.Look != nil && it.Look.Preset != "" {
 		look = it.Look.Preset

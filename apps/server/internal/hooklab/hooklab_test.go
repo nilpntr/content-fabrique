@@ -132,7 +132,7 @@ func TestScoreBoundsAndSpeed(t *testing.T) {
 }
 
 func TestRunRanksAndBreaksTies(t *testing.T) {
-	clear := func(v Variant) Evidence { return Evidence{Text: TextClear} }
+	clear := func(Variant) Evidence { return Evidence{Text: TextClear} }
 	vs := []Variant{
 		{ID: "late", AssetID: "x", InMs: 0, OutMs: 2000, Text: "BACK DAY", TextAtMs: 2500},
 		{ID: "one", AssetID: "x", InMs: 3000, OutMs: 5000, Text: "BACK DAY"},
