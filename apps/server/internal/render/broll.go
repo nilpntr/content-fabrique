@@ -24,7 +24,7 @@ import (
 const RoleBroll = "broll"
 
 // TrackBroll is the TimeMapEntry.Track of a cutaway's entry. A main item's entry, and a text or graphics item's, has no track.
-const TrackBroll = "broll"
+const TrackBroll = string(timeline.TrackBroll)
 
 // cutaway is a b-roll item with everything the compiler derives from it.
 type cutaway struct {

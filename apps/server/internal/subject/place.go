@@ -93,7 +93,7 @@ func Regions(spec *timeline.Spec, lookup Lookup, startMs, endMs int64) []timelin
 	}
 	// A cutaway plays at speed 1, has no camera move and is drawn with its own reframe over the whole frame.
 	for _, b := range cuts {
-		os, oe := max(b.AtMs, startMs), min(b.EndMs(), endMs)
+		os, oe := max(b.AtMs, startMs), min(b.EndMs(), endMs) // empty for an empty source range
 		if oe <= os {
 			continue
 		}
@@ -115,6 +115,9 @@ func uncovered(from, to int64, cuts []timeline.BrollItem) [][2]int64 {
 	parts := [][2]int64{{from, to}}
 	for _, b := range cuts {
 		bs, be := b.AtMs, b.EndMs()
+		if be <= bs {
+			continue // an empty source range covers nothing (the validator refuses it)
+		}
 		var next [][2]int64
 		for _, p := range parts {
 			if be <= p[0] || bs >= p[1] {
