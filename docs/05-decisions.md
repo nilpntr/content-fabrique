@@ -159,6 +159,8 @@ The README asks for a pluggable layer that can be "a hosted one or this one your
 
 **Validated in P1-03 (2026-10-17).** On a GitHub-hosted 4-vCPU runner with runsc 20261012.0, a 30 s 1080p H.264 transcode takes 7.41 s under `hardened` against 7.46 s under `docker` (-0.8 %, noise), a 0.9 GB read-and-write copy is within 5 %, and the only measured cost is start-up, +30 to 50 ms per job. gVisor stays the `hardened` runtime; repeat the benchmark on the first real worker host. Details: [benchmarks/2026-10-17-gvisor-overhead.md](benchmarks/2026-10-17-gvisor-overhead.md).
 
+**Rootless Docker (2026-11-20, from the [VPS live test](design/live-test-2026-11-20.md)).** Under rootless Docker the `docker` and `hardened` providers run the container as `0:0`, which the daemon maps to its own unprivileged host user; every other isolation rule stays. A sandbox that cannot run (no daemon, no image, no `runsc`, limits it cannot apply, a tool that cannot use its mounts) is an "unavailable" error: the jobs wait for it and never blame the file. `hardened` still has no fallback to runc. See [docs/06, Rootless Docker and the sandbox](06-setup-and-credentials.md#rootless-docker-and-the-sandbox).
+
 **Alternatives behind the same interface:**
 - E2B (Firecracker microVMs, ≈ $0.166/h for 2 vCPU / 4 GiB).
 - Claude Managed Agents, when we want Anthropic to run the free-form loop: `cloud` environment, or `self_hosted` on our `hardened` hosts through the Go environment worker.
